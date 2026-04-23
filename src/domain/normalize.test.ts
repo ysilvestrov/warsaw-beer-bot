@@ -13,3 +13,12 @@ test('removes common style noise', () => {
 test('normalizes brewery the same way, no style stripping', () => {
   expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
 });
+
+test('strips every Polish diacritic', () => {
+  expect(normalizeBrewery('ąćęłńóśźż')).toBe('acelnoszz');
+  expect(normalizeBrewery('ĄĆĘŁŃÓŚŹŻ')).toBe('acelnoszz');
+  expect(normalizeBrewery('Żywiec')).toBe('zywiec');
+  expect(normalizeBrewery('Średnica')).toBe('srednica');
+  expect(normalizeBrewery('Księżyc')).toBe('ksiezyc');
+  expect(normalizeBrewery('Piąte')).toBe('piate');
+});
