@@ -1,0 +1,24 @@
+[
+  {
+    "beer_name": "Atak Chmielu",
+    "brewery_name": "Pinta",
+    "beer_type": "American IPA",
+    "beer_abv": 6.1,
+    "rating_score": 4.25,
+    "created_at": "2024-03-01 20:12:00",
+    "venue_name": "Beer & Bones",
+    "checkin_id": 1234,
+    "bid": 567
+  },
+  {
+    "beer_name": "Buty Skejta",
+    "brewery_name": "Stu Mostow",
+    "beer_type": "Pilsner",
+    "beer_abv": 5.0,
+    "rating_score": 3.75,
+    "created_at": "2024-03-10 19:55:00",
+    "venue_name": "",
+    "checkin_id": 2345,
+    "bid": 890
+  }
+]
