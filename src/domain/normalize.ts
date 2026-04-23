@@ -6,6 +6,12 @@ const STYLE_WORDS = new Set([
 ]);
 const BREWERY_NOISE = new Set(['browar', 'brewery', 'brewing', 'co', 'company']);
 
+// NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
+// uppercase forms) into a base letter + a combining mark from the
+// U+0300–U+036F block, which the regex then strips. Ł/ł is the one
+// Polish letter that is NOT canonically decomposable — it's a base
+// letter with an inherent stroke (U+0141 / U+0142), so NFD leaves it
+// intact and we replace it explicitly.
 function stripDiacritics(s: string): string {
   return s.normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
