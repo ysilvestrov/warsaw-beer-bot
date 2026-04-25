@@ -21,6 +21,7 @@
     "better-sqlite3": "^12.9.0",
     "cheerio": "^1.2.0",
     "csv-parse": "^6.2.1",
+    "dotenv": "^17.4.2",
     "fast-fuzzy": "^1.12.0",
     "node-cron": "^4.2.1",
     "p-queue": "^6.6.2",
