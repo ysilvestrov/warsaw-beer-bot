@@ -1,11 +1,12 @@
 import { Readable } from 'node:stream';
 import { parse as csvParse } from 'csv-parse';
-// stream-json v2 package.json exports: { "./*": "./src/*" }
-// ts (moduleResolution: node) doesn't honour that map, so we use require
-// to get the underlying module directly.
+// stream-json v2 exports: { "./*": "./src/*" } — Node applies the mapping
+// but does NOT append `.js` afterwards, so the require path must be explicit.
+// ts-jest resolves without the suffix, so tests passed while `node dist/...`
+// failed at module load.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const streamArray: typeof import('stream-json/src/streamers/stream-array') =
-  require('stream-json/streamers/stream-array');
+  require('stream-json/streamers/stream-array.js');
 import yauzl from 'yauzl';
 
 export interface Checkin {
