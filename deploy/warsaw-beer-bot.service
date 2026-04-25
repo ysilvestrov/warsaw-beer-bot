@@ -1,0 +1,19 @@
+[Unit]
+Description=Warsaw Beer Crawler Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/warsaw-beer-bot
+EnvironmentFile=/etc/warsaw-beer-bot/.env
+ExecStart=/usr/bin/node /opt/warsaw-beer-bot/dist/index.js
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+User=warsaw-beer-bot
+Group=warsaw-beer-bot
+
+[Install]
+WantedBy=multi-user.target
