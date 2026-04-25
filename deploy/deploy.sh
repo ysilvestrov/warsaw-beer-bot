@@ -21,7 +21,9 @@ sudo rsync -a --delete \
 # rsync -a preserves source ownership (root); reset before npm runs as warsaw-beer-bot.
 sudo chown -R warsaw-beer-bot:warsaw-beer-bot "$APP"
 
-sudo -u warsaw-beer-bot bash -lc "cd $APP && npm ci --omit=dev && npm run build"
+# typescript lives in devDependencies, so we need a full install for `tsc`,
+# then prune dev deps once dist/ is built.
+sudo -u warsaw-beer-bot bash -lc "cd $APP && npm ci && npm run build && npm prune --omit=dev"
 sudo install -m 0644 deploy/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now warsaw-beer-bot
