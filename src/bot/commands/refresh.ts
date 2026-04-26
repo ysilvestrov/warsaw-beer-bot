@@ -33,22 +33,32 @@ export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>)
     lastCall.set(ctx.from.id, Date.now());
 
     const status = await ctx.reply('⏳ Оновлюю…');
+    const chatId = ctx.chat.id;
+    const messageId = status.message_id;
+    const telegram = ctx.telegram;
+    const log = ctx.deps.log;
     const notify = makeThrottledProgress(
       async (text) => {
-        await ctx.telegram
-          .editMessageText(ctx.chat.id, status.message_id, undefined, text)
+        await telegram
+          .editMessageText(chatId, messageId, undefined, text)
           .catch(() => {});
       },
       PROGRESS_MIN_INTERVAL_MS,
     );
 
-    try {
-      await run(notify);
-      await notify('✅ Готово.', { force: true });
-    } catch (e) {
-      ctx.deps.log.error({ err: e }, 'refresh failed');
-      await notify('❌ Не вдалось — подивись логи.', { force: true });
-    }
+    // Detach the work: the refresh sweep takes minutes, but Telegraf's
+    // handlerTimeout (default 90s) would otherwise kill the handler and
+    // raise TimeoutError into bot.catch. Captured locals above keep the
+    // background promise independent of ctx's lifetime.
+    void (async () => {
+      try {
+        await run(notify);
+        await notify('✅ Готово.', { force: true });
+      } catch (e) {
+        log.error({ err: e }, 'refresh failed');
+        await notify('❌ Не вдалось — подивись логи.', { force: true });
+      }
+    })();
   });
   return cmd;
 }
