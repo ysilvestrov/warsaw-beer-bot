@@ -6,17 +6,24 @@ import { allProfiles } from '../storage/user_profiles';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
 import { mergeCheckin } from '../storage/checkins';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
+import { noopProgress, type ProgressFn } from './progress';
 
 interface Deps {
   db: DB;
   log: pino.Logger;
   http: Http;
+  onProgress?: ProgressFn;
 }
 
 export async function refreshAllUntappd(deps: Deps): Promise<void> {
-  const { db, log, http } = deps;
-  for (const p of allProfiles(db)) {
-    if (!p.untappd_username) continue;
+  const { db, log, http, onProgress = noopProgress } = deps;
+  const profiles = allProfiles(db).filter((p) => p.untappd_username);
+  await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
+
+  let i = 0;
+  let ok = 0;
+  for (const p of profiles) {
+    i++;
     try {
       const html = await http.get(`https://untappd.com/user/${p.untappd_username}/beer`);
       const items = parseUserBeerPage(html);
@@ -45,8 +52,11 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
           venue: null,
         });
       }
+      ok++;
     } catch (e) {
       log.warn({ err: e, user: p.untappd_username }, 'untappd scrape failed');
     }
+    await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
   }
+  await onProgress(`👤 untappd: ✓ ${ok}/${profiles.length} профілів`, { force: true });
 }
