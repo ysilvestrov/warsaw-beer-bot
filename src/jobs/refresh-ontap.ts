@@ -59,7 +59,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
       const catalog = listBeerCatalog(db);
       for (const t of taps) {
         const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
-        const m = matchBeer({ brewery, name: t.beer_ref }, catalog);
+        const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
         if (m) {
           upsertMatch(db, t.beer_ref, m.id, m.confidence);
         } else {
@@ -84,8 +84,8 @@ export async function refreshOntap(deps: Deps): Promise<void> {
   await onProgress(`🍻 ontap: ✓ ${ok}/${indexPubs.length} пабів`, { force: true });
 }
 
-function listBeerCatalog(db: DB): { id: number; brewery: string; name: string }[] {
+function listBeerCatalog(db: DB): { id: number; brewery: string; name: string; abv: number | null }[] {
   return db
-    .prepare('SELECT id, brewery, name FROM beers')
-    .all() as { id: number; brewery: string; name: string }[];
+    .prepare('SELECT id, brewery, name, abv FROM beers')
+    .all() as { id: number; brewery: string; name: string; abv: number | null }[];
 }

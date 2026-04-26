@@ -43,11 +43,13 @@ newbeersCommand.command('newbeers', async (ctx) => {
     }));
     const good = filterInteresting(taps, drunk, filters);
     for (const t of good) {
+      const display = t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref;
       candidates.push({
         beer_id: t.beer_id,
-        beer_ref: t.beer_ref,
+        display,
         brewery_norm: normalizeBrewery(t.brewery_ref ?? ''),
         name_norm: normalizeName(t.beer_ref),
+        abv: t.abv,
         rating: t.u_rating,
         pub_name: pub.name,
       });
