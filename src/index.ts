@@ -26,9 +26,6 @@ async function main(): Promise<void> {
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
 
-  const runOntap = () => refreshOntap({ db, log, http, geocoder });
-  const runUntappd = () => refreshAllUntappd({ db, log, http });
-
   const bot = createBot({ db, env, log });
   bot.use(
     startCommand,
@@ -37,17 +34,17 @@ async function main(): Promise<void> {
     newbeersCommand,
     routeCommand,
     filtersCommand,
-    createRefreshCommand(async () => {
-      await runOntap();
-      await runUntappd();
+    createRefreshCommand(async (notify) => {
+      await refreshOntap({ db, log, http, geocoder, onProgress: notify });
+      await refreshAllUntappd({ db, log, http, onProgress: notify });
     }),
   );
 
   cron.schedule('0 */12 * * *', () => {
-    runOntap().catch((e) => log.error({ err: e }, 'ontap cron'));
+    refreshOntap({ db, log, http, geocoder }).catch((e) => log.error({ err: e }, 'ontap cron'));
   });
   cron.schedule('0 3 * * *', () => {
-    runUntappd().catch((e) => log.error({ err: e }, 'untappd cron'));
+    refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
   });
 
   bot.launch();

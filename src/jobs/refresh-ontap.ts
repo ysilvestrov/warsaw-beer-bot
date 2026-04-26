@@ -10,21 +10,28 @@ import { upsertMatch } from '../storage/match_links';
 import { upsertBeer } from '../storage/beers';
 import { matchBeer } from '../domain/matcher';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
+import { noopProgress, type ProgressFn } from './progress';
 
 interface Deps {
   db: DB;
   log: pino.Logger;
   http: Http;
   geocoder: Geocoder;
+  onProgress?: ProgressFn;
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
-  const { db, log, http, geocoder } = deps;
+  const { db, log, http, geocoder, onProgress = noopProgress } = deps;
+  await onProgress('🍻 ontap: парсю індекс…', { force: true });
   const indexHtml = await http.get('https://ontap.pl/warszawa');
   const indexPubs = parseWarsawIndex(indexHtml);
   log.info({ n: indexPubs.length }, 'ontap index parsed');
+  await onProgress(`🍻 ontap: 0/${indexPubs.length} пабів`, { force: true });
 
+  let i = 0;
+  let ok = 0;
   for (const ip of indexPubs) {
+    i++;
     try {
       const html = await http.get(`https://${ip.slug}.ontap.pl/`);
       const { pub, taps } = parsePubPage(html);
@@ -68,10 +75,13 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           upsertMatch(db, t.beer_ref, beerId, 1.0);
         }
       }
+      ok++;
     } catch (e) {
       log.warn({ err: e, slug: ip.slug }, 'ontap pub refresh failed');
     }
+    await onProgress(`🍻 ontap: ${i}/${indexPubs.length} — ${ip.slug}`);
   }
+  await onProgress(`🍻 ontap: ✓ ${ok}/${indexPubs.length} пабів`, { force: true });
 }
 
 function listBeerCatalog(db: DB): { id: number; brewery: string; name: string }[] {
