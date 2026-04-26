@@ -16,6 +16,7 @@ import { filtersCommand } from './bot/commands/filters';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
+import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
   const env = loadEnv(process.env);
@@ -40,18 +41,27 @@ async function main(): Promise<void> {
     }),
   );
 
-  cron.schedule('0 */12 * * *', () => {
-    refreshOntap({ db, log, http, geocoder }).catch((e) => log.error({ err: e }, 'ontap cron'));
-  });
-  cron.schedule('0 3 * * *', () => {
-    refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
-  });
+  const cronJobs = [
+    cron.schedule('0 */12 * * *', () => {
+      refreshOntap({ db, log, http, geocoder }).catch((e) => log.error({ err: e }, 'ontap cron'));
+    }),
+    cron.schedule('0 3 * * *', () => {
+      refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
+    }),
+  ];
 
   bot.launch();
   log.info('bot launched');
 
-  process.once('SIGINT', () => bot.stop('SIGINT'));
-  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+  // Without an explicit exit, node-cron schedules and the SQLite handle keep
+  // the event loop alive — systemd then SIGKILLs us at TimeoutStopSec (90s
+  // default), which risks a non-clean SQLite WAL flush.
+  const shutdown = createShutdown({ bot, cronJobs, db, log });
+  const onSignal = (signal: string) => {
+    shutdown(signal).finally(() => process.exit(0));
+  };
+  process.once('SIGINT', () => onSignal('SIGINT'));
+  process.once('SIGTERM', () => onSignal('SIGTERM'));
 }
 
 main().catch((e) => {

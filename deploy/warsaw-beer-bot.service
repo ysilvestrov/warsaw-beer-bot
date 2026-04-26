@@ -10,6 +10,10 @@ EnvironmentFile=/etc/warsaw-beer-bot/.env
 ExecStart=/usr/bin/node /opt/warsaw-beer-bot/dist/index.js
 Restart=on-failure
 RestartSec=5
+# Bot's signal handler stops crons + bot + db then exits, well under this
+# budget. Cap below systemd's 90s default so a stuck process doesn't drag
+# every redeploy.
+TimeoutStopSec=20
 StandardOutput=journal
 StandardError=journal
 User=warsaw-beer-bot
