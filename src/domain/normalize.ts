@@ -25,12 +25,22 @@ function baseNormalize(s: string): string {
     .trim();
 }
 
+// Strip pure-digit tokens — covers ontap noise like "24" / "8" / "5"
+// (left over after baseNormalize splits "24°·8,5%") and Untappd vintage
+// suffixes like "2024"/"2026". Trade-off: legitimate numeric beer names
+// ("Pinta 555") collapse too — acceptable for now.
+const isNumericNoise = (t: string): boolean => /^\d+$/.test(t);
+
 export function normalizeName(s: string): string {
-  const tokens = baseNormalize(s).split(' ').filter((t) => t && !STYLE_WORDS.has(t));
+  const tokens = baseNormalize(s)
+    .split(' ')
+    .filter((t) => t && !STYLE_WORDS.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
 }
 
 export function normalizeBrewery(s: string): string {
-  const tokens = baseNormalize(s).split(' ').filter((t) => t && !BREWERY_NOISE.has(t));
+  const tokens = baseNormalize(s)
+    .split(' ')
+    .filter((t) => t && !BREWERY_NOISE.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
 }

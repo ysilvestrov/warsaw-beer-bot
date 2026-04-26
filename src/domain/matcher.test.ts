@@ -1,9 +1,16 @@
-import { matchBeer } from './matcher';
+import { matchBeer, type CatalogBeer } from './matcher';
 
-const catalog = [
-  { id: 1, brewery: 'Pinta', name: 'Atak Chmielu' },
-  { id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta' },
-  { id: 3, brewery: 'Piwne Podziemie', name: 'Hopinka' },
+const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
+  brewery: 'Pinta',
+  name: 'Atak Chmielu',
+  abv: null,
+  ...over,
+});
+
+const catalog: CatalogBeer[] = [
+  c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 }),
+  c({ id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta', abv: 5.0 }),
+  c({ id: 3, brewery: 'Piwne Podziemie', name: 'Hopinka', abv: 6.0 }),
 ];
 
 test('exact normalized match is confidence 1', () => {
@@ -11,13 +18,71 @@ test('exact normalized match is confidence 1', () => {
   expect(m).toEqual({ id: 1, confidence: 1, source: 'exact' });
 });
 
-test('fuzzy match above threshold returns 0.85..1 confidence', () => {
+test('fuzzy match above the lowered 0.75 threshold returns < 1 confidence', () => {
   const m = matchBeer({ brewery: 'Stu Mostow', name: 'Buty Skejty' }, catalog);
   expect(m?.id).toBe(2);
-  expect(m!.confidence).toBeGreaterThanOrEqual(0.85);
+  expect(m!.confidence).toBeGreaterThanOrEqual(0.75);
   expect(m!.confidence).toBeLessThan(1);
 });
 
 test('no match below threshold returns null', () => {
   expect(matchBeer({ brewery: 'Random', name: 'Xyz' }, catalog)).toBeNull();
+});
+
+describe('vintage handling', () => {
+  const vintages: CatalogBeer[] = [
+    c({ id: 10, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy 2024', abv: 8.0 }),
+    c({ id: 11, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy 2025', abv: 8.5 }),
+    c({ id: 12, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy 2026', abv: 9.5 }),
+  ];
+
+  test('picks the latest vintage when ABV not provided', () => {
+    const m = matchBeer({ brewery: 'Harpagan', name: 'Buzdygan Rozkoszy' }, vintages);
+    expect(m?.id).toBe(12); // highest id = newest
+    expect(m?.source).toBe('exact');
+  });
+
+  test('picks ABV-matching vintage when ABV provided', () => {
+    const m = matchBeer(
+      { brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.5 },
+      vintages,
+    );
+    expect(m?.id).toBe(11); // 2025 matches ABV 8.5
+  });
+
+  test('falls back to latest when no ABV in catalog matches input', () => {
+    const m = matchBeer(
+      { brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 12.0 },
+      vintages,
+    );
+    expect(m?.id).toBe(12); // none match — return latest anyway
+  });
+
+  test('ABV tolerance: 0.3 absolute', () => {
+    const m = matchBeer(
+      { brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.7 },
+      vintages,
+    );
+    expect(m?.id).toBe(11); // 8.5 within 0.3 of 8.7
+  });
+
+  test('ignores catalog ABV nulls when picking by ABV', () => {
+    const mixed: CatalogBeer[] = [
+      c({ id: 20, brewery: 'X', name: 'Foo', abv: null }),
+      c({ id: 21, brewery: 'X', name: 'Foo', abv: 5.0 }),
+    ];
+    const m = matchBeer({ brewery: 'X', name: 'Foo', abv: 5.0 }, mixed);
+    expect(m?.id).toBe(21);
+  });
+});
+
+test('ontap-style raw beer_ref + ABV maps to clean Untappd entry', () => {
+  // Real-world scenario from issue #18: ontap parser used to leave
+  // "Buzdygan Rozkoszy 24°·8,5% — Caribbean Imperial Stout" in beer_ref,
+  // but with the fix beer_ref is clean.
+  const m = matchBeer(
+    { brewery: 'Harpagan Brewery', name: 'Buzdygan Rozkoszy', abv: 8.5 },
+    [c({ id: 99, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.5 })],
+  );
+  expect(m?.id).toBe(99);
 });

@@ -22,6 +22,26 @@ export interface ParsedPubPage {
   taps: ParsedTap[];
 }
 
+// Strip ABV/strength suffix and brewery prefix from h4 text.
+// h4Text typically looks like "Brewery Name BeerName 24°·8,5%" — we want
+// just "BeerName" so the matcher sees a canonical key.
+export function extractBeerName(h4Text: string, brewery_ref: string | null): string {
+  let s = h4Text;
+  // Truncate at the first ABV/strength pattern: "16°", "8.5%", "24°·5%".
+  const m = s.match(/^(.*?)\s+\d+(?:[.,]\d+)?\s*[°%]/);
+  if (m) s = m[1];
+  // Drop a leading brewery prefix when present.
+  if (brewery_ref) {
+    const brl = brewery_ref.toLowerCase();
+    if (s.toLowerCase().startsWith(brl + ' ')) {
+      s = s.slice(brl.length + 1);
+    } else if (s.toLowerCase() === brl) {
+      s = '';
+    }
+  }
+  return s.trim();
+}
+
 export function parsePubPage(html: string): ParsedPubPage {
   const $ = cheerio.load(html);
 
@@ -66,7 +86,8 @@ export function parsePubPage(html: string): ParsedPubPage {
 
     const subtitle = row.find('span.cml_shadow > b').first().text()
       .replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
-    const beer_ref = subtitle ? `${h4Text} — ${subtitle}` : h4Text;
+    const beer_ref = extractBeerName(h4Text, brewery_ref) || h4Text;
+    const style = subtitle || null;
 
     let ibu: number | null = null;
     row.find('kbd').each((_, k) => {
@@ -86,7 +107,7 @@ export function parsePubPage(html: string): ParsedPubPage {
       brewery_ref,
       abv,
       ibu,
-      style: null,
+      style,
       u_rating,
     });
   });
