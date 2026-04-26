@@ -12,6 +12,9 @@ import {
   createOsrmDistance,
   type RoutePub,
 } from '../../domain/router';
+import { makeThrottledProgress } from './refresh';
+
+const PROGRESS_MIN_INTERVAL_MS = 2000;
 
 export const routeCommand = new Composer<BotContext>();
 
@@ -59,38 +62,69 @@ routeCommand.command('route', async (ctx) => {
     return;
   }
 
-  const osrm = createOsrmDistance(ctx.deps.env.OSRM_BASE_URL);
-  const n = routePubs.length;
-  const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
-  const coordKey = (lat: number, lon: number) => `${lat},${lon}`;
-  const idxByCoord = new Map(routePubs.map((p, i) => [coordKey(p.lat, p.lon), i]));
+  const status = await ctx.reply(`⏳ Будую маршрут для ≥${N} нових пив…`);
+  const chatId = ctx.chat.id;
+  const messageId = status.message_id;
+  const telegram = ctx.telegram;
+  const log = ctx.deps.log;
+  const env = ctx.deps.env;
+  const notify = makeThrottledProgress(
+    async (text) => {
+      await telegram
+        .editMessageText(chatId, messageId, undefined, text)
+        .catch(() => {});
+    },
+    PROGRESS_MIN_INTERVAL_MS,
+  );
 
-  for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const a: [number, number] = [routePubs[i].lat, routePubs[i].lon];
-      const b: [number, number] = [routePubs[j].lat, routePubs[j].lon];
-      let d: number;
-      try {
-        d = await osrm(a, b);
-      } catch (e) {
-        ctx.deps.log.warn({ err: e }, 'osrm failed, haversine');
-        d = haversineMeters(a, b);
+  // Detach the work: an N×N OSRM matrix on ~30 pubs is ~435 sequential
+  // HTTP calls — comfortably past Telegraf's 90s handlerTimeout. Captured
+  // locals above keep the background promise independent of ctx's lifetime.
+  void (async () => {
+    try {
+      const osrm = createOsrmDistance(env.OSRM_BASE_URL);
+      const n = routePubs.length;
+      const totalPairs = (n * (n - 1)) / 2;
+      const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
+      const coordKey = (lat: number, lon: number) => `${lat},${lon}`;
+      const idxByCoord = new Map(routePubs.map((p, i) => [coordKey(p.lat, p.lon), i]));
+
+      await notify(`🗺 Матриця відстаней: 0/${totalPairs}`, { force: true });
+      let done = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const a: [number, number] = [routePubs[i].lat, routePubs[i].lon];
+          const b: [number, number] = [routePubs[j].lat, routePubs[j].lon];
+          let d: number;
+          try {
+            d = await osrm(a, b);
+          } catch (e) {
+            log.warn({ err: e }, 'osrm failed, haversine');
+            d = haversineMeters(a, b);
+          }
+          matrix[i][j] = d;
+          matrix[j][i] = d;
+          done++;
+          await notify(`🗺 Матриця відстаней: ${done}/${totalPairs}`);
+        }
       }
-      matrix[i][j] = d;
-      matrix[j][i] = d;
+      await notify('🧠 Шукаю найкоротший обхід…', { force: true });
+
+      const distance = (a: [number, number], b: [number, number]): number => {
+        const ia = idxByCoord.get(coordKey(a[0], a[1]));
+        const ib = idxByCoord.get(coordKey(b[0], b[1]));
+        if (ia === undefined || ib === undefined) return haversineMeters(a, b);
+        return matrix[ia][ib];
+      };
+
+      const result = buildRoute(routePubs, N, { distance });
+      const km = (result.distanceMeters / 1000).toFixed(1);
+      const header = `Маршрут: ≥${N} нових пив, покрито ${result.coveredCount}, ≈ ${km} км, ${result.pubIds.length} пабів`;
+      const lines = result.pubIds.map((id, i) => `${i + 1}. ${pubsById.get(id)!.name}`);
+      await notify([header, '', ...lines].join('\n'), { force: true });
+    } catch (e) {
+      log.error({ err: e }, 'route failed');
+      await notify('❌ Не вдалось побудувати маршрут — подивись логи.', { force: true });
     }
-  }
-
-  const distance = (a: [number, number], b: [number, number]): number => {
-    const ia = idxByCoord.get(coordKey(a[0], a[1]));
-    const ib = idxByCoord.get(coordKey(b[0], b[1]));
-    if (ia === undefined || ib === undefined) return haversineMeters(a, b);
-    return matrix[ia][ib];
-  };
-
-  const result = buildRoute(routePubs, N, { distance });
-  const km = (result.distanceMeters / 1000).toFixed(1);
-  const header = `Маршрут: ≥${N} нових пив, покрито ${result.coveredCount}, ≈ ${km} км, ${result.pubIds.length} пабів`;
-  const lines = result.pubIds.map((id, i) => `${i + 1}. ${pubsById.get(id)!.name}`);
-  await ctx.reply([header, '', ...lines].join('\n'));
+  })();
 });
