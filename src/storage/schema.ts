@@ -82,6 +82,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE pub_distances (
+        pub_id_a INTEGER NOT NULL REFERENCES pubs(id) ON DELETE CASCADE,
+        pub_id_b INTEGER NOT NULL REFERENCES pubs(id) ON DELETE CASCADE,
+        meters REAL NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('osrm', 'haversine')),
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (pub_id_a, pub_id_b),
+        CHECK (pub_id_a < pub_id_b)
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

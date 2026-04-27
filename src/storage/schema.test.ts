@@ -12,7 +12,8 @@ describe('schema migrations', () => {
     expect(names).toEqual(
       expect.arrayContaining([
         'beers', 'pubs', 'tap_snapshots', 'taps', 'checkins',
-        'match_links', 'user_profiles', 'user_filters', 'schema_version',
+        'match_links', 'user_profiles', 'user_filters', 'pub_distances',
+        'schema_version',
       ]),
     );
   });

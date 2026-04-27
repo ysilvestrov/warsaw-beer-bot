@@ -119,3 +119,18 @@ export function createOsrmDistance(base: string, fetchImpl: typeof fetch = fetch
     return body.routes?.[0]?.distance ?? haversineMeters(a, b);
   };
 }
+
+export function createOsrmTable(base: string, fetchImpl: typeof fetch = fetch) {
+  return async (points: [number, number][]): Promise<number[][]> => {
+    if (points.length < 2) return points.map(() => points.map(() => 0));
+    const coords = points.map(([lat, lon]) => `${lon},${lat}`).join(';');
+    const url = `${base}/table/v1/foot/${coords}?annotations=distance`;
+    const res = await fetchImpl(url);
+    if (!res.ok) throw new Error(`OSRM /table HTTP ${res.status}`);
+    const body = (await res.json()) as { distances?: (number | null)[][] };
+    if (!body.distances) throw new Error('OSRM /table missing distances');
+    return body.distances.map((row, i) =>
+      row.map((d, j) => (d == null ? haversineMeters(points[i], points[j]) : d)),
+    );
+  };
+}
