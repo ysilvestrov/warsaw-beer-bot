@@ -6,6 +6,7 @@ import { drunkBeerIds } from '../../storage/checkins';
 import { getMatch } from '../../storage/match_links';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting } from '../../domain/filters';
+import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import {
   buildRoute,
   haversineMeters,
@@ -20,6 +21,12 @@ import {
   type DistanceSource,
 } from '../../storage/pub_distances';
 import { makeThrottledProgress } from './refresh';
+import {
+  groupTaps,
+  rankGroups,
+  type CandidateTap,
+} from './newbeers-format';
+import { formatRouteResult, type RoutePubFormat } from './route-format';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -45,6 +52,7 @@ routeCommand.command('route', async (ctx) => {
   const pubsById = new Map(listPubs(db).map((p) => [p.id, p]));
 
   const routePubs: RoutePub[] = [];
+  const interestingByPub = new Map<number, CandidateTap[]>();
   for (const snap of latestSnapshotsPerPub(db)) {
     const pub = pubsById.get(snap.pub_id);
     if (!pub || pub.lat == null || pub.lon == null) continue;
@@ -53,15 +61,29 @@ routeCommand.command('route', async (ctx) => {
       style: t.style,
       abv: t.abv,
       u_rating: t.u_rating,
+      beer_ref: t.beer_ref,
+      brewery_ref: t.brewery_ref,
     }));
-    const interesting = filterInteresting(taps, drunk, filters).map((t) => t.beer_id!) as number[];
-    if (!interesting.length) continue;
+    const good = filterInteresting(taps, drunk, filters);
+    if (!good.length) continue;
     routePubs.push({
       id: pub.id,
       lat: pub.lat,
       lon: pub.lon,
-      interesting: new Set(interesting),
+      interesting: new Set(good.map((t) => t.beer_id!) as number[]),
     });
+    interestingByPub.set(
+      pub.id,
+      good.map((t) => ({
+        beer_id: t.beer_id,
+        display: t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref,
+        brewery_norm: normalizeBrewery(t.brewery_ref ?? ''),
+        name_norm: normalizeName(t.beer_ref),
+        abv: t.abv,
+        rating: t.u_rating,
+        pub_name: pub.name,
+      })),
+    );
   }
 
   if (!routePubs.length) {
@@ -78,7 +100,7 @@ routeCommand.command('route', async (ctx) => {
   const notify = makeThrottledProgress(
     async (text) => {
       await telegram
-        .editMessageText(chatId, messageId, undefined, text)
+        .editMessageText(chatId, messageId, undefined, text, { parse_mode: 'HTML' })
         .catch(() => {});
     },
     PROGRESS_MIN_INTERVAL_MS,
@@ -176,10 +198,20 @@ routeCommand.command('route', async (ctx) => {
       };
 
       const result = buildRoute(routePubs, N, { distance });
-      const km = (result.distanceMeters / 1000).toFixed(1);
-      const header = `Маршрут: ≥${N} нових пив, покрито ${result.coveredCount}, ≈ ${km} км, ${result.pubIds.length} пабів`;
-      const lines = result.pubIds.map((id, i) => `${i + 1}. ${pubsById.get(id)!.name}`);
-      await notify([header, '', ...lines].join('\n'), { force: true });
+      const pubsInOrder: RoutePubFormat[] = result.pubIds.map((id) => {
+        const taps = interestingByPub.get(id) ?? [];
+        const ranked = rankGroups(groupTaps(taps));
+        return {
+          name: pubsById.get(id)!.name,
+          beers: ranked.map((g) => ({ display: g.display, rating: g.rating, abv: g.abv })),
+        };
+      });
+      const text = formatRouteResult({
+        N,
+        distanceMeters: result.distanceMeters,
+        pubsInOrder,
+      });
+      await notify(text, { force: true });
     } catch (e) {
       log.error({ err: e }, 'route failed');
       await notify('❌ Не вдалось побудувати маршрут — подивись логи.', { force: true });

@@ -69,13 +69,13 @@ export function rankGroups(groups: BeerGroup[]): BeerGroup[] {
   });
 }
 
-const escapeHtml = (s: string): string =>
+export const escapeHtml = (s: string): string =>
   s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-const fmtRating = (r: number | null): string =>
+export const fmtRating = (r: number | null): string =>
   r === null ? '⭐ —' : `⭐ ${r.toFixed(2).replace(/\.?0+$/, '')}`;
 
-const fmtAbv = (abv: number | null): string => {
+export const fmtAbv = (abv: number | null): string => {
   if (abv === null) return '';
   // Comma decimal separator (UA/PL convention); strip trailing .0 → integer.
   const rounded = Math.round(abv * 10) / 10;
