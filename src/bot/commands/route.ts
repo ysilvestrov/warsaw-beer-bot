@@ -10,8 +10,15 @@ import {
   buildRoute,
   haversineMeters,
   createOsrmDistance,
+  createOsrmTable,
   type RoutePub,
 } from '../../domain/router';
+import {
+  getDistancesFor,
+  pairKey,
+  putDistances,
+  type DistanceSource,
+} from '../../storage/pub_distances';
 import { makeThrottledProgress } from './refresh';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
@@ -77,37 +84,88 @@ routeCommand.command('route', async (ctx) => {
     PROGRESS_MIN_INTERVAL_MS,
   );
 
-  // Detach the work: an N×N OSRM matrix on ~30 pubs is ~435 sequential
-  // HTTP calls — comfortably past Telegraf's 90s handlerTimeout. Captured
-  // locals above keep the background promise independent of ctx's lifetime.
+  // Detach the work: even with /table API + DB cache, a cold call still
+  // exceeds Telegraf's 90s handlerTimeout on a fresh deploy. Captured locals
+  // above keep the background promise independent of ctx's lifetime.
   void (async () => {
     try {
-      const osrm = createOsrmDistance(env.OSRM_BASE_URL);
       const n = routePubs.length;
       const totalPairs = (n * (n - 1)) / 2;
       const matrix: number[][] = Array.from({ length: n }, () => Array(n).fill(0));
       const coordKey = (lat: number, lon: number) => `${lat},${lon}`;
       const idxByCoord = new Map(routePubs.map((p, i) => [coordKey(p.lat, p.lon), i]));
 
-      await notify(`🗺 Матриця відстаней: 0/${totalPairs}`, { force: true });
-      let done = 0;
+      const cached = getDistancesFor(db, routePubs.map((p) => p.id));
+      const missing: [number, number][] = [];
       for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
-          const a: [number, number] = [routePubs[i].lat, routePubs[i].lon];
-          const b: [number, number] = [routePubs[j].lat, routePubs[j].lon];
-          let d: number;
-          try {
-            d = await osrm(a, b);
-          } catch (e) {
-            log.warn({ err: e }, 'osrm failed, haversine');
-            d = haversineMeters(a, b);
+          const c = cached.get(pairKey(routePubs[i].id, routePubs[j].id));
+          if (c) {
+            matrix[i][j] = c.meters;
+            matrix[j][i] = c.meters;
+          } else {
+            missing.push([i, j]);
           }
-          matrix[i][j] = d;
-          matrix[j][i] = d;
-          done++;
-          await notify(`🗺 Матриця відстаней: ${done}/${totalPairs}`);
         }
       }
+
+      const cachedCount = totalPairs - missing.length;
+      await notify(
+        `🗺 Матриця відстаней: ${cachedCount}/${totalPairs} з кешу, ${missing.length} нових`,
+        { force: true },
+      );
+
+      if (missing.length) {
+        const involvedSet = new Set<number>();
+        for (const [i, j] of missing) { involvedSet.add(i); involvedSet.add(j); }
+        const involved = [...involvedSet];
+        const subPoints: [number, number][] = involved.map(
+          (i) => [routePubs[i].lat, routePubs[i].lon],
+        );
+        const subIndex = new Map(involved.map((idx, sub) => [idx, sub]));
+
+        const fresh: { idA: number; idB: number; meters: number; source: DistanceSource }[] = [];
+        let table: number[][] | null = null;
+        try {
+          table = await createOsrmTable(env.OSRM_BASE_URL)(subPoints);
+        } catch (e) {
+          log.warn({ err: e }, 'osrm /table failed, fall back per-pair');
+        }
+
+        if (table) {
+          for (const [i, j] of missing) {
+            const d = table[subIndex.get(i)!][subIndex.get(j)!];
+            matrix[i][j] = d;
+            matrix[j][i] = d;
+            fresh.push({ idA: routePubs[i].id, idB: routePubs[j].id, meters: d, source: 'osrm' });
+          }
+        } else {
+          const osrm = createOsrmDistance(env.OSRM_BASE_URL);
+          let done = 0;
+          for (const [i, j] of missing) {
+            const a: [number, number] = [routePubs[i].lat, routePubs[i].lon];
+            const b: [number, number] = [routePubs[j].lat, routePubs[j].lon];
+            let d: number;
+            let source: DistanceSource;
+            try {
+              d = await osrm(a, b);
+              source = 'osrm';
+            } catch (err) {
+              log.warn({ err }, 'osrm failed, haversine');
+              d = haversineMeters(a, b);
+              source = 'haversine';
+            }
+            matrix[i][j] = d;
+            matrix[j][i] = d;
+            fresh.push({ idA: routePubs[i].id, idB: routePubs[j].id, meters: d, source });
+            done++;
+            await notify(`🗺 Догружаю пари без кешу: ${done}/${missing.length}`);
+          }
+        }
+
+        putDistances(db, fresh);
+      }
+
       await notify('🧠 Шукаю найкоротший обхід…', { force: true });
 
       const distance = (a: [number, number], b: [number, number]): number => {
