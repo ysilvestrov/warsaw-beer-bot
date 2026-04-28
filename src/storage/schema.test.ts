@@ -23,4 +23,16 @@ describe('schema migrations', () => {
     migrate(db);
     expect(() => migrate(db)).not.toThrow();
   });
+
+  it('migration v3 adds user_profiles.language column', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db
+      .prepare("PRAGMA table_info(user_profiles)")
+      .all() as { name: string; type: string; dflt_value: unknown }[];
+    const lang = cols.find((c) => c.name === 'language');
+    expect(lang).toBeDefined();
+    expect(lang?.type).toBe('TEXT');
+    expect(lang?.dflt_value).toBeNull();
+  });
 });
