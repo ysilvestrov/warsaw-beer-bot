@@ -15,10 +15,10 @@ linkCommand.command('link', async (ctx) => {
   const arg = ctx.message.text.split(' ').slice(1).join(' ');
   const parsed = parseLinkArgs(arg);
   if (!parsed) {
-    await ctx.reply('Використання: /link <username> (або повний URL untappd.com/user/<username>)');
+    await ctx.reply(ctx.t('link.usage'));
     return;
   }
   ensureProfile(ctx.deps.db, ctx.from.id);
   setUntappdUsername(ctx.deps.db, ctx.from.id, parsed.username);
-  await ctx.reply(`✅ Прив'язано до untappd.com/user/${parsed.username}`);
+  await ctx.reply(ctx.t('link.success', { username: parsed.username }));
 });
