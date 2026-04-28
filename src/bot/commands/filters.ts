@@ -18,7 +18,10 @@ filtersCommand.command('filters', async (ctx) => {
   ensureProfile(ctx.deps.db, ctx.from.id);
   const f = getFilters(ctx.deps.db, ctx.from.id);
   await ctx.reply(
-    `Поточні: styles=${(f?.styles ?? []).join(',') || '—'}, min_rating=${f?.min_rating ?? '—'}`,
+    ctx.t('filters.current', {
+      styles: (f?.styles ?? []).join(',') || '—',
+      min_rating: f?.min_rating ?? '—',
+    }),
     filtersKeyboard(),
   );
 });
@@ -30,17 +33,17 @@ filtersCommand.action(/style:(.+)/, async (ctx) => {
     ? f.styles.filter((s) => s !== style)
     : [...f.styles, style];
   setFilters(ctx.deps.db, ctx.from!.id, { ...f, styles });
-  await ctx.answerCbQuery(`styles=${styles.join(',') || '—'}`);
+  await ctx.answerCbQuery(ctx.t('filters.styles_changed', { styles: styles.join(',') || '—' }));
 });
 
 filtersCommand.action(/rating:(.+)/, async (ctx) => {
   const r = parseFloat(ctx.match[1]);
   const f = getFilters(ctx.deps.db, ctx.from!.id) ?? emptyFilters();
   setFilters(ctx.deps.db, ctx.from!.id, { ...f, min_rating: r });
-  await ctx.answerCbQuery(`min_rating=${r}`);
+  await ctx.answerCbQuery(ctx.t('filters.rating_changed', { rating: r }));
 });
 
 filtersCommand.action('reset', async (ctx) => {
   setFilters(ctx.deps.db, ctx.from!.id, emptyFilters());
-  await ctx.answerCbQuery('Скинуто');
+  await ctx.answerCbQuery(ctx.t('filters.reset_done'));
 });
