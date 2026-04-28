@@ -31,3 +31,56 @@ describe('translator (plain string keys)', () => {
     expect(t('link.success', { username: 42 })).toBe('Linked: 42');
   });
 });
+
+describe('translator (plurals)', () => {
+  // Synthetic dict — PR 1 has no real plural keys in uk.ts yet.
+  const ukDict = {
+    'pubs.uk': {
+      one:  'паб у маршруті: {count}',
+      few:  'паби у маршруті: {count}',
+      many: 'пабів у маршруті: {count}',
+      other:'пабів у маршруті: {count}',
+    },
+  } as unknown as Messages;
+  const enDict = {
+    'pubs.en': {
+      one:   '{count} pub on the route',
+      other: '{count} pubs on the route',
+    },
+  } as unknown as Messages;
+
+  const ukT = makeTranslatorFromDict('uk', ukDict);
+  const enT = makeTranslatorFromDict('en', enDict);
+
+  test('UA selects "one" for count = 1', () => {
+    expect(ukT('pubs.uk' as keyof Messages, { count: 1 })).toBe('паб у маршруті: 1');
+  });
+
+  test('UA selects "few" for count = 3', () => {
+    expect(ukT('pubs.uk' as keyof Messages, { count: 3 })).toBe('паби у маршруті: 3');
+  });
+
+  test('UA selects "many" for count = 5', () => {
+    expect(ukT('pubs.uk' as keyof Messages, { count: 5 })).toBe('пабів у маршруті: 5');
+  });
+
+  test('UA selects "many" for count = 0 (Intl.PluralRules convention)', () => {
+    expect(ukT('pubs.uk' as keyof Messages, { count: 0 })).toBe('пабів у маршруті: 0');
+  });
+
+  test('EN selects "one" for count = 1', () => {
+    expect(enT('pubs.en' as keyof Messages, { count: 1 })).toBe('1 pub on the route');
+  });
+
+  test('EN selects "other" for count = 3', () => {
+    expect(enT('pubs.en' as keyof Messages, { count: 3 })).toBe('3 pubs on the route');
+  });
+
+  test('falls back to "other" when the selected form is missing', () => {
+    const partial = {
+      'partial': { other: 'fallback' },
+    } as unknown as Messages;
+    const t = makeTranslatorFromDict('uk', partial);
+    expect(t('partial' as keyof Messages, { count: 1 })).toBe('fallback');
+  });
+});

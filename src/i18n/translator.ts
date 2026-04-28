@@ -7,11 +7,15 @@ function interpolate(tmpl: string, params?: Record<string, string | number>): st
   );
 }
 
-export function makeTranslatorFromDict(_locale: Locale, dict: Messages): Translator {
+export function makeTranslatorFromDict(locale: Locale, dict: Messages): Translator {
+  const pr = new Intl.PluralRules(locale);
   return (key, params) => {
     const raw = dict[key] as string | PluralForms;
     if (typeof raw === 'string') return interpolate(raw, params);
-    // Plural — implemented in Task 6.
-    throw new Error(`PluralForms not yet supported for key: ${String(key)}`);
+    // PluralForms — pivot завжди params.count (стандарт ICU/i18next).
+    const count = params?.count;
+    const form = typeof count === 'number' ? pr.select(count) : 'other';
+    const tmpl = raw[form as keyof PluralForms] ?? raw.other;
+    return interpolate(tmpl, params);
   };
 }
