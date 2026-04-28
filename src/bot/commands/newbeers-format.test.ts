@@ -5,6 +5,12 @@ import {
   type CandidateTap,
   type BeerGroup,
 } from './newbeers-format';
+import type { Translator } from '../../i18n/types';
+
+const stubT: Translator = (key, params) => {
+  if (key === 'newbeers.more_pubs_suffix') return ` +${params!.extra} інших`;
+  return String(key);
+};
 
 const tap = (over: Partial<CandidateTap> = {}): CandidateTap => ({
   beer_id: null,
@@ -108,9 +114,10 @@ describe('rankGroups', () => {
 
 describe('formatGroupedBeers', () => {
   test('numbered list with bold name, rating and ABV', () => {
-    const text = formatGroupedBeers([
-      { display: 'Salamander', rating: 3.9, abv: 5.5, pubs: ['Cuda'] },
-    ]);
+    const text = formatGroupedBeers(
+      [{ display: 'Salamander', rating: 3.9, abv: 5.5, pubs: ['Cuda'] }],
+      'uk', stubT,
+    );
     expect(text).toContain('1. <b>Salamander</b>');
     expect(text).toContain('⭐ 3.9');
     expect(text).toContain('5,5%');
@@ -118,33 +125,44 @@ describe('formatGroupedBeers', () => {
   });
 
   test('renders integer ABV without decimal separator', () => {
-    const text = formatGroupedBeers([{ display: 'X', rating: 4.0, abv: 6, pubs: ['A'] }]);
+    const text = formatGroupedBeers(
+      [{ display: 'X', rating: 4.0, abv: 6, pubs: ['A'] }],
+      'uk', stubT,
+    );
     expect(text).toContain('6%');
     expect(text).not.toContain('6,0%');
   });
 
   test('omits ABV chip when abv is null', () => {
-    const text = formatGroupedBeers([{ display: 'X', rating: 4.0, abv: null, pubs: ['A'] }]);
+    const text = formatGroupedBeers(
+      [{ display: 'X', rating: 4.0, abv: null, pubs: ['A'] }],
+      'uk', stubT,
+    );
     expect(text).not.toMatch(/%/);
   });
 
   test('caps pub list at maxPubs and appends +N інших', () => {
     const text = formatGroupedBeers(
       [{ display: 'X', rating: 4.0, abv: null, pubs: ['A', 'B', 'C', 'D', 'E'] }],
+      'uk', stubT,
       { maxPubs: 3 },
     );
     expect(text).toContain('A, B, C +2 інших');
   });
 
   test('renders null rating as ⭐ —', () => {
-    const text = formatGroupedBeers([{ display: 'X', rating: null, abv: null, pubs: ['A'] }]);
+    const text = formatGroupedBeers(
+      [{ display: 'X', rating: null, abv: null, pubs: ['A'] }],
+      'uk', stubT,
+    );
     expect(text).toContain('⭐ —');
   });
 
   test('HTML-escapes special chars in name and pubs', () => {
-    const text = formatGroupedBeers([
-      { display: 'Pivo & <Co>', rating: null, abv: null, pubs: ['Bar & Grill'] },
-    ]);
+    const text = formatGroupedBeers(
+      [{ display: 'Pivo & <Co>', rating: null, abv: null, pubs: ['Bar & Grill'] }],
+      'uk', stubT,
+    );
     expect(text).toContain('Pivo &amp; &lt;Co&gt;');
     expect(text).toContain('Bar &amp; Grill');
   });
@@ -156,18 +174,21 @@ describe('formatGroupedBeers', () => {
       abv: null,
       pubs: ['P'],
     }));
-    const text = formatGroupedBeers(groups, { topN: 3 });
+    const text = formatGroupedBeers(groups, 'uk', stubT, { topN: 3 });
     expect(text).toContain('1. <b>B0</b>');
     expect(text).toContain('3. <b>B2</b>');
     expect(text).not.toContain('4. <b>B3</b>');
   });
 
   test('empty input → empty string', () => {
-    expect(formatGroupedBeers([])).toBe('');
+    expect(formatGroupedBeers([], 'uk', stubT)).toBe('');
   });
 
   test('two-line layout per beer', () => {
-    const text = formatGroupedBeers([{ display: 'X', rating: 4.0, abv: null, pubs: ['A', 'B'] }]);
+    const text = formatGroupedBeers(
+      [{ display: 'X', rating: 4.0, abv: null, pubs: ['A', 'B'] }],
+      'uk', stubT,
+    );
     const lines = text.split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^1\. <b>X<\/b>/);

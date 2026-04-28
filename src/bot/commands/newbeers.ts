@@ -56,6 +56,6 @@ newbeersCommand.command('newbeers', async (ctx) => {
     }
   }
 
-  const text = formatGroupedBeers(rankGroups(groupTaps(candidates)));
-  await ctx.replyWithHTML(text || 'Нічого цікавого — спробуй /refresh.');
+  const text = formatGroupedBeers(rankGroups(groupTaps(candidates)), ctx.locale, ctx.t);
+  await ctx.replyWithHTML(text || ctx.t('newbeers.empty'));
 });

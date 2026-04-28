@@ -1,4 +1,12 @@
 import { formatRouteResult, type RoutePubFormat } from './route-format';
+import type { Translator } from '../../i18n/types';
+
+const stubT: Translator = (key, params) => {
+  if (key === 'route.header') {
+    return `Знайдено маршрут для <b>${params!.count}</b> (чи більше) нових пив, відстань ≈ <b>${params!.km}</b>, пабів у маршруті: <b>${params!.pubs}</b>.`;
+  }
+  return String(key);
+};
 
 const beerBones: RoutePubFormat = {
   name: 'Beer & Bones',
@@ -21,12 +29,14 @@ describe('formatRouteResult', () => {
       N: 10,
       distanceMeters: 14400,
       pubsInOrder: [beerBones, cuda],
+      locale: 'uk',
+      t: stubT,
     });
     const firstLine = out.split('\n')[0];
     expect(firstLine).toContain('Знайдено маршрут для');
     expect(firstLine).toContain('10');
     expect(firstLine).toContain('(чи більше) нових пив');
-    expect(firstLine).toContain('14.4 км');
+    expect(firstLine).toContain('14,4 км');
     expect(firstLine).toContain('пабів');
     expect(firstLine).toContain('2');
   });
@@ -36,6 +46,8 @@ describe('formatRouteResult', () => {
       N: 5,
       distanceMeters: 1000,
       pubsInOrder: [beerBones, cuda],
+      locale: 'uk',
+      t: stubT,
     });
     expect(out).toContain('<b>1. Beer &amp; Bones</b>');
     expect(out).toContain('<b>2. Cuda na Kiju</b>');
@@ -49,6 +61,8 @@ describe('formatRouteResult', () => {
       N: 5,
       distanceMeters: 1000,
       pubsInOrder: [beerBones],
+      locale: 'uk',
+      t: stubT,
     });
     expect(out).toContain('<b>Pinta Atak Chmielu</b>');
     expect(out).toContain('⭐ 4.12');
@@ -66,6 +80,8 @@ describe('formatRouteResult', () => {
         name: '<Pub>',
         beers: [{ display: 'A & B <c>', rating: null, abv: null }],
       }],
+      locale: 'uk',
+      t: stubT,
     });
     expect(out).toContain('&lt;Pub&gt;');
     expect(out).toContain('A &amp; B &lt;c&gt;');
@@ -73,8 +89,14 @@ describe('formatRouteResult', () => {
   });
 
   test('formats distance with one decimal', () => {
-    const out = formatRouteResult({ N: 1, distanceMeters: 12345, pubsInOrder: [beerBones] });
-    expect(out).toContain('12.3 км');
+    const out = formatRouteResult({
+      N: 1,
+      distanceMeters: 12345,
+      pubsInOrder: [beerBones],
+      locale: 'uk',
+      t: stubT,
+    });
+    expect(out).toContain('12,3 км');
   });
 
   test('handles empty per-pub beer list gracefully', () => {
@@ -82,6 +104,8 @@ describe('formatRouteResult', () => {
       N: 1,
       distanceMeters: 0,
       pubsInOrder: [{ name: 'X', beers: [] }],
+      locale: 'uk',
+      t: stubT,
     });
     expect(out).toContain('<b>1. X</b>');
   });

@@ -87,16 +87,18 @@ routeCommand.command('route', async (ctx) => {
   }
 
   if (!routePubs.length) {
-    await ctx.reply('Немає цікавих непитих пив у поточному snapshot.');
+    await ctx.reply(ctx.t('app.no_data_in_snapshot'));
     return;
   }
 
-  const status = await ctx.reply(`⏳ Будую маршрут для ≥${N} нових пив…`);
+  const status = await ctx.reply(ctx.t('route.preparing', { count: N }));
   const chatId = ctx.chat.id;
   const messageId = status.message_id;
   const telegram = ctx.telegram;
   const log = ctx.deps.log;
   const env = ctx.deps.env;
+  const t = ctx.t;
+  const locale = ctx.locale;
   const notify = makeThrottledProgress(
     async (text) => {
       await telegram
@@ -133,7 +135,7 @@ routeCommand.command('route', async (ctx) => {
 
       const cachedCount = totalPairs - missing.length;
       await notify(
-        `🗺 Матриця відстаней: ${cachedCount}/${totalPairs} з кешу, ${missing.length} нових`,
+        t('route.matrix_progress', { cached: cachedCount, total: totalPairs, missing: missing.length }),
         { force: true },
       );
 
@@ -181,14 +183,14 @@ routeCommand.command('route', async (ctx) => {
             matrix[j][i] = d;
             fresh.push({ idA: routePubs[i].id, idB: routePubs[j].id, meters: d, source });
             done++;
-            await notify(`🗺 Догружаю пари без кешу: ${done}/${missing.length}`);
+            await notify(t('route.fill_missing', { done, total: missing.length }));
           }
         }
 
         putDistances(db, fresh);
       }
 
-      await notify('🧠 Шукаю найкоротший обхід…', { force: true });
+      await notify(t('route.searching_tour'), { force: true });
 
       const distance = (a: [number, number], b: [number, number]): number => {
         const ia = idxByCoord.get(coordKey(a[0], a[1]));
@@ -210,11 +212,13 @@ routeCommand.command('route', async (ctx) => {
         N,
         distanceMeters: result.distanceMeters,
         pubsInOrder,
+        locale,
+        t,
       });
       await notify(text, { force: true });
     } catch (e) {
       log.error({ err: e }, 'route failed');
-      await notify('❌ Не вдалось побудувати маршрут — подивись логи.', { force: true });
+      await notify(t('route.failed'), { force: true });
     }
   })();
 });
