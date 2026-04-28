@@ -3,6 +3,7 @@ import type { DB } from './db';
 export interface ProfileRow {
   telegram_id: number;
   untappd_username: string | null;
+  language: string | null;
   created_at: string;
 }
 
