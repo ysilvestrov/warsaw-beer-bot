@@ -83,4 +83,14 @@ describe('translator (plurals)', () => {
     const t = makeTranslatorFromDict('uk', partial);
     expect(t('partial' as keyof Messages, { count: 1 })).toBe('fallback');
   });
+
+  test('falls back to "other" when params is undefined', () => {
+    expect(ukT('pubs.uk' as keyof Messages, undefined)).toBe('пабів у маршруті: {count}');
+  });
+
+  test('falls back to "other" when count is not a number (interpolation still runs)', () => {
+    expect(ukT('pubs.uk' as keyof Messages, { count: 'three' as unknown as number })).toBe(
+      'пабів у маршруті: three',
+    );
+  });
 });
