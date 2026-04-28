@@ -19,10 +19,7 @@ const TG_DOWNLOAD_LIMIT = 20 * 1024 * 1024;
 export const importCommand = new Composer<BotContext>();
 
 importCommand.command('import', async (ctx) => {
-  await ctx.reply(
-    'Надішли експорт з Untappd: CSV, JSON або ZIP (до 20 MB).\n' +
-      'Supporter → Account → Download History. Великий JSON краще запакувати в ZIP.',
-  );
+  await ctx.reply(ctx.t('import.prompt'));
 });
 
 importCommand.on('document', async (ctx) => {
@@ -33,15 +30,12 @@ importCommand.on('document', async (ctx) => {
   try {
     format = detectFormat(name);
   } catch {
-    await ctx.reply('Формат не підтримується. Очікую .csv, .json або .zip.');
+    await ctx.reply(ctx.t('import.unsupported_format'));
     return;
   }
 
   if (doc.file_size && doc.file_size > TG_DOWNLOAD_LIMIT) {
-    await ctx.reply(
-      'Файл > 20 MB — Telegram не дасть боту його скачати. ' +
-        'Запакуй JSON у ZIP (стискається ≈10×) і надішли ще раз.',
-    );
+    await ctx.reply(ctx.t('import.too_large'));
     return;
   }
 
@@ -50,12 +44,12 @@ importCommand.on('document', async (ctx) => {
   const link = await ctx.telegram.getFileLink(doc.file_id);
   const res = await fetch(link.toString());
   if (!res.ok || !res.body) {
-    await ctx.reply('Не вдалось отримати файл з Telegram.');
+    await ctx.reply(ctx.t('import.fetch_failed'));
     return;
   }
   const stream = Readable.fromWeb(res.body as never);
 
-  const progress = await ctx.reply('⏳ Починаю імпорт…');
+  const progress = await ctx.reply(ctx.t('import.starting'));
   const db = ctx.deps.db;
   const telegramId = ctx.from.id;
 
@@ -101,7 +95,7 @@ importCommand.on('document', async (ctx) => {
         batch = [];
         if (Date.now() - lastReport > PROGRESS_INTERVAL_MS) {
           lastReport = Date.now();
-          await report(`⏳ Імпортовано ${total}…`);
+          await report(ctx.t('import.progress', { total }));
         }
       }
     }
@@ -109,9 +103,9 @@ importCommand.on('document', async (ctx) => {
       flushBatch(batch);
       total += batch.length;
     }
-    await report(`✅ Імпортовано ${total} чекінів (${format.toUpperCase()}).`);
+    await report(ctx.t('import.done', { total, format: format.toUpperCase() }));
   } catch (e) {
-    await report(`❌ Помилка після ${total} рядків: ${(e as Error).message}`);
+    await report(ctx.t('import.failed', { total, message: (e as Error).message }));
     throw e;
   }
 });

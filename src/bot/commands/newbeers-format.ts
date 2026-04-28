@@ -1,3 +1,6 @@
+import type { Locale, Translator } from '../../i18n/types';
+import { fmtAbv as fmtAbvLocale } from '../../i18n/format';
+
 export interface CandidateTap {
   beer_id: number | null;
   display: string;          // human-readable "Brewery BeerName"
@@ -75,24 +78,23 @@ export const escapeHtml = (s: string): string =>
 export const fmtRating = (r: number | null): string =>
   r === null ? '⭐ —' : `⭐ ${r.toFixed(2).replace(/\.?0+$/, '')}`;
 
-export const fmtAbv = (abv: number | null): string => {
-  if (abv === null) return '';
-  // Comma decimal separator (UA/PL convention); strip trailing .0 → integer.
-  const rounded = Math.round(abv * 10) / 10;
-  const txt = Number.isInteger(rounded) ? `${rounded}` : `${rounded}`.replace('.', ',');
-  return `  ·  ${txt}%`;
-};
+// Re-export the locale-aware ABV formatter under the original name so callers
+// (route-format.ts) keep a single import surface.
+export { fmtAbvLocale as fmtAbv };
 
 export function formatGroupedBeers(
   groups: BeerGroup[],
+  locale: Locale,
+  t: Translator,
   opts: { topN?: number; maxPubs?: number } = {},
 ): string {
   const { topN = 15, maxPubs = 3 } = opts;
   const lines: string[] = [];
   groups.slice(0, topN).forEach((g, i) => {
-    const head = `${i + 1}. <b>${escapeHtml(g.display)}</b>  ${fmtRating(g.rating)}${fmtAbv(g.abv)}`;
+    const head = `${i + 1}. <b>${escapeHtml(g.display)}</b>  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
     const shown = g.pubs.slice(0, maxPubs).map(escapeHtml).join(', ');
-    const extra = g.pubs.length > maxPubs ? ` +${g.pubs.length - maxPubs} інших` : '';
+    const extra =
+      g.pubs.length > maxPubs ? t('newbeers.more_pubs_suffix', { extra: g.pubs.length - maxPubs }) : '';
     lines.push(head, `     · ${shown}${extra}`);
   });
   return lines.join('\n');

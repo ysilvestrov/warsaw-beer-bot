@@ -27,16 +27,17 @@ export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>)
   cmd.command('refresh', async (ctx) => {
     const prev = lastCall.get(ctx.from.id) ?? 0;
     if (Date.now() - prev < COOLDOWN_MS) {
-      await ctx.reply('⏱ Занадто часто — спробуй за кілька хвилин.');
+      await ctx.reply(ctx.t('refresh.cooldown'));
       return;
     }
     lastCall.set(ctx.from.id, Date.now());
 
-    const status = await ctx.reply('⏳ Оновлюю…');
+    const status = await ctx.reply(ctx.t('refresh.starting'));
     const chatId = ctx.chat.id;
     const messageId = status.message_id;
     const telegram = ctx.telegram;
     const log = ctx.deps.log;
+    const t = ctx.t;
     const notify = makeThrottledProgress(
       async (text) => {
         await telegram
@@ -53,10 +54,10 @@ export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>)
     void (async () => {
       try {
         await run(notify);
-        await notify('✅ Готово.', { force: true });
+        await notify(t('refresh.done'), { force: true });
       } catch (e) {
         log.error({ err: e }, 'refresh failed');
-        await notify('❌ Не вдалось — подивись логи.', { force: true });
+        await notify(t('refresh.failed'), { force: true });
       }
     })();
   });
