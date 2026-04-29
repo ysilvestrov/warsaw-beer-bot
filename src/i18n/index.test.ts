@@ -1,30 +1,54 @@
 import { createTranslator } from './index';
 
 describe('createTranslator', () => {
-  test('returns a translator that resolves uk strings for locale=uk', () => {
+  test('uk resolves Ukrainian strings', () => {
     const t = createTranslator('uk');
     expect(t('newbeers.empty')).toBe('Нічого цікавого — спробуй /refresh.');
     expect(t('refresh.done')).toBe('✅ Готово.');
   });
 
-  // PR 1 placeholder: pl + en aliases point at the uk dict because real
-  // translations land in PR 2. This test pins the placeholder behavior so
-  // PR 2 must update both the LOCALES map and this expectation — preventing
-  // a silent ship of "supposedly Polish bot still speaks Ukrainian".
-  test('pl alias resolves uk strings (placeholder — update in PR 2)', () => {
+  test('pl resolves Polish strings', () => {
     const t = createTranslator('pl');
-    expect(t('newbeers.empty')).toBe('Нічого цікавого — спробуй /refresh.');
+    expect(t('newbeers.empty')).toBe('Nic ciekawego — spróbuj /refresh.');
+    expect(t('refresh.done')).toBe('✅ Gotowe.');
   });
 
-  test('en alias resolves uk strings (placeholder — update in PR 2)', () => {
+  test('en resolves English strings', () => {
     const t = createTranslator('en');
-    expect(t('newbeers.empty')).toBe('Нічого цікавого — спробуй /refresh.');
+    expect(t('newbeers.empty')).toBe('Nothing interesting — try /refresh.');
+    expect(t('refresh.done')).toBe('✅ Done.');
   });
 
-  test('interpolates parameters', () => {
+  test('interpolates parameters in uk', () => {
     const t = createTranslator('uk');
     expect(t('link.success', { username: 'yuriy' })).toBe(
       "✅ Прив'язано до untappd.com/user/yuriy",
+    );
+  });
+
+  test('interpolates parameters in pl', () => {
+    const t = createTranslator('pl');
+    expect(t('link.success', { username: 'yuriy' })).toBe(
+      '✅ Powiązano z untappd.com/user/yuriy',
+    );
+  });
+
+  test('interpolates parameters in en', () => {
+    const t = createTranslator('en');
+    expect(t('link.success', { username: 'yuriy' })).toBe(
+      '✅ Linked to untappd.com/user/yuriy',
+    );
+  });
+
+  test('lang.changed uses {name} param across all locales', () => {
+    expect(createTranslator('uk')('lang.changed', { name: 'Polski' })).toBe(
+      '✅ Мову змінено на Polski.',
+    );
+    expect(createTranslator('pl')('lang.changed', { name: 'Українська' })).toBe(
+      '✅ Zmieniono język na Українська.',
+    );
+    expect(createTranslator('en')('lang.changed', { name: 'English' })).toBe(
+      '✅ Language switched to English.',
     );
   });
 });
