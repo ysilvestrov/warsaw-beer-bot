@@ -54,4 +54,9 @@ export const uk: Messages = {
   'filters.styles_changed': 'styles={styles}',
   'filters.rating_changed': 'min_rating={rating}',
   'filters.reset_done': 'Скинуто',
+  'filters.reset_button': 'Скинути',
+
+  // lang
+  'lang.prompt': 'Оберіть мову інтерфейсу:',
+  'lang.changed': '✅ Мову змінено на {name}.',
 };

@@ -22,7 +22,7 @@ filtersCommand.command('filters', async (ctx) => {
       styles: (f?.styles ?? []).join(',') || '—',
       min_rating: f?.min_rating ?? '—',
     }),
-    filtersKeyboard(),
+    filtersKeyboard(ctx.t),
   );
 });
 
