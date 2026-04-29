@@ -1,17 +1,17 @@
 # PL translations review
 
-**Status:** draft (draft → reviewed-by-user → reviewed-by-llm → final)
+**Status:** final (draft → reviewed-by-user → reviewed-by-llm → final)
 
 Source of truth during review: this markdown. After `Status: final`, runtime
-authority shifts to `src/i18n/locales/pl.ts` (treat this file as a snapshot of
-the review cycle).
+authority shifts to `src/i18n/locales/pl.ts` (this markdown becomes a
+historical record of the review cycle).
 
 ## app
 
 | Key | Source (uk) | Draft (pl) | Notes |
 |-----|-------------|------------|-------|
-| `app.start` | Привіт! Я допоможу зібрати маршрут… (6-line welcome) | Cześć! Pomogę zaplanować trasę po warszawskich pubach i spróbować czegoś nowego.<br><br>1) /link <untappd-username> — żeby pobrać twoje check-iny.<br>2) /import — wyślij eksport Untappd (CSV/JSON/ZIP), by uzupełnić historię.<br>3) /newbeers — top niespróbowanych piw z aktualnych kranów.<br>4) /route N — trasa pokrywająca ≥ N niespróbowanych piw z najkrótszym dystansem pieszym. | "trasa" (нативніше за "marszruta"); "niespróbowane" = untried |
-| `app.no_data_in_snapshot` | Немає цікавих непитих пив у поточному snapshot. | Brak ciekawych niespróbowanych piw w aktualnym snapshocie. | "snapshot" як термін з ontap.pl/розробницький |
+| `app.start` | Привіт! Я допоможу зібрати маршрут… (6-line welcome) | Cześć! Pomogę zaplanować trasę po warszawskich pubach i spróbować czegoś nowego.<br><br>1) /link <untappd-username> — żeby pobrać twoje check-iny.<br>2) /import — wyślij eksport Untappd (CSV/JSON/ZIP), by uzupełnić historię.<br>3) /newbeers — top niespróbowanych piw z aktualnych kranów.<br>4) /route N — trasa pokrywająca ≥ N niespróbowanych piw z najkrótszą trasą pieszą. | "trasa" (нативніше за "marszruta"); "niespróbowane" = untried |
+| `app.no_data_in_snapshot` | Наразі немає цікавих непитих пив. | Aktualnie brak ciekawych niespróbowanych piw. | прибрано технічне "snapshot" з тексту — користувачу нецікаво про DB-структуру; ключ лишається як є, бо це програмний ідентифікатор |
 
 ## link
 
@@ -31,7 +31,7 @@ the review cycle).
 | `import.starting` | ⏳ Починаю імпорт… | ⏳ Rozpoczynam import… | |
 | `import.progress` | ⏳ Імпортовано {total}… | ⏳ Zaimportowano {total}… | |
 | `import.done` | ✅ Імпортовано {total} чекінів ({format}). | ✅ Zaimportowano {total} check-inów ({format}). | "check-in" як англомовний термін Untappd |
-| `import.failed` | ❌ Помилка після {total} рядків: {message} | ❌ Błąd po {total} wierszach: {message} | |
+| `import.failed` | ❌ Помилка після {total} рядків: {message} | ❌ Błąd po {total} wpisach: {message} | "wpis" (запис) природніше за "wiersz" для JSON/CSV-експорту |
 
 ## newbeers
 
@@ -45,11 +45,11 @@ the review cycle).
 | Key | Source (uk) | Draft (pl) | Notes |
 |-----|-------------|------------|-------|
 | `route.preparing` | ⏳ Будую маршрут для ≥{count} нових пив… | ⏳ Buduję trasę dla ≥{count} nowych piw… | |
-| `route.matrix_progress` | 🗺 Матриця відстаней: {cached}/{total} з кешу, {missing} нових | 🗺 Macierz dystansów: {cached}/{total} z cache, {missing} nowych | "z cache" — pl-en змішане, прийнятне в IT-контексті |
-| `route.fill_missing` | 🗺 Догружаю пари без кешу: {done}/{total} | 🗺 Doładowuję pary bez cache: {done}/{total} | |
+| `route.matrix_progress` | 🗺 Матриця відстаней: {cached}/{total} зі збережених, {missing} нових | 🗺 Macierz dystansów: {cached}/{total} z zapisanych, {missing} nowych | прибрано технічне "cache" з тексту |
+| `route.fill_missing` | 🗺 Догружаю незбережені пари: {done}/{total} | 🗺 Pobieram brakujące pary: {done}/{total} | "Doładowuję" асоціюється з поповненням рахунку телефону; "Pobieram" — стандарт для завантаження даних |
 | `route.searching_tour` | 🧠 Шукаю найкоротший обхід… | 🧠 Szukam najkrótszej trasy… | |
 | `route.failed` | ❌ Не вдалось побудувати маршрут — подивись логи. | ❌ Nie udało się zbudować trasy — sprawdź logi. | |
-| `route.header` | Знайдено маршрут для <b>{count}</b> (чи більше) нових пив, відстань ≈ <b>{km}</b>, пабів у маршруті: <b>{pubs}</b>. | Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, pubów w trasie: <b>{pubs}</b>. | `{km}` приходить **уже відформатований** з fmtKm — НЕ додавати "km" самостійно. "pubów" — родовий мн.; помилка для count=1, але "(lub więcej)" пом'якшує. |
+| `route.header` | Знайдено маршрут для <b>{count}</b> (чи більше) нових пив, відстань ≈ <b>{km}</b>, пабів у маршруті: <b>{pubs}</b>. | Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, liczba pubów na trasie: <b>{pubs}</b>. | `{km}` приходить **уже відформатований** з fmtKm — НЕ додавати "km" самостійно. Конструкція "liczba pubów na trasie: {pubs}" уникає граматичного конфлікту для будь-якого числа (включно з 1). |
 
 ## refresh
 
@@ -82,11 +82,9 @@ the review cycle).
 - ABV separator: `,` (запис `6,1%`)
 - Distance unit: `km` (без крапки/коми всередині)
 - Distance separator: `,` (запис `14,4 km`)
-- Plural forms: PL використовує `one/few/many/other` через `Intl.PluralRules('pl')`. Тут plural-форм поки що нема (єдиний кандидат — `pubów w trasie: {pubs}` у `route.header`, але хедер не пагіналізує по числу — лишаємо родовий мн., приймаємо граматичну неточність для count=1).
+- Plural forms: PL використовує `one/few/many/other` через `Intl.PluralRules('pl')`. Plural-форм у словнику нема — `route.header` переформульований через "liczba pubów na trasie: {pubs}", щоб уникнути конфлікту для count=1.
 
 ## Невирішені питання для перевірки
 
-1. "snapshot" в `app.no_data_in_snapshot` — лишити англіцизм чи замінити на "migawce"/"zrzucie"? Англіцизм у нас — це технічний термін з ontap.pl.
-2. "check-in" / "check-inów" — підтвердити, що це загальноприйнята форма серед польських Untappd-юзерів.
-3. "trasa" vs "marszruta" для `/route` — обрав "trasa" як більш повсякденне; підтвердити з носіями.
-4. `route.header` — родовий мн. "pubów" буде граматично некоректний для `{pubs}=1`. Варіант з plural'ами в PR 3? Чи переформулювати: "trasa: {pubs} pubów" → працює тільки для 5+; "{pubs} pub(ów)" — некрасиво.
+1. "check-in" / "check-inów" — підтвердити, що це загальноприйнята форма серед польських Untappd-юзерів.
+2. "trasa" vs "marszruta" для `/route` — обрав "trasa" як більш повсякденне; підтвердити з носіями.
