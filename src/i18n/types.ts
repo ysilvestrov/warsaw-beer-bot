@@ -51,7 +51,12 @@ export interface Messages {
   'filters.current': string;             // {styles}, {min_rating}
   'filters.styles_changed': string;      // {styles}
   'filters.rating_changed': string;      // {rating}
-  'filters.reset_done': string;
+  'filters.reset_done': string;          // callback answer after reset
+  'filters.reset_button': string;        // inline-keyboard button label
+
+  // lang
+  'lang.prompt': string;
+  'lang.changed': string;                // {name} = native name of newly chosen locale
 }
 
 export type Translator = (
