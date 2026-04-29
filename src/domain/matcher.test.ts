@@ -86,3 +86,74 @@ test('ontap-style raw beer_ref + ABV maps to clean Untappd entry', () => {
   );
   expect(m?.id).toBe(99);
 });
+
+describe('matchBeer — slash-alias breweries', () => {
+  test('exact: ontap "Piwne Podziemie Brewery" hits Untappd row "Piwne Podziemie / Beer Underground"', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 8396, brewery: 'Piwne Podziemie / Beer Underground', name: 'Juicilicious', abv: 6.0 },
+    ];
+    const m = matchBeer(
+      { brewery: 'Piwne Podziemie Brewery', name: 'Juicilicious', abv: 6.0 },
+      catalog,
+    );
+    expect(m).toEqual({ id: 8396, confidence: 1, source: 'exact' });
+  });
+
+  test('exact: reverse direction also works', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 1, brewery: 'Piwne Podziemie Brewery', name: 'X', abv: null },
+    ];
+    const m = matchBeer(
+      { brewery: 'Piwne Podziemie / Beer Underground', name: 'X' },
+      catalog,
+    );
+    expect(m?.id).toBe(1);
+    expect(m?.source).toBe('exact');
+  });
+
+  test('exact: collab — ontap shows left brewery, Untappd has "A / B"', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 42, brewery: 'AleBrowar / Poppels Bryggeri', name: 'Son Of The Son', abv: 8.0 },
+    ];
+    const m = matchBeer(
+      { brewery: 'AleBrowar', name: 'Son Of The Son', abv: 8.0 },
+      catalog,
+    );
+    expect(m).toEqual({ id: 42, confidence: 1, source: 'exact' });
+  });
+
+  test('exact: collab — ontap shows right brewery', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 42, brewery: 'AleBrowar / Poppels Bryggeri', name: 'Son Of The Son', abv: 8.0 },
+    ];
+    const m = matchBeer(
+      { brewery: 'Poppels Bryggeri Brewery', name: 'Son Of The Son', abv: 8.0 },
+      catalog,
+    );
+    expect(m?.id).toBe(42);
+    expect(m?.source).toBe('exact');
+  });
+
+  test('negative: brewery alias does not bridge unrelated names', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 1, brewery: 'Piwne Podziemie / Beer Underground', name: 'Different Beer', abv: null },
+    ];
+    const m = matchBeer(
+      { brewery: 'Piwne Podziemie Brewery', name: 'Juicilicious' },
+      catalog,
+    );
+    // Name doesn't match; alias overlap alone is not enough.
+    expect(m).toBeNull();
+  });
+
+  test('negative: completely different brewery — no alias overlap', () => {
+    const catalog: CatalogBeer[] = [
+      { id: 1, brewery: 'Piwne Podziemie / Beer Underground', name: 'Juicilicious', abv: null },
+    ];
+    const m = matchBeer(
+      { brewery: 'Browar Stu Mostów', name: 'Juicilicious' },
+      catalog,
+    );
+    expect(m).toBeNull();
+  });
+});
