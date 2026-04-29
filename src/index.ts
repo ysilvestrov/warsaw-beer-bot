@@ -13,6 +13,7 @@ import { importCommand } from './bot/commands/import';
 import { newbeersCommand } from './bot/commands/newbeers';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
+import { langCommand } from './bot/commands/lang';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
     newbeersCommand,
     routeCommand,
     filtersCommand,
+    langCommand,
     createRefreshCommand(async (notify) => {
       await refreshOntap({ db, log, http, geocoder, onProgress: notify });
       await refreshAllUntappd({ db, log, http, onProgress: notify });

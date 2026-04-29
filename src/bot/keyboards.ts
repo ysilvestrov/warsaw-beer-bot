@@ -1,6 +1,13 @@
 import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
 
+export const langKeyboard = () =>
+  Markup.inlineKeyboard([
+    [Markup.button.callback('🇺🇦 Українська', 'lang:uk')],
+    [Markup.button.callback('🇵🇱 Polski', 'lang:pl')],
+    [Markup.button.callback('🇬🇧 English', 'lang:en')],
+  ]);
+
 export const filtersKeyboard = (t: Translator) =>
   Markup.inlineKeyboard([
     [Markup.button.callback('IPA', 'style:IPA'), Markup.button.callback('Pils', 'style:Pils')],
