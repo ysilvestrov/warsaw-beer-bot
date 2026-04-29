@@ -8,9 +8,9 @@ export const pl: Messages = {
     '1) /link <untappd-username> — żeby pobrać twoje check-iny.',
     '2) /import — wyślij eksport Untappd (CSV/JSON/ZIP), by uzupełnić historię.',
     '3) /newbeers — top niespróbowanych piw z aktualnych kranów.',
-    '4) /route N — trasa pokrywająca ≥ N niespróbowanych piw z najkrótszym dystansem pieszym.',
+    '4) /route N — trasa pokrywająca ≥ N niespróbowanych piw z najkrótszą trasą pieszą.',
   ].join('\n'),
-  'app.no_data_in_snapshot': 'Brak ciekawych niespróbowanych piw w aktualnym snapshocie.',
+  'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
   // link
   'link.usage': 'Użycie: /link <username> (lub pełny URL untappd.com/user/<username>)',
@@ -28,7 +28,7 @@ export const pl: Messages = {
   'import.starting': '⏳ Rozpoczynam import…',
   'import.progress': '⏳ Zaimportowano {total}…',
   'import.done': '✅ Zaimportowano {total} check-inów ({format}).',
-  'import.failed': '❌ Błąd po {total} wierszach: {message}',
+  'import.failed': '❌ Błąd po {total} wpisach: {message}',
 
   // newbeers
   'newbeers.empty': 'Nic ciekawego — spróbuj /refresh.',
@@ -36,12 +36,12 @@ export const pl: Messages = {
 
   // route
   'route.preparing': '⏳ Buduję trasę dla ≥{count} nowych piw…',
-  'route.matrix_progress': '🗺 Macierz dystansów: {cached}/{total} z cache, {missing} nowych',
-  'route.fill_missing': '🗺 Doładowuję pary bez cache: {done}/{total}',
+  'route.matrix_progress': '🗺 Macierz dystansów: {cached}/{total} z zapisanych, {missing} nowych',
+  'route.fill_missing': '🗺 Pobieram brakujące pary: {done}/{total}',
   'route.searching_tour': '🧠 Szukam najkrótszej trasy…',
   'route.failed': '❌ Nie udało się zbudować trasy — sprawdź logi.',
   'route.header':
-    'Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, pubów w trasie: <b>{pubs}</b>.',
+    'Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, liczba pubów na trasie: <b>{pubs}</b>.',
 
   // refresh
   'refresh.cooldown': '⏱ Za często — spróbuj za kilka minut.',

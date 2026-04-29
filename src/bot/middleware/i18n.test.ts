@@ -67,6 +67,6 @@ describe('i18nMiddleware', () => {
     const db = fresh();
     const ctx: FakeCtx = { from: { id: 1, language_code: 'uk' }, deps: { db } };
     await runMiddleware(ctx);
-    expect(ctx.t!('app.no_data_in_snapshot')).toBe('Немає цікавих непитих пив у поточному snapshot.');
+    expect(ctx.t!('app.no_data_in_snapshot')).toBe('Наразі немає цікавих непитих пив.');
   });
 });

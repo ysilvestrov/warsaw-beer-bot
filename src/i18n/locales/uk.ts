@@ -10,7 +10,7 @@ export const uk: Messages = {
     '3) /newbeers — топ непитих пив на поточних кранах.',
     '4) /route N — маршрут, що покриває ≥ N непитих пив із мінімальною пішою відстанню.',
   ].join('\n'),
-  'app.no_data_in_snapshot': 'Немає цікавих непитих пив у поточному snapshot.',
+  'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
@@ -36,8 +36,8 @@ export const uk: Messages = {
 
   // route
   'route.preparing': '⏳ Будую маршрут для ≥{count} нових пив…',
-  'route.matrix_progress': '🗺 Матриця відстаней: {cached}/{total} з кешу, {missing} нових',
-  'route.fill_missing': '🗺 Догружаю пари без кешу: {done}/{total}',
+  'route.matrix_progress': '🗺 Матриця відстаней: {cached}/{total} зі збережених, {missing} нових',
+  'route.fill_missing': '🗺 Догружаю незбережені пари: {done}/{total}',
   'route.searching_tour': '🧠 Шукаю найкоротший обхід…',
   'route.failed': '❌ Не вдалось побудувати маршрут — подивись логи.',
   'route.header':

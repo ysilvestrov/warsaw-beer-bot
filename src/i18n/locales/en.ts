@@ -8,9 +8,9 @@ export const en: Messages = {
     '1) /link <untappd-username> — to pull your check-ins.',
     '2) /import — upload your Untappd CSV/JSON/ZIP export to backfill history.',
     '3) /newbeers — top untried beers on current taps.',
-    '4) /route N — a route covering ≥ N untried beers with the shortest walking distance.',
+    '4) /route N — a route covering ≥ N untried beers with the shortest total walking distance.',
   ].join('\n'),
-  'app.no_data_in_snapshot': 'No interesting untried beers in the current snapshot.',
+  'app.no_data_in_snapshot': 'No interesting untried beers right now.',
 
   // link
   'link.usage': 'Usage: /link <username> (or full URL untappd.com/user/<username>)',
@@ -28,7 +28,7 @@ export const en: Messages = {
   'import.starting': '⏳ Starting import…',
   'import.progress': '⏳ Imported {total}…',
   'import.done': '✅ Imported {total} check-ins ({format}).',
-  'import.failed': '❌ Failed after {total} rows: {message}',
+  'import.failed': '❌ Failed after {total} records: {message}',
 
   // newbeers
   'newbeers.empty': 'Nothing interesting — try /refresh.',
@@ -36,12 +36,12 @@ export const en: Messages = {
 
   // route
   'route.preparing': '⏳ Building a route for ≥{count} new beers…',
-  'route.matrix_progress': '🗺 Distance matrix: {cached}/{total} cached, {missing} new',
-  'route.fill_missing': '🗺 Fetching uncached pairs: {done}/{total}',
+  'route.matrix_progress': '🗺 Distance matrix: {cached}/{total} saved, {missing} new',
+  'route.fill_missing': '🗺 Fetching unsaved pairs: {done}/{total}',
   'route.searching_tour': '🧠 Searching for the shortest tour…',
   'route.failed': '❌ Could not build a route — check the logs.',
   'route.header':
-    'Found a route for <b>{count}</b> (or more) new beers, distance ≈ <b>{km}</b>, pubs on the route: <b>{pubs}</b>.',
+    'Found a route for <b>{count}</b> (or more) untried beers, distance ≈ <b>{km}</b>, pubs on the route: <b>{pubs}</b>.',
 
   // refresh
   'refresh.cooldown': '⏱ Too often — try again in a few minutes.',
@@ -53,7 +53,7 @@ export const en: Messages = {
   'filters.current': 'Current: styles={styles}, min_rating={min_rating}',
   'filters.styles_changed': 'styles={styles}',
   'filters.rating_changed': 'min_rating={rating}',
-  'filters.reset_done': 'Reset',
+  'filters.reset_done': 'Filters reset',
   'filters.reset_button': 'Reset',
 
   // lang
