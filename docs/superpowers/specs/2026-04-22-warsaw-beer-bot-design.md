@@ -386,5 +386,14 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   catalog is clean. Legacy ABV-polluted ontap rows
   (`Pilsner Urquell Brewery Pilsner Urquell 11.8°·4,4% — Pilsner` as
   beer name) are out of scope for this fix — separate cleanup task.
+- **Untappd `global_weighted_rating_score`**: the public "rating" Untappd
+  shows on every beer page. JSON / CSV exports include it on every row.
+  Read into `beers.rating_global` at `/import` time
+  (`src/sources/untappd/export.ts` + `src/bot/commands/import.ts`).
+  Re-importing the same export backfills `rating_global` for existing
+  rows via `upsertBeer`'s UPDATE branch — no migration needed. The
+  legacy `refresh-untappd` job stored the user's *personal* rating in
+  this field; that misuse goes away when the job is rewritten in the
+  next phase.
 
 Ці грабельки — чек-лист на першу секунду нового деплою.
