@@ -41,3 +41,15 @@ test('parses ZIP fixture (unwraps inner json)', async () => {
   expect(rows).toHaveLength(2);
   expect(rows[0].beer_name).toBe('Atak Chmielu');
 });
+
+test('captures global_weighted_rating_score from CSV', async () => {
+  const rows = await collect('csv', fx('export.csv'));
+  expect(rows[0].global_rating).toBe(3.85);
+  expect(rows[1].global_rating).toBeNull();
+});
+
+test('captures global_weighted_rating_score from JSON', async () => {
+  const rows = await collect('json', fx('export.json'));
+  expect(rows[0].global_rating).toBe(3.85);
+  expect(rows[1].global_rating).toBeNull();
+});
