@@ -17,6 +17,7 @@ export interface Checkin {
   beer_type: string | null;
   beer_abv: number | null;
   rating_score: number | null;
+  global_rating: number | null;
   created_at: string;
   venue_name: string | null;
 }
@@ -60,6 +61,7 @@ function mapCsv(r: Record<string, string>): Checkin {
     beer_type: blankNull(r['beer_type']),
     beer_abv: numOrNull(r['beer_abv']),
     rating_score: numOrNull(r['rating_score']),
+    global_rating: numOrNull(r['global_weighted_rating_score']),
     created_at: r['created_at'],
     venue_name: blankNull(r['venue_name']),
   };
@@ -74,6 +76,7 @@ function mapJson(r: Record<string, unknown>): Checkin {
     beer_type: blankNull(r['beer_type']),
     beer_abv: numOrNull(r['beer_abv']),
     rating_score: numOrNull(r['rating_score']),
+    global_rating: numOrNull(r['global_weighted_rating_score']),
     created_at: String(r['created_at'] ?? ''),
     venue_name: blankNull(r['venue_name']),
   };

@@ -5,6 +5,7 @@
     "beer_type": "American IPA",
     "beer_abv": 6.1,
     "rating_score": 4.25,
+    "global_weighted_rating_score": 3.85,
     "created_at": "2024-03-01 20:12:00",
     "venue_name": "Beer & Bones",
     "checkin_id": 1234,

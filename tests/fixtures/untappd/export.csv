@@ -1,3 +1,3 @@
-beer_name,brewery_name,beer_type,beer_abv,rating_score,created_at,venue_name,checkin_id,bid
-Atak Chmielu,Pinta,American IPA,6.1,4.25,2024-03-01 20:12:00,Beer & Bones,1234,567
-Buty Skejta,Stu Mostow,Pilsner,5.0,3.75,2024-03-10 19:55:00,,2345,890
+beer_name,brewery_name,beer_type,beer_abv,rating_score,created_at,venue_name,checkin_id,bid,global_weighted_rating_score
+Atak Chmielu,Pinta,American IPA,6.1,4.25,2024-03-01 20:12:00,Beer & Bones,1234,567,3.85
+Buty Skejta,Stu Mostow,Pilsner,5.0,3.75,2024-03-10 19:55:00,,2345,890,
