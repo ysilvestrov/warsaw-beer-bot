@@ -61,7 +61,7 @@ importCommand.on('document', async (ctx) => {
         brewery: r.brewery_name,
         style: r.beer_type,
         abv: r.beer_abv,
-        rating_global: null,
+        rating_global: r.global_rating,
         normalized_name: normalizeName(r.beer_name),
         normalized_brewery: normalizeBrewery(r.brewery_name),
       });
