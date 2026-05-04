@@ -1,51 +1,50 @@
 import * as cheerio from 'cheerio';
 
-export interface ScrapedCheckin {
-  checkin_id: string;
+export interface ScrapedBeer {
+  bid: number;
   beer_name: string;
   brewery_name: string;
-  rating_score: number | null;
-  checkin_at: string;
-  bid: number | null;
+  style: string | null;
+  their_rating: number | null;
+  global_rating: number | null;
 }
 
-export function parseUserBeerPage(html: string): ScrapedCheckin[] {
+const MAX_ITEMS = 25;
+
+function parseRating(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+export function parseUserBeersPage(html: string): ScrapedBeer[] {
   const $ = cheerio.load(html);
-  const out: ScrapedCheckin[] = [];
+  const out: ScrapedBeer[] = [];
 
-  $('.item[data-checkin-id]').each((_, el) => {
+  $('.beer-item[data-bid]').each((_, el) => {
+    if (out.length >= MAX_ITEMS) return false;
     const row = $(el);
-    const checkin_id = row.attr('data-checkin-id') ?? '';
-    if (!checkin_id) return;
 
-    const text = row.find('.text').first();
+    const bidRaw = (row.attr('data-bid') ?? '').trim();
+    const bid = parseInt(bidRaw, 10);
+    if (!Number.isFinite(bid) || String(bid) !== bidRaw) return;
 
-    const beerAnchor = text.find('a[href^="/b/"]').first();
-    const beer_name = beerAnchor.text().trim().replace(/\s+/g, ' ');
+    const details = row.find('.beer-details').first();
+    const beer_name = details.find('.name a').first().text().trim().replace(/\s+/g, ' ');
+    const brewery_name = details.find('.brewery a').first().text().trim().replace(/\s+/g, ' ');
+    const styleText = details.find('.style').first().text().trim().replace(/\s+/g, ' ');
+    const style = styleText.length > 0 ? styleText : null;
 
-    const beerHref = beerAnchor.attr('href') ?? '';
-    const bidMatch = beerHref.match(/\/b\/[^/]+\/(\d+)/);
-    const bid = bidMatch ? parseInt(bidMatch[1], 10) : null;
-
-    let brewery_name = '';
-    text.find('a').each((_, a) => {
-      if (brewery_name) return;
-      const href = $(a).attr('href') ?? '';
-      if (href.startsWith('/user/') || href.startsWith('/b/') || href.startsWith('/v/')) return;
-      const t = $(a).text().trim().replace(/\s+/g, ' ');
-      if (t) brewery_name = t;
+    let their_rating: number | null = null;
+    let global_rating: number | null = null;
+    details.find('.ratings .you').each((_, you) => {
+      const label = $(you).find('p').first().text().trim();
+      const value = parseRating($(you).find('.caps[data-rating]').first().attr('data-rating'));
+      if (/^Their Rating/i.test(label)) their_rating = value;
+      else if (/^Global Rating/i.test(label)) global_rating = value;
     });
 
-    const ratingAttr = row.find('.caps[data-rating]').first().attr('data-rating');
-    const rating_score = ratingAttr && !Number.isNaN(parseFloat(ratingAttr))
-      ? parseFloat(ratingAttr) : null;
-
-    const checkin_at = row.find('a.time.timezoner').first().text().trim();
-
-    if (!beer_name || !brewery_name) return;
-
-    out.push({ checkin_id, beer_name, brewery_name, rating_score, checkin_at, bid });
-    if (out.length >= 25) return false;
+    out.push({ bid, beer_name, brewery_name, style, their_rating, global_rating });
   });
 
   return out;

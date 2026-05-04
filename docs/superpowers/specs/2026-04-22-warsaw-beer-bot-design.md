@@ -395,5 +395,14 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   legacy `refresh-untappd` job stored the user's *personal* rating in
   this field; that misuse goes away when the job is rewritten in the
   next phase.
+- **Untappd `/user/<X>/beers` scraper**: fetches the user's distinct-beers
+  list (top ~25 unauthenticated) for an incremental refresh of
+  `beers.rating_global`. Replaces a multi-layered broken predecessor that
+  hit `/beer` (which 303-redirects), used activity-feed selectors
+  (`.item[data-checkin-id]`), and stored the user's personal rating in
+  `rating_global`. Bulk backfill of `rating_global` is the `/import` path
+  (Design 3); this job catches new releases and rating drift between
+  imports. `/beers` does not paginate unauthenticated, so the 25-item cap
+  is a hard ceiling.
 
 Ці грабельки — чек-лист на першу секунду нового деплою.

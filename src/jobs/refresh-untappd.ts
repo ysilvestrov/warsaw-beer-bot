@@ -1,10 +1,9 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
-import { parseUserBeerPage } from '../sources/untappd/scraper';
+import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles } from '../storage/user_profiles';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
-import { mergeCheckin } from '../storage/checkins';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 
@@ -20,37 +19,33 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
   const profiles = allProfiles(db).filter((p) => p.untappd_username);
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 
+  const updateRatingOnly = db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?');
+
   let i = 0;
   let ok = 0;
   for (const p of profiles) {
     i++;
     try {
-      const html = await http.get(`https://untappd.com/user/${p.untappd_username}/beer`);
-      const items = parseUserBeerPage(html);
+      const html = await http.get(`https://untappd.com/user/${p.untappd_username}/beers`);
+      const items = parseUserBeersPage(html);
       for (const it of items) {
         const nb = normalizeBrewery(it.brewery_name);
         const nn = normalizeName(it.beer_name);
         const existing = findBeerByNormalized(db, nb, nn);
-        const beerId =
-          existing?.id ??
+        if (existing) {
+          updateRatingOnly.run(it.global_rating, existing.id);
+        } else {
           upsertBeer(db, {
-            untappd_id: it.bid ?? null,
+            untappd_id: it.bid,
             name: it.beer_name,
             brewery: it.brewery_name,
-            style: null,
+            style: it.style,
             abv: null,
-            rating_global: it.rating_score,
+            rating_global: it.global_rating,
             normalized_name: nn,
             normalized_brewery: nb,
           });
-        mergeCheckin(db, {
-          checkin_id: it.checkin_id,
-          telegram_id: p.telegram_id,
-          beer_id: beerId,
-          user_rating: it.rating_score,
-          checkin_at: it.checkin_at || new Date().toISOString(),
-          venue: null,
-        });
+        }
       }
       ok++;
     } catch (e) {
