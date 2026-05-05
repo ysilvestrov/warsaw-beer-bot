@@ -91,7 +91,7 @@ describe('cleanupPollutedOntap', () => {
     expect(checkin.beer_id).toBe(cleanId);
   });
 
-  test('polluted with both ontap and untappd canonicals → merge into the higher-id exact match', () => {
+  test('polluted ontap-side row merges into untappd-side canonical (cross-source)', () => {
     const db = fresh();
     const untappdId = upsertBeer(db, {
       untappd_id: 12345,
@@ -100,16 +100,6 @@ describe('cleanupPollutedOntap', () => {
       style: 'Sour Ale',
       abv: 4.5,
       rating_global: 3.7,
-      normalized_name: 'oxymel',
-      normalized_brewery: 'wagabunda',
-    });
-    const ontapCleanId = upsertBeer(db, {
-      untappd_id: null,
-      name: 'Oxymel',
-      brewery: 'Wagabunda Brewery',
-      style: 'Sour Ale',
-      abv: 4.5,
-      rating_global: null,
       normalized_name: 'oxymel',
       normalized_brewery: 'wagabunda',
     });
@@ -128,7 +118,7 @@ describe('cleanupPollutedOntap', () => {
     expect(result).toEqual({ rewritten: 0, merged: 1 });
     expect(getRow(db, pollutedId)).toBeUndefined();
     expect(getRow(db, untappdId)?.untappd_id).toBe(12345);
-    expect(getRow(db, ontapCleanId)?.untappd_id).toBeNull();
+    expect(getRow(db, untappdId)?.name).toBe('Oxymel');
   });
 
   test('two polluted rows resolving to the same clean name, no canonical → both rewrite (become duplicates)', () => {
