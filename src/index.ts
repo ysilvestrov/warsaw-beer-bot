@@ -18,6 +18,7 @@ import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
+import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -26,6 +27,7 @@ async function main(): Promise<void> {
   const db = openDb(env.DATABASE_PATH);
   migrate(db);
   dedupeBreweryAliases(db, log);
+  cleanupPollutedOntap(db, log);
 
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });

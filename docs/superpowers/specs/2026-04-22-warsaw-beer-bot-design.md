@@ -404,5 +404,12 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   (Design 3); this job catches new releases and rating drift between
   imports. `/beers` does not paginate unauthenticated, so the 25-item cap
   is a hard ceiling.
+- **Polluted ontap-row cleanup**: pre-Task 25 scrapes left ~500 rows where
+  `name` was the full `<h4>` text (brewery + name + ABV + style suffix).
+  Cleaned at startup by `src/jobs/cleanup-polluted-ontap.ts`: re-runs the
+  parser's `extractBeerName` on each ontap-side (`untappd_id IS NULL`) row
+  whose name still matches the pollution regex (`\d+[°%]` or ` — `), then
+  either merges into a canonical match (confidence ≥ 0.9, exact or
+  high-fuzzy) or rewrites in place. Idempotent — second boot finds 0 rows.
 
 Ці грабельки — чек-лист на першу секунду нового деплою.
