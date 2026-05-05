@@ -1,0 +1,22 @@
+# Litestream replication for warsaw-beer-bot.
+# Replicates /var/lib/warsaw-beer-bot/bot.db (SQLite WAL) → Cloudflare R2.
+#
+# Credentials live in /etc/warsaw-beer-bot/litestream.env and are passed in
+# via systemd's EnvironmentFile= directive — never hardcode them here.
+#
+# Install location: /etc/litestream.yml
+
+dbs:
+  - path: /var/lib/warsaw-beer-bot/bot.db
+    replicas:
+      - type: s3
+        bucket: ${R2_BUCKET}
+        path: warsaw-beer-bot/bot.db
+        endpoint: ${R2_ENDPOINT}
+        region: auto
+        access-key-id: ${R2_ACCESS_KEY_ID}
+        secret-access-key: ${R2_SECRET_ACCESS_KEY}
+        force-path-style: true
+        # 24h snapshot interval + 72h retention is plenty for a bot this size.
+        snapshot-interval: 24h
+        retention: 72h

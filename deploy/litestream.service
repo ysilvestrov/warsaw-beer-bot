@@ -1,0 +1,19 @@
+[Unit]
+Description=Litestream replication for warsaw-beer-bot SQLite DB
+Documentation=https://litestream.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=warsaw-beer-bot
+Group=warsaw-beer-bot
+EnvironmentFile=/etc/warsaw-beer-bot/litestream.env
+ExecStart=/usr/bin/litestream replicate -config /etc/litestream.yml
+Restart=always
+RestartSec=5
+# Keep replicating even if warsaw-beer-bot.service is stopped — backups
+# of an idle DB are still valuable. No Requires=/After= on the bot unit.
+
+[Install]
+WantedBy=multi-user.target

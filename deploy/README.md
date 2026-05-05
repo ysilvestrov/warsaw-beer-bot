@@ -50,3 +50,68 @@ sudo systemctl status warsaw-beer-bot
 sudo journalctl -u warsaw-beer-bot -f
 sudo systemctl restart warsaw-beer-bot
 ```
+
+## Backup: Litestream → Cloudflare R2
+
+Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2
+bucket. Runs as a separate systemd service alongside the bot.
+
+### One-time install (as root)
+
+```bash
+# 1. Install the litestream binary (latest .deb from upstream).
+# Litestream's release assets use x86_64/arm64/armv7 — map from dpkg's naming.
+case "$(dpkg --print-architecture)" in
+  amd64) LS_ARCH=x86_64 ;;
+  arm64) LS_ARCH=arm64 ;;
+  armhf) LS_ARCH=armv7 ;;
+  *) echo "unsupported arch"; exit 1 ;;
+esac
+TMP=$(mktemp -d)
+URL=$(curl -s https://api.github.com/repos/benbjohnson/litestream/releases/latest \
+  | grep -oE 'https://github.com/benbjohnson/litestream/releases/download/[^"]+-linux-'"${LS_ARCH}"'\.deb' \
+  | head -1)
+curl -fsSL "$URL" -o "$TMP/litestream.deb"
+apt-get install -y "$TMP/litestream.deb"
+rm -rf "$TMP"
+
+# 2. Drop the config and systemd unit from this repo.
+install -m 0644 deploy/litestream.yml      /etc/litestream.yml
+install -m 0644 deploy/litestream.service  /etc/systemd/system/litestream.service
+
+# 3. Seed the credentials file (must be owned root:root, mode 600 — systemd
+#    reads it as root before dropping privileges to warsaw-beer-bot).
+install -m 0600 -o root -g root \
+  deploy/litestream.env.example /etc/warsaw-beer-bot/litestream.env
+
+# 4. Edit /etc/warsaw-beer-bot/litestream.env and fill in:
+#       R2_BUCKET             — your R2 bucket name
+#       R2_ENDPOINT           — https://<accountid>.r2.cloudflarestorage.com
+#       R2_ACCESS_KEY_ID      — from R2 API token (Object Read & Write)
+#       R2_SECRET_ACCESS_KEY  — same token's secret
+
+systemctl daemon-reload
+systemctl enable --now litestream
+```
+
+### Operate
+
+```bash
+sudo systemctl status litestream
+sudo journalctl -u litestream -f
+```
+
+A successful first run logs `replicating to: ...`. If you see
+`InvalidAccessKeyId` / `SignatureDoesNotMatch`, the creds in
+`/etc/warsaw-beer-bot/litestream.env` are wrong — fix and `systemctl restart litestream`.
+
+### Restore (disaster recovery)
+
+```bash
+sudo systemctl stop warsaw-beer-bot
+sudo -u warsaw-beer-bot litestream restore -config /etc/litestream.yml \
+  -o /var/lib/warsaw-beer-bot/bot.db.restored \
+  /var/lib/warsaw-beer-bot/bot.db
+# inspect bot.db.restored, swap into place when satisfied, then:
+sudo systemctl start warsaw-beer-bot
+```
