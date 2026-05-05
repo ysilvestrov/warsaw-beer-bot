@@ -411,5 +411,11 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   whose name still matches the pollution regex (`\d+[°%]` or ` — `), then
   either merges into a canonical match (confidence ≥ 0.9, exact or
   high-fuzzy) or rewrites in place. Idempotent — second boot finds 0 rows.
+- **Rating fallback (catalog → tap)**: `tap.u_rating` is the rating ontap.pl
+  showed at scrape time; often NULL when ontap.pl hasn't matched the beer
+  to Untappd. `tapsForSnapshotWithBeer` (`src/storage/snapshots.ts`) now
+  COALESCEs into `beers.rating_global` from the matched catalog row,
+  giving render and `min_rating` filter a usable rating in the ~2 % of
+  rows where the catalog has one but the tap doesn't.
 
 Ці грабельки — чек-лист на першу секунду нового деплою.

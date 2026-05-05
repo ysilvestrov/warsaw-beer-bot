@@ -52,3 +52,23 @@ export function latestSnapshotsPerPub(db: DB): SnapshotRow[] {
      ) x ON x.pub_id = s.pub_id AND x.m = s.snapshot_at`,
   ).all() as SnapshotRow[];
 }
+
+export interface TapWithBeer extends TapRow {
+  beer_id: number | null;
+  // u_rating on this row is the COALESCEd value: tap.u_rating ?? beers.rating_global ?? null
+}
+
+export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer[] {
+  return db.prepare(`
+    SELECT
+      t.id, t.snapshot_id, t.tap_number, t.beer_ref, t.brewery_ref,
+      t.abv, t.ibu, t.style,
+      COALESCE(t.u_rating, b.rating_global) AS u_rating,
+      ml.untappd_beer_id AS beer_id
+    FROM taps t
+    LEFT JOIN match_links ml ON t.beer_ref = ml.ontap_ref
+    LEFT JOIN beers b ON ml.untappd_beer_id = b.id
+    WHERE t.snapshot_id = ?
+    ORDER BY t.tap_number
+  `).all(snapshotId) as TapWithBeer[];
+}
