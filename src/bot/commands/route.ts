@@ -1,9 +1,8 @@
 import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
 import { listPubs } from '../../storage/pubs';
-import { latestSnapshotsPerPub, tapsForSnapshot } from '../../storage/snapshots';
+import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
 import { drunkBeerIds } from '../../storage/checkins';
-import { getMatch } from '../../storage/match_links';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting } from '../../domain/filters';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
@@ -56,14 +55,7 @@ routeCommand.command('route', async (ctx) => {
   for (const snap of latestSnapshotsPerPub(db)) {
     const pub = pubsById.get(snap.pub_id);
     if (!pub || pub.lat == null || pub.lon == null) continue;
-    const taps = tapsForSnapshot(db, snap.id).map((t) => ({
-      beer_id: getMatch(db, t.beer_ref)?.untappd_beer_id ?? null,
-      style: t.style,
-      abv: t.abv,
-      u_rating: t.u_rating,
-      beer_ref: t.beer_ref,
-      brewery_ref: t.brewery_ref,
-    }));
+    const taps = tapsForSnapshotWithBeer(db, snap.id);
     const good = filterInteresting(taps, drunk, filters);
     if (!good.length) continue;
     routePubs.push({
