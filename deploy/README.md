@@ -60,10 +60,16 @@ bucket. Runs as a separate systemd service alongside the bot.
 
 ```bash
 # 1. Install the litestream binary (latest .deb from upstream).
-ARCH=$(dpkg --print-architecture)
+# Litestream's release assets use x86_64/arm64/armv7 — map from dpkg's naming.
+case "$(dpkg --print-architecture)" in
+  amd64) LS_ARCH=x86_64 ;;
+  arm64) LS_ARCH=arm64 ;;
+  armhf) LS_ARCH=armv7 ;;
+  *) echo "unsupported arch"; exit 1 ;;
+esac
 TMP=$(mktemp -d)
 URL=$(curl -s https://api.github.com/repos/benbjohnson/litestream/releases/latest \
-  | grep -oP 'https://github.com/benbjohnson/litestream/releases/download/[^"]+_'"${ARCH}"'\.deb' \
+  | grep -oE 'https://github.com/benbjohnson/litestream/releases/download/[^"]+-linux-'"${LS_ARCH}"'\.deb' \
   | head -1)
 curl -fsSL "$URL" -o "$TMP/litestream.deb"
 apt-get install -y "$TMP/litestream.deb"
