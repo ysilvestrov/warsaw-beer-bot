@@ -164,4 +164,60 @@ describe('dedupeBreweryAliases', () => {
     const r2 = dedupeBreweryAliases(db, silentLog);
     expect(r2).toEqual({ pairsMerged: 0, beersDeleted: 0 });
   });
+
+  test('merges paren-form alias pair (Kemker Kultuur case)', () => {
+    const db = fresh();
+    // Canonical Untappd-side row — brewery in "X (Y)" form.
+    const aId = upsertBeer(db, {
+      untappd_id: 2133795,
+      name: 'Stadt Land Bier',
+      brewery: 'Kemker Kultuur (Brauerei J. Kemker)',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'stadt land bier',
+      normalized_brewery: 'kemker kultuur brauerei j kemker',
+    });
+    // Orphan ontap-side row — normalized brewery matches one alias half.
+    const bId = upsertBeer(db, {
+      untappd_id: null,
+      name: 'Stadt Land Bier',
+      brewery: 'Kemker Kultuur Brewery',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'stadt land bier',
+      normalized_brewery: 'kemker kultuur',
+    });
+    upsertMatch(db, 'Stadt Land Bier', bId, 1.0);
+    ensureProfile(db, 42);
+    mergeCheckin(db, {
+      checkin_id: 'kemker-1',
+      telegram_id: 42,
+      beer_id: bId,
+      user_rating: 4.5,
+      checkin_at: '2026-05-10T12:00:00Z',
+      venue: null,
+    });
+
+    const result = dedupeBreweryAliases(db, silentLog);
+
+    expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+    // Orphan deleted.
+    const orphan = db.prepare('SELECT id FROM beers WHERE id = ?').get(bId);
+    expect(orphan).toBeUndefined();
+    // Canonical survives.
+    const canonical = db.prepare('SELECT id FROM beers WHERE id = ?').get(aId);
+    expect(canonical).toEqual({ id: aId });
+    // match_link transferred to canonical.
+    const link = db
+      .prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
+      .get('Stadt Land Bier') as { untappd_beer_id: number };
+    expect(link.untappd_beer_id).toBe(aId);
+    // Checkin re-pointed to canonical.
+    const checkin = db
+      .prepare('SELECT beer_id FROM checkins WHERE checkin_id = ?')
+      .get('kemker-1') as { beer_id: number };
+    expect(checkin.beer_id).toBe(aId);
+  });
 });

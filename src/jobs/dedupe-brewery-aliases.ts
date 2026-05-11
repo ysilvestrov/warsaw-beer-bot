@@ -30,7 +30,8 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
         AND a.id <> b.id
        WHERE a.untappd_id IS NOT NULL
          AND b.untappd_id IS NULL
-         AND a.brewery LIKE '% / %'
+         AND (a.brewery LIKE '% / %'
+              OR (a.brewery LIKE '%(%' AND a.brewery LIKE '%)%'))
        ORDER BY a.id, b.id`,
     )
     .all() as PairCandidate[];
