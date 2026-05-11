@@ -1,6 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { brewerySlashAliases } from '../domain/matcher';
+import { breweryAliases } from '../domain/matcher';
 
 interface PairCandidate {
   canonical_id: number;
@@ -39,7 +39,7 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
   // Group by orphan_id to ensure each orphan is merged into its earliest canonical.
   const pairsByOrphan = new Map<number, PairCandidate>();
   for (const c of candidates) {
-    const aliases = new Set(brewerySlashAliases(c.canonical_brewery));
+    const aliases = new Set(breweryAliases(c.canonical_brewery));
     if (!aliases.has(c.orphan_norm_brewery)) continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);
   }
