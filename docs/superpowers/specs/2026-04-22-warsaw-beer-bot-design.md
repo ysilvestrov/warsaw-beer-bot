@@ -423,5 +423,14 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   COALESCEs into `beers.rating_global` from the matched catalog row,
   giving render and `min_rating` filter a usable rating in the ~2 % of
   rows where the catalog has one but the tap doesn't.
+- **Paren-form brewery aliases**: Untappd renders some breweries with a
+  parenthesized German alias — "Kemker Kultuur (Brauerei J. Kemker)" —
+  parallel to the "X / Y" bilingual/collab form. `breweryAliases`
+  (`src/domain/matcher.ts`) splits BOTH forms so that either side counts
+  as a valid brewery for the beer. Missing the paren form let
+  ontap-side rows fail to find their Untappd canonical and create
+  duplicates (caught 2026-05-10 via duplicated `beers#12061/12093`
+  for *Stadt Land Bier*; startup `dedupeBreweryAliases` now sweeps both
+  forms on boot).
 
 Ці грабельки — чек-лист на першу секунду нового деплою.
