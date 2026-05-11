@@ -42,9 +42,14 @@ describe('breweryAliases', () => {
 
   test('mixed slash + paren splits on both', () => {
     const out = breweryAliases('AleBrowar / Kemker Kultuur (Brauerei J. Kemker)');
-    expect(out).toContain('alebrowar');
-    expect(out).toContain('kemker kultuur');
-    expect(out).toContain('brauerei j kemker');
+    expect(new Set(out)).toEqual(
+      new Set([
+        'alebrowar kemker kultuur brauerei j kemker',
+        'alebrowar',
+        'kemker kultuur',
+        'brauerei j kemker',
+      ]),
+    );
   });
 
   test('empty input returns empty array', () => {
