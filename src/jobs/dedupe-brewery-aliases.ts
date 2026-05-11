@@ -15,7 +15,8 @@ export interface DedupeResult {
 }
 
 export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
-  // Find candidates: same normalized_name, A has untappd_id + slash, B has neither.
+  // Find candidates: same normalized_name, A has untappd_id and a brewery
+  // in either "X / Y" slash form or "X (Y)" paren form, B has neither.
   // Return brewery raw so we can compute aliases in JS (SQLite has no JS regex).
   const candidates = db
     .prepare(
