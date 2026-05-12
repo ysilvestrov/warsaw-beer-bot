@@ -17,18 +17,32 @@ export interface MatchResult {
 const FUZZY_THRESHOLD = 0.75;
 const ABV_TOLERANCE = 0.3;
 
-// Untappd records breweries either as a single name ("Piwne Podziemie Brewery")
-// or as a "X / Y" alias used for two purposes:
-//   • bilingual presentation — "Piwne Podziemie / Beer Underground", same brewery
-//   • collaboration — "AleBrowar / Poppels Bryggeri", two different breweries
-// Ontap.pl renders only one half. For matching purposes both cases collapse to:
-// "the brewery on either side of '/' is also a valid brewery for this beer".
-export function brewerySlashAliases(brewery: string): string[] {
+// Untappd records breweries either as a single name ("Piwne Podziemie Brewery"),
+// as an "X / Y" alias used for bilingual ("Piwne Podziemie / Beer Underground")
+// or collaboration ("AleBrowar / Poppels Bryggeri") pairs, or as an "X (Y)"
+// form for German aliases ("Kemker Kultuur (Brauerei J. Kemker)").
+// Ontap.pl renders only one of these. For matching purposes all three forms
+// collapse to: "any side of the separator is a valid brewery for this beer".
+export function breweryAliases(brewery: string): string[] {
+  const aliases = new Set<string>();
   const full = normalizeBrewery(brewery);
-  if (!brewery.includes(' / ')) return full ? [full] : [];
-  const parts = brewery.split(' / ').map((p) => normalizeBrewery(p)).filter(Boolean);
-  const all = [full, ...parts].filter(Boolean);
-  return Array.from(new Set(all));
+  if (full) aliases.add(full);
+
+  const slashParts = brewery.includes(' / ') ? brewery.split(' / ') : [brewery];
+  for (const part of slashParts) {
+    const parenMatch = part.match(/^(.+?)\s*\((.+)\)\s*$/);
+    if (parenMatch) {
+      const outer = normalizeBrewery(parenMatch[1]);
+      const inner = normalizeBrewery(parenMatch[2]);
+      if (outer) aliases.add(outer);
+      if (inner) aliases.add(inner);
+    } else {
+      const norm = normalizeBrewery(part);
+      if (norm) aliases.add(norm);
+    }
+  }
+
+  return Array.from(aliases);
 }
 
 function brewerySetsOverlap(a: string[], b: Set<string>): boolean {
@@ -39,7 +53,7 @@ export function matchBeer(
   input: { brewery: string; name: string; abv?: number | null },
   catalog: CatalogBeer[],
 ): MatchResult | null {
-  const inputAliases = new Set(brewerySlashAliases(input.brewery));
+  const inputAliases = new Set(breweryAliases(input.brewery));
   const nn = normalizeName(input.name);
 
   // Exact-normalized hits — multiple rows are common when Untappd has
@@ -47,7 +61,7 @@ export function matchBeer(
   const exacts = catalog
     .filter(
       (c) =>
-        brewerySetsOverlap(brewerySlashAliases(c.brewery), inputAliases) &&
+        brewerySetsOverlap(breweryAliases(c.brewery), inputAliases) &&
         normalizeName(c.name) === nn,
     )
     .sort((a, b) => b.id - a.id);
@@ -66,7 +80,7 @@ export function matchBeer(
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's,
   // otherwise full catalog.
   const pool = catalog.filter((c) =>
-    brewerySetsOverlap(brewerySlashAliases(c.brewery), inputAliases),
+    brewerySetsOverlap(breweryAliases(c.brewery), inputAliases),
   );
   const candidates = pool.length ? pool : catalog;
   const searcher = new Searcher(candidates, {
@@ -75,7 +89,7 @@ export function matchBeer(
     returnMatchData: true,
   });
   // Use the first alias as the search seed — full normalized brewery already
-  // appears at index 0 of brewerySlashAliases when no slash is present.
+  // appears at index 0 of breweryAliases when no slash is present.
   const seedBrewery = Array.from(inputAliases)[0] ?? '';
   const results = searcher.search(`${seedBrewery} ${nn}`);
   if (!results.length) return null;

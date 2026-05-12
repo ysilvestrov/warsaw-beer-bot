@@ -1,4 +1,4 @@
-import { matchBeer, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -12,6 +12,50 @@ const catalog: CatalogBeer[] = [
   c({ id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta', abv: 5.0 }),
   c({ id: 3, brewery: 'Piwne Podziemie', name: 'Hopinka', abv: 6.0 }),
 ];
+
+describe('breweryAliases', () => {
+  test('plain brewery returns one alias', () => {
+    expect(breweryAliases('Pinta')).toEqual(['pinta']);
+  });
+
+  test('drops noise words consistent with normalizeBrewery', () => {
+    expect(breweryAliases('Piwne Podziemie Brewery')).toEqual(['piwne podziemie']);
+  });
+
+  test('slash form returns full + each half', () => {
+    const out = breweryAliases('Piwne Podziemie / Beer Underground');
+    expect(new Set(out)).toEqual(
+      new Set(['piwne podziemie beer underground', 'piwne podziemie', 'beer underground']),
+    );
+  });
+
+  test('paren form returns full + outer + inner', () => {
+    const out = breweryAliases('Kemker Kultuur (Brauerei J. Kemker)');
+    expect(new Set(out)).toEqual(
+      new Set([
+        'kemker kultuur brauerei j kemker',
+        'kemker kultuur',
+        'brauerei j kemker',
+      ]),
+    );
+  });
+
+  test('mixed slash + paren splits on both', () => {
+    const out = breweryAliases('AleBrowar / Kemker Kultuur (Brauerei J. Kemker)');
+    expect(new Set(out)).toEqual(
+      new Set([
+        'alebrowar kemker kultuur brauerei j kemker',
+        'alebrowar',
+        'kemker kultuur',
+        'brauerei j kemker',
+      ]),
+    );
+  });
+
+  test('empty input returns empty array', () => {
+    expect(breweryAliases('')).toEqual([]);
+  });
+});
 
 test('exact normalized match is confidence 1', () => {
   const m = matchBeer({ brewery: 'PINTA', name: 'Atak Chmielu IPA' }, catalog);
