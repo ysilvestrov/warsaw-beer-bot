@@ -35,4 +35,21 @@ describe('schema migrations', () => {
     expect(lang?.type).toBe('TEXT');
     expect(lang?.dflt_value).toBeNull();
   });
+
+  test('migration v4 creates untappd_had table', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const row = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='untappd_had'",
+      )
+      .get();
+    expect(row).toEqual({ name: 'untappd_had' });
+    const idx = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_untappd_had_telegram'",
+      )
+      .get();
+    expect(idx).toEqual({ name: 'idx_untappd_had_telegram' });
+  });
 });
