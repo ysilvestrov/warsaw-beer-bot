@@ -1,7 +1,7 @@
 import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
 import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
-import { drunkBeerIds } from '../../storage/checkins';
+import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting } from '../../domain/filters';
 import { listPubs } from '../../storage/pubs';
@@ -17,7 +17,7 @@ export const newbeersCommand = new Composer<BotContext>();
 
 newbeersCommand.command('newbeers', async (ctx) => {
   const db = ctx.deps.db;
-  const drunk = drunkBeerIds(db, ctx.from.id);
+  const tried = triedBeerIds(db, ctx.from.id);
   const filters =
     getFilters(db, ctx.from.id) ?? {
       styles: [],
@@ -33,7 +33,7 @@ newbeersCommand.command('newbeers', async (ctx) => {
     const pub = pubs.get(snap.pub_id);
     if (!pub) continue;
     const taps = tapsForSnapshotWithBeer(db, snap.id);
-    const good = filterInteresting(taps, drunk, filters);
+    const good = filterInteresting(taps, tried, filters);
     for (const t of good) {
       const display = t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref;
       candidates.push({
