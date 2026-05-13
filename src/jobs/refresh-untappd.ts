@@ -4,6 +4,7 @@ import type { Http } from '../sources/http';
 import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles } from '../storage/user_profiles';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
+import { markHad } from '../storage/untappd_had';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 
@@ -32,10 +33,12 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
         const nb = normalizeBrewery(it.brewery_name);
         const nn = normalizeName(it.beer_name);
         const existing = findBeerByNormalized(db, nb, nn);
+        let beerId: number;
         if (existing) {
           updateRatingOnly.run(it.global_rating, existing.id);
+          beerId = existing.id;
         } else {
-          upsertBeer(db, {
+          beerId = upsertBeer(db, {
             untappd_id: it.bid,
             name: it.beer_name,
             brewery: it.brewery_name,
@@ -46,6 +49,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
             normalized_brewery: nb,
           });
         }
+        markHad(db, p.telegram_id, beerId, new Date().toISOString());
       }
       ok++;
     } catch (e) {

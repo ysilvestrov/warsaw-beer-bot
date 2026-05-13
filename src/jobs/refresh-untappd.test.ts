@@ -198,4 +198,29 @@ describe('refreshAllUntappd', () => {
     expect(row).not.toBeNull();
     expect(row!.rating_global).toBe(3.50);
   });
+
+  test('marks each scraped beer in untappd_had for that user', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+
+    const html = `
+      ${PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12')}
+      ${PAGE_ONE_BEER(202, 'Buty Skejta', 'Stu Mostow', '3.5')}`;
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers': html,
+    });
+
+    await refreshAllUntappd({ db, log: silentLog, http });
+
+    const rows = db
+      .prepare('SELECT telegram_id, beer_id FROM untappd_had ORDER BY beer_id')
+      .all() as { telegram_id: number; beer_id: number }[];
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.telegram_id === 1)).toBe(true);
+
+    const atak = findBeerByNormalized(db, 'pinta', 'atak chmielu')!;
+    const buty = findBeerByNormalized(db, 'stu mostow', 'buty skejta')!;
+    expect(new Set(rows.map((r) => r.beer_id))).toEqual(new Set([atak.id, buty.id]));
+  });
 });

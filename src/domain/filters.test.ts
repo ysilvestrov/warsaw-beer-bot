@@ -6,10 +6,10 @@ const taps = [
   { beer_id: 3, style: 'IPA',   abv: 7.5, u_rating: 3.9 },
   { beer_id: null, style: 'x',  abv: 4,   u_rating: 3.0 },
 ];
-const drunk = new Set([1]);
+const tried = new Set([1]);
 
 test('filterInteresting respects checkins + style + rating + abv', () => {
-  const out = filterInteresting(taps, drunk, {
+  const out = filterInteresting(taps, tried, {
     styles: ['IPA'], min_rating: 3.8, abv_min: 4, abv_max: 8,
   });
   expect(out.map((t) => t.beer_id)).toEqual([3]);

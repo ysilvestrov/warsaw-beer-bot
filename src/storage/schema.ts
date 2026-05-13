@@ -102,6 +102,18 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE user_profiles ADD COLUMN language TEXT;
     `,
   },
+  {
+    version: 4,
+    sql: `
+      CREATE TABLE untappd_had (
+        telegram_id INTEGER NOT NULL,
+        beer_id INTEGER NOT NULL REFERENCES beers(id) ON DELETE CASCADE,
+        last_seen_at TEXT NOT NULL,
+        PRIMARY KEY (telegram_id, beer_id)
+      );
+      CREATE INDEX idx_untappd_had_telegram ON untappd_had(telegram_id);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
