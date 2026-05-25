@@ -288,6 +288,7 @@ describe('dedupeBreweryAliases', () => {
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
     expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeUndefined();
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(aId)).toEqual({ id: aId });
   });
 
   test('does NOT merge slash orphan when no alias overlaps with canonical', () => {

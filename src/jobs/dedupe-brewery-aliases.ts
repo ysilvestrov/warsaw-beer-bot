@@ -7,7 +7,6 @@ interface PairCandidate {
   canonical_brewery: string;
   orphan_id: number;
   orphan_brewery: string;
-  orphan_norm_brewery: string;
 }
 
 export interface DedupeResult {
@@ -28,8 +27,7 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
          a.id AS canonical_id,
          a.brewery AS canonical_brewery,
          b.id AS orphan_id,
-         b.brewery AS orphan_brewery,
-         b.normalized_brewery AS orphan_norm_brewery
+         b.brewery AS orphan_brewery
        FROM beers a
        JOIN beers b
          ON a.normalized_name = b.normalized_name
