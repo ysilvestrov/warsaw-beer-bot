@@ -3,12 +3,13 @@ import type { Messages } from '../types';
 export const en: Messages = {
   // app
   'app.start': [
-    "Hi! I'll help you build a route through Warsaw pubs and try something new.",
+    'Hi! I help plan a route across Warsaw pubs and drink something new.',
     '',
     '1) /link <untappd-username> — to pull your check-ins.',
-    '2) /import — upload your Untappd CSV/JSON/ZIP export to backfill history.',
-    '3) /newbeers — top untried beers on current taps.',
-    '4) /route N — a route covering ≥ N untried beers with the shortest total walking distance.',
+    '2) /import — upload a CSV export from Untappd for a full history backfill.',
+    '3) /newbeers [pub-name fragment] — top untried beers; with an argument — only in matching pubs.',
+    '4) /pubs — list of available pubs.',
+    '5) /route N — a route covering ≥ N untried beers with minimal walking distance.',
   ].join('\n'),
   'app.no_data_in_snapshot': 'No interesting untried beers right now.',
 
@@ -33,6 +34,12 @@ export const en: Messages = {
   // newbeers
   'newbeers.empty': 'Nothing interesting — try /refresh.',
   'newbeers.more_pubs_suffix': ' +{extra} more',
+  'newbeers.pub_not_found': 'Pub "{query}" not found. /pubs lists available ones.',
+
+  // pubs
+  'pubs.header': 'Available pubs:',
+  'pubs.empty': 'No pubs in the database yet — wait for the first /refresh.',
+  'pubs.hint': 'Tip: /newbeers <name fragment> shows new beers only in matching pubs.',
 
   // route
   'route.preparing': '⏳ Building a route for ≥{count} new beers…',
