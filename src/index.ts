@@ -11,6 +11,7 @@ import { startCommand } from './bot/commands/start';
 import { linkCommand } from './bot/commands/link';
 import { importCommand } from './bot/commands/import';
 import { newbeersCommand } from './bot/commands/newbeers';
+import { buildNewbeersMessage } from './bot/commands/newbeers-build';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
@@ -41,10 +42,13 @@ async function main(): Promise<void> {
     routeCommand,
     filtersCommand,
     langCommand,
-    createRefreshCommand(async (notify) => {
-      await refreshOntap({ db, log, http, geocoder, onProgress: notify });
-      await refreshAllUntappd({ db, log, http, onProgress: notify });
-    }),
+    createRefreshCommand(
+      async (notify) => {
+        await refreshOntap({ db, log, http, geocoder, onProgress: notify });
+        await refreshAllUntappd({ db, log, http, onProgress: notify });
+      },
+      buildNewbeersMessage,
+    ),
   );
 
   const cronJobs = [
