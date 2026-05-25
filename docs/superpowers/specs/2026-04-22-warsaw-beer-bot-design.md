@@ -442,5 +442,16 @@ bot /route N → domain/filters: interesting(p) для кожного пабу �
   consume. Caught 2026-05-10 — `/newbeers` showed *Stadt Land Bier*
   because the scrape rewrote `beers.rating_global` but never marked
   the user as having had it.
+- **Bare-slash brewery aliases (any side)**: Polish collab breweries
+  often render with no spaces around `/` ("Sady/Beer Bacon and Liberty
+  Brewery", "Nieczajna/Craftownia Brewery"). The original PR-A
+  assumption was that the compound form lives on the Untappd-canonical
+  side and uses `' / '` with spaces — both wrong for this case.
+  `breweryAliases` (`src/domain/matcher.ts`) now splits on `/\s*\/\s*/`
+  to absorb any spacing, and `dedupeBreweryAliases`
+  (`src/jobs/dedupe-brewery-aliases.ts`) detects compound form on
+  either pair side with a symmetric alias-overlap check. Caught
+  2026-05-25 via 17 prod orphans (e.g. *Midnight Mass* duplicated as
+  `beers#12276/12286`); merged on next boot.
 
 Ці грабельки — чек-лист на першу секунду нового деплою.
