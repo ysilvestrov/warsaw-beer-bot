@@ -18,9 +18,15 @@ export interface NewbeersDeps {
   telegramId: number;
   locale: Locale;
   t: Translator;
+  pubQuery?: string;
 }
 
-export function buildNewbeersMessage(deps: NewbeersDeps): string | null {
+export type NewbeersResult =
+  | { kind: 'ok'; html: string }
+  | { kind: 'empty' }
+  | { kind: 'pub_not_found'; query: string };
+
+export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
   const { db, telegramId, locale, t } = deps;
   const tried = triedBeerIds(db, telegramId);
   const filters =
@@ -33,8 +39,19 @@ export function buildNewbeersMessage(deps: NewbeersDeps): string | null {
     };
   const pubs = new Map(listPubs(db).map((p) => [p.id, p]));
 
+  const q = deps.pubQuery?.trim().toLowerCase();
+  let matchedIds: Set<number> | null = null;
+  if (q) {
+    const matched = [...pubs.values()].filter((p) => p.name.toLowerCase().includes(q));
+    if (matched.length === 0) {
+      return { kind: 'pub_not_found', query: deps.pubQuery! };
+    }
+    matchedIds = new Set(matched.map((p) => p.id));
+  }
+
   const candidates: CandidateTap[] = [];
   for (const snap of latestSnapshotsPerPub(db)) {
+    if (matchedIds && !matchedIds.has(snap.pub_id)) continue;
     const pub = pubs.get(snap.pub_id);
     if (!pub) continue;
     const taps = tapsForSnapshotWithBeer(db, snap.id);
@@ -54,5 +71,5 @@ export function buildNewbeersMessage(deps: NewbeersDeps): string | null {
   }
 
   const text = formatGroupedBeers(rankGroups(groupTaps(candidates)), locale, t);
-  return text || null;
+  return text ? { kind: 'ok', html: text } : { kind: 'empty' };
 }

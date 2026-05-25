@@ -3,7 +3,7 @@ import type pino from 'pino';
 import type { BotContext } from '../index';
 import type { ProgressFn } from '../../jobs/progress';
 import type { Translator } from '../../i18n/types';
-import type { NewbeersDeps } from './newbeers-build';
+import type { NewbeersDeps, NewbeersResult } from './newbeers-build';
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 const PROGRESS_MIN_INTERVAL_MS = 2000;
@@ -53,7 +53,7 @@ export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<
 
 export function createRefreshCommand(
   run: (notify: ProgressFn) => Promise<void>,
-  postRun?: (deps: NewbeersDeps) => string | null,
+  postRun?: (deps: NewbeersDeps) => NewbeersResult,
 ) {
   const cmd = new Composer<BotContext>();
   cmd.command('refresh', async (ctx) => {
@@ -85,9 +85,9 @@ export function createRefreshCommand(
 
     const postRunClosure = postRun
       ? async () => {
-          const text = postRun({ db, telegramId, locale, t });
-          if (text) {
-            await telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
+          const result = postRun({ db, telegramId, locale, t });
+          if (result.kind === 'ok') {
+            await telegram.sendMessage(chatId, result.html, { parse_mode: 'HTML' });
           }
         }
       : undefined;
