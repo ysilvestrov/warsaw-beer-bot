@@ -28,8 +28,8 @@ describe('buildPubsMessage', () => {
     const t = createTranslator('uk');
     const out = buildPubsMessage({ db, t });
 
-    expect(out).toContain(t('pubs.header'));
-    expect(out).toContain(t('pubs.hint'));
+    expect(out).toContain('Доступні паби:');
+    expect(out).toContain('Підказка:');
     expect(out).toContain('Alfa');
     expect(out).toContain('Bar');
     expect(out).toContain('Cuda');
@@ -45,5 +45,16 @@ describe('buildPubsMessage', () => {
     const out = buildPubsMessage({ db, t });
     expect(out).toContain('Cuda &amp; &lt;Co&gt;');
     expect(out).not.toContain('Cuda & <Co>');
+  });
+
+  test('HTML-escapes the hint string so angle-bracket metavars survive Telegram HTML mode', () => {
+    const db = fresh();
+    upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null });
+    const t = createTranslator('uk');
+    const out = buildPubsMessage({ db, t });
+    // uk hint contains '<частина назви>' as metavar notation; Telegram's HTML
+    // parser rejects unknown tags, so this MUST be escaped before send.
+    expect(out).toContain('&lt;частина назви&gt;');
+    expect(out).not.toContain('<частина назви>');
   });
 });
