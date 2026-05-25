@@ -6,6 +6,7 @@ interface PairCandidate {
   canonical_id: number;
   canonical_brewery: string;
   orphan_id: number;
+  orphan_brewery: string;
   orphan_norm_brewery: string;
 }
 
@@ -15,15 +16,19 @@ export interface DedupeResult {
 }
 
 export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
-  // Find candidates: same normalized_name, A has untappd_id and a brewery
-  // in either "X / Y" slash form or "X (Y)" paren form, B has neither.
-  // Return brewery raw so we can compute aliases in JS (SQLite has no JS regex).
+  // Find candidates: same normalized_name, A has untappd_id and B doesn't.
+  // Compound brewery form ("X/Y" slash, any spacing, or "X (Y)" paren) may
+  // appear on EITHER side of the pair — PR-A had it on canonical (Kemker
+  // (Brauerei J. Kemker)), PR-C had it on orphan (Sady/Beer Bacon and
+  // Liberty Brewery). Match either; JS alias-overlap will decide whether
+  // the pair actually corresponds.
   const candidates = db
     .prepare(
       `SELECT
          a.id AS canonical_id,
          a.brewery AS canonical_brewery,
          b.id AS orphan_id,
+         b.brewery AS orphan_brewery,
          b.normalized_brewery AS orphan_norm_brewery
        FROM beers a
        JOIN beers b
@@ -31,18 +36,26 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
         AND a.id <> b.id
        WHERE a.untappd_id IS NOT NULL
          AND b.untappd_id IS NULL
-         AND (a.brewery LIKE '% / %'
-              OR (a.brewery LIKE '%(%' AND a.brewery LIKE '%)%'))
+         AND (
+           a.brewery LIKE '%/%'
+           OR (a.brewery LIKE '%(%' AND a.brewery LIKE '%)%')
+           OR b.brewery LIKE '%/%'
+           OR (b.brewery LIKE '%(%' AND b.brewery LIKE '%)%')
+         )
        ORDER BY a.id, b.id`,
     )
     .all() as PairCandidate[];
 
-  // Filter to pairs where the orphan brewery actually overlaps an alias of canonical.
-  // Group by orphan_id to ensure each orphan is merged into its earliest canonical.
+  // Symmetric alias-overlap: pair merges only if breweryAliases(canonical)
+  // and breweryAliases(orphan) share at least one element. This filters out
+  // false-positives where the SQL pre-filter caught a pair that happens to
+  // share normalized_name but whose breweries are unrelated.
   const pairsByOrphan = new Map<number, PairCandidate>();
   for (const c of candidates) {
-    const aliases = new Set(breweryAliases(c.canonical_brewery));
-    if (!aliases.has(c.orphan_norm_brewery)) continue;
+    const canonicalAliases = new Set(breweryAliases(c.canonical_brewery));
+    const orphanAliases = breweryAliases(c.orphan_brewery);
+    const overlap = orphanAliases.some((x) => canonicalAliases.has(x));
+    if (!overlap) continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);
   }
 

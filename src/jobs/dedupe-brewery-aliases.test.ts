@@ -220,4 +220,107 @@ describe('dedupeBreweryAliases', () => {
       .get('kemker-1') as { beer_id: number };
     expect(checkin.beer_id).toBe(aId);
   });
+
+  test('merges bare-slash collab orphan (Sady/Beer Bacon Midnight Mass case)', () => {
+    const db = fresh();
+    // Canonical Untappd-side row — simple brewery name.
+    const aId = upsertBeer(db, {
+      untappd_id: 6645648,
+      name: 'Midnight Mass',
+      brewery: 'Browar Sady',
+      style: null,
+      abv: 10.9,
+      rating_global: 3.92,
+      normalized_name: 'midnight mass',
+      normalized_brewery: 'sady',
+    });
+    // Orphan ontap-side row — brewery is compound bare-slash form.
+    const bId = upsertBeer(db, {
+      untappd_id: null,
+      name: 'Midnight Mass',
+      brewery: 'Sady/Beer Bacon and Liberty Brewery',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'midnight mass',
+      normalized_brewery: 'sady beer bacon and liberty',
+    });
+    upsertMatch(db, 'Midnight Mass', bId, 1.0);
+
+    const result = dedupeBreweryAliases(db, silentLog);
+    expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+
+    // Orphan gone; canonical survives.
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeUndefined();
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(aId)).toEqual({ id: aId });
+
+    // match_link transferred to canonical.
+    const link = db
+      .prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
+      .get('Midnight Mass') as { untappd_beer_id: number };
+    expect(link.untappd_beer_id).toBe(aId);
+  });
+
+  test('merges mixed-spacing slash orphan (Nieczajna/ Monsters style)', () => {
+    const db = fresh();
+    const aId = upsertBeer(db, {
+      untappd_id: 5712429,
+      name: 'Mexican',
+      brewery: 'Browar Monsters',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'mexican',
+      normalized_brewery: 'monsters',
+    });
+    const bId = upsertBeer(db, {
+      untappd_id: null,
+      name: 'Mexican',
+      brewery: 'Nieczajna/ Monsters Brewery',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'mexican',
+      normalized_brewery: 'nieczajna monsters',
+    });
+    upsertMatch(db, 'Mexican', bId, 1.0);
+
+    const result = dedupeBreweryAliases(db, silentLog);
+    expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeUndefined();
+  });
+
+  test('does NOT merge slash orphan when no alias overlaps with canonical', () => {
+    const db = fresh();
+    // Canonical: "Genys Brewing Co.", normalized 'genys brewing co'.
+    const aId = upsertBeer(db, {
+      untappd_id: 5738553,
+      name: 'Grodziskie',
+      brewery: 'Genys Brewing Co.',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'grodziskie',
+      normalized_brewery: 'genys brewing co',
+    });
+    // Orphan: "Miejski Stargard/Nieczajna Brewery" — aliases include
+    // 'miejski stargard' and 'nieczajna' but NOT 'genys brewing co'.
+    const bId = upsertBeer(db, {
+      untappd_id: null,
+      name: 'Grodziskie',
+      brewery: 'Miejski Stargard/Nieczajna Brewery',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'grodziskie',
+      normalized_brewery: 'miejski stargard nieczajna',
+    });
+    upsertMatch(db, 'Grodziskie', bId, 1.0);
+
+    const result = dedupeBreweryAliases(db, silentLog);
+    expect(result).toEqual({ pairsMerged: 0, beersDeleted: 0 });
+    // Both rows still present.
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(aId)).toBeDefined();
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeDefined();
+  });
 });
