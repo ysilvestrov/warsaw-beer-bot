@@ -18,17 +18,20 @@ const FUZZY_THRESHOLD = 0.75;
 const ABV_TOLERANCE = 0.3;
 
 // Untappd records breweries either as a single name ("Piwne Podziemie Brewery"),
-// as an "X / Y" alias used for bilingual ("Piwne Podziemie / Beer Underground")
-// or collaboration ("AleBrowar / Poppels Bryggeri") pairs, or as an "X (Y)"
-// form for German aliases ("Kemker Kultuur (Brauerei J. Kemker)").
-// Ontap.pl renders only one of these. For matching purposes all three forms
-// collapse to: "any side of the separator is a valid brewery for this beer".
+// as a slash alias used for bilingual ("Piwne Podziemie / Beer Underground")
+// or collaboration ("Sady/Beer Bacon and Liberty Brewery") pairs, or as an
+// "X (Y)" form for German aliases ("Kemker Kultuur (Brauerei J. Kemker)").
+// The slash form appears with any spacing around "/" (with, without, or one
+// side only) — the regex absorbs all variants. Ontap.pl renders only one of
+// these. For matching purposes all forms collapse to: "any side of the
+// separator is a valid brewery for this beer".
 export function breweryAliases(brewery: string): string[] {
   const aliases = new Set<string>();
   const full = normalizeBrewery(brewery);
   if (full) aliases.add(full);
 
-  const slashParts = brewery.includes(' / ') ? brewery.split(' / ') : [brewery];
+  const slashRegex = /\s*\/\s*/;
+  const slashParts = slashRegex.test(brewery) ? brewery.split(slashRegex) : [brewery];
   for (const part of slashParts) {
     const parenMatch = part.match(/^(.+?)\s*\((.+)\)\s*$/);
     if (parenMatch) {
