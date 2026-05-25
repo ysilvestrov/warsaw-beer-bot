@@ -1,6 +1,9 @@
 import { Composer } from 'telegraf';
+import type pino from 'pino';
 import type { BotContext } from '../index';
 import type { ProgressFn } from '../../jobs/progress';
+import type { Translator } from '../../i18n/types';
+import type { NewbeersDeps } from './newbeers-build';
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 const PROGRESS_MIN_INTERVAL_MS = 2000;
@@ -22,7 +25,36 @@ export function makeThrottledProgress(
   };
 }
 
-export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>) {
+export interface RunRefreshPipelineArgs {
+  run: (notify: ProgressFn) => Promise<void>;
+  notify: ProgressFn;
+  t: Translator;
+  log: pino.Logger;
+  postRun?: () => Promise<void>;
+}
+
+export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<void> {
+  const { run, notify, t, log, postRun } = args;
+  try {
+    await run(notify);
+    await notify(t('refresh.done'), { force: true });
+    if (postRun) {
+      try {
+        await postRun();
+      } catch (e) {
+        log.error({ err: e }, 'refresh post-run failed');
+      }
+    }
+  } catch (e) {
+    log.error({ err: e }, 'refresh failed');
+    await notify(t('refresh.failed'), { force: true });
+  }
+}
+
+export function createRefreshCommand(
+  run: (notify: ProgressFn) => Promise<void>,
+  postRun?: (deps: NewbeersDeps) => string | null,
+) {
   const cmd = new Composer<BotContext>();
   cmd.command('refresh', async (ctx) => {
     const prev = lastCall.get(ctx.from.id) ?? 0;
@@ -38,6 +70,10 @@ export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>)
     const telegram = ctx.telegram;
     const log = ctx.deps.log;
     const t = ctx.t;
+    const db = ctx.deps.db;
+    const telegramId = ctx.from.id;
+    const locale = ctx.locale;
+
     const notify = makeThrottledProgress(
       async (text) => {
         await telegram
@@ -47,19 +83,26 @@ export function createRefreshCommand(run: (notify: ProgressFn) => Promise<void>)
       PROGRESS_MIN_INTERVAL_MS,
     );
 
+    const postRunClosure = postRun
+      ? async () => {
+          const text = postRun({ db, telegramId, locale, t });
+          if (text) {
+            await telegram.sendMessage(chatId, text, { parse_mode: 'HTML' });
+          }
+        }
+      : undefined;
+
     // Detach the work: the refresh sweep takes minutes, but Telegraf's
     // handlerTimeout (default 90s) would otherwise kill the handler and
     // raise TimeoutError into bot.catch. Captured locals above keep the
     // background promise independent of ctx's lifetime.
-    void (async () => {
-      try {
-        await run(notify);
-        await notify(t('refresh.done'), { force: true });
-      } catch (e) {
-        log.error({ err: e }, 'refresh failed');
-        await notify(t('refresh.failed'), { force: true });
-      }
-    })();
+    void runRefreshPipeline({
+      run,
+      notify,
+      t,
+      log,
+      postRun: postRunClosure,
+    });
   });
   return cmd;
 }
