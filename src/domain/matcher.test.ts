@@ -78,9 +78,14 @@ describe('breweryAliases', () => {
   });
 
   test('multi-slash collab (A/B/C) splits into all parts', () => {
-    const out = breweryAliases('Nieczajna/Craftownia Brewery');
+    const out = breweryAliases('Nieczajna/Craftownia/Same Krafty Brewery');
     expect(new Set(out)).toEqual(
-      new Set(['nieczajna craftownia', 'nieczajna', 'craftownia']),
+      new Set([
+        'nieczajna craftownia same krafty',
+        'nieczajna',
+        'craftownia',
+        'same krafty',
+      ]),
     );
   });
 
