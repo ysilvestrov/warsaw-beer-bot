@@ -3,12 +3,13 @@ import type { Messages } from '../types';
 export const pl: Messages = {
   // app
   'app.start': [
-    'Cześć! Pomogę zaplanować trasę po warszawskich pubach i spróbować czegoś nowego.',
+    'Cześć! Pomogę ułożyć trasę po warszawskich pubach i wypić coś nowego.',
     '',
-    '1) /link <untappd-username> — żeby pobrać twoje check-iny.',
-    '2) /import — wyślij eksport Untappd (CSV/JSON/ZIP), by uzupełnić historię.',
-    '3) /newbeers — top niespróbowanych piw z aktualnych kranów.',
-    '4) /route N — trasa pokrywająca ≥ N niespróbowanych piw z najkrótszą trasą pieszą.',
+    '1) /link <untappd-username> — żeby podciągnąć twoje check-iny.',
+    '2) /import — wyślij CSV-eksport z Untappd dla pełnego backfillu historii.',
+    '3) /newbeers [fragment nazwy pubu] — top niespróbowanych piw; z argumentem — tylko w dopasowanych pubach.',
+    '4) /pubs — lista dostępnych pubów.',
+    '5) /route N — trasa pokrywająca ≥ N niespróbowanych piw z minimalnym dystansem.',
   ].join('\n'),
   'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
@@ -33,6 +34,12 @@ export const pl: Messages = {
   // newbeers
   'newbeers.empty': 'Nic ciekawego — spróbuj /refresh.',
   'newbeers.more_pubs_suffix': ' +{extra} innych',
+  'newbeers.pub_not_found': 'Nie znaleziono pubu „{query}". /pubs pokaże dostępne.',
+
+  // pubs
+  'pubs.header': 'Dostępne puby:',
+  'pubs.empty': 'W bazie nie ma jeszcze pubów — najpierw musi się wykonać /refresh.',
+  'pubs.hint': 'Podpowiedź: /newbeers <fragment nazwy> pokaże nowości tylko w dopasowanych pubach.',
 
   // route
   'route.preparing': '⏳ Buduję trasę dla ≥{count} nowych piw…',

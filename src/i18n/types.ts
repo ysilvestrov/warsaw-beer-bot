@@ -29,6 +29,12 @@ export interface Messages {
   // newbeers
   'newbeers.empty': string;
   'newbeers.more_pubs_suffix': string;   // {extra}
+  'newbeers.pub_not_found': string;      // {query}
+
+  // pubs
+  'pubs.header': string;
+  'pubs.empty': string;
+  'pubs.hint': string;
 
   // route
   'route.preparing': string;             // {count}
