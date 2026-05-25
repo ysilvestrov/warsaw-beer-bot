@@ -86,6 +86,9 @@ export function createRefreshCommand(
     const postRunClosure = postRun
       ? async () => {
           const result = postRun({ db, telegramId, locale, t });
+          // pubQuery is never set from /refresh, so only 'ok' and 'empty' can
+          // occur here. 'empty' is intentionally silent to avoid spam after a
+          // successful refresh that surfaced nothing new.
           if (result.kind === 'ok') {
             await telegram.sendMessage(chatId, result.html, { parse_mode: 'HTML' });
           }

@@ -146,6 +146,14 @@ describe('buildNewbeersMessage', () => {
     expect(out).toEqual({ kind: 'pub_not_found', query: 'nonexistent' });
   });
 
+  test('pub_not_found preserves leading/trailing whitespace in the original query', () => {
+    const db = fresh();
+    seedTwoPubs(db);
+    const t = createTranslator('uk');
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: '  Nope  ' });
+    expect(out).toEqual({ kind: 'pub_not_found', query: '  Nope  ' });
+  });
+
   test('whitespace-only pubQuery is treated as no filter', () => {
     const db = fresh();
     seedTwoPubs(db);

@@ -23,5 +23,8 @@ newbeersCommand.command('newbeers', async (ctx) => {
     case 'pub_not_found':
       await ctx.reply(ctx.t('newbeers.pub_not_found', { query: result.query }));
       return;
+    default:
+      // exhaustiveness: if NewbeersResult grows a new arm, TS errors here
+      result satisfies never;
   }
 });

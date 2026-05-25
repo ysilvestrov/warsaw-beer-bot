@@ -44,6 +44,7 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
   if (q) {
     const matched = [...pubs.values()].filter((p) => p.name.toLowerCase().includes(q));
     if (matched.length === 0) {
+      // Preserve user's original casing/whitespace in the error message.
       return { kind: 'pub_not_found', query: deps.pubQuery! };
     }
     matchedIds = new Set(matched.map((p) => p.id));
