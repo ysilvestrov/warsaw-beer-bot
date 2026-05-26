@@ -52,4 +52,23 @@ describe('schema migrations', () => {
       .get();
     expect(idx).toEqual({ name: 'idx_untappd_had_telegram' });
   });
+
+  test('migration v5 adds beers.untappd_lookup_at + untappd_lookup_count columns', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db
+      .prepare('PRAGMA table_info(beers)')
+      .all() as { name: string; type: string; notnull: number; dflt_value: unknown }[];
+
+    const lookupAt = cols.find((c) => c.name === 'untappd_lookup_at');
+    expect(lookupAt).toBeDefined();
+    expect(lookupAt?.type).toBe('TEXT');
+    expect(lookupAt?.notnull).toBe(0);
+
+    const lookupCount = cols.find((c) => c.name === 'untappd_lookup_count');
+    expect(lookupCount).toBeDefined();
+    expect(lookupCount?.type).toBe('INTEGER');
+    expect(lookupCount?.notnull).toBe(1);
+    expect(String(lookupCount?.dflt_value)).toBe('0');
+  });
 });

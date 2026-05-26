@@ -103,3 +103,220 @@ test('upsertBeer prefers untappd_id row over a normalized-only match', () => {
   const orphan = db.prepare('SELECT name FROM beers WHERE id = ?').get(orphanId) as { name: string };
   expect(orphan.name).toBe('Foo'); // orphan untouched
 });
+
+// ---------------------------------------------------------------------------
+// PR-D1 helpers below
+// ---------------------------------------------------------------------------
+
+import {
+  getBeer,
+  recordLookupSuccess,
+  recordLookupNotFound,
+  recordLookupTransient,
+} from './beers';
+
+describe('getBeer', () => {
+  test('returns full row including new lookup_at + lookup_count columns', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    const row = getBeer(db, id);
+    expect(row).not.toBeNull();
+    expect(row?.id).toBe(id);
+    expect(row?.untappd_id).toBeNull();
+    expect(row?.untappd_lookup_at).toBeNull();
+    expect(row?.untappd_lookup_count).toBe(0);
+  });
+
+  test('returns null when beer does not exist', () => {
+    expect(getBeer(fresh(), 9999)).toBeNull();
+  });
+});
+
+describe('recordLookupSuccess', () => {
+  test('sets untappd_id, style, abv, rating_global from SearchResult', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: 'IPA', abv: 6.5, global_rating: 3.98,
+    });
+    const row = getBeer(db, id);
+    expect(row?.untappd_id).toBe(5001);
+    expect(row?.style).toBe('IPA');
+    expect(row?.abv).toBeCloseTo(6.5);
+    expect(row?.rating_global).toBeCloseTo(3.98);
+  });
+
+  test('NULL rating_global does NOT overwrite existing non-null rating', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: 'Lager', abv: 5.0, rating_global: 3.5,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: 'IPA', abv: 6.5, global_rating: null,
+    });
+    const row = getBeer(db, id);
+    expect(row?.rating_global).toBeCloseTo(3.5);    // preserved
+    expect(row?.untappd_id).toBe(5001);             // set
+    expect(row?.style).toBe('IPA');                  // overwritten
+  });
+
+  test('NULL abv does NOT overwrite existing non-null abv', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: 4.6, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: null, abv: null, global_rating: 3.5,
+    });
+    const row = getBeer(db, id);
+    expect(row?.abv).toBeCloseTo(4.6);    // preserved
+  });
+});
+
+describe('recordLookupNotFound', () => {
+  test('increments count + sets lookup_at', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupNotFound(db, id, '2026-05-26T12:00:00Z');
+    let row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(1);
+
+    recordLookupNotFound(db, id, '2026-05-27T12:00:00Z');
+    row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-27T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(2);
+  });
+});
+
+describe('recordLookupTransient', () => {
+  test('updates lookup_at but does NOT increment count', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupTransient(db, id, '2026-05-26T12:00:00Z');
+    let row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(0);
+
+    recordLookupTransient(db, id, '2026-05-26T13:00:00Z');
+    row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T13:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(0);
+  });
+});
+
+import { upsertPub } from './pubs';
+import { createSnapshot, insertTaps } from './snapshots';
+import { upsertMatch } from './match_links';
+import { listLookupCandidates } from './beers';
+
+describe('listLookupCandidates', () => {
+  function seedBeerOnTap(
+    db: ReturnType<typeof fresh>,
+    opts: { brewery: string; name: string; untappdId?: number | null;
+            lookupAt?: string | null; lookupCount?: number },
+  ): number {
+    const beerId = upsertBeer(db, {
+      untappd_id: opts.untappdId ?? null,
+      name: opts.name, brewery: opts.brewery,
+      style: null, abv: null, rating_global: null,
+      normalized_name: opts.name.toLowerCase(),
+      normalized_brewery: opts.brewery.toLowerCase(),
+    });
+    if (opts.lookupAt !== undefined || opts.lookupCount !== undefined) {
+      db.prepare(
+        'UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = ? WHERE id = ?',
+      ).run(opts.lookupAt ?? null, opts.lookupCount ?? 0, beerId);
+    }
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null,
+    });
+    const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+    const ref = `${opts.brewery} ${opts.name}`;
+    upsertMatch(db, ref, beerId, 1.0);
+    insertTaps(db, snapId, [{
+      tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    return beerId;
+  }
+
+  test('returns orphan beers currently on tap, omits beers with untappd_id', () => {
+    const db = fresh();
+    const orphan = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
+    seedBeerOnTap(db, { brewery: 'Pinta', name: 'Atak', untappdId: 12345 });
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    const ids = out.map((c) => c.id);
+    expect(ids).toContain(orphan);
+    expect(ids.length).toBe(1);
+  });
+
+  test('omits orphans not on any current tap', () => {
+    const db = fresh();
+    upsertBeer(db, {
+      name: 'Ghost', brewery: 'Old', style: null, abv: null, rating_global: null,
+      normalized_name: 'ghost', normalized_brewery: 'old',
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    expect(listLookupCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('respects backoff: not eligible when lookup_at + delay > now', () => {
+    const db = fresh();
+    seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine',
+      lookupAt: '2026-05-26T11:00:00Z', lookupCount: 1,
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    expect(listLookupCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('backoff-eligible orphan IS returned', () => {
+    const db = fresh();
+    const id = seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine',
+      lookupAt: '2026-05-25T11:00:00Z', lookupCount: 1,
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([id]);
+  });
+
+  test('applies the limit', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) {
+      seedBeerOnTap(db, { brewery: `Brew ${i}`, name: `Beer ${i}` });
+    }
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 2, now);
+    expect(out.length).toBe(2);
+  });
+
+  test('returned shape carries brewery and name (raw, not normalized)', () => {
+    const db = fresh();
+    seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine & Passionfruit' });
+    const now = new Date('2026-05-26T12:00:00Z');
+    const [c] = listLookupCandidates(db, 10, now);
+    expect(c.brewery).toBe('Magic Road');
+    expect(c.name).toBe('Clementine & Passionfruit');
+    expect(c.untappd_lookup_at).toBeNull();
+    expect(c.untappd_lookup_count).toBe(0);
+  });
+});
