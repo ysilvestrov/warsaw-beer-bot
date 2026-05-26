@@ -11,7 +11,11 @@ export interface BeerInput {
   normalized_brewery: string;
 }
 
-export interface BeerRow extends BeerInput { id: number; }
+export interface BeerRow extends BeerInput {
+  id: number;
+  untappd_lookup_at: string | null;
+  untappd_lookup_count: number;
+}
 
 export function upsertBeer(db: DB, b: BeerInput): number {
   // Prefer match by untappd_id when provided — it's authoritative and
@@ -57,4 +61,50 @@ export function findBeerByNormalized(
     .prepare('SELECT * FROM beers WHERE normalized_brewery = ? AND normalized_name = ?')
     .get(normBrewery, normName) as BeerRow | undefined;
   return row ?? null;
+}
+
+export function getBeer(db: DB, beerId: number): BeerRow | null {
+  const row = db
+    .prepare('SELECT * FROM beers WHERE id = ?')
+    .get(beerId) as BeerRow | undefined;
+  return row ?? null;
+}
+
+export function recordLookupSuccess(
+  db: DB,
+  beerId: number,
+  r: {
+    bid: number;
+    style: string | null;
+    abv: number | null;
+    global_rating: number | null;
+  },
+): void {
+  db.prepare(
+    `UPDATE beers SET
+       untappd_id = ?,
+       style = COALESCE(?, style),
+       abv = COALESCE(?, abv),
+       rating_global = COALESCE(?, rating_global)
+     WHERE id = ?`,
+  ).run(r.bid, r.style, r.abv, r.global_rating, beerId);
+}
+
+export function recordLookupNotFound(db: DB, beerId: number, at: string): void {
+  db.prepare(
+    `UPDATE beers SET
+       untappd_lookup_at = ?,
+       untappd_lookup_count = untappd_lookup_count + 1
+     WHERE id = ?`,
+  ).run(at, beerId);
+}
+
+export function recordLookupTransient(
+  db: DB,
+  beerId: number,
+  at: string,
+): void {
+  db.prepare(
+    'UPDATE beers SET untappd_lookup_at = ? WHERE id = ?',
+  ).run(at, beerId);
 }

@@ -103,3 +103,118 @@ test('upsertBeer prefers untappd_id row over a normalized-only match', () => {
   const orphan = db.prepare('SELECT name FROM beers WHERE id = ?').get(orphanId) as { name: string };
   expect(orphan.name).toBe('Foo'); // orphan untouched
 });
+
+// ---------------------------------------------------------------------------
+// PR-D1 helpers below
+// ---------------------------------------------------------------------------
+
+import {
+  getBeer,
+  recordLookupSuccess,
+  recordLookupNotFound,
+  recordLookupTransient,
+} from './beers';
+
+describe('getBeer', () => {
+  test('returns full row including new lookup_at + lookup_count columns', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    const row = getBeer(db, id);
+    expect(row).not.toBeNull();
+    expect(row?.id).toBe(id);
+    expect(row?.untappd_id).toBeNull();
+    expect(row?.untappd_lookup_at).toBeNull();
+    expect(row?.untappd_lookup_count).toBe(0);
+  });
+
+  test('returns null when beer does not exist', () => {
+    expect(getBeer(fresh(), 9999)).toBeNull();
+  });
+});
+
+describe('recordLookupSuccess', () => {
+  test('sets untappd_id, style, abv, rating_global from SearchResult', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: 'IPA', abv: 6.5, global_rating: 3.98,
+    });
+    const row = getBeer(db, id);
+    expect(row?.untappd_id).toBe(5001);
+    expect(row?.style).toBe('IPA');
+    expect(row?.abv).toBeCloseTo(6.5);
+    expect(row?.rating_global).toBeCloseTo(3.98);
+  });
+
+  test('NULL rating_global does NOT overwrite existing non-null rating', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: 'Lager', abv: 5.0, rating_global: 3.5,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: 'IPA', abv: 6.5, global_rating: null,
+    });
+    const row = getBeer(db, id);
+    expect(row?.rating_global).toBeCloseTo(3.5);    // preserved
+    expect(row?.untappd_id).toBe(5001);             // set
+    expect(row?.style).toBe('IPA');                  // overwritten
+  });
+
+  test('NULL abv does NOT overwrite existing non-null abv', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: 4.6, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupSuccess(db, id, {
+      bid: 5001, style: null, abv: null, global_rating: 3.5,
+    });
+    const row = getBeer(db, id);
+    expect(row?.abv).toBeCloseTo(4.6);    // preserved
+  });
+});
+
+describe('recordLookupNotFound', () => {
+  test('increments count + sets lookup_at', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupNotFound(db, id, '2026-05-26T12:00:00Z');
+    let row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(1);
+
+    recordLookupNotFound(db, id, '2026-05-27T12:00:00Z');
+    row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-27T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(2);
+  });
+});
+
+describe('recordLookupTransient', () => {
+  test('updates lookup_at but does NOT increment count', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordLookupTransient(db, id, '2026-05-26T12:00:00Z');
+    let row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T12:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(0);
+
+    recordLookupTransient(db, id, '2026-05-26T13:00:00Z');
+    row = getBeer(db, id);
+    expect(row?.untappd_lookup_at).toBe('2026-05-26T13:00:00Z');
+    expect(row?.untappd_lookup_count).toBe(0);
+  });
+});
