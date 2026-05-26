@@ -218,3 +218,105 @@ describe('recordLookupTransient', () => {
     expect(row?.untappd_lookup_count).toBe(0);
   });
 });
+
+import { upsertPub } from './pubs';
+import { createSnapshot, insertTaps } from './snapshots';
+import { upsertMatch } from './match_links';
+import { listLookupCandidates } from './beers';
+
+describe('listLookupCandidates', () => {
+  function seedBeerOnTap(
+    db: ReturnType<typeof fresh>,
+    opts: { brewery: string; name: string; untappdId?: number | null;
+            lookupAt?: string | null; lookupCount?: number },
+  ): number {
+    const beerId = upsertBeer(db, {
+      untappd_id: opts.untappdId ?? null,
+      name: opts.name, brewery: opts.brewery,
+      style: null, abv: null, rating_global: null,
+      normalized_name: opts.name.toLowerCase(),
+      normalized_brewery: opts.brewery.toLowerCase(),
+    });
+    if (opts.lookupAt !== undefined || opts.lookupCount !== undefined) {
+      db.prepare(
+        'UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = ? WHERE id = ?',
+      ).run(opts.lookupAt ?? null, opts.lookupCount ?? 0, beerId);
+    }
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null,
+    });
+    const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+    const ref = `${opts.brewery} ${opts.name}`;
+    upsertMatch(db, ref, beerId, 1.0);
+    insertTaps(db, snapId, [{
+      tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    return beerId;
+  }
+
+  test('returns orphan beers currently on tap, omits beers with untappd_id', () => {
+    const db = fresh();
+    const orphan = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
+    seedBeerOnTap(db, { brewery: 'Pinta', name: 'Atak', untappdId: 12345 });
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    const ids = out.map((c) => c.id);
+    expect(ids).toContain(orphan);
+    expect(ids.length).toBe(1);
+  });
+
+  test('omits orphans not on any current tap', () => {
+    const db = fresh();
+    upsertBeer(db, {
+      name: 'Ghost', brewery: 'Old', style: null, abv: null, rating_global: null,
+      normalized_name: 'ghost', normalized_brewery: 'old',
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    expect(listLookupCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('respects backoff: not eligible when lookup_at + delay > now', () => {
+    const db = fresh();
+    seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine',
+      lookupAt: '2026-05-26T11:00:00Z', lookupCount: 1,
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    expect(listLookupCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('backoff-eligible orphan IS returned', () => {
+    const db = fresh();
+    const id = seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine',
+      lookupAt: '2026-05-25T11:00:00Z', lookupCount: 1,
+    });
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([id]);
+  });
+
+  test('applies the limit', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) {
+      seedBeerOnTap(db, { brewery: `Brew ${i}`, name: `Beer ${i}` });
+    }
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 2, now);
+    expect(out.length).toBe(2);
+  });
+
+  test('returned shape carries brewery and name (raw, not normalized)', () => {
+    const db = fresh();
+    seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine & Passionfruit' });
+    const now = new Date('2026-05-26T12:00:00Z');
+    const [c] = listLookupCandidates(db, 10, now);
+    expect(c.brewery).toBe('Magic Road');
+    expect(c.name).toBe('Clementine & Passionfruit');
+    expect(c.untappd_lookup_at).toBeNull();
+    expect(c.untappd_lookup_count).toBe(0);
+  });
+});
