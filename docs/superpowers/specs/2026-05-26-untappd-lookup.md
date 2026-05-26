@@ -212,33 +212,32 @@ export function listLookupCandidates(db: DB, limit: number, now: Date): Array<{
 
 ### Inline в `refreshOntap`
 
-`src/jobs/refresh-ontap.ts` зараз робить:
+Після `matchBeer`, **тільки якщо `matchBeer === null`** (тобто `upsertBeer` створив новий рядок у цьому sweep-і), викликаємо `enrichOneOrphan(beerId)`. Існуючі orphan-и (matchBeer повернув existing рядок без `untappd_id`) інлайн НЕ обробляє — вони чекають cron. Це критично, бо інакше один sweep пробує всі on-tap orphan-и (287 у проді), кожен з HTTP+sleep ≈2.5s → sweep уповільнюється на +12 хв.
 
 ```ts
 const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
-const beerId = m ? m.id : upsertBeer(db, {...});
-// (далі match_links upsert тощо)
-```
+let beerId: number;
+let isFreshOrphan = false;
+if (m) {
+  upsertMatch(db, t.beer_ref, m.id, m.confidence);
+  beerId = m.id;
+} else {
+  beerId = upsertBeer(db, {...});
+  upsertMatch(db, t.beer_ref, beerId, 1.0);
+  isFreshOrphan = true;
+}
 
-Стає:
-
-```ts
-const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
-const beerId = m ? m.id : upsertBeer(db, {...});
-
-const beer = getBeer(db, beerId);    // small helper, returns full row
-if (beer.untappd_id === null && isEligible(now, beer.untappd_lookup_at, beer.untappd_lookup_count)) {
-  const outcome = await lookupBeer({ brewery, name: t.beer_ref, fetch: http.get });
-  await new Promise((r) => setTimeout(r, 500));   // polite spacing
-  switch (outcome.kind) {
-    case 'matched':       recordLookupSuccess(db, beerId, outcome.result); break;
-    case 'not_found':     recordLookupNotFound(db, beerId, now.toISOString()); break;
-    case 'transient':     recordLookupTransient(db, beerId, now.toISOString()); break;
+if (lookupEnabled && isFreshOrphan) {
+  const outcome = await enrichOneOrphan({ db, log, http, now }, beerId);
+  // sleep тільки якщо HTTP реально був (defense in depth: outcome може
+  // повернутись 'skipped' через backoff або race condition)
+  if (lookupSleepMs > 0 && outcome !== 'skipped') {
+    await new Promise<void>((r) => setTimeout(r, lookupSleepMs));
   }
 }
 ```
 
-**Overhead в типовому sweep-і:** 0–3 нових orphan-ів за день — 1.5s оверхеду max. Backlog-сценарій керується cron-ом.
+**Overhead в типовому sweep-і:** 0–3 нових orphan-ів за день — 1.5s оверхеду max. Backlog (287 рядків у проді) обробляється cron-ом, по 20×2/добу = ~7 днів до 0.
 
 ### Cron `enrich-orphans` — backfill
 
@@ -420,3 +419,4 @@ Beers, що PR-D2 знайшов з `untappd_id` але `rating_global=NULL` (б
 - **Catalog growth.** PR-D2 знаходить нові untappd_id-и → нові варіанти стилів і ABV у `beers`. Це normal. Якщо BR-побори через дуже шумний search → false-positives ростуть → PR-A/B/C dedupe може видалити неправильні мерджі. Це тестується в `enrich-orphans.test.ts` на дуплікат-сценарії.
 - **`rating_refresh_*` колонки на існуючих рядках.** Default 0 → з'являються в пулі PR-D3 одразу. Усі beers з `untappd_id` set + `rating_global=NULL` (зараз 0 таких в проді — всі мають rating якщо мають bid) на момент деплою PR-D3 пройдуть один lookup кожен. Реал-кейс це невелика кількість (≤10), не вибух.
 - **Curl-first на dev-стороні.** PR-D1 і PR-D3 включають кроки в плані «curl URL, save fixture». CI цього НЕ робить. Це разова дія перед написанням parser-у — план фіксує конкретні URL і fixture-шляхи.
+- **Inline must NOT process backlog.** PR-D2.1 hotfix (2026-05-26): початковий PR-D2 inline-шлях не розрізняв fresh orphan-ів від існуючого backlog-у. На першому post-deploy sweep-і inline проходив всі 287 on-tap orphan-ів з HTTP+sleep ≈2.5s кожен → sweep уповільнився з ~5 хв до 10+ хв на 28 пабах. Fix: `isFreshOrphan` guard (`matchBeer === null` → upsertBeer create) + conditional sleep on `outcome !== 'skipped'`. Урок: "harmless guard skipped 95% of the time" у hot loop-і — не harmless, коли N=350 тапів × 500ms = 3 хв пустого sleep-у, плюс backlog-multiplier.
