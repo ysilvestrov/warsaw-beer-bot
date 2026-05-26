@@ -11,6 +11,7 @@ import { upsertBeer } from '../storage/beers';
 import { matchBeer } from '../domain/matcher';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
+import { enrichOneOrphan } from './untappd-enrich';
 
 interface Deps {
   db: DB;
@@ -18,10 +19,19 @@ interface Deps {
   http: Http;
   geocoder: Geocoder;
   onProgress?: ProgressFn;
+  lookupEnabled?: boolean;     // default true
+  lookupSleepMs?: number;       // default 500
+  now?: () => Date;             // for tests
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
-  const { db, log, http, geocoder, onProgress = noopProgress } = deps;
+  const {
+    db, log, http, geocoder,
+    onProgress = noopProgress,
+    lookupEnabled = true,
+    lookupSleepMs = 500,
+    now = () => new Date(),
+  } = deps;
   await onProgress('🍻 ontap: парсю індекс…', { force: true });
   const indexHtml = await http.get('https://ontap.pl/warszawa');
   const indexPubs = parseWarsawIndex(indexHtml);
@@ -60,10 +70,12 @@ export async function refreshOntap(deps: Deps): Promise<void> {
       for (const t of taps) {
         const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
         const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
+        let beerId: number;
         if (m) {
           upsertMatch(db, t.beer_ref, m.id, m.confidence);
+          beerId = m.id;
         } else {
-          const beerId = upsertBeer(db, {
+          beerId = upsertBeer(db, {
             name: t.beer_ref,
             brewery,
             style: t.style,
@@ -73,6 +85,17 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             normalized_brewery: normalizeBrewery(brewery),
           });
           upsertMatch(db, t.beer_ref, beerId, 1.0);
+        }
+
+        // Inline Untappd enrichment for orphans (untappd_id NULL) that
+        // pass the backoff gate. enrichOneOrphan itself short-circuits
+        // for non-orphans and ineligible ones, so the check here only
+        // saves the function-call + sleep overhead.
+        if (lookupEnabled) {
+          await enrichOneOrphan({ db, log, http, now }, beerId);
+          if (lookupSleepMs > 0) {
+            await new Promise<void>((r) => setTimeout(r, lookupSleepMs));
+          }
         }
       }
       ok++;
