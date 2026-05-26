@@ -7,6 +7,10 @@ const Schema = z.object({
   NOMINATIM_USER_AGENT: z.string().min(1),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error']).default('info'),
   DEFAULT_ROUTE_N: z.coerce.number().int().positive().default(5),
+  UNTAPPD_LOOKUP_ENABLED: z
+    .union([z.literal('true'), z.literal('false')])
+    .default('true')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof Schema>;
