@@ -21,6 +21,7 @@ import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
+import { enrichOrphans } from './jobs/enrich-orphans';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -46,7 +47,10 @@ async function main(): Promise<void> {
     langCommand,
     createRefreshCommand(
       async (notify) => {
-        await refreshOntap({ db, log, http, geocoder, onProgress: notify });
+        await refreshOntap({
+          db, log, http, geocoder, onProgress: notify,
+          lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+        });
         await refreshAllUntappd({ db, log, http, onProgress: notify });
       },
       buildNewbeersMessage,
@@ -55,10 +59,19 @@ async function main(): Promise<void> {
 
   const cronJobs = [
     cron.schedule('0 */12 * * *', () => {
-      refreshOntap({ db, log, http, geocoder }).catch((e) => log.error({ err: e }, 'ontap cron'));
+      refreshOntap({
+        db, log, http, geocoder,
+        lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+      }).catch((e) => log.error({ err: e }, 'ontap cron'));
     }),
     cron.schedule('0 3 * * *', () => {
       refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
+    }),
+    cron.schedule('0 6,18 * * *', () => {
+      enrichOrphans({
+        db, log, http,
+        lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+      }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
   ];
 
