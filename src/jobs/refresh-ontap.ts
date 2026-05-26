@@ -71,6 +71,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
         const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
         const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
         let beerId: number;
+        let isFreshOrphan = false;
         if (m) {
           upsertMatch(db, t.beer_ref, m.id, m.confidence);
           beerId = m.id;
@@ -85,15 +86,19 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             normalized_brewery: normalizeBrewery(brewery),
           });
           upsertMatch(db, t.beer_ref, beerId, 1.0);
+          isFreshOrphan = true;
         }
 
-        // Inline Untappd enrichment for orphans (untappd_id NULL) that
-        // pass the backoff gate. enrichOneOrphan itself short-circuits
-        // for non-orphans and ineligible ones, so the check here only
-        // saves the function-call + sleep overhead.
-        if (lookupEnabled) {
-          await enrichOneOrphan({ db, log, http, now }, beerId);
-          if (lookupSleepMs > 0) {
+        // Inline Untappd enrichment ONLY for beers we just created
+        // (matchBeer returned null). Existing orphans (matched to a row
+        // that has untappd_id NULL) are handled by the enrich-orphans
+        // cron — letting inline try them every 12h multiplies HTTP +
+        // sleep across the full backlog. PR-D2.1 perf fix (2026-05-26).
+        // Sleep only when HTTP actually fired (outcome !== 'skipped')
+        // as a defense in depth.
+        if (lookupEnabled && isFreshOrphan) {
+          const outcome = await enrichOneOrphan({ db, log, http, now }, beerId);
+          if (lookupSleepMs > 0 && outcome !== 'skipped') {
             await new Promise<void>((r) => setTimeout(r, lookupSleepMs));
           }
         }
