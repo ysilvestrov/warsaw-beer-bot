@@ -114,6 +114,13 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX idx_untappd_had_telegram ON untappd_had(telegram_id);
     `,
   },
+  {
+    version: 5,
+    sql: `
+      ALTER TABLE beers ADD COLUMN untappd_lookup_at TEXT;
+      ALTER TABLE beers ADD COLUMN untappd_lookup_count INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
