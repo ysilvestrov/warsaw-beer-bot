@@ -22,6 +22,7 @@ import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
+import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -72,6 +73,12 @@ async function main(): Promise<void> {
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
+    }),
+    cron.schedule('0 9,21 * * *', () => {
+      refreshTapRatings({
+        db, log, http,
+        lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+      }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
     }),
   ];
 
