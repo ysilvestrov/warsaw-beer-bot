@@ -15,6 +15,8 @@ export interface BeerRow extends BeerInput {
   id: number;
   untappd_lookup_at: string | null;
   untappd_lookup_count: number;
+  rating_refresh_at: string | null;
+  rating_refresh_count: number;
 }
 
 export function upsertBeer(db: DB, b: BeerInput): number {
@@ -153,6 +155,85 @@ export function listLookupCandidates(
   // and drift over time).
   const eligible = rows.filter((r) =>
     isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+  );
+
+  return eligible.slice(0, limit);
+}
+
+export function recordRatingSuccess(
+  db: DB,
+  beerId: number,
+  rating: number,
+): void {
+  // Success overwrites whatever rating_global was there. Count not touched —
+  // the beer leaves the candidate pool naturally (rating_global IS NOT NULL).
+  db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?')
+    .run(rating, beerId);
+}
+
+export function recordRatingNotFound(
+  db: DB,
+  beerId: number,
+  at: string,
+): void {
+  db.prepare(
+    `UPDATE beers SET
+       rating_refresh_at = ?,
+       rating_refresh_count = rating_refresh_count + 1
+     WHERE id = ?`,
+  ).run(at, beerId);
+}
+
+export function recordRatingTransient(
+  db: DB,
+  beerId: number,
+  at: string,
+): void {
+  db.prepare(
+    'UPDATE beers SET rating_refresh_at = ? WHERE id = ?',
+  ).run(at, beerId);
+}
+
+export interface RatingRefreshCandidate {
+  id: number;
+  untappd_id: number;
+  rating_refresh_at: string | null;
+  rating_refresh_count: number;
+}
+
+export function listRatingRefreshCandidates(
+  db: DB,
+  limit: number,
+  now: Date,
+): RatingRefreshCandidate[] {
+  // SQL pre-filter: beers WITH untappd_id but NO rating, currently on tap.
+  // Same on-tap join as listLookupCandidates.
+  const rows = db
+    .prepare(
+      `SELECT b.id, b.untappd_id,
+              b.rating_refresh_at, b.rating_refresh_count
+       FROM beers b
+       WHERE b.untappd_id IS NOT NULL
+         AND b.rating_global IS NULL
+         AND EXISTS (
+           SELECT 1 FROM match_links ml
+           JOIN taps t ON t.beer_ref = ml.ontap_ref
+           JOIN tap_snapshots ts ON ts.id = t.snapshot_id
+           JOIN (
+             SELECT pub_id, MAX(snapshot_at) AS m
+             FROM tap_snapshots
+             GROUP BY pub_id
+           ) latest ON latest.pub_id = ts.pub_id
+                  AND latest.m = ts.snapshot_at
+           WHERE ml.untappd_beer_id = b.id
+         )
+       ORDER BY b.rating_refresh_count ASC, b.id ASC`,
+    )
+    .all() as RatingRefreshCandidate[];
+
+  // JS-side backoff filter using the shared lookup-backoff module.
+  const eligible = rows.filter((r) =>
+    isEligible(now, r.rating_refresh_at, r.rating_refresh_count),
   );
 
   return eligible.slice(0, limit);

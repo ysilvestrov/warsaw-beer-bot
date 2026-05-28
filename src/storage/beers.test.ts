@@ -320,3 +320,206 @@ describe('listLookupCandidates', () => {
     expect(c.untappd_lookup_count).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR-D3 helpers — rating-refresh
+// ---------------------------------------------------------------------------
+
+import {
+  recordRatingSuccess,
+  recordRatingNotFound,
+  recordRatingTransient,
+  listRatingRefreshCandidates,
+} from './beers';
+
+describe('recordRatingSuccess', () => {
+  test('sets rating_global from the parsed beer-page rating', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 6645513,
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordRatingSuccess(db, id, 3.98);
+    const row = getBeer(db, id);
+    expect(row?.rating_global).toBeCloseTo(3.98);
+    expect(row?.rating_refresh_count).toBe(0);     // success doesn't increment
+  });
+
+  test('overwrites a stale existing rating', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 100,
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: 3.5,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordRatingSuccess(db, id, 3.9);
+    expect(getBeer(db, id)?.rating_global).toBeCloseTo(3.9);
+  });
+});
+
+describe('recordRatingNotFound', () => {
+  test('increments count + sets refresh_at', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 100,
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordRatingNotFound(db, id, '2026-05-27T12:00:00Z');
+    let row = getBeer(db, id);
+    expect(row?.rating_refresh_at).toBe('2026-05-27T12:00:00Z');
+    expect(row?.rating_refresh_count).toBe(1);
+
+    recordRatingNotFound(db, id, '2026-05-28T12:00:00Z');
+    row = getBeer(db, id);
+    expect(row?.rating_refresh_at).toBe('2026-05-28T12:00:00Z');
+    expect(row?.rating_refresh_count).toBe(2);
+  });
+});
+
+describe('recordRatingTransient', () => {
+  test('updates refresh_at but does NOT increment count', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 100,
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    recordRatingTransient(db, id, '2026-05-27T12:00:00Z');
+    expect(getBeer(db, id)?.rating_refresh_count).toBe(0);
+    expect(getBeer(db, id)?.rating_refresh_at).toBe('2026-05-27T12:00:00Z');
+  });
+});
+
+describe('listRatingRefreshCandidates', () => {
+  function seedBeerOnTap(
+    db: ReturnType<typeof fresh>,
+    opts: {
+      brewery: string; name: string;
+      untappdId: number;
+      ratingGlobal?: number | null;
+      refreshAt?: string | null;
+      refreshCount?: number;
+    },
+  ): number {
+    const beerId = upsertBeer(db, {
+      untappd_id: opts.untappdId,
+      name: opts.name, brewery: opts.brewery,
+      style: null, abv: null,
+      rating_global: opts.ratingGlobal ?? null,
+      normalized_name: opts.name.toLowerCase(),
+      normalized_brewery: opts.brewery.toLowerCase(),
+    });
+    if (opts.refreshAt !== undefined || opts.refreshCount !== undefined) {
+      db.prepare(
+        'UPDATE beers SET rating_refresh_at = ?, rating_refresh_count = ? WHERE id = ?',
+      ).run(opts.refreshAt ?? null, opts.refreshCount ?? 0, beerId);
+    }
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null,
+    });
+    const snapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
+    const ref = `${opts.brewery} ${opts.name}`;
+    upsertMatch(db, ref, beerId, 1.0);
+    insertTaps(db, snapId, [{
+      tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    return beerId;
+  }
+
+  test('returns beers with untappd_id AND rating_global IS NULL on a current tap', () => {
+    const db = fresh();
+    const candidate = seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
+    });
+    // Has rating already — must be excluded.
+    seedBeerOnTap(db, {
+      brewery: 'Pinta', name: 'Atak', untappdId: 12345, ratingGlobal: 3.9,
+    });
+    const now = new Date('2026-05-27T12:00:00Z');
+    const out = listRatingRefreshCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([candidate]);
+    expect(out[0].untappd_id).toBe(6645513);
+  });
+
+  test('omits orphan beers (untappd_id NULL — those are PR-D2 territory)', () => {
+    const db = fresh();
+    const beerId = upsertBeer(db, {
+      name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
+      normalized_name: 'x', normalized_brewery: 'y',
+    });
+    const pubId = upsertPub(db, {
+      slug: 'p', name: 'P', address: null, lat: null, lon: null,
+    });
+    const snapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
+    upsertMatch(db, 'X', beerId, 1.0);
+    insertTaps(db, snapId, [{
+      tap_number: 1, beer_ref: 'X', brewery_ref: 'Y',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    const now = new Date('2026-05-27T12:00:00Z');
+    expect(listRatingRefreshCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('omits beers not on any current tap', () => {
+    const db = fresh();
+    upsertBeer(db, {
+      untappd_id: 100,
+      name: 'Ghost', brewery: 'Old', style: null, abv: null, rating_global: null,
+      normalized_name: 'ghost', normalized_brewery: 'old',
+    });
+    const now = new Date('2026-05-27T12:00:00Z');
+    expect(listRatingRefreshCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('respects backoff via shared lookup-backoff isEligible', () => {
+    const db = fresh();
+    // count=1 → 24h delay. Last refresh 1h ago → not eligible.
+    seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
+      refreshAt: '2026-05-27T11:00:00Z', refreshCount: 1,
+    });
+    const now = new Date('2026-05-27T12:00:00Z');
+    expect(listRatingRefreshCandidates(db, 10, now)).toEqual([]);
+  });
+
+  test('returns backoff-eligible beer 25h after last refresh attempt', () => {
+    const db = fresh();
+    const id = seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
+      refreshAt: '2026-05-26T11:00:00Z', refreshCount: 1,
+    });
+    const now = new Date('2026-05-27T12:00:00Z');
+    const out = listRatingRefreshCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([id]);
+  });
+
+  test('applies the limit', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) {
+      seedBeerOnTap(db, {
+        brewery: `Brew${i}`, name: `Beer${i}`, untappdId: 1000 + i,
+      });
+    }
+    const now = new Date('2026-05-27T12:00:00Z');
+    expect(listRatingRefreshCandidates(db, 2, now).length).toBe(2);
+  });
+
+  test('returned shape carries untappd_id for the cron to use as URL input', () => {
+    const db = fresh();
+    seedBeerOnTap(db, {
+      brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
+    });
+    const now = new Date('2026-05-27T12:00:00Z');
+    const [c] = listRatingRefreshCandidates(db, 10, now);
+    expect(c).toEqual(expect.objectContaining({
+      id: expect.any(Number),
+      untappd_id: 6645513,
+      rating_refresh_at: null,
+      rating_refresh_count: 0,
+    }));
+  });
+});
