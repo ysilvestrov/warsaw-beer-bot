@@ -121,6 +121,13 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE beers ADD COLUMN untappd_lookup_count INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 6,
+    sql: `
+      ALTER TABLE beers ADD COLUMN rating_refresh_at TEXT;
+      ALTER TABLE beers ADD COLUMN rating_refresh_count INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

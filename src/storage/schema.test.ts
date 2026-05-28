@@ -71,4 +71,23 @@ describe('schema migrations', () => {
     expect(lookupCount?.notnull).toBe(1);
     expect(String(lookupCount?.dflt_value)).toBe('0');
   });
+
+  test('migration v6 adds beers.rating_refresh_at + rating_refresh_count columns', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db
+      .prepare('PRAGMA table_info(beers)')
+      .all() as { name: string; type: string; notnull: number; dflt_value: unknown }[];
+
+    const refreshAt = cols.find((c) => c.name === 'rating_refresh_at');
+    expect(refreshAt).toBeDefined();
+    expect(refreshAt?.type).toBe('TEXT');
+    expect(refreshAt?.notnull).toBe(0);
+
+    const refreshCount = cols.find((c) => c.name === 'rating_refresh_count');
+    expect(refreshCount).toBeDefined();
+    expect(refreshCount?.type).toBe('INTEGER');
+    expect(refreshCount?.notnull).toBe(1);
+    expect(String(refreshCount?.dflt_value)).toBe('0');
+  });
 });
