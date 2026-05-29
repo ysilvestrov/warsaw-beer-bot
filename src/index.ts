@@ -68,13 +68,22 @@ async function main(): Promise<void> {
     cron.schedule('0 3 * * *', () => {
       refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
     }),
-    cron.schedule('0 6,18 * * *', () => {
+    // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
+    // on-the-hour slot used by refreshOntap and refreshAllUntappd).
+    // 8 runs/day × LIMIT 20 = 160 lookups/day; 287-orphan backlog drains
+    // in ~1.8 days. Burst signature unchanged (20 calls × 500ms = ~10s).
+    // Bumped from '0 6,18 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
+    cron.schedule('30 */3 * * *', () => {
       enrichOrphans({
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
-    cron.schedule('0 9,21 * * *', () => {
+    // refresh-tap-ratings runs every 3h at xx:30 too, but on hours
+    // 1/4/7/10/13/16/19/22 — offset 1h from enrich-orphans so the two
+    // jobs never burst Untappd simultaneously. 8 runs/day × LIMIT 20.
+    // Bumped from '0 9,21 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
+    cron.schedule('30 1,4,7,10,13,16,19,22 * * *', () => {
       refreshTapRatings({
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
