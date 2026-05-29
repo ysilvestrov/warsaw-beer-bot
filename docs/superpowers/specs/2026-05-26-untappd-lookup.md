@@ -263,9 +263,9 @@ cron.schedule('0 6,18 * * *', () => {
 }),
 ```
 
-(06:00 і 18:00 — offset від існуючих cron-ів: refreshOntap 00:00/12:00, refreshAllUntappd 03:00.)
+(xx:30 кожні 3 години — offset від on-the-hour cron-ів: refreshOntap 00:00/12:00, refreshAllUntappd 03:00.)
 
-LIMIT 20 × 2 рази/добу = 40 запитів/день. За тиждень backlog-кейс (286) закриється повністю.
+LIMIT 20 × 8 разів/добу = 160 запитів/день. Backlog ~287 закривається за ~1.8 днів. Бамп з 12h до 3h частоти виконано в PR-D-throughput-bump (2026-05-29) після виявлення, що 7-денний backfill не покриває реальний user-pain (orphan-и з spurious not_found чекали тиждень на retry).
 
 ### PR-D2 поведінка
 
@@ -336,7 +336,7 @@ cron.schedule('0 9,21 * * *', () => {
 }),
 ```
 
-09:00/21:00 — offset від D2 (06/18) і від існуючих.
+xx:30 кожні 3 години на годинах 1, 4, 7, 10, 13, 16, 19, 22 UTC — offset 1h від enrich-orphans (хх:30 на 0/3/6/9/12/15/18/21) і ніколи не одночасно. Frequency bumped from 12h to 3h together with enrich-orphans (PR-D-throughput-bump 2026-05-29).
 
 ### PR-D3 поведінка
 
@@ -420,3 +420,4 @@ Beers, що PR-D2 знайшов з `untappd_id` але `rating_global=NULL` (б
 - **`rating_refresh_*` колонки на існуючих рядках.** Default 0 → з'являються в пулі PR-D3 одразу. Усі beers з `untappd_id` set + `rating_global=NULL` (зараз 0 таких в проді — всі мають rating якщо мають bid) на момент деплою PR-D3 пройдуть один lookup кожен. Реал-кейс це невелика кількість (≤10), не вибух.
 - **Curl-first на dev-стороні.** PR-D1 і PR-D3 включають кроки в плані «curl URL, save fixture». CI цього НЕ робить. Це разова дія перед написанням parser-у — план фіксує конкретні URL і fixture-шляхи.
 - **Inline must NOT process backlog.** PR-D2.1 hotfix (2026-05-26): початковий PR-D2 inline-шлях не розрізняв fresh orphan-ів від існуючого backlog-у. На першому post-deploy sweep-і inline проходив всі 287 on-tap orphan-ів з HTTP+sleep ≈2.5s кожен → sweep уповільнився з ~5 хв до 10+ хв на 28 пабах. Fix: `isFreshOrphan` guard (`matchBeer === null` → upsertBeer create) + conditional sleep on `outcome !== 'skipped'`. Урок: "harmless guard skipped 95% of the time" у hot loop-і — не harmless, коли N=350 тапів × 500ms = 3 хв пустого sleep-у, плюс backlog-multiplier.
+- **Throughput-tuning lesson** (PR-D-throughput-bump 2026-05-29). Initial PR-D2 plan хардкодив `LIMIT=20` × 12h cron «з рукава», без розрахунку backlog-часу. На реальному 287-orphan backlog це дало 7-денний фікс — неприйнятно для one-off bug-trace user-flow (`/newbeers Piw Paw` пропускав Bleat без rating). Бамп до 3h cron-частоти (LIMIT незмінний) дає 1.8-денний backfill і зберігає burst-сигнатуру (10s × 20 calls), яку Untappd толерує. Якщо `transient`-метрика в логах почне рости — dial-back до 6h або 12h (one-line revert). Урок: коли LIMIT × cron-frequency визначає user-facing latency, рахуй backlog-time перед коммітом плану.
