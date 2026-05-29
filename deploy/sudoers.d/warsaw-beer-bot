@@ -1,0 +1,47 @@
+# /etc/sudoers.d/warsaw-beer-bot
+#
+# Lets the operator user (default: ysi) run the warsaw-beer-bot deploy and
+# maintenance commands without a password prompt. Installed once on the host
+# via:
+#
+#   sudo visudo -cf deploy/sudoers.d/warsaw-beer-bot
+#   sudo install -m 0440 -o root -g root \
+#       deploy/sudoers.d/warsaw-beer-bot /etc/sudoers.d/warsaw-beer-bot
+#
+# Threat model: the operator is already in the `sudo` group, so NOPASSWD does
+# not grant new capabilities — it just removes the password prompt for this
+# scoped set of commands. The bot continues to run under the dedicated
+# unprivileged `warsaw-beer-bot` user with `nologin` shell; nothing about the
+# privilege-separation model changes.
+#
+# If the operator user is not `ysi`, change `ysi` below to match.
+
+# 1. Filesystem ops the deploy script performs as root.
+Cmnd_Alias WBB_DEPLOY_FILES = \
+    /usr/bin/install -d -o warsaw-beer-bot -g warsaw-beer-bot /opt/warsaw-beer-bot /var/lib/warsaw-beer-bot /etc/warsaw-beer-bot, \
+    /usr/bin/install -d -o warsaw-beer-bot -g warsaw-beer-bot -m 750 /home/warsaw-beer-bot, \
+    /usr/bin/install -m 0644 deploy/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service, \
+    /usr/bin/install -m 0644 deploy/litestream.service /etc/systemd/system/litestream.service, \
+    /usr/bin/rsync -a --delete --exclude node_modules --exclude tests --exclude docs --exclude .git --exclude .worktrees --exclude dist ./ /opt/warsaw-beer-bot/, \
+    /usr/bin/chown -R warsaw-beer-bot\:warsaw-beer-bot /opt/warsaw-beer-bot
+
+# 2. systemctl ops on our two units only (matched by unit name, not wildcard).
+Cmnd_Alias WBB_SYSTEMCTL = \
+    /usr/bin/systemctl daemon-reload, \
+    /usr/bin/systemctl enable warsaw-beer-bot, \
+    /usr/bin/systemctl disable warsaw-beer-bot, \
+    /usr/bin/systemctl restart warsaw-beer-bot, \
+    /usr/bin/systemctl stop warsaw-beer-bot, \
+    /usr/bin/systemctl start warsaw-beer-bot, \
+    /usr/bin/systemctl enable litestream, \
+    /usr/bin/systemctl disable litestream, \
+    /usr/bin/systemctl restart litestream, \
+    /usr/bin/systemctl stop litestream, \
+    /usr/bin/systemctl start litestream
+
+# 3. Build step runs as the service user (so npm cache + node_modules end up
+# owned by warsaw-beer-bot). Allowed as Runas=warsaw-beer-bot only — not root.
+ysi ALL=(warsaw-beer-bot) NOPASSWD: /usr/bin/bash -lc *
+
+# 4. Root-runnable deploy + systemctl ops.
+ysi ALL=(root) NOPASSWD: WBB_DEPLOY_FILES, WBB_SYSTEMCTL

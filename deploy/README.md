@@ -28,6 +28,33 @@ apt-get install -y nodejs build-essential python3
 
 `build-essential` + `python3` are needed for the `better-sqlite3` native build.
 
+### Operator sudo + journal access
+
+The deploy script and routine maintenance commands run a fixed set of
+privileged operations. To run them without a password prompt, install the
+NOPASSWD sudoers fragment shipped in this repo and put the operator user in
+the `systemd-journal` group:
+
+```bash
+# As root (one time per host). The visudo -cf check rejects malformed files,
+# so an accidental edit can't lock you out of sudo.
+visudo -cf deploy/sudoers.d/warsaw-beer-bot
+install -m 0440 -o root -g root \
+  deploy/sudoers.d/warsaw-beer-bot /etc/sudoers.d/warsaw-beer-bot
+
+# `journalctl -u <unit>` works without sudo for members of systemd-journal.
+usermod -aG systemd-journal ysi
+# The new group takes effect on the next login (or `newgrp systemd-journal`).
+```
+
+The sudoers fragment is scoped to specific binaries with pinned arguments
+(see `deploy/sudoers.d/warsaw-beer-bot` for the full list). It does not
+grant the operator extra capability — the operator is already in the `sudo`
+group — it only removes the password prompt for the scoped commands.
+
+If the operator user is not `ysi`, edit `deploy/sudoers.d/warsaw-beer-bot`
+and replace `ysi` with the correct username before installing.
+
 ## Deploy
 
 From a dev checkout:
@@ -46,9 +73,9 @@ git pull
 ## Operate
 
 ```bash
-sudo systemctl status warsaw-beer-bot
-sudo journalctl -u warsaw-beer-bot -f
-sudo systemctl restart warsaw-beer-bot
+systemctl status warsaw-beer-bot       # no sudo: status is unprivileged
+journalctl -u warsaw-beer-bot -f       # no sudo: operator is in systemd-journal
+sudo systemctl restart warsaw-beer-bot # NOPASSWD via /etc/sudoers.d/warsaw-beer-bot
 ```
 
 ## Backup: Litestream → Cloudflare R2
@@ -97,8 +124,8 @@ systemctl enable --now litestream
 ### Operate
 
 ```bash
-sudo systemctl status litestream
-sudo journalctl -u litestream -f
+systemctl status litestream
+journalctl -u litestream -f
 ```
 
 A successful first run logs `replicating to: ...`. If you see
