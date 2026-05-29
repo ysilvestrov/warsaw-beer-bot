@@ -30,4 +30,6 @@ sudo systemctl enable warsaw-beer-bot
 # `enable --now` is a no-op on an already-running unit, so a redeploy with new
 # code would leave the old process in memory. Always restart explicitly.
 sudo systemctl restart warsaw-beer-bot
-sudo journalctl -u warsaw-beer-bot -n 30 --no-pager
+# journalctl works without sudo because the operator user is in the
+# systemd-journal group (see deploy/README.md → "One-time host setup").
+journalctl -u warsaw-beer-bot -n 30 --no-pager
