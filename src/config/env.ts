@@ -11,6 +11,8 @@ const Schema = z.object({
     .union([z.literal('true'), z.literal('false')])
     .default('true')
     .transform((v) => v === 'true'),
+  UNTAPPD_SESSION_COOKIE: z.string().optional(),
+  ADMIN_TELEGRAM_ID: z.string().optional(),
 });
 
 export type Env = z.infer<typeof Schema>;
