@@ -92,4 +92,62 @@ describe('lookupBeer', () => {
     });
     expect(out.kind).toBe('not_found');
   });
+
+  test('non-collab brewery: single fetch call (behaviour unchanged)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([{ bid: 1, name: 'Fifty/Fifty', brewery: 'Magic Road' }]),
+    );
+    await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Fifty/Fifty', fetch });
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('Magic%20Road%20Brewery'));
+  });
+
+  test('slash collab: first part returns 0 results, second part matches', async () => {
+    const fetch = jest.fn()
+      .mockResolvedValueOnce('<html><body></body></html>')
+      .mockResolvedValueOnce(
+        htmlFor([{ bid: 7777, name: 'S.M.O.K.E.', brewery: 'TankBusters / Blech.Brut' }]),
+      );
+    const out = await lookupBeer({
+      brewery: 'TankBusters/Blech.Brut/Yeast Side Labs Brewery',
+      name: 'S.M.O.K.E.',
+      fetch,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(7777);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch).toHaveBeenNthCalledWith(1, expect.stringContaining('TankBusters'));
+    expect(fetch).toHaveBeenNthCalledWith(2, expect.stringContaining('Blech.Brut'));
+  });
+
+  test('x-connector collab: first part finds the beer', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([{ bid: 8888, name: 'NOT YOUR MILKSHAKE', brewery: 'Ziemia Obiecana' }]),
+    );
+    const out = await lookupBeer({
+      brewery: 'ZIEMIA OBIECANA x Weźże Krafta Brewery',
+      name: 'NOT YOUR MILKSHAKE',
+      fetch,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(8888);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('ZIEMIA%20OBIECANA'));
+  });
+
+  test('collab: transient on any part short-circuits immediately', async () => {
+    const boom = new Error('ETIMEDOUT');
+    const fetch = jest.fn(async () => { throw boom; });
+    const out = await lookupBeer({
+      brewery: 'TankBusters/Blech.Brut Brewery',
+      name: 'S.M.O.K.E.',
+      fetch,
+    });
+    expect(out.kind).toBe('transient');
+    if (out.kind !== 'transient') return;
+    expect(out.error).toBe(boom);
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
 });
