@@ -23,7 +23,8 @@ Cmnd_Alias WBB_DEPLOY_FILES = \
     /usr/bin/install -m 0644 deploy/warsaw-beer-bot.service /etc/systemd/system/warsaw-beer-bot.service, \
     /usr/bin/install -m 0644 deploy/litestream.service /etc/systemd/system/litestream.service, \
     /usr/bin/rsync -a --delete --exclude node_modules --exclude tests --exclude docs --exclude .git --exclude .worktrees --exclude dist ./ /opt/warsaw-beer-bot/, \
-    /usr/bin/chown -R warsaw-beer-bot\:warsaw-beer-bot /opt/warsaw-beer-bot
+    /usr/bin/chown -R warsaw-beer-bot\:warsaw-beer-bot /opt/warsaw-beer-bot, \
+    /usr/bin/chown -R warsaw-beer-bot\:warsaw-beer-bot /etc/warsaw-beer-bot
 
 # 2. systemctl ops on our two units only (matched by unit name, not wildcard).
 Cmnd_Alias WBB_SYSTEMCTL = \

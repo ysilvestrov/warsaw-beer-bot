@@ -9,6 +9,10 @@ HOMEDIR=/home/warsaw-beer-bot
 sudo install -d -o warsaw-beer-bot -g warsaw-beer-bot "$APP" "$DATA" "$ENVDIR"
 sudo install -d -o warsaw-beer-bot -g warsaw-beer-bot -m 750 "$HOMEDIR"
 
+# Re-assert ownership of env files — created manually as root during first
+# setup, must be owned by warsaw-beer-bot so refresh-cookie.sh can edit them.
+sudo chown -R warsaw-beer-bot:warsaw-beer-bot "$ENVDIR"
+
 sudo rsync -a --delete \
   --exclude node_modules \
   --exclude tests \
