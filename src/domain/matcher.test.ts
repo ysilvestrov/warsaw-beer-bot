@@ -103,6 +103,13 @@ describe('breweryAliases', () => {
     );
   });
 
+  test('&-connector collab returns full + each side', () => {
+    const out = breweryAliases('Moon Lark & AleBrowar Brewery');
+    expect(new Set(out)).toEqual(
+      new Set(['moon lark alebrowar', 'moon lark', 'alebrowar']),
+    );
+  });
+
   test('empty input returns empty array', () => {
     expect(breweryAliases('')).toEqual([]);
   });
