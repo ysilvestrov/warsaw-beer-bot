@@ -223,4 +223,41 @@ describe('refreshAllUntappd', () => {
     const buty = findBeerByNormalized(db, 'stu mostow', 'buty skejta')!;
     expect(new Set(rows.map((r) => r.beer_id))).toEqual(new Set([atak.id, buty.id]));
   });
+
+  test('CookieExpiredError: calls notifyAdmin once and stops processing further users', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 2, 'bob');
+
+    const seenUrls: string[] = [];
+    const http: Http = {
+      async get(url: string) {
+        seenUrls.push(url);
+        const { CookieExpiredError: E } = await import('../sources/http');
+        throw new E();
+      },
+    };
+    const notifyAdmin = jest.fn(async () => {});
+
+    await refreshAllUntappd({ db, log: silentLog, http, notifyAdmin });
+
+    expect(notifyAdmin).toHaveBeenCalledTimes(1);
+    expect(notifyAdmin).toHaveBeenCalledWith(expect.stringContaining('cookie'));
+    expect(seenUrls).toHaveLength(1); // stopped after first user
+  });
+
+  test('CookieExpiredError without notifyAdmin does not throw', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+
+    const { CookieExpiredError: E } = await import('../sources/http');
+    const http: Http = { async get() { throw new E(); } };
+
+    await expect(
+      refreshAllUntappd({ db, log: silentLog, http }),
+    ).resolves.toBeUndefined();
+  });
 });

@@ -1,6 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
+import { CookieExpiredError } from '../sources/http';
 import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles } from '../storage/user_profiles';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
@@ -13,10 +14,11 @@ interface Deps {
   log: pino.Logger;
   http: Http;
   onProgress?: ProgressFn;
+  notifyAdmin?: (msg: string) => Promise<void>;
 }
 
 export async function refreshAllUntappd(deps: Deps): Promise<void> {
-  const { db, log, http, onProgress = noopProgress } = deps;
+  const { db, log, http, onProgress = noopProgress, notifyAdmin } = deps;
   const profiles = allProfiles(db).filter((p) => p.untappd_username);
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 
@@ -53,6 +55,13 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
       }
       ok++;
     } catch (e) {
+      if (e instanceof CookieExpiredError) {
+        log.warn('untappd cookie expired — stopping scrape');
+        await notifyAdmin?.(
+          '⚠️ Untappd cookie expired. Run: ./deploy/refresh-cookie.sh <new-value>',
+        );
+        break;
+      }
       log.warn({ err: e, user: p.untappd_username }, 'untappd scrape failed');
     }
     await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
