@@ -36,7 +36,24 @@ async function main(): Promise<void> {
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
 
+  const untappdHttp = env.UNTAPPD_SESSION_COOKIE
+    ? createHttp({
+        userAgent: env.NOMINATIM_USER_AGENT,
+        cookie: env.UNTAPPD_SESSION_COOKIE,
+        redirect: 'manual',
+      })
+    : null;
+  if (!untappdHttp) {
+    log.warn('untappd profile scraper disabled (UNTAPPD_SESSION_COOKIE not set)');
+  }
+
   const bot = createBot({ db, env, log });
+
+  const notifyAdmin = env.ADMIN_TELEGRAM_ID
+    ? (msg: string) =>
+        bot.telegram.sendMessage(env.ADMIN_TELEGRAM_ID!, msg).then(() => {})
+    : undefined;
+
   bot.use(
     startCommand,
     linkCommand,
@@ -52,7 +69,9 @@ async function main(): Promise<void> {
           db, log, http, geocoder, onProgress: notify,
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         });
-        await refreshAllUntappd({ db, log, http, onProgress: notify });
+        if (untappdHttp) {
+          await refreshAllUntappd({ db, log, http: untappdHttp, onProgress: notify, notifyAdmin });
+        }
       },
       buildNewbeersMessage,
     ),
@@ -64,9 +83,6 @@ async function main(): Promise<void> {
         db, log, http, geocoder,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
       }).catch((e) => log.error({ err: e }, 'ontap cron'));
-    }),
-    cron.schedule('0 3 * * *', () => {
-      refreshAllUntappd({ db, log, http }).catch((e) => log.error({ err: e }, 'untappd cron'));
     }),
     // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
     // on-the-hour slot used by refreshOntap and refreshAllUntappd).
@@ -90,6 +106,13 @@ async function main(): Promise<void> {
       }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
     }),
   ];
+
+  if (untappdHttp) {
+    cronJobs.push(cron.schedule('0 3 * * *', () => {
+      refreshAllUntappd({ db, log, http: untappdHttp, notifyAdmin })
+        .catch((e) => log.error({ err: e }, 'untappd cron'));
+    }));
+  }
 
   bot.launch();
   log.info('bot launched');
