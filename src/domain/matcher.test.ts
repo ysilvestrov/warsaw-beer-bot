@@ -89,6 +89,20 @@ describe('breweryAliases', () => {
     );
   });
 
+  test('x-connector collab (lower case x) returns full + each side', () => {
+    const out = breweryAliases('ZIEMIA OBIECANA x Weźże Krafta Brewery');
+    expect(new Set(out)).toEqual(
+      new Set(['ziemia obiecana x wezze krafta', 'ziemia obiecana', 'wezze krafta']),
+    );
+  });
+
+  test('X-connector collab (upper case X) returns full + each side', () => {
+    const out = breweryAliases('HOPITO X SADY Brewery');
+    expect(new Set(out)).toEqual(
+      new Set(['hopito x sady', 'hopito', 'sady']),
+    );
+  });
+
   test('empty input returns empty array', () => {
     expect(breweryAliases('')).toEqual([]);
   });
