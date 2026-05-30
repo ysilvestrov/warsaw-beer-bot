@@ -20,9 +20,10 @@ const ABV_TOLERANCE = 0.3;
 // Separator regex for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
+//   "A & B"  — " & " connector (collab)
 //   "A (B)"  — paren form for German aliases
 // Ontap.pl renders only one side. All forms collapse to: "any side is valid".
-export const COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+/;
+export const COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+|\s+&\s+/;
 
 export function breweryAliases(brewery: string): string[] {
   const aliases = new Set<string>();
