@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, extractYear, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -271,4 +271,114 @@ test('ontap-style raw beer_ref + ABV maps to clean Untappd entry', () => {
     [c({ id: 99, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.5 })],
   );
   expect(m?.id).toBe(99);
+});
+
+describe('extractYear', () => {
+  test('finds 4-digit year in parentheses', () => {
+    expect(extractYear('Affection (2025)')).toBe(2025);
+  });
+  test('finds bare 4-digit year', () => {
+    expect(extractYear('AFFECTION 2023')).toBe(2023);
+  });
+  test('returns null when no 4-digit year present', () => {
+    expect(extractYear('Affection')).toBeNull();
+  });
+  test('ignores abbreviated 2-digit year form', () => {
+    expect(extractYear("Farm to Glass '25: Citra")).toBeNull();
+  });
+  test('1900-range year is detected', () => {
+    expect(extractYear('Vintage 1998')).toBe(1998);
+  });
+  test('number outside 19xx/20xx range is not a year', () => {
+    expect(extractYear('Tripel 888')).toBeNull();
+  });
+});
+
+describe('matchBeer — vintage year disambiguation', () => {
+  const pinta = (id: number, name: string, abv: number | null): CatalogBeer =>
+    ({ id, name, brewery: 'PINTA Barrel Brewing', abv });
+
+  test('year match + ABV ok → returns yearMatch candidate', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 7.1),
+      pinta(9,  'Affection (2024)', 6.8),
+      pinta(8,  'Affection',        7.0),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, catalog);
+    expect(m?.id).toBe(10);
+    expect(m?.source).toBe('exact');
+  });
+
+  test('year match + ABV mismatch → noYear ABV hit wins', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 9.9),
+      pinta(8,  'Affection',        7.0),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, catalog);
+    expect(m?.id).toBe(8);
+  });
+
+  test('year match + ABV mismatch + no noYear → wrongYear ABV hit wins (most recent)', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 9.9),
+      pinta(9,  'Affection (2024)', 7.0),
+      pinta(7,  'Affection (2022)', 7.0),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, catalog);
+    expect(m?.id).toBe(9);
+  });
+
+  test('year match + ABV mismatch + no alternatives → accept ABV error, return yearMatch', () => {
+    const catalog = [pinta(10, 'Affection (2025)', 9.9)];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, catalog);
+    expect(m?.id).toBe(10);
+  });
+
+  test('year match + no input ABV → returns yearMatch without ABV check', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 9.9),
+      pinta(8,  'Affection',        7.0),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025' }, catalog);
+    expect(m?.id).toBe(10);
+  });
+
+  test('no same-year entry → noYear fallback, ABV applied', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 7.1),
+      pinta(9,  'Affection (2024)', 6.8),
+      pinta(8,  'Affection',        7.0),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2023', abv: 7.0 }, catalog);
+    expect(m?.id).toBe(8);
+  });
+
+  test('no same-year entry → noYear fallback, most-recent when no ABV', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 7.1),
+      pinta(9,  'Affection (2024)', 6.8),
+      pinta(8,  'Affection',        7.0),
+      pinta(6,  'Affection',        6.5),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2023' }, catalog);
+    expect(m?.id).toBe(8);
+  });
+
+  test('only wrong-year candidates → null (no cross-vintage match)', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 7.1),
+      pinta(9,  'Affection (2024)', 6.8),
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2023', abv: 7.0 }, catalog);
+    expect(m).toBeNull();
+  });
+
+  test('no year in input → existing behavior (ABV then most-recent)', () => {
+    const catalog = [
+      pinta(10, 'Affection (2025)', 8.5),  // outside 0.3 tolerance of 6.8
+      pinta(9,  'Affection (2024)', 6.8),  // exact ABV match
+    ];
+    const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 6.8 }, catalog);
+    expect(m?.id).toBe(9);
+  });
 });
