@@ -60,7 +60,7 @@ export type BeersResult =
   | { kind: 'no_arg' }
   | { kind: 'pub_not_found'; query: string }
   | { kind: 'ambiguous'; pubs: { name: string; address: string | null }[] } // ≤3
-  | { kind: 'empty' }; // паб знайдено, але немає snapshot / кранів
+  | { kind: 'empty'; pub: string }; // паб знайдено, але немає snapshot / кранів
 
 export function buildBeersMessage(deps: BeersDeps): BeersResult;
 ```
