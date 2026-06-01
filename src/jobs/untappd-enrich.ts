@@ -8,6 +8,7 @@ import {
   recordLookupSuccess,
   recordLookupNotFound,
   recordLookupTransient,
+  mergeIntoCanonical,
 } from '../storage/beers';
 
 export type EnrichOutcomeKind = 'matched' | 'not_found' | 'transient' | 'skipped';
@@ -40,8 +41,25 @@ export async function enrichOneOrphan(
   const nowIso = now.toISOString();
   switch (outcome.kind) {
     case 'matched':
-      recordLookupSuccess(deps.db, beerId, outcome.result);
-      return 'matched';
+      try {
+        recordLookupSuccess(deps.db, beerId, outcome.result);
+        return 'matched';
+      } catch (e: unknown) {
+        if ((e as { code?: string }).code !== 'SQLITE_CONSTRAINT_UNIQUE') throw e;
+        // The found untappd_id already belongs to another catalog entry.
+        // Redirect match_links to that canonical row and delete this orphan.
+        const canonical = deps.db
+          .prepare('SELECT id FROM beers WHERE untappd_id = ?')
+          .get(outcome.result.bid) as { id: number } | undefined;
+        if (canonical) {
+          mergeIntoCanonical(deps.db, beerId, canonical.id);
+          deps.log.warn(
+            { beerId, canonicalId: canonical.id, bid: outcome.result.bid },
+            'enrich: merged duplicate orphan into canonical',
+          );
+        }
+        return 'not_found';
+      }
     case 'not_found':
       recordLookupNotFound(deps.db, beerId, nowIso);
       return 'not_found';

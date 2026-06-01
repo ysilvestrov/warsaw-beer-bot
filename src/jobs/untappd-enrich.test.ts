@@ -146,6 +146,42 @@ describe('enrichOneOrphan', () => {
     expect(httpCalled).toBe(false);
   });
 
+  test('duplicate untappd_id: merges orphan into canonical, returns not_found', async () => {
+    const db = fresh();
+
+    // Canonical entry already has untappd_id=999.
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 999,
+      name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'marine', normalized_brewery: 'moon lark',
+    });
+
+    // Orphan for the same Untappd beer (collab ontap name, no untappd_id).
+    const orphanId = upsertBeer(db, {
+      name: 'Marine', brewery: 'Moon Lark & AleBrowar Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'marine', normalized_brewery: 'moon lark alebrowar',
+    });
+    db.prepare('INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence) VALUES (?,?,1)')
+      .run('Marine ontap', orphanId);
+
+    // Untappd returns bid=999 — same as canonical.
+    const http = fakeHttp(searchHtml([
+      { bid: 999, name: 'Marine', brewery: 'Moon Lark Brewery' },
+    ]));
+
+    const out = await enrichOneOrphan({ db, log: silentLog, http }, orphanId);
+
+    expect(out).toBe('not_found');
+    // Orphan row deleted.
+    expect(getBeer(db, orphanId)).toBeNull();
+    // match_link redirected to canonical.
+    const ml = db.prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
+      .get('Marine ontap') as { untappd_beer_id: number } | undefined;
+    expect(ml?.untappd_beer_id).toBe(canonicalId);
+  });
+
   test('skipped: beer does not exist (defensive)', async () => {
     const db = fresh();
     let httpCalled = false;
