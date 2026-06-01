@@ -120,4 +120,19 @@ describe('buildBeersMessage — ok rendering', () => {
     // line is: "— • <b>No Numbers</b> • — • — • ⚪"
     expect(out.html).toContain('— • <b>No Numbers</b> • — • — • ⚪');
   });
+
+  test('empty tap (beer_ref "N/A") collapses to "{tap#} • N/A"', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    insertTaps(db, snap, [
+      { tap_number: 2, beer_ref: 'N/A', brewery_ref: null,
+        abv: null, ibu: null, style: null, u_rating: null },
+    ]);
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    const line = out.html.split('\n').find((l) => l.startsWith('2 '));
+    expect(line).toBe('2 • N/A'); // no abv/rating/icon trailing fields
+  });
 });

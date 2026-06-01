@@ -53,6 +53,11 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
   });
 
   const lines = taps.map((tap) => {
+    // Empty tap: ontap.pl renders "N/A" as the beer name. Show just the tap
+    // number — abv/rating/match-status would all be noise.
+    if (tap.beer_ref.trim().toUpperCase() === 'N/A') {
+      return `${fmtTapNum(tap.tap_number)} • N/A`;
+    }
     const display = tap.brewery_ref
       ? `${tap.brewery_ref} ${tap.beer_ref}`.trim()
       : tap.beer_ref;
