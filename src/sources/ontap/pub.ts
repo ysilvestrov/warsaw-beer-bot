@@ -71,8 +71,11 @@ export function parsePubPage(html: string): ParsedPubPage {
   $('div.panel.panel-default[onclick*="beer?mode=view"]').each((_, el) => {
     const row = $(el);
 
+    // Label is usually a bare "12", but pump/cask taps read "12 Pompa".
+    // Take the leading integer; non-numeric labels (e.g. "Pompa") stay null.
     const numTxt = row.find('h5 .label').first().text().trim();
-    const tap_number = /^\d+$/.test(numTxt) ? parseInt(numTxt, 10) : null;
+    const numMatch = numTxt.match(/^\d+/);
+    const tap_number = numMatch ? parseInt(numMatch[0], 10) : null;
 
     const brewery_ref = row.find('.brewery').first().text()
       .replace(/ /g, ' ').replace(/\s+/g, ' ').trim() || null;

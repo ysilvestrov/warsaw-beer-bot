@@ -37,6 +37,29 @@ test('style is populated when subtitle exists', () => {
   expect(withStyle.length).toBeGreaterThan(0);
 });
 
+describe('tap_number parsing', () => {
+  // ontap.pl labels hand-pump / cask taps "N Pompa" instead of a bare "N";
+  // regular taps are just "N". Both must yield the integer N.
+  const panel = (label: string, h4: string) =>
+    `<div class="panel panel-default" onclick="location.href='https://x.ontap.pl/beer?mode=view'">` +
+    `<h5><span class="label label-primary">${label}</span></h5>` +
+    `<h4>${h4}</h4></div>`;
+
+  test('extracts the leading integer from "N Pompa" pump-tap labels', () => {
+    const html =
+      panel('1 Pompa', 'Monsters Brewery Bonfire Boy 6,5%') +
+      panel('2 Pompa', 'Kufle i Kapsle Brewery KRAN W SERWISIE') +
+      panel('3', 'Monsters Brewery Cheek Squieeze 5%');
+    const { taps } = parsePubPage(html);
+    expect(taps.map((t) => t.tap_number)).toEqual([1, 2, 3]);
+  });
+
+  test('non-numeric labels still yield null tap_number', () => {
+    const { taps } = parsePubPage(panel('Pompa', 'Some Brewery Some Beer 5%'));
+    expect(taps[0].tap_number).toBeNull();
+  });
+});
+
 describe('extractBeerName', () => {
   test('truncates at first ABV-like token', () => {
     expect(extractBeerName('Buzdygan Rozkoszy 24°·8,5%', null)).toBe('Buzdygan Rozkoszy');
