@@ -12,6 +12,7 @@ import { linkCommand } from './bot/commands/link';
 import { importCommand } from './bot/commands/import';
 import { newbeersCommand } from './bot/commands/newbeers';
 import { buildNewbeersMessage } from './bot/commands/newbeers-build';
+import { beersCommand } from './bot/commands/beers';
 import { pubsCommand } from './bot/commands/pubs';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
@@ -59,6 +60,7 @@ async function main(): Promise<void> {
     linkCommand,
     importCommand,
     newbeersCommand,
+    beersCommand,
     pubsCommand,
     routeCommand,
     filtersCommand,
