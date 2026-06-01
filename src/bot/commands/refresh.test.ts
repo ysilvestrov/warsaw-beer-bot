@@ -1,5 +1,11 @@
 import pino from 'pino';
-import { makeThrottledProgress, runRefreshPipeline, resolveRefreshScope } from './refresh';
+import {
+  makeThrottledProgress,
+  runRefreshPipeline,
+  resolveRefreshScope,
+  checkAndStampCooldown,
+  cooldownWindowFor,
+} from './refresh';
 import type { Translator } from '../../i18n/types';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
@@ -185,5 +191,42 @@ describe('resolveRefreshScope', () => {
       kind: 'pub_not_found',
       query: 'nonexistent',
     });
+  });
+});
+
+describe('cooldownWindowFor', () => {
+  test('full refresh → 5 minutes', () => {
+    expect(cooldownWindowFor('all')).toBe(5 * 60 * 1000);
+  });
+  test('scoped refresh → 30 seconds', () => {
+    expect(cooldownWindowFor('scoped')).toBe(30 * 1000);
+  });
+});
+
+describe('checkAndStampCooldown', () => {
+  test('first call allowed and stamps the map', () => {
+    const map = new Map<number, number>();
+    expect(checkAndStampCooldown(map, 42, 1000, 5000)).toBe(true);
+    expect(map.get(42)).toBe(5000);
+  });
+
+  test('second call within the window is blocked', () => {
+    const map = new Map<number, number>();
+    checkAndStampCooldown(map, 42, 1000, 5000);
+    expect(checkAndStampCooldown(map, 42, 1000, 5500)).toBe(false);
+  });
+
+  test('call after the window is allowed again', () => {
+    const map = new Map<number, number>();
+    checkAndStampCooldown(map, 42, 1000, 5000);
+    expect(checkAndStampCooldown(map, 42, 1000, 6001)).toBe(true);
+  });
+
+  test('separate maps do not interfere', () => {
+    const full = new Map<number, number>();
+    const scoped = new Map<number, number>();
+    checkAndStampCooldown(full, 42, 300000, 1000);
+    // full is now in cooldown, but the scoped map is untouched
+    expect(checkAndStampCooldown(scoped, 42, 30000, 1000)).toBe(true);
   });
 });
