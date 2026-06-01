@@ -4,7 +4,7 @@ import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/sn
 import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
 import { filterInteresting } from '../../domain/filters';
-import { listPubs } from '../../storage/pubs';
+import { listPubs, type PubRow } from '../../storage/pubs';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import {
   groupTaps,
@@ -12,6 +12,24 @@ import {
   formatGroupedBeers,
   type CandidateTap,
 } from './newbeers-format';
+
+export function filterPubsByQuery(pubs: PubRow[], query: string): PubRow[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return pubs;
+
+  const nameMatches = pubs.filter((p) => p.name.toLowerCase().includes(q));
+
+  if (nameMatches.length === 1) return nameMatches;
+
+  const words = q.split(/\s+/).filter(Boolean);
+  const searchBase = nameMatches.length === 0 ? pubs : nameMatches;
+  const combined = searchBase.filter((p) =>
+    words.every((w) => (p.name + ' ' + (p.address ?? '')).toLowerCase().includes(w)),
+  );
+
+  if (nameMatches.length === 0) return combined;
+  return combined.length === 1 ? combined : nameMatches;
+}
 
 export interface NewbeersDeps {
   db: DB;
@@ -39,15 +57,12 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
     };
   const pubs = new Map(listPubs(db).map((p) => [p.id, p]));
 
-  const q = deps.pubQuery?.trim().toLowerCase();
+  const q = deps.pubQuery?.trim().toLowerCase() ?? '';
   let matchedIds: Set<number> | null = null;
   if (q) {
-    const matched = [...pubs.values()].filter((p) => p.name.toLowerCase().includes(q));
-    if (matched.length === 0) {
-      // Preserve user's original casing/whitespace in the error message.
-      return { kind: 'pub_not_found', query: deps.pubQuery! };
-    }
-    matchedIds = new Set(matched.map((p) => p.id));
+    const filtered = filterPubsByQuery([...pubs.values()], q);
+    if (filtered.length === 0) return { kind: 'pub_not_found', query: deps.pubQuery! };
+    matchedIds = new Set(filtered.map((p) => p.id));
   }
 
   const candidates: CandidateTap[] = [];
