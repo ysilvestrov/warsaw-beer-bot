@@ -92,6 +92,15 @@ export function recordLookupSuccess(
   ).run(r.bid, r.style, r.abv, r.global_rating, beerId);
 }
 
+// Merges an orphan beer into a canonical catalog entry by redirecting all
+// match_links and deleting the orphan. Called when recordLookupSuccess hits a
+// UNIQUE constraint (the found untappd_id already belongs to another row).
+export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number): void {
+  db.prepare('UPDATE match_links SET untappd_beer_id = ? WHERE untappd_beer_id = ?')
+    .run(canonicalId, orphanId);
+  db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
+}
+
 export function recordLookupNotFound(db: DB, beerId: number, at: string): void {
   db.prepare(
     `UPDATE beers SET
