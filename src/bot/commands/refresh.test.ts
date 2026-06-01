@@ -1,6 +1,9 @@
 import pino from 'pino';
-import { makeThrottledProgress, runRefreshPipeline } from './refresh';
+import { makeThrottledProgress, runRefreshPipeline, resolveRefreshScope } from './refresh';
 import type { Translator } from '../../i18n/types';
+import { openDb } from '../../storage/db';
+import { migrate } from '../../storage/schema';
+import { upsertPub } from '../../storage/pubs';
 
 describe('makeThrottledProgress', () => {
   test('drops non-forced calls within interval', async () => {
@@ -143,5 +146,44 @@ describe('runRefreshPipeline', () => {
 
     expect(postRunCalled).toBe(false);
     expect(calls).toEqual([{ text: 'refresh.failed', force: true }]);
+  });
+});
+
+function dbWithPubs() {
+  const db = openDb(':memory:');
+  migrate(db);
+  upsertPub(db, { slug: 'bracka', name: 'Bracka 4', address: 'Bracka 4', lat: null, lon: null });
+  upsertPub(db, { slug: 'piwpaw', name: 'PiwPaw', address: 'Foksal 16', lat: null, lon: null });
+  upsertPub(db, { slug: 'piwpaw-bis', name: 'PiwPaw Bis', address: 'Żurawia 32', lat: null, lon: null });
+  return db;
+}
+
+describe('resolveRefreshScope', () => {
+  test('empty argument → all', () => {
+    const db = dbWithPubs();
+    expect(resolveRefreshScope(db, '')).toEqual({ kind: 'all' });
+    expect(resolveRefreshScope(db, '   ')).toEqual({ kind: 'all' });
+  });
+
+  test('argument matching exactly one pub → scoped with that slug', () => {
+    const db = dbWithPubs();
+    const scope = resolveRefreshScope(db, 'bracka');
+    expect(scope).toEqual({ kind: 'scoped', slugs: new Set(['bracka']), query: 'bracka' });
+  });
+
+  test('argument matching several pubs → scoped with all their slugs', () => {
+    const db = dbWithPubs();
+    const scope = resolveRefreshScope(db, 'piwpaw');
+    expect(scope.kind).toBe('scoped');
+    if (scope.kind !== 'scoped') throw new Error('expected scoped');
+    expect(scope.slugs).toEqual(new Set(['piwpaw', 'piwpaw-bis']));
+  });
+
+  test('argument matching nothing → pub_not_found', () => {
+    const db = dbWithPubs();
+    expect(resolveRefreshScope(db, 'nonexistent')).toEqual({
+      kind: 'pub_not_found',
+      query: 'nonexistent',
+    });
   });
 });

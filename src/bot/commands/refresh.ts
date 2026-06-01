@@ -3,7 +3,9 @@ import type pino from 'pino';
 import type { BotContext } from '../index';
 import type { ProgressFn } from '../../jobs/progress';
 import type { Translator } from '../../i18n/types';
-import type { NewbeersDeps, NewbeersResult } from './newbeers-build';
+import type { DB } from '../../storage/db';
+import { listPubs } from '../../storage/pubs';
+import { type NewbeersDeps, type NewbeersResult, filterPubsByQuery } from './newbeers-build';
 
 const COOLDOWN_MS = 5 * 60 * 1000;
 const PROGRESS_MIN_INTERVAL_MS = 2000;
@@ -49,6 +51,19 @@ export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<
     log.error({ err: e }, 'refresh failed');
     await notify(t('refresh.failed'), { force: true });
   }
+}
+
+export type RefreshScope =
+  | { kind: 'all' }
+  | { kind: 'scoped'; slugs: Set<string>; query: string }
+  | { kind: 'pub_not_found'; query: string };
+
+export function resolveRefreshScope(db: DB, arg: string): RefreshScope {
+  const query = arg.trim();
+  if (!query) return { kind: 'all' };
+  const matched = filterPubsByQuery(listPubs(db), query);
+  if (matched.length === 0) return { kind: 'pub_not_found', query };
+  return { kind: 'scoped', slugs: new Set(matched.map((p) => p.slug)), query };
 }
 
 export function createRefreshCommand(
