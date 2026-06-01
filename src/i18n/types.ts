@@ -31,6 +31,14 @@ export interface Messages {
   'newbeers.more_pubs_suffix': string;   // {extra}
   'newbeers.pub_not_found': string;      // {query}
 
+  // beers (debug: raw tap dump for one pub)
+  'beers.usage': string;
+  'beers.header': string;          // {pub}, {address}, {count}
+  'beers.pub_not_found': string;   // {query}
+  'beers.ambiguous': string;
+  'beers.ambiguous_item': string;  // {name}, {address}
+  'beers.empty': string;           // {pub}
+
   // pubs
   'pubs.header': string;
   'pubs.empty': string;

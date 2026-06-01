@@ -10,6 +10,7 @@ export const pl: Messages = {
     '3) /newbeers [fragment nazwy pubu] — top niespróbowanych piw; z argumentem — tylko w dopasowanych pubach.',
     '4) /pubs — lista dostępnych pubów.',
     '5) /route N — trasa pokrywająca ≥ N niespróbowanych piw z minimalnym dystansem.',
+    '6) /beers <pub> — debug: wszystkie krany pubu tak, jak rozpoznał je bot.',
   ].join('\n'),
   'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
@@ -35,6 +36,14 @@ export const pl: Messages = {
   'newbeers.empty': 'Nic ciekawego — spróbuj /refresh.',
   'newbeers.more_pubs_suffix': ' +{extra} innych',
   'newbeers.pub_not_found': 'Nie znaleziono pubu „{query}". /pubs pokaże dostępne.',
+
+  // beers (debug)
+  'beers.usage': 'Użycie: /beers <fragment nazwy pubu>. Argument wymagany.',
+  'beers.header': '🍺 <b>{pub}</b>{address}\nKrany: {count}',
+  'beers.pub_not_found': 'Pub „{query}" nie znaleziony. /pubs pokaże dostępne.',
+  'beers.ambiguous': 'Pasuje kilka pubów — doprecyzuj zapytanie (np. dodaj ulicę):',
+  'beers.ambiguous_item': '• {name} — {address}',
+  'beers.empty': 'Pub „{pub}" nie ma teraz danych o kranach.',
 
   // pubs
   'pubs.header': 'Dostępne puby:',

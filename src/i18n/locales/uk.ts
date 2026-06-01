@@ -10,6 +10,7 @@ export const uk: Messages = {
     '3) /newbeers [пiдрядок назви паба] — топ непитих пив; з аргументом — тільки в матчених пабах.',
     '4) /pubs — список доступних пабів.',
     '5) /route N — маршрут, що покриває ≥ N непитих пив із мінімальною пішою відстанню.',
+    '6) /beers <паб> — діагностика: усі краны паба як їх розпарсив бот.',
   ].join('\n'),
   'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
 
@@ -35,6 +36,14 @@ export const uk: Messages = {
   'newbeers.empty': 'Нічого цікавого — спробуй /refresh.',
   'newbeers.more_pubs_suffix': ' +{extra} інших',
   'newbeers.pub_not_found': 'Паб «{query}» не знайдено. /pubs покаже доступні.',
+
+  // beers (debug)
+  'beers.usage': 'Використання: /beers <частина назви паба>. Аргумент обовʼязковий.',
+  'beers.header': '🍺 <b>{pub}</b>{address}\nКранів: {count}',
+  'beers.pub_not_found': 'Паб «{query}» не знайдено. /pubs покаже доступні.',
+  'beers.ambiguous': 'Підходить кілька пабів — уточни запит (напр. додай вулицю):',
+  'beers.ambiguous_item': '• {name} — {address}',
+  'beers.empty': 'У пабі «{pub}» зараз немає даних про крани.',
 
   // pubs
   'pubs.header': 'Доступні паби:',

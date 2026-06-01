@@ -10,6 +10,7 @@ export const en: Messages = {
     '3) /newbeers [pub-name fragment] — top untried beers; with an argument — only in matching pubs.',
     '4) /pubs — list of available pubs.',
     '5) /route N — a route covering ≥ N untried beers with minimal walking distance.',
+    '6) /beers <pub> — debug: all taps of a pub exactly as the bot parsed them.',
   ].join('\n'),
   'app.no_data_in_snapshot': 'No interesting untried beers right now.',
 
@@ -35,6 +36,14 @@ export const en: Messages = {
   'newbeers.empty': 'Nothing interesting — try /refresh.',
   'newbeers.more_pubs_suffix': ' +{extra} more',
   'newbeers.pub_not_found': 'Pub "{query}" not found. /pubs lists available ones.',
+
+  // beers (debug)
+  'beers.usage': 'Usage: /beers <pub name fragment>. Argument required.',
+  'beers.header': '🍺 <b>{pub}</b>{address}\nTaps: {count}',
+  'beers.pub_not_found': 'Pub "{query}" not found. /pubs lists available ones.',
+  'beers.ambiguous': 'Several pubs match — narrow the query (e.g. add a street):',
+  'beers.ambiguous_item': '• {name} — {address}',
+  'beers.empty': 'Pub "{pub}" has no tap data right now.',
 
   // pubs
   'pubs.header': 'Available pubs:',
