@@ -5,7 +5,7 @@ import { createSnapshot, insertTaps } from '../../storage/snapshots';
 import { upsertBeer } from '../../storage/beers';
 import { upsertMatch } from '../../storage/match_links';
 import { createTranslator } from '../../i18n';
-import { buildNewbeersMessage } from './newbeers-build';
+import { buildNewbeersMessage, filterPubsByQuery } from './newbeers-build';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -164,5 +164,45 @@ describe('buildNewbeersMessage', () => {
     // Both pubs visible — same as no-arg call.
     expect(out.html).toContain('Pub A');
     expect(out.html).toContain('Pub B');
+  });
+});
+
+describe('filterPubsByQuery', () => {
+  const pubChmielna = {
+    id: 1, slug: 'pinta-chmielna', name: 'PINTA Warszawa',
+    address: 'Chmielna 7/9, Warszawa', lat: null, lon: null,
+  };
+  const pubNowogrodzka = {
+    id: 2, slug: 'pinta-nowogrodzka', name: 'PINTA Warszawa',
+    address: 'Nowogrodzka 4, Warszawa', lat: null, lon: null,
+  };
+  const pubKufel = {
+    id: 3, slug: 'kufel', name: 'Kufel i Chmiel',
+    address: 'Nowy Swiat 22, Warszawa', lat: null, lon: null,
+  };
+  const allPubs = [pubChmielna, pubNowogrodzka, pubKufel];
+
+  test('unique name-match returns that pub without address check', () => {
+    expect(filterPubsByQuery(allPubs, 'kufel')).toEqual([pubKufel]);
+  });
+
+  test('2 name-matches without disambiguating word returns both', () => {
+    expect(filterPubsByQuery(allPubs, 'pinta warszawa')).toEqual([pubChmielna, pubNowogrodzka]);
+  });
+
+  test('2 name-matches + address word narrows to Nowogrodzka', () => {
+    expect(filterPubsByQuery(allPubs, 'pinta nowogrodzka')).toEqual([pubNowogrodzka]);
+  });
+
+  test('2 name-matches + address word narrows to Chmielna', () => {
+    expect(filterPubsByQuery(allPubs, 'pinta chmielna')).toEqual([pubChmielna]);
+  });
+
+  test('0 name-matches uses address fallback', () => {
+    expect(filterPubsByQuery(allPubs, 'nowogrodzka')).toEqual([pubNowogrodzka]);
+  });
+
+  test('unknown query returns empty array', () => {
+    expect(filterPubsByQuery(allPubs, 'xxxxxx')).toEqual([]);
   });
 });
