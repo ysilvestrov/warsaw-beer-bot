@@ -2,7 +2,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
 import type { Geocoder } from '../sources/geocoder';
-import { parseWarsawIndex } from '../sources/ontap/index';
+import { parseWarsawIndex, type IndexPub } from '../sources/ontap/index';
 import { parsePubPage } from '../sources/ontap/pub';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
@@ -22,6 +22,7 @@ interface Deps {
   lookupEnabled?: boolean;     // default true
   lookupSleepMs?: number;       // default 500
   now?: () => Date;             // for tests
+  pubSlugs?: Set<string>;       // when set, refresh only these pubs (scoped /refresh)
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
@@ -34,8 +35,8 @@ export async function refreshOntap(deps: Deps): Promise<void> {
   } = deps;
   await onProgress('🍻 ontap: парсю індекс…', { force: true });
   const indexHtml = await http.get('https://ontap.pl/warszawa');
-  const indexPubs = parseWarsawIndex(indexHtml);
-  log.info({ n: indexPubs.length }, 'ontap index parsed');
+  const indexPubs = filterIndexBySlugs(parseWarsawIndex(indexHtml), deps.pubSlugs);
+  log.info({ n: indexPubs.length, scoped: deps.pubSlugs != null }, 'ontap index parsed');
   await onProgress(`🍻 ontap: 0/${indexPubs.length} пабів`, { force: true });
 
   let i = 0;
@@ -110,6 +111,14 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     await onProgress(`🍻 ontap: ${i}/${indexPubs.length} — ${ip.slug}`);
   }
   await onProgress(`🍻 ontap: ✓ ${ok}/${indexPubs.length} пабів`, { force: true });
+}
+
+export function filterIndexBySlugs(
+  pubs: IndexPub[],
+  slugs: Set<string> | undefined,
+): IndexPub[] {
+  if (!slugs) return pubs;
+  return pubs.filter((p) => slugs.has(p.slug));
 }
 
 function listBeerCatalog(db: DB): { id: number; brewery: string; name: string; abv: number | null }[] {

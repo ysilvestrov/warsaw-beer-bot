@@ -66,12 +66,15 @@ async function main(): Promise<void> {
     filtersCommand,
     langCommand,
     createRefreshCommand(
-      async (notify) => {
+      async (notify, opts) => {
         await refreshOntap({
           db, log, http, geocoder, onProgress: notify,
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+          pubSlugs: opts?.pubSlugs,
         });
-        if (untappdHttp) {
+        // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
+        // is not pub-specific and is refreshed daily + on a full /refresh.
+        if (!opts?.pubSlugs && untappdHttp) {
           await refreshAllUntappd({ db, log, http: untappdHttp, onProgress: notify, notifyAdmin });
         }
       },
