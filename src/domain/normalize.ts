@@ -44,3 +44,16 @@ export function normalizeBrewery(s: string): string {
     .filter((t) => t && !BREWERY_NOISE.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
 }
+
+// Remove brewery noise words ("Browar", "Brewery", "Brewing", "Co", "Company")
+// from a brewery label while preserving the original case and diacritics of the
+// remaining tokens. Used to build Untappd search queries: the raw ontap label
+// often appends "Brewery", which Untappd's term-AND search does not find in the
+// real brewery name (e.g. "JBW Brewery" vs the registered "JBW Browar").
+export function stripBreweryNoise(brewery: string): string {
+  return brewery
+    .split(/\s+/)
+    .filter((tok) => tok && !BREWERY_NOISE.has(tok.toLowerCase()))
+    .join(' ')
+    .trim();
+}
