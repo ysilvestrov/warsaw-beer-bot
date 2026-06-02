@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -31,4 +31,25 @@ test('strips every Polish diacritic', () => {
   expect(normalizeBrewery('Średnica')).toBe('srednica');
   expect(normalizeBrewery('Księżyc')).toBe('ksiezyc');
   expect(normalizeBrewery('Piąte')).toBe('piate');
+});
+
+describe('stripBreweryNoise', () => {
+  test('drops a trailing "Brewery" suffix', () => {
+    expect(stripBreweryNoise('JBW Brewery')).toBe('JBW');
+  });
+  test('drops "Browar" in any position', () => {
+    expect(stripBreweryNoise('Browar Pinta')).toBe('Pinta');
+  });
+  test('preserves case and diacritics of non-noise tokens', () => {
+    expect(stripBreweryNoise('Gościszewo Brewery')).toBe('Gościszewo');
+  });
+  test('multi-word brewery keeps all non-noise words', () => {
+    expect(stripBreweryNoise('Trzech Kumpli Brewery')).toBe('Trzech Kumpli');
+  });
+  test('all-noise brewery collapses to empty string', () => {
+    expect(stripBreweryNoise('Browar')).toBe('');
+  });
+  test('brewery with no noise words is unchanged', () => {
+    expect(stripBreweryNoise('Magic Road')).toBe('Magic Road');
+  });
 });

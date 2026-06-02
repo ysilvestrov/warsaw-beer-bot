@@ -135,4 +135,51 @@ describe('buildBeersMessage — ok rendering', () => {
     const line = out.html.split('\n').find((l) => l.startsWith('2 '));
     expect(line).toBe('2 • N/A'); // no abv/rating/icon trailing fields
   });
+
+  test('tap matched to an orphan beers row (untappd_id NULL) shows ⚪, not 🟢', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    // Orphan beers row: created from ontap, no untappd_id yet, but match_links
+    // points the ontap_ref at this row's own id (as refreshOntap does).
+    const orphanId = upsertBeer(db, {
+      untappd_id: null, name: 'Wocky Talky', brewery: 'JBW Brewery', style: null,
+      abv: 4.2, rating_global: null,
+      normalized_name: 'wocky talky', normalized_brewery: 'jbw',
+    });
+    upsertMatch(db, 'JBW Brewery Wocky Talky', orphanId, 1.0);
+    insertTaps(db, snap, [
+      { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
+        abv: 4.2, ibu: null, style: null, u_rating: null },
+    ]);
+
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    expect(line).toContain('⚪');
+    expect(line).not.toContain('🟢');
+  });
+
+  test('tap matched to a real catalog beer (untappd_id set) shows 🟢', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    const beerId = upsertBeer(db, {
+      untappd_id: 6172039, name: 'Wocky Talky', brewery: 'JBW Browar', style: null,
+      abv: 4.2, rating_global: 3.18,
+      normalized_name: 'wocky talky', normalized_brewery: 'jbw',
+    });
+    upsertMatch(db, 'JBW Brewery Wocky Talky', beerId, 1.0);
+    insertTaps(db, snap, [
+      { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
+        abv: 4.2, ibu: null, style: null, u_rating: null },
+    ]);
+
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    expect(line).toContain('🟢');
+  });
 });

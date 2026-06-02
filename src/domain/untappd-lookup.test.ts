@@ -93,13 +93,30 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('strips brewery noise word from the search query', async () => {
+    const fetch = jest.fn(async (_url: string) =>
+      htmlFor([{ bid: 6172039, name: 'WOCKY TALKY', brewery: 'JBW Browar', rating: '3.18' }]),
+    );
+    const out = await lookupBeer({ brewery: 'JBW Brewery', name: 'Wocky Talky', fetch });
+
+    const calledUrl = fetch.mock.calls[0][0];
+    expect(calledUrl).toContain('JBW%20Wocky%20Talky');
+    expect(calledUrl).not.toContain('Brewery');
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6172039);
+  });
+
   test('non-collab brewery: single fetch call (behaviour unchanged)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = jest.fn(async (_url: string) =>
       htmlFor([{ bid: 1, name: 'Fifty/Fifty', brewery: 'Magic Road' }]),
     );
     await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Fifty/Fifty', fetch });
     expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('Magic%20Road%20Brewery'));
+    const url = fetch.mock.calls[0][0];
+    expect(url).toContain('Magic%20Road');
+    expect(url).not.toContain('Brewery');
   });
 
   test('slash collab: first part returns 0 results, second part matches', async () => {

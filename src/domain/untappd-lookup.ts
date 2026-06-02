@@ -1,6 +1,6 @@
 import { Searcher } from 'fast-fuzzy';
 import { breweryAliases, COLLAB_SEP } from './matcher';
-import { normalizeName } from './normalize';
+import { normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
   parseSearchPage,
@@ -40,7 +40,7 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   for (const part of parts) {
     let html: string;
     try {
-      html = await fetch(buildSearchUrl(`${part} ${name}`));
+      html = await fetch(buildSearchUrl(`${stripBreweryNoise(part)} ${name}`.trim()));
     } catch (error) {
       return { kind: 'transient', error };
     }
