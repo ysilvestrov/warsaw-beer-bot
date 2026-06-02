@@ -90,4 +90,38 @@ describe('schema migrations', () => {
     expect(refreshCount?.notnull).toBe(1);
     expect(String(refreshCount?.dflt_value)).toBe('0');
   });
+
+  it('migration v7 is registered and resets only orphan lookup backoff', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    // (a) v7 is registered — this is the fail-first hook (maxV is 6 before v7).
+    const maxV = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
+    expect(maxV).toBeGreaterThanOrEqual(7);
+
+    // (b) the v7 statement: orphans (untappd_id NULL) get backoff cleared,
+    //     matched beers (untappd_id set) are left untouched.
+    db.prepare(
+      `INSERT INTO beers (name, brewery, normalized_name, normalized_brewery,
+         untappd_id, untappd_lookup_at, untappd_lookup_count)
+       VALUES ('Wocky Talky', 'JBW Brewery', 'wocky talky', 'jbw',
+         NULL, '2026-05-31T21:30:08.061Z', 3)`,
+    ).run();
+    db.prepare(
+      `INSERT INTO beers (name, brewery, normalized_name, normalized_brewery,
+         untappd_id, untappd_lookup_at, untappd_lookup_count)
+       VALUES ('Atak Chmielu', 'Pinta', 'atak chmielu', 'pinta',
+         12345, '2026-05-31T21:30:08.061Z', 2)`,
+    ).run();
+    db.exec("UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE untappd_id IS NULL");
+
+    const orphan = db.prepare(
+      "SELECT untappd_lookup_at AS at, untappd_lookup_count AS cnt FROM beers WHERE untappd_id IS NULL",
+    ).get() as { at: string | null; cnt: number };
+    const matched = db.prepare(
+      "SELECT untappd_lookup_at AS at, untappd_lookup_count AS cnt FROM beers WHERE untappd_id = 12345",
+    ).get() as { at: string | null; cnt: number };
+    expect(orphan).toEqual({ at: null, cnt: 0 });
+    expect(matched).toEqual({ at: '2026-05-31T21:30:08.061Z', cnt: 2 });
+  });
 });
