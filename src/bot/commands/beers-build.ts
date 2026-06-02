@@ -61,7 +61,7 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
     const display = tap.brewery_ref
       ? `${tap.brewery_ref} ${tap.beer_ref}`.trim()
       : tap.beer_ref;
-    const icon = tap.beer_id != null ? '🟢' : '⚪';
+    const icon = tap.untappd_id != null ? '🟢' : '⚪';
     return (
       `${fmtTapNum(tap.tap_number)} • <b>${escapeHtml(display)}</b>` +
       ` • ${fmtAbv(tap.abv)} • ${fmtRating(tap.u_rating)} • ${icon}`
