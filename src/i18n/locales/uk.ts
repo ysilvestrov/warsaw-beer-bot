@@ -14,6 +14,20 @@ export const uk: Messages = {
   ].join('\n'),
   'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
 
+  // help / command catalog
+  'help.intro': 'Команди бота:',
+  'cmd.newbeers': 'топ непитих пив',
+  'cmd.route': 'пішохідний маршрут',
+  'cmd.pubs': 'список пабів',
+  'cmd.filters': 'фільтри (стиль/рейтинг/ABV)',
+  'cmd.link': "прив'язати Untappd",
+  'cmd.import': 'імпорт історії (CSV/JSON/ZIP)',
+  'cmd.beers': 'діагностика кранів паба',
+  'cmd.refresh': 'оновити дані',
+  'cmd.lang': 'мова інтерфейсу',
+  'cmd.help': 'ця довідка',
+  'cmd.start': 'почати',
+
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
   'link.success': "✅ Прив'язано до untappd.com/user/{username}",

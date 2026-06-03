@@ -14,6 +14,20 @@ export const en: Messages = {
   ].join('\n'),
   'app.no_data_in_snapshot': 'No interesting untried beers right now.',
 
+  // help / command catalog
+  'help.intro': 'Bot commands:',
+  'cmd.newbeers': 'top untried beers',
+  'cmd.route': 'walking route',
+  'cmd.pubs': 'list of pubs',
+  'cmd.filters': 'filters (style/rating/ABV)',
+  'cmd.link': 'link Untappd',
+  'cmd.import': 'import history (CSV/JSON/ZIP)',
+  'cmd.beers': 'pub taps diagnostics',
+  'cmd.refresh': 'refresh data',
+  'cmd.lang': 'interface language',
+  'cmd.help': 'this help',
+  'cmd.start': 'start',
+
   // link
   'link.usage': 'Usage: /link <username> (or full URL untappd.com/user/<username>)',
   'link.success': '✅ Linked to untappd.com/user/{username}',

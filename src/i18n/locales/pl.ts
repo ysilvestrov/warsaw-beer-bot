@@ -14,6 +14,20 @@ export const pl: Messages = {
   ].join('\n'),
   'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
+  // help / command catalog
+  'help.intro': 'Komendy bota:',
+  'cmd.newbeers': 'top niepitych piw',
+  'cmd.route': 'trasa piesza',
+  'cmd.pubs': 'lista pubów',
+  'cmd.filters': 'filtry (styl/ocena/ABV)',
+  'cmd.link': 'połącz Untappd',
+  'cmd.import': 'import historii (CSV/JSON/ZIP)',
+  'cmd.beers': 'diagnostyka kranów pubu',
+  'cmd.refresh': 'odśwież dane',
+  'cmd.lang': 'język interfejsu',
+  'cmd.help': 'ta pomoc',
+  'cmd.start': 'start',
+
   // link
   'link.usage': 'Użycie: /link <username> (lub pełny URL untappd.com/user/<username>)',
   'link.success': '✅ Powiązano z untappd.com/user/{username}',
