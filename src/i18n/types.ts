@@ -9,8 +9,21 @@ export type PluralForms = {
 
 export interface Messages {
   // app
-  'app.start': string;
   'app.no_data_in_snapshot': string;
+
+  // help / command catalog
+  'help.intro': string;
+  'cmd.newbeers': string;
+  'cmd.route': string;
+  'cmd.pubs': string;
+  'cmd.filters': string;
+  'cmd.link': string;
+  'cmd.import': string;
+  'cmd.beers': string;
+  'cmd.refresh': string;
+  'cmd.lang': string;
+  'cmd.help': string;
+  'cmd.start': string;
 
   // link
   'link.usage': string;

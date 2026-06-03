@@ -2,15 +2,15 @@ import { makeTranslatorFromDict } from './translator';
 import type { Messages } from './types';
 
 describe('translator (plain string keys)', () => {
-  const dict: Pick<Messages, 'app.start' | 'link.success' | 'route.header'> = {
-    'app.start': 'Hello, world',
+  const dict: Pick<Messages, 'app.no_data_in_snapshot' | 'link.success' | 'route.header'> = {
+    'app.no_data_in_snapshot': 'Hello, world',
     'link.success': 'Linked: {username}',
     'route.header': 'Found {count} beers, {km} km, {pubs} pubs',
   };
   const t = makeTranslatorFromDict('en', dict as Messages);
 
   test('returns a string verbatim when no params and no placeholders', () => {
-    expect(t('app.start')).toBe('Hello, world');
+    expect(t('app.no_data_in_snapshot')).toBe('Hello, world');
   });
 
   test('interpolates a single named placeholder', () => {

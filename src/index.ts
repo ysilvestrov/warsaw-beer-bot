@@ -17,6 +17,8 @@ import { pubsCommand } from './bot/commands/pubs';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
+import { helpCommand } from './bot/commands/help';
+import { registerCommandMenu } from './bot/register-command-menu';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
@@ -65,6 +67,7 @@ async function main(): Promise<void> {
     routeCommand,
     filtersCommand,
     langCommand,
+    helpCommand,
     createRefreshCommand(
       async (notify, opts) => {
         await refreshOntap({
@@ -118,6 +121,8 @@ async function main(): Promise<void> {
         .catch((e) => log.error({ err: e }, 'untappd cron'));
     }));
   }
+
+  await registerCommandMenu(bot, log);
 
   bot.launch();
   log.info('bot launched');

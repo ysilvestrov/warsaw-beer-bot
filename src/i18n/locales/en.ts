@@ -2,17 +2,21 @@ import type { Messages } from '../types';
 
 export const en: Messages = {
   // app
-  'app.start': [
-    'Hi! I help plan a route across Warsaw pubs and drink something new.',
-    '',
-    '1) /link <untappd-username> — to pull your check-ins.',
-    '2) /import — upload a CSV export from Untappd for a full history backfill.',
-    '3) /newbeers [pub-name fragment] — top untried beers; with an argument — only in matching pubs.',
-    '4) /pubs — list of available pubs.',
-    '5) /route N — a route covering ≥ N untried beers with minimal walking distance.',
-    '6) /beers <pub> — debug: all taps of a pub exactly as the bot parsed them.',
-  ].join('\n'),
   'app.no_data_in_snapshot': 'No interesting untried beers right now.',
+
+  // help / command catalog
+  'help.intro': 'Bot commands:',
+  'cmd.newbeers': 'top untried beers',
+  'cmd.route': 'walking route',
+  'cmd.pubs': 'list of pubs',
+  'cmd.filters': 'filters (style/rating/ABV)',
+  'cmd.link': 'link Untappd',
+  'cmd.import': 'import history (CSV/JSON/ZIP)',
+  'cmd.beers': 'pub taps diagnostics',
+  'cmd.refresh': 'refresh data',
+  'cmd.lang': 'interface language',
+  'cmd.help': 'this help',
+  'cmd.start': 'start',
 
   // link
   'link.usage': 'Usage: /link <username> (or full URL untappd.com/user/<username>)',

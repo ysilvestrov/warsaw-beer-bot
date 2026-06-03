@@ -2,17 +2,21 @@ import type { Messages } from '../types';
 
 export const uk: Messages = {
   // app
-  'app.start': [
-    'Привіт! Я допоможу зібрати маршрут по варшавських пабах і випити щось нове.',
-    '',
-    '1) /link <untappd-username> — щоб підтягувати твої чекіни.',
-    '2) /import — завантаж CSV-експорт зі свого Untappd для повного бекфілу історії.',
-    '3) /newbeers [пiдрядок назви паба] — топ непитих пив; з аргументом — тільки в матчених пабах.',
-    '4) /pubs — список доступних пабів.',
-    '5) /route N — маршрут, що покриває ≥ N непитих пив із мінімальною пішою відстанню.',
-    '6) /beers <паб> — діагностика: усі краны паба як їх розпарсив бот.',
-  ].join('\n'),
   'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
+
+  // help / command catalog
+  'help.intro': 'Команди бота:',
+  'cmd.newbeers': 'топ непитих пив',
+  'cmd.route': 'пішохідний маршрут',
+  'cmd.pubs': 'список пабів',
+  'cmd.filters': 'фільтри (стиль/рейтинг/ABV)',
+  'cmd.link': "прив'язати Untappd",
+  'cmd.import': 'імпорт історії (CSV/JSON/ZIP)',
+  'cmd.beers': 'діагностика кранів паба',
+  'cmd.refresh': 'оновити дані',
+  'cmd.lang': 'мова інтерфейсу',
+  'cmd.help': 'ця довідка',
+  'cmd.start': 'почати',
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
