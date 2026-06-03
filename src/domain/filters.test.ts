@@ -64,6 +64,23 @@ test('bucketForRange maps an exact (min,max) pair to its key, else null', () => 
   expect(bucketForRange(4, 6)).toBeNull();
 });
 
+test('filterInteresting matches styles by family, not substring', () => {
+  const rows = [
+    { beer_id: 10, style: 'IPA - American',      abv: 6, u_rating: 4 },
+    { beer_id: 11, style: 'Pale Ale - American', abv: 5, u_rating: 4 },
+    { beer_id: 12, style: 'Stout - Imperial',    abv: 9, u_rating: 4 },
+    { beer_id: 13, style: null,                  abv: 5, u_rating: 4 },
+  ];
+  // selecting 'IPA' yields only the IPA family
+  expect(filterInteresting(rows, new Set(), { styles: ['IPA'] }).map((r) => r.beer_id)).toEqual([10]);
+  // 'Ale' must NOT substring-match 'Pale Ale' anymore
+  expect(filterInteresting(rows, new Set(), { styles: ['Ale'] }).map((r) => r.beer_id)).toEqual([]);
+  // case-insensitive family match
+  expect(filterInteresting(rows, new Set(), { styles: ['stout'] }).map((r) => r.beer_id)).toEqual([12]);
+  // null style never matches a selected family
+  expect(filterInteresting(rows, new Set(), { styles: ['IPA', 'Stout'] }).map((r) => r.beer_id)).toEqual([10, 12]);
+});
+
 test('rankByRating sorts desc and breaks ties by beer_id', () => {
   const sorted = rankByRating([
     { beer_id: 1, u_rating: 3.5 }, { beer_id: 2, u_rating: 4.0 },
