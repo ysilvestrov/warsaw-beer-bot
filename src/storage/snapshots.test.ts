@@ -120,6 +120,56 @@ describe('tapsForSnapshotWithBeer', () => {
     expect(row.beer_id).toBeNull();
   });
 
+  test('matched beer with abv → prefers beers.abv over the (garbage) tap abv', () => {
+    const { db, snapId } = setupWithBeer();
+    const beerId = upsertBeer(db, {
+      untappd_id: 6400148,
+      name: 'Gardees II - 2025',
+      brewery: 'Brasserie La Malpolon',
+      style: 'Farmhouse Ale - Bière de Garde',
+      abv: 8.4,
+      rating_global: 3.85,
+      normalized_name: 'gardees ii',
+      normalized_brewery: 'brasserie la malpolon',
+    });
+    upsertMatch(db, 'GARDEES II - 2025', beerId, 1.0);
+    insertTaps(db, snapId, [
+      { tap_number: 24, beer_ref: 'GARDEES II - 2025', brewery_ref: 'Brasserie La Malpolon Brewery', abv: 40, ibu: 8.4, style: null, u_rating: null },
+    ]);
+    const [row] = tapsForSnapshotWithBeer(db, snapId);
+    expect(row.abv).toBe(8.4);
+    expect(row.beer_id).toBe(beerId);
+  });
+
+  test('matched beer with NULL abv → falls back to tap abv', () => {
+    const { db, snapId } = setupWithBeer();
+    const beerId = upsertBeer(db, {
+      untappd_id: 200,
+      name: 'No Abv Beer',
+      brewery: 'X',
+      style: null,
+      abv: null,
+      rating_global: 3.5,
+      normalized_name: 'no abv beer',
+      normalized_brewery: 'x',
+    });
+    upsertMatch(db, 'X No Abv Beer', beerId, 1.0);
+    insertTaps(db, snapId, [
+      { tap_number: 1, beer_ref: 'X No Abv Beer', brewery_ref: 'X', abv: 5.2, ibu: null, style: null, u_rating: null },
+    ]);
+    const [row] = tapsForSnapshotWithBeer(db, snapId);
+    expect(row.abv).toBe(5.2);
+  });
+
+  test('orphan tap (no match) → keeps tap abv', () => {
+    const { db, snapId } = setupWithBeer();
+    insertTaps(db, snapId, [
+      { tap_number: 1, beer_ref: 'Lonely', brewery_ref: 'Nobody', abv: 6.6, ibu: null, style: null, u_rating: null },
+    ]);
+    const [row] = tapsForSnapshotWithBeer(db, snapId);
+    expect(row.abv).toBe(6.6);
+  });
+
   test('preserves ORDER BY tap_number', () => {
     const { db, snapId } = setupWithBeer();
     insertTaps(db, snapId, [
