@@ -1,7 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertPub } from './pubs';
-import { createSnapshot, latestSnapshot, insertTaps, tapsForSnapshot, tapsForSnapshotWithBeer } from './snapshots';
+import { createSnapshot, latestSnapshot, insertTaps, tapsForSnapshot, tapsForSnapshotWithBeer, currentTapStyles } from './snapshots';
 import { upsertBeer } from './beers';
 import { upsertMatch } from './match_links';
 
@@ -130,4 +130,29 @@ describe('tapsForSnapshotWithBeer', () => {
     const rows = tapsForSnapshotWithBeer(db, snapId);
     expect(rows.map((r) => r.beer_ref)).toEqual(['A', 'B', 'C']);
   });
+});
+
+test('currentTapStyles returns styles from the latest snapshot of each pub only', () => {
+  const { db, pubId } = setup();
+  const pubId2 = upsertPub(db, { slug: 'q', name: 'Q', address: null, lat: null, lon: null });
+
+  // older snapshot for pub 1 — must be ignored
+  const old = createSnapshot(db, pubId, '2026-06-01T10:00:00Z');
+  insertTaps(db, old, [
+    { tap_number: 1, beer_ref: 'old', brewery_ref: null, abv: 5, ibu: null, style: 'Porter - Baltic', u_rating: null },
+  ]);
+  // latest snapshot for pub 1
+  const cur1 = createSnapshot(db, pubId, '2026-06-03T10:00:00Z');
+  insertTaps(db, cur1, [
+    { tap_number: 1, beer_ref: 'a', brewery_ref: null, abv: 6, ibu: null, style: 'IPA - American', u_rating: null },
+    { tap_number: 2, beer_ref: 'b', brewery_ref: null, abv: 5, ibu: null, style: null, u_rating: null },
+  ]);
+  // latest snapshot for pub 2
+  const cur2 = createSnapshot(db, pubId2, '2026-06-03T11:00:00Z');
+  insertTaps(db, cur2, [
+    { tap_number: 1, beer_ref: 'c', brewery_ref: null, abv: 7, ibu: null, style: 'Sour - Fruited', u_rating: null },
+  ]);
+
+  const styles = currentTapStyles(db).sort();
+  expect(styles).toEqual(['IPA - American', 'Sour - Fruited']); // no Porter (old), no null
 });
