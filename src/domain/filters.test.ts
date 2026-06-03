@@ -1,4 +1,4 @@
-import { filterInteresting, rankByRating, familyOf, topStyleFamilies } from './filters';
+import { filterInteresting, rankByRating, familyOf, topStyleFamilies, ABV_BUCKETS, bucketForRange } from './filters';
 
 const taps = [
   { beer_id: 1, style: 'IPA',   abv: 6.1, u_rating: 4.0 },
@@ -47,6 +47,21 @@ test('topStyleFamilies appends active families absent from the top-n (alpha)', (
 test('topStyleFamilies on empty taps returns only active families', () => {
   expect(topStyleFamilies([], ['Stout'], 10)).toEqual(['Stout']);
   expect(topStyleFamilies([], [], 10)).toEqual([]);
+});
+
+test('ABV_BUCKETS are the four agreed single-select ranges', () => {
+  expect(ABV_BUCKETS.map((b) => b.key)).toEqual(['0-5', '5-7', '7-9', '9plus']);
+  expect(ABV_BUCKETS.map((b) => [b.min, b.max])).toEqual([
+    [null, 5], [5, 7], [7, 9], [9, null],
+  ]);
+});
+
+test('bucketForRange maps an exact (min,max) pair to its key, else null', () => {
+  expect(bucketForRange(null, 5)).toBe('0-5');
+  expect(bucketForRange(5, 7)).toBe('5-7');
+  expect(bucketForRange(9, null)).toBe('9plus');
+  expect(bucketForRange(null, null)).toBeNull();
+  expect(bucketForRange(4, 6)).toBeNull();
 });
 
 test('rankByRating sorts desc and breaks ties by beer_id', () => {

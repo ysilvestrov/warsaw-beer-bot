@@ -45,6 +45,25 @@ export function topStyleFamilies(
   return [...top, ...extraActive];
 }
 
+export interface AbvBucket {
+  key: string;
+  label: string;
+  min: number | null;
+  max: number | null;
+}
+
+export const ABV_BUCKETS: ReadonlyArray<AbvBucket> = [
+  { key: '0-5', label: '≤5%', min: null, max: 5 },
+  { key: '5-7', label: '5–7%', min: 5, max: 7 },
+  { key: '7-9', label: '7–9%', min: 7, max: 9 },
+  { key: '9plus', label: '9%+', min: 9, max: null },
+];
+
+export function bucketForRange(abvMin: number | null, abvMax: number | null): string | null {
+  const b = ABV_BUCKETS.find((x) => x.min === abvMin && x.max === abvMax);
+  return b ? b.key : null;
+}
+
 export function filterInteresting<T extends TapView>(
   taps: T[], tried: Set<number>, opts: FilterOpts,
 ): T[] {
