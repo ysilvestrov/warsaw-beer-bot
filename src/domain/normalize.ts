@@ -18,7 +18,7 @@ function stripDiacritics(s: string): string {
     .replace(/ł/g, 'l').replace(/Ł/g, 'L');
 }
 
-function baseNormalize(s: string): string {
+export function baseNormalize(s: string): string {
   return stripDiacritics(s).toLowerCase()
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .replace(/\s+/g, ' ')
