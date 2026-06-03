@@ -1,5 +1,6 @@
 import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
+import { ABV_BUCKETS } from '../domain/filters';
 
 export const langKeyboard = () =>
   Markup.inlineKeyboard([
@@ -8,10 +9,39 @@ export const langKeyboard = () =>
     [Markup.button.callback('🇬🇧 English', 'lang:en')],
   ]);
 
-export const filtersKeyboard = (t: Translator) =>
-  Markup.inlineKeyboard([
-    [Markup.button.callback('IPA', 'style:IPA'), Markup.button.callback('Pils', 'style:Pils')],
-    [Markup.button.callback('Stout', 'style:Stout'), Markup.button.callback('Sour', 'style:Sour')],
-    [Markup.button.callback('min 3.5', 'rating:3.5'), Markup.button.callback('min 3.8', 'rating:3.8')],
+export interface FiltersKeyboardState {
+  families: string[];        // already ordered: top-N present ∪ active
+  activeStyles: string[];
+  abvKey: string | null;     // active ABV bucket key, or null
+  minRating: number | null;  // active rating preset, or null
+}
+
+const RATING_PRESETS = [3.5, 3.8] as const;
+
+export const filtersKeyboard = (t: Translator, state: FiltersKeyboardState) => {
+  const activeLc = new Set(state.activeStyles.map((s) => s.toLowerCase()));
+
+  const styleRows = [];
+  for (let i = 0; i < state.families.length; i += 2) {
+    const row = state.families.slice(i, i + 2).map((fam) => {
+      const on = activeLc.has(fam.toLowerCase());
+      return Markup.button.callback(on ? `✅ ${fam}` : fam, `style:${fam}`);
+    });
+    styleRows.push(row);
+  }
+
+  const abvRow = ABV_BUCKETS.map((b) =>
+    Markup.button.callback(b.key === state.abvKey ? `✅ ${b.label}` : b.label, `abv:${b.key}`),
+  );
+
+  const ratingRow = RATING_PRESETS.map((r) =>
+    Markup.button.callback(state.minRating === r ? `✅ min ${r}` : `min ${r}`, `rating:${r}`),
+  );
+
+  return Markup.inlineKeyboard([
+    ...styleRows,
+    abvRow,
+    ratingRow,
     [Markup.button.callback(t('filters.reset_button'), 'reset')],
   ]);
+};
