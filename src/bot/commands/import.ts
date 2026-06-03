@@ -11,6 +11,7 @@ import { upsertBeer } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
 import { ensureProfile } from '../../storage/user_profiles';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
+import { withBusyRetry } from '../../storage/busy-retry';
 
 const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -90,7 +91,7 @@ importCommand.on('document', async (ctx) => {
     for await (const row of iterExport(stream, format)) {
       batch.push(row);
       if (batch.length >= BATCH_SIZE) {
-        flushBatch(batch);
+        await withBusyRetry(() => flushBatch(batch));
         total += batch.length;
         batch = [];
         if (Date.now() - lastReport > PROGRESS_INTERVAL_MS) {
@@ -100,7 +101,7 @@ importCommand.on('document', async (ctx) => {
       }
     }
     if (batch.length) {
-      flushBatch(batch);
+      await withBusyRetry(() => flushBatch(batch));
       total += batch.length;
     }
     await report(ctx.t('import.done', { total, format: format.toUpperCase() }));
