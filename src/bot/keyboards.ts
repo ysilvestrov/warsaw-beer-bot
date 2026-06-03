@@ -1,6 +1,6 @@
 import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
-import { ABV_BUCKETS } from '../domain/filters';
+import { ABV_PRESETS } from '../domain/filters';
 import { OTHER_FAMILY } from '../domain/style-family';
 
 export const langKeyboard = () =>
@@ -32,7 +32,7 @@ export const filtersKeyboard = (t: Translator, state: FiltersKeyboardState) => {
     styleRows.push(row);
   }
 
-  const abvRow = ABV_BUCKETS.map((b) =>
+  const abvRow = ABV_PRESETS.map((b) =>
     Markup.button.callback(b.key === state.abvKey ? `✅ ${b.label}` : b.label, `abv:${b.key}`),
   );
 
