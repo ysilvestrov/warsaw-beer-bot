@@ -326,9 +326,17 @@ pubs          *───* pubs             via pub_distances (a<b)
 > `user_profiles.language`; `/lang` дозволяє override.
 > Усі команди наразі stateless (без Telegraf scenes).
 
-### `/start` — реєстрація
-Створює профіль (ключ — `telegram_id`), друкує коротку інструкцію.
-Ідемпотентна: повтор не дублює профіль.
+### `/start` та `/help` — реєстрація + довідник команд
+`/start` створює профіль (ключ — `telegram_id`; ідемпотентно) і друкує довідку.
+`/help` друкує **той самий** текст без сайд-ефектів. Джерело тексту —
+`buildHelpText` з `src/bot/commands/catalog.ts`: `COMMAND_CATALOG` (єдиний
+впорядкований список усіх команд) + i18n-описи `cmd.*` / `help.intro`.
+Локалізовано (uk/pl/en).
+
+Нативне меню Telegram («/») заповнюється на старті через
+`registerCommandMenu` (`src/bot/register-command-menu.ts`): `setMyCommands` для
+`uk`/`pl`/`en` + дефолтний англійський scope, з того ж каталогу. Збій
+`setMyCommands` лише логується (`warn`), старт не падає.
 
 ### `/link <username>` — прив'язка Untappd
 Приймає bare-username, `untappd.com/user/<u>`, з/без `www`. Валідація у
