@@ -42,7 +42,10 @@ export async function* iterExport(
     return;
   }
   if (format === 'csv') {
-    const parser = input.pipe(csvParse({ columns: true, skip_empty_lines: true, trim: true }));
+    // bom: true strips a UTF-8 BOM so the first header (beer_name) isn't read as
+    // "﻿beer_name" — otherwise every row's beer_name is undefined and the
+    // import crashes in normalizeName. Untappd's CSV export puts beer_name first.
+    const parser = input.pipe(csvParse({ columns: true, skip_empty_lines: true, trim: true, bom: true }));
     for await (const r of parser) yield mapCsv(r as Record<string, string>);
     return;
   }
@@ -53,6 +56,13 @@ export async function* iterExport(
 }
 
 function mapCsv(r: Record<string, string>): Checkin {
+  // columns:true keys every row off the header. A missing beer_name key means
+  // the header didn't parse as expected (wrong delimiter — e.g. ';' from Excel —
+  // or non-Untappd columns). Fail with a clear message instead of crashing later
+  // in normalizeName. (An empty *value* is fine; only an absent column throws.)
+  if (r['beer_name'] === undefined) {
+    throw new Error('CSV has no "beer_name" column — check the delimiter/columns of the export');
+  }
   return {
     checkin_id: r['checkin_id'],
     bid: numOrNull(r['bid']),
