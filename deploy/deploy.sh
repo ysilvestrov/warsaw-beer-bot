@@ -20,6 +20,7 @@ sudo rsync -a --delete \
   --exclude .git \
   --exclude .worktrees \
   --exclude dist \
+  --exclude '*.png' \
   ./ "$APP"/
 
 # rsync -a preserves source ownership (root); reset before npm runs as warsaw-beer-bot.
