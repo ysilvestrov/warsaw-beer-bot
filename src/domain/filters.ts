@@ -1,3 +1,5 @@
+import { canonicalStyleFamily } from './style-family';
+
 export interface TapView {
   beer_id: number | null;
   style: string | null;
@@ -12,15 +14,6 @@ export interface FilterOpts {
   abv_max?: number | null;
 }
 
-export function familyOf(style: string | null): string | null {
-  if (style == null) return null;
-  const trimmed = style.trim();
-  if (trimmed === '') return null;
-  const idx = trimmed.indexOf(' - ');
-  const fam = (idx === -1 ? trimmed : trimmed.slice(0, idx)).trim();
-  return fam === '' ? null : fam;
-}
-
 export function topStyleFamilies(
   currentTapStyles: (string | null)[],
   activeStyles: string[],
@@ -28,8 +21,10 @@ export function topStyleFamilies(
 ): string[] {
   const counts = new Map<string, number>();
   for (const s of currentTapStyles) {
-    const fam = familyOf(s);
-    if (fam == null) continue;
+    // Skip absence-of-style (null/empty) so it doesn't inflate the Other
+    // bucket in the ranking; a non-empty unmatched style still counts as Other.
+    if (s == null || s.trim() === '') continue;
+    const fam = canonicalStyleFamily(s);
     counts.set(fam, (counts.get(fam) ?? 0) + 1);
   }
   const top = [...counts.entries()]
@@ -74,8 +69,8 @@ export function filterInteresting<T extends TapView>(
     if (opts.abv_min != null && (t.abv ?? 0) < opts.abv_min) return false;
     if (opts.abv_max != null && (t.abv ?? 0) > opts.abv_max) return false;
     if (opts.styles && opts.styles.length) {
-      const fam = familyOf(t.style);
-      if (fam == null || !opts.styles.some((x) => x.toLowerCase() === fam.toLowerCase())) {
+      const fam = canonicalStyleFamily(t.style);
+      if (!opts.styles.some((x) => x.toLowerCase() === fam.toLowerCase())) {
         return false;
       }
     }

@@ -69,6 +69,7 @@ export const pl: Messages = {
   'filters.current':
     '🎛 Twoje filtry\nStyle: {styles}\nMoc: {abv}\nOcena: {rating}\n\nKliknij, aby włączyć/wyłączyć. ♻️ — zresetuj wszystko.',
   'filters.any': 'dowolna',
+  'filters.family_other': 'Inne',
   'filters.rating_value': 'od {rating}',
   'filters.reset_done': 'Zresetowano',
   'filters.reset_button': '♻️ Zresetuj wszystko',

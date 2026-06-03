@@ -69,6 +69,7 @@ export const en: Messages = {
   'filters.current':
     '🎛 Your filters\nStyles: {styles}\nABV: {abv}\nRating: {rating}\n\nTap to toggle. ♻️ — reset all.',
   'filters.any': 'any',
+  'filters.family_other': 'Other',
   'filters.rating_value': 'from {rating}',
   'filters.reset_done': 'Filters reset',
   'filters.reset_button': '♻️ Reset all',

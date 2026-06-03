@@ -5,6 +5,7 @@ import { getFilters, setFilters, type Filters } from '../../storage/user_filters
 import { ensureProfile } from '../../storage/user_profiles';
 import { currentTapStyles } from '../../storage/snapshots';
 import { topStyleFamilies, ABV_BUCKETS, bucketForRange } from '../../domain/filters';
+import { OTHER_FAMILY } from '../../domain/style-family';
 import type { DB } from '../../storage/db';
 import type { Translator } from '../../i18n/types';
 
@@ -19,7 +20,9 @@ const emptyFilters = (): Filters => ({
 function render(t: Translator, db: DB, f: Filters): { text: string; kb: ReturnType<typeof filtersKeyboard> } {
   const families = topStyleFamilies(currentTapStyles(db), f.styles, 10);
   const abvKey = bucketForRange(f.abv_min, f.abv_max);
-  const stylesStr = f.styles.length ? f.styles.join(', ') : t('filters.any');
+  const stylesStr = f.styles.length
+    ? f.styles.map((s) => (s === OTHER_FAMILY ? t('filters.family_other') : s)).join(', ')
+    : t('filters.any');
   const abvStr = abvKey ? ABV_BUCKETS.find((b) => b.key === abvKey)!.label : t('filters.any');
   const ratingStr = f.min_rating != null ? t('filters.rating_value', { rating: f.min_rating }) : t('filters.any');
   const text = t('filters.current', { styles: stylesStr, abv: abvStr, rating: ratingStr });

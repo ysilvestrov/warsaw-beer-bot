@@ -69,6 +69,7 @@ export const uk: Messages = {
   'filters.current':
     '🎛 Твої фільтри\nСтилі: {styles}\nМіцність: {abv}\nРейтинг: {rating}\n\nТисни, щоб увімкнути/вимкнути. ♻️ — скинути все.',
   'filters.any': 'будь-яка',
+  'filters.family_other': 'Інше',
   'filters.rating_value': 'від {rating}',
   'filters.reset_done': 'Скинуто',
   'filters.reset_button': '♻️ Скинути все',
