@@ -42,6 +42,13 @@ test('filtersKeyboard renders ABV buckets, rating presets and reset; marks activ
   expect(all.find((b) => b.callback_data === 'reset')!.text).toBe('♻️ Reset all');
 });
 
+test('filtersKeyboard splits ABV into a caps row and a floors row', () => {
+  const kb = filtersKeyboard(t, { families: [], activeStyles: [], abvKey: null, minRating: null });
+  const rows = kb.reply_markup.inline_keyboard as { callback_data: string }[][];
+  expect(rows[0].map((b) => b.callback_data)).toEqual(['abv:lte3_5', 'abv:lte5']);
+  expect(rows[1].map((b) => b.callback_data)).toEqual(['abv:gte5', 'abv:gte7', 'abv:gte9']);
+});
+
 test('filtersKeyboard renders the Other family with its localized label, raw callback', () => {
   const kb = filtersKeyboard(t, {
     families: ['IPA', 'Other'],

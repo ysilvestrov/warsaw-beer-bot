@@ -32,9 +32,10 @@ export const filtersKeyboard = (t: Translator, state: FiltersKeyboardState) => {
     styleRows.push(row);
   }
 
-  const abvRow = ABV_PRESETS.map((b) =>
-    Markup.button.callback(b.key === state.abvKey ? `✅ ${b.label}` : b.label, `abv:${b.key}`),
-  );
+  const abvBtn = (b: (typeof ABV_PRESETS)[number]) =>
+    Markup.button.callback(b.key === state.abvKey ? `✅ ${b.label}` : b.label, `abv:${b.key}`);
+  const abvCapRow = ABV_PRESETS.filter((b) => b.max != null).map(abvBtn); // ≤X
+  const abvFloorRow = ABV_PRESETS.filter((b) => b.min != null).map(abvBtn); // X+
 
   const ratingRow = RATING_PRESETS.map((r) =>
     Markup.button.callback(state.minRating === r ? `✅ min ${r}` : `min ${r}`, `rating:${r}`),
@@ -42,7 +43,8 @@ export const filtersKeyboard = (t: Translator, state: FiltersKeyboardState) => {
 
   return Markup.inlineKeyboard([
     ...styleRows,
-    abvRow,
+    abvCapRow,
+    abvFloorRow,
     ratingRow,
     [Markup.button.callback(t('filters.reset_button'), 'reset')],
   ]);
