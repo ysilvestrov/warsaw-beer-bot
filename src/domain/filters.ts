@@ -12,6 +12,58 @@ export interface FilterOpts {
   abv_max?: number | null;
 }
 
+export function familyOf(style: string | null): string | null {
+  if (style == null) return null;
+  const trimmed = style.trim();
+  if (trimmed === '') return null;
+  const idx = trimmed.indexOf(' - ');
+  const fam = (idx === -1 ? trimmed : trimmed.slice(0, idx)).trim();
+  return fam === '' ? null : fam;
+}
+
+export function topStyleFamilies(
+  currentTapStyles: (string | null)[],
+  activeStyles: string[],
+  n = 10,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const s of currentTapStyles) {
+    const fam = familyOf(s);
+    if (fam == null) continue;
+    counts.set(fam, (counts.get(fam) ?? 0) + 1);
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, n)
+    .map(([fam]) => fam);
+
+  const present = new Set(top.map((f) => f.toLowerCase()));
+  const extraActive = activeStyles
+    .filter((f) => !present.has(f.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+
+  return [...top, ...extraActive];
+}
+
+export interface AbvBucket {
+  key: string;
+  label: string;
+  min: number | null;
+  max: number | null;
+}
+
+export const ABV_BUCKETS: ReadonlyArray<AbvBucket> = [
+  { key: '0-5', label: '≤5%', min: null, max: 5 },
+  { key: '5-7', label: '5–7%', min: 5, max: 7 },
+  { key: '7-9', label: '7–9%', min: 7, max: 9 },
+  { key: '9plus', label: '9%+', min: 9, max: null },
+];
+
+export function bucketForRange(abvMin: number | null, abvMax: number | null): string | null {
+  const b = ABV_BUCKETS.find((x) => x.min === abvMin && x.max === abvMax);
+  return b ? b.key : null;
+}
+
 export function filterInteresting<T extends TapView>(
   taps: T[], tried: Set<number>, opts: FilterOpts,
 ): T[] {
@@ -22,8 +74,10 @@ export function filterInteresting<T extends TapView>(
     if (opts.abv_min != null && (t.abv ?? 0) < opts.abv_min) return false;
     if (opts.abv_max != null && (t.abv ?? 0) > opts.abv_max) return false;
     if (opts.styles && opts.styles.length) {
-      const s = (t.style ?? '').toLowerCase();
-      if (!opts.styles.some((x) => s.includes(x.toLowerCase()))) return false;
+      const fam = familyOf(t.style);
+      if (fam == null || !opts.styles.some((x) => x.toLowerCase() === fam.toLowerCase())) {
+        return false;
+      }
     }
     return true;
   });

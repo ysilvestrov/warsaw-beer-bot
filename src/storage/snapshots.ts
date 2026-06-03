@@ -74,3 +74,18 @@ export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer
     ORDER BY t.tap_number
   `).all(snapshotId) as TapWithBeer[];
 }
+
+export function currentTapStyles(db: DB): string[] {
+  const rows = db
+    .prepare(
+      `SELECT t.style AS style
+         FROM taps t
+         JOIN tap_snapshots s ON s.id = t.snapshot_id
+         JOIN (
+           SELECT pub_id, MAX(snapshot_at) AS m FROM tap_snapshots GROUP BY pub_id
+         ) x ON x.pub_id = s.pub_id AND x.m = s.snapshot_at
+        WHERE t.style IS NOT NULL`,
+    )
+    .all() as { style: string }[];
+  return rows.map((r) => r.style);
+}

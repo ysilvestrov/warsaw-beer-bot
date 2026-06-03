@@ -1,4 +1,4 @@
-import { filterInteresting, rankByRating } from './filters';
+import { filterInteresting, rankByRating, familyOf, topStyleFamilies, ABV_BUCKETS, bucketForRange } from './filters';
 
 const taps = [
   { beer_id: 1, style: 'IPA',   abv: 6.1, u_rating: 4.0 },
@@ -13,6 +13,72 @@ test('filterInteresting respects checkins + style + rating + abv', () => {
     styles: ['IPA'], min_rating: 3.8, abv_min: 4, abv_max: 8,
   });
   expect(out.map((t) => t.beer_id)).toEqual([3]);
+});
+
+test('familyOf splits on the first " - " and trims', () => {
+  expect(familyOf('IPA - American')).toBe('IPA');
+  expect(familyOf('Sour - Fruited - Other')).toBe('Sour');
+  expect(familyOf('Mead')).toBe('Mead');
+  expect(familyOf('  Pilsner - German  ')).toBe('Pilsner');
+  expect(familyOf(null)).toBeNull();
+  expect(familyOf('')).toBeNull();
+  expect(familyOf('   ')).toBeNull();
+});
+
+test('topStyleFamilies ranks present families by count, then alpha, caps at n', () => {
+  const styles = [
+    'IPA - American', 'IPA - Imperial', 'IPA - New England',  // IPA x3
+    'Sour - Fruited', 'Sour - Other',                          // Sour x2
+    'Lager - Pale',                                            // Lager x1
+    'Stout - Imperial',                                        // Stout x1
+    null, '',                                                  // ignored
+  ];
+  expect(topStyleFamilies(styles, [], 2)).toEqual(['IPA', 'Sour']);
+  // count tie (Lager 1, Stout 1) breaks alphabetically
+  expect(topStyleFamilies(styles, [], 4)).toEqual(['IPA', 'Sour', 'Lager', 'Stout']);
+});
+
+test('topStyleFamilies appends active families absent from the top-n (alpha)', () => {
+  const styles = ['IPA - American', 'IPA - Imperial'];
+  // Saison + Bock are active but not on tap → appended, alpha-sorted, after present
+  expect(topStyleFamilies(styles, ['Saison', 'IPA', 'Bock'], 1)).toEqual(['IPA', 'Bock', 'Saison']);
+});
+
+test('topStyleFamilies on empty taps returns only active families', () => {
+  expect(topStyleFamilies([], ['Stout'], 10)).toEqual(['Stout']);
+  expect(topStyleFamilies([], [], 10)).toEqual([]);
+});
+
+test('ABV_BUCKETS are the four agreed single-select ranges', () => {
+  expect(ABV_BUCKETS.map((b) => b.key)).toEqual(['0-5', '5-7', '7-9', '9plus']);
+  expect(ABV_BUCKETS.map((b) => [b.min, b.max])).toEqual([
+    [null, 5], [5, 7], [7, 9], [9, null],
+  ]);
+});
+
+test('bucketForRange maps an exact (min,max) pair to its key, else null', () => {
+  expect(bucketForRange(null, 5)).toBe('0-5');
+  expect(bucketForRange(5, 7)).toBe('5-7');
+  expect(bucketForRange(9, null)).toBe('9plus');
+  expect(bucketForRange(null, null)).toBeNull();
+  expect(bucketForRange(4, 6)).toBeNull();
+});
+
+test('filterInteresting matches styles by family, not substring', () => {
+  const rows = [
+    { beer_id: 10, style: 'IPA - American',      abv: 6, u_rating: 4 },
+    { beer_id: 11, style: 'Pale Ale - American', abv: 5, u_rating: 4 },
+    { beer_id: 12, style: 'Stout - Imperial',    abv: 9, u_rating: 4 },
+    { beer_id: 13, style: null,                  abv: 5, u_rating: 4 },
+  ];
+  // selecting 'IPA' yields only the IPA family
+  expect(filterInteresting(rows, new Set(), { styles: ['IPA'] }).map((r) => r.beer_id)).toEqual([10]);
+  // 'Ale' must NOT substring-match 'Pale Ale' anymore
+  expect(filterInteresting(rows, new Set(), { styles: ['Ale'] }).map((r) => r.beer_id)).toEqual([]);
+  // case-insensitive family match
+  expect(filterInteresting(rows, new Set(), { styles: ['stout'] }).map((r) => r.beer_id)).toEqual([12]);
+  // null style never matches a selected family
+  expect(filterInteresting(rows, new Set(), { styles: ['IPA', 'Stout'] }).map((r) => r.beer_id)).toEqual([10, 12]);
 });
 
 test('rankByRating sorts desc and breaks ties by beer_id', () => {

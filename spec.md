@@ -276,8 +276,8 @@ src/
 | `telegram_id` | INTEGER | PK → `user_profiles(telegram_id)` **ON DELETE CASCADE** | |
 | `styles` | TEXT | nullable | список стилів (серіалізований) |
 | `min_rating` | REAL | nullable | мінімальний Untappd-рейтинг |
-| `abv_min` | REAL | nullable | (у схемі; ще не в кнопках) |
-| `abv_max` | REAL | nullable | (у схемі; ще не в кнопках) |
+| `abv_min` | REAL | nullable | мінімальний ABV (керується ABV-бакетами в /filters) |
+| `abv_max` | REAL | nullable | максимальний ABV (керується ABV-бакетами в /filters) |
 | `default_route_n` | INTEGER | nullable | дефолт для `/route` |
 
 ### 3.10 `pub_distances` — кеш пішохідних дистанцій (v2)
@@ -385,9 +385,16 @@ pubs          *───* pubs             via pub_distances (a<b)
 `editMessageText` (обхід `handlerTimeout` 90 c).
 
 ### `/filters` — інлайн-фільтри
-Toggle стилів (`IPA`/`Pils`/`Stout`/`Sour`), `min 3.5`/`min 3.8`, `Скинути`.
-Поточний стан показано в тілі повідомлення. ABV-фільтри є в схемі, але поки не
-винесені в кнопки.
+Стейтфул інлайн-клавіатура; кожен тап перемальовує клавіатуру й
+повідомлення-зведення (✓ на активних фільтрах).
+- **Стилі:** топ-10 родин (`familyOf` = частина Untappd-стилю до `" - "`),
+  що є на кранах прямо зараз, ∪ активні родини користувача (multi-select).
+  Матчинг — family-equality (`domain/filters.ts`), не substring.
+- **ABV:** пресетні бакети `≤5%`/`5–7%`/`7–9%`/`9%+` (single-select); тап по
+  активному очищає. Виставляють `user_filters.abv_min/abv_max`.
+- **Рейтинг:** пресети `min 3.5`/`min 3.8` (тап по активному очищає).
+- **♻️ Скинути все** — очищає всі фільтри.
+Поточний стан показано в тілі повідомлення.
 
 ### `/lang` — мова інтерфейсу
 Інлайн-вибір 🇺🇦/🇵🇱/🇬🇧. Підтвердження редагується вже **новою** мовою.

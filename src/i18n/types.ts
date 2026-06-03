@@ -62,9 +62,9 @@ export interface Messages {
   'refresh.failed': string;
 
   // filters
-  'filters.current': string;             // {styles}, {min_rating}
-  'filters.styles_changed': string;      // {styles}
-  'filters.rating_changed': string;      // {rating}
+  'filters.current': string;             // {styles}, {abv}, {rating} — multi-line summary
+  'filters.any': string;                 // value shown when a filter is unset
+  'filters.rating_value': string;        // {rating} — e.g. "from 3.8"
   'filters.reset_done': string;          // callback answer after reset
   'filters.reset_button': string;        // inline-keyboard button label
 
