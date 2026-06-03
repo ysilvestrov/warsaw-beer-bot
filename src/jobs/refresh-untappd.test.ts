@@ -43,6 +43,24 @@ const PAGE_ONE_BEER = (bid: number, name: string, brewery: string, global: strin
     </div>
   </div>`;
 
+const PAGE_ONE_BEER_ABV = (
+  bid: number, name: string, brewery: string, global: string, abv: string,
+) => `
+  <div class="beer-item" data-bid="${bid}">
+    <div class="beer-details">
+      <p class="name"><a href="/b/x/${bid}">${name}</a></p>
+      <p class="brewery"><a href="/x">${brewery}</a></p>
+      <p class="style">IPA</p>
+      <div class="ratings">
+        <div class="you">
+          <p>Global Rating (${global})</p>
+          <div class="caps" data-rating="${global}"></div>
+        </div>
+      </div>
+    </div>
+    <p class="abv">${abv}</p>
+  </div>`;
+
 // IMPORTANT for test names: `normalizeBrewery` strips tokens
 // `brewing/brewery/co/company/browar`; `normalizeName` strips style words
 // like `ipa/lager/stout/...`. Keep test fixtures clear of those tokens
@@ -66,6 +84,52 @@ describe('refreshAllUntappd', () => {
     expect(row!.rating_global).toBe(4.12);
     expect(row!.abv).toBeNull();
     expect(row!.style).toBe('IPA');
+  });
+
+  test('inserts a new beer with abv parsed from /beers', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers':
+        PAGE_ONE_BEER_ABV(300, 'Gardees', 'Malpolon', '3.85', '8.4% ABV'),
+    });
+
+    await refreshAllUntappd({ db, log: silentLog, http });
+
+    const row = findBeerByNormalized(db, 'malpolon', 'gardees')!;
+    expect(row.untappd_id).toBe(300);
+    expect(row.abv).toBe(8.4);
+  });
+
+  test('backfills abv on an existing matched beer whose abv was NULL', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+
+    const seededId = upsertBeer(db, {
+      untappd_id: 6400148,
+      name: 'Gardees',
+      brewery: 'Malpolon',
+      style: 'Farmhouse Ale',
+      abv: null,
+      rating_global: 3.85,
+      normalized_name: 'gardees',
+      normalized_brewery: 'malpolon',
+    });
+
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers':
+        PAGE_ONE_BEER_ABV(6400148, 'Gardees', 'Malpolon', '3.90', '8.4% ABV'),
+    });
+
+    await refreshAllUntappd({ db, log: silentLog, http });
+
+    const row = findBeerByNormalized(db, 'malpolon', 'gardees')!;
+    expect(row.id).toBe(seededId);
+    expect(row.abv).toBe(8.4);
+    expect(row.rating_global).toBe(3.90);
   });
 
   test('matches existing row by normalized name+brewery; updates rating_global only', async () => {

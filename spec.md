@@ -173,7 +173,7 @@ src/
 | `name` | TEXT | NOT NULL | канонічна назва пива |
 | `brewery` | TEXT | NOT NULL | пивоварня |
 | `style` | TEXT | nullable | стиль |
-| `abv` | REAL | nullable | міцність, % |
+| `abv` | REAL | nullable | міцність, %; заповнюється з Untappd (`refreshAllUntappd` парсить `.abv`, backfill через `COALESCE`; orphan-lookup — теж) |
 | `rating_global` | REAL | nullable | публічний рейтинг Untappd (`global_weighted_rating_score`) |
 | `normalized_name` | TEXT | NOT NULL | для матчингу |
 | `normalized_brewery` | TEXT | NOT NULL | для матчингу |
@@ -348,7 +348,9 @@ pubs          *───* pubs             via pub_distances (a<b)
 Топ-**15** цікавих непитих пив, **згруповано по пиву**.
 **Під капотом:**
 1. для кожного паба беремо latest snapshot → `tapsForSnapshotWithBeer`
-   (COALESCE рейтингу: `tap.u_rating` → `beers.rating_global`);
+   (COALESCE рейтингу: `tap.u_rating` → `beers.rating_global`; COALESCE ABV —
+   **навпаки**: `beers.abv` → `tap.abv`, бо tap-ABV з ontap вводиться вручну й
+   буває помилковим, тож авторитетний Untappd-ABV переважає);
 2. `filterInteresting(taps, drunkSet, user_filters)` — відсів випитого
    (`checkins ∪ untappd_had`) і застосування фільтрів;
 3. групування за `match_links.untappd_beer_id` (fallback —

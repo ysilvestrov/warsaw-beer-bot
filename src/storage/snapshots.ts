@@ -57,13 +57,17 @@ export interface TapWithBeer extends TapRow {
   beer_id: number | null;
   untappd_id: number | null;
   // u_rating on this row is the COALESCEd value: tap.u_rating ?? beers.rating_global ?? null
+  // abv prefers the matched beer's Untappd value over the tap's: beers.abv ?? tap.abv ?? null.
+  // (Opposite precedence from rating: ontap's hand-entered tap ABV is unreliable — e.g. a
+  // pub once entered 40% ABV / 8.4 IBU swapped — so the authoritative Untappd value wins.)
 }
 
 export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer[] {
   return db.prepare(`
     SELECT
       t.id, t.snapshot_id, t.tap_number, t.beer_ref, t.brewery_ref,
-      t.abv, t.ibu, t.style,
+      COALESCE(b.abv, t.abv) AS abv,
+      t.ibu, t.style,
       COALESCE(t.u_rating, b.rating_global) AS u_rating,
       ml.untappd_beer_id AS beer_id,
       b.untappd_id AS untappd_id

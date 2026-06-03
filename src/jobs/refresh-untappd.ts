@@ -22,7 +22,11 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
   const profiles = allProfiles(db).filter((p) => p.untappd_username);
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 
-  const updateRatingOnly = db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?');
+  // Refresh the rating and backfill abv when Untappd has it; COALESCE keeps an
+  // existing abv if this scrape didn't surface one (don't wipe known values).
+  const updateRatingAndAbv = db.prepare(
+    'UPDATE beers SET rating_global = ?, abv = COALESCE(?, abv) WHERE id = ?',
+  );
 
   let i = 0;
   let ok = 0;
@@ -37,7 +41,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
         const existing = findBeerByNormalized(db, nb, nn);
         let beerId: number;
         if (existing) {
-          updateRatingOnly.run(it.global_rating, existing.id);
+          updateRatingAndAbv.run(it.global_rating, it.abv, existing.id);
           beerId = existing.id;
         } else {
           beerId = upsertBeer(db, {
@@ -45,7 +49,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
             name: it.beer_name,
             brewery: it.brewery_name,
             style: it.style,
-            abv: null,
+            abv: it.abv,
             rating_global: it.global_rating,
             normalized_name: nn,
             normalized_brewery: nb,

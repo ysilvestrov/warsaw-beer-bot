@@ -117,6 +117,41 @@ describe('parseUserBeersPage', () => {
     expect(out[0].bid).toBe(99);
   });
 
+  test('parses abv from .abv text', () => {
+    const html = `
+      <div class="beer-item" data-bid="55">
+        <div class="beer-details">
+          <p class="name"><a>Strong One</a></p>
+          <p class="brewery"><a>Brew</a></p>
+          <p class="style">Imperial Stout</p>
+          <p class="abv">8.4% ABV</p>
+          <div class="ratings"></div>
+        </div>
+      </div>`;
+    const [it] = parseUserBeersPage(html);
+    expect(it.abv).toBe(8.4);
+  });
+
+  test('missing abv → null', () => {
+    const html = `
+      <div class="beer-item" data-bid="56">
+        <div class="beer-details">
+          <p class="name"><a>No Abv</a></p>
+          <p class="brewery"><a>Brew</a></p>
+          <p class="style">Lager</p>
+          <div class="ratings"></div>
+        </div>
+      </div>`;
+    const [it] = parseUserBeersPage(html);
+    expect(it.abv).toBeNull();
+  });
+
+  test('extracts a numeric abv from real fixture markup (at least one item)', () => {
+    const withAbv = parseUserBeersPage(html).filter((b) => b.abv !== null);
+    expect(withAbv.length).toBeGreaterThan(0);
+    expect(withAbv.every((b) => typeof b.abv === 'number' && b.abv! >= 0)).toBe(true);
+  });
+
   test('blank style → null', () => {
     const html = `
       <div class="beer-item" data-bid="7">
