@@ -21,6 +21,30 @@ export function familyOf(style: string | null): string | null {
   return fam === '' ? null : fam;
 }
 
+export function topStyleFamilies(
+  currentTapStyles: (string | null)[],
+  activeStyles: string[],
+  n = 10,
+): string[] {
+  const counts = new Map<string, number>();
+  for (const s of currentTapStyles) {
+    const fam = familyOf(s);
+    if (fam == null) continue;
+    counts.set(fam, (counts.get(fam) ?? 0) + 1);
+  }
+  const top = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, n)
+    .map(([fam]) => fam);
+
+  const present = new Set(top.map((f) => f.toLowerCase()));
+  const extraActive = activeStyles
+    .filter((f) => !present.has(f.toLowerCase()))
+    .sort((a, b) => a.localeCompare(b));
+
+  return [...top, ...extraActive];
+}
+
 export function filterInteresting<T extends TapView>(
   taps: T[], tried: Set<number>, opts: FilterOpts,
 ): T[] {

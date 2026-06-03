@@ -1,4 +1,4 @@
-import { filterInteresting, rankByRating, familyOf } from './filters';
+import { filterInteresting, rankByRating, familyOf, topStyleFamilies } from './filters';
 
 const taps = [
   { beer_id: 1, style: 'IPA',   abv: 6.1, u_rating: 4.0 },
@@ -23,6 +23,30 @@ test('familyOf splits on the first " - " and trims', () => {
   expect(familyOf(null)).toBeNull();
   expect(familyOf('')).toBeNull();
   expect(familyOf('   ')).toBeNull();
+});
+
+test('topStyleFamilies ranks present families by count, then alpha, caps at n', () => {
+  const styles = [
+    'IPA - American', 'IPA - Imperial', 'IPA - New England',  // IPA x3
+    'Sour - Fruited', 'Sour - Other',                          // Sour x2
+    'Lager - Pale',                                            // Lager x1
+    'Stout - Imperial',                                        // Stout x1
+    null, '',                                                  // ignored
+  ];
+  expect(topStyleFamilies(styles, [], 2)).toEqual(['IPA', 'Sour']);
+  // count tie (Lager 1, Stout 1) breaks alphabetically
+  expect(topStyleFamilies(styles, [], 4)).toEqual(['IPA', 'Sour', 'Lager', 'Stout']);
+});
+
+test('topStyleFamilies appends active families absent from the top-n (alpha)', () => {
+  const styles = ['IPA - American', 'IPA - Imperial'];
+  // Saison + Bock are active but not on tap → appended, alpha-sorted, after present
+  expect(topStyleFamilies(styles, ['Saison', 'IPA', 'Bock'], 1)).toEqual(['IPA', 'Bock', 'Saison']);
+});
+
+test('topStyleFamilies on empty taps returns only active families', () => {
+  expect(topStyleFamilies([], ['Stout'], 10)).toEqual(['Stout']);
+  expect(topStyleFamilies([], [], 10)).toEqual([]);
 });
 
 test('rankByRating sorts desc and breaks ties by beer_id', () => {
