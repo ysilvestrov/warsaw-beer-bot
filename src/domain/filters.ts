@@ -12,6 +12,15 @@ export interface FilterOpts {
   abv_max?: number | null;
 }
 
+export function familyOf(style: string | null): string | null {
+  if (style == null) return null;
+  const trimmed = style.trim();
+  if (trimmed === '') return null;
+  const idx = trimmed.indexOf(' - ');
+  const fam = (idx === -1 ? trimmed : trimmed.slice(0, idx)).trim();
+  return fam === '' ? null : fam;
+}
+
 export function filterInteresting<T extends TapView>(
   taps: T[], tried: Set<number>, opts: FilterOpts,
 ): T[] {

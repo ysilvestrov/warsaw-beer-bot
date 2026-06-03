@@ -1,4 +1,4 @@
-import { filterInteresting, rankByRating } from './filters';
+import { filterInteresting, rankByRating, familyOf } from './filters';
 
 const taps = [
   { beer_id: 1, style: 'IPA',   abv: 6.1, u_rating: 4.0 },
@@ -13,6 +13,16 @@ test('filterInteresting respects checkins + style + rating + abv', () => {
     styles: ['IPA'], min_rating: 3.8, abv_min: 4, abv_max: 8,
   });
   expect(out.map((t) => t.beer_id)).toEqual([3]);
+});
+
+test('familyOf splits on the first " - " and trims', () => {
+  expect(familyOf('IPA - American')).toBe('IPA');
+  expect(familyOf('Sour - Fruited - Other')).toBe('Sour');
+  expect(familyOf('Mead')).toBe('Mead');
+  expect(familyOf('  Pilsner - German  ')).toBe('Pilsner');
+  expect(familyOf(null)).toBeNull();
+  expect(familyOf('')).toBeNull();
+  expect(familyOf('   ')).toBeNull();
 });
 
 test('rankByRating sorts desc and breaks ties by beer_id', () => {
