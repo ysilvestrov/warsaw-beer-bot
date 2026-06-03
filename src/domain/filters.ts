@@ -40,23 +40,37 @@ export function topStyleFamilies(
   return [...top, ...extraActive];
 }
 
-export interface AbvBucket {
+export interface AbvPreset {
   key: string;
   label: string;
   min: number | null;
   max: number | null;
 }
 
-export const ABV_BUCKETS: ReadonlyArray<AbvBucket> = [
-  { key: '0-5', label: '≤5%', min: null, max: 5 },
-  { key: '5-7', label: '5–7%', min: 5, max: 7 },
-  { key: '7-9', label: '7–9%', min: 7, max: 9 },
-  { key: '9plus', label: '9%+', min: 9, max: null },
+// Open-ended thresholds (not closed bands): a cap (`≤X`, max set) or a
+// floor (`X+`, min set). Single-select. `≤5%` and `9%+` keep the (min,max)
+// of the old bands so prior selections stay valid.
+export const ABV_PRESETS: ReadonlyArray<AbvPreset> = [
+  { key: 'lte3_5', label: '≤3.5%', min: null, max: 3.5 },
+  { key: 'lte5', label: '≤5%', min: null, max: 5 },
+  { key: 'gte5', label: '5%+', min: 5, max: null },
+  { key: 'gte7', label: '7%+', min: 7, max: null },
+  { key: 'gte9', label: '9%+', min: 9, max: null },
 ];
 
 export function bucketForRange(abvMin: number | null, abvMax: number | null): string | null {
-  const b = ABV_BUCKETS.find((x) => x.min === abvMin && x.max === abvMax);
+  const b = ABV_PRESETS.find((x) => x.min === abvMin && x.max === abvMax);
   return b ? b.key : null;
+}
+
+// Honest display of the stored ABV range, independent of whether it matches a
+// preset — so a stale bounded range (e.g. an old 5–7% band) is visible in the
+// summary rather than silently filtering. null → caller shows "any".
+export function formatAbvRange(min: number | null, max: number | null): string | null {
+  if (min == null && max == null) return null;
+  if (min == null) return `≤${max}%`;
+  if (max == null) return `${min}%+`;
+  return `${min}–${max}%`;
 }
 
 export function filterInteresting<T extends TapView>(

@@ -1,4 +1,4 @@
-import { filterInteresting, rankByRating, topStyleFamilies, ABV_BUCKETS, bucketForRange } from './filters';
+import { filterInteresting, rankByRating, topStyleFamilies, ABV_PRESETS, bucketForRange, formatAbvRange } from './filters';
 
 const taps = [
   { beer_id: 1, style: 'IPA',   abv: 6.1, u_rating: 4.0 },
@@ -39,19 +39,31 @@ test('topStyleFamilies on empty taps returns only active families', () => {
   expect(topStyleFamilies([], [], 10)).toEqual([]);
 });
 
-test('ABV_BUCKETS are the four agreed single-select ranges', () => {
-  expect(ABV_BUCKETS.map((b) => b.key)).toEqual(['0-5', '5-7', '7-9', '9plus']);
-  expect(ABV_BUCKETS.map((b) => [b.min, b.max])).toEqual([
-    [null, 5], [5, 7], [7, 9], [9, null],
+test('ABV_PRESETS are the open-ended threshold presets', () => {
+  expect(ABV_PRESETS.map((b) => b.key)).toEqual(['lte3_5', 'lte5', 'gte5', 'gte7', 'gte9']);
+  expect(ABV_PRESETS.map((b) => [b.min, b.max])).toEqual([
+    [null, 3.5], [null, 5], [5, null], [7, null], [9, null],
   ]);
 });
 
-test('bucketForRange maps an exact (min,max) pair to its key, else null', () => {
-  expect(bucketForRange(null, 5)).toBe('0-5');
-  expect(bucketForRange(5, 7)).toBe('5-7');
-  expect(bucketForRange(9, null)).toBe('9plus');
+test('formatAbvRange renders caps, floors, bounded (stale), and null', () => {
+  expect(formatAbvRange(null, 3.5)).toBe('≤3.5%');
+  expect(formatAbvRange(null, 5)).toBe('≤5%');
+  expect(formatAbvRange(5, null)).toBe('5%+');
+  expect(formatAbvRange(9, null)).toBe('9%+');
+  expect(formatAbvRange(5, 7)).toBe('5–7%'); // stale bounded range stays visible
+  expect(formatAbvRange(null, null)).toBeNull();
+});
+
+test('bucketForRange maps an exact (min,max) pair to its preset key, else null', () => {
+  expect(bucketForRange(null, 3.5)).toBe('lte3_5');
+  expect(bucketForRange(null, 5)).toBe('lte5');
+  expect(bucketForRange(5, null)).toBe('gte5');
+  expect(bucketForRange(7, null)).toBe('gte7');
+  expect(bucketForRange(9, null)).toBe('gte9');
+  expect(bucketForRange(5, 7)).toBeNull(); // stale old band
+  expect(bucketForRange(7, 9)).toBeNull(); // stale old band
   expect(bucketForRange(null, null)).toBeNull();
-  expect(bucketForRange(4, 6)).toBeNull();
 });
 
 test('filterInteresting matches styles by family, not substring', () => {

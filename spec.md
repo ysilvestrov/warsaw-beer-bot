@@ -276,8 +276,8 @@ src/
 | `telegram_id` | INTEGER | PK → `user_profiles(telegram_id)` **ON DELETE CASCADE** | |
 | `styles` | TEXT | nullable | список стилів (серіалізований) |
 | `min_rating` | REAL | nullable | мінімальний Untappd-рейтинг |
-| `abv_min` | REAL | nullable | мінімальний ABV (керується ABV-бакетами в /filters) |
-| `abv_max` | REAL | nullable | максимальний ABV (керується ABV-бакетами в /filters) |
+| `abv_min` | REAL | nullable | мінімальний ABV (відкриті ABV-пороги в /filters) |
+| `abv_max` | REAL | nullable | максимальний ABV (відкриті ABV-пороги в /filters) |
 | `default_route_n` | INTEGER | nullable | дефолт для `/route` |
 
 ### 3.10 `pub_distances` — кеш пішохідних дистанцій (v2)
@@ -393,8 +393,10 @@ pubs          *───* pubs             via pub_distances (a<b)
   правил (IPA/Stout/Porter перед Sour; Gose→Sour; Pils→Lager), fallback — родина
   `Other` (єдина локалізована мітка). Замінила прежню `familyOf`
   (prefix-before-`" - "`), хибну для вільнотекстових мультимовних стилів ontap.pl.
-- **ABV:** пресетні бакети `≤5%`/`5–7%`/`7–9%`/`9%+` (single-select); тап по
-  активному очищає. Виставляють `user_filters.abv_min/abv_max`.
+- **ABV:** відкриті порогові пресети `≤3.5%`/`≤5%`/`5%+`/`7%+`/`9%+`
+  (single-select, два ряди — кепи / флори); тап по активному очищає. Виставляють
+  `user_filters.abv_min/abv_max`. Зведення показує реальний діапазон через
+  `formatAbvRange` (вкл. stale-діапазони зі старих закритих смуг).
 - **Рейтинг:** пресети `min 3.5`/`min 3.8` (тап по активному очищає).
 - **♻️ Скинути все** — очищає всі фільтри.
 Поточний стан показано в тілі повідомлення.

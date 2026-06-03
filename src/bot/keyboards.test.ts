@@ -31,15 +31,22 @@ test('filtersKeyboard renders ABV buckets, rating presets and reset; marks activ
   const kb = filtersKeyboard(t, {
     families: [],
     activeStyles: [],
-    abvKey: '9plus',
+    abvKey: 'gte9',
     minRating: 3.8,
   });
   const all = buttons(kb);
-  expect(all.find((b) => b.callback_data === 'abv:9plus')!.text).toBe('✅ 9%+');
-  expect(all.find((b) => b.callback_data === 'abv:0-5')!.text).toBe('≤5%');
+  expect(all.find((b) => b.callback_data === 'abv:gte9')!.text).toBe('✅ 9%+');
+  expect(all.find((b) => b.callback_data === 'abv:lte5')!.text).toBe('≤5%');
   expect(all.find((b) => b.callback_data === 'rating:3.8')!.text).toBe('✅ min 3.8');
   expect(all.find((b) => b.callback_data === 'rating:3.5')!.text).toBe('min 3.5');
   expect(all.find((b) => b.callback_data === 'reset')!.text).toBe('♻️ Reset all');
+});
+
+test('filtersKeyboard splits ABV into a caps row and a floors row', () => {
+  const kb = filtersKeyboard(t, { families: [], activeStyles: [], abvKey: null, minRating: null });
+  const rows = kb.reply_markup.inline_keyboard as { callback_data: string }[][];
+  expect(rows[0].map((b) => b.callback_data)).toEqual(['abv:lte3_5', 'abv:lte5']);
+  expect(rows[1].map((b) => b.callback_data)).toEqual(['abv:gte5', 'abv:gte7', 'abv:gte9']);
 });
 
 test('filtersKeyboard renders the Other family with its localized label, raw callback', () => {
