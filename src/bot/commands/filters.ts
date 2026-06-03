@@ -4,7 +4,7 @@ import { filtersKeyboard } from '../keyboards';
 import { getFilters, setFilters, type Filters } from '../../storage/user_filters';
 import { ensureProfile } from '../../storage/user_profiles';
 import { currentTapStyles } from '../../storage/snapshots';
-import { topStyleFamilies, ABV_PRESETS, bucketForRange } from '../../domain/filters';
+import { topStyleFamilies, ABV_PRESETS, bucketForRange, formatAbvRange } from '../../domain/filters';
 import { OTHER_FAMILY } from '../../domain/style-family';
 import type { DB } from '../../storage/db';
 import type { Translator } from '../../i18n/types';
@@ -23,7 +23,7 @@ function render(t: Translator, db: DB, f: Filters): { text: string; kb: ReturnTy
   const stylesStr = f.styles.length
     ? f.styles.map((s) => (s === OTHER_FAMILY ? t('filters.family_other') : s)).join(', ')
     : t('filters.any');
-  const abvStr = abvKey ? ABV_PRESETS.find((b) => b.key === abvKey)!.label : t('filters.any');
+  const abvStr = formatAbvRange(f.abv_min, f.abv_max) ?? t('filters.any');
   const ratingStr = f.min_rating != null ? t('filters.rating_value', { rating: f.min_rating }) : t('filters.any');
   const text = t('filters.current', { styles: stylesStr, abv: abvStr, rating: ratingStr });
   const kb = filtersKeyboard(t, { families, activeStyles: f.styles, abvKey, minRating: f.min_rating });

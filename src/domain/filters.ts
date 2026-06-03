@@ -63,6 +63,16 @@ export function bucketForRange(abvMin: number | null, abvMax: number | null): st
   return b ? b.key : null;
 }
 
+// Honest display of the stored ABV range, independent of whether it matches a
+// preset — so a stale bounded range (e.g. an old 5–7% band) is visible in the
+// summary rather than silently filtering. null → caller shows "any".
+export function formatAbvRange(min: number | null, max: number | null): string | null {
+  if (min == null && max == null) return null;
+  if (min == null) return `≤${max}%`;
+  if (max == null) return `${min}%+`;
+  return `${min}–${max}%`;
+}
+
 export function filterInteresting<T extends TapView>(
   taps: T[], tried: Set<number>, opts: FilterOpts,
 ): T[] {
