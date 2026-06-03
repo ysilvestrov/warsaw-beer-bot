@@ -9,7 +9,6 @@ export type PluralForms = {
 
 export interface Messages {
   // app
-  'app.start': string;
   'app.no_data_in_snapshot': string;
 
   // help / command catalog

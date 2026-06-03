@@ -2,16 +2,6 @@ import type { Messages } from '../types';
 
 export const pl: Messages = {
   // app
-  'app.start': [
-    'Cześć! Pomogę ułożyć trasę po warszawskich pubach i wypić coś nowego.',
-    '',
-    '1) /link <untappd-username> — żeby podciągnąć twoje check-iny.',
-    '2) /import — wyślij CSV-eksport z Untappd dla pełnego backfillu historii.',
-    '3) /newbeers [fragment nazwy pubu] — top niespróbowanych piw; z argumentem — tylko w dopasowanych pubach.',
-    '4) /pubs — lista dostępnych pubów.',
-    '5) /route N — trasa pokrywająca ≥ N niespróbowanych piw z minimalnym dystansem.',
-    '6) /beers <pub> — debug: wszystkie krany pubu tak, jak rozpoznał je bot.',
-  ].join('\n'),
   'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
   // help / command catalog
