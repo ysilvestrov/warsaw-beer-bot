@@ -66,11 +66,12 @@ export const en: Messages = {
   'refresh.failed': '❌ Failed — check the logs.',
 
   // filters
-  'filters.current': 'Current: styles={styles}, min_rating={min_rating}',
-  'filters.styles_changed': 'styles={styles}',
-  'filters.rating_changed': 'min_rating={rating}',
+  'filters.current':
+    '🎛 Your filters\nStyles: {styles}\nABV: {abv}\nRating: {rating}\n\nTap to toggle. ♻️ — reset all.',
+  'filters.any': 'any',
+  'filters.rating_value': 'from {rating}',
   'filters.reset_done': 'Filters reset',
-  'filters.reset_button': 'Reset',
+  'filters.reset_button': '♻️ Reset all',
 
   // lang
   'lang.prompt': 'Choose interface language:',

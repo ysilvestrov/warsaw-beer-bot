@@ -66,11 +66,12 @@ export const pl: Messages = {
   'refresh.failed': '❌ Nie udało się — sprawdź logi.',
 
   // filters
-  'filters.current': 'Aktualne: styles={styles}, min_rating={min_rating}',
-  'filters.styles_changed': 'styles={styles}',
-  'filters.rating_changed': 'min_rating={rating}',
+  'filters.current':
+    '🎛 Twoje filtry\nStyle: {styles}\nMoc: {abv}\nOcena: {rating}\n\nKliknij, aby włączyć/wyłączyć. ♻️ — zresetuj wszystko.',
+  'filters.any': 'dowolna',
+  'filters.rating_value': 'od {rating}',
   'filters.reset_done': 'Zresetowano',
-  'filters.reset_button': 'Resetuj',
+  'filters.reset_button': '♻️ Zresetuj wszystko',
 
   // lang
   'lang.prompt': 'Wybierz język interfejsu:',

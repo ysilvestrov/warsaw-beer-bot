@@ -66,11 +66,12 @@ export const uk: Messages = {
   'refresh.failed': '❌ Не вдалось — подивись логи.',
 
   // filters
-  'filters.current': 'Поточні: styles={styles}, min_rating={min_rating}',
-  'filters.styles_changed': 'styles={styles}',
-  'filters.rating_changed': 'min_rating={rating}',
+  'filters.current':
+    '🎛 Твої фільтри\nСтилі: {styles}\nМіцність: {abv}\nРейтинг: {rating}\n\nТисни, щоб увімкнути/вимкнути. ♻️ — скинути все.',
+  'filters.any': 'будь-яка',
+  'filters.rating_value': 'від {rating}',
   'filters.reset_done': 'Скинуто',
-  'filters.reset_button': 'Скинути',
+  'filters.reset_button': '♻️ Скинути все',
 
   // lang
   'lang.prompt': 'Оберіть мову інтерфейсу:',
