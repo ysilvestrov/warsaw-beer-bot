@@ -1,6 +1,7 @@
 import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
 import { ABV_BUCKETS } from '../domain/filters';
+import { OTHER_FAMILY } from '../domain/style-family';
 
 export const langKeyboard = () =>
   Markup.inlineKeyboard([
@@ -25,7 +26,8 @@ export const filtersKeyboard = (t: Translator, state: FiltersKeyboardState) => {
   for (let i = 0; i < state.families.length; i += 2) {
     const row = state.families.slice(i, i + 2).map((fam) => {
       const on = activeLc.has(fam.toLowerCase());
-      return Markup.button.callback(on ? `✅ ${fam}` : fam, `style:${fam}`);
+      const label = fam === OTHER_FAMILY ? t('filters.family_other') : fam;
+      return Markup.button.callback(on ? `✅ ${label}` : label, `style:${fam}`);
     });
     styleRows.push(row);
   }
