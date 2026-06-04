@@ -129,7 +129,7 @@ describe('enrichOrphans', () => {
       now: () => new Date('2026-05-26T12:00:00Z'),
     });
 
-    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0 });
+    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0 });
     expect(calls).toBe(0);
   });
 
@@ -152,13 +152,8 @@ describe('enrichOrphans', () => {
   });
 
   function dbWithOrphans(n: number) {
-    const db = openDb(':memory:'); migrate(db);
-    for (let k = 0; k < n; k++) {
-      upsertBeer(db, {
-        untappd_id: null, name: `N${k}`, brewery: `B${k}`, style: null, abv: null,
-        rating_global: null, normalized_name: `n${k}`, normalized_brewery: `b${k}`,
-      });
-    }
+    const db = fresh();
+    for (let k = 0; k < n; k++) seedOrphanOnTap(db, `B${k}`, `N${k}`);
     return db;
   }
   const T = new Date('2026-06-04T00:00:00Z');
