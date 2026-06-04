@@ -4,7 +4,14 @@ const STYLE_WORDS = new Set([
   'pils', 'pilsner', 'lager', 'stout', 'porter', 'weizen', 'wheat',
   'saison', 'sour', 'gose', 'lambic', 'barleywine', 'bock',
 ]);
-const BREWERY_NOISE = new Set(['browar', 'brewery', 'brewing', 'co', 'company']);
+const BREWERY_NOISE = new Set([
+  // English / Polish
+  'browar', 'browary', 'brewery', 'brewing', 'co', 'company',
+  // Czech / Slovak, German, French, Italian, Dutch/Flemish,
+  // Scandinavian (+ definite form), Spanish (post-diacritic-strip form)
+  'pivovar', 'pivovary', 'brauerei', 'brasserie', 'birrificio',
+  'brouwerij', 'bryggeri', 'bryggeriet', 'cerveceria',
+]);
 
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the

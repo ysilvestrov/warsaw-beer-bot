@@ -33,9 +33,9 @@ describe('breweryAliases', () => {
     const out = breweryAliases('Kemker Kultuur (Brauerei J. Kemker)');
     expect(new Set(out)).toEqual(
       new Set([
-        'kemker kultuur brauerei j kemker',
+        'kemker kultuur j kemker',
         'kemker kultuur',
-        'brauerei j kemker',
+        'j kemker',
       ]),
     );
   });
@@ -44,10 +44,10 @@ describe('breweryAliases', () => {
     const out = breweryAliases('AleBrowar / Kemker Kultuur (Brauerei J. Kemker)');
     expect(new Set(out)).toEqual(
       new Set([
-        'alebrowar kemker kultuur brauerei j kemker',
+        'alebrowar kemker kultuur j kemker',
         'alebrowar',
         'kemker kultuur',
-        'brauerei j kemker',
+        'j kemker',
       ]),
     );
   });
@@ -381,4 +381,10 @@ describe('matchBeer — vintage year disambiguation', () => {
     const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 6.8 }, catalog);
     expect(m?.id).toBe(9);
   });
+});
+
+test('brewery hard-gate: Czech Pivovar prefix overlaps tap label', () => {
+  const tap = new Set(breweryAliases('Cerna Hora Brewery'));
+  const untappd = breweryAliases('Pivovar Černá Hora');
+  expect(untappd.some((a) => tap.has(a))).toBe(true);
 });
