@@ -79,8 +79,9 @@ export function cleanupOldSnapshots(db: DB, log: Logger, retentionDays: number):
 Computes `cutoff = (now − retentionDays days).toISOString()`, calls
 `deleteOldSnapshots`, logs `{ deleted, retentionDays }`. Positional `(db, log,
 …)` signature, matching the other startup jobs (`dedupeBreweryAliases`,
-`cleanupPollutedOntap`). Synchronous (single SQL statement); errors propagate to
-the caller's `.catch` in the cron wrapper.
+`cleanupPollutedOntap`). Synchronous (single SQL statement); the function itself
+does not swallow errors — the cron wrapper guards it with `try/catch` (not
+`.catch`, since there is no promise), matching how a sync job is invoked.
 
 ### 3. Config — `src/config/env.ts` + `.env.example`
 
@@ -93,8 +94,8 @@ Add a documented line to `.env.example`.
   the existing `dedupeBreweryAliases(db, log)` / `cleanupPollutedOntap(db, log)`
   calls.
 - Cron: push `cron.schedule('0 5 * * *', () => { try { cleanupOldSnapshots(...) }
-  catch … })` (or `.catch` if kept async) into `cronJobs` so it is torn down by
-  the existing `createShutdown`.
+  catch (e) { log.error({ err: e }, 'cleanup-old-snapshots cron') } })` into
+  `cronJobs` so it is torn down by the existing `createShutdown`.
 
 ## Testing (Jest, per CLAUDE.md)
 
