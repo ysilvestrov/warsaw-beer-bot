@@ -53,3 +53,23 @@ describe('stripBreweryNoise', () => {
     expect(stripBreweryNoise('Magic Road')).toBe('Magic Road');
   });
 });
+
+describe('multilingual brewery descriptors', () => {
+  test('normalizeBrewery strips foreign brewery words', () => {
+    expect(normalizeBrewery('Pivovar Černá Hora')).toBe('cerna hora');
+    expect(normalizeBrewery('Měšťanský Pivovary Polička')).toBe('mestansky policka');
+    expect(normalizeBrewery('Brauerei Aying')).toBe('aying');
+    expect(normalizeBrewery('Brasserie Dupont')).toBe('dupont');
+    expect(normalizeBrewery('Birrificio Italiano')).toBe('italiano');
+    expect(normalizeBrewery('Brouwerij Bosteels')).toBe('bosteels');
+    expect(normalizeBrewery('Stigbergets Bryggeri')).toBe('stigbergets');
+    expect(normalizeBrewery('Nya Carnegie Bryggeriet')).toBe('nya carnegie');
+    expect(normalizeBrewery('Cervecería Maier')).toBe('maier');
+    expect(normalizeBrewery('Browary Regionalne')).toBe('regionalne');
+  });
+
+  test('stripBreweryNoise drops Pivovar in any position (case-insensitive)', () => {
+    expect(stripBreweryNoise('Pivovar Polička')).toBe('Polička');
+    expect(stripBreweryNoise('Cerna Hora Pivovar')).toBe('Cerna Hora');
+  });
+});
