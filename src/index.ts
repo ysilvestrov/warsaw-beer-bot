@@ -27,6 +27,7 @@ import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
 import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
+import { dailyStatus } from './jobs/daily-status';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -124,6 +125,13 @@ async function main(): Promise<void> {
       } catch (e) {
         log.error({ err: e }, 'cleanup-old-snapshots cron');
       }
+    }),
+    // daily-status: admin health digest at 09:00 Warsaw, after the overnight
+    // jobs (00:00 ontap, 03:00 untappd, 05:00 cleanup) have settled. Async →
+    // .catch. Self-noops when ADMIN_TELEGRAM_ID is unset.
+    cron.schedule('0 9 * * *', () => {
+      dailyStatus({ db, log, notifyAdmin })
+        .catch((e) => log.error({ err: e }, 'daily-status cron'));
     }),
   ];
 
