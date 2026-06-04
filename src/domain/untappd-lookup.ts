@@ -6,13 +6,16 @@ import {
   parseSearchPage,
   type SearchResult,
 } from '../sources/untappd/search';
+import { HttpError } from '../sources/http';
+import { isBlockStatus, isBlockPage } from '../sources/untappd/block';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 
 export type LookupOutcome =
   | { kind: 'matched'; result: SearchResult }
   | { kind: 'not_found' }
-  | { kind: 'transient'; error: unknown };
+  | { kind: 'transient'; error: unknown }
+  | { kind: 'blocked' };
 
 export interface LookupArgs {
   brewery: string;
@@ -42,8 +45,13 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     try {
       html = await fetch(buildSearchUrl(`${stripBreweryNoise(part)} ${name}`.trim()));
     } catch (error) {
+      if (error instanceof HttpError && isBlockStatus(error.status)) {
+        return { kind: 'blocked' };
+      }
       return { kind: 'transient', error };
     }
+
+    if (isBlockPage(html)) return { kind: 'blocked' };
 
     const results = parseSearchPage(html);
     if (results.length === 0) continue;
