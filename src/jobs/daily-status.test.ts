@@ -1,5 +1,16 @@
+import pino from 'pino';
 import type { StatusMetrics } from '../storage/stats';
-import { buildStatusMessage } from './daily-status';
+import { openDb } from '../storage/db';
+import { migrate } from '../storage/schema';
+import { buildStatusMessage, dailyStatus } from './daily-status';
+
+const silentLog = pino({ level: 'silent' });
+
+function emptyDb() {
+  const db = openDb(':memory:');
+  migrate(db);
+  return db;
+}
 
 const base: StatusMetrics = {
   lastScrapeHoursAgo: 9.3, pubsScraped24h: 42,
@@ -42,4 +53,23 @@ test('buildStatusMessage: no snapshots shows немає даних', () => {
 test('buildStatusMessage: null dbSizeMb omits size suffix', () => {
   const out = buildStatusMessage({ ...base, dbSizeMb: null }, '2026-06-05 09:00');
   expect(out).toContain("• БД: 1 976 snapshot'ів / 29 459 кранів\n");
+});
+
+test('dailyStatus: no-op when notifyAdmin is undefined', async () => {
+  const db = emptyDb();
+  await expect(
+    dailyStatus({ db, log: silentLog, now: () => new Date('2026-06-04T07:00:00Z') }),
+  ).resolves.toBeUndefined();
+});
+
+test('dailyStatus: sends the built message once when notifyAdmin is set', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  await dailyStatus({
+    db, log: silentLog,
+    notifyAdmin: async (msg: string) => { sent.push(msg); },
+    now: () => new Date('2026-06-04T07:00:00Z'),
+  });
+  expect(sent).toHaveLength(1);
+  expect(sent[0].startsWith('🍺 Статус бота — ')).toBe(true);
 });
