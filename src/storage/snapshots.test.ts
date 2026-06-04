@@ -1,7 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertPub } from './pubs';
-import { createSnapshot, latestSnapshot, insertTaps, tapsForSnapshot, tapsForSnapshotWithBeer, currentTapStyles } from './snapshots';
+import { createSnapshot, latestSnapshot, insertTaps, tapsForSnapshot, tapsForSnapshotWithBeer, currentTapStyles, deleteOldSnapshots } from './snapshots';
 import { upsertBeer } from './beers';
 import { upsertMatch } from './match_links';
 
@@ -205,4 +205,69 @@ test('currentTapStyles returns styles from the latest snapshot of each pub only'
 
   const styles = currentTapStyles(db).sort();
   expect(styles).toEqual(['IPA - American', 'Sour - Fruited']); // no Porter (old), no null
+});
+
+describe('deleteOldSnapshots', () => {
+  const CUTOFF = '2026-06-01T00:00:00.000Z';
+
+  function fresh() {
+    const db = openDb(':memory:');
+    migrate(db);
+    return db;
+  }
+
+  function pub(db: ReturnType<typeof fresh>, slug: string): number {
+    return upsertPub(db, { slug, name: slug, address: null, lat: null, lon: null });
+  }
+
+  function snap(db: ReturnType<typeof fresh>, pubId: number, at: string): number {
+    const id = createSnapshot(db, pubId, at);
+    insertTaps(db, id, [{
+      tap_number: 1, beer_ref: `ref-${id}`, brewery_ref: null,
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    return id;
+  }
+
+  test('deletes old non-latest snapshots and cascades their taps', () => {
+    const db = fresh();
+    const p = pub(db, 'a');
+    const old = snap(db, p, '2026-05-20T12:00:00Z');   // old, not latest
+    const recent = snap(db, p, '2026-06-03T12:00:00Z'); // latest, recent
+
+    const deleted = deleteOldSnapshots(db, CUTOFF);
+
+    expect(deleted).toBe(1);
+    expect(tapsForSnapshot(db, old)).toHaveLength(0);
+    expect(tapsForSnapshot(db, recent)).toHaveLength(1);
+  });
+
+  test('preserves a pub latest snapshot even when older than cutoff', () => {
+    const db = fresh();
+    const p = pub(db, 'stale');
+    const onlyOld = snap(db, p, '2026-05-01T12:00:00Z'); // old AND latest-for-pub
+
+    const deleted = deleteOldSnapshots(db, CUTOFF);
+
+    expect(deleted).toBe(0);
+    expect(tapsForSnapshot(db, onlyOld)).toHaveLength(1);
+  });
+
+  test('keeps the latest per pub independently across pubs', () => {
+    const db = fresh();
+    const a = pub(db, 'a');
+    const b = pub(db, 'b');
+    const aOld = snap(db, a, '2026-05-10T12:00:00Z');
+    const aNew = snap(db, a, '2026-06-03T12:00:00Z');
+    const bOld1 = snap(db, b, '2026-05-11T12:00:00Z');
+    const bOld2 = snap(db, b, '2026-05-12T12:00:00Z'); // latest for b, still old
+
+    const deleted = deleteOldSnapshots(db, CUTOFF);
+
+    expect(deleted).toBe(2); // aOld + bOld1
+    expect(tapsForSnapshot(db, aOld)).toHaveLength(0);
+    expect(tapsForSnapshot(db, aNew)).toHaveLength(1);
+    expect(tapsForSnapshot(db, bOld1)).toHaveLength(0);
+    expect(tapsForSnapshot(db, bOld2)).toHaveLength(1);
+  });
 });
