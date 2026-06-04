@@ -79,6 +79,19 @@ export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer
   `).all(snapshotId) as TapWithBeer[];
 }
 
+// Deletes snapshots older than cutoffIso, EXCEPT each pub's most recent
+// (MAX(id) per pub — id and snapshot_at are co-monotonic, set at insert).
+// taps are removed by the taps.snapshot_id ON DELETE CASCADE (foreign_keys=ON).
+// Returns the number of snapshot rows deleted.
+export function deleteOldSnapshots(db: DB, cutoffIso: string): number {
+  const res = db.prepare(
+    `DELETE FROM tap_snapshots
+     WHERE snapshot_at < ?
+       AND id NOT IN (SELECT MAX(id) FROM tap_snapshots GROUP BY pub_id)`,
+  ).run(cutoffIso);
+  return res.changes;
+}
+
 export function currentTapStyles(db: DB): string[] {
   const rows = db
     .prepare(

@@ -26,6 +26,7 @@ import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
 import { refreshTapRatings } from './jobs/refresh-tap-ratings';
+import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -35,6 +36,7 @@ async function main(): Promise<void> {
   migrate(db);
   dedupeBreweryAliases(db, log);
   cleanupPollutedOntap(db, log);
+  cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
 
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
@@ -112,6 +114,16 @@ async function main(): Promise<void> {
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
       }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
+    }),
+    // cleanup-old-snapshots: daily at 05:00 Warsaw, a quiet slot away from the
+    // on-the-hour scraper runs (00:00/12:00 ontap, 03:00 untappd). Bounds DB
+    // growth; each pub always keeps its latest snapshot. Synchronous → try/catch.
+    cron.schedule('0 5 * * *', () => {
+      try {
+        cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
+      } catch (e) {
+        log.error({ err: e }, 'cleanup-old-snapshots cron');
+      }
     }),
   ];
 
