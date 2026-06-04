@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
 import { listLookupCandidates } from '../storage/beers';
 import { enrichOneOrphan } from './untappd-enrich';
+import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
 
 export interface EnrichOrphansResult {
   processed: number;
@@ -10,6 +11,7 @@ export interface EnrichOrphansResult {
   not_found: number;
   transient: number;
   skipped: number;
+  blocked: number;
 }
 
 export interface EnrichOrphansDeps {
@@ -21,10 +23,11 @@ export interface EnrichOrphansDeps {
   sleepMs?: number;             // default 500
   sleep?: (ms: number) => Promise<void>;   // for tests
   now?: () => Date;             // for tests
+  breaker?: CircuitBreaker;     // default noopBreaker
 }
 
 const ZERO_RESULT: EnrichOrphansResult = {
-  processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0,
+  processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0,
 };
 
 export async function enrichOrphans(
@@ -40,6 +43,12 @@ export async function enrichOrphans(
   const sleep = deps.sleep ?? ((ms: number) =>
     new Promise<void>((r) => setTimeout(r, ms)));
   const now = deps.now ?? (() => new Date());
+  const breaker = deps.breaker ?? noopBreaker;
+
+  if (!breaker.canAttempt(now())) {
+    deps.log.info('enrich-orphans skipped (untappd circuit open)');
+    return { ...ZERO_RESULT };
+  }
 
   const candidates = listLookupCandidates(deps.db, limit, now());
   const result: EnrichOrphansResult = { ...ZERO_RESULT };
@@ -50,6 +59,13 @@ export async function enrichOrphans(
       { db: deps.db, log: deps.log, http: deps.http, now },
       c.id,
     );
+    if (kind === 'blocked') {
+      breaker.onResult(true, now());
+      result.blocked++;
+      result.processed++;
+      break;
+    }
+    breaker.onResult(false, now());
     result.processed++;
     result[kind]++;
 

@@ -5,8 +5,9 @@ import { upsertBeer, getBeer } from '../storage/beers';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
-import type { Http } from '../sources/http';
+import { HttpError, type Http } from '../sources/http';
 import { enrichOrphans } from './enrich-orphans';
+import { createCircuitBreaker } from '../domain/untappd-circuit';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -148,5 +149,51 @@ describe('enrichOrphans', () => {
     });
 
     expect(sleeps).toEqual([500]);
+  });
+
+  function dbWithOrphans(n: number) {
+    const db = openDb(':memory:'); migrate(db);
+    for (let k = 0; k < n; k++) {
+      upsertBeer(db, {
+        untappd_id: null, name: `N${k}`, brewery: `B${k}`, style: null, abv: null,
+        rating_global: null, normalized_name: `n${k}`, normalized_brewery: `b${k}`,
+      });
+    }
+    return db;
+  }
+  const T = new Date('2026-06-04T00:00:00Z');
+
+  test('breaker open → run skipped, ZERO result', async () => {
+    const db = dbWithOrphans(2);
+    const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {} });
+    breaker.onResult(true, T); // open
+    const http = { get: jest.fn(async () => '<html></html>') };
+    const res = await enrichOrphans({ db, log: silentLog, http, breaker, sleepMs: 0, now: () => new Date(T.getTime() + 3600_000) });
+    expect(res.processed).toBe(0);
+    expect(http.get).not.toHaveBeenCalled();
+  });
+
+  test('block mid-run → trips breaker and stops', async () => {
+    const db = dbWithOrphans(3);
+    const events: string[] = [];
+    const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => events.push('trip'), onRecover: () => {} });
+    const http: Http = { get: async () => { throw new HttpError(403, 'u'); } };
+    const res = await enrichOrphans({ db, log: silentLog, http, breaker, sleepMs: 0, now: () => T });
+    expect(res.blocked).toBe(1);
+    expect(res.processed).toBe(1);
+    expect(breaker.state).toBe('open');
+    expect(events).toEqual(['trip']);
+  });
+
+  test('half-open probe success → recovers and continues', async () => {
+    const db = dbWithOrphans(2);
+    const events: string[] = [];
+    const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => events.push('trip'), onRecover: () => events.push('recover') });
+    breaker.onResult(true, T); // open
+    const http: Http = { get: async () => '<html></html>' }; // no results → not_found, NOT blocked
+    const res = await enrichOrphans({ db, log: silentLog, http, breaker, sleepMs: 0, now: () => new Date(T.getTime() + 6 * 3600_000) });
+    expect(breaker.state).toBe('closed');
+    expect(events).toContain('recover');
+    expect(res.processed).toBe(2);
   });
 });
