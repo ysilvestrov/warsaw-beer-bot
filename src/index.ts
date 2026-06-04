@@ -28,6 +28,7 @@ import { enrichOrphans } from './jobs/enrich-orphans';
 import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
+import { createCircuitBreaker } from './domain/untappd-circuit';
 import { createShutdown } from './shutdown';
 
 async function main(): Promise<void> {
@@ -59,6 +60,13 @@ async function main(): Promise<void> {
     ? (msg: string) =>
         bot.telegram.sendMessage(env.ADMIN_TELEGRAM_ID!, msg).then(() => {})
     : undefined;
+
+  const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
+  const untappdBreaker = createCircuitBreaker({
+    cooldownMs: 6 * 60 * 60 * 1000,
+    onTrip: () => adminAlert('⚠️ Untappd: можливий бан IP (403/429 або captcha). Енрич призупинено на ~6 год.'),
+    onRecover: () => adminAlert('✅ Untappd: доступ відновлено, енрич продовжено.'),
+  });
 
   bot.use(
     startCommand,
@@ -104,6 +112,7 @@ async function main(): Promise<void> {
       enrichOrphans({
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+        breaker: untappdBreaker,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
     // refresh-tap-ratings runs every 3h at xx:30 too, but on hours
@@ -114,6 +123,7 @@ async function main(): Promise<void> {
       refreshTapRatings({
         db, log, http,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+        breaker: untappdBreaker,
       }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
     }),
     // cleanup-old-snapshots: daily at 05:00 Warsaw, a quiet slot away from the
