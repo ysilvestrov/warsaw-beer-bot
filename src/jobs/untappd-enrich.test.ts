@@ -2,7 +2,7 @@ import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
-import type { Http } from '../sources/http';
+import { HttpError, type Http } from '../sources/http';
 import { enrichOneOrphan } from './untappd-enrich';
 
 const silentLog = pino({ level: 'silent' });
@@ -191,5 +191,22 @@ describe('enrichOneOrphan', () => {
     const out = await enrichOneOrphan({ db, log: silentLog, http }, 9999);
     expect(out).toBe('skipped');
     expect(httpCalled).toBe(false);
+  });
+
+  test('blocked: returns "blocked" and records nothing (no backoff mutation)', async () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: null, name: 'A', brewery: 'X', style: null, abv: null,
+      rating_global: null, normalized_name: 'a', normalized_brewery: 'x',
+    });
+    const http: Http = { get: async () => { throw new HttpError(403, 'u'); } };
+    const kind = await enrichOneOrphan(
+      { db, log: silentLog, http, now: () => new Date('2026-06-04T00:00:00Z') },
+      id,
+    );
+    expect(kind).toBe('blocked');
+    const row = getBeer(db, id);
+    expect(row?.untappd_lookup_count).toBe(0);
+    expect(row?.untappd_lookup_at).toBeNull();
   });
 });
