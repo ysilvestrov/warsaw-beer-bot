@@ -382,3 +382,9 @@ describe('matchBeer — vintage year disambiguation', () => {
     expect(m?.id).toBe(9);
   });
 });
+
+test('brewery hard-gate: Czech Pivovar prefix overlaps tap label', () => {
+  const tap = new Set(breweryAliases('Cerna Hora Brewery'));
+  const untappd = breweryAliases('Pivovar Černá Hora');
+  expect(untappd.some((a) => tap.has(a))).toBe(true);
+});
