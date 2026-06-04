@@ -33,9 +33,9 @@ describe('breweryAliases', () => {
     const out = breweryAliases('Kemker Kultuur (Brauerei J. Kemker)');
     expect(new Set(out)).toEqual(
       new Set([
-        'kemker kultuur brauerei j kemker',
+        'kemker kultuur j kemker',
         'kemker kultuur',
-        'brauerei j kemker',
+        'j kemker',
       ]),
     );
   });
@@ -44,10 +44,10 @@ describe('breweryAliases', () => {
     const out = breweryAliases('AleBrowar / Kemker Kultuur (Brauerei J. Kemker)');
     expect(new Set(out)).toEqual(
       new Set([
-        'alebrowar kemker kultuur brauerei j kemker',
+        'alebrowar kemker kultuur j kemker',
         'alebrowar',
         'kemker kultuur',
-        'brauerei j kemker',
+        'j kemker',
       ]),
     );
   });
