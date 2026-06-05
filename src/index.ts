@@ -136,13 +136,14 @@ async function main(): Promise<void> {
         log.error({ err: e }, 'cleanup-old-snapshots cron');
       }
     }),
-    // daily-status: admin health digest at 09:00 Warsaw, after the overnight
-    // jobs (00:00 ontap, 03:00 untappd, 05:00 cleanup) have settled. Async →
-    // .catch. Self-noops when ADMIN_TELEGRAM_ID is unset.
+    // daily-status: admin health digest at 09:00 Warsaw. The server runs in UTC
+    // (Etc/UTC), and node-cron fires in the server's local time unless told
+    // otherwise — so we pin the timezone explicitly, else 09:00 UTC lands at
+    // 11:00 CEST. Async → .catch. Self-noops when ADMIN_TELEGRAM_ID is unset.
     cron.schedule('0 9 * * *', () => {
       dailyStatus({ db, log, notifyAdmin })
         .catch((e) => log.error({ err: e }, 'daily-status cron'));
-    }),
+    }, { timezone: 'Europe/Warsaw' }),
   ];
 
   if (untappdHttp) {
