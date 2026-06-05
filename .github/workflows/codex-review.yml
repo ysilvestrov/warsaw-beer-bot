@@ -1,0 +1,27 @@
+name: AI PR Review
+
+# Runs an automated AI code review on every pull request when it is first
+# opened and on every push to its branch (synchronize). The reviewer prompt /
+# focus areas live in AGENTS.md at the repo root.
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+# Least-privilege: the action only needs to read the code and post review
+# comments back onto the PR.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: AI code review
+        uses: anc95/ChatGPT-CodeReview@main
+        env:
+          # Built-in token GitHub injects per run — used to post PR comments.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Added manually in repo Settings → Secrets and variables → Actions.
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LANGUAGE: English
