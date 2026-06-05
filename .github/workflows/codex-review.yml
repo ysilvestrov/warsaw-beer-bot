@@ -17,6 +17,23 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
+      # Needed so AGENTS.md is present on the runner; the action itself works
+      # off the GitHub API and would otherwise never clone the repo. Uses the
+      # PR head, so the reviewer prompt tracks the branch under review.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Load the reviewer persona / focus rules from AGENTS.md into an env var
+      # so it can be passed as the action's PROMPT. Heredoc delimiter keeps the
+      # multi-line markdown intact in $GITHUB_ENV.
+      - name: Load reviewer prompt from AGENTS.md
+        run: |
+          {
+            echo 'REVIEW_PROMPT<<__AGENTS_EOF__'
+            cat AGENTS.md
+            echo '__AGENTS_EOF__'
+          } >> "$GITHUB_ENV"
+
       - name: AI code review
         uses: anc95/ChatGPT-CodeReview@main
         env:
@@ -25,3 +42,11 @@ jobs:
           # Added manually in repo Settings → Secrets and variables → Actions.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           LANGUAGE: English
+          # Drives the review with our AGENTS.md persona instead of the
+          # action's built-in generic prompt.
+          PROMPT: ${{ env.REVIEW_PROMPT }}
+          # Cost guard: skip files whose diff exceeds this many characters so a
+          # huge generated/vendored change can't blow up token usage (the full
+          # PROMPT is sent per reviewed file). Tune if large hand-written diffs
+          # get skipped.
+          MAX_PATCH_LENGTH: 8000
