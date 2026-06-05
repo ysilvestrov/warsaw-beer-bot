@@ -45,3 +45,8 @@ jobs:
           # Drives the review with our AGENTS.md persona instead of the
           # action's built-in generic prompt.
           PROMPT: ${{ env.REVIEW_PROMPT }}
+          # Cost guard: skip files whose diff exceeds this many characters so a
+          # huge generated/vendored change can't blow up token usage (the full
+          # PROMPT is sent per reviewed file). Tune if large hand-written diffs
+          # get skipped.
+          MAX_PATCH_LENGTH: 8000
