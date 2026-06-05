@@ -7,6 +7,13 @@ export class CookieExpiredError extends Error {
   }
 }
 
+export class HttpError extends Error {
+  constructor(public readonly status: number, url: string) {
+    super(`HTTP ${status} for ${url}`);
+    this.name = 'HttpError';
+  }
+}
+
 export interface Http {
   get(url: string): Promise<string>;
 }
@@ -45,9 +52,9 @@ export function createHttp(opts: HttpOpts): Http {
         // where headers are not exposed, so we use the option flag as the signal.)
         if (res.status >= 300 && res.status < 400) {
           if (opts.redirect === 'manual') throw new CookieExpiredError();
-          throw new Error(`HTTP ${res.status} for ${url}`);
+          throw new HttpError(res.status, url);
         }
-        if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`);
+        if (!res.ok) throw new HttpError(res.status, url);
         return res.text();
       }) as Promise<string>;
     },

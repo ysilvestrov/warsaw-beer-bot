@@ -167,4 +167,17 @@ describe('lookupBeer', () => {
     expect(out.error).toBe(boom);
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  test('blocked: HttpError 403 → blocked (not transient)', async () => {
+    const { HttpError } = await import('../sources/http');
+    const fetch = jest.fn(async () => { throw new HttpError(403, 'u'); });
+    const out = await lookupBeer({ brewery: 'X', name: 'Y', fetch });
+    expect(out.kind).toBe('blocked');
+  });
+
+  test('blocked: captcha page → blocked (not not_found)', async () => {
+    const fetch = jest.fn(async () => '<title>Just a moment...</title>');
+    const out = await lookupBeer({ brewery: 'X', name: 'Y', fetch });
+    expect(out.kind).toBe('blocked');
+  });
 });

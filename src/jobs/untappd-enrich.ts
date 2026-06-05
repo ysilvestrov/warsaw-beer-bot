@@ -11,7 +11,7 @@ import {
   mergeIntoCanonical,
 } from '../storage/beers';
 
-export type EnrichOutcomeKind = 'matched' | 'not_found' | 'transient' | 'skipped';
+export type EnrichOutcomeKind = 'matched' | 'not_found' | 'transient' | 'skipped' | 'blocked';
 
 export interface EnrichDeps {
   db: DB;
@@ -70,5 +70,9 @@ export async function enrichOneOrphan(
       );
       recordLookupTransient(deps.db, beerId, nowIso);
       return 'transient';
+    case 'blocked':
+      // Untappd is blocking us (403/429/captcha). Record NOTHING — a block must
+      // never mutate backoff state. The caller's circuit breaker handles it.
+      return 'blocked';
   }
 }
