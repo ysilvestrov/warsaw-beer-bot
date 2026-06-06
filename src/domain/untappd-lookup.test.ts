@@ -53,6 +53,25 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('matched: token-prefix gate accepts official-suffix brewery', async () => {
+    // Candidate brewery has extra non-noise tokens ("craft beer") that the
+    // old exact-equality gate would reject; only the token-prefix gate passes.
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 6620595, name: 'Buzdygan Rozkoszy', brewery: 'Harpagan Craft Beer' },
+        { bid: 3240662, name: 'Buzdygan Rozkoszy Rum BA', brewery: 'Harpagan Craft Beer' },
+      ]),
+    );
+    const out = await lookupBeer({
+      brewery: 'Harpagan Brewery',
+      name: 'Buzdygan Rozkoszy',
+      fetch,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6620595);
+  });
+
   test('not_found: brewery passes hard-gate but every name is below 0.85 fuzzy', async () => {
     const fetch = jest.fn(async () =>
       htmlFor([

@@ -1,5 +1,5 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, COLLAB_SEP } from './matcher';
+import { breweryAliases, breweryAliasesMatch, COLLAB_SEP } from './matcher';
 import { normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
@@ -36,7 +36,7 @@ function brewerySearchParts(brewery: string): string[] {
 
 export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   const { brewery, name, fetch } = args;
-  const inputBreweryAliases = new Set(breweryAliases(brewery));
+  const inputBreweryAliases = breweryAliases(brewery);
   const targetName = normalizeName(name);
   const parts = brewerySearchParts(brewery);
 
@@ -56,11 +56,10 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     const results = parseSearchPage(html);
     if (results.length === 0) continue;
 
-    // Stage 1: brewery hard-gate — alias overlap.
-    const breweryPassed = results.filter((r) => {
-      const candidateAliases = breweryAliases(r.brewery_name);
-      return candidateAliases.some((a) => inputBreweryAliases.has(a));
-    });
+    // Stage 1: brewery hard-gate — token-boundary prefix overlap.
+    const breweryPassed = results.filter((r) =>
+      breweryAliasesMatch(breweryAliases(r.brewery_name), inputBreweryAliases),
+    );
     if (breweryPassed.length === 0) continue;
 
     // Stage 2: name fuzzy >= 0.85.
