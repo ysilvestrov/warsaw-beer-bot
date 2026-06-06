@@ -536,6 +536,34 @@ recovery (`open→closed`). Стан скидається на рестарті.
 - Бекап: **Litestream** → Cloudflare R2 (стрім WAL), креденшели лише з env/конфіга.
 - Cron — у процесі через `node-cron` (зміна частоти = окремий PR).
 
+### 5.10 Автоматичне рев'ю PR (Adversarial Review)
+Кожен Pull Request автоматично рев'юється AI-агентом через GitHub Actions —
+доповнення до людського рев'ю, не заміна.
+
+- **Workflow:** `.github/workflows/codex-review.yml` — `anc95/ChatGPT-CodeReview@main`
+  на події PR `opened` + `synchronize`. Найменші права:
+  `permissions: contents:read / pull-requests:write`. Секрети: `OPENAI_API_KEY`
+  (репо-секрет) + вбудований `GITHUB_TOKEN`.
+- **`AGENTS.md` (корінь репо)** — системний промпт рев'ювера (персона
+  Senior Backend Security Reviewer; фокус P0/P1: витоки ресурсів/незакриті
+  потоки, безпека транзакцій SQLite і race-умови через `await`, таймаути й
+  обробка помилок зовнішнього I/O; anti-focus: форматування, назви, type hints у
+  тестах). **Націлений на TS/Node** — згадка «Python» у постановці хибна (див.
+  корекцію стеку на початку файлу).
+- **Дія НЕ читає `AGENTS.md` нативно.** Файл підвантажується в рантаймі: крок
+  `actions/checkout` + `cat AGENTS.md` у `$GITHUB_ENV`, далі передається як
+  `PROMPT`. (Справжня інтеграція OpenAI Codex читала б `AGENTS.md` напряму й
+  зняла б цю обв'язку.)
+- **Кост-гард `MAX_PATCH_LENGTH: 8000`** — `PROMPT` шлеться **по файлу**, тож
+  великі генеровані/vendored-діфи пропускаються, щоб не множити токени.
+- **Зміна будь-чого під `.github/workflows/` вимагає OAuth-scope `workflow`**
+  (інакше push → `remote rejected`). Фікс:
+  `gh auth refresh -s workflow --hostname github.com`.
+- **Дія ковтає помилки OpenAI і все одно репортить job `success`.** `429`/auth-збій
+  → **жодного рев'ю при зеленому чеку**. Робочий ознака — лише **опублікований
+  коментар бота**, не галочка CI. Потрібен **поповнений** OpenAI-акаунт
+  (перший прогін упав на `429 quota exceeded`).
+
 ---
 
 ## Appendix — Operational gotchas (чек-лист на новий деплой)
