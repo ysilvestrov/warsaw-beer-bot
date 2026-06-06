@@ -54,15 +54,26 @@ export function breweryAliases(brewery: string): string[] {
   return Array.from(aliases);
 }
 
-function brewerySetsOverlap(a: string[], b: Set<string>): boolean {
-  return a.some((x) => b.has(x));
+// Token-boundary prefix: true if `a`'s tokens are a leading prefix of `b`'s,
+// or vice versa. Compares whole tokens, so "harp" never matches "harpagan".
+function tokenPrefix(a: string, b: string): boolean {
+  if (a === '' || b === '') return false;
+  const ta = a.split(' ');
+  const tb = b.split(' ');
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  return short.every((t, i) => t === long[i]);
+}
+
+// True if any alias from one side is a token-prefix of any alias from the other.
+export function breweryAliasesMatch(a: string[], b: string[]): boolean {
+  return a.some((x) => b.some((y) => tokenPrefix(x, y)));
 }
 
 export function matchBeer(
   input: { brewery: string; name: string; abv?: number | null },
   catalog: CatalogBeer[],
 ): MatchResult | null {
-  const inputAliases = new Set(breweryAliases(input.brewery));
+  const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
 
   // Exact-normalized hits — multiple rows are common when Untappd has
@@ -70,7 +81,7 @@ export function matchBeer(
   const exacts = catalog
     .filter(
       (c) =>
-        brewerySetsOverlap(breweryAliases(c.brewery), inputAliases) &&
+        breweryAliasesMatch(breweryAliases(c.brewery), inputAliases) &&
         normalizeName(c.name) === nn,
     )
     .sort((a, b) => b.id - a.id);
@@ -138,7 +149,7 @@ export function matchBeer(
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's,
   // otherwise full catalog.
   const pool = catalog.filter((c) =>
-    brewerySetsOverlap(breweryAliases(c.brewery), inputAliases),
+    breweryAliasesMatch(breweryAliases(c.brewery), inputAliases),
   );
   const candidates = pool.length ? pool : catalog;
   const searcher = new Searcher(candidates, {
@@ -148,7 +159,7 @@ export function matchBeer(
   });
   // Use the first alias as the search seed — full normalized brewery already
   // appears at index 0 of breweryAliases when no slash is present.
-  const seedBrewery = Array.from(inputAliases)[0] ?? '';
+  const seedBrewery = inputAliases[0] ?? '';
   const results = searcher.search(`${seedBrewery} ${nn}`);
   if (!results.length) return null;
   const best = results[0];
