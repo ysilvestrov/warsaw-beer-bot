@@ -6,7 +6,7 @@ const STYLE_WORDS = new Set([
 ]);
 const BREWERY_NOISE = new Set([
   // English / Polish
-  'browar', 'browary', 'brewery', 'brewing', 'co', 'company',
+  'browar', 'browary', 'brewery', 'brewing', 'co', 'company', 'contracts',
   // Czech / Slovak, German, French, Italian, Dutch/Flemish,
   // Scandinavian (+ definite form), Spanish (post-diacritic-strip form)
   'pivovar', 'pivovary', 'brauerei', 'brasserie', 'birrificio',
@@ -38,6 +38,21 @@ export function baseNormalize(s: string): string {
 // ("Pinta 555") collapse too — acceptable for now.
 const isNumericNoise = (t: string): boolean => /^\d+$/.test(t);
 
+// Legal-entity suffixes carry no brand meaning. Stripped from the RAW brewery
+// string before tokenization so we never denylist the bare letters they
+// decompose into (z, o, a). Finite, conservative set; dots are required for the
+// S.A. form to avoid eating a real "S A" token.
+const LEGAL_FORM_RES = [
+  /\bsp\.?\s*z\s*o\.?\s*o\.?/gi, // Sp. z o.o. + dotted/spacing variants
+  /\bs\.\s*a\.?/gi,             // S.A.
+];
+
+export function stripLegalForm(s: string): string {
+  let out = s;
+  for (const re of LEGAL_FORM_RES) out = out.replace(re, ' ');
+  return out.replace(/\s+/g, ' ').trim();
+}
+
 export function normalizeName(s: string): string {
   const tokens = baseNormalize(s)
     .split(' ')
@@ -46,7 +61,7 @@ export function normalizeName(s: string): string {
 }
 
 export function normalizeBrewery(s: string): string {
-  const tokens = baseNormalize(s)
+  const tokens = baseNormalize(stripLegalForm(s))
     .split(' ')
     .filter((t) => t && !BREWERY_NOISE.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
@@ -58,7 +73,7 @@ export function normalizeBrewery(s: string): string {
 // often appends "Brewery", which Untappd's term-AND search does not find in the
 // real brewery name (e.g. "JBW Brewery" vs the registered "JBW Browar").
 export function stripBreweryNoise(brewery: string): string {
-  return brewery
+  return stripLegalForm(brewery)
     .split(/\s+/)
     .filter((tok) => tok && !BREWERY_NOISE.has(tok.toLowerCase()))
     .join(' ')
