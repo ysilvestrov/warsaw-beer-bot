@@ -577,8 +577,19 @@ recovery (`open→closed`). Стан скидається на рестарті.
 - Brewery-aliases: `"X / Y"` (білінгва + колаби, будь-який пробіл навколо `/`)
   і паренформа `"X (Y)"` — обидві сторони рахуються як валідна пивоварня;
   `dedupeBreweryAliases` зливає дублі на старті.
+- Brewery hard-gate: **token-boundary prefix** (`matcher.ts breweryAliasesMatch`) —
+  співпадіння, якщо токени одного аліаса є провідним префіксом токенів іншого
+  (`[harpagan]` ⊑ `[harpagan, contracts]`), у будь-якому напрямку. Точна рівність —
+  окремий випадок. Порівняння по цілих токенах: `harp` ≠ `harpagan`; спільний
+  НЕ-провідний токен не рахується (`[project]` ⋢ `[side, project]`). Далі —
+  name-fuzzy ≥ 0.85 як захист від хибних збігів. Той самий gate в
+  `untappd-lookup.ts` (Stage 1).
 - `BREWERY_NOISE` стрипить дескриптори пивоварні багатьма мовами (`browar`,
-  `brewery`, `pivovar`, `brauerei`, `brasserie`, `birrificio`, `brouwerij`,
-  `bryggeri`, `cerveceria`, …) — інакше brewery hard-gate валить валідний матч
-  (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`). Зміна списку міняє
-  `normalized_brewery` → `dedupeBreweryAliases` може злити нові дублі на старті.
+  `brewery`, `contracts`, `pivovar`, `brauerei`, `brasserie`, `birrificio`,
+  `brouwerij`, `bryggeri`, `cerveceria`, …); `stripLegalForm` вирізає юридичні
+  форми (`Sp. z o.o.`, `S.A.`) ДО токенізації — інакше brewery hard-gate валить
+  валідний матч (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`; ontap
+  `Harpagan Brewery` → `harpagan` vs Untappd `Harpagan Contracts`).
+- Збережений `normalized_brewery` — ключ ідемпотентності upsert; при зміні правил
+  нормалізації перераховується на старті (`backfill-normalized-brewery.ts`).
+  `idx_beers_norm` НЕ unique, тож перерахунок не кидає constraint.
