@@ -564,6 +564,34 @@ recovery (`open→closed`). Стан скидається на рестарті.
   коментар бота**, не галочка CI. Потрібен **поповнений** OpenAI-акаунт
   (перший прогін упав на `429 quota exceeded`).
 
+**Відомі хибні спрацювання рев'ювера (контекст, якого він не має).** PROMPT
+шлеться по файлу, тож рев'ювер не бачить решти діфа (зокрема тестів) і не знає
+рантайму. Це — навмисні конвенції, НЕ зауваження до виправлення:
+- **`better-sqlite3` синхронний.** Джоби (`backfill-normalized-brewery`,
+  `dedupeBreweryAliases`, `cleanupPollutedOntap`) — синхронні й викликаються
+  синхронно в `main()`. Немає `await` → немає «race через await». Зауваження
+  «ensure no async / race conditions» до цих джоб — неактуальне.
+- **Тести відкривають `openDb(':memory:')` per-test** (через `fresh()`). Це
+  навмисна **ізоляція**, а не «неправильне керування з'єднанням» — спільний
+  файл/з'єднання дав би крос-тест-зв'язність. In-memory БД знищується з процесом
+  тесту; саме так роблять усі job-тести в репо.
+- **`breweryAliases` повертає `string[]`, не `Set`.** `breweryAliasesMatch(a:
+  string[], b: string[])` ітерує аліаси й порівнює токен-списки (token-prefix);
+  передавання `Set` зламає типізацію. «Change to `new Set(...)`» — некоректне.
+- **SQLite busy-handling — багатошарове, не «скрізь обгортати».** Базовий рівень:
+  `openDb` явно ставить `busy_timeout = 5000` (PRAGMA) → будь-який заблокований
+  запис синхронно ретраїться до 5 с на рівні SQLite, покриваючи **всіх** писачів
+  (startup-джоби, крони). (`better-sqlite3` має такий самий неявний дефолт, але ми
+  закріплюємо явно — щоб майбутній апгрейд бібліотеки не зняв гарантію.) Другий
+  рівень — `withBusyRetry` (експоненційний бекоф)
+  **лише** для довгого `import`, який пише поки бот живий і може вичерпати 5-с
+  вікно під checkpoint-контеншеном litestream. Startup/cron one-shots навмисно
+  покладаються на базовий рівень: prod-логи показують **0** `SQLITE_BUSY` поза
+  `import`. Тож «обгорнути backfill у `withBusyRetry`» — надлишково.
+- **Кожен модуль логіки має колоковані `*.test.ts`.** «Немає тестів для X»
+  зазвичай означає, що рев'ювер не отримав діфа тест-файлу (per-file PROMPT), а не
+  що тестів немає.
+
 ---
 
 ## Appendix — Operational gotchas (чек-лист на новий деплой)
@@ -577,8 +605,24 @@ recovery (`open→closed`). Стан скидається на рестарті.
 - Brewery-aliases: `"X / Y"` (білінгва + колаби, будь-який пробіл навколо `/`)
   і паренформа `"X (Y)"` — обидві сторони рахуються як валідна пивоварня;
   `dedupeBreweryAliases` зливає дублі на старті.
+- Brewery hard-gate: **token-boundary prefix** (`matcher.ts breweryAliasesMatch`) —
+  співпадіння, якщо токени одного аліаса є провідним префіксом токенів іншого
+  (`[harpagan]` ⊑ `[harpagan, contracts]`), у будь-якому напрямку. Точна рівність —
+  окремий випадок. Порівняння по цілих токенах: `harp` ≠ `harpagan`; спільний
+  НЕ-провідний токен не рахується (`[project]` ⋢ `[side, project]`). Далі —
+  name-fuzzy ≥ 0.85 як захист від хибних збігів. Той самий gate в
+  `untappd-lookup.ts` (Stage 1).
 - `BREWERY_NOISE` стрипить дескриптори пивоварні багатьма мовами (`browar`,
-  `brewery`, `pivovar`, `brauerei`, `brasserie`, `birrificio`, `brouwerij`,
-  `bryggeri`, `cerveceria`, …) — інакше brewery hard-gate валить валідний матч
-  (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`). Зміна списку міняє
-  `normalized_brewery` → `dedupeBreweryAliases` може злити нові дублі на старті.
+  `brewery`, `contracts`, `pivovar`, `brauerei`, `brasserie`, `birrificio`,
+  `brouwerij`, `bryggeri`, `cerveceria`, …); `stripLegalForm` вирізає юридичні
+  форми (`Sp. z o.o.`, `S.A.`) ДО токенізації — інакше brewery hard-gate валить
+  валідний матч (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`; ontap
+  `Harpagan Brewery` → `harpagan` vs Untappd `Harpagan Contracts`).
+- `untappd-lookup.ts` Stage 2: серед однаково-оцінених name-fuzzy збігів —
+  ABV-tiebreak (`ABV_TOLERANCE`). `normalizeName` зрізає рік, тож різні
+  vintage/міцності одного пива (`Buzdygan Rozkoszy` 8.5% vs `… 2026` 9.8%)
+  колапсують в однакову назву; ABV — єдиний сигнал, що їх розрізняє.
+  `enrichOneOrphan` передає `beer.abv` у `lookupBeer`.
+- Збережений `normalized_brewery` — ключ ідемпотентності upsert; при зміні правил
+  нормалізації перераховується на старті (`backfill-normalized-brewery.ts`).
+  `idx_beers_norm` НЕ unique, тож перерахунок не кидає constraint.

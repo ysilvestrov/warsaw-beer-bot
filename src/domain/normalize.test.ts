@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -71,5 +71,38 @@ describe('multilingual brewery descriptors', () => {
   test('stripBreweryNoise drops Pivovar in any position (case-insensitive)', () => {
     expect(stripBreweryNoise('Pivovar Polička')).toBe('Polička');
     expect(stripBreweryNoise('Cerna Hora Pivovar')).toBe('Cerna Hora');
+  });
+});
+
+describe('contracts noise word', () => {
+  test('drops "contracts" so official-suffix collapses to the brand', () => {
+    expect(normalizeBrewery('Harpagan Contracts')).toBe('harpagan');
+  });
+});
+
+describe('stripLegalForm', () => {
+  test('removes Sp. z o.o. and dotted/spacing variants', () => {
+    expect(stripLegalForm('Browar X Sp. z o.o.')).toBe('Browar X');
+    expect(stripLegalForm('Browar X Sp.z o.o.')).toBe('Browar X');
+    expect(stripLegalForm('Browar X Sp. z o. o.')).toBe('Browar X');
+  });
+
+  test('removes S.A.', () => {
+    expect(stripLegalForm('Żywiec S.A.')).toBe('Żywiec');
+  });
+
+  test('leaves non-legal text untouched', () => {
+    expect(stripLegalForm('Harpagan Contracts')).toBe('Harpagan Contracts');
+  });
+});
+
+describe('normalizeBrewery with legal forms', () => {
+  test('strips legal form before tokenizing', () => {
+    expect(normalizeBrewery('Browar X Sp. z o.o.')).toBe('x'); // "browar" is noise
+  });
+
+  test('does not clobber standalone z / o tokens', () => {
+    expect(normalizeBrewery('Pinta z Warszawy')).toBe('pinta z warszawy');
+    expect(normalizeBrewery('Browar O Beczki')).toBe('o beczki');
   });
 });

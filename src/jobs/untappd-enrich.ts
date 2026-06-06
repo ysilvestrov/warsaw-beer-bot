@@ -35,6 +35,7 @@ export async function enrichOneOrphan(
   const outcome = await lookupBeer({
     brewery: beer.brewery,
     name: beer.name,
+    abv: beer.abv,
     fetch: (url) => deps.http.get(url),
   });
 

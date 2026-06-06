@@ -1,5 +1,5 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, COLLAB_SEP } from './matcher';
+import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP } from './matcher';
 import { normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
@@ -20,6 +20,7 @@ export type LookupOutcome =
 export interface LookupArgs {
   brewery: string;
   name: string;
+  abv?: number | null;
   fetch: (url: string) => Promise<string>;
 }
 
@@ -35,8 +36,8 @@ function brewerySearchParts(brewery: string): string[] {
 }
 
 export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
-  const { brewery, name, fetch } = args;
-  const inputBreweryAliases = new Set(breweryAliases(brewery));
+  const { brewery, name, abv = null, fetch } = args;
+  const inputBreweryAliases = breweryAliases(brewery);
   const targetName = normalizeName(name);
   const parts = brewerySearchParts(brewery);
 
@@ -56,11 +57,10 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     const results = parseSearchPage(html);
     if (results.length === 0) continue;
 
-    // Stage 1: brewery hard-gate — alias overlap.
-    const breweryPassed = results.filter((r) => {
-      const candidateAliases = breweryAliases(r.brewery_name);
-      return candidateAliases.some((a) => inputBreweryAliases.has(a));
-    });
+    // Stage 1: brewery hard-gate — token-boundary prefix overlap.
+    const breweryPassed = results.filter((r) =>
+      breweryAliasesMatch(breweryAliases(r.brewery_name), inputBreweryAliases),
+    );
     if (breweryPassed.length === 0) continue;
 
     // Stage 2: name fuzzy >= 0.85.
@@ -71,6 +71,21 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     });
     const matches = searcher.search(targetName);
     if (matches.length === 0) continue;
+
+    // ABV tiebreak: normalizeName strips vintage years, so different-year /
+    // different-strength variants of the same beer collapse to identical names
+    // and tie at the top score. ABV is the only signal that separates them, so
+    // among the equally-scored top matches prefer one within ABV_TOLERANCE.
+    const topScore = matches[0].score;
+    if (abv != null) {
+      const abvHit = matches.find(
+        (m) =>
+          m.score === topScore &&
+          m.item.abv != null &&
+          Math.abs(m.item.abv - abv) <= ABV_TOLERANCE,
+      );
+      if (abvHit) return { kind: 'matched', result: abvHit.item };
+    }
 
     return { kind: 'matched', result: matches[0].item };
   }

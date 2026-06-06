@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, extractYear, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -387,4 +387,41 @@ test('brewery hard-gate: Czech Pivovar prefix overlaps tap label', () => {
   const tap = new Set(breweryAliases('Cerna Hora Brewery'));
   const untappd = breweryAliases('Pivovar Černá Hora');
   expect(untappd.some((a) => tap.has(a))).toBe(true);
+});
+
+describe('breweryAliasesMatch (token-boundary prefix)', () => {
+  test('shorter token list is a leading prefix of the longer', () => {
+    expect(breweryAliasesMatch(['harpagan'], ['harpagan contracts'])).toBe(true);
+    expect(breweryAliasesMatch(['harpagan'], ['harpagan craft beer'])).toBe(true);
+    expect(breweryAliasesMatch(['harpagan contracts'], ['harpagan'])).toBe(true);
+  });
+
+  test('exact equality still matches', () => {
+    expect(breweryAliasesMatch(['pinta'], ['pinta'])).toBe(true);
+  });
+
+  test('mid-token prefixes do NOT match (Harp vs Harpagan)', () => {
+    expect(breweryAliasesMatch(['harp'], ['harpagan'])).toBe(false);
+  });
+
+  test('non-leading shared token does NOT match (Project vs Side Project)', () => {
+    expect(breweryAliasesMatch(['project'], ['side project'])).toBe(false);
+  });
+
+  test('disjoint breweries do not match', () => {
+    expect(breweryAliasesMatch(['pinta'], ['stu mostow'])).toBe(false);
+  });
+});
+
+describe('matchBeer with official-suffix brewery', () => {
+  test('matches ontap brand-only brewery to catalog official-suffix brewery', () => {
+    const cat: CatalogBeer[] = [
+      c({ id: 42, brewery: 'Harpagan Contracts', name: 'Buzdygan Rozkoszy', abv: 8.5 }),
+    ];
+    const result = matchBeer(
+      { brewery: 'Harpagan Brewery', name: 'Buzdygan Rozkoszy', abv: 8.5 },
+      cat,
+    );
+    expect(result).toEqual({ id: 42, confidence: 1, source: 'exact' });
+  });
 });

@@ -1,6 +1,8 @@
 import { lookupBeer } from './untappd-lookup';
 
-function htmlFor(items: Array<{ bid: number; name: string; brewery: string; rating?: string }>): string {
+function htmlFor(
+  items: Array<{ bid: number; name: string; brewery: string; rating?: string; abv?: string }>,
+): string {
   const cards = items
     .map((it) => `
       <div class="beer-item">
@@ -10,7 +12,7 @@ function htmlFor(items: Array<{ bid: number; name: string; brewery: string; rati
           <p class="style">IPA</p>
         </div>
         <div class="details beer">
-          <p class="abv">5% ABV</p>
+          <p class="abv">${it.abv ?? '5'}% ABV</p>
           <div class="rating">
             <div class="caps" data-rating="${it.rating ?? '3.5'}"></div>
           </div>
@@ -51,6 +53,46 @@ describe('lookupBeer', () => {
       fetch,
     });
     expect(out.kind).toBe('not_found');
+  });
+
+  test('matched: token-prefix gate accepts official-suffix brewery', async () => {
+    // Candidate brewery has extra non-noise tokens ("craft beer") that the
+    // old exact-equality gate would reject; only the token-prefix gate passes.
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 6620595, name: 'Buzdygan Rozkoszy', brewery: 'Harpagan Craft Beer' },
+        { bid: 3240662, name: 'Buzdygan Rozkoszy Rum BA', brewery: 'Harpagan Craft Beer' },
+      ]),
+    );
+    const out = await lookupBeer({
+      brewery: 'Harpagan Brewery',
+      name: 'Buzdygan Rozkoszy',
+      fetch,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6620595);
+  });
+
+  test('matched: ABV breaks name-fuzzy ties between same-brand vintages', async () => {
+    // normalizeName strips the year, so both names collapse to "buzdygan
+    // rozkoszy" and tie at score 1.0. Untappd returns the 9.8% 2026 vintage
+    // first; only the ABV tiebreak should pull the 8.5% entry the tap shows.
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 6620595, name: 'Buzdygan Rozkoszy 2026', brewery: 'Harpagan Craft Beer', abv: '9.8' },
+        { bid: 2388534, name: 'Buzdygan Rozkoszy', brewery: 'Harpagan Contracts', abv: '8.5' },
+      ]),
+    );
+    const out = await lookupBeer({
+      brewery: 'Harpagan Brewery',
+      name: 'Buzdygan Rozkoszy',
+      abv: 8.5,
+      fetch,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(2388534);
   });
 
   test('not_found: brewery passes hard-gate but every name is below 0.85 fuzzy', async () => {
