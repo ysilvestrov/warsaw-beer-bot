@@ -133,6 +133,20 @@ not instant (~1 day after deploy).
 gate and the `contracts` / legal-form stripping. Per CLAUDE.md, spec.md is the
 single source of truth and is updated in the same PR.
 
+## Addendum (discovered during implementation)
+
+End-to-end verification revealed that fixing the brewery gate exposed a latent
+gap in `untappd-lookup.ts`: `normalizeName` strips vintage years, so
+`"Buzdygan Rozkoszy"` (8.5%) and `"Buzdygan Rozkoszy 2026"` (9.8%) collapse to
+the same normalized name and tie at the top name-fuzzy score. `lookupBeer` took
+`matches[0]` with no ABV signal, so it picked the wrong vintage (9.8%) — which
+would have healed the reported orphan to the wrong catalog entry. Added an ABV
+tiebreak (Task 6): `enrichOneOrphan` threads `beer.abv` into `lookupBeer`, and
+among equally-scored top matches the one within `ABV_TOLERANCE` (0.3, exported
+from `matcher.ts`) wins. This mirrors `matchBeer`'s ABV disambiguation.
+Year-based disambiguation in lookup remains unhandled (YAGNI — ABV resolves the
+reported case).
+
 ## Out of scope
 
 - Changing `dedupe-brewery-aliases.ts` matching semantics.
