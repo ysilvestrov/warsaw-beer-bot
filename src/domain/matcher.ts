@@ -15,7 +15,7 @@ export interface MatchResult {
 }
 
 const FUZZY_THRESHOLD = 0.75;
-const ABV_TOLERANCE = 0.3;
+export const ABV_TOLERANCE = 0.3;
 
 // Separator regex for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)

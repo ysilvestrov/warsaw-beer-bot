@@ -590,6 +590,11 @@ recovery (`open→closed`). Стан скидається на рестарті.
   форми (`Sp. z o.o.`, `S.A.`) ДО токенізації — інакше brewery hard-gate валить
   валідний матч (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`; ontap
   `Harpagan Brewery` → `harpagan` vs Untappd `Harpagan Contracts`).
+- `untappd-lookup.ts` Stage 2: серед однаково-оцінених name-fuzzy збігів —
+  ABV-tiebreak (`ABV_TOLERANCE`). `normalizeName` зрізає рік, тож різні
+  vintage/міцності одного пива (`Buzdygan Rozkoszy` 8.5% vs `… 2026` 9.8%)
+  колапсують в однакову назву; ABV — єдиний сигнал, що їх розрізняє.
+  `enrichOneOrphan` передає `beer.abv` у `lookupBeer`.
 - Збережений `normalized_brewery` — ключ ідемпотентності upsert; при зміні правил
   нормалізації перераховується на старті (`backfill-normalized-brewery.ts`).
   `idx_beers_norm` НЕ unique, тож перерахунок не кидає constraint.
