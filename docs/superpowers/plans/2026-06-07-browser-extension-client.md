@@ -1062,7 +1062,11 @@ git commit -m "chore(extension): Playwright capture script + onemorebeer rendere
 - Modify: `extension/src/sites/onemorebeer.ts`
 - Test: `extension/src/sites/onemorebeer.test.ts`
 
-> Fixture-derived. The capture investigation confirmed the real DOM: tile `.one-product-list-view__tile`; brewery `[data-information-type="brand-name"] .one-product-tile-information__row__value`; title `a.product__title h2` (e.g. `PINTA TAPROOM PL WEST COAST IPA 15,0° BUT. 0,5 L`); **ABV is embedded in the title** as `15,0°` (no separate Moc node on the tile). The grid container `.one-product-list-view` is the SPA re-render container (Task 13b/14).
+> Fixture-derived. The capture investigation confirmed the real DOM: tile `.one-product-list-view__tile`; brewery `[data-information-type="brand-name"] .one-product-tile-information__row__value`; title `a.product__title h2` (e.g. `PINTA TAPROOM PL WEST COAST IPA 15,0° BUT. 0,5 L`).
+>
+> **Corrections applied during implementation (the code/tests below reflect these):**
+> 1. The `NN,N°` token in titles is **degrees Plato (extract), NOT ABV** (`30,0°` ≠ 30% ABV). So the adapter **omits `abv`** entirely; the `°` token is only stripped out of the name (along with the `BUT./PUSZ. … L` packaging tail). The "parses ABV" test became "never sets abv".
+> 2. The SPA re-render container is **`.one-catalog-view-list`** (single, wraps all tiles), not `.one-product-list-view` (which is per-tile, appears 15×).
 
 - [ ] **Step 1: Inspect ~5 real titles + the brewery node in the fixture**
 
