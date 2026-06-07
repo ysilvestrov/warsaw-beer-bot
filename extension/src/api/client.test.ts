@@ -13,7 +13,7 @@ afterEach(() => vi.restoreAllMocks());
 
 describe('api/client', () => {
   it('postMatch posts beers with bearer auth and returns results', async () => {
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ results: [result] }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
