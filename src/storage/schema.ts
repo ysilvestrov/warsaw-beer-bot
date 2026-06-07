@@ -135,6 +135,18 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       WHERE untappd_id IS NULL;
     `,
   },
+  {
+    version: 8,
+    sql: `
+      CREATE TABLE api_tokens (
+        token_hash TEXT NOT NULL PRIMARY KEY,
+        telegram_id INTEGER NOT NULL
+                    REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+        created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX idx_api_tokens_telegram ON api_tokens(telegram_id);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
