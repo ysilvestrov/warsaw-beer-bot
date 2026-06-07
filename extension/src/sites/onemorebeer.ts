@@ -12,14 +12,7 @@ function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
-/** ABV is embedded in the title as e.g. "15,0°". */
-function parseAbvFromTitle(title: string): number | undefined {
-  const m = title.match(/(\d+(?:[.,]\d+)?)\s*°/);
-  if (!m) return undefined;
-  const v = Number(m[1].replace(',', '.'));
-  return Number.isFinite(v) && v > 0 && v < 30 ? v : undefined;
-}
-
+// The "NN,N°" token in titles is degrees Plato (extract), not ABV — used only to trim the name, never sent as abv.
 function cleanName(rawTitle: string, brewery: string): string {
   let name = rawTitle;
   const b = brewery.trim();
@@ -45,10 +38,9 @@ export const onemorebeer: SiteAdapter = {
       const brewery = text(el.querySelector(BREWERY_SELECTOR));
       const rawTitle = text(el.querySelector(TITLE_SELECTOR));
       if (!brewery || !rawTitle) continue;
-      const abv = parseAbvFromTitle(rawTitle);
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
-      cards.push(abv !== undefined ? { el, brewery, name, abv } : { el, brewery, name });
+      cards.push({ el, brewery, name });
     }
     return cards;
   },

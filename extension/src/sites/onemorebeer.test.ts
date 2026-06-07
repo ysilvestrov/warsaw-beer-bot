@@ -29,13 +29,9 @@ describe('onemorebeer adapter', () => {
     }
   });
 
-  it('parses ABV from the title degree token when present', () => {
-    const withAbv = cards.filter((c) => c.abv !== undefined);
-    expect(withAbv.length).toBeGreaterThan(0);
-    for (const c of withAbv) {
-      expect(typeof c.abv).toBe('number');
-      expect(c.abv as number).toBeGreaterThan(0);
-      expect(c.abv as number).toBeLessThan(30);
+  it('never sets abv (the degree token is Plato/extract, not ABV)', () => {
+    for (const c of cards) {
+      expect(c.abv).toBeUndefined();
     }
   });
 
