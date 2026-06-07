@@ -28,6 +28,17 @@ export function checkinsForUser(db: DB, telegramId: number): CheckinRow[] {
     .all(telegramId) as CheckinRow[];
 }
 
+// Most recent non-null personal rating per beer. Iterates newest-first and
+// keeps the first non-null rating seen for each beer_id.
+export function latestRatingsByBeer(db: DB, telegramId: number): Map<number, number> {
+  const out = new Map<number, number>();
+  for (const c of checkinsForUser(db, telegramId)) {
+    if (c.beer_id === null || c.user_rating === null) continue;
+    if (!out.has(c.beer_id)) out.set(c.beer_id, c.user_rating);
+  }
+  return out;
+}
+
 export function hasBeenDrunk(db: DB, telegramId: number, beerId: number): boolean {
   const row = db.prepare(
     'SELECT 1 FROM checkins WHERE telegram_id = ? AND beer_id = ? LIMIT 1',

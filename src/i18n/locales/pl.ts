@@ -17,6 +17,7 @@ export const pl: Messages = {
   'cmd.lang': 'język interfejsu',
   'cmd.help': 'ta pomoc',
   'cmd.start': 'start',
+  'cmd.extension': 'token dla rozszerzenia przeglądarki',
 
   // link
   'link.usage': 'Użycie: /link <username> (lub pełny URL untappd.com/user/<username>)',
@@ -81,4 +82,10 @@ export const pl: Messages = {
   // lang
   'lang.prompt': 'Wybierz język interfejsu:',
   'lang.changed': '✅ Zmieniono język na {name}.',
+
+  // extension
+  'extension.success':
+    'Twój token dostępu do rozszerzenia przeglądarki. Dodaj go w ustawieniach ' +
+    'rozszerzenia (pole „API Token"). Poprzedni token, jeśli istniał, przestał działać.\n' +
+    'Adres API: {url}',
 };

@@ -17,6 +17,7 @@ export const uk: Messages = {
   'cmd.lang': 'мова інтерфейсу',
   'cmd.help': 'ця довідка',
   'cmd.start': 'почати',
+  'cmd.extension': 'токен для браузерного розширення',
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
@@ -81,4 +82,10 @@ export const uk: Messages = {
   // lang
   'lang.prompt': 'Оберіть мову інтерфейсу:',
   'lang.changed': '✅ Мову змінено на {name}.',
+
+  // extension
+  'extension.success':
+    'Ваш токен доступу для браузерного розширення. Додайте його в налаштування ' +
+    'розширення (поле «API Token»). Старий токен, якщо був, більше не діє.\n' +
+    'Адреса API: {url}',
 };

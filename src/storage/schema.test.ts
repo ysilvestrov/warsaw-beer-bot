@@ -13,7 +13,7 @@ describe('schema migrations', () => {
       expect.arrayContaining([
         'beers', 'pubs', 'tap_snapshots', 'taps', 'checkins',
         'match_links', 'user_profiles', 'user_filters', 'pub_distances',
-        'schema_version',
+        'schema_version', 'api_tokens',
       ]),
     );
   });
@@ -123,5 +123,45 @@ describe('schema migrations', () => {
     ).get() as { at: string | null; cnt: number };
     expect(orphan).toEqual({ at: null, cnt: 0 });
     expect(matched).toEqual({ at: '2026-05-31T21:30:08.061Z', cnt: 2 });
+  });
+
+  it('migration v8 creates api_tokens table with token_hash PK', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db
+      .prepare("PRAGMA table_info(api_tokens)")
+      .all() as { name: string; pk: number; notnull: number }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining(['token_hash', 'telegram_id', 'created_at']),
+    );
+    expect(cols.find((c) => c.name === 'token_hash')?.pk).toBe(1);
+    expect(cols.find((c) => c.name === 'token_hash')?.notnull).toBe(1);
+
+    const idx = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='api_tokens'")
+      .all() as { name: string }[];
+    expect(idx.map((i) => i.name)).toContain('idx_api_tokens_telegram');
+  });
+
+  it('api_tokens enforces the telegram_id foreign key (reject + CASCADE)', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    // Reject: a token for a non-existent user violates the FK.
+    expect(() =>
+      db
+        .prepare('INSERT INTO api_tokens (token_hash, telegram_id) VALUES (?, ?)')
+        .run('hash-orphan', 999),
+    ).toThrow(/FOREIGN KEY/);
+
+    // CASCADE: deleting the owning profile removes its token.
+    db.prepare('INSERT INTO user_profiles (telegram_id) VALUES (?)').run(42);
+    db.prepare('INSERT INTO api_tokens (token_hash, telegram_id) VALUES (?, ?)').run('hash-42', 42);
+    db.prepare('DELETE FROM user_profiles WHERE telegram_id = ?').run(42);
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE telegram_id = ?')
+      .get(42) as { n: number };
+    expect(remaining.n).toBe(0);
   });
 });

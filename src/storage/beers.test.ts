@@ -1,6 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer, findBeerByNormalized } from './beers';
+import { upsertBeer, findBeerByNormalized, loadCatalog } from './beers';
+import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -521,5 +522,22 @@ describe('listRatingRefreshCandidates', () => {
       rating_refresh_at: null,
       rating_refresh_count: 0,
     }));
+  });
+});
+
+describe('loadCatalog', () => {
+  it('returns id, brewery, name, abv, rating_global for every beer', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const id = upsertBeer(db, {
+      untappd_id: 9001, name: 'Pan IPAni', brewery: 'Trzech Kumpli',
+      style: 'IPA', abv: 6.0, rating_global: 3.85,
+      normalized_name: normalizeName('Pan IPAni'),
+      normalized_brewery: normalizeBrewery('Trzech Kumpli'),
+    });
+    const cat = loadCatalog(db);
+    expect(cat).toContainEqual({
+      id, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85,
+    });
   });
 });

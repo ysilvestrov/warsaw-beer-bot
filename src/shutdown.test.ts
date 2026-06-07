@@ -53,4 +53,39 @@ describe('createShutdown', () => {
     expect(db.close).toHaveBeenCalledTimes(1);
     expect(cronJobs[0].stop).toHaveBeenCalledTimes(1);
   });
+
+  test('closes the http server between bot stop and db close', async () => {
+    const order: string[] = [];
+    const bot = { stop: jest.fn(() => order.push('bot')) };
+    const db = { close: jest.fn(() => order.push('db')) };
+    const httpServer = {
+      close: jest.fn((cb?: (err?: Error) => void) => { order.push('http'); cb?.(); }),
+    };
+    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, httpServer: httpServer as any, log });
+    await shutdown('SIGTERM');
+    expect(order).toEqual(['bot', 'http', 'db']);
+  });
+
+  test('works when no http server is provided', async () => {
+    const bot = { stop: jest.fn() };
+    const db = { close: jest.fn() };
+    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, log });
+    await expect(shutdown('SIGINT')).resolves.toBeUndefined();
+    expect(db.close).toHaveBeenCalled();
+  });
+
+  test('logs and continues when http server close errors', async () => {
+    const order: string[] = [];
+    const bot = { stop: jest.fn(() => order.push('bot')) };
+    const db = { close: jest.fn(() => order.push('db')) };
+    const httpServer = { close: jest.fn((cb?: (err?: Error) => void) => cb?.(new Error('boom'))) };
+    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, httpServer: httpServer as any, log });
+    await shutdown('SIGTERM');
+    expect(log.error).toHaveBeenCalled();
+    expect(db.close).toHaveBeenCalled();
+    expect(order).toEqual(['bot', 'db']); // http pushed nothing (it errored), db still ran
+  });
 });
