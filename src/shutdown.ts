@@ -7,6 +7,7 @@ export interface ShutdownDeps {
   bot: Pick<Telegraf<never>, 'stop'>;
   cronJobs: Pick<ScheduledTask, 'stop'>[];
   db: Pick<DB, 'close'>;
+  httpServer?: { close: (cb?: (err?: Error) => void) => void };
   log: pino.Logger;
 }
 
@@ -24,6 +25,14 @@ export function createShutdown(deps: ShutdownDeps): Shutdown {
     }
 
     try { deps.bot.stop(signal); } catch (err) { deps.log.error({ err }, 'bot stop failed'); }
+
+    if (deps.httpServer) {
+      try {
+        await new Promise<void>((resolve, reject) =>
+          deps.httpServer!.close((err) => (err ? reject(err) : resolve())),
+        );
+      } catch (err) { deps.log.error({ err }, 'http server close failed'); }
+    }
 
     try { deps.db.close(); } catch (err) { deps.log.error({ err }, 'db close failed'); }
 
