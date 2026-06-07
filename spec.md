@@ -465,13 +465,14 @@ CORS: `origin: '*'` (авторизація — Bearer-заголовок, не 
 
 #### `POST /match` — матчинг пив
 Авторизація: `Authorization: Bearer <token>` → sha256 → `api_tokens` →
-`telegram_id` власника. Несвалідний або відсутній токен → `401 { error: "unauthorized" }`.
+`telegram_id` власника. Невалідний або відсутній токен → `401 { error: "unauthorized" }`.
 
 **Запит** (`Content-Type: application/json`):
 ```json
 { "beers": [{ "brewery": "string", "name": "string", "abv": 0.0 }] }
 ```
 Масив від 1 до 200 елементів; `abv` — опційний.
+Невалідне тіло (порожній `beers`, або `beers` > 200, або відсутні поля) → `400` (zod-валідація через `@hono/zod-validator`).
 
 **Відповідь** (`200 OK`):
 ```json

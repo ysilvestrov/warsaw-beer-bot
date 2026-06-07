@@ -69,4 +69,11 @@ describe('POST /match', () => {
     const res = await post(appAs(1), { beers: [] }); // violates .min(1)
     expect(res.status).toBe(400);
   });
+
+  it('400 when more than 200 beers are sent', async () => {
+    const { appAs } = setup();
+    const beers = Array.from({ length: 201 }, (_, i) => ({ brewery: `B${i}`, name: `N${i}` }));
+    const res = await post(appAs(1), { beers });
+    expect(res.status).toBe(400);
+  });
 });
