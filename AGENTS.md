@@ -80,8 +80,16 @@ replicated to Cloudflare R2 by **Litestream** (streaming the WAL).
   `await` boundaries, so a non-atomic **read-modify-write across an `await`** is a
   real race even though each individual query is synchronous.
 - **Litestream runs a checkpoint against the same WAL**, which can surface
-  `SQLITE_BUSY`. The codebase already has a retry helper (`storage/busy-retry.ts`)
-  — new write paths must use it or justify why not.
+  `SQLITE_BUSY`. The **baseline guard is `busy_timeout = 5000`**, set explicitly
+  in `openDb` (`src/storage/db.ts`): SQLite retries any blocked write for up to
+  5 s, covering **all** writers (startup jobs, cron one-shots, command handlers,
+  short transactions). The exponential-backoff helper `withBusyRetry`
+  (`storage/busy-retry.ts`) is reserved for the **one** path that writes
+  continuously while the bot serves live traffic and can exhaust the 5 s window
+  under checkpoint contention: the long-running `/import`. Do **not** demand
+  `withBusyRetry` on short transactions, startup jobs, or cron one-shots — they
+  rely on the baseline by design (prod logs show zero `SQLITE_BUSY` outside
+  `/import`).
 
 **Architectural invariants (treat violations as P1 unless noted):**
 
@@ -126,7 +134,12 @@ This is a single long-running process; small leaks accumulate over weeks.
   *not* per-request — closing `db` outside `createShutdown` would break the whole
   process. Flag any `db.close()` outside the graceful-shutdown path. Conversely,
   any code that opens a *second* connection (instead of using the injected `db`)
-  is a leak and an invariant violation.
+  is a leak and an invariant violation **in production code**. **Exempt: test
+  files.** `*.test.ts` open their own `openDb(':memory:')` per test (often via a
+  `fresh()` helper) for isolation — this is the sanctioned pattern, not a
+  "second connection" violation. The single-shared-connection rule is about
+  production code wired through the composition root. Never flag `:memory:`,
+  `migrate(db)`, or seed helpers in test files (see §4).
 - **Prepared-statement and listener accumulation.** Watch for prepared statements
   or event listeners (`bot.on`, cron handles, `editMessageText` loops) being
   created inside hot loops / per-update handlers instead of once. Repeated
@@ -137,6 +150,14 @@ This is a single long-running process; small leaks accumulate over weeks.
   batched path exists (import already batches 500 rows per `db.transaction`) — is
   a finding. The 20 MB import ceiling and the snapshot-retention plateau exist for
   this reason; do not let a PR reintroduce unbounded growth.
+  **Exception — sanctioned in-memory working sets.** Loading the full `beers`
+  catalog or a user's checkin/had set into an array for **in-memory matching /
+  ranking** (`loadCatalog`, the `fast-fuzzy` `Searcher`, `triedBeerIds`,
+  `latestRatingsByBeer`) is by design: these need a materialized array, have no
+  streaming equivalent (`fast-fuzzy` cannot consume an iterator), and are bounded
+  by catalog / per-user size. This rule targets the **import / scrape** paths,
+  where a batched/streaming path already exists. Do **not** recommend
+  `.iterate()` for catalog or match-set loads.
 
 > **Note on terminology:** there are **no DB cursors to close** here — that is a
 > Python DB-API concept. The `better-sqlite3` analogue is the **`.iterate()`**
@@ -152,14 +173,23 @@ This is a single long-running process; small leaks accumulate over weeks.
   read-modify-write be wrapped in a single synchronous `db.transaction(...)` with
   **no `await` inside it**, or be made idempotent (e.g. `INSERT ... ON CONFLICT`,
   `UNIQUE` constraints — as `checkins(telegram_id, checkin_id)` already does).
+  **Conversely: no `await` ⇒ no race.** If the read and the write sit in a single
+  synchronous sequence with **no `await` (and no other yield to the event loop)
+  between them**, there is no interleaving point and therefore no race — do not
+  flag it. `better-sqlite3` is synchronous; only an `await` between read and write
+  creates a window. Do **not** posit "concurrent request" / "two requests at once"
+  races for purely synchronous DB code.
 - **`await` inside a `db.transaction(...)` callback.** `better-sqlite3`
   transactions are synchronous by contract. An `await` inside the transaction
   callback silently breaks atomicity (the transaction commits before the async
   work finishes). Treat any `async` transaction callback as a **P0**.
-- **Missing `SQLITE_BUSY` handling on writes.** New write paths that can run
-  concurrently with the Litestream checkpoint must go through `busy-retry.ts`
-  (the `/import` batch path already learned this the hard way). A raw write that
-  can throw `SQLITE_BUSY` and isn't retried/handled is P1.
+- **Missing `withBusyRetry` on a long-lived concurrent write loop.** The
+  `busy_timeout = 5000` baseline (see §2) already covers ordinary writers. Flag a
+  missing `withBusyRetry` **only** for a *new long-running write loop that streams
+  many writes while the bot serves live traffic* — effectively the `/import`
+  class. A normal short `db.transaction(...)`, a startup job, or a cron one-shot
+  is covered by the baseline and must **not** be flagged for "missing
+  `SQLITE_BUSY` handling".
 - **Multi-statement invariants not wrapped in a transaction.** Operations that
   must be all-or-nothing (e.g. delete-snapshots-but-keep-latest, brewery-alias
   dedupe/merge, batched inserts) must be a single transaction. A partial-failure
@@ -176,7 +206,12 @@ untrusted and the network is hostile.
 
 - **Every outbound `fetch` must have a timeout.** A scrape/geocode/route call
   with no `AbortController`/timeout can hang the single process indefinitely.
-  Missing timeout on external I/O is **P1**.
+  Missing timeout on external I/O is **P1**. **"External I/O" means outbound
+  network calls only** — `fetch` to ontap.pl, Untappd, OSRM, Nominatim. It does
+  **not** include internal awaits: `await next()` in HTTP middleware, an `await`ed
+  in-process function, a synchronous `better-sqlite3` call, or `ctx.reply`. Do
+  **not** demand `AbortController`/timeouts on those — there is nothing to time
+  out.
 - **HTML parsing must not assume shape.** `cheerio` selectors that index
   `[0]`/`.first()` and dereference without a presence check will throw when the
   upstream markup changes. Parsers must degrade gracefully (return empty / skip
@@ -233,6 +268,13 @@ review failures. **Do not raise them, not even as P2.**
 - **Re-debating settled architecture.** The invariants in §2 are decided. Flag
   *violations* of them; do not propose replacing the design (e.g. "use an ORM",
   "use Postgres", "make storage async", "drop the circuit breaker").
+- **Per-test database setup.** Test files open a fresh `openDb(':memory:')` per
+  test (often via a `fresh()` helper) and call `migrate(db)` + seed helpers. This
+  is deliberate isolation, **not** a connection-management bug, a "second
+  connection" leak, or a `:memory:`-vs-production mismatch. Do not comment on it.
+- **Generated / lock files.** Do not comment on `package-lock.json` or other
+  generated / vendored files (they are also excluded from review via
+  `IGNORE_PATTERNS` in the workflow). If one ever reaches you, stay silent.
 
 ---
 

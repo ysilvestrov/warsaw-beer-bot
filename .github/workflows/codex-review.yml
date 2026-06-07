@@ -50,3 +50,8 @@ jobs:
           # PROMPT is sent per reviewed file). Tune if large hand-written diffs
           # get skipped.
           MAX_PATCH_LENGTH: 8000
+          # Skip generated/lock files entirely — reviewing them only produces
+          # generic "validate your deps" noise and wastes a per-file PROMPT.
+          # Comma-separated globs (minimatch, regex fallback), matched against
+          # the file path by anc95/ChatGPT-CodeReview (src/bot.ts).
+          IGNORE_PATTERNS: package-lock.json

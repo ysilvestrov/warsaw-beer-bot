@@ -626,7 +626,12 @@ recovery (`open→closed`). Стан скидається на рестарті.
   `PROMPT`. (Справжня інтеграція OpenAI Codex читала б `AGENTS.md` напряму й
   зняла б цю обв'язку.)
 - **Кост-гард `MAX_PATCH_LENGTH: 8000`** — `PROMPT` шлеться **по файлу**, тож
-  великі генеровані/vendored-діфи пропускаються, щоб не множити токени.
+  великі генеровані/vendored-діфи пропускаються, щоб не множити токени. Це
+  **per-file skip-поріг**, а не контекст-ліміт: рев'ювер розглядає кожен файл
+  окремо незалежно від цього числа (тюнінг порога FP не прибирає).
+- **`IGNORE_PATTERNS: package-lock.json`** — лок-файли повністю виключені з
+  рев'ю (інакше дають лише шумні «validate your deps»). Кома-розділені glob'и
+  (minimatch + regex-fallback), матчаться по шляху файла (`anc95 src/bot.ts`).
 - **Зміна будь-чого під `.github/workflows/` вимагає OAuth-scope `workflow`**
   (інакше push → `remote rejected`). Фікс:
   `gh auth refresh -s workflow --hostname github.com`.
@@ -637,7 +642,11 @@ recovery (`open→closed`). Стан скидається на рестарті.
 
 **Відомі хибні спрацювання рев'ювера (контекст, якого він не має).** PROMPT
 шлеться по файлу, тож рев'ювер не бачить решти діфа (зокрема тестів) і не знає
-рантайму. Це — навмисні конвенції, НЕ зауваження до виправлення:
+рантайму. Це — навмисні конвенції, НЕ зауваження до виправлення. **Більшість із них тепер явно закодовані в
+`AGENTS.md`** (§2 busy-baseline, §3.1 carve-out для in-memory working sets +
+test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «external I/O», §4
+анти-фокус для test-БД і generated/lock-файлів), щоб рев'ювер узагалі їх не
+піднімав:
 - **`better-sqlite3` синхронний.** Джоби (`backfill-normalized-brewery`,
   `dedupeBreweryAliases`, `cleanupPollutedOntap`) — синхронні й викликаються
   синхронно в `main()`. Немає `await` → немає «race через await». Зауваження
@@ -659,6 +668,15 @@ recovery (`open→closed`). Стан скидається на рестарті.
   вікно під checkpoint-контеншеном litestream. Startup/cron one-shots навмисно
   покладаються на базовий рівень: prod-логи показують **0** `SQLITE_BUSY` поза
   `import`. Тож «обгорнути backfill у `withBusyRetry`» — надлишково.
+- **In-memory working sets — навмисні.** `loadCatalog`, `fast-fuzzy` `Searcher`,
+  `triedBeerIds`, `latestRatingsByBeer` матеріалізують повний каталог / історію
+  користувача в масив — це потрібно для матчингу (fast-fuzzy не їсть ітератор) і
+  обмежено розміром каталогу/юзера. «Unbounded memory / use `.iterate()`» до них —
+  неактуальне; правило стосується import/scrape-шляхів, де batched-шлях вже є.
+- **«External I/O timeout» лише для outbound-мережі.** Вимога
+  `AbortController`/таймауту стосується `fetch` до ontap/Untappd/OSRM/Nominatim.
+  Внутрішні `await` (Hono `await next()`, синхронні better-sqlite3 виклики,
+  `ctx.reply`) — НЕ external I/O; «add a timeout to `next()`» — некоректне.
 - **Кожен модуль логіки має колоковані `*.test.ts`.** «Немає тестів для X»
   зазвичай означає, що рев'ювер не отримав діфа тест-файлу (per-file PROMPT), а не
   що тестів немає.
