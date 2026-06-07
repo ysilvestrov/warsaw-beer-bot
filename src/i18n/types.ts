@@ -24,6 +24,7 @@ export interface Messages {
   'cmd.lang': string;
   'cmd.help': string;
   'cmd.start': string;
+  'cmd.extension': string;
 
   // link
   'link.usage': string;
@@ -85,6 +86,9 @@ export interface Messages {
   // lang
   'lang.prompt': string;
   'lang.changed': string;                // {name} = native name of newly chosen locale
+
+  // extension (browser-extension API token)
+  'extension.success': string;   // {url} — instructional text; token sent separately in <code>
 }
 
 export type Translator = (

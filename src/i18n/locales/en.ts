@@ -17,6 +17,7 @@ export const en: Messages = {
   'cmd.lang': 'interface language',
   'cmd.help': 'this help',
   'cmd.start': 'start',
+  'cmd.extension': 'browser-extension access token',
 
   // link
   'link.usage': 'Usage: /link <username> (or full URL untappd.com/user/<username>)',
@@ -81,4 +82,10 @@ export const en: Messages = {
   // lang
   'lang.prompt': 'Choose interface language:',
   'lang.changed': '✅ Language switched to {name}.',
+
+  // extension
+  'extension.success':
+    'Your access token for the browser extension. Add it to the extension ' +
+    "settings (the \"API Token\" field). Any previous token has been revoked.\n" +
+    'API URL: {url}',
 };
