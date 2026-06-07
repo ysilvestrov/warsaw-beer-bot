@@ -41,10 +41,11 @@ extension/
     │   ├── beerrepublic.ts       # SSR adapter
     │   └── onemorebeer.ts        # client-rendered adapter (+ waitForGrid)
     ├── content/
-    │   ├── grid-ready.ts         # waitForSelector(root, sel, {timeoutMs})
+    │   ├── grid-ready.ts         # waitForSelector — one-shot render gate
+    │   ├── rerender.ts           # observeReRender — debounced SPA re-render observer
     │   ├── badge.ts              # renderBadge(el, result)
     │   ├── index.ts              # runOverlay(doc, adapter, sendMatch) orchestrator
-    │   └── main.ts               # content entry: wire runOverlay + sendMessage
+    │   └── main.ts               # content entry: wire runOverlay + observer + sendMessage
     ├── background/
     │   └── index.ts              # handleMatch() + onMessage listener
     └── options/
@@ -991,35 +992,28 @@ import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// Candidate selectors that mark a rendered product card. The script tries each;
-// the first that appears is used as the readiness signal and logged so the
-// adapter (Task 10) can reuse it.
-const CARD_CANDIDATES = [
-  '[class*="product-tile"]',
-  '[class*="product-card"]',
-  '[class*="catalog-item"]',
-  '[class*="product-item"]',
-  'a[href*="/produkt"]',
-  'a[href*="/p/"]',
-];
+// Confirmed (capture investigation): onemorebeer tiles are .one-product-list-view__tile,
+// matched by [class*="product-tile"]. onemorebeer paginates client-side (SPA) ~15/page;
+// only ~4 tiles render at networkidle, stabilizing to ~7–15 after a scroll + wait.
+const CARD_SELECTOR = '.one-product-list-view__tile';
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' });
   await page.goto('https://onemorebeer.pl/piwa', { waitUntil: 'networkidle', timeout: 60_000 });
 
-  let used = '';
-  for (const sel of CARD_CANDIDATES) {
-    try {
-      await page.waitForSelector(sel, { timeout: 8000 });
-      used = sel;
-      break;
-    } catch {
-      /* try next candidate */
-    }
+  await page.waitForSelector(CARD_SELECTOR, { timeout: 15_000 });
+
+  // Tiles finish hydrating after networkidle — scroll a few times + wait so the
+  // full page of tiles is in the DOM before we dump the fixture.
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(1500);
   }
-  if (!used) throw new Error('No product-card selector matched; inspect the page manually.');
-  console.log(`Rendered card selector that matched: ${used}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  const count = await page.locator(CARD_SELECTOR).count();
+  console.log(`Rendered ${count} tiles (${CARD_SELECTOR})`);
 
   const html = await page.content();
   const outDir = fileURLToPath(new URL('../tests/fixtures/', import.meta.url));
@@ -1039,17 +1033,18 @@ main().catch((e) => {
 - [ ] **Step 3: Run the capture**
 
 Run: `cd extension && npm run capture-omb`
-Expected: prints the matched card selector and "Wrote tests/fixtures/onemorebeer-piwa.html". **Record the printed selector** — Task 10 uses it.
+Expected: prints "Rendered N tiles (.one-product-list-view__tile)" with N ≥ 7 and "Wrote tests/fixtures/onemorebeer-piwa.html".
 
-- [ ] **Step 4: Confirm the fixture now contains cards**
+- [ ] **Step 4: Confirm the fixture now contains tiles**
 
 Run:
 ```bash
 cd extension
-grep -c -i 'producent' tests/fixtures/onemorebeer-piwa.html
+grep -c 'one-product-list-view__tile' tests/fixtures/onemorebeer-piwa.html
+grep -c 'data-information-type="brand-name"' tests/fixtures/onemorebeer-piwa.html
 wc -c tests/fixtures/onemorebeer-piwa.html
 ```
-Expected: multiple "producent" hits (one per card) and a sizeable file — proof the grid rendered.
+Expected: tile count ≥ 7, a matching brand-name count, and a sizeable file — proof the grid rendered.
 
 - [ ] **Step 5: Commit the script + fixture**
 
@@ -1060,129 +1055,137 @@ git commit -m "chore(extension): Playwright capture script + onemorebeer rendere
 
 ---
 
-## Task 10: `onemorebeer` adapter (client-rendered)
+## Task 10: `onemorebeer` adapter (Nuxt SPA, client-rendered)
 
 **Files:**
+- Modify: `extension/src/sites/types.ts` (add `reRenderContainerSelector?`)
 - Modify: `extension/src/sites/onemorebeer.ts`
 - Test: `extension/src/sites/onemorebeer.test.ts`
 
-> This is the one fixture-derived task: the exact card/title/Producent/Moc selectors come from the fixture captured in Task 9. Steps 1–2 derive them; Steps 3–6 lock them in with a test.
+> Fixture-derived. The capture investigation confirmed the real DOM: tile `.one-product-list-view__tile`; brewery `[data-information-type="brand-name"] .one-product-tile-information__row__value`; title `a.product__title h2` (e.g. `PINTA TAPROOM PL WEST COAST IPA 15,0° BUT. 0,5 L`); **ABV is embedded in the title** as `15,0°` (no separate Moc node on the tile). The grid container `.one-product-list-view` is the SPA re-render container (Task 13b/14).
 
-- [ ] **Step 1: Derive the per-card selectors from the fixture**
+- [ ] **Step 1: Inspect ~5 real titles + the brewery node in the fixture**
 
-Run:
 ```bash
 cd extension
-# the card container = the selector printed by Task 9 Step 3
-# inspect how Producent value and title sit inside one card:
-grep -o -i '.\{0\}producent.\{160\}' tests/fixtures/onemorebeer-piwa.html | head -3
-grep -o -i '.\{60\}moc (%).\{80\}' tests/fixtures/onemorebeer-piwa.html | head -3
+grep -o 'data-information-type="brand-name"[^°]\{0,160\}' tests/fixtures/onemorebeer-piwa.html | head -5
+grep -o '<a class="product__title[^>]*>.\{0,200\}' tests/fixtures/onemorebeer-piwa.html | head -5
+grep -c 'one-product-list-view__tile' tests/fixtures/onemorebeer-piwa.html
+grep -c 'class="one-product-list-view"' tests/fixtures/onemorebeer-piwa.html
 ```
-From the output record: (a) `CARD_SELECTOR` (Task 9's matched selector), (b) how the brewery appears next to the `Producent` label, (c) the product-title element, (d) how `Moc (%)` value appears. Note one concrete `{brewery, name}` pair to assert.
+Record: the brewery value shape, ~5 title strings (note the `NN,N°` ABV token and trailing packaging like `BUT. 0,5 L`), the tile count (≥7), and confirm the container `.one-product-list-view` exists exactly once. Note one concrete `{brewery, expected-clean-name}` pair to sanity-check.
 
-- [ ] **Step 2: Write the failing contract test**
+- [ ] **Step 2: Add `reRenderContainerSelector?` to the SiteAdapter interface**
 
-Replace `extension/src/sites/onemorebeer.test.ts` with (substitute the one real beer name you recorded into the marked assertion):
+In `extension/src/sites/types.ts`, add the optional field to `SiteAdapter` (keep everything else):
 ```ts
-import { describe, it, expect } from 'vitest';
+export interface SiteAdapter {
+  hostMatch(url: URL): boolean;
+  parseCards(root: ParentNode): Card[];
+  /** Optional: resolve once the (client-rendered) grid has painted cards. */
+  waitForGrid?(root: ParentNode): Promise<void>;
+  /** Optional: container whose child mutations signal an SPA page change (re-render observer). */
+  reRenderContainerSelector?: string;
+}
+```
+
+- [ ] **Step 3: Write the failing contract test**
+
+Replace `extension/src/sites/onemorebeer.test.ts` with (this reads the committed fixture; note `resolve(__dirname, …)` not `import.meta.url`, which is an http URL under jsdom Vitest):
+```ts
+import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { onemorebeer } from './onemorebeer';
 
 const html = readFileSync(
-  fileURLToPath(new URL('../../tests/fixtures/onemorebeer-piwa.html', import.meta.url)),
+  resolve(__dirname, '../../tests/fixtures/onemorebeer-piwa.html'),
   'utf8',
 );
 
-function parseFixture() {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  return onemorebeer.parseCards(doc);
-}
+let cards: ReturnType<typeof onemorebeer.parseCards>;
+beforeAll(() => {
+  cards = onemorebeer.parseCards(new DOMParser().parseFromString(html, 'text/html'));
+});
 
 describe('onemorebeer adapter', () => {
-  it('parses multiple cards from the rendered grid', () => {
-    expect(parseFixture().length).toBeGreaterThan(5);
+  it('parses the rendered tiles', () => {
+    expect(cards.length).toBeGreaterThanOrEqual(7);
   });
 
-  it('extracts a non-empty brewery and name per card', () => {
-    for (const c of parseFixture()) {
+  it('extracts a non-empty brewery and name per tile', () => {
+    for (const c of cards) {
       expect(c.brewery.length).toBeGreaterThan(0);
       expect(c.name.length).toBeGreaterThan(0);
     }
   });
 
-  it('parses ABV as a number when "Moc (%)" is present, omits it otherwise', () => {
-    const cards = parseFixture();
-    const withAbv = cards.filter((c) => c.abv !== undefined);
-    for (const c of withAbv) {
-      expect(typeof c.abv).toBe('number');
-      expect(c.abv).toBeGreaterThan(0);
-      expect(c.abv).toBeLessThan(30);
+  it('strips the ABV/packaging tail out of the name', () => {
+    for (const c of cards) {
+      expect(c.name).not.toMatch(/°/); // the degree-ABV token must not survive in the name
     }
   });
 
-  it('defines waitForGrid (client-rendered)', () => {
+  it('parses ABV from the title degree token when present', () => {
+    const withAbv = cards.filter((c) => c.abv !== undefined);
+    expect(withAbv.length).toBeGreaterThan(0); // at least some titles carry NN,N°
+    for (const c of withAbv) {
+      expect(typeof c.abv).toBe('number');
+      expect(c.abv as number).toBeGreaterThan(0);
+      expect(c.abv as number).toBeLessThan(30);
+    }
+  });
+
+  it('defines waitForGrid and reRenderContainerSelector (SPA)', () => {
     expect(typeof onemorebeer.waitForGrid).toBe('function');
+    expect(typeof onemorebeer.reRenderContainerSelector).toBe('string');
   });
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 4: Run test to verify it fails**
 
 Run: `cd extension && npx vitest run src/sites/onemorebeer.test.ts`
 Expected: FAIL (stub returns `[]`).
 
-- [ ] **Step 4: Implement the adapter**
+- [ ] **Step 5: Implement the adapter**
 
-Replace `extension/src/sites/onemorebeer.ts` with the following, setting the four `*_SELECTOR`/label constants to the values derived in Step 1:
+Replace `extension/src/sites/onemorebeer.ts` with:
 ```ts
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
 
-// Derived from tests/fixtures/onemorebeer-piwa.html (Task 9/10 Step 1):
-const CARD_SELECTOR = '__SET_FROM_FIXTURE__';   // e.g. '[class*="product-tile"]'
-const TITLE_SELECTOR = '__SET_FROM_FIXTURE__';  // product name element within a card
-const PRODUCENT_LABEL = 'producent';            // label text preceding the brewery value
-const MOC_LABEL = 'moc';                         // label text preceding the ABV value
+// Confirmed from tests/fixtures/onemorebeer-piwa.html (capture investigation):
+const CARD_SELECTOR = '.one-product-list-view__tile';
+const BREWERY_SELECTOR = '[data-information-type="brand-name"] .one-product-tile-information__row__value';
+const TITLE_SELECTOR = 'a.product__title';
+const CONTAINER_SELECTOR = '.one-product-list-view';
 
 function text(el: Element | null | undefined): string {
-  return el?.textContent?.trim() ?? '';
+  return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
-/** Find the value rendered next to a label like "Producent:" / "Moc (%)" inside a card. */
-function valueForLabel(card: Element, label: string): string {
-  const lower = label.toLowerCase();
-  for (const node of Array.from(card.querySelectorAll('*'))) {
-    if (node.children.length > 0) continue; // leaf nodes only
-    const t = text(node).toLowerCase();
-    if (t.startsWith(lower)) {
-      // value is either after a ':' in the same node, or in the next sibling element
-      const inline = text(node).split(/[:：]/).slice(1).join(':').trim();
-      if (inline) return inline;
-      const sib = node.nextElementSibling;
-      if (sib) return text(sib);
-    }
-  }
-  return '';
-}
-
-function parseAbv(raw: string): number | undefined {
-  const m = raw.replace(',', '.').match(/(\d+(\.\d+)?)/);
+/** ABV is embedded in the title as e.g. "15,0°". */
+function parseAbvFromTitle(title: string): number | undefined {
+  const m = title.match(/(\d+(?:[.,]\d+)?)\s*°/);
   if (!m) return undefined;
-  const v = Number(m[1]);
-  return Number.isFinite(v) && v > 0 ? v : undefined;
+  const v = Number(m[1].replace(',', '.'));
+  return Number.isFinite(v) && v > 0 && v < 30 ? v : undefined;
 }
 
-function stripBreweryPrefix(name: string, brewery: string): string {
+function cleanName(rawTitle: string, brewery: string): string {
+  let name = rawTitle;
+  // strip a leading brewery prefix (titles repeat the brand)
   const b = brewery.trim();
-  if (b && name.toLowerCase().startsWith(b.toLowerCase())) {
-    return name.slice(b.length).trim() || name.trim();
-  }
+  if (b && name.toLowerCase().startsWith(b.toLowerCase())) name = name.slice(b.length);
+  // strip the "NN,N° …packaging" tail (ABV + bottle/can/volume noise) from the degree token on
+  name = name.replace(/\s*\d+(?:[.,]\d+)?\s*°.*$/, '');
   return name.trim();
 }
 
 export const onemorebeer: SiteAdapter = {
   hostMatch: (url) => url.hostname === 'onemorebeer.pl' || url.hostname.endsWith('.onemorebeer.pl'),
+  reRenderContainerSelector: CONTAINER_SELECTOR,
 
   async waitForGrid(root) {
     await waitForSelector(root, CARD_SELECTOR, { timeoutMs: 8000 });
@@ -1191,11 +1194,12 @@ export const onemorebeer: SiteAdapter = {
   parseCards(root) {
     const cards: Card[] = [];
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
-      const brewery = valueForLabel(el, PRODUCENT_LABEL);
-      const rawName = text(el.querySelector(TITLE_SELECTOR));
-      const name = stripBreweryPrefix(rawName, brewery);
-      if (!brewery || !name) continue;
-      const abv = parseAbv(valueForLabel(el, MOC_LABEL));
+      const brewery = text(el.querySelector(BREWERY_SELECTOR));
+      const rawTitle = text(el.querySelector(TITLE_SELECTOR));
+      if (!brewery || !rawTitle) continue;
+      const abv = parseAbvFromTitle(rawTitle);
+      const name = cleanName(rawTitle, brewery);
+      if (!name) continue;
       cards.push(abv !== undefined ? { el, brewery, name, abv } : { el, brewery, name });
     }
     return cards;
@@ -1203,16 +1207,16 @@ export const onemorebeer: SiteAdapter = {
 };
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 6: Run test to verify it passes**
 
 Run: `cd extension && npx vitest run src/sites/onemorebeer.test.ts`
-Expected: PASS (4 tests). If parsing returns 0 cards, the `CARD_SELECTOR`/`TITLE_SELECTOR` constants are wrong — re-inspect the fixture (Step 1) and adjust. If `valueForLabel` misses the brewery, log `el.outerHTML` for one card and adjust the label-matching to the real DOM shape.
+Expected: PASS (5 tests). If 0 tiles parse, re-check the selectors against the fixture (Step 1). If a title has no `°` and its name still looks noisy, that's acceptable — the backend normalizer handles residual noise; keep the test assertions as written. If `reRenderContainerSelector`'s `.one-product-list-view` isn't present/unique in the fixture, pick the actual stable tiles-container from Step 1 and update `CONTAINER_SELECTOR` (report the change).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add extension/src/sites/onemorebeer.ts extension/src/sites/onemorebeer.test.ts
-git commit -m "feat(extension): onemorebeer client-rendered adapter + render-wait"
+git add extension/src/sites/types.ts extension/src/sites/onemorebeer.ts extension/src/sites/onemorebeer.test.ts
+git commit -m "feat(extension): onemorebeer SPA adapter (render-wait + re-render container)"
 ```
 
 ---
@@ -1623,6 +1627,141 @@ git commit -m "feat(extension): content orchestrator (cache → match → badge,
 
 ---
 
+## Task 13b: `content/rerender.ts` — debounced SPA re-render observer
+
+**Files:**
+- Create: `extension/src/content/rerender.ts`
+- Test: `extension/src/content/rerender.test.ts`
+
+> For SPA-paginated sites (onemorebeer), changing pages re-renders the tile container in place with no document reload. `observeReRender` watches that container and (debounced) re-runs the overlay. CRITICAL: it disconnects the observer **while the callback runs** so the overlay's own badge DOM writes don't retrigger it (no infinite loop).
+
+- [ ] **Step 1: Write the failing test `extension/src/content/rerender.test.ts`**
+
+```ts
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { observeReRender } from './rerender';
+
+const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+beforeEach(() => { document.body.innerHTML = ''; });
+
+describe('observeReRender', () => {
+  it('returns a noop and never fires when the container is absent', async () => {
+    const cb = vi.fn();
+    const stop = observeReRender(document, '.grid', cb, { debounceMs: 20 });
+    document.body.innerHTML = '<div class="x"></div>';
+    await tick(40);
+    expect(cb).not.toHaveBeenCalled();
+    stop();
+  });
+
+  it('fires once (debounced) after the container children change', async () => {
+    document.body.innerHTML = '<div class="grid"></div>';
+    const cb = vi.fn();
+    const stop = observeReRender(document, '.grid', cb, { debounceMs: 20 });
+    const grid = document.querySelector('.grid')!;
+    grid.appendChild(document.createElement('div'));
+    grid.appendChild(document.createElement('div'));
+    await tick(60);
+    expect(cb).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('does not re-trigger from DOM writes made inside the callback', async () => {
+    document.body.innerHTML = '<div class="grid"></div>';
+    const grid = document.querySelector('.grid')!;
+    const cb = vi.fn(() => { grid.appendChild(document.createElement('span')); });
+    const stop = observeReRender(document, '.grid', cb, { debounceMs: 20 });
+    grid.appendChild(document.createElement('div')); // external trigger
+    await tick(80);
+    expect(cb).toHaveBeenCalledTimes(1); // the callback's own append did not loop
+    stop();
+  });
+
+  it('stops firing after the disposer is called', async () => {
+    document.body.innerHTML = '<div class="grid"></div>';
+    const cb = vi.fn();
+    const stop = observeReRender(document, '.grid', cb, { debounceMs: 20 });
+    stop();
+    document.querySelector('.grid')!.appendChild(document.createElement('div'));
+    await tick(40);
+    expect(cb).not.toHaveBeenCalled();
+  });
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd extension && npx vitest run src/content/rerender.test.ts`
+Expected: FAIL ("Cannot find module './rerender'").
+
+- [ ] **Step 3: Write `extension/src/content/rerender.ts`**
+
+```ts
+export interface ReRenderOptions {
+  debounceMs?: number;
+}
+
+/**
+ * Watch `containerSelector` for child mutations (SPA page swap) and re-run
+ * `onReRender`, debounced. The observer is disconnected while the callback runs
+ * so the callback's own DOM writes (e.g. badge insertion) cannot retrigger it.
+ * Returns a disposer. If the container is absent, returns a no-op disposer.
+ */
+export function observeReRender(
+  root: ParentNode,
+  containerSelector: string,
+  onReRender: () => unknown,
+  opts: ReRenderOptions = {},
+): () => void {
+  const debounceMs = opts.debounceMs ?? 250;
+  const container = root.querySelector(containerSelector);
+  if (!container) return () => {};
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+
+  const connect = () => observer.observe(container, { childList: true, subtree: true });
+
+  const run = async () => {
+    observer.disconnect();
+    try {
+      await onReRender();
+    } finally {
+      if (!stopped) connect();
+    }
+  };
+
+  const schedule = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void run(), debounceMs);
+  };
+
+  const observer = new MutationObserver(schedule);
+  connect();
+
+  return () => {
+    stopped = true;
+    observer.disconnect();
+    if (timer) clearTimeout(timer);
+  };
+}
+```
+
+- [ ] **Step 4: Run test to verify it passes**
+
+Run: `cd extension && npx vitest run src/content/rerender.test.ts`
+Expected: PASS (4 tests).
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add extension/src/content/rerender.ts extension/src/content/rerender.test.ts
+git commit -m "feat(extension): debounced SPA re-render observer (loop-safe)"
+```
+
+---
+
 ## Task 14: `content/main.ts` — content entry wiring
 
 **Files:**
@@ -1633,6 +1772,7 @@ git commit -m "feat(extension): content orchestrator (cache → match → badge,
 ```ts
 import { pickAdapter } from '../sites/registry';
 import { runOverlay, type SendMatch } from './index';
+import { observeReRender } from './rerender';
 import type { MatchReply, MatchMessage } from '../background/index';
 import type { MatchResult, RawBeer } from '../api/types';
 
@@ -1651,7 +1791,14 @@ const sendMatch: SendMatch = (cards: RawBeer[]) =>
 
 const adapter = pickAdapter(new URL(window.location.href));
 if (adapter) {
-  void runOverlay(document, adapter, sendMatch);
+  const run = () => runOverlay(document, adapter, sendMatch);
+  // First pass awaits waitForGrid, so by the time it resolves the SPA grid
+  // container exists — only then attach the re-render observer.
+  void run().then(() => {
+    if (adapter.reRenderContainerSelector) {
+      observeReRender(document, adapter.reRenderContainerSelector, run);
+    }
+  });
 }
 ```
 
@@ -1664,7 +1811,7 @@ Expected: PASS (no type errors across all modules so far).
 
 ```bash
 git add extension/src/content/main.ts
-git commit -m "feat(extension): content script entry wiring (sendMessage bridge)"
+git commit -m "feat(extension): content entry wiring + SPA re-render observer hookup"
 ```
 
 ---
