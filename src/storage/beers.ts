@@ -56,6 +56,20 @@ export function upsertBeer(db: DB, b: BeerInput): number {
   return Number(res.lastInsertRowid);
 }
 
+export interface CatalogRow {
+  id: number;
+  brewery: string;
+  name: string;
+  abv: number | null;
+  rating_global: number | null;
+}
+
+export function loadCatalog(db: DB): CatalogRow[] {
+  return db
+    .prepare('SELECT id, brewery, name, abv, rating_global FROM beers')
+    .all() as CatalogRow[];
+}
+
 export function findBeerByNormalized(
   db: DB, normBrewery: string, normName: string,
 ): BeerRow | null {

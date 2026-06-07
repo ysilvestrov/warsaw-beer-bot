@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -29,4 +29,28 @@ test('hasBeenDrunk ignores other users', () => {
     user_rating: null, checkin_at: '2026-04-22T10:00:00Z', venue: null });
   expect(hasBeenDrunk(db, 10, beerId)).toBe(true);
   expect(hasBeenDrunk(db, 11, beerId)).toBe(false);
+});
+
+describe('latestRatingsByBeer', () => {
+  it('returns the most recent non-null rating per beer for the user', () => {
+    const db = openDb(':memory:'); migrate(db);
+    const beerA = upsertBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
+    const beerB = upsertBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
+    const base = { telegram_id: 1, venue: null as string | null };
+    mergeCheckin(db, { ...base, checkin_id: 'c1', beer_id: beerA, user_rating: 3.0, checkin_at: '2026-01-01T00:00:00Z' });
+    mergeCheckin(db, { ...base, checkin_id: 'c2', beer_id: beerA, user_rating: 4.5, checkin_at: '2026-03-01T00:00:00Z' });
+    mergeCheckin(db, { ...base, checkin_id: 'c3', beer_id: beerB, user_rating: null, checkin_at: '2026-03-02T00:00:00Z' });
+    const map = latestRatingsByBeer(db, 1);
+    expect(map.get(beerA)).toBe(4.5);
+    expect(map.has(beerB)).toBe(false);
+  });
+
+  it('falls back to an older non-null rating when the newest is null', () => {
+    const db = openDb(':memory:'); migrate(db);
+    const beer = upsertBeer(db, { name: 'X', brewery: 'Y', normalized_name: 'x', normalized_brewery: 'y' });
+    const base = { telegram_id: 1, venue: null as string | null };
+    mergeCheckin(db, { ...base, checkin_id: 'd1', beer_id: beer, user_rating: 3.7, checkin_at: '2026-01-01T00:00:00Z' });
+    mergeCheckin(db, { ...base, checkin_id: 'd2', beer_id: beer, user_rating: null, checkin_at: '2026-05-01T00:00:00Z' });
+    expect(latestRatingsByBeer(db, 1).get(beer)).toBe(3.7);
+  });
 });
