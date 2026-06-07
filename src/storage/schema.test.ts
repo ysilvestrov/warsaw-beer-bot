@@ -143,4 +143,25 @@ describe('schema migrations', () => {
       .all() as { name: string }[];
     expect(idx.map((i) => i.name)).toContain('idx_api_tokens_telegram');
   });
+
+  it('api_tokens enforces the telegram_id foreign key (reject + CASCADE)', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    // Reject: a token for a non-existent user violates the FK.
+    expect(() =>
+      db
+        .prepare('INSERT INTO api_tokens (token_hash, telegram_id) VALUES (?, ?)')
+        .run('hash-orphan', 999),
+    ).toThrow(/FOREIGN KEY/);
+
+    // CASCADE: deleting the owning profile removes its token.
+    db.prepare('INSERT INTO user_profiles (telegram_id) VALUES (?)').run(42);
+    db.prepare('INSERT INTO api_tokens (token_hash, telegram_id) VALUES (?, ?)').run('hash-42', 42);
+    db.prepare('DELETE FROM user_profiles WHERE telegram_id = ?').run(42);
+    const remaining = db
+      .prepare('SELECT COUNT(*) AS n FROM api_tokens WHERE telegram_id = ?')
+      .get(42) as { n: number };
+    expect(remaining.n).toBe(0);
+  });
 });
