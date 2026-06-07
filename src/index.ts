@@ -17,7 +17,9 @@ import { pubsCommand } from './bot/commands/pubs';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
+import { extensionCommand } from './bot/commands/extension';
 import { helpCommand } from './bot/commands/help';
+import { createApiApp, createApiServer } from './api';
 import { registerCommandMenu } from './bot/register-command-menu';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
@@ -80,6 +82,7 @@ async function main(): Promise<void> {
     routeCommand,
     filtersCommand,
     langCommand,
+    extensionCommand,
     helpCommand,
     createRefreshCommand(
       async (notify, opts) => {
@@ -160,10 +163,13 @@ async function main(): Promise<void> {
   bot.launch();
   log.info('bot launched');
 
+  const apiApp = createApiApp({ db, env, log });
+  const apiServer = createApiServer(apiApp, env, log);
+
   // Without an explicit exit, node-cron schedules and the SQLite handle keep
   // the event loop alive — systemd then SIGKILLs us at TimeoutStopSec (90s
   // default), which risks a non-clean SQLite WAL flush.
-  const shutdown = createShutdown({ bot, cronJobs, db, log });
+  const shutdown = createShutdown({ bot, cronJobs, db, httpServer: apiServer, log });
   const onSignal = (signal: string) => {
     shutdown(signal).finally(() => process.exit(0));
   };
