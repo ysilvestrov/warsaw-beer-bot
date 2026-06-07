@@ -2,35 +2,28 @@ import { chromium } from 'playwright';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-// Candidate selectors that mark a rendered product card. The script tries each;
-// the first that appears is used as the readiness signal and logged so the
-// adapter (Task 10) can reuse it.
-const CARD_CANDIDATES = [
-  '[class*="product-tile"]',
-  '[class*="product-card"]',
-  '[class*="catalog-item"]',
-  '[class*="product-item"]',
-  'a[href*="/produkt"]',
-  'a[href*="/p/"]',
-];
+// Confirmed: onemorebeer tiles are .one-product-list-view__tile. The SPA paginates
+// client-side (~15/page); only ~4 tiles render at networkidle, stabilizing after a
+// scroll + wait.
+const CARD_SELECTOR = '.one-product-list-view__tile';
 
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36' });
   await page.goto('https://onemorebeer.pl/piwa', { waitUntil: 'networkidle', timeout: 60_000 });
 
-  let used = '';
-  for (const sel of CARD_CANDIDATES) {
-    try {
-      await page.waitForSelector(sel, { timeout: 8000 });
-      used = sel;
-      break;
-    } catch {
-      /* try next candidate */
-    }
+  await page.waitForSelector(CARD_SELECTOR, { timeout: 15_000 });
+
+  // Tiles finish hydrating after networkidle — scroll a few times + wait so the
+  // full page of tiles is in the DOM before we dump the fixture.
+  for (let i = 0; i < 4; i++) {
+    await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+    await page.waitForTimeout(1500);
   }
-  if (!used) throw new Error('No product-card selector matched; inspect the page manually.');
-  console.log(`Rendered card selector that matched: ${used}`);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
+  const count = await page.locator(CARD_SELECTOR).count();
+  console.log(`Rendered ${count} tiles (${CARD_SELECTOR})`);
 
   const html = await page.content();
   const outDir = fileURLToPath(new URL('../tests/fixtures/', import.meta.url));
