@@ -39,4 +39,8 @@ describe('beerrepublic adapter', () => {
   it('does not define waitForGrid (SSR)', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
   });
+
+  it('defines a re-render container for AJAX collection updates', () => {
+    expect(beerrepublic.reRenderContainerSelector).toBe('section[data-section-type="collection"]');
+  });
 });

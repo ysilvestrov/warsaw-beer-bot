@@ -6,6 +6,7 @@ function text(el: Element | null): string {
 
 export const beerrepublic: SiteAdapter = {
   hostMatch: (url) => url.hostname === 'beerrepublic.eu' || url.hostname.endsWith('.beerrepublic.eu'),
+  reRenderContainerSelector: 'section[data-section-type="collection"]',
 
   parseCards(root) {
     const cards: Card[] = [];
