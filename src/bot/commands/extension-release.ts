@@ -1,5 +1,6 @@
 import { Composer, Markup } from 'telegraf';
 import type { Telegram } from 'telegraf';
+import type pino from 'pino';
 import { createHash } from 'node:crypto';
 import type { BotContext } from '../index';
 import type { DB } from '../../storage/db';
@@ -29,7 +30,8 @@ export async function handleReleaseDocument(
   if (!isAdmin(ctx) || !RELEASE_ZIP.test(doc.file_name ?? '')) return next();
 
   const link = await ctx.telegram.getFileLink(doc.file_id);
-  const res = await fetch(link.toString());
+  // Bound the download so a stalled Telegram CDN fetch can't hang the handler.
+  const res = await fetch(link.toString(), { signal: AbortSignal.timeout(15_000) });
   const buf = Buffer.from(await res.arrayBuffer());
   const sha256 = createHash('sha256').update(buf).digest('hex');
 
@@ -58,6 +60,7 @@ export async function broadcastRelease(
   telegram: Pick<Telegram, 'sendMessage' | 'sendDocument'>,
   db: DB,
   version: string,
+  log?: Pick<pino.Logger, 'warn'>,
 ): Promise<{ sent: number; failed: number }> {
   const rel = getReleaseByVersion(db, version);
   if (!rel || !rel.file_id) return { sent: 0, failed: 0 };
@@ -71,7 +74,10 @@ export async function broadcastRelease(
       await telegram.sendMessage(id, text);
       await telegram.sendDocument(id, rel.file_id);
       sent++;
-    } catch {
+    } catch (err) {
+      // A blocked recipient is expected; log so a systematic failure (bad
+      // file_id, revoked bot) is diagnosable beyond the sent/failed count.
+      log?.warn({ err, telegramId: id }, 'broadcast: delivery failed');
       failed++;
     }
   }
@@ -89,7 +95,7 @@ extensionReleaseCommand.action(/^extrel:send:(.+)$/, async (ctx) => {
   if (!isAdmin(ctx as never)) return;
   const version = ctx.match[1];
   await ctx.editMessageText(ctx.t('extrel.sending', { version }));
-  const { sent, failed } = await broadcastRelease(ctx.telegram, ctx.deps.db, version);
+  const { sent, failed } = await broadcastRelease(ctx.telegram, ctx.deps.db, version, ctx.deps.log);
   await ctx.reply(ctx.t('extrel.broadcast_done', { sent, failed }));
 });
 
