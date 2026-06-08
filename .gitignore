@@ -9,3 +9,6 @@ coverage/
 *.db-shm
 .DS_Store
 migrate_env.sh
+extension/node_modules/
+extension/dist/
+extension/*.zip

@@ -1,0 +1,25 @@
+{
+  "name": "warsaw-beer-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "package": "npm run build && python3 scripts/zip-dist.py",
+    "capture-omb": "tsx scripts/capture-omb-fixture.ts"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.4.0",
+    "@types/chrome": "^0.0.270",
+    "@types/node": "^22.19.20",
+    "jsdom": "^25.0.1",
+    "playwright": "^1.60.0",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21",
+    "vitest": "^2.1.9"
+  }
+}
