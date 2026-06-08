@@ -27,6 +27,16 @@ describe('observeReRender', () => {
     stop();
   });
 
+  it('fires after the observed container is replaced', async () => {
+    document.body.innerHTML = '<div class="grid"></div>';
+    const cb = vi.fn();
+    const stop = observeReRender(document, '.grid', cb, { debounceMs: 20 });
+    document.body.innerHTML = '<div class="grid"><div></div></div>';
+    await tick(60);
+    expect(cb).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it('does not re-trigger from DOM writes made inside the callback', async () => {
     document.body.innerHTML = '<div class="grid"></div>';
     const grid = document.querySelector('.grid')!;

@@ -38,8 +38,6 @@ jobs:
           git fetch origin "${{ github.base_ref }}" --depth=1
 
           {
-            echo 'REVIEW_PROMPT<<AI_REVIEW_PROMPT_EOF'
-
             echo '# Pull request context'
             gh pr view "${{ github.event.pull_request.number }}" \
               --json title,body,baseRefName,headRefName \
@@ -56,9 +54,7 @@ jobs:
             echo
             echo '# Review instructions'
             cat "$REVIEW_INSTRUCTIONS_PATH"
-
-            echo 'AI_REVIEW_PROMPT_EOF'
-          } >> "$GITHUB_ENV"
+          } | bash scripts/github-env-multiline.sh REVIEW_PROMPT
 
       - name: AI code review
         uses: anc95/ChatGPT-CodeReview@v1.0.23
