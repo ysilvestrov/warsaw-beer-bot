@@ -19,14 +19,20 @@ const parsed = JSON.parse(json);
 const beers: { brewery: string; name: string; abv?: number }[] =
   Array.isArray(parsed) ? parsed : parsed.beers;
 
-const db = new Database(dbPath, { readonly: true });
-const catalog = loadCatalog(db);
+// Wrapped in an async main() because matchBeerList is async and the project
+// compiles to CommonJS (no top-level await).
+async function main(): Promise<void> {
+  const db = new Database(dbPath, { readonly: true });
+  const catalog = loadCatalog(db);
 
-const t0 = performance.now();
-const results = matchBeerList(catalog, new Set(), new Map(), beers);
-const ms = performance.now() - t0;
+  const t0 = performance.now();
+  const results = await matchBeerList(catalog, new Set(), new Map(), beers);
+  const ms = performance.now() - t0;
 
-const matched = results.filter((r) => r.matched_beer !== null).length;
-console.log(`catalog=${catalog.length} beers=${beers.length}`);
-console.log(`total=${ms.toFixed(0)}ms  perBeer=${(ms / beers.length).toFixed(1)}ms  matched=${matched}/${beers.length}`);
-db.close();
+  const matched = results.filter((r) => r.matched_beer !== null).length;
+  console.log(`catalog=${catalog.length} beers=${beers.length}`);
+  console.log(`total=${ms.toFixed(0)}ms  perBeer=${(ms / beers.length).toFixed(1)}ms  matched=${matched}/${beers.length}`);
+  db.close();
+}
+
+void main();

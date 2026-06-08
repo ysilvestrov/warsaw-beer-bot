@@ -44,24 +44,36 @@ export interface PreparedCatalog {
   fullSearcher(): PreparedSearcher;
 }
 
-// `build` is injectable purely so tests can observe Searcher construction; the
-// default is the production builder.
-export function prepareCatalog(
-  catalog: CatalogBeer[],
-  build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
-): PreparedCatalog {
-  const beers: PreparedBeer[] = catalog.map((c) => ({
+// Per-row preparation: precompute the normalizations once.
+export function prepareBeer(c: CatalogBeer): PreparedBeer {
+  return {
     ...c,
     nameNorm: normalizeName(c.name),
     breweryNorm: normalizeBrewery(c.brewery),
     aliases: breweryAliases(c.brewery),
-  }));
+  };
+}
+
+// Assembles a PreparedCatalog from already-prepared rows. `build` is injectable
+// purely so tests can observe Searcher construction; the default is the
+// production builder. `fullSearcher()` is memoized + lazily built.
+export function makePreparedCatalog(
+  beers: PreparedBeer[],
+  build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
+): PreparedCatalog {
   let full: PreparedSearcher | undefined;
   return {
     beers,
     searcherFor: build,
     fullSearcher: () => (full ??= build(beers)),
   };
+}
+
+export function prepareCatalog(
+  catalog: CatalogBeer[],
+  build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
+): PreparedCatalog {
+  return makePreparedCatalog(catalog.map(prepareBeer), build);
 }
 
 // Separator regex for collab/bilingual brewery names. Untappd uses:

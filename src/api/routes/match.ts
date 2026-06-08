@@ -23,7 +23,7 @@ const MatchBody = z.object({
 // Registers POST /match on the given app. Assumes auth middleware has set
 // 'telegramId' on the context for this route.
 export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
-  app.post('/match', zValidator('json', MatchBody), (c) => {
+  app.post('/match', zValidator('json', MatchBody), async (c) => {
     const telegramId = c.get('telegramId');
     const { beers } = c.req.valid('json');
 
@@ -31,7 +31,7 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const drunkSet = triedBeerIds(deps.db, telegramId);
     const ratings = latestRatingsByBeer(deps.db, telegramId);
 
-    const results = matchBeerList(catalog, drunkSet, ratings, beers);
+    const results = await matchBeerList(catalog, drunkSet, ratings, beers);
     return c.json({ results });
   });
 }
