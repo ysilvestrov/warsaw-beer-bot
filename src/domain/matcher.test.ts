@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -423,6 +423,16 @@ describe('matchBeer with official-suffix brewery', () => {
       cat,
     );
     expect(result).toEqual({ id: 42, confidence: 1, source: 'exact' });
+  });
+});
+
+describe('prepareBeer', () => {
+  it('precomputes nameNorm, breweryNorm and aliases', () => {
+    const p = prepareBeer({ id: 7, brewery: 'Piwne Podziemie Brewery', name: 'Hopinka IPA', abv: 6 });
+    expect(p.id).toBe(7);
+    expect(p.nameNorm).toBe('hopinka');            // STYLE_WORD "ipa" stripped
+    expect(p.breweryNorm).toBe('piwne podziemie');  // noise word "brewery" stripped
+    expect(p.aliases).toEqual(['piwne podziemie']);
   });
 });
 
