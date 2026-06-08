@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Warsaw Beer Overlay — Options</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="card">
+      <h1>Warsaw Beer Overlay</h1>
+      <label for="token">Token (from the bot's <code>/extension</code> command)</label>
+      <input id="token" type="password" autocomplete="off" placeholder="paste your token" />
+
+      <label for="baseUrl">API URL</label>
+      <input id="baseUrl" type="url" placeholder="https://beer-api.ysilvestrov-ai.uk" />
+
+      <div class="row">
+        <button id="save" type="button">Save</button>
+        <button id="test" type="button">Test connection</button>
+      </div>
+      <p id="status" class="status" aria-live="polite"></p>
+    </main>
+    <script type="module" src="./options.ts"></script>
+  </body>
+</html>

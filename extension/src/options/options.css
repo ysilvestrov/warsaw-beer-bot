@@ -1,0 +1,9 @@
+body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 24px; background: #f6f6f7; }
+.card { max-width: 460px; margin: 0 auto; background: #fff; padding: 22px; border-radius: 12px; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+h1 { font-size: 18px; margin: 0 0 16px; }
+label { display: block; margin: 14px 0 4px; font-weight: 600; font-size: 13px; }
+input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+.row { display: flex; gap: 10px; margin-top: 16px; }
+button { padding: 8px 14px; border: 0; border-radius: 8px; background: #d9822b; color: #fff; font-weight: 600; cursor: pointer; }
+button:hover { background: #c2741f; }
+.status { min-height: 20px; margin-top: 12px; font-size: 13px; }
