@@ -88,4 +88,16 @@ export const uk: Messages = {
     'Ваш токен доступу для браузерного розширення. Додайте його в налаштування ' +
     'розширення (поле «API Token»). Старий токен, якщо був, більше не діє.\n' +
     'Адреса API: {url}',
+  'extension.download': 'Актуальна версія розширення: v{version} (файл нижче).',
+  'extrel.no_match':
+    'Цей файл не відповідає останньому релізу в таблиці. Спершу зроби npm run release, потім надішли саме той zip.',
+  'extrel.attached': 'Прикріплено файл до v{version}. Отримають {n} тестер(ів).',
+  'extrel.btn_send': '📣 Розіслати',
+  'extrel.btn_cancel': 'Скасувати',
+  'extrel.sending': 'Розсилаю v{version}…',
+  'extrel.broadcast_done': 'Готово. Надіслано {sent}, помилок {failed}.',
+  'extrel.cancelled': 'Скасовано, не розіслано.',
+  'extrel.new_version': '🔔 Нова версія розширення v{version}',
+  'extrel.how_to_update':
+    'Як оновити: розпакуй zip поверх тієї ж теки й натисни ↻ на картці розширення в chrome://extensions. Токен і налаштування збережуться.',
 };
