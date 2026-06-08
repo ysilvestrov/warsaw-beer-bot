@@ -46,6 +46,10 @@ When implementing a feature:
 - avoid extending scope beyond the request
 - avoid adding speculative future abstractions
 
+When changing the browser extension:
+
+- update the extension changelog as part of the same change
+
 ---
 
 Architecture
@@ -146,3 +150,11 @@ Changes should be:
 Prefer small, targeted pull requests over broad changes.
 
 If uncertain, choose the more conservative implementation.
+
+For every code change:
+
+- ask whether to create a pull request
+- if pull request creation is confirmed, create the PR
+- wait for review comments, if any
+- evaluate review comments technically before changing code
+- address review findings that are valid and worth addressing
