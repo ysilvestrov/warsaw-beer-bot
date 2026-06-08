@@ -14,6 +14,7 @@ export default defineManifest({
     {
       matches: [
         'https://beerrepublic.eu/*',
+        'https://*.beerrepublic.eu/*',
         'https://onemorebeer.pl/*',
         'https://*.onemorebeer.pl/*',
       ],
