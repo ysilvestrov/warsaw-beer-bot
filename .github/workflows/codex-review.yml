@@ -1,57 +1,105 @@
 name: AI PR Review
 
-# Runs an automated AI code review on every pull request when it is first
-# opened and on every push to its branch (synchronize). The reviewer prompt /
-# focus areas live in AGENTS.md at the repo root.
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, reopened, synchronize]
 
-# Least-privilege: the action only needs to read the code and post review
-# comments back onto the PR.
 permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: ai-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   review:
     runs-on: ubuntu-latest
-    steps:
-      # Needed so AGENTS.md is present on the runner; the action itself works
-      # off the GitHub API and would otherwise never clone the repo. Uses the
-      # PR head, so the reviewer prompt tracks the branch under review.
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      # Load the reviewer persona / focus rules from AGENTS.md into an env var
-      # so it can be passed as the action's PROMPT. Heredoc delimiter keeps the
-      # multi-line markdown intact in $GITHUB_ENV.
-      - name: Load reviewer prompt from AGENTS.md
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Build review prompt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_INSTRUCTIONS_PATH: .github/ai-review/AGENTS.md
         run: |
+          set -euo pipefail
+
+          if [ ! -f "$REVIEW_INSTRUCTIONS_PATH" ]; then
+            echo "::error::$REVIEW_INSTRUCTIONS_PATH is missing"
+            exit 1
+          fi
+
+          git fetch origin "${{ github.base_ref }}" --depth=1
+
           {
-            echo 'REVIEW_PROMPT<<__AGENTS_EOF__'
-            cat AGENTS.md
-            echo '__AGENTS_EOF__'
+            echo 'REVIEW_PROMPT<<AI_REVIEW_PROMPT_EOF'
+
+            echo '# Pull request context'
+            gh pr view "${{ github.event.pull_request.number }}" \
+              --json title,body,baseRefName,headRefName \
+              --jq '"Title: \(.title)\nBase: \(.baseRefName)\nHead: \(.headRefName)\n\nBody:\n\(.body // "")"'
+
+            echo
+            echo '# Changed files'
+            git diff --name-status "origin/${{ github.base_ref }}...HEAD"
+
+            echo
+            echo '# Diff stat'
+            git diff --stat "origin/${{ github.base_ref }}...HEAD"
+
+            echo
+            echo '# Review instructions'
+            cat "$REVIEW_INSTRUCTIONS_PATH"
+
+            echo 'AI_REVIEW_PROMPT_EOF'
           } >> "$GITHUB_ENV"
 
       - name: AI code review
-        uses: anc95/ChatGPT-CodeReview@main
+        uses: anc95/ChatGPT-CodeReview@v1.0.23
         env:
-          # Built-in token GitHub injects per run — used to post PR comments.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Added manually in repo Settings → Secrets and variables → Actions.
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_API_ENDPOINT: https://api.openai.com/v1
+
+          MODEL: gpt-4o-mini
           LANGUAGE: English
-          # Drives the review with our AGENTS.md persona instead of the
-          # action's built-in generic prompt.
           PROMPT: ${{ env.REVIEW_PROMPT }}
-          # Cost guard: skip files whose diff exceeds this many characters so a
-          # huge generated/vendored change can't blow up token usage (the full
-          # PROMPT is sent per reviewed file). Tune if large hand-written diffs
-          # get skipped.
-          MAX_PATCH_LENGTH: 8000
-          # Skip generated/lock files entirely — reviewing them only produces
-          # generic "validate your deps" noise and wastes a per-file PROMPT.
-          # Comma-separated globs (minimatch, regex fallback), matched against
-          # the file path by anc95/ChatGPT-CodeReview (src/bot.ts).
-          IGNORE_PATTERNS: package-lock.json
+
+          temperature: 0
+          top_p: 1
+          max_tokens: 10000
+          MAX_PATCH_LENGTH: 10000
+
+          INCLUDE_PATTERNS: src//*.ts,tests//*.ts,scripts/**/*.ts,.github/workflows/*.yml
+          IGNORE_PATTERNS: package-lock.json,*.md,docs/**
+
+      - name: Verify review was posted
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          review_comments="$(
+            gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" \
+              --jq '[.[] | select(.user.type == "Bot")] | length'
+          )"
+
+          reviews="$(
+            gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" \
+              --jq '[.[] | select(.user.type == "Bot")] | length'
+          )"
+
+          total=$((review_comments + reviews))
+
+          if [ "$total" -eq 0 ]; then
+            echo "::error::AI review finished without posting any PR review/comment. Check OpenAI quota, model name, token permissions, or action logs."
+            exit 1
+          fi
