@@ -24,9 +24,15 @@ beta-testers** (4–5 now, up to ~10), without going to the Chrome Web Store.
 - **The Telegram bot is the delivery channel.** Every tester already uses the
   bot (they minted their token via `/extension`). Telegram hosts the file; we
   re-send by `file_id`, so there is no separate file hosting.
-- **Version + release notes come from the build artifact, not from manual
-  input at send time.** The bot reads them out of the zip. This removes the
-  chance of the announced version drifting from the shipped one.
+- **The build is the single source of metadata.** At build time we write the
+  version + release notes into **both** the zip (for the human) **and** the
+  `extension_releases` table (for the bot), together with the zip's **sha256**.
+  The bot never parses the zip — it has no unzip dependency.
+- **The bot's only job on receiving the zip is to attach a `file_id`.** It
+  hashes the received document and checks the hash equals the latest release
+  row's `sha256`; on match it stores the Telegram `file_id` so it can re-send
+  the file later. The file is uploaded to the bot **solely** to obtain that
+  reusable `file_id`.
 - **Version is bumped in one place** (`package.json`); the manifest derives it.
 - **Extension self-version-check is out of scope** for v1 (possible Phase 2).
 
@@ -35,12 +41,16 @@ beta-testers** (4–5 now, up to ~10), without going to the Chrome Web Store.
 **Release (admin):**
 1. Bump `version` in `extension/package.json`; add the matching section to
    `extension/CHANGELOG.md`.
-2. `npm run package` → `warsaw-beer-overlay-<version>.zip` with `manifest.json`
-   (version) and `RELEASE_NOTES.txt` (version + notes) at the zip root.
+2. `npm run release` → builds → `warsaw-beer-overlay-<version>.zip` with
+   `manifest.json` (version) and `RELEASE_NOTES.txt` (version + notes) at the zip
+   root → computes the zip's **sha256** → **writes the `extension_releases` row**
+   (version, notes, sha256; `file_id` still NULL) into the bot's DB.
 3. Forward that zip to the bot as a document (no caption/args needed).
-4. Bot reads metadata from the zip, stores the release, and replies with an
-   inline **📣 Розіслати / Скасувати** confirmation.
-5. On confirm, the bot broadcasts the zip + notes to every token holder.
+4. Bot hashes the received file; if it matches the latest release row's sha256,
+   it stores the `file_id` and replies with an inline
+   **📣 Розіслати / Скасувати** confirmation.
+5. On confirm, the bot broadcasts the zip (by `file_id`) + the stored notes to
+   every token holder.
 
 **Tester (first install):** `/extension` → token **and** the current zip +
 instructions → unzip into a stable folder → `chrome://extensions` →
@@ -67,10 +77,10 @@ The current duplicated `version: '0.1.0'` in `manifest.config.ts` is removed.
 **Changelog.** `extension/CHANGELOG.md` in keep-a-changelog style; one section
 per release headed `## [x.y.z] - YYYY-MM-DD`.
 
-**Packaging.** `npm run package` becomes: `vite build` → generate
-`dist/RELEASE_NOTES.txt` from the CHANGELOG section matching `package.json`'s
-version → zip `dist/` into `warsaw-beer-overlay-<version>.zip`.
-`RELEASE_NOTES.txt` content:
+**Packaging + release.** `npm run package` builds the zip:
+`vite build` → generate `dist/RELEASE_NOTES.txt` from the CHANGELOG section
+matching `package.json`'s version → zip `dist/` into
+`warsaw-beer-overlay-<version>.zip`. `RELEASE_NOTES.txt` content:
 
 ```
 Warsaw Beer Overlay v0.2.0
@@ -78,10 +88,17 @@ Warsaw Beer Overlay v0.2.0
 <the body of the matching CHANGELOG section>
 ```
 
-A new build step (`scripts/release-notes.ts` or extended `zip-dist.py`)
-**fails the build** if `package.json`'s version has no matching CHANGELOG
-section — this catches "forgot to write notes / forgot to bump". The changelog
-slicer is a pure function and is unit-tested in isolation.
+`npm run release` runs `package`, then computes `sha256(zip)` and **upserts the
+`extension_releases` row** (version, notes, sha256) into the bot's DB. The DB
+path comes from the same env the bot uses; since the release runs on the bot
+host, it writes the live DB directly (SQLite WAL + the pinned `busy_timeout`
+make a concurrent writer safe). The row's `file_id` stays NULL until the admin
+uploads the file to the bot.
+
+A new build step (`scripts/release-notes.ts`) **fails the build** if
+`package.json`'s version has no matching CHANGELOG section — this catches
+"forgot to write notes / forgot to bump". The changelog slicer is a pure
+function and is unit-tested in isolation.
 
 **Stable extension ID.** Add a `key` (base64 public key) to the manifest so the
 unpacked extension ID is deterministic regardless of the install path. Without
@@ -98,30 +115,32 @@ documented in the deploy/release notes).
 ```sql
 CREATE TABLE extension_releases (
   version      TEXT NOT NULL PRIMARY KEY,   -- semver, e.g. "0.2.0"
-  file_id      TEXT NOT NULL,               -- Telegram file_id (re-send w/o re-upload)
-  notes        TEXT NOT NULL,
+  sha256       TEXT NOT NULL,               -- hex digest of the zip (written by the build)
+  notes        TEXT NOT NULL,               -- changelog body (written by the build)
+  file_id      TEXT,                        -- Telegram file_id; NULL until the admin uploads
   published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  published_by INTEGER NOT NULL             -- admin telegram_id
+  attached_by  INTEGER                      -- admin telegram_id who attached file_id; NULL until then
 );
 ```
 
-"Latest" = the row with the highest semver (compared in code, not lexically).
+The build (`npm run release`) inserts `version`, `sha256`, `notes`. The bot fills
+`file_id` + `attached_by` when the admin uploads the matching file. "Latest" =
+the row with the highest semver (compared in code, not lexically).
 
 **Publish handler.** On a document message from `ADMIN_TELEGRAM_ID`:
 1. Guard: sender is the admin and the document looks like our zip (filename /
    mime, size bound — same ≤20 MB Telegram limit already handled for `/import`).
-2. Download via `getFile` + fetch into a buffer.
-3. Unzip in memory (`fflate` — small, zero-dep, sync `unzipSync`). Read
-   `manifest.json` → `version` + `name`; read `RELEASE_NOTES.txt` → notes.
-4. Validate: `name` === expected ("Warsaw Beer Overlay"); `version` is valid
-   semver; `version` is **strictly greater** than the current latest (reject
-   duplicate/downgrade); `RELEASE_NOTES.txt` present and non-empty.
-5. Insert into `extension_releases` with the received document's `file_id`.
-6. Reply to the admin: "Збережено v0.2.0. Отримають N тестерів." + inline
-   keyboard **📣 Розіслати / Скасувати**.
+2. Download via `getFile` + fetch into a buffer; compute `sha256`.
+3. Look up the **latest** `extension_releases` row. If its `sha256` matches the
+   uploaded file's hash, store the document's `file_id` + `attached_by` on that
+   row. The bot never opens the zip.
+4. Reply to the admin: "Прикріплено файл до v0.2.0. Отримають N тестерів." +
+   inline keyboard **📣 Розіслати / Скасувати**.
 
-A non-admin sending a random document is handled by existing behavior (ignored /
-normal fallback) — the publish path simply doesn't trigger.
+Mismatch / no row → reject with the reason ("файл не відповідає останньому
+релізу в таблиці — спершу `npm run release`"). A non-admin sending a random
+document is handled by existing behavior (ignored / normal fallback) — the
+publish path simply doesn't trigger.
 
 **Broadcast.** On the **Розіслати** callback (admin-only):
 - Select distinct `telegram_id` from `api_tokens`.
@@ -157,10 +176,11 @@ build-from-source path is kept as an appendix for maintainers.
 |---|---|---|
 | Build | version has no CHANGELOG section | `npm run package` exits non-zero with a clear message |
 | Build | `dist/manifest.json` missing | exit non-zero (build didn't run) |
+| Release | can't reach/write the DB | `npm run release` exits non-zero; zip is still produced |
 | Publish | sender not admin | publish path not triggered (normal fallback) |
-| Publish | not a zip / too large | reply with the reason, no DB write |
-| Publish | malformed zip / missing manifest or notes | reply with the reason, no DB write |
-| Publish | bad / duplicate / downgrade version | reply with the reason, no DB write |
+| Publish | not a zip / too large | reply with the reason, no DB change |
+| Publish | hash matches no release row | reply "файл не відповідає останньому релізу — спершу `npm run release`" |
+| Broadcast | `file_id` not attached yet | buttons aren't shown until attach, so this can't be reached |
 | Broadcast | a recipient send fails | log + skip; counted in the failure summary |
 
 ## Testing (Jest for `src/`, Vitest for `extension/`)
@@ -169,10 +189,12 @@ build-from-source path is kept as an appendix for maintainers.
   throws when the section is missing; trims/normalizes whitespace.
 - **Manifest version wiring** (extension): manifest version equals
   `package.json` version.
-- **Zip metadata extraction** (bot): from a fixture zip → correct version +
-  notes; rejects a zip missing `manifest.json` / `RELEASE_NOTES.txt`.
-- **`extension_releases` storage** (bot): insert; "latest" by semver; reject
-  duplicate; reject downgrade.
+- **Release DB write** (bot/script): `npm run release` upserts a row with the
+  expected version, notes, and the zip's sha256.
+- **`extension_releases` storage** (bot): insert by build; "latest" by semver;
+  attach `file_id` to the latest row; idempotent re-attach.
+- **Hash-match on publish** (bot): a file whose sha256 matches the latest row
+  attaches its `file_id`; a non-matching file is rejected and no row changes.
 - **Broadcast** (bot): iterates all token holders; continues past a failing
   send (mocked Telegram); returns `{ sent, failed }`.
 - **Admin guard** (bot): publish + broadcast callbacks reject non-admin senders.
