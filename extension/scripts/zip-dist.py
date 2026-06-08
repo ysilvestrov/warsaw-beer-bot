@@ -5,6 +5,7 @@ Used by `npm run package`. Kept in Python because the host has no `zip` binary a
 Node has no stdlib zip writer. The resulting archive, once unzipped, is a folder you
 load via chrome://extensions -> Load unpacked.
 """
+import json
 import os
 import sys
 import zipfile
@@ -12,7 +13,10 @@ import zipfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 EXT_ROOT = os.path.dirname(HERE)
 DIST = os.path.join(EXT_ROOT, "dist")
-OUT = os.path.join(EXT_ROOT, "warsaw-beer-overlay.zip")
+
+with open(os.path.join(EXT_ROOT, "package.json"), encoding="utf-8") as f:
+    VERSION = json.load(f)["version"]
+OUT = os.path.join(EXT_ROOT, f"warsaw-beer-overlay-{VERSION}.zip")
 
 if not os.path.isdir(DIST):
     sys.exit("dist/ not found — run `npm run build` first (or use `npm run package`).")

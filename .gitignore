@@ -12,3 +12,6 @@ migrate_env.sh
 extension/node_modules/
 extension/dist/
 extension/*.zip
+
+# Built browser-extension release artifact
+extension/warsaw-beer-overlay-*.zip

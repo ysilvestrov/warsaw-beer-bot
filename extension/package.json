@@ -8,7 +8,7 @@
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "package": "npm run build && python3 scripts/zip-dist.py",
+    "package": "vite build && tsx scripts/release-notes.ts && python3 scripts/zip-dist.py",
     "capture-omb": "tsx scripts/capture-omb-fixture.ts"
   },
   "devDependencies": {
