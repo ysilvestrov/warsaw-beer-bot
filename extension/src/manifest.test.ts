@@ -1,7 +1,11 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import manifest from '../manifest.config';
+import manifestExport from '../manifest.config';
 import pkg from '../package.json';
+
+// defineManifest's return type is a union (object | Promise | fn); at build time
+// we pass a plain object, so narrow to a record for property access in the test.
+const manifest = manifestExport as { version: string; key: string };
 
 describe('manifest', () => {
   it('derives version from package.json (single source of truth)', () => {
@@ -10,6 +14,6 @@ describe('manifest', () => {
 
   it('pins a stable extension id via the key field', () => {
     expect(typeof manifest.key).toBe('string');
-    expect((manifest.key as string).length).toBeGreaterThan(100);
+    expect(manifest.key.length).toBeGreaterThan(100);
   });
 });
