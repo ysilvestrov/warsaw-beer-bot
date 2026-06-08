@@ -7,8 +7,8 @@ const catalog: CatalogBeerWithRating[] = [
 ];
 
 describe('matchBeerList', () => {
-  it('marks a matched, drunk beer with its personal rating', () => {
-    const res = matchBeerList(
+  it('marks a matched, drunk beer with its personal rating', async () => {
+    const res = await matchBeerList(
       catalog,
       new Set([105]),
       new Map([[105, 4.0]]),
@@ -24,16 +24,16 @@ describe('matchBeerList', () => {
     ]);
   });
 
-  it('drunk via had-list only → is_drunk true, user_rating null', () => {
-    const res = matchBeerList(catalog, new Set([200]), new Map(), [
+  it('drunk via had-list only → is_drunk true, user_rating null', async () => {
+    const res = await matchBeerList(catalog, new Set([200]), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
     ]);
     expect(res[0].is_drunk).toBe(true);
     expect(res[0].user_rating).toBeNull();
   });
 
-  it('no catalog match → matched_beer null, not drunk', () => {
-    const res = matchBeerList(catalog, new Set(), new Map(), [
+  it('no catalog match → matched_beer null, not drunk', async () => {
+    const res = await matchBeerList(catalog, new Set(), new Map(), [
       { brewery: 'Nowhere', name: 'Unknown Stout' },
     ]);
     expect(res[0]).toEqual({
@@ -44,8 +44,8 @@ describe('matchBeerList', () => {
     });
   });
 
-  it('preserves input order', () => {
-    const res = matchBeerList(catalog, new Set(), new Map(), [
+  it('preserves input order', async () => {
+    const res = await matchBeerList(catalog, new Set(), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
       { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
     ]);
@@ -70,11 +70,28 @@ describe('matchBeerList — prepare-once equivalence', () => {
     { brewery: 'Nowhere', name: 'Totally Unknown Stout' },    // no match
   ];
 
-  it('per-batch result equals matching each beer alone', () => {
-    const batch = matchBeerList(bigCatalog, new Set(), new Map(), inputs);
+  it('per-batch result equals matching each beer alone', async () => {
+    const batch = await matchBeerList(bigCatalog, new Set(), new Map(), inputs);
     inputs.forEach((input, i) => {
       const solo = matchBeer(input, bigCatalog);
       expect(batch[i].matched_beer?.id ?? null).toBe(solo?.id ?? null);
     });
+  });
+});
+
+describe('matchBeerList — cooperative yielding', () => {
+  it('yields between prep chunks and after each beer', async () => {
+    // 2001 rows → ceil(2001/2000) = 2 prep-chunk yields.
+    const big: CatalogBeerWithRating[] = Array.from({ length: 2001 }, (_, i) => ({
+      id: i + 1, brewery: `Brew ${i}`, name: `Beer ${i}`, abv: null, rating_global: null,
+    }));
+    const items = [
+      { brewery: 'Brew 0', name: 'Beer 0' },   // exact match
+      { brewery: 'Nowhere', name: 'Unknown' }, // empty-pool fallback
+    ];
+    const yieldSpy = jest.fn(() => Promise.resolve());
+    await matchBeerList(big, new Set(), new Map(), items, { yield: yieldSpy });
+    // 2 prep-chunk yields + 1 yield per beer.
+    expect(yieldSpy.mock.calls.length).toBe(2 + items.length);
   });
 });
