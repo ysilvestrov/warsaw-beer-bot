@@ -164,4 +164,19 @@ describe('schema migrations', () => {
       .get(42) as { n: number };
     expect(remaining.n).toBe(0);
   });
+
+  it('migration v9 creates extension_releases with version PK and nullable file_id', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db
+      .prepare('PRAGMA table_info(extension_releases)')
+      .all() as { name: string; pk: number; notnull: number }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining(['version', 'sha256', 'notes', 'file_id', 'published_at', 'attached_by']),
+    );
+    expect(cols.find((c) => c.name === 'version')?.pk).toBe(1);
+    expect(cols.find((c) => c.name === 'sha256')?.notnull).toBe(1);
+    expect(cols.find((c) => c.name === 'file_id')?.notnull).toBe(0);
+  });
 });

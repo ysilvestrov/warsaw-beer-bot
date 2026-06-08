@@ -88,4 +88,16 @@ export const en: Messages = {
     'Your access token for the browser extension. Add it to the extension ' +
     "settings (the \"API Token\" field). Any previous token has been revoked.\n" +
     'API URL: {url}',
+  'extension.download': 'Current extension version: v{version} (file below).',
+  'extrel.no_match':
+    'This file does not match the latest release row. Run npm run release first, then send that exact zip.',
+  'extrel.attached': 'Attached the file to v{version}. {n} tester(s) will receive it.',
+  'extrel.btn_send': '📣 Broadcast',
+  'extrel.btn_cancel': 'Cancel',
+  'extrel.sending': 'Broadcasting v{version}…',
+  'extrel.broadcast_done': 'Done. Sent {sent}, failed {failed}.',
+  'extrel.cancelled': 'Cancelled, not broadcast.',
+  'extrel.new_version': '🔔 New extension version v{version}',
+  'extrel.how_to_update':
+    'How to update: unzip over the same folder and click ↻ on the extension card in chrome://extensions. Your token and settings are kept.',
 };

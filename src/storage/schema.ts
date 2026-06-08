@@ -147,6 +147,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX idx_api_tokens_telegram ON api_tokens(telegram_id);
     `,
   },
+  {
+    version: 9,
+    sql: `
+      CREATE TABLE extension_releases (
+        version      TEXT NOT NULL PRIMARY KEY,
+        sha256       TEXT NOT NULL,
+        notes        TEXT NOT NULL,
+        file_id      TEXT,
+        published_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        attached_by  INTEGER
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

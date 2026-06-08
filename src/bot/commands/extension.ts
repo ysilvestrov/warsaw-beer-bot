@@ -5,6 +5,7 @@ import type { Translator } from '../../i18n/types';
 import type { DB } from '../../storage/db';
 import { ensureProfile } from '../../storage/user_profiles';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
+import { latestRelease } from '../../storage/extension_releases';
 import { escapeHtml } from './newbeers-format';
 
 // Public hostname served via the Cloudflare tunnel → 127.0.0.1:API_PORT.
@@ -24,10 +25,25 @@ export function buildExtensionMessage(t: Translator, token: string, url: string)
   return `${escapeHtml(t('extension.success', { url }))}\n\n<code>${token}</code>`;
 }
 
+// The newest release that has a Telegram file_id attached (i.e. ready to send).
+export function latestDeliverableRelease(
+  db: DB,
+): { fileId: string; version: string } | null {
+  const rel = latestRelease(db);
+  return rel?.file_id ? { fileId: rel.file_id, version: rel.version } : null;
+}
+
 export const extensionCommand = new Composer<BotContext>();
 
 extensionCommand.command('extension', async (ctx) => {
   ensureProfile(ctx.deps.db, ctx.from.id);
   const token = generateAndStoreToken(ctx.deps.db, ctx.from.id, new Date().toISOString());
   await ctx.replyWithHTML(buildExtensionMessage(ctx.t, token, API_URL));
+
+  const delivery = latestDeliverableRelease(ctx.deps.db);
+  if (delivery) {
+    await ctx.replyWithDocument(delivery.fileId, {
+      caption: ctx.t('extension.download', { version: delivery.version }),
+    });
+  }
 });

@@ -88,4 +88,16 @@ export const pl: Messages = {
     'Twój token dostępu do rozszerzenia przeglądarki. Dodaj go w ustawieniach ' +
     'rozszerzenia (pole „API Token"). Poprzedni token, jeśli istniał, przestał działać.\n' +
     'Adres API: {url}',
+  'extension.download': 'Aktualna wersja rozszerzenia: v{version} (plik poniżej).',
+  'extrel.no_match':
+    'Ten plik nie odpowiada ostatniemu wydaniu w tabeli. Najpierw uruchom npm run release, potem wyślij ten zip.',
+  'extrel.attached': 'Dołączono plik do v{version}. Otrzyma {n} testerów.',
+  'extrel.btn_send': '📣 Roześlij',
+  'extrel.btn_cancel': 'Anuluj',
+  'extrel.sending': 'Wysyłam v{version}…',
+  'extrel.broadcast_done': 'Gotowe. Wysłano {sent}, błędów {failed}.',
+  'extrel.cancelled': 'Anulowano, nie wysłano.',
+  'extrel.new_version': '🔔 Nowa wersja rozszerzenia v{version}',
+  'extrel.how_to_update':
+    'Jak zaktualizować: rozpakuj zip do tego samego folderu i kliknij ↻ na karcie rozszerzenia w chrome://extensions. Token i ustawienia zostaną zachowane.',
 };

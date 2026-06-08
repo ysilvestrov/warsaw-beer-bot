@@ -89,6 +89,18 @@ export interface Messages {
 
   // extension (browser-extension API token)
   'extension.success': string;   // {url} — instructional text; token sent separately in <code>
+  'extension.download': string;  // {version} — caption for the latest release zip
+
+  // extension release / distribution (admin-facing + broadcast)
+  'extrel.no_match': string;
+  'extrel.attached': string;          // {version}, {n}
+  'extrel.btn_send': string;
+  'extrel.btn_cancel': string;
+  'extrel.sending': string;           // {version}
+  'extrel.broadcast_done': string;    // {sent}, {failed}
+  'extrel.cancelled': string;
+  'extrel.new_version': string;       // {version}
+  'extrel.how_to_update': string;
 }
 
 export type Translator = (

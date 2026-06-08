@@ -314,10 +314,24 @@ src/
 вставляється новий — усе в одній транзакції (`rotateToken`). Сирий токен ніколи не
 зберігається — лише sha256-хеш.
 
-### 3.12 `schema_version` — версія міграцій
+### 3.12 `extension_releases` — релізи браузерного розширення (v9)
+| Поле | Тип | Обмеження | Опис |
+|------|-----|-----------|------|
+| `version` | TEXT | NOT NULL PRIMARY KEY | semver релізу (напр. `0.2.0`) |
+| `sha256` | TEXT | NOT NULL | hex-дайджест zip (пишеться збіркою) |
+| `notes` | TEXT | NOT NULL | тіло секції CHANGELOG (пишеться збіркою) |
+| `file_id` | TEXT | nullable | Telegram `file_id` для перешилання; NULL поки адмін не завантажить |
+| `published_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | час запису рядка |
+| `attached_by` | INTEGER | nullable | telegram_id адміна, що прикріпив `file_id` |
+
+**Хто що пише:** `version`/`sha256`/`notes` — збірка (`npm run release`);
+`file_id`/`attached_by` — бот, коли адмін надсилає zip і його sha256 збігається з
+останнім рядком. «Остання» версія — за semver (числове порівняння, не лексичне).
+
+### 3.13 `schema_version` — версія міграцій
 Єдине поле `version INTEGER PRIMARY KEY`; по рядку на застосовану міграцію.
 
-### 3.13 Зв'язки (ER, текстом)
+### 3.14 Зв'язки (ER, текстом)
 ```
 user_profiles 1───* checkins        (telegram_id)
 user_profiles 1───1 user_filters    (telegram_id, CASCADE)
@@ -331,7 +345,7 @@ tap_snapshots 1───* taps             (snapshot_id, CASCADE)
 pubs          *───* pubs             via pub_distances (a<b)
 ```
 
-### 3.14 Історія міграцій
+### 3.15 Історія міграцій
 | v | Зміст |
 |---|-------|
 | 1 | базова схема: beers, pubs, tap_snapshots, taps, checkins, match_links, user_profiles, user_filters |
@@ -342,6 +356,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 6 | `beers.rating_refresh_at` + `rating_refresh_count` (rating refresh) |
 | 7 | reset lookup-backoff для orphan'ів (`untappd_id IS NULL`) — переенрич |
 | 8 | `api_tokens` (токен-авторизація браузерного розширення) |
+| 9 | `extension_releases` (дистрибуція бета-версій розширення) |
 
 ---
 
@@ -708,6 +723,28 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - **Тести:** контрактні тести адаптерів на HTML-фікстурах (`beerrepublic` — `curl`;
   `onemorebeer` — headless-Playwright рендер-дамп зі scroll), unit-тести
   кеша/normalize/client/worker/badge/grid-ready/re-render observer. Білд — `vite build`.
+
+### 6.1 Дистрибуція бета-версій (off-store, через бота)
+> Приватна роздача ~10 технічним тестерам; **без Chrome Web Store** (рев'ю,
+> публічність, зайве навантаження на Untappd). Дизайн:
+> `docs/superpowers/specs/2026-06-08-extension-beta-distribution-design.md`,
+> рунбук: `docs/extension-release.md`.
+
+- **Збірка — єдине джерело метаданих.** Версія береться з `extension/package.json`
+  (маніфест імпортує її; `key` у маніфесті фіксує ID розширення → токен переживає
+  переустановку). `npm run release` = build → `RELEASE_NOTES.txt` (тіло секції
+  `CHANGELOG.md`; білд падає, якщо секції нема) → `warsaw-beer-overlay-<v>.zip` →
+  запис рядка `extension_releases` (version, notes, sha256) у БД бота.
+- **Бот zip не парсить.** Адмін пересилає zip боту лише щоб Telegram видав
+  `file_id`; бот рахує sha256 й звіряє з останнім рядком `extension_releases`
+  (§3.12), при збігу зберігає `file_id` і пропонує двокрокову розсилку
+  (📣 Розіслати / Скасувати). Хендлер `on('document')` стоїть **перед** `/import`
+  і пропускає (next) усе, що не є адмінським релізним zip.
+- **Розсилка** йде всім власникам `api_tokens` (тим, хто робив `/extension`),
+  кожному його мовою, стійко до збоїв доставки (підсумок «надіслано X, помилок Y»).
+  `/extension` також віддає актуальний прикріплений реліз новим тестерам.
+- **Оновлення в тестера:** розпакувати новий zip поверх тієї ж теки + `↻ reload`
+  (Chromium не авто-оновлює off-store розширення — прийнятно для техаудиторії).
 
 ---
 
