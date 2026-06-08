@@ -12,7 +12,8 @@ if (!existsSync(dist)) {
   throw new Error('dist/ not found — run `vite build` first (npm run package does this).');
 }
 
+// Body only: the version lives in manifest.json and the broadcast prepends a
+// localized "new version vX" header, so a header here would just duplicate it.
 const notes = extractNotes(changelog, pkg.version); // throws if missing/empty → fails the build
-const out = `Warsaw Beer Overlay v${pkg.version}\n\n${notes}\n`;
-writeFileSync(resolve(dist, 'RELEASE_NOTES.txt'), out);
+writeFileSync(resolve(dist, 'RELEASE_NOTES.txt'), `${notes}\n`);
 console.log(`Wrote dist/RELEASE_NOTES.txt for v${pkg.version}`);
