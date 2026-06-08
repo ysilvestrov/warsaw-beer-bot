@@ -1,4 +1,4 @@
-import { matchBeer, type CatalogBeer } from './matcher';
+import { matchPrepared, prepareCatalog, type CatalogBeer } from './matcher';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
@@ -31,9 +31,10 @@ export function matchBeerList(
   items: MatchInput[],
 ): MatchListResult[] {
   const byId = new Map(catalog.map((c) => [c.id, c]));
+  const prepared = prepareCatalog(catalog);
   return items.map((item) => {
     const raw = { brewery: item.brewery, name: item.name };
-    const m = matchBeer(item, catalog);
+    const m = matchPrepared(item, prepared);
     if (!m) {
       return { raw, matched_beer: null, is_drunk: false, user_rating: null };
     }
