@@ -17,7 +17,8 @@ function cleanName(rawTitle: string, brewery: string): string {
   let name = rawTitle;
   const b = brewery.trim();
   if (b && name.toLowerCase().startsWith(b.toLowerCase())) name = name.slice(b.length);
-  // strip the degree-ABV token and everything after it ("15,0° BUT. 0,5 L")
+  // strip the degree-extract (Plato) token and everything after it ("15,0° BUT. 0,5 L").
+  // Assumes ° never appears inside a beer name on this site — true for all observed titles.
   name = name.replace(/\s*\d+(?:[.,]\d+)?\s*°.*$/, '');
   // strip a trailing packaging tail when there was no degree token ("… BUT. 0,33 L")
   name = name.replace(/\s*(BUT|PUSZ|KEG|ZGRZ)\w*\.?\s*\d+(?:[.,]\d+)?\s*l\b.*$/i, '');
