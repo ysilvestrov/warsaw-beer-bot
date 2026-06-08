@@ -57,4 +57,25 @@ describe('api/client', () => {
     vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('failed'); }));
     expect(await getHealth('https://api.test')).toBe(false);
   });
+
+  it('postMatch throws ApiError "network" when the request times out', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')));
+      }),
+    ));
+    await expect(postMatch('https://api.test', 'tok', [{ brewery: 'X', name: 'Y' }], 20))
+      .rejects.toMatchObject({ code: 'network' });
+  });
+
+  it('getHealth returns false when the request times out', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () =>
+          reject(new DOMException('The operation was aborted.', 'AbortError')));
+      }),
+    ));
+    expect(await getHealth('https://api.test', 20)).toBe(false);
+  });
 });
