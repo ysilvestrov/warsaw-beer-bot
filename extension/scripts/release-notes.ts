@@ -1,8 +1,9 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { extractNotes } from '../src/shared/release-notes';
 
-const root = resolve(__dirname, '..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as { version: string };
 const changelog = readFileSync(resolve(root, 'CHANGELOG.md'), 'utf8');
 
