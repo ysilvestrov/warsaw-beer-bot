@@ -683,6 +683,34 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 
 ---
 
+## 6. Browser Extension Client (`extension/`)
+
+> Read-only MV3 розширення (monorepo-lite): Vite + Vanilla-TS + `@crxjs/vite-plugin`,
+> тести — Vitest. Накладає особистий drunk-статус + рейтинг на сітки крафт-магазинів,
+> споживаючи `POST /match` (§4). Дизайн: `docs/superpowers/specs/2026-06-07-browser-extension-client-design.md`.
+
+- **Per-site адаптери** (`src/sites/`): `beerrepublic` (Shopify SSR — `.product-item`/
+  `__vendor`/`__title`, повна навігація `?page=N`), `onemorebeer` (Nuxt **SPA** —
+  тайл `.one-product-list-view__tile`, brewery `[data-information-type="brand-name"]`,
+  назва `a.product__title`; `°` у тайтлі це Плато, не ABV → `abv` опускається; має
+  `waitForGrid` + `reRenderContainerSelector`). `registry.pickAdapter(url)`.
+- **Потік:** content script парсить видиму сітку → short-TTL кеш
+  (`chrome.storage.local`) → промахи йдуть у background service worker, який
+  тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
+  бейдж ✅+оцінка на випитих. `beerrepublic` — матч на кожне завантаження сторінки;
+  `onemorebeer` — SPA-пагінація без перезавантаження, тож debounced re-render
+  observer на контейнері тайлів перезапускає overlay (кеш дедуплікує).
+- **Auth:** токен з команди `/extension` зберігається в `chrome.storage.local`;
+  base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
+  options-сторінка має Test connection (`GET /health` + 1-beer `/match`).
+- **Read-only гарантія:** лише додає власні бейдж-ноди; будь-яка помилка
+  парсингу/рендеру проковтується й не ламає сторінку магазину.
+- **Тести:** контрактні тести адаптерів на HTML-фікстурах (`beerrepublic` — `curl`;
+  `onemorebeer` — headless-Playwright рендер-дамп зі scroll), unit-тести
+  кеша/normalize/client/worker/badge/grid-ready/re-render observer. Білд — `vite build`.
+
+---
+
 ## Appendix — Operational gotchas (чек-лист на новий деплой)
 Зведено з post-MVP уроків (`docs/.../2026-04-22-...-design.md` §14):
 - `enable --now` ≠ `restart` на запущеному unit'і.
