@@ -96,6 +96,16 @@ jobs:
           total=$((review_comments + reviews))
 
           if [ "$total" -eq 0 ]; then
+            reviewable_files="$(
+              git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
+                | awk '!/^(package-lock\.json|[^/]+\.md|docs\/.*)$/ { count += 1 } END { print count + 0 }'
+            )"
+
+            if [ "$reviewable_files" -eq 0 ]; then
+              echo "::notice::AI review skipped because all changed files match IGNORE_PATTERNS."
+              exit 0
+            fi
+
             echo "::error::AI review finished without posting any PR review/comment. Check OpenAI quota, model name, token permissions, or action logs."
             exit 1
           fi
