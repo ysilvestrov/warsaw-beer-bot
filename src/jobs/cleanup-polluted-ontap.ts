@@ -1,7 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { extractBeerName } from '../sources/ontap/pub';
-import { matchBeer, type CatalogBeer } from '../domain/matcher';
+import { matchPrepared, prepareCatalog, type CatalogBeer } from '../domain/matcher';
 import { normalizeName } from '../domain/normalize';
 
 const POLLUTION_RE = /\d+(?:[.,]\d+)?\s*[°%]| — /;
@@ -48,6 +48,7 @@ export function cleanupPollutedOntap(db: DB, log: pino.Logger): CleanupResult {
     .prepare('SELECT id, name, brewery, abv FROM beers')
     .all() as CatalogBeer[];
   const pool = cleanPool.filter((c) => !pollutedIds.has(c.id));
+  const preparedPool = prepareCatalog(pool);
 
   const plans: Plan[] = [];
   for (const p of polluted) {
@@ -56,7 +57,7 @@ export function cleanupPollutedOntap(db: DB, log: pino.Logger): CleanupResult {
     const cleanedNorm = normalizeName(cleaned);
     if (cleanedNorm === p.normalized_name) continue;
 
-    const match = matchBeer({ brewery: p.brewery, name: cleaned, abv: p.abv }, pool);
+    const match = matchPrepared({ brewery: p.brewery, name: cleaned, abv: p.abv }, preparedPool);
     if (match && match.confidence >= MERGE_THRESHOLD) {
       plans.push({ kind: 'merge', pollutedId: p.id, targetId: match.id });
     } else {

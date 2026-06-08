@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -423,5 +423,28 @@ describe('matchBeer with official-suffix brewery', () => {
       cat,
     );
     expect(result).toEqual({ id: 42, confidence: 1, source: 'exact' });
+  });
+});
+
+describe('prepareCatalog — lazy/memoized fullSearcher', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 }),
+    c({ id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta', abv: 5.0 }),
+  ];
+
+  it('does not build any Searcher when every beer matches exactly', () => {
+    const build = jest.fn((rows) => prepareCatalog(rows).searcherFor(rows));
+    const prepared = prepareCatalog(cat, build);
+    matchPrepared({ brewery: 'Pinta', name: 'Atak Chmielu' }, prepared);
+    expect(build).not.toHaveBeenCalled();
+  });
+
+  it('builds the full-catalog Searcher at most once across empty-pool fallbacks', () => {
+    const build = jest.fn((rows) => prepareCatalog(rows).searcherFor(rows));
+    const prepared = prepareCatalog(cat, build);
+    // Two unknown breweries → empty pool → full-catalog fallback, twice.
+    matchPrepared({ brewery: 'Nowhere', name: 'Mystery One' }, prepared);
+    matchPrepared({ brewery: 'Elsewhere', name: 'Mystery Two' }, prepared);
+    expect(build).toHaveBeenCalledTimes(1);
   });
 });

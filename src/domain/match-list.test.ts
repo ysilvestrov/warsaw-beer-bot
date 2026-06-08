@@ -1,4 +1,5 @@
 import { matchBeerList, type CatalogBeerWithRating } from './match-list';
+import { matchBeer } from './matcher';
 
 const catalog: CatalogBeerWithRating[] = [
   { id: 105, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85 },
@@ -49,5 +50,31 @@ describe('matchBeerList', () => {
       { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
     ]);
     expect(res.map((r) => r.matched_beer?.id)).toEqual([200, 105]);
+  });
+});
+
+describe('matchBeerList — prepare-once equivalence', () => {
+  const bigCatalog: CatalogBeerWithRating[] = [
+    { id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1, rating_global: 3.7 },
+    { id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta', abv: 5.0, rating_global: 3.5 },
+    { id: 3, brewery: 'Piwne Podziemie', name: 'Hopinka', abv: 6.0, rating_global: 3.6 },
+    { id: 4, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85 },
+    { id: 5, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.5, rating_global: 3.7 },
+  ];
+
+  const inputs = [
+    { brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 },   // exact + abv
+    { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },          // exact, no abv
+    { brewery: 'Piwne Podziemie Brewery', name: 'Hopinka' },  // noise-word brewery
+    { brewery: 'Stu Mostow', name: 'Buty Skejt' },            // fuzzy
+    { brewery: 'Nowhere', name: 'Totally Unknown Stout' },    // no match
+  ];
+
+  it('per-batch result equals matching each beer alone', () => {
+    const batch = matchBeerList(bigCatalog, new Set(), new Map(), inputs);
+    inputs.forEach((input, i) => {
+      const solo = matchBeer(input, bigCatalog);
+      expect(batch[i].matched_beer?.id ?? null).toBe(solo?.id ?? null);
+    });
   });
 });

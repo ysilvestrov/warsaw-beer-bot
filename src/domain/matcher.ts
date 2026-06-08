@@ -17,6 +17,53 @@ export interface MatchResult {
 const FUZZY_THRESHOLD = 0.75;
 export const ABV_TOLERANCE = 0.3;
 
+// A catalog row with its normalizations precomputed once, so a batch of input
+// beers does not re-normalize the whole catalog per beer.
+export interface PreparedBeer extends CatalogBeer {
+  nameNorm: string;     // normalizeName(name)
+  breweryNorm: string;  // normalizeBrewery(brewery)
+  aliases: string[];    // breweryAliases(brewery)
+}
+
+function defaultBuildSearcher(rows: PreparedBeer[]) {
+  return new Searcher(rows, {
+    keySelector: (c) => `${c.breweryNorm} ${c.nameNorm}`,
+    threshold: FUZZY_THRESHOLD,
+    returnMatchData: true,
+  });
+}
+
+type PreparedSearcher = ReturnType<typeof defaultBuildSearcher>;
+
+// Build-once-per-request prepared catalog. `fullSearcher()` is memoized and built
+// lazily — only the first empty-pool fuzzy fallback in a batch constructs the
+// 20k-row index; if no beer falls through, it is never built.
+export interface PreparedCatalog {
+  beers: PreparedBeer[];
+  searcherFor(rows: PreparedBeer[]): PreparedSearcher;
+  fullSearcher(): PreparedSearcher;
+}
+
+// `build` is injectable purely so tests can observe Searcher construction; the
+// default is the production builder.
+export function prepareCatalog(
+  catalog: CatalogBeer[],
+  build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
+): PreparedCatalog {
+  const beers: PreparedBeer[] = catalog.map((c) => ({
+    ...c,
+    nameNorm: normalizeName(c.name),
+    breweryNorm: normalizeBrewery(c.brewery),
+    aliases: breweryAliases(c.brewery),
+  }));
+  let full: PreparedSearcher | undefined;
+  return {
+    beers,
+    searcherFor: build,
+    fullSearcher: () => (full ??= build(beers)),
+  };
+}
+
 // Separator regex for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
@@ -69,20 +116,21 @@ export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));
 }
 
-export function matchBeer(
+export function matchPrepared(
   input: { brewery: string; name: string; abv?: number | null },
-  catalog: CatalogBeer[],
+  prepared: PreparedCatalog,
 ): MatchResult | null {
   const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
+  const catalog = prepared.beers;
 
   // Exact-normalized hits — multiple rows are common when Untappd has
   // several vintages of the same beer. Latest id first.
   const exacts = catalog
     .filter(
       (c) =>
-        breweryAliasesMatch(breweryAliases(c.brewery), inputAliases) &&
-        normalizeName(c.name) === nn,
+        breweryAliasesMatch(c.aliases, inputAliases) &&
+        c.nameNorm === nn,
     )
     .sort((a, b) => b.id - a.id);
 
@@ -147,16 +195,9 @@ export function matchBeer(
   }
 
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's,
-  // otherwise full catalog.
-  const pool = catalog.filter((c) =>
-    breweryAliasesMatch(breweryAliases(c.brewery), inputAliases),
-  );
-  const candidates = pool.length ? pool : catalog;
-  const searcher = new Searcher(candidates, {
-    keySelector: (c) => `${normalizeBrewery(c.brewery)} ${normalizeName(c.name)}`,
-    threshold: FUZZY_THRESHOLD,
-    returnMatchData: true,
-  });
+  // otherwise the full catalog (shared, lazily-built Searcher).
+  const pool = catalog.filter((c) => breweryAliasesMatch(c.aliases, inputAliases));
+  const searcher = pool.length ? prepared.searcherFor(pool) : prepared.fullSearcher();
   // Use the first alias as the search seed — full normalized brewery already
   // appears at index 0 of breweryAliases when no slash is present.
   const seedBrewery = inputAliases[0] ?? '';
@@ -164,4 +205,13 @@ export function matchBeer(
   if (!results.length) return null;
   const best = results[0];
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
+}
+
+// Back-compat single-beer entry point. Prepares the catalog per call, so callers
+// that match many beers should call prepareCatalog once and loop matchPrepared.
+export function matchBeer(
+  input: { brewery: string; name: string; abv?: number | null },
+  catalog: CatalogBeer[],
+): MatchResult | null {
+  return matchPrepared(input, prepareCatalog(catalog));
 }
