@@ -8,7 +8,7 @@ import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
 import { upsertBeer } from '../storage/beers';
-import { matchBeer } from '../domain/matcher';
+import { matchPrepared, prepareCatalog } from '../domain/matcher';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 import { enrichOneOrphan } from './untappd-enrich';
@@ -68,9 +68,10 @@ export async function refreshOntap(deps: Deps): Promise<void> {
       insertTaps(db, snapshotId, taps);
 
       const catalog = listBeerCatalog(db);
+      const prepared = prepareCatalog(catalog);
       for (const t of taps) {
         const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
-        const m = matchBeer({ brewery, name: t.beer_ref, abv: t.abv }, catalog);
+        const m = matchPrepared({ brewery, name: t.beer_ref, abv: t.abv }, prepared);
         let beerId: number;
         let isFreshOrphan = false;
         if (m) {
