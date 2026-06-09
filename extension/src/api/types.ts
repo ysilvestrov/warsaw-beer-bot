@@ -9,6 +9,7 @@ export interface MatchedBeer {
   name: string;
   brewery: string;
   rating_global: number | null;
+  untappd_id: number | null;
 }
 
 export interface MatchResult {
