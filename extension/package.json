@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "postbuild": "python3 scripts/zip-dist.py",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "package": "vite build && tsx scripts/release-notes.ts && python3 scripts/zip-dist.py",
