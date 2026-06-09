@@ -24,7 +24,7 @@ function cardEl(): HTMLElement {
 beforeEach(() => { document.body.innerHTML = ''; });
 
 function adapterFor(cards: Card[]): SiteAdapter {
-  return { hostMatch: () => true, parseCards: () => cards };
+  return { id: 'test', hostMatch: () => true, parseCards: () => cards };
 }
 
 describe('runOverlay', () => {
@@ -53,6 +53,7 @@ describe('runOverlay', () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };
     const adapter: SiteAdapter = {
+      id: 'test',
       hostMatch: () => true,
       waitForGrid: async () => { order.push('wait'); },
       parseCards: () => { order.push('parse'); return [card]; },
