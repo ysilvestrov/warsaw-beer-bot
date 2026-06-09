@@ -22,7 +22,11 @@ describe('manifest', () => {
   });
 
   it('injects the content script on BeerFreak pages', () => {
-    expect(manifest.content_scripts[0].matches).toContain('https://beerfreak.org/*');
-    expect(manifest.content_scripts[0].matches).toContain('https://*.beerfreak.org/*');
+    expect(Array.isArray(manifest.content_scripts)).toBe(true);
+    expect(manifest.content_scripts.length).toBeGreaterThan(0);
+    const [contentScript] = manifest.content_scripts;
+    expect(Array.isArray(contentScript.matches)).toBe(true);
+    expect(contentScript.matches).toContain('https://beerfreak.org/*');
+    expect(contentScript.matches).toContain('https://*.beerfreak.org/*');
   });
 });

@@ -30,6 +30,17 @@ describe('beerfreak adapter', () => {
     });
   });
 
+  it('falls back to card title text when embedded product metadata is absent', () => {
+    const doc = new DOMParser().parseFromString(html.replace(/products = \[[\s\S]*?\],\n    ids = \[[\s\S]*?\];/, ''), 'text/html');
+    const parsed = beerfreak.parseCards(doc);
+
+    expect(parsed.length).toBeGreaterThan(20);
+    expect(parsed[0]).toMatchObject({
+      brewery: '',
+      name: 'Volta Brewery SMOOTHIE BEAST: RED CURRANT, YUZU, BLUEBERRY, RASPBERRY, BERGAMOT',
+    });
+  });
+
   it('does not define waitForGrid (SSR)', () => {
     expect(beerfreak.waitForGrid).toBeUndefined();
   });
