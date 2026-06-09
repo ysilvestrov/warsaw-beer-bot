@@ -746,7 +746,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   (маніфест імпортує її; `key` у маніфесті фіксує ID розширення → токен переживає
   переустановку). `npm run release` = build → `RELEASE_NOTES.txt` (тіло секції
   `CHANGELOG.md`; білд падає, якщо секції нема) → `warsaw-beer-overlay-<v>.zip` →
-  запис рядка `extension_releases` (version, notes, sha256) у БД бота.
+  запис рядка `extension_releases` (version, notes, sha256) у БД бота → стейджинг
+  zip у `~/extension-releases/`. Zip **детермінований** (сортовані записи, фіксований
+  mtime), тож повторний реліз тієї ж версії дає той самий sha (upsert-no-op). Запис у
+  прод-БД адаптивний: in-process, якщо БД писабельна; інакше — через вузький
+  привілейований applier (`deploy/bin/apply-extension-release.sh` + NOPASSWD-sudoers),
+  бо прод-БД належить сервісному юзеру. Рунбук: `docs/extension-release.md`.
 - **Бот zip не парсить.** Адмін пересилає zip боту лише щоб Telegram видав
   `file_id`; бот рахує sha256 й звіряє з останнім рядком `extension_releases`
   (§3.12), при збігу зберігає `file_id` і пропонує двокрокову розсилку
