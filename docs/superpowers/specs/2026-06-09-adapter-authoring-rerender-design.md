@@ -43,18 +43,27 @@ badges.
 
 ## Design
 
-### 1. Re-render mechanism — signature as single source of truth
+### 1. Re-render mechanism — "any unprocessed card" as single source of truth
 
 Replace "observe the container + relevance filter + disconnect during the async
-callback" with **the set of parsed cards (a signature) as the single source of
+callback" with **the presence of an unprocessed card as the single source of
 truth** for whether to re-run. All three problems dissolve as a consequence.
+
+`runOverlay` marks every card element it has processed with a `data-beerseen`
+attribute. The observer re-runs whenever a parsed card lacks that marker — i.e.
+whenever the shop has rendered fresh card nodes (navigation, SPA re-mount,
+infinite-scroll append), regardless of whether the content differs. (A content
+signature was considered and rejected: identical-content node replacement —
+e.g. a browser-back SPA re-mount, and the conformance test's "clone the same
+grid" synthesis — leaves a fresh, badge-less DOM with an unchanged signature, so
+a signature would miss it. The seen-marker is also simpler.)
 
 New module API (`content/rerender.ts`) — knows nothing about adapters:
 
 ```ts
 observeReRender(
   root: ParentNode,
-  computeSignature: () => string,
+  hasUnprocessed: () => boolean,
   onReRender: () => unknown,
   opts?: { debounceMs?: number },
 ): () => void   // disposer
@@ -63,17 +72,17 @@ observeReRender(
 Behaviour:
 
 - Observe **`document.body`** (`childList + subtree`), debounced (default 250 ms).
-- On each debounced quiet period, compute `computeSignature()` and compare to the
-  last value. **Re-run `onReRender` only when the signature changed.**
-- Signature is built by the caller from the adapter's own cards:
-  `parseCards(scope).map(c => c.brewery + '\0' + c.name).join('\1')`.
-- **No disconnect during the callback.** Our own badge nodes do not change the
-  signature (it is derived from `brewery|name` of cards, not from badges), so
-  self-writes never re-trigger. Navigation during an in-flight `onReRender` still
-  produces body mutations that get debounced and caught.
+- On each debounced quiet period, call `hasUnprocessed()`. **Re-run `onReRender`
+  only when it returns true.**
+- `hasUnprocessed` is built by the caller from the adapter's own cards:
+  `parseCards(scope).some(c => !c.el.hasAttribute('data-beerseen'))`.
+- **No disconnect during the callback.** Our own badge nodes are not cards and do
+  not clear the marker, so self-writes never re-trigger. Navigation during an
+  in-flight `onReRender` still produces body mutations that get debounced and
+  caught.
 - **Re-entrancy guard** (replaces the disconnect): a `running` flag. A check that
   fires while a run is in flight sets `pending`; when the run finishes, if
-  `pending`, re-read the signature and run again if needed. Handles rapid
+  `pending`, re-check `hasUnprocessed` and run again if needed. Handles rapid
   back-to-back navigation correctly.
 
 Removed: `isRelevant`, container tracking, the `observeTarget` heuristic. The
@@ -81,14 +90,15 @@ module is smaller and strictly more correct.
 
 | Problem | Why it disappears |
 |---|---|
-| Deaf observer (replacement) | Observe `body`, not the container; scope re-resolved each check. |
-| Forgotten selector | Signature comes from `parseCards`, not a selector — nothing to forget. |
-| Await-window | No disconnect; signature distinguishes navigation from self-writes; mid-call nav still observed. |
+| Deaf observer (replacement) | Observe `body`, not the container; cards re-parsed each check. |
+| Forgotten selector | Trigger comes from `parseCards`, not a selector — nothing to forget. |
+| Await-window | No disconnect; the marker distinguishes fresh cards from self-writes; mid-call nav still observed. |
+| Identical-content re-mount | Fresh nodes lack the marker → re-run (a content signature would miss this). |
 
 Trade-off accepted: on a noisy page we run `parseCards` once per quiet period
 over the document. The optional `reRenderContainerSelector` (see §3) now only
-*narrows the signature scope* as a perf optimization; it no longer gates whether
-the mechanism runs.
+*narrows the parse scope* as a perf optimization; it no longer gates whether the
+mechanism runs.
 
 ### 2. Conformance test over the registry (non-isolated coverage)
 
@@ -112,12 +122,14 @@ For each adapter the test asserts:
    - load the fixture into a `document`;
    - `startOverlay(document, adapter, mockSendMatch, { debounceMs: 10 })` (mock
      returns drunk=true for some beers) → first pass applies badges;
-   - programmatically **replace the container node with a clone of the same
-     grid** (fresh, badge-less nodes) — exactly reproduces AJAX navigation / bug 1;
+   - programmatically **replace the grid with a clone of the same fixture**
+     (fresh, badge-less, marker-less nodes) — reproduces AJAX navigation / bug 1.
+     Content is intentionally identical: the seen-marker trigger fires on fresh
+     nodes regardless of content (§1), so this is a valid synthesis;
    - wait for the debounce;
    - assert `onReRender` fired again **and** badges were applied to the new nodes.
 
-`computeSignature` is built with the same helper used in production (§3), so the
+`hasUnprocessed` is built with the same helper used in production (§3), so the
 test exercises the real path, not a parallel imitation.
 
 Bespoke per-adapter tests shrink to **shop-specific quirks only** (e.g.
@@ -141,9 +153,9 @@ export function startOverlay(
 It performs what `main.ts`'s body does today:
 
 1. first pass `runOverlay(doc, adapter, sendMatch)` (awaits `waitForGrid` if present);
-2. build `computeSignature` from `adapter.parseCards`, scoped by the optional
+2. build `hasUnprocessed` from `adapter.parseCards`, scoped by the optional
    `reRenderContainerSelector` (set → `doc.querySelector(sel) ?? doc`; unset → `doc`);
-3. **always** attach `observeReRender(doc, computeSignature, () => runOverlay(...), opts)`
+3. **always** attach `observeReRender(doc, hasUnprocessed, () => runOverlay(...), opts)`
    — no `if (selector)` gate, so the forgotten-selector bug cannot recur;
 4. return a disposer (for test teardown and clean shutdown).
 
@@ -160,7 +172,7 @@ a new shop adapter", aimed also at `good first issue` contributors (#87):
    headless-Playwright scroll dump — method already in `spec.md §6`).
 2. Implement `SiteAdapter` in `src/sites/<id>.ts`: required `id`, `hostMatch`,
    `parseCards`; optional `waitForGrid` (SPA grids) and `reRenderContainerSelector`
-   (**signature-scope optimization only** — it does NOT enable re-render, which is
+   (**parse-scope optimization only** — it does NOT enable re-render, which is
    on by default).
 3. Register in `registry.ts`.
 4. Run the conformance test — it auto-covers parse + re-render + selector
@@ -174,7 +186,7 @@ SSR ≠ "no observer needed".**
 
 **`spec.md §6` update (same PR — CLAUDE.md requirement):**
 
-- Adapter contract: `id` required; re-render is the **default** signature-based
+- Adapter contract: `id` required; re-render is the **default** seen-marker
   mechanism; `reRenderContainerSelector` reclassified from an enabler to an
   optional scope optimization.
 - Tests section (~line 723): contract coverage is the **conformance test over the
@@ -193,7 +205,7 @@ SSR ≠ "no observer needed".**
 
 | # | Change | Closes |
 |---|---|---|
-| 1 | `rerender.ts` → `parseCards` signature as the single source of truth; observe `body`; no disconnect; re-entrancy guard | deaf observer, forgotten selector, await-window |
+| 1 | `rerender.ts` → `data-beerseen` marker ("any unprocessed card") as the single source of truth; observe `body`; no disconnect; re-entrancy guard | deaf observer, forgotten selector, await-window, identical-content re-mount |
 | 2 | `conformance.test.ts` parametrized over `ADAPTERS`; container replacement synthesized from one fixture; `id` convention; selector validity | regression of all three + future adapters |
 | 3 | Extract `startOverlay()`; `main.ts` → thin bootstrap; observer always attached | forgotten selector (structurally) + honest test |
 | 4 | `docs/adapter-authoring.md` + `spec.md §6` update | the mental model that caused the bugs |
