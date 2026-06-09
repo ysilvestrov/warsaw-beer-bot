@@ -72,7 +72,7 @@ jobs:
           max_tokens: 10000
           MAX_PATCH_LENGTH: 10000
 
-          INCLUDE_PATTERNS: src//*.ts,tests//*.ts,scripts/**/*.ts,.github/workflows/*.yml
+          INCLUDE_PATTERNS: src/**/*.ts,tests/**/*.ts,scripts/**/*.ts,extension/**/*.ts,.github/workflows/*.yml
           IGNORE_PATTERNS: package-lock.json,*.md,docs/**
 
       - name: Verify review was posted
@@ -96,13 +96,17 @@ jobs:
           total=$((review_comments + reviews))
 
           if [ "$total" -eq 0 ]; then
+            # Count only files the reviewer actually looks at — must mirror
+            # INCLUDE_PATTERNS above. Files outside that scope (e.g. package.json,
+            # *.md, docs/, lockfiles) never get reviewed, so a PR touching only
+            # those legitimately produces no comment and must not fail here.
             reviewable_files="$(
               git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
-                | awk '!/^(package-lock\.json|[^/]+\.md|docs\/.*)$/ { count += 1 } END { print count + 0 }'
+                | awk '/^(src|tests|scripts|extension)\/.*\.ts$/ || /^\.github\/workflows\/[^/]+\.yml$/ { count += 1 } END { print count + 0 }'
             )"
 
             if [ "$reviewable_files" -eq 0 ]; then
-              echo "::notice::AI review skipped because all changed files match IGNORE_PATTERNS."
+              echo "::notice::AI review skipped: no changed files are in the reviewer's scope (INCLUDE_PATTERNS)."
               exit 0
             fi
 
