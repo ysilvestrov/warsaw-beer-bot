@@ -6,10 +6,15 @@ export interface Card {
 }
 
 export interface SiteAdapter {
+  /** Stable, unique adapter id; also the fixture name: tests/fixtures/<id>.html. */
+  id: string;
   hostMatch(url: URL): boolean;
   parseCards(root: ParentNode): Card[];
   /** Optional: resolve once the (client-rendered) grid has painted cards. */
   waitForGrid?(root: ParentNode): Promise<void>;
-  /** Optional: container whose child mutations signal an SPA page change (re-render observer). */
+  /**
+   * Optional perf scope for the re-render check — narrows where cards are
+   * re-parsed. Does NOT enable re-render (that is always on). Omit it freely.
+   */
   reRenderContainerSelector?: string;
 }

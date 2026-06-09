@@ -29,8 +29,8 @@ async function main() {
     const html = await page.content();
     const outDir = fileURLToPath(new URL('../tests/fixtures/', import.meta.url));
     mkdirSync(outDir, { recursive: true });
-    writeFileSync(`${outDir}onemorebeer-piwa.html`, html, 'utf8');
-    console.log('Wrote tests/fixtures/onemorebeer-piwa.html');
+    writeFileSync(`${outDir}onemorebeer.html`, html, 'utf8');
+    console.log('Wrote tests/fixtures/onemorebeer.html');
   } finally {
     await browser.close();
   }

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runOverlay } from './index';
-import { BADGE_MARKER } from './badge';
+import { BADGE_MARKER, isSeen } from './badge';
 import { setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
 import type { SiteAdapter, Card } from '../sites/types';
@@ -24,7 +24,7 @@ function cardEl(): HTMLElement {
 beforeEach(() => { document.body.innerHTML = ''; });
 
 function adapterFor(cards: Card[]): SiteAdapter {
-  return { hostMatch: () => true, parseCards: () => cards };
+  return { id: 'test', hostMatch: () => true, parseCards: () => cards };
 }
 
 describe('runOverlay', () => {
@@ -53,6 +53,7 @@ describe('runOverlay', () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };
     const adapter: SiteAdapter = {
+      id: 'test',
       hostMatch: () => true,
       waitForGrid: async () => { order.push('wait'); },
       parseCards: () => { order.push('parse'); return [card]; },
@@ -66,5 +67,23 @@ describe('runOverlay', () => {
     const sendMatch = vi.fn(async () => { throw new Error('offline'); });
     await expect(runOverlay(document, adapterFor([card]), sendMatch)).resolves.toBeUndefined();
     expect(card.el.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+  });
+
+  it('marks every parsed card element seen, drunk or not', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const notDrunk: MatchResult = {
+      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, user_rating: null,
+    };
+    const adapter = adapterFor([
+      { el: a, brewery: 'X', name: 'One' },
+      { el: b, brewery: 'X', name: 'Two' },
+    ]);
+    const sendMatch = async () => [drunkResult('X', 'One'), notDrunk];
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(isSeen(a)).toBe(true);
+    expect(isSeen(b)).toBe(true);
   });
 });

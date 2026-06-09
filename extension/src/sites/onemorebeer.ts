@@ -26,6 +26,7 @@ function cleanName(rawTitle: string, brewery: string): string {
 }
 
 export const onemorebeer: SiteAdapter = {
+  id: 'onemorebeer',
   hostMatch: (url) => url.hostname === 'onemorebeer.pl' || url.hostname.endsWith('.onemorebeer.pl'),
   reRenderContainerSelector: CONTAINER_SELECTOR,
 

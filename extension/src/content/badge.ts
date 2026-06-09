@@ -1,6 +1,17 @@
 import type { MatchResult } from '../api/types';
 
 export const BADGE_MARKER = 'data-beerbadge';
+export const SEEN_MARKER = 'data-beerseen';
+
+/** Mark a card element as processed by the overlay (badged or not). */
+export function markSeen(el: HTMLElement): void {
+  el.setAttribute(SEEN_MARKER, '');
+}
+
+/** True if the overlay has already processed this card element. */
+export function isSeen(el: HTMLElement): boolean {
+  return el.hasAttribute(SEEN_MARKER);
+}
 
 export function renderBadge(host: HTMLElement, result: MatchResult): void {
   if (!result.is_drunk) return; // MVP: only drunk beers get a badge

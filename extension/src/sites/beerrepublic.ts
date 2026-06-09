@@ -5,6 +5,7 @@ function text(el: Element | null): string {
 }
 
 export const beerrepublic: SiteAdapter = {
+  id: 'beerrepublic',
   hostMatch: (url) => url.hostname === 'beerrepublic.eu' || url.hostname.endsWith('.beerrepublic.eu'),
   reRenderContainerSelector: 'section[data-section-type="collection"]',
 

@@ -16,3 +16,12 @@ describe('pickAdapter', () => {
     expect(pickAdapter(new URL('https://example.com/'))).toBeNull();
   });
 });
+
+describe('adapter ids', () => {
+  it('every adapter has a unique non-empty id', () => {
+    const ids = [beerrepublic, onemorebeer].map((a) => a.id);
+    expect(ids).toEqual(['beerrepublic', 'onemorebeer']);
+    expect(new Set(ids).size).toBe(ids.length);
+    for (const id of ids) expect(id.length).toBeGreaterThan(0);
+  });
+});

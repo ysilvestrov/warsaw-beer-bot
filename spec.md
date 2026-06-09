@@ -704,25 +704,35 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 > тести — Vitest. Накладає особистий drunk-статус + рейтинг на сітки крафт-магазинів,
 > споживаючи `POST /match` (§4). Дизайн: `docs/superpowers/specs/2026-06-07-browser-extension-client-design.md`.
 
-- **Per-site адаптери** (`src/sites/`): `beerrepublic` (Shopify SSR — `.product-item`/
-  `__vendor`/`__title`, повна навігація `?page=N`), `onemorebeer` (Nuxt **SPA** —
-  тайл `.one-product-list-view__tile`, brewery `[data-information-type="brand-name"]`,
-  назва `a.product__title`; `°` у тайтлі це Плато, не ABV → `abv` опускається; має
-  `waitForGrid` + `reRenderContainerSelector`). `registry.pickAdapter(url)`.
+- **Per-site адаптери** (`src/sites/`): кожен має стабільний `id` (= ім'я
+  фікстури `tests/fixtures/<id>.html`). `beerrepublic` (Shopify SSR —
+  `.product-item`/`__vendor`/`__title`, повна навігація `?page=N`), `onemorebeer`
+  (Nuxt **SPA** — тайл `.one-product-list-view__tile`, brewery
+  `[data-information-type="brand-name"]`, назва `a.product__title`; `°` у тайтлі це
+  Плато, не ABV → `abv` опускається; має `waitForGrid`). `registry.pickAdapter(url)`.
+  Опційний `reRenderContainerSelector` — **звуження скоупу re-parse**, НЕ вмикач
+  re-render (див. нижче). Як додати адаптер: `docs/adapter-authoring.md`.
 - **Потік:** content script парсить видиму сітку → short-TTL кеш
   (`chrome.storage.local`) → промахи йдуть у background service worker, який
   тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
-  бейдж ✅+оцінка на випитих. `beerrepublic` — матч на кожне завантаження сторінки;
-  `onemorebeer` — SPA-пагінація без перезавантаження, тож debounced re-render
-  observer на контейнері тайлів перезапускає overlay (кеш дедуплікує).
+  бейдж ✅+оцінка на випитих. **Re-render однаковий для всіх адаптерів:** overlay
+  позначає оброблені картки (`data-beerseen`), а спостерігач на `document.body`
+  перезапускає `runOverlay` щойно серед розпарсених карток з'являється непозначена
+  (навігація / SPA ре-маунт / infinite-scroll); кеш дедуплікує повторні матчі.
 - **Auth:** токен з команди `/extension` зберігається в `chrome.storage.local`;
   base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
   options-сторінка має Test connection (`GET /health` + 1-beer `/match`).
 - **Read-only гарантія:** лише додає власні бейдж-ноди; будь-яка помилка
   парсингу/рендеру проковтується й не ламає сторінку магазину.
-- **Тести:** контрактні тести адаптерів на HTML-фікстурах (`beerrepublic` — `curl`;
-  `onemorebeer` — headless-Playwright рендер-дамп зі scroll), unit-тести
-  кеша/normalize/client/worker/badge/grid-ready/re-render observer. Білд — `vite build`.
+- **Тести:** контракт адаптера покрито **конформанс-тестом над реєстром**
+  (`src/sites/conformance.test.ts`, параметризований по `ADAPTERS`) — наявність
+  фікстури `tests/fixtures/<id>.html`, парс, валідність `reRenderContainerSelector`
+  на фікстурі, і **re-render після заміни сітки** (синтез заміни з одного фікстура).
+  Відсутня фікстура для зареєстрованого адаптера = червоний CI. Bespoke-тести
+  адаптера лишають **лише квірки** магазину. Фікстури: `beerrepublic` — `curl`;
+  `onemorebeer` — headless-Playwright рендер-дамп зі scroll. Плюс unit-тести
+  кеша/normalize/client/worker/badge/grid-ready/re-render observer/startOverlay.
+  Білд — `vite build`.
 
 ### 6.1 Дистрибуція бета-версій (off-store, через бота)
 > Приватна роздача ~10 технічним тестерам; **без Chrome Web Store** (рев'ю,

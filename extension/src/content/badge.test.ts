@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { renderBadge, BADGE_MARKER } from './badge';
+import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER } from './badge';
 import type { MatchResult } from '../api/types';
 
 function el(): HTMLElement {
@@ -51,5 +51,15 @@ describe('renderBadge', () => {
     renderBadge(host, drunk(4.0));
     renderBadge(host, drunk(4.0));
     expect(host.querySelectorAll(`[${BADGE_MARKER}]`).length).toBe(1);
+  });
+});
+
+describe('seen marker', () => {
+  it('marks and detects a processed element', () => {
+    const host = document.createElement('div');
+    expect(isSeen(host)).toBe(false);
+    markSeen(host);
+    expect(host.hasAttribute(SEEN_MARKER)).toBe(true);
+    expect(isSeen(host)).toBe(true);
   });
 });
