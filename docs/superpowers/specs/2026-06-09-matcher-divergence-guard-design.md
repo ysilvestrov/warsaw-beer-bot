@@ -49,9 +49,17 @@ nameTokensDiverge(a: string, b: string): boolean
   brewery noise, and pure-digit tokens already stripped).
 - Tokenize on spaces; ignore fragments shorter than 2 chars (drops the apostrophe-junk
   `s` from `s'mores` → `s mores`).
-- Let `I` = input token set, `C` = candidate token set. Return `true` (diverge) iff
-  **both** `I \ C ≠ ∅` **and** `C \ I ≠ ∅` — each side has a content token the other
-  lacks.
+- **Token coverage is fuzzy, not exact.** A token `t` is *covered* by the other side's
+  token list `S` iff `max(fuzzy(t, s) for s in S) >= TOKEN_SIM`, where `fuzzy` is
+  `fast-fuzzy`'s standalone similarity (already a project dependency) and
+  `TOKEN_SIM = 0.7`. This is essential: an **exact** token-set difference would reject
+  legitimate fuzzy matches — Polish inflections (`skejty`/`skejta`, sim 0.83) and typos
+  (`chmiel`/`chmielu`, sim 1.0) would diverge and break existing fuzzy matching, which is
+  the whole point of the fuzzy fallback.
+- Return `true` (diverge) iff **both** sides have an uncovered token — each name has a
+  content token with no sufficiently-similar token on the other side. `0.7` has wide
+  margin: inflections score ≥0.83, distinct flavour words (`vanilla`↔`mores` 0.0,
+  `vanilla`↔`matter` 0.14) score ≤0.2.
 
 In `matchPrepared`, the fuzzy branch computes `best = results[0]` as today, then:
 
@@ -63,18 +71,23 @@ if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
   ones are even less similar; and when an exact-normalized candidate exists it is
   returned by the exact branch before fuzzy runs.
 - Exact matches are unaffected (their tokens are equal, so divergence is impossible).
+- Cost: runs only on the single top fuzzy-fallback candidate, over 2–6 short tokens —
+  negligible.
 
-Behaviour table:
+Behaviour table (TOKEN_SIM = 0.7):
 
-| input name | candidate name | I\C, C\I | result |
+| input name | candidate name | uncovered: input / candidate | result |
 | --- | --- | --- | --- |
-| vanilla mind over matter | s mores mind over matter | {vanilla}, {mores} | **reject** |
-| clementine passionfruit | clementine | {passionfruit}, {} | allow (subset) |
-| vanilla mind over matter | mind over matter | {vanilla}, {} | allow (base beer) |
+| vanilla mind over matter | s mores mind over matter | {vanilla} / {mores} | **reject** |
+| buty skejty | buty skejta | {} (skejty~skejta 0.83) / {} | allow (inflection) |
+| atak chmiel | atak chmielu | {} (chmiel~chmielu 1.0) / {} | allow (typo) |
+| clementine passionfruit | clementine | {passionfruit} / {} | allow (subset) |
+| vanilla mind over matter | mind over matter | {vanilla} / {} | allow (base beer) |
 
 This is shared by the bot's ontap→catalog matching too. The rule is conservative (rejects
-only genuine two-sided divergence, tolerates abbreviation/addition), so the added
-false-negative risk for ontap matching is small and acceptable.
+only genuine two-sided divergence on content words, tolerates inflection, typos,
+abbreviation, and addition), so the added false-negative risk for ontap matching is small
+and acceptable.
 
 ## B. Exact-only personal claims (`src/domain/match-list.ts`)
 
@@ -109,10 +122,12 @@ the badge, or the extension cache. Both changes live in `src/domain/`.
 
 ## Testing
 
-- **`src/domain/matcher.test.ts`** — `nameTokensDiverge`: diverge (vanilla vs s'mores),
-  subset both directions → false, equal → false, sub-2-char fragments ignored.
-  Integration: a catalog containing only `S'mores Mind Over Matter` + input
-  `Double Vanilla Mind Over Matter` → `matchBeer` returns `null`; a subset input still
+- **`src/domain/matcher.test.ts`** — `nameTokensDiverge`: diverge (vanilla vs s'mores) →
+  true; inflection (`buty skejty` vs `buty skejta`) and typo (`atak chmiel` vs
+  `atak chmielu`) → false; subset both directions → false; equal → false; sub-2-char
+  fragments ignored. Integration: a catalog containing only `S'mores Mind Over Matter` +
+  input `Double Vanilla Mind Over Matter` → `matchBeer` returns `null`; the existing
+  `Buty Skejty`→`Buty Skejta` fuzzy match still returns id 2; a subset input still
   matches.
 - **`src/domain/match-list.test.ts`** — a fuzzy match whose id is in the drunk set →
   `is_drunk: false`, `user_rating: null`; an exact match in the drunk set →
