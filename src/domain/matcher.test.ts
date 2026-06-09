@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -456,5 +456,38 @@ describe('prepareCatalog — lazy/memoized fullSearcher', () => {
     matchPrepared({ brewery: 'Nowhere', name: 'Mystery One' }, prepared);
     matchPrepared({ brewery: 'Elsewhere', name: 'Mystery Two' }, prepared);
     expect(build).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('nameTokensDiverge', () => {
+  test('diverges on different flavour variants', () => {
+    expect(nameTokensDiverge('vanilla mind over matter', 's mores mind over matter')).toBe(true);
+  });
+  test('tolerates a Polish inflection (skejty vs skejta)', () => {
+    expect(nameTokensDiverge('buty skejty', 'buty skejta')).toBe(false);
+  });
+  test('tolerates a typo (chmiel vs chmielu)', () => {
+    expect(nameTokensDiverge('atak chmiel', 'atak chmielu')).toBe(false);
+  });
+  test('subset names do not diverge, either direction', () => {
+    expect(nameTokensDiverge('clementine passionfruit', 'clementine')).toBe(false);
+    expect(nameTokensDiverge('clementine', 'clementine passionfruit')).toBe(false);
+  });
+  test('equal names do not diverge', () => {
+    expect(nameTokensDiverge('atak chmielu', 'atak chmielu')).toBe(false);
+  });
+  test('ignores sub-2-char fragments', () => {
+    expect(nameTokensDiverge('s mores', 'mores')).toBe(false);
+  });
+});
+
+describe('matchBeer — divergence guard', () => {
+  test('rejects a different flavour variant with no exact entry', () => {
+    const cat = [c({ id: 50, brewery: 'Magnify Brewing Company', name: "S'mores Mind Over Matter" })];
+    expect(matchBeer({ brewery: 'Magnify', name: 'Double Vanilla Mind Over Matter' }, cat)).toBeNull();
+  });
+  test('still matches when the input name is a subset of the candidate', () => {
+    const cat = [c({ id: 51, brewery: 'Magnify', name: 'Mind Over Matter' })];
+    expect(matchBeer({ brewery: 'Magnify', name: 'Vanilla Mind Over Matter' }, cat)?.id).toBe(51);
   });
 });
