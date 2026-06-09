@@ -9,7 +9,7 @@ import type { MatchResult, RawBeer } from '../api/types';
 function drunkResult(brewery: string, name: string): MatchResult {
   return {
     raw: { brewery, name },
-    matched_beer: { id: 1, name, brewery, rating_global: 4.0 },
+    matched_beer: { id: 1, name, brewery, rating_global: 4.0, untappd_id: 111 },
     is_drunk: true,
     user_rating: 4.2,
   };

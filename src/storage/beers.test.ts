@@ -538,6 +538,7 @@ describe('loadCatalog', () => {
     const cat = loadCatalog(db);
     expect(cat).toContainEqual({
       id, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85,
+      untappd_id: 9001,
     });
   });
 });

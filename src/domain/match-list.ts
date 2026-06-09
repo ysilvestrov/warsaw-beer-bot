@@ -9,6 +9,7 @@ import {
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
+  untappd_id?: number | null;
 }
 
 export interface MatchInput {
@@ -22,6 +23,7 @@ export interface MatchedBeer {
   name: string;
   brewery: string;
   rating_global: number | null;
+  untappd_id: number | null;
 }
 
 export interface MatchListResult {
@@ -83,6 +85,7 @@ export async function matchBeerList(
           name: beer.name,
           brewery: beer.brewery,
           rating_global: beer.rating_global,
+          untappd_id: beer.untappd_id ?? null,
         },
         is_drunk: drunkSet.has(m.id),
         user_rating: ratingByBeerId.get(m.id) ?? null,

@@ -1,7 +1,7 @@
 import type { MatchResult } from '../api/types';
 
 export const CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8h
-const PREFIX = 'mc:';
+const PREFIX = 'mc2:';
 
 interface Entry {
   result: MatchResult;

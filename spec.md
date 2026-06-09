@@ -742,6 +742,11 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 > `docs/superpowers/specs/2026-06-08-extension-beta-distribution-design.md`,
 > рунбук: `docs/extension-release.md`.
 
+- **Бейджі.** Питі беври — `✅` + особиста оцінка. Каталожні беври, які користувач ще
+  не пив, але які мають `untappd_id` і глобальний рейтинг — `⭐` + глобальна оцінка
+  Untappd. Будь-який бейдж із `untappd_id` клікабельний: відкриває сторінку беври на
+  Untappd (`https://untappd.com/beer/<untappd_id>`) у новій вкладці. Орфани (без
+  `untappd_id`/рейтингу) і незматчені — без бейджа.
 - **Збірка — єдине джерело метаданих.** Версія береться з `extension/package.json`
   (маніфест імпортує її; `key` у маніфесті фіксує ID розширення → токен переживає
   переустановку). `npm run release` = build → `RELEASE_NOTES.txt` (тіло секції

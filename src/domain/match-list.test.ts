@@ -17,11 +17,23 @@ describe('matchBeerList', () => {
     expect(res).toEqual([
       {
         raw: { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
-        matched_beer: { id: 105, name: 'Pan IPAni', brewery: 'Trzech Kumpli', rating_global: 3.85 },
+        matched_beer: { id: 105, name: 'Pan IPAni', brewery: 'Trzech Kumpli', rating_global: 3.85, untappd_id: null },
         is_drunk: true,
         user_rating: 4.0,
       },
     ]);
+  });
+
+  it('passes untappd_id through to matched_beer', async () => {
+    const cat: CatalogBeerWithRating[] = [
+      { id: 300, brewery: 'PINTA', name: 'Viva la Wit', abv: 4.8, rating_global: 3.6, untappd_id: 555 },
+    ];
+    const res = await matchBeerList(cat, new Set(), new Map(), [
+      { brewery: 'PINTA', name: 'Viva la Wit' },
+    ]);
+    expect(res[0].matched_beer).toEqual({
+      id: 300, name: 'Viva la Wit', brewery: 'PINTA', rating_global: 3.6, untappd_id: 555,
+    });
   });
 
   it('drunk via had-list only → is_drunk true, user_rating null', async () => {

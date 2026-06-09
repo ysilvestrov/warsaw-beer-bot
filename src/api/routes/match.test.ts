@@ -56,6 +56,13 @@ describe('POST /match', () => {
     });
   });
 
+  it('includes the matched beer untappd_id in the response', async () => {
+    const { appAs } = setup();
+    const res = await post(appAs(1), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });
+    const body = await res.json();
+    expect(body.results[0].matched_beer.untappd_id).toBe(9001);
+  });
+
   it('isolates users — user 2 has not drunk the beer', async () => {
     const { appAs } = setup();
     const res = await post(appAs(2), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });
