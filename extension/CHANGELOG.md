@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-09
+
 - Show ⭐ global Untappd rating for catalog beers you haven't drunk yet.
 - Click any rating badge to open that beer on Untappd in a new tab.
 
