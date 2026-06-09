@@ -4,6 +4,12 @@ import { resolve } from 'node:path';
 import { beerfreak } from './beerfreak';
 
 const html = readFileSync(resolve(__dirname, '../../tests/fixtures/beerfreak.html'), 'utf8');
+const PRODUCT_METADATA_RE = /products = \[[\s\S]*?\],\n    ids = \[[\s\S]*?\];/;
+
+function withoutProductMetadata(source: string): string {
+  expect(source).toMatch(PRODUCT_METADATA_RE);
+  return source.replace(PRODUCT_METADATA_RE, '');
+}
 
 let cards: ReturnType<typeof beerfreak.parseCards>;
 beforeAll(() => {
@@ -31,7 +37,7 @@ describe('beerfreak adapter', () => {
   });
 
   it('falls back to card title text when embedded product metadata is absent', () => {
-    const doc = new DOMParser().parseFromString(html.replace(/products = \[[\s\S]*?\],\n    ids = \[[\s\S]*?\];/, ''), 'text/html');
+    const doc = new DOMParser().parseFromString(withoutProductMetadata(html), 'text/html');
     const parsed = beerfreak.parseCards(doc);
 
     expect(parsed.length).toBeGreaterThan(20);
