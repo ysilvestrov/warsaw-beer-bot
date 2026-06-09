@@ -24,6 +24,20 @@ describe('matchBeerList', () => {
     ]);
   });
 
+  it('a fuzzy match never claims drunk or personal rating', async () => {
+    // "Atak Chmiel" (typo) fuzzy-matches catalog 200 "Atak Chmielu". Even though 200 is
+    // in the drunk set with a rating, a fuzzy match must not assert drunk/personal.
+    const res = await matchBeerList(
+      catalog,
+      new Set([200]),
+      new Map([[200, 4.5]]),
+      [{ brewery: 'PINTA', name: 'Atak Chmiel' }],
+    );
+    expect(res[0].matched_beer?.id).toBe(200);
+    expect(res[0].is_drunk).toBe(false);
+    expect(res[0].user_rating).toBeNull();
+  });
+
   it('passes untappd_id through to matched_beer', async () => {
     const cat: CatalogBeerWithRating[] = [
       { id: 300, brewery: 'PINTA', name: 'Viva la Wit', abv: 4.8, rating_global: 3.6, untappd_id: 555 },
