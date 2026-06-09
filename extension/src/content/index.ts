@@ -2,7 +2,7 @@ import type { SiteAdapter } from '../sites/types';
 import type { MatchResult, RawBeer } from '../api/types';
 import { getCached, setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
-import { renderBadge } from './badge';
+import { renderBadge, markSeen } from './badge';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
 
@@ -21,6 +21,7 @@ export async function runOverlay(
       const cached = await getCached(key);
       if (cached) {
         renderBadge(card.el, cached);
+        markSeen(card.el);
       } else {
         const raw: RawBeer =
           card.abv !== undefined
@@ -42,6 +43,7 @@ export async function runOverlay(
       const miss = misses[i];
       if (!miss) return;
       renderBadge(miss.el, result);
+      markSeen(miss.el);
       void setCached(miss.key, result);
     });
   } catch {

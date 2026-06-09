@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { runOverlay } from './index';
-import { BADGE_MARKER } from './badge';
+import { BADGE_MARKER, isSeen } from './badge';
 import { setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
 import type { SiteAdapter, Card } from '../sites/types';
@@ -67,5 +67,23 @@ describe('runOverlay', () => {
     const sendMatch = vi.fn(async () => { throw new Error('offline'); });
     await expect(runOverlay(document, adapterFor([card]), sendMatch)).resolves.toBeUndefined();
     expect(card.el.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+  });
+
+  it('marks every parsed card element seen, drunk or not', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const notDrunk: MatchResult = {
+      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, user_rating: null,
+    };
+    const adapter = adapterFor([
+      { el: a, brewery: 'X', name: 'One' },
+      { el: b, brewery: 'X', name: 'Two' },
+    ]);
+    const sendMatch = async () => [drunkResult('X', 'One'), notDrunk];
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(isSeen(a)).toBe(true);
+    expect(isSeen(b)).toBe(true);
   });
 });
