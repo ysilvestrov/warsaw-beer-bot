@@ -155,6 +155,6 @@ For every code change:
 
 - ask whether to create a pull request
 - if pull request creation is confirmed, create the PR
-- wait for review comments, if any
+- after creating the PR, wait for review comments/checks to complete before reporting final status
 - evaluate review comments technically before changing code
 - address review findings that are valid and worth addressing

@@ -709,9 +709,11 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `.product-item`/`__vendor`/`__title`, повна навігація `?page=N`), `onemorebeer`
   (Nuxt **SPA** — тайл `.one-product-list-view__tile`, brewery
   `[data-information-type="brand-name"]`, назва `a.product__title`; `°` у тайтлі це
-  Плато, не ABV → `abv` опускається; має `waitForGrid`). `registry.pickAdapter(url)`.
-  Опційний `reRenderContainerSelector` — **звуження скоупу re-parse**, НЕ вмикач
-  re-render (див. нижче). Як додати адаптер: `docs/adapter-authoring.md`.
+  Плато, не ABV → `abv` опускається; має `waitForGrid`), `beerfreak` (Horoshop SSR —
+  `.catalogCard`, brewery/name з embedded `products` metadata, домен
+  `beerfreak.org`). `registry.pickAdapter(url)`. Опційний `reRenderContainerSelector` —
+  **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати
+  адаптер: `docs/adapter-authoring.md`.
 - **Потік:** content script парсить видиму сітку → short-TTL кеш
   (`chrome.storage.local`) → промахи йдуть у background service worker, який
   тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
