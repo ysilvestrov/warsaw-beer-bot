@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { beerrepublic } from './beerrepublic';
 
 const html = readFileSync(
-  resolve(__dirname, '../../tests/fixtures/beerrepublic-collection.html'),
+  resolve(__dirname, '../../tests/fixtures/beerrepublic.html'),
   'utf8',
 );
 

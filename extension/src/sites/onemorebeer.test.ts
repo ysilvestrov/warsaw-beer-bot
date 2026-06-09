@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { onemorebeer } from './onemorebeer';
 
-const html = readFileSync(resolve(__dirname, '../../tests/fixtures/onemorebeer-piwa.html'), 'utf8');
+const html = readFileSync(resolve(__dirname, '../../tests/fixtures/onemorebeer.html'), 'utf8');
 
 let cards: ReturnType<typeof onemorebeer.parseCards>;
 beforeAll(() => {
