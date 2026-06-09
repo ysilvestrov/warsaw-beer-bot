@@ -62,11 +62,12 @@ export interface CatalogRow {
   name: string;
   abv: number | null;
   rating_global: number | null;
+  untappd_id: number | null;
 }
 
 export function loadCatalog(db: DB): CatalogRow[] {
   return db
-    .prepare('SELECT id, brewery, name, abv, rating_global FROM beers')
+    .prepare('SELECT id, brewery, name, abv, rating_global, untappd_id FROM beers')
     .all() as CatalogRow[];
 }
 
