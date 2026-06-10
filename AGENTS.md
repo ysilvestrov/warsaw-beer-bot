@@ -74,6 +74,8 @@ Superpowers Workflow
 
 Follow the project's Superpowers workflow.
 
+Always set up an isolated worktree when developing a change.
+
 When making changes:
 
 1. Understand the request.
