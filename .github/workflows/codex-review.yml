@@ -35,7 +35,10 @@ jobs:
             exit 1
           fi
 
-          git fetch origin "${{ github.base_ref }}" --depth=1
+          # Full fetch (not --depth=1): the `origin/base...HEAD` triple-dot diffs below
+          # need the merge base, which a shallow tip-only fetch omits once main has
+          # advanced past the branch point ("fatal: ...: no merge base", exit 128).
+          git fetch origin "${{ github.base_ref }}"
 
           {
             echo '# Pull request context'
