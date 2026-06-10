@@ -290,10 +290,9 @@ import type { SiteAdapter } from './types';
 import { beerrepublic } from './beerrepublic';
 import { onemorebeer } from './onemorebeer';
 import { beerfreak } from './beerfreak';
-import { bierloods22 } from './bierloods22';
 import { winetime } from './winetime';
 
-export const ADAPTERS: SiteAdapter[] = [beerrepublic, onemorebeer, beerfreak, bierloods22, winetime];
+export const ADAPTERS: SiteAdapter[] = [beerrepublic, onemorebeer, beerfreak, winetime];
 
 export function pickAdapter(url: URL): SiteAdapter | null {
   return ADAPTERS.find((a) => a.hostMatch(url)) ?? null;
@@ -310,7 +309,6 @@ import { pickAdapter } from './registry';
 import { beerrepublic } from './beerrepublic';
 import { onemorebeer } from './onemorebeer';
 import { beerfreak } from './beerfreak';
-import { bierloods22 } from './bierloods22';
 import { winetime } from './winetime';
 
 describe('pickAdapter', () => {
@@ -326,10 +324,6 @@ describe('pickAdapter', () => {
     expect(pickAdapter(new URL('https://beerfreak.org/beer/'))).toBe(beerfreak);
   });
 
-  it('selects bierloods22 for bierloods22.nl', () => {
-    expect(pickAdapter(new URL('https://www.bierloods22.nl/en/all-beers/'))).toBe(bierloods22);
-  });
-
   it('selects winetime for winetime.com.ua', () => {
     expect(pickAdapter(new URL('https://winetime.com.ua/ua/napoyi-slaboalkogolni/pyvo'))).toBe(winetime);
     expect(pickAdapter(new URL('https://www.winetime.com.ua/ua/napoyi-slaboalkogolni/pyvo'))).toBe(winetime);
@@ -342,8 +336,8 @@ describe('pickAdapter', () => {
 
 describe('adapter ids', () => {
   it('every adapter has a unique non-empty id', () => {
-    const ids = [beerrepublic, onemorebeer, beerfreak, bierloods22, winetime].map((a) => a.id);
-    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'bierloods22', 'winetime']);
+    const ids = [beerrepublic, onemorebeer, beerfreak, winetime].map((a) => a.id);
+    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'winetime']);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id.length).toBeGreaterThan(0);
   });
