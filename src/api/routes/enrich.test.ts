@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
+import { upsertBeer, findBeerByNormalized } from '../../storage/beers';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiEnv } from '../types';
@@ -62,7 +62,6 @@ describe('POST /enrich/candidates', () => {
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Bar', name: 'Foo' }] });
     const body = await res.json();
     expect(body.candidates[0].eligible).toBe(false);
-    void getBeer; // imported for Task 2
   });
 
   it('400 on an empty beer list', async () => {
