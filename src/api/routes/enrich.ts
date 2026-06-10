@@ -64,6 +64,11 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
     const { brewery, name, html } = c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name);
+    // Only orphans are enrichable. Never overwrite / merge a canonical (already
+    // matched) row from client-relayed input.
+    if (row.untappd_id != null) {
+      return c.json({ status: 'skipped' });
+    }
     // Reuse the full server pick pipeline; the client already fetched, so the
     // injected fetch just returns the relayed HTML regardless of URL.
     const outcome = await lookupBeer({ brewery, name, abv: row.abv, fetch: async () => html });
