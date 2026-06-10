@@ -6,10 +6,15 @@ import { renderBadge, markSeen } from './badge';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
 
+export type EnrichOrphans = (
+  orphans: { key: string; el: HTMLElement; brewery: string; name: string }[],
+) => void;
+
 export async function runOverlay(
   doc: Document,
   adapter: SiteAdapter,
   sendMatch: SendMatch,
+  enrich?: EnrichOrphans,
 ): Promise<void> {
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
@@ -46,6 +51,19 @@ export async function runOverlay(
       markSeen(miss.el);
       void setCached(miss.key, result);
     });
+
+    if (enrich) {
+      const orphans = results
+        .map((result, i) => ({ result, miss: misses[i] }))
+        .filter(
+          (x) =>
+            x.miss &&
+            !x.result.is_drunk &&
+            (x.result.matched_beer == null || x.result.matched_beer.untappd_id == null),
+        )
+        .map((x) => ({ key: x.miss!.key, el: x.miss!.el, brewery: x.miss!.raw.brewery, name: x.miss!.raw.name }));
+      if (orphans.length) enrich(orphans);
+    }
   } catch {
     // Any parsing/rendering failure must never break the host page.
   }

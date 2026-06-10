@@ -32,6 +32,23 @@ async function initOptionsPage(): Promise<void> {
   tokenInput.value = s.token;
   urlInput.value = s.baseUrl || DEFAULT_BASE_URL;
 
+  const enrich = el<HTMLInputElement>('enrichEnabled');
+  if (enrich) {
+    enrich.checked = s.enrichEnabled;
+    enrich.addEventListener('change', async () => {
+      if (enrich.checked) {
+        const granted = await chrome.permissions.request({ origins: ['https://untappd.com/*'] });
+        enrich.checked = granted;
+        await setSettings({ enrichEnabled: granted });
+        status.textContent = granted ? 'Enrichment on.' : 'Permission denied.';
+      } else {
+        await chrome.permissions.remove({ origins: ['https://untappd.com/*'] });
+        await setSettings({ enrichEnabled: false });
+        status.textContent = 'Enrichment off.';
+      }
+    });
+  }
+
   el<HTMLButtonElement>('save')?.addEventListener('click', async () => {
     await setSettings({ token: tokenInput.value.trim(), baseUrl: urlInput.value.trim() });
     // Best-effort: request permission for a custom (non-default) host so the worker can fetch it.
