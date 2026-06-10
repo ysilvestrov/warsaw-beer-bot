@@ -7,6 +7,7 @@ import type { Env } from '../config/env';
 import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
 import { matchRoute } from './routes/match';
+import { enrichRoute } from './routes/enrich';
 
 export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
@@ -20,6 +21,9 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   // Auth applies to /match only — /health stays open.
   app.use('/match', authMiddleware(deps.db));
   matchRoute(app, deps);
+
+  app.use('/enrich/*', authMiddleware(deps.db));
+  enrichRoute(app, deps);
 
   app.onError((err, c) => {
     deps.log.error({ err }, 'api error');
