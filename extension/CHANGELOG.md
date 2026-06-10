@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-06-10
+
+- Fix: Untappd enrichment now runs on large shop pages — it searches a bounded number of beers per page instead of skipping the page entirely.
+- Fix: options page checkbox layout (no longer stretched/misplaced).
+
 ## [0.5.0] - 2026-06-10
 
 - Added WineTime shop support.

@@ -3,6 +3,8 @@ body { font: 15px/1.45 system-ui, sans-serif; margin: 0; padding: 24px; backgrou
 h1 { font-size: 18px; margin: 0 0 16px; }
 label { display: block; margin: 14px 0 4px; font-weight: 600; font-size: 13px; }
 input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ccc; border-radius: 8px; }
+.checkbox { display: flex; align-items: center; gap: 8px; margin: 18px 0 4px; font-weight: 400; font-size: 13px; }
+.checkbox input { width: auto; flex: none; margin: 0; }
 .row { display: flex; gap: 10px; margin-top: 16px; }
 button { padding: 8px 14px; border: 0; border-radius: 8px; background: #d9822b; color: #fff; font-weight: 600; cursor: pointer; }
 button:hover { background: #c2741f; }

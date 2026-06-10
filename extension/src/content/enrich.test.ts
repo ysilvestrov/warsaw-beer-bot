@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { runEnrichment, PAGE_NO_ID_CAP, type EnrichDeps } from './enrich';
+import { runEnrichment, MAX_SEARCHES_PER_PAGE, type EnrichDeps } from './enrich';
 import type { EnrichResult } from '../api/types';
 
 function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
@@ -23,10 +23,11 @@ const beers = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ key: `k${i}`, brewery: 'B', name: `N${i}` }));
 
 describe('runEnrichment', () => {
-  it('does nothing when the page has >= PAGE_NO_ID_CAP orphans', async () => {
+  it('registers all orphans but searches at most MAX_SEARCHES_PER_PAGE (no abstain on big pages)', async () => {
     const d = deps();
-    await runEnrichment(beers(PAGE_NO_ID_CAP), d);
-    expect(d.getCandidates).not.toHaveBeenCalled();
+    await runEnrichment(beers(MAX_SEARCHES_PER_PAGE + 5), d); // 25 orphans, all eligible
+    expect(d.getCandidates).toHaveBeenCalledTimes(1); // all registered, not abstained
+    expect(d.fetchSearch).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE); // search capped at 20
   });
 
   it('searches eligible beers, throttling between them, and resolves matched → setEnriched', async () => {

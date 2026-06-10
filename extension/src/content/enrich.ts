@@ -1,6 +1,6 @@
 import type { EnrichResult } from '../api/types';
 
-export const PAGE_NO_ID_CAP = 20;
+export const MAX_SEARCHES_PER_PAGE = 20;
 export const DEFAULT_DELAY_MS = 4000;
 
 export interface OrphanBeer {
@@ -25,16 +25,17 @@ export interface EnrichDeps {
 
 const pairKey = (brewery: string, name: string) => `${brewery} ${name}`;
 
-// Searches the page's orphan beers on Untappd (via deps) one at a time, throttled. Gated:
-// if the page has >= PAGE_NO_ID_CAP orphans, abstains entirely (leave it to the server).
+// Registers every page orphan, then searches Untappd one at a time, throttled — but at
+// most MAX_SEARCHES_PER_PAGE per page so a big shop page doesn't drain the user's session.
+// The rest stay ⚪ for a later load / the server cron (same orphan pool + backoff).
 export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Promise<void> {
-  if (orphans.length === 0 || orphans.length >= PAGE_NO_ID_CAP) return;
+  if (orphans.length === 0) return;
 
   const candidates = await deps.getCandidates(
     orphans.map((o) => ({ brewery: o.brewery, name: o.name })),
   );
   const byPair = new Map(orphans.map((o) => [pairKey(o.brewery, o.name), o]));
-  const eligible = candidates.filter((c) => c.eligible);
+  const eligible = candidates.filter((c) => c.eligible).slice(0, MAX_SEARCHES_PER_PAGE);
 
   const delayMs = deps.delayMs ?? DEFAULT_DELAY_MS;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
