@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { upsertBeer, findBeerByNormalized, getBeer, recordLookupSuccess } from '../../storage/beers';
+import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiEnv } from '../types';
@@ -111,7 +111,6 @@ describe('POST /enrich/result', () => {
     )!;
     expect(getBeer(db, row.id)!.untappd_id).toBe(5001);
     expect(getBeer(db, row.id)!.rating_global).toBeCloseTo(3.98);
-    void recordLookupSuccess; // route uses it internally
   });
 
   it('records not_found and bumps the backoff when nothing matches', async () => {
@@ -127,5 +126,25 @@ describe('POST /enrich/result', () => {
       db, normalizeBrewery('Magic Road Brewery'), normalizeName('Fifty/Fifty Clementine & Passionfruit'),
     )!;
     expect(getBeer(db, row.id)!.untappd_lookup_count).toBe(1);
+  });
+
+  it('reports blocked without mutating backoff when Untappd serves a block page', async () => {
+    const { db, app } = setup();
+    // Cloudflare "Just a moment..." interstitial — isBlockPage flags this.
+    const html = '<html><head><title>Just a moment...</title></head><body>cf-browser-verification</body></html>';
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Magic Road Brewery', name: 'Fifty/Fifty Clementine & Passionfruit', html,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('blocked');
+
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('Magic Road Brewery'), normalizeName('Fifty/Fifty Clementine & Passionfruit'),
+    )!;
+    const after = getBeer(db, row.id)!;
+    // A block must NOT mutate backoff state.
+    expect(after.untappd_lookup_at).toBeNull();
+    expect(after.untappd_lookup_count).toBe(0);
   });
 });
