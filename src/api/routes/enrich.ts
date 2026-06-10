@@ -2,16 +2,30 @@ import type { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
-import { findBeerByNormalized, getBeer, upsertBeer } from '../../storage/beers';
+import {
+  findBeerByNormalized,
+  getBeer,
+  upsertBeer,
+  recordLookupNotFound,
+  recordLookupSuccess,
+  recordLookupTransient,
+} from '../../storage/beers';
 import { normalizeBrewery, normalizeName, stripBreweryNoise } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
 import { buildSearchUrl } from '../../sources/untappd/search';
+import { lookupBeer } from '../../domain/untappd-lookup';
 
 const CandidatesBody = z.object({
   beers: z
     .array(z.object({ brewery: z.string(), name: z.string() }))
     .min(1)
     .max(200),
+});
+
+const ResultBody = z.object({
+  brewery: z.string(),
+  name: z.string(),
+  html: z.string(),
 });
 
 // Ensures a beer row exists for (brewery, name) and returns it.
@@ -47,5 +61,33 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       }),
     )();
     return c.json({ candidates });
+  });
+
+  app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
+    const { brewery, name, html } = c.req.valid('json');
+    const row = ensureBeerRow(deps.db, brewery, name);
+    // Reuse the full server pick pipeline; the client already fetched, so the
+    // injected fetch just returns the relayed HTML regardless of URL.
+    const outcome = await lookupBeer({ brewery, name, abv: row.abv, fetch: async () => html });
+    const nowIso = new Date().toISOString();
+
+    if (outcome.kind === 'matched') {
+      recordLookupSuccess(deps.db, row.id, {
+        bid: outcome.result.bid,
+        style: outcome.result.style,
+        abv: outcome.result.abv,
+        global_rating: outcome.result.global_rating,
+      });
+      return c.json({ status: 'matched', untappd_id: outcome.result.bid, rating_global: outcome.result.global_rating });
+    }
+    if (outcome.kind === 'not_found') {
+      recordLookupNotFound(deps.db, row.id, nowIso);
+      return c.json({ status: 'not_found' });
+    }
+    if (outcome.kind === 'blocked') {
+      recordLookupTransient(deps.db, row.id, nowIso); // soft backoff, no count penalty
+      return c.json({ status: 'blocked' });
+    }
+    return c.json({ status: 'transient' });
   });
 }

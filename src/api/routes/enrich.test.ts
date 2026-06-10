@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { upsertBeer, findBeerByNormalized } from '../../storage/beers';
+import { upsertBeer, findBeerByNormalized, getBeer, recordLookupSuccess } from '../../storage/beers';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiEnv } from '../types';
@@ -68,5 +68,64 @@ describe('POST /enrich/candidates', () => {
     const { app } = setup();
     const res = await post(app, '/enrich/candidates', { beers: [] });
     expect(res.status).toBe(400);
+  });
+});
+
+// Minimal Untappd search markup parseSearchPage understands (mirrors untappd-lookup.test).
+function searchHtml(
+  items: Array<{ bid: number; name: string; brewery: string; rating?: string }>,
+): string {
+  const cards = items
+    .map(
+      (it) => `
+      <div class="beer-item"><div class="beer-details">
+        <p class="name"><a href="/b/x/${it.bid}">${it.name}</a></p>
+        <p class="brewery"><a>${it.brewery}</a></p>
+        <p class="style">IPA</p>
+      </div><div class="details beer">
+        <p class="abv">5% ABV</p>
+        <div class="rating"><div class="caps" data-rating="${it.rating ?? '3.5'}"></div></div>
+      </div></div>`,
+    )
+    .join('');
+  return `<html><body>${cards}</body></html>`;
+}
+
+describe('POST /enrich/result', () => {
+  it('enriches the orphan on a matched search result', async () => {
+    const { db, app } = setup();
+    const html = searchHtml([
+      { bid: 5001, name: 'Fifty/Fifty Clementine & Passionfruit', brewery: 'Magic Road', rating: '3.98' },
+    ]);
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Magic Road Brewery',
+      name: 'Fifty/Fifty Clementine & Passionfruit',
+      html,
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: 'matched', untappd_id: 5001 });
+
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('Magic Road Brewery'), normalizeName('Fifty/Fifty Clementine & Passionfruit'),
+    )!;
+    expect(getBeer(db, row.id)!.untappd_id).toBe(5001);
+    expect(getBeer(db, row.id)!.rating_global).toBeCloseTo(3.98);
+    void recordLookupSuccess; // route uses it internally
+  });
+
+  it('records not_found and bumps the backoff when nothing matches', async () => {
+    const { db, app } = setup();
+    const html = searchHtml([{ bid: 9000, name: 'Totally Different', brewery: 'Other Brewery' }]);
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Magic Road Brewery', name: 'Fifty/Fifty Clementine & Passionfruit', html,
+    });
+    const body = await res.json();
+    expect(body.status).toBe('not_found');
+
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('Magic Road Brewery'), normalizeName('Fifty/Fifty Clementine & Passionfruit'),
+    )!;
+    expect(getBeer(db, row.id)!.untappd_lookup_count).toBe(1);
   });
 });
