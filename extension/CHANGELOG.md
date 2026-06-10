@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-06-10
+
 - Added Bierloods22 shop support.
 
 ## [0.3.0] - 2026-06-09
