@@ -26,6 +26,8 @@ export default defineManifest({
         'https://*.beerfreak.org/*',
         'https://bierloods22.nl/*',
         'https://*.bierloods22.nl/*',
+        'https://winetime.com.ua/*',
+        'https://*.winetime.com.ua/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
