@@ -479,6 +479,11 @@ describe('nameTokensDiverge', () => {
   test('ignores sub-2-char fragments', () => {
     expect(nameTokensDiverge('s mores', 'mores')).toBe(false);
   });
+  test('empty / one-sided names never diverge', () => {
+    expect(nameTokensDiverge('', '')).toBe(false);
+    expect(nameTokensDiverge('', 'mind over matter')).toBe(false);
+    expect(nameTokensDiverge('mind over matter', '')).toBe(false);
+  });
 });
 
 describe('matchBeer — divergence guard', () => {
