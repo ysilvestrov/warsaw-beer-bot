@@ -87,7 +87,7 @@ describe('winetime adapter', () => {
     expect(cards).toContainEqual(
       expect.objectContaining({
         brewery: 'Meteor',
-        name: 'Session IPA',
+        name: 'Pils',
       }),
     );
   });
@@ -110,7 +110,7 @@ describe('winetime adapter', () => {
     );
   });
 
-  it('falls back to visible DOM text when initial cart metadata is unavailable', () => {
+  it('falls back to visible DOM text when embedded product metadata is unavailable', () => {
     const doc = new DOMParser().parseFromString(withoutInitialData(html), 'text/html');
     const parsed = winetime.parseCards(doc);
 

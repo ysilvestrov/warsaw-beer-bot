@@ -11,6 +11,18 @@ function withoutInitialData(source: string): string {
   return source.replace(CATEGORY_ASSIGNMENT_RE, 'window.initialData.disabledCategory =');
 }
 
+function withVisibleBrewery(source: string, productKey: string, brewery: string): string {
+  const doc = new DOMParser().parseFromString(source, 'text/html');
+  const card = doc.querySelector(`[data-productkey="${productKey}"]`)?.closest('a.product-micro');
+  expect(card).not.toBeNull();
+
+  const rows = Array.from(card!.querySelectorAll('.j-grow-1-xs.j-size-0\\.75-xs'));
+  expect(rows.length).toBeGreaterThan(0);
+
+  rows[rows.length - 1].textContent = brewery;
+  return doc.documentElement.outerHTML;
+}
+
 let cards: ReturnType<typeof winetime.parseCards>;
 beforeAll(() => {
   cards = winetime.parseCards(new DOMParser().parseFromString(html, 'text/html'));
@@ -32,7 +44,10 @@ describe('winetime adapter', () => {
   });
 
   it('uses embedded manufacturer metadata for brewery', () => {
-    expect(cards).toContainEqual(
+    const doc = new DOMParser().parseFromString(withVisibleBrewery(html, '10469', 'Wrong Visible Brewery'), 'text/html');
+    const parsed = winetime.parseCards(doc);
+
+    expect(parsed).toContainEqual(
       expect.objectContaining({
         brewery: 'Meteor',
         name: 'Pils',
