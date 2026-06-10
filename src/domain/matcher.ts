@@ -1,4 +1,4 @@
-import { Searcher } from 'fast-fuzzy';
+import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery } from './normalize';
 
 export interface CatalogBeer {
@@ -128,6 +128,32 @@ export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));
 }
 
+// Per-token similarity floor for the divergence guard. A token is "covered" by the
+// other name when some token there scores at least this against it. 0.7 has wide margin:
+// Polish inflections / typos score >= 0.83, distinct flavour words <= 0.2.
+const TOKEN_SIM = 0.7;
+
+// Drop sub-2-char fragments (e.g. the apostrophe-junk "s" from "s'mores" -> "s mores").
+function divergenceTokens(name: string): string[] {
+  return name.split(' ').filter((t) => t.length >= 2);
+}
+
+function tokenCovered(t: string, others: string[]): boolean {
+  return others.some((o) => fuzzy(t, o) >= TOKEN_SIM);
+}
+
+// True when each normalized name has a content token the other side does not cover
+// (fuzzily) — i.e. the names diverge rather than one being a subset/inflection of the
+// other. Rejects fuzzy matches between different flavour variants that share a long base
+// name ("vanilla mind over matter" vs "s mores mind over matter").
+export function nameTokensDiverge(a: string, b: string): boolean {
+  const ta = divergenceTokens(a);
+  const tb = divergenceTokens(b);
+  const aUncovered = ta.some((t) => !tokenCovered(t, tb));
+  const bUncovered = tb.some((t) => !tokenCovered(t, ta));
+  return aUncovered && bUncovered;
+}
+
 export function matchPrepared(
   input: { brewery: string; name: string; abv?: number | null },
   prepared: PreparedCatalog,
@@ -216,6 +242,10 @@ export function matchPrepared(
   const results = searcher.search(`${seedBrewery} ${nn}`);
   if (!results.length) return null;
   const best = results[0];
+  // Reject a fuzzy candidate that diverges from the input on content tokens — a
+  // different flavour variant of the same base beer (e.g. "Double Vanilla Mind Over
+  // Matter" vs "S'mores Mind Over Matter"), which must not inherit drunk/rating data.
+  if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
 }
 

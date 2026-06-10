@@ -87,8 +87,8 @@ export async function matchBeerList(
           rating_global: beer.rating_global,
           untappd_id: beer.untappd_id ?? null,
         },
-        is_drunk: drunkSet.has(m.id),
-        user_rating: ratingByBeerId.get(m.id) ?? null,
+        is_drunk: m.source === 'exact' && drunkSet.has(m.id),
+        user_rating: m.source === 'exact' ? (ratingByBeerId.get(m.id) ?? null) : null,
       });
     }
     await yield_();
