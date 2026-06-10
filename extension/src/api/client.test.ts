@@ -79,3 +79,32 @@ describe('api/client', () => {
     expect(await getHealth('https://api.test', 20)).toBe(false);
   });
 });
+
+import { postEnrichCandidates, postEnrichResult } from './client';
+
+describe('postEnrichCandidates', () => {
+  it('posts beers and returns candidates', async () => {
+    const calls: { url: string; body: unknown }[] = [];
+    const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
+      calls.push({ url, body: JSON.parse(init.body as string) });
+      return new Response(JSON.stringify({ candidates: [{ brewery: 'B', name: 'N', eligible: true, searchUrl: 'u' }] }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await postEnrichCandidates('https://api', 'tok', [{ brewery: 'B', name: 'N' }]);
+    expect(out[0]).toEqual({ brewery: 'B', name: 'N', eligible: true, searchUrl: 'u' });
+    expect(calls[0].url).toBe('https://api/enrich/candidates');
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('postEnrichResult', () => {
+  it('posts html and returns the status payload', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ status: 'matched', untappd_id: 5001, rating_global: 3.9 }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const out = await postEnrichResult('https://api', 'tok', { brewery: 'B', name: 'N', html: '<x>' });
+    expect(out).toEqual({ status: 'matched', untappd_id: 5001, rating_global: 3.9 });
+    vi.unstubAllGlobals();
+  });
+});

@@ -22,3 +22,16 @@ export interface MatchResult {
 export interface MatchResponse {
   results: MatchResult[];
 }
+
+export interface EnrichCandidate {
+  brewery: string;
+  name: string;
+  eligible: boolean;
+  searchUrl: string;
+}
+
+export interface EnrichResult {
+  status: 'matched' | 'not_found' | 'blocked' | 'transient' | 'skipped';
+  untappd_id?: number;
+  rating_global?: number | null;
+}
