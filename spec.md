@@ -729,7 +729,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `[data-information-type="brand-name"]`, назва `a.product__title`; `°` у тайтлі це
   Плато, не ABV → `abv` опускається; має `waitForGrid`), `beerfreak` (Horoshop SSR —
   `.catalogCard`, brewery/name з embedded `products` metadata, домен
-  `beerfreak.org`). `registry.pickAdapter(url)`. Опційний `reRenderContainerSelector` —
+  `beerfreak.org`), `bierloods22` (Bierloods22 SSR — `.product-block`,
+  brewery/name з title split на ` - `, домен `bierloods22.nl`), `winetime` (WineTime SSR — `a.product-micro`,
+  brewery/name з `window.initialData.category.products` metadata keyed by
+  `data-productkey`, fallback на видимий title/brewery, ABV опускається,
+  домен `winetime.com.ua`). `registry.pickAdapter(url)`.
+  Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати
   адаптер: `docs/adapter-authoring.md`.
 - **Потік:** content script парсить видиму сітку → short-TTL кеш

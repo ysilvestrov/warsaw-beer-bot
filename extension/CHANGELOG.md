@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added WineTime shop support.
+
 ## [0.4.0] - 2026-06-10
 
 - Added Bierloods22 shop support.
