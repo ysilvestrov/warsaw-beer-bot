@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-10
+
 - Added WineTime shop support.
 - Orphan beers (no Untappd match yet) now show a ⚪ badge.
 - Optional (off by default): find missing beers via Untappd search in your own session and contribute ratings back; enable it in the extension options.
