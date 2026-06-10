@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added Bierloods22 shop support.
+
 ## [0.3.0] - 2026-06-09
 
 - Show ⭐ global Untappd rating for catalog beers you haven't drunk yet.

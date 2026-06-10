@@ -24,6 +24,8 @@ export default defineManifest({
         'https://*.onemorebeer.pl/*',
         'https://beerfreak.org/*',
         'https://*.beerfreak.org/*',
+        'https://bierloods22.nl/*',
+        'https://*.bierloods22.nl/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
