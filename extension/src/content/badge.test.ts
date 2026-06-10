@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER } from './badge';
+import { setSearching, setEnriched, setOrphan } from './badge';
 import type { MatchResult } from '../api/types';
 
 function el(): HTMLElement {
@@ -65,10 +66,10 @@ describe('renderBadge', () => {
     expect(badge!.textContent).toContain('3.9');
   });
 
-  it('renders nothing for a not-drunk orphan (no bid / no global rating)', () => {
+  it('renders ⚪ for a not-drunk orphan (matched, no bid / no global rating)', () => {
     const host = el();
     renderBadge(host, notDrunkOrphan);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
   });
 
   it('renders nothing for an unmatched beer', () => {
@@ -93,6 +94,39 @@ describe('renderBadge', () => {
     renderBadge(host, drunk(4.0));
     renderBadge(host, drunk(4.0));
     expect(host.querySelectorAll(`[${BADGE_MARKER}]`).length).toBe(1);
+  });
+});
+
+const orphan: MatchResult = {
+  raw: { brewery: 'PINTA', name: 'Orphan' },
+  matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
+  is_drunk: false,
+  user_rating: null,
+};
+
+describe('orphan + enrichment badge states', () => {
+  it('renders ⚪ for a not-drunk orphan (matched, no untappd_id)', () => {
+    const host = el();
+    renderBadge(host, orphan);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
+  });
+
+  it('setSearching replaces the badge with a loading glyph; setEnriched swaps to ⭐ + opens Untappd', () => {
+    const host = el();
+    setOrphan(host);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
+
+    setSearching(host);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⏳');
+    expect(host.querySelectorAll(`[${BADGE_MARKER}]`).length).toBe(1);
+
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    setEnriched(host, 222, 3.9);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`)!;
+    expect(badge.textContent).toContain('⭐');
+    expect(badge.textContent).toContain('3.9');
+    (badge as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
   });
 });
 

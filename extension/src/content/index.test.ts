@@ -86,4 +86,19 @@ describe('runOverlay', () => {
     expect(isSeen(a)).toBe(true);
     expect(isSeen(b)).toBe(true);
   });
+
+  it('passes not-drunk no-untappd_id beers to the enrich callback', async () => {
+    const a = cardEl();
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'Orphan One' },
+      matched_beer: { id: 1, name: 'Orphan One', brewery: 'B', rating_global: null, untappd_id: null },
+      is_drunk: false, user_rating: null,
+    };
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan One' }]);
+    const sendMatch = async () => [orphan];
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, sendMatch, enrich);
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(enrich.mock.calls[0][0][0]).toMatchObject({ brewery: 'B', name: 'Orphan One' });
+  });
 });

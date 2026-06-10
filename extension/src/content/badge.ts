@@ -17,28 +17,8 @@ function untappdUrl(untappdId: number): string {
   return `https://untappd.com/beer/${untappdId}`;
 }
 
-// The badge label, or null when this result should not be badged.
-// drunk → ✅ (+ personal rating; the ✅ shows the user's own data, independent of the
-// catalog match); in-catalog & not drunk with a bid + global rating → ⭐ (global
-// rating); everything else (orphan / unmatched) → no badge.
-function badgeText(result: MatchResult): string | null {
-  if (result.is_drunk) {
-    return result.user_rating != null ? `✅ ${result.user_rating.toFixed(1)}` : '✅';
-  }
-  const m = result.matched_beer;
-  if (m && m.untappd_id != null && m.rating_global != null) {
-    return `⭐ ${m.rating_global.toFixed(1)}`;
-  }
-  return null;
-}
-
-export function renderBadge(host: HTMLElement, result: MatchResult): void {
-  const text = badgeText(result);
-  if (text == null) return;
-  if (host.querySelector(`[${BADGE_MARKER}]`)) return;
-
-  const untappdId = result.matched_beer?.untappd_id ?? null;
-
+// Builds the styled badge element. Clickable (opens Untappd) when untappdId is set.
+function makeBadge(text: string, untappdId: number | null): HTMLElement {
   const badge = document.createElement('div');
   badge.setAttribute(BADGE_MARKER, '');
   badge.textContent = text;
@@ -55,17 +35,54 @@ export function renderBadge(host: HTMLElement, result: MatchResult): void {
     pointerEvents: untappdId != null ? 'auto' : 'none',
     cursor: untappdId != null ? 'pointer' : 'default',
   } as Partial<CSSStyleDeclaration>);
-
   if (untappdId != null) {
     badge.addEventListener('click', (e) => {
-      // The badge sits on top of the product card, which is usually itself a
-      // link — suppress the card's navigation before opening Untappd.
       e.preventDefault();
       e.stopPropagation();
       window.open(untappdUrl(untappdId), '_blank', 'noopener');
     });
   }
+  return badge;
+}
 
+function attach(host: HTMLElement, badge: HTMLElement): void {
+  host.querySelector(`[${BADGE_MARKER}]`)?.remove();
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   host.appendChild(badge);
+}
+
+// drunk → ✅ (+ personal rating); not-drunk with a bid + global rating → ⭐; not-drunk
+// matched orphan (no bid) → ⚪; truly unmatched (matched_beer null) → no badge.
+function badgeFor(result: MatchResult): HTMLElement | null {
+  if (result.is_drunk) {
+    return makeBadge(result.user_rating != null ? `✅ ${result.user_rating.toFixed(1)}` : '✅', null);
+  }
+  const m = result.matched_beer;
+  if (!m) return null;
+  if (m.untappd_id != null && m.rating_global != null) {
+    return makeBadge(`⭐ ${m.rating_global.toFixed(1)}`, m.untappd_id);
+  }
+  if (m.untappd_id == null) return makeBadge('⚪', null);
+  return null;
+}
+
+export function renderBadge(host: HTMLElement, result: MatchResult): void {
+  if (host.querySelector(`[${BADGE_MARKER}]`)) return; // idempotent for the /match path
+  const badge = badgeFor(result);
+  if (badge) attach(host, badge);
+}
+
+/** Show the ⚪ orphan badge (used by enrichment before/around a search). */
+export function setOrphan(host: HTMLElement): void {
+  attach(host, makeBadge('⚪', null));
+}
+
+/** Replace the badge with a loading glyph while an Untappd search is in flight. */
+export function setSearching(host: HTMLElement): void {
+  attach(host, makeBadge('⏳', null));
+}
+
+/** Swap the badge to ⭐ + global rating once the beer is enriched. */
+export function setEnriched(host: HTMLElement, untappdId: number, ratingGlobal: number | null): void {
+  attach(host, makeBadge(ratingGlobal != null ? `⭐ ${ratingGlobal.toFixed(1)}` : '⭐', untappdId));
 }
