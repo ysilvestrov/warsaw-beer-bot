@@ -14,12 +14,13 @@ function withoutInitialData(source: string): string {
 function withVisibleBrewery(source: string, productKey: string, brewery: string): string {
   const doc = new DOMParser().parseFromString(source, 'text/html');
   const card = doc.querySelector(`[data-productkey="${productKey}"]`)?.closest('a.product-micro');
-  expect(card).not.toBeNull();
+  if (!card) throw new Error(`Missing WineTime fixture card for product key ${productKey}`);
 
-  const rows = Array.from(card!.querySelectorAll('.j-grow-1-xs.j-size-0\\.75-xs'));
-  expect(rows.length).toBeGreaterThan(0);
+  const rows = Array.from(card.querySelectorAll('.j-grow-1-xs.j-size-0\\.75-xs'));
+  const row = rows[rows.length - 1];
+  if (!row) throw new Error(`Missing visible brewery row for product key ${productKey}`);
 
-  rows[rows.length - 1].textContent = brewery;
+  row.textContent = brewery;
   return doc.documentElement.outerHTML;
 }
 
