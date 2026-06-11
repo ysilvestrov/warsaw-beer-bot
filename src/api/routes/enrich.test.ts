@@ -64,6 +64,18 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
+  it('candidate searchUrl strips collab junk and both collab breweries (#117)', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar' }],
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const url = body.candidates[0].searchUrl as string;
+    expect(url).toContain('Omnipollo%20Trillium%20Kanelbullar');
+    expect(url.toLowerCase()).not.toContain('collab');
+  });
+
   it('400 on an empty beer list', async () => {
     const { app } = setup();
     const res = await post(app, '/enrich/candidates', { beers: [] });

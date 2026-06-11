@@ -222,4 +222,34 @@ describe('lookupBeer', () => {
     const out = await lookupBeer({ brewery: 'X', name: 'Y', fetch });
     expect(out.kind).toBe('blocked');
   });
+
+  describe('name-keys stage (#117)', () => {
+    test('matched: reordered name (below fuzzy 0.85) via key intersection', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 11827, name: 'Festweisse (TAP04)', brewery: 'Schneider Weisse G. Schneider & Sohn' }]),
+      );
+      const out = await lookupBeer({ brewery: 'Schneider', name: 'TAP04 FESTWEISSE', fetch });
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(11827);
+    });
+
+    test('matched: collab partner in input name → base-beer key hit', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 6683161, name: 'Fast Talking', brewery: 'Root + Branch Brewing' }]),
+      );
+      const out = await lookupBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park', fetch });
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(6683161);
+    });
+
+    test('not_found: single-token name with no fuzzy hit stays not_found', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 1, name: 'Totally Different', brewery: 'Root + Branch' }]),
+      );
+      const out = await lookupBeer({ brewery: 'Root + Branch', name: 'Hazy', fetch });
+      expect(out.kind).toBe('not_found');
+    });
+  });
 });

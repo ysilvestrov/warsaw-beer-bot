@@ -7,11 +7,19 @@ const STYLE_WORDS = new Set([
 const BREWERY_NOISE = new Set([
   // English / Polish
   'browar', 'browary', 'brewery', 'brewing', 'co', 'company', 'contracts',
+  'collab', 'collaboration',
   // Czech / Slovak, German, French, Italian, Dutch/Flemish,
   // Scandinavian (+ definite form), Spanish (post-diacritic-strip form)
   'pivovar', 'pivovary', 'brauerei', 'brasserie', 'birrificio',
   'brouwerij', 'bryggeri', 'bryggeriet', 'cerveceria',
 ]);
+
+// Separator for collab/bilingual brewery names. Untappd uses:
+//   "A / B"  — slash with any spacing (bilingual or collab)
+//   "A x B"  — " x "/" X " connector (collab, case-insensitive)
+//   "A & B"  — " & " connector (collab)
+// String.split() applies this to every occurrence regardless of the global flag.
+export const COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+|\s+&\s+/;
 
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the
@@ -74,6 +82,8 @@ export function normalizeBrewery(s: string): string {
 // real brewery name (e.g. "JBW Brewery" vs the registered "JBW Browar").
 export function stripBreweryNoise(brewery: string): string {
   return stripLegalForm(brewery)
+    .split(COLLAB_SEP)             // collapse "/", " x ", " & " so glued junk ("collab/") detaches
+    .join(' ')
     .split(/\s+/)
     .filter((tok) => tok && !BREWERY_NOISE.has(tok.toLowerCase()))
     .join(' ')

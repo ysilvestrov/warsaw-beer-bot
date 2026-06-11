@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -494,5 +494,55 @@ describe('matchBeer — divergence guard', () => {
   test('still matches when the input name is a subset of the candidate', () => {
     const cat = [c({ id: 51, brewery: 'Magnify', name: 'Mind Over Matter' })];
     expect(matchBeer({ brewery: 'Magnify', name: 'Vanilla Mind Over Matter' }, cat)?.id).toBe(51);
+  });
+});
+
+describe('nameKeys (#117)', () => {
+  test('order-insensitive: reordered tokens produce the same key', () => {
+    expect(nameKeys('TAP04 FESTWEISSE', 'Schneider'))
+      .toEqual(nameKeys('Festweisse (TAP04)', 'Schneider Weisse'));
+  });
+  test('collab split: each "/"-side is its own key', () => {
+    expect([...nameKeys('Fast Talking / North Park', 'Root + Branch')])
+      .toEqual(expect.arrayContaining(['fast talking', 'north park']));
+  });
+  test('multi-token guard: single-token sides are dropped', () => {
+    // "Finback" (1 token) dropped; "Globe Coagulant" (2) kept and sorted
+    expect([...nameKeys('Globe Coagulant / Finback', 'Messorem')]).toEqual(['coagulant globe']);
+  });
+  test('single-token whole name → empty key set (falls through to fuzzy)', () => {
+    expect(nameKeys('Kanelbullar', 'Omnipollo').size).toBe(0);
+  });
+  test('strips brewery duplicated into the name', () => {
+    expect([...nameKeys('PRIMÁTOR FREE MOTHER IN LAW', 'Primator')]).toEqual(['free in law mother']);
+  });
+  test('bilingual canonical: English side matches the deduped input', () => {
+    const input = nameKeys('PRIMÁTOR FREE MOTHER IN LAW', 'Primator');
+    const canon = nameKeys('Free Tchyně / Free Mother In Law', 'Primátor');
+    expect([...input].some((k) => canon.has(k))).toBe(true);
+  });
+  test('FP: superset input does not match a shorter single-token canonical', () => {
+    // "Hazy Mango" (2-token key) vs "Hazy" (1-token, dropped) → no shared key
+    expect(intersects(nameKeys('Hazy Mango', 'Foo'), nameKeys('Hazy', 'Foo'))).toBe(false);
+  });
+  test('regression: Fifty/Fifty Clementine keys only the 2-token side, not "fifty"', () => {
+    const input = nameKeys('Fifty/Fifty Clementine & Passionfruit', 'Magic Road');
+    expect(intersects(input, nameKeys('Fifty / Fifty Clementine & Passionfruit', 'Magic Road'))).toBe(true);
+    expect(intersects(input, nameKeys('Fifty / Fifty - Pineapple', 'Magic Road'))).toBe(false);
+  });
+});
+
+describe('matchPrepared key-intersection (#117)', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 10, brewery: 'Schneider Weisse', name: 'Festweisse (TAP04)' }),
+    c({ id: 11, brewery: 'Root + Branch', name: 'Fast Talking' }),
+  ];
+  test('reordered name matches as exact (source=exact, confidence 1)', () => {
+    const m = matchBeer({ brewery: 'Schneider', name: 'TAP04 FESTWEISSE' }, cat);
+    expect(m).toEqual({ id: 10, confidence: 1, source: 'exact' });
+  });
+  test('collab partner in input name matches the base beer as exact', () => {
+    const m = matchBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park' }, cat);
+    expect(m).toEqual({ id: 11, confidence: 1, source: 'exact' });
   });
 });
