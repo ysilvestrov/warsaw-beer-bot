@@ -160,6 +160,23 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 10,
+    sql: `
+      CREATE TABLE enrich_failures (
+        beer_id            INTEGER NOT NULL PRIMARY KEY
+                           REFERENCES beers(id) ON DELETE CASCADE,
+        brewery            TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        search_url         TEXT NOT NULL,
+        outcome            TEXT NOT NULL CHECK (outcome IN ('not_found','blocked')),
+        candidates_count   INTEGER NOT NULL,
+        candidates_summary TEXT NOT NULL,
+        fail_count         INTEGER NOT NULL DEFAULT 1,
+        last_at            TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

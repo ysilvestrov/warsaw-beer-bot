@@ -73,7 +73,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // injected fetch just returns the relayed HTML regardless of URL.
     const outcome = await lookupBeer({ brewery, name, abv: row.abv, fetch: async () => html });
     const nowIso = new Date().toISOString();
-    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso);
+    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name });
     if (kind === 'matched' && outcome.kind === 'matched') {
       return c.json({ status: 'matched', untappd_id: outcome.result.bid, rating_global: outcome.result.global_rating });
     }

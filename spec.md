@@ -328,10 +328,30 @@ src/
 `file_id`/`attached_by` — бот, коли адмін надсилає zip і його sha256 збігається з
 останнім рядком. «Остання» версія — за semver (числове порівняння, не лексичне).
 
-### 3.13 `schema_version` — версія міграцій
+### 3.13 `enrich_failures` — лог провалів енричу (v10)
+| Поле | Тип | Обмеження | Опис |
+|------|-----|-----------|------|
+| `beer_id` | INTEGER | PK → `beers(id)` **ON DELETE CASCADE** | один рядок на пиво |
+| `brewery` | TEXT | NOT NULL | сирий вхід (як прийшов) |
+| `name` | TEXT | NOT NULL | сирий вхід |
+| `search_url` | TEXT | NOT NULL | побудований запит (перша brewery-частина) — відкрити для відтворення |
+| `outcome` | TEXT | NOT NULL CHECK IN (`not_found`,`blocked`) | результат провалу |
+| `candidates_count` | INTEGER | NOT NULL | скільки кандидатів повернув пошук (0 = зашумлений запит) |
+| `candidates_summary` | TEXT | NOT NULL | топ-3 `"<brewery> — <name>"`, `;`-joined (порожньо для blocked) |
+| `fail_count` | INTEGER | NOT NULL DEFAULT 1 | скільки разів провалився (++ на upsert) |
+| `last_at` | TEXT | NOT NULL | час останнього провалу (ISO) |
+
+**Хто що пише:** `applyLookupOutcome` (спільний для серверного крона і client-relay)
+upsert'ить рядок на `not_found`/`blocked` і **видаляє** його на `matched`. Один рядок на
+пиво (upsert по `beer_id`), розмір обмежений поточним набором orphan'ів. Untappd-пошук
+відтворюваний без кукі, тож `search_url` достатньо для дебагу. Запит:
+`SELECT … FROM enrich_failures ORDER BY last_at DESC` — «0 кандидатів» = зашумлений запит;
+«N, але not_found» = brewery-gate / name-fuzzy відсік (видно по `candidates_summary`).
+
+### 3.14 `schema_version` — версія міграцій
 Єдине поле `version INTEGER PRIMARY KEY`; по рядку на застосовану міграцію.
 
-### 3.14 Зв'язки (ER, текстом)
+### 3.15 Зв'язки (ER, текстом)
 ```
 user_profiles 1───* checkins        (telegram_id)
 user_profiles 1───1 user_filters    (telegram_id, CASCADE)
@@ -340,12 +360,13 @@ user_profiles 1───* api_tokens      (telegram_id, CASCADE; ротація 
 beers         1───* checkins         (beer_id)
 beers         1───* untappd_had      (beer_id, CASCADE)
 beers         1───* match_links      (untappd_beer_id = LOCAL beers.id)
+beers         1───1 enrich_failures   (beer_id, CASCADE; один рядок на пиво, що провалило енрич)
 pubs          1───* tap_snapshots    (pub_id)
 tap_snapshots 1───* taps             (snapshot_id, CASCADE)
 pubs          *───* pubs             via pub_distances (a<b)
 ```
 
-### 3.15 Історія міграцій
+### 3.16 Історія міграцій
 | v | Зміст |
 |---|-------|
 | 1 | базова схема: beers, pubs, tap_snapshots, taps, checkins, match_links, user_profiles, user_filters |
@@ -357,6 +378,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 7 | reset lookup-backoff для orphan'ів (`untappd_id IS NULL`) — переенрич |
 | 8 | `api_tokens` (токен-авторизація браузерного розширення) |
 | 9 | `extension_releases` (дистрибуція бета-версій розширення) |
+| 10 | `enrich_failures` (лог провалів енричу для дебагу матчингу) |
 
 ---
 
@@ -535,9 +557,15 @@ eligible,searchUrl}]}`, де `eligible` = backoff-due (`isEligible`) і пиво
 `/enrich/result` приймає `{brewery,name,html}` (обрізана клієнтом сторінка Untappd-пошуку),
 проганяє наявний `lookupBeer` з `fetch=()=>html` і застосовує спільний `applyLookupOutcome`:
 matched → `recordLookupSuccess` (bid+рейтинг; UNIQUE-клеш → merge у канонічний рядок),
-not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не пише (блок ніколи не
-мутує backoff). Той самий orphan-пул і backoff, що й у серверного enrich-крона — клієнт
-лише дозбирює видиме й due.
+not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не пише в backoff (блок
+ніколи не мутує backoff). Той самий orphan-пул і backoff, що й у серверного enrich-крона —
+клієнт лише дозбирює видиме й due.
+
+**Лог провалів (дебаг).** Обидва канали (крон + client-relay) через `applyLookupOutcome`
+upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked` — вхід + `search_url`
++ summary кандидатів, self-cleared на `matched`. Це робить орфани дебажними без ручного
+відтворення/прикладання HTML до ішьюзу (бо Untappd-пошук відтворюється без кукі — досить
+`search_url`). Backoff це НЕ зачіпає: `blocked` пише лише debug-рядок, не `untappd_lookup_*`.
 
 ### Фонові джоби (node-cron, у процесі)
 | Джоба | Розклад | Призначення |
