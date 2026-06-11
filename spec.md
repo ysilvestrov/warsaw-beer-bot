@@ -582,7 +582,7 @@ upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked
 Авторизація: `Authorization: Bearer <ADMIN_API_TOKEN>` — окремий адмін-токен на
 маршрутах `/admin/*` (не per-user токен з `api_tokens`); constant-time порівняння
 (захист від timing-атак). Якщо `ADMIN_API_TOKEN` не задано в `.env` — ендпоінт
-повертає `503 { error: "admin endpoint not configured" }`.
+повертає `503 { error: "admin disabled" }`.
 
 **Запит** (`Content-Type: application/json`):
 ```json
