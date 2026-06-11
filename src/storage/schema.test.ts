@@ -179,4 +179,18 @@ describe('schema migrations', () => {
     expect(cols.find((c) => c.name === 'sha256')?.notnull).toBe(1);
     expect(cols.find((c) => c.name === 'file_id')?.notnull).toBe(0);
   });
+
+  test('migration v10 creates enrich_failures table with beer_id PK', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db.prepare('PRAGMA table_info(enrich_failures)').all() as { name: string; pk: number }[];
+    const names = cols.map((c) => c.name);
+    expect(names).toEqual(
+      expect.arrayContaining([
+        'beer_id', 'brewery', 'name', 'search_url', 'outcome',
+        'candidates_count', 'candidates_summary', 'fail_count', 'last_at',
+      ]),
+    );
+    expect(cols.find((c) => c.name === 'beer_id')?.pk).toBe(1);
+  });
 });
