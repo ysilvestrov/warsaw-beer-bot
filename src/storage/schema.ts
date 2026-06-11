@@ -177,6 +177,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 11,
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN source_url TEXT NOT NULL DEFAULT '';
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
