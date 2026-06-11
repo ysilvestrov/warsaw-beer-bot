@@ -30,7 +30,10 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
        candidates_count   = excluded.candidates_count,
        candidates_summary = excluded.candidates_summary,
        fail_count         = enrich_failures.fail_count + 1,
-       last_at            = excluded.last_at`,
+       last_at            = excluded.last_at,
+       review_class       = NULL,
+       review_note        = NULL,
+       reviewed_at        = NULL`,
   ).run(
     r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
     r.candidates_count, r.candidates_summary, r.at,
@@ -39,4 +42,27 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
 
 export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
+}
+
+// Values must stay in sync with the CHECK on enrich_failures.review_class (schema migration 12).
+export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix';
+
+// Marks an orphan failure as triaged. Returns false if no row exists for beerId
+// (e.g. the failure already cleared because the beer matched). A later recurring
+// failure resets these fields via recordEnrichFailure's ON CONFLICT clause.
+export function setEnrichFailureReview(
+  db: DB,
+  beerId: number,
+  reviewClass: ReviewClass,
+  note: string | null,
+  atIso: string,
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE enrich_failures
+         SET review_class = ?, review_note = ?, reviewed_at = ?
+       WHERE beer_id = ?`,
+    )
+    .run(reviewClass, note, atIso, beerId);
+  return info.changes > 0;
 }

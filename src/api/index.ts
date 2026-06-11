@@ -7,8 +7,10 @@ import type pino from 'pino';
 import type { Env } from '../config/env';
 import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
+import { adminMiddleware } from './middleware/admin';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
+import { adminRoute } from './routes/admin';
 
 export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
@@ -25,6 +27,9 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
 
   app.use('/enrich/*', authMiddleware(deps.db));
   enrichRoute(app, deps);
+
+  app.use('/admin/*', adminMiddleware(deps.env));
+  adminRoute(app, deps);
 
   app.onError((err, c) => {
     deps.log.error({ err }, 'api error');

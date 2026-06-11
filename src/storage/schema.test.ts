@@ -207,4 +207,18 @@ describe('schema migrations', () => {
     expect(col!.notnull).toBe(1);
     expect(col!.dflt_value).toBe("''"); // backfills existing rows on the additive migration
   });
+
+  test('enrich_failures has nullable review columns', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db.prepare(`PRAGMA table_info(enrich_failures)`).all() as Array<{
+      name: string;
+      notnull: number;
+    }>;
+    for (const name of ['review_class', 'review_note', 'reviewed_at']) {
+      const col = cols.find((c) => c.name === name);
+      expect(col).toBeDefined();
+      expect(col!.notnull).toBe(0); // nullable
+    }
+  });
 });

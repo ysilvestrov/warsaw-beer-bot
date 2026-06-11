@@ -2,7 +2,7 @@ import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertBeer } from './beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
-import { recordEnrichFailure, clearEnrichFailure, type EnrichFailureRow } from './enrich_failures';
+import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, type EnrichFailureRow } from './enrich_failures';
 
 function freshDbWithBeer() {
   const db = openDb(':memory:');
@@ -72,5 +72,39 @@ describe('enrich_failures', () => {
     recordEnrichFailure(db, row({ beer_id: id, source_url: 'https://beerfreak.org/p/new' }));
     const got = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.source_url).toBe('https://beerfreak.org/p/new');
+  });
+
+  test('setEnrichFailureReview updates review fields and reports change', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    const ok = setEnrichFailureReview(db, id, 'parser_bug', 'name split wrong', '2026-06-11T02:00:00Z');
+    expect(ok).toBe(true);
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got).toMatchObject({ review_class: 'parser_bug', review_note: 'name split wrong', reviewed_at: '2026-06-11T02:00:00Z' });
+  });
+
+  test('setEnrichFailureReview reports no change for an unknown beer', () => {
+    const { db } = freshDbWithBeer();
+    expect(setEnrichFailureReview(db, 99999, 'wontfix', null, '2026-06-11T02:00:00Z')).toBe(false);
+  });
+
+  test('a recurring failure clears a prior review', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    setEnrichFailureReview(db, id, 'matcher_bug', null, '2026-06-11T02:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, at: '2026-06-11T03:00:00Z' })); // fails again
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBeNull();
+    expect(got.review_note).toBeNull();
+    expect(got.reviewed_at).toBeNull();
+    expect(got.fail_count).toBe(2);
+  });
+
+  test('the review_class CHECK constraint rejects an invalid class', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    expect(() =>
+      db.prepare('UPDATE enrich_failures SET review_class = ? WHERE beer_id = ?').run('bogus', id),
+    ).toThrow();
   });
 });
