@@ -25,6 +25,7 @@ export interface PreparedBeer extends CatalogBeer {
   nameNorm: string;     // normalizeName(name)
   breweryNorm: string;  // normalizeBrewery(brewery)
   aliases: string[];    // breweryAliases(brewery)
+  keys: Set<string>;    // nameKeys(name, brewery)  (#117)
 }
 
 function defaultBuildSearcher(rows: PreparedBeer[]) {
@@ -53,6 +54,7 @@ export function prepareBeer(c: CatalogBeer): PreparedBeer {
     nameNorm: normalizeName(c.name),
     breweryNorm: normalizeBrewery(c.brewery),
     aliases: breweryAliases(c.brewery),
+    keys: nameKeys(c.name, c.brewery),
   };
 }
 
@@ -123,6 +125,39 @@ export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));
 }
 
+// Strip leading brewery tokens duplicated into a normalized name (e.g. the product
+// title "PRIMÁTOR Free Mother In Law" with brewery "Primátor"). Token-prefix only.
+function stripLeadingBrewery(nameNorm: string, breweryNorm: string): string {
+  if (!breweryNorm) return nameNorm;
+  const nt = nameNorm.split(' ').filter(Boolean);
+  const bt = breweryNorm.split(' ').filter(Boolean);
+  if (bt.length && bt.length < nt.length && bt.every((t, i) => nt[i] === t)) {
+    return nt.slice(bt.length).join(' ');
+  }
+  return nameNorm;
+}
+
+// Set of canonical name keys: split on COLLAB_SEP (collab/bilingual sides), normalize
+// each side, strip a leading brewery duplication, drop <2-token sides (weak keys), then
+// sort tokens (order-insensitive). Names match when their key sets intersect — set
+// EQUALITY per side, as FP-safe as exact match. Single-token whole names yield an empty
+// set and fall through to the fuzzy path. See spec §3.1.
+export function nameKeys(rawName: string, brewery: string): Set<string> {
+  const bNorm = normalizeBrewery(brewery);
+  const keys = new Set<string>();
+  for (const side of rawName.split(COLLAB_SEP)) {
+    const toks = stripLeadingBrewery(normalizeName(side), bNorm).split(' ').filter(Boolean);
+    if (toks.length < 2) continue;
+    keys.add([...toks].sort().join(' '));
+  }
+  return keys;
+}
+
+export function intersects(a: Set<string>, b: Set<string>): boolean {
+  for (const x of a) if (b.has(x)) return true;
+  return false;
+}
+
 // Per-token similarity floor for the divergence guard. A token is "covered" by the
 // other name when some token there scores at least this against it. 0.7 has wide margin:
 // Polish inflections / typos score >= 0.83, distinct flavour words <= 0.2.
@@ -155,15 +190,17 @@ export function matchPrepared(
 ): MatchResult | null {
   const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
+  const inputKeys = nameKeys(input.name, input.brewery);   // #117
   const catalog = prepared.beers;
 
   // Exact-normalized hits — multiple rows are common when Untappd has
-  // several vintages of the same beer. Latest id first.
+  // several vintages of the same beer. Latest id first. #117: also accept an
+  // order-insensitive / collab-aware name-key intersection as exact-equivalent.
   const exacts = catalog
     .filter(
       (c) =>
         breweryAliasesMatch(c.aliases, inputAliases) &&
-        c.nameNorm === nn,
+        (c.nameNorm === nn || intersects(c.keys, inputKeys)),
     )
     .sort((a, b) => b.id - a.id);
 
