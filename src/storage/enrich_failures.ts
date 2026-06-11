@@ -1,0 +1,39 @@
+import type { DB } from './db';
+
+export interface EnrichFailureRow {
+  beer_id: number;
+  brewery: string;
+  name: string;
+  search_url: string;
+  outcome: 'not_found' | 'blocked';
+  candidates_count: number;
+  candidates_summary: string;
+  at: string; // ISO timestamp of this failure
+}
+
+// One row per failing beer. Upsert on beer_id: a repeat failure refreshes the
+// diagnostic fields and bumps fail_count. The row is cleared (clearEnrichFailure)
+// when the beer eventually matches, and CASCADE-deleted if the beer row is removed.
+export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
+  db.prepare(
+    `INSERT INTO enrich_failures
+       (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+     ON CONFLICT(beer_id) DO UPDATE SET
+       brewery            = excluded.brewery,
+       name               = excluded.name,
+       search_url         = excluded.search_url,
+       outcome            = excluded.outcome,
+       candidates_count   = excluded.candidates_count,
+       candidates_summary = excluded.candidates_summary,
+       fail_count         = enrich_failures.fail_count + 1,
+       last_at            = excluded.last_at`,
+  ).run(
+    r.beer_id, r.brewery, r.name, r.search_url, r.outcome,
+    r.candidates_count, r.candidates_summary, r.at,
+  );
+}
+
+export function clearEnrichFailure(db: DB, beerId: number): void {
+  db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
+}
