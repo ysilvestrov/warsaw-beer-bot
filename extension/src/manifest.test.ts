@@ -32,5 +32,7 @@ describe('manifest', () => {
     expect(contentScript.matches).toContain('https://*.bierloods22.nl/*');
     expect(contentScript.matches).toContain('https://winetime.com.ua/*');
     expect(contentScript.matches).toContain('https://*.winetime.com.ua/*');
+    expect(contentScript.matches).toContain('https://hoptimaal.com/*');
+    expect(contentScript.matches).toContain('https://*.hoptimaal.com/*');
   });
 });

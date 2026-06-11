@@ -28,6 +28,8 @@ export default defineManifest({
         'https://*.bierloods22.nl/*',
         'https://winetime.com.ua/*',
         'https://*.winetime.com.ua/*',
+        'https://hoptimaal.com/*',
+        'https://*.hoptimaal.com/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
