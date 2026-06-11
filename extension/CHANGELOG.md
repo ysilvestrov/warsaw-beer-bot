@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed BeerFreak parsing when product titles repeat a brewery suffix such as "Brewery", or when BeerFreak omits brand metadata for descriptor-led breweries like "Brouwerij ...".
+
 ## [0.5.2] - 2026-06-11
 
 - Fixed Bierloods22 product parsing for breweries whose name contains " - " (e.g. "Kykao - Handcrafted") — those beers now match instead of showing as unmatched.

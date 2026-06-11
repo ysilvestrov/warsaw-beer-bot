@@ -11,6 +11,29 @@ function withoutProductMetadata(source: string): string {
   return source.replace(PRODUCT_METADATA_RE, '');
 }
 
+function metadataCard(id: number, title: string): string {
+  return `
+    <div class="catalogCard j-catalog-card">
+      <div class="j-product-container" data-id="${id}"></div>
+      <a class="catalogCard-title">${title}</a>
+    </div>
+  `;
+}
+
+function docWithProducts(products: unknown[]): Document {
+  return new DOMParser().parseFromString(`
+    <div data-catalog-view-block="products">
+      ${metadataCard(1737, 'fallback title')}
+      ${metadataCard(10079, 'fallback title')}
+      ${metadataCard(10112, 'fallback title')}
+    </div>
+    <script>
+      products = ${JSON.stringify(products)},
+      ids = [];
+    </script>
+  `, 'text/html');
+}
+
 let cards: ReturnType<typeof beerfreak.parseCards>;
 beforeAll(() => {
   cards = beerfreak.parseCards(new DOMParser().parseFromString(html, 'text/html'));
@@ -34,6 +57,33 @@ describe('beerfreak adapter', () => {
       brewery: '',
       name: 'Popihn/Brasserie Cambier DIPA DDH - DOLCITA',
     });
+  });
+
+  it('removes brewery suffix noise that remains after brand prefix trimming', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 1737, brand_title: 'ДІДЬКО (Україна)', title: 'Дідько Brewery Double Trouble' },
+      { id: 10079, brand_title: 'TEN MEN (Україна)', title: 'Ten Men Brewery RUBIS' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'ДІДЬКО',
+      name: 'Double Trouble',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'TEN MEN',
+      name: 'RUBIS',
+    }));
+  });
+
+  it('extracts a brewery prefix from Beerfreak titles when metadata has no brand', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10112, brand_title: null, title: 'Brouwerij De Dolle Brouwers Oerbier' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brouwerij De Dolle Brouwers',
+      name: 'Oerbier',
+    }));
   });
 
   it('falls back to card title text when embedded product metadata is absent', () => {
