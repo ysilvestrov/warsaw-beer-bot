@@ -32,6 +32,13 @@ describe('bierloods22 brewery extraction (#117)', () => {
     expect(c.name).toBe('Bar');
   });
 
+  it('brand prefix that is not a suffix of the title → first-dash fallback', () => {
+    // Guard: attr is non-empty but does not end with the visible title → ignore it.
+    const [c] = parse(card('Totally Unrelated Brand Label', 'Foo - Bar'));
+    expect(c.brewery).toBe('Foo');
+    expect(c.name).toBe('Bar');
+  });
+
   it('no dash → empty brewery, whole title as name', () => {
     const [c] = parse(card('Solo', 'Solo'));
     expect(c.brewery).toBe('');

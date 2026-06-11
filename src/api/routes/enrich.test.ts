@@ -69,6 +69,7 @@ describe('POST /enrich/candidates', () => {
     const res = await post(app, '/enrich/candidates', {
       beers: [{ brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar' }],
     });
+    expect(res.status).toBe(200);
     const body = await res.json();
     const url = body.candidates[0].searchUrl as string;
     expect(url).toContain('Omnipollo%20Trillium%20Kanelbullar');
