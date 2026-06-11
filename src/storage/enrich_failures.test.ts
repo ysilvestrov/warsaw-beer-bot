@@ -99,4 +99,12 @@ describe('enrich_failures', () => {
     expect(got.reviewed_at).toBeNull();
     expect(got.fail_count).toBe(2);
   });
+
+  test('the review_class CHECK constraint rejects an invalid class', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    expect(() =>
+      db.prepare('UPDATE enrich_failures SET review_class = ? WHERE beer_id = ?').run('bogus', id),
+    ).toThrow();
+  });
 });
