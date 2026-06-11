@@ -1,6 +1,8 @@
 import { pickAdapter } from '../sites/registry';
 import { runOverlay, type SendMatch, type EnrichOrphans } from './index';
 import { observeReRender, type ReRenderOptions } from './rerender';
+import { refreshCards } from './refresh';
+import { clearKeys } from '../cache/store';
 import { isSeen, setSearching, setEnriched, setOrphan } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { trimSearchHtml } from './untappd-trim';
@@ -80,4 +82,18 @@ export function startOverlay(
 }
 
 const adapter = pickAdapter(new URL(window.location.href));
-if (adapter) startOverlay(document, adapter, sendMatch, undefined, enrichOrphans);
+if (adapter) {
+  startOverlay(document, adapter, sendMatch, undefined, enrichOrphans);
+  // Popup → "Refresh this page": drop the visible cards' cache entries and re-run
+  // the overlay so badges reflect fresh server state without waiting out the TTL.
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if ((message as { type?: unknown }).type !== 'refresh-page') return undefined;
+    void (async () => {
+      const keys = refreshCards(document, adapter);
+      await clearKeys(keys);
+      await runOverlay(document, adapter, sendMatch, enrichOrphans);
+      sendResponse({ ok: true, cleared: keys.length });
+    })();
+    return true; // keep the message channel open for the async sendResponse
+  });
+}
