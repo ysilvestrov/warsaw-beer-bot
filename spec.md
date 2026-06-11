@@ -591,7 +591,7 @@ upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked
 `beer_id` — обов'язкове; `review_class` — один з: `parser_bug`, `matcher_bug`,
 `not_on_untappd`, `wontfix`; `note` — опційний рядок.
 
-**Відповіді:** `200 { ok: true }` — розмітка збережена; `400` — невалідний або
+**Відповіді:** `200 { status: "reviewed", beer_id, review_class }` — розмітка збережена; `400` — невалідний або
 відсутній `review_class`; `401` — токен невалідний або відсутній;
 `404` — `beer_id` не знайдено в `enrich_failures`; `503` — `ADMIN_API_TOKEN` не задано.
 

@@ -7,7 +7,7 @@ import { setEnrichFailureReview } from '../../storage/enrich_failures';
 const ReviewBody = z.object({
   beer_id: z.number().int().positive(),
   review_class: z.enum(['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix']),
-  note: z.string().optional(),
+  note: z.string().nullable().optional(), // accept explicit null (clear/no note) as well as omitted
 });
 
 // Admin maintenance routes. Assumes adminMiddleware has already authenticated.

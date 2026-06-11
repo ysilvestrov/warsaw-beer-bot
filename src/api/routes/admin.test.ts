@@ -43,6 +43,7 @@ describe('POST /admin/enrich-failures/review', () => {
     const { db, app, id } = setup();
     const res = await review(app, { beer_id: id, review_class: 'parser_bug', note: 'split wrong' });
     expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'reviewed', beer_id: id, review_class: 'parser_bug' });
     const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_class).toBe('parser_bug');
     expect(got.review_note).toBe('split wrong');
@@ -58,6 +59,14 @@ describe('POST /admin/enrich-failures/review', () => {
     const { app, id } = setup();
     const res = await review(app, { beer_id: id, review_class: 'nonsense' });
     expect(res.status).toBe(400);
+  });
+
+  it('accepts an explicit null note', async () => {
+    const { db, app, id } = setup();
+    const res = await review(app, { beer_id: id, review_class: 'wontfix', note: null });
+    expect(res.status).toBe(200);
+    const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_note).toBeNull();
   });
 
   it('401 with a bad admin token', async () => {
