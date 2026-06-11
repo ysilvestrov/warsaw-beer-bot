@@ -89,10 +89,15 @@ if (adapter) {
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if ((message as { type?: unknown }).type !== 'refresh-page') return undefined;
     void (async () => {
-      const keys = refreshCards(document, adapter);
-      await clearKeys(keys);
-      await runOverlay(document, adapter, sendMatch, enrichOrphans);
-      sendResponse({ ok: true, cleared: keys.length });
+      try {
+        const keys = refreshCards(document, adapter);
+        await clearKeys(keys);
+        await runOverlay(document, adapter, sendMatch, enrichOrphans);
+        sendResponse({ ok: true, cleared: keys.length });
+      } catch {
+        // Always answer so the popup never hangs on "Refreshing…".
+        sendResponse({ ok: false, cleared: 0 });
+      }
     })();
     return true; // keep the message channel open for the async sendResponse
   });
