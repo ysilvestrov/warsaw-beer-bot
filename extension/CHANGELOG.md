@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-06-11
+
+- Fixed Bierloods22 product parsing for breweries whose name contains " - " (e.g. "Kykao - Handcrafted") — those beers now match instead of showing as unmatched.
+- Fixed WineTime product titles that repeat the brewery name as a suffix.
+
 ## [0.5.1] - 2026-06-10
 
 - Fix: Untappd enrichment now runs on large shop pages — it searches a bounded number of beers per page instead of skipping the page entirely.
