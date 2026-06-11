@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-11
+
+- Added a toolbar popup to manage the cache: "Refresh this page" re-fetches badges for the beers on the current supported-shop tab (without waiting out the 8h TTL), and "Clear all cache" empties the whole cache.
 - Fixed BeerFreak parsing when product titles repeat a brewery suffix such as "Brewery", or when BeerFreak omits brand metadata for descriptor-led breweries like "Brouwerij ...".
 - Fixed BeerRepublic parsing so mixed beer packs, vertical sets, surprise boxes, and advent calendars are ignored instead of being matched as individual beers.
 
