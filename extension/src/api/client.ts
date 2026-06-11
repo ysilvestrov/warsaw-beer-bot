@@ -71,7 +71,7 @@ export async function postEnrichCandidates(
 export async function postEnrichResult(
   baseUrl: string,
   token: string,
-  payload: { brewery: string; name: string; html: string },
+  payload: { brewery: string; name: string; html: string; pageUrl?: string },
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<EnrichResult> {
   let res: Response;

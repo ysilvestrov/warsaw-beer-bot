@@ -36,7 +36,7 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
 
 export interface EnrichFetchMessage { type: 'enrich:fetch'; url: string }
 export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; html: string }
+export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; html: string; pageUrl?: string }
 
 const UNTAPPD_ORIGIN = 'https://untappd.com/*';
 
@@ -77,7 +77,7 @@ export async function handleEnrichResult(
   const { token, baseUrl, enrichEnabled } = await getSettings();
   if (!enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
   try {
-    const result = await postEnrichResult(baseUrl, token, { brewery: msg.brewery, name: msg.name, html: msg.html });
+    const result = await postEnrichResult(baseUrl, token, { brewery: msg.brewery, name: msg.name, html: msg.html, pageUrl: msg.pageUrl });
     return { type: 'enrich:result:ok', result };
   } catch {
     return { type: 'enrich:result:ok', result: null };
