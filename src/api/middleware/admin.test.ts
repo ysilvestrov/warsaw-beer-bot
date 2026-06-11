@@ -17,6 +17,10 @@ describe('adminMiddleware', () => {
     const res = await appWith(undefined).request('/admin/ping');
     expect(res.status).toBe(503);
   });
+  it('503 when ADMIN_API_TOKEN is an empty string', async () => {
+    const res = await appWith('').request('/admin/ping');
+    expect(res.status).toBe(503);
+  });
   it('401 with no/!bearer header', async () => {
     const res = await appWith('secret').request('/admin/ping');
     expect(res.status).toBe(401);
