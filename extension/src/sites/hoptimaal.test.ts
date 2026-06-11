@@ -26,6 +26,7 @@ describe('hoptimaal adapter', () => {
     const cards = parseFixture();
     expect(cards.length).toBeGreaterThan(40);
     expect(cards.every((c) => c.brewery.length > 0)).toBe(true);
+    expect(cards.every((c) => c.name.length > 0)).toBe(true);
     expect(cards).toContainEqual(expect.objectContaining({
       brewery: 'PINTA Barrel Brewing',
       name: 'Patience 5th Anniversary (2026)',

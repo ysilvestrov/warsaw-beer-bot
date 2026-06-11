@@ -26,6 +26,11 @@ function cleanBeerName(raw: string): string {
   return raw.replace(/^\s*[-–—:]\s*/, '').trim();
 }
 
+function splitResult(brewery: string, rawName: string, fallbackName: string): { brewery: string; name: string } {
+  const name = cleanBeerName(rawName);
+  return { brewery, name: name || fallbackName };
+}
+
 function productUrl(el: HTMLElement, titleLink: Element | null): string {
   return el.getAttribute('data-url') ?? titleLink?.getAttribute('href') ?? '';
 }
@@ -49,7 +54,7 @@ function splitByVendor(title: string, vendors: string[]): { brewery: string; nam
     const normalizedVendor = normalize(vendor);
     if (normalizedTitle === normalizedVendor) return null;
     if (normalizedTitle.startsWith(`${normalizedVendor} `)) {
-      return { brewery: vendor, name: cleanBeerName(title.slice(vendor.length)) };
+      return splitResult(vendor, title.slice(vendor.length), title);
     }
   }
   return null;
@@ -58,13 +63,13 @@ function splitByVendor(title: string, vendors: string[]): { brewery: string; nam
 function splitByDescriptor(title: string): { brewery: string; name: string } {
   const leading = title.match(LEADING_BREWERY_DESCRIPTOR_RE);
   if (leading && leading[0].length < title.length) {
-    return { brewery: leading[0], name: cleanBeerName(title.slice(leading[0].length)) };
+    return splitResult(leading[0], title.slice(leading[0].length), title);
   }
 
   const suffix = title.match(BREWERY_SUFFIX_RE);
   if (suffix && suffix.index != null) {
     const end = suffix.index + suffix[0].length;
-    if (end < title.length) return { brewery: title.slice(0, end).trim(), name: cleanBeerName(title.slice(end)) };
+    if (end < title.length) return splitResult(title.slice(0, end).trim(), title.slice(end), title);
   }
 
   const tokens = title.split(/\s+/).filter(Boolean);
@@ -72,7 +77,7 @@ function splitByDescriptor(title: string): { brewery: string; name: string } {
   if (tokens.length > prefixSize) {
     return {
       brewery: tokens.slice(0, prefixSize).join(' '),
-      name: cleanBeerName(tokens.slice(prefixSize).join(' ')),
+      name: cleanBeerName(tokens.slice(prefixSize).join(' ')) || title,
     };
   }
 
@@ -99,7 +104,6 @@ export const hoptimaal: SiteAdapter = {
       if (!title) continue;
 
       const parsed = splitTitle(title, vendors);
-      if (!parsed.name) continue;
 
       const abv = parseAbv(text(el.querySelector('.product-item__subtitle')));
       cards.push({ el, brewery: parsed.brewery, name: parsed.name, ...(abv == null ? {} : { abv }) });
