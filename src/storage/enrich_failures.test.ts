@@ -65,4 +65,12 @@ describe('enrich_failures', () => {
     const got = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.source_url).toBe('https://beerfreak.org/p/x');
   });
+
+  test('upsert overwrites with a newer non-empty source_url (most-recent page wins)', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, source_url: 'https://beerfreak.org/p/old' }));
+    recordEnrichFailure(db, row({ beer_id: id, source_url: 'https://beerfreak.org/p/new' }));
+    const got = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.source_url).toBe('https://beerfreak.org/p/new');
+  });
 });

@@ -205,5 +205,6 @@ describe('schema migrations', () => {
     const col = cols.find((c) => c.name === 'source_url');
     expect(col).toBeDefined();
     expect(col!.notnull).toBe(1);
+    expect(col!.dflt_value).toBe("''"); // backfills existing rows on the additive migration
   });
 });
