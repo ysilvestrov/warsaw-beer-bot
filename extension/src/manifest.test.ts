@@ -9,6 +9,8 @@ const manifest = manifestExport as {
   version: string;
   key: string;
   content_scripts: Array<{ matches: string[] }>;
+  permissions: string[];
+  action?: { default_popup?: string };
 };
 
 describe('manifest', () => {
@@ -32,5 +34,14 @@ describe('manifest', () => {
     expect(contentScript.matches).toContain('https://*.bierloods22.nl/*');
     expect(contentScript.matches).toContain('https://winetime.com.ua/*');
     expect(contentScript.matches).toContain('https://*.winetime.com.ua/*');
+  });
+
+  it('exposes a popup action', () => {
+    expect(manifest.action?.default_popup).toBe('src/popup/popup.html');
+  });
+
+  it('requests activeTab + tabs permissions for the popup', () => {
+    expect(manifest.permissions).toContain('activeTab');
+    expect(manifest.permissions).toContain('tabs');
   });
 });
