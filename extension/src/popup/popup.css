@@ -1,0 +1,7 @@
+body { margin: 0; font: 14px/1.4 system-ui, sans-serif; }
+.card { min-width: 240px; padding: 12px; }
+h1 { font-size: 15px; margin: 0 0 8px; }
+.row { display: flex; flex-direction: column; gap: 8px; }
+button { padding: 8px; cursor: pointer; }
+button:disabled { cursor: default; opacity: 0.5; }
+.status { margin: 10px 0 0; color: #444; min-height: 1.2em; }
