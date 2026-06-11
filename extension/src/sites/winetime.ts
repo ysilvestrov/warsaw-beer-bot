@@ -88,6 +88,19 @@ function stripPrefix(value: string, prefix: string): string {
   return trimmed;
 }
 
+function stripSuffix(value: string, suffix: string): string {
+  const trimmed = value.trim();
+  const normalizedSuffix = suffix.trim();
+  if (!normalizedSuffix) return trimmed;
+  const lower = trimmed.toLocaleLowerCase('uk-UA');
+  const suffixLower = normalizedSuffix.toLocaleLowerCase('uk-UA');
+  if (lower === suffixLower || lower.endsWith(` ${suffixLower}`)) {
+    const next = trimmed.slice(0, -normalizedSuffix.length).trim();
+    if (next) return next;
+  }
+  return trimmed;
+}
+
 function breweryPrefixes(brewery: string): string[] {
   const base = brewery.trim();
   const withoutBrewerySuffix = base.replace(/\s+(?:brewery|броварня)$/iu, '').trim();
@@ -104,6 +117,9 @@ function cleanName(rawTitle: string, brewery: string): string {
 
   let cleaned = name.replace(/\s+(?:\d+(?:[,.]\d+)?\s*(?:л|l|ml|мл))$/iu, '').trim();
   while (DESCRIPTOR_RE.test(cleaned)) cleaned = cleaned.replace(DESCRIPTOR_RE, '').trim();
+  for (const suffix of breweryPrefixes(brewery)) {
+    cleaned = stripSuffix(cleaned, suffix);
+  }
 
   return cleaned || name || original;
 }
