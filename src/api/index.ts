@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
+import type { Server as HttpServer } from 'node:http';
 import type pino from 'pino';
 import type { Env } from '../config/env';
 import type { ApiDeps, ApiEnv } from './types';
@@ -38,8 +39,18 @@ export function createApiServer(
   env: Env,
   log: pino.Logger,
 ): ServerType {
-  return serve(
+  const server = serve(
     { fetch: app.fetch, hostname: '127.0.0.1', port: env.API_PORT },
     (info) => log.info({ port: info.port }, 'api listening'),
   );
+  // The Cloudflare tunnel (cloudflared) pools keep-alive connections to this
+  // origin (~90s idle). Node's default keepAliveTimeout (5s) would close an idle
+  // socket out from under cloudflared, racing a concurrent write → "use of closed
+  // network connection" → Cloudflare 502 (issue #124). Outlast the proxy so it
+  // always closes idle connections first; headersTimeout must exceed keepAliveTimeout.
+  // serve() is invoked without an http2 option, so this is always a node:http server.
+  const http = server as HttpServer;
+  http.keepAliveTimeout = 120_000;
+  http.headersTimeout = 125_000;
+  return server;
 }

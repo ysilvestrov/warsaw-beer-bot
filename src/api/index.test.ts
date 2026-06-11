@@ -3,7 +3,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { ensureProfile } from '../storage/user_profiles';
 import { rotateToken, hashToken } from '../storage/api_tokens';
-import { createApiApp } from './index';
+import { createApiApp, createApiServer } from './index';
 
 function deps() {
   const db = openDb(':memory:');
@@ -35,5 +35,23 @@ describe('createApiApp', () => {
     const app = createApiApp(deps());
     const res = await app.request('/health', { headers: { Origin: 'https://shop.example' } });
     expect(res.headers.get('access-control-allow-origin')).toBe('*');
+  });
+});
+
+describe('createApiServer', () => {
+  it('tunes keep-alive to outlast the cloudflared proxy (avoids 502 socket races)', async () => {
+    // Node's default keepAliveTimeout (5s) closes idle keep-alive sockets that
+    // cloudflared still holds in its pool, racing a concurrent write → Cloudflare 502
+    // (issue #124). Make the origin outlast the proxy so the proxy closes first;
+    // headersTimeout must exceed keepAliveTimeout.
+    const app = createApiApp(deps());
+    const server = createApiServer(app, { API_PORT: 0 } as never, pino({ level: 'silent' })) as import('node:http').Server;
+    try {
+      expect(server.keepAliveTimeout).toBe(120_000);
+      expect(server.headersTimeout).toBe(125_000);
+      expect(server.headersTimeout).toBeGreaterThan(server.keepAliveTimeout);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 });
