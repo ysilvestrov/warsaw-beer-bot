@@ -30,5 +30,6 @@ describe('refreshCards', () => {
     expect(a.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
     expect(isSeen(a)).toBe(false);
     expect(isSeen(b)).toBe(false);
+    expect(b.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
   });
 });

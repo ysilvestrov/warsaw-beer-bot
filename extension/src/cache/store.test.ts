@@ -47,4 +47,12 @@ describe('cache/store', () => {
     expect(await getCached('a|x')).toBeNull();
     expect(await getCached('b|y')).toBeNull();
   });
+
+  it('clearAll leaves non-cache (non-mc2:) storage untouched', async () => {
+    await chrome.storage.local.set({ token: 'keep-me' });
+    await setCached('a|x', sample);
+    await clearAll();
+    expect(await getCached('a|x')).toBeNull();
+    expect((await chrome.storage.local.get('token')).token).toBe('keep-me');
+  });
 });
