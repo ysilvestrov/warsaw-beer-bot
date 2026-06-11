@@ -27,7 +27,7 @@ export function applyLookupOutcome(
   beerId: number,
   outcome: LookupOutcome,
   nowIso: string,
-  input: { brewery: string; name: string },
+  input: { brewery: string; name: string; sourceUrl?: string },
 ): EnrichOutcomeKind {
   switch (outcome.kind) {
     case 'matched':
@@ -57,6 +57,7 @@ export function applyLookupOutcome(
         brewery: input.brewery,
         name: input.name,
         search_url: outcome.searchUrls[0] ?? '',
+        source_url: input.sourceUrl ?? '',
         outcome: 'not_found',
         candidates_count: outcome.candidates.length,
         candidates_summary: summarizeCandidates(outcome.candidates),
@@ -74,6 +75,7 @@ export function applyLookupOutcome(
         brewery: input.brewery,
         name: input.name,
         search_url: outcome.searchUrl,
+        source_url: input.sourceUrl ?? '',
         outcome: 'blocked',
         candidates_count: 0,
         candidates_summary: '',

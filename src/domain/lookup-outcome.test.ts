@@ -62,4 +62,19 @@ describe('applyLookupOutcome failure logging', () => {
       { kind: 'transient', error: new Error('x') }, '2026-06-11T00:00:00Z', input);
     expect(failRow(db, id)).toBeUndefined();
   });
+
+  test('not_found persists the supplied sourceUrl', () => {
+    const { db, id, log } = fresh();
+    const outcome: LookupOutcome = { kind: 'not_found', searchUrls: ['u'], candidates: [] };
+    applyLookupOutcome({ db, log }, id, outcome, '2026-06-11T00:00:00Z',
+      { ...input, sourceUrl: 'https://beerfreak.org/p/x' });
+    expect(failRow(db, id).source_url).toBe('https://beerfreak.org/p/x');
+  });
+
+  test('omitting sourceUrl stores empty string', () => {
+    const { db, id, log } = fresh();
+    const outcome: LookupOutcome = { kind: 'blocked', searchUrl: 'u' };
+    applyLookupOutcome({ db, log }, id, outcome, '2026-06-11T00:00:00Z', input);
+    expect(failRow(db, id).source_url).toBe('');
+  });
 });
