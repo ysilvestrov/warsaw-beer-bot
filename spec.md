@@ -783,7 +783,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   ` - `), домен `bierloods22.nl`), `winetime` (WineTime SSR — `a.product-micro`,
   brewery/name з `window.initialData.category.products` metadata keyed by
   `data-productkey`, fallback на видимий title/brewery, ABV опускається,
-  домен `winetime.com.ua`). `registry.pickAdapter(url)`.
+  домен `winetime.com.ua`), `hoptimaal` (Hoptimaal Shopify SSR — `.product-item`,
+  назва з `.product-item__product-title`, brewery з vendor-фільтрів або агресивного
+  title-prefix fallback, ABV із subtitle; Beer Club/Merch/Spirits/Bundles виключаються),
+  домен `hoptimaal.com`). `registry.pickAdapter(url)`.
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати
   адаптер: `docs/adapter-authoring.md`.
