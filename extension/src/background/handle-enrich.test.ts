@@ -75,4 +75,17 @@ describe('handleEnrichResult', () => {
     const out = await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', html: '<x>' });
     expect(out.result).toMatchObject({ status: 'matched', untappd_id: 5001 });
   });
+
+  it('forwards pageUrl in the request body', async () => {
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await handleEnrichResult({
+      type: 'enrich:result', brewery: 'B', name: 'N', html: '<x>', pageUrl: 'https://beerfreak.org/p/x',
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    expect(body.pageUrl).toBe('https://beerfreak.org/p/x');
+  });
 });

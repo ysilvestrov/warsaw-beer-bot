@@ -24,6 +24,7 @@ const ResultBody = z.object({
   brewery: z.string(),
   name: z.string(),
   html: z.string(),
+  pageUrl: z.string().optional(),
 });
 
 // Ensures a beer row exists for (brewery, name) and returns it.
@@ -62,7 +63,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   });
 
   app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
-    const { brewery, name, html } = c.req.valid('json');
+    const { brewery, name, html, pageUrl } = c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name);
     // Only orphans are enrichable. Never overwrite / merge a canonical (already
     // matched) row from client-relayed input.
@@ -73,7 +74,8 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // injected fetch just returns the relayed HTML regardless of URL.
     const outcome = await lookupBeer({ brewery, name, abv: row.abv, fetch: async () => html });
     const nowIso = new Date().toISOString();
-    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name });
+    // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
+    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
     if (kind === 'matched' && outcome.kind === 'matched') {
       return c.json({ status: 'matched', untappd_id: outcome.result.bid, rating_global: outcome.result.global_rating });
     }

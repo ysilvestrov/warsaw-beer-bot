@@ -41,7 +41,7 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
         (await sendBg<{ html: string | null }>({ type: 'enrich:fetch', url }))?.html ?? null,
       trim: trimSearchHtml,
       submitResult: async (brewery, name, html) =>
-        (await sendBg<{ result: EnrichResult | null }>({ type: 'enrich:result', brewery, name, html }))?.result ??
+        (await sendBg<{ result: EnrichResult | null }>({ type: 'enrich:result', brewery, name, html, pageUrl: window.location.href }))?.result ??
         { status: 'transient' },
       setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },
       setEnriched: (key, id, r) => { const el = elByKey.get(key); if (el) setEnriched(el, id, r); },

@@ -5,6 +5,7 @@ export interface EnrichFailureRow {
   brewery: string;
   name: string;
   search_url: string;
+  source_url: string;
   outcome: 'not_found' | 'blocked';
   candidates_count: number;
   candidates_summary: string;
@@ -17,19 +18,21 @@ export interface EnrichFailureRow {
 export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   db.prepare(
     `INSERT INTO enrich_failures
-       (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+       (beer_id, brewery, name, search_url, source_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
      ON CONFLICT(beer_id) DO UPDATE SET
        brewery            = excluded.brewery,
        name               = excluded.name,
        search_url         = excluded.search_url,
+       source_url         = CASE WHEN excluded.source_url != '' THEN excluded.source_url
+                                 ELSE enrich_failures.source_url END,
        outcome            = excluded.outcome,
        candidates_count   = excluded.candidates_count,
        candidates_summary = excluded.candidates_summary,
        fail_count         = enrich_failures.fail_count + 1,
        last_at            = excluded.last_at`,
   ).run(
-    r.beer_id, r.brewery, r.name, r.search_url, r.outcome,
+    r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
     r.candidates_count, r.candidates_summary, r.at,
   );
 }

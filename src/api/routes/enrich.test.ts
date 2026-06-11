@@ -156,6 +156,22 @@ describe('POST /enrich/result', () => {
     expect(getBeer(db, row.id)!.untappd_lookup_count).toBe(1);
   });
 
+  it('stores the supplied pageUrl as the failure source_url', async () => {
+    const { db, app } = setup();
+    const html = searchHtml([{ bid: 9000, name: 'Totally Different', brewery: 'Other Brewery' }]);
+    await post(app, '/enrich/result', {
+      brewery: 'Magic Road Brewery',
+      name: 'Fifty/Fifty Clementine & Passionfruit',
+      html,
+      pageUrl: 'https://beerfreak.org/p/abc',
+    });
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('Magic Road Brewery'), normalizeName('Fifty/Fifty Clementine & Passionfruit'),
+    )!;
+    const fail = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.source_url).toBe('https://beerfreak.org/p/abc');
+  });
+
   it('reports blocked without mutating backoff when Untappd serves a block page', async () => {
     const { db, app } = setup();
     // Cloudflare "Just a moment..." interstitial — isBlockPage flags this.

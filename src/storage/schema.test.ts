@@ -193,4 +193,18 @@ describe('schema migrations', () => {
     );
     expect(cols.find((c) => c.name === 'beer_id')?.pk).toBe(1);
   });
+
+  test('enrich_failures has a source_url column defaulting to empty string', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db.prepare(`PRAGMA table_info(enrich_failures)`).all() as Array<{
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }>;
+    const col = cols.find((c) => c.name === 'source_url');
+    expect(col).toBeDefined();
+    expect(col!.notnull).toBe(1);
+    expect(col!.dflt_value).toBe("''"); // backfills existing rows on the additive migration
+  });
 });
