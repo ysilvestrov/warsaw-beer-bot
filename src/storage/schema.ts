@@ -183,6 +183,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN source_url TEXT NOT NULL DEFAULT '';
     `,
   },
+  {
+    version: 12,
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN review_class TEXT
+        CHECK (review_class IN ('parser_bug','matcher_bug','not_on_untappd','wontfix'));
+      ALTER TABLE enrich_failures ADD COLUMN review_note TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN reviewed_at TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
