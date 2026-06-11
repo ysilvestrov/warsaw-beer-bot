@@ -4,6 +4,7 @@
 
 - Fixed BeerFreak parsing when product titles repeat a brewery suffix such as "Brewery", or when BeerFreak omits brand metadata for descriptor-led breweries like "Brouwerij ...".
 - Fixed BeerRepublic parsing so mixed beer packs, vertical sets, surprise boxes, and advent calendars are ignored instead of being matched as individual beers.
+- Fixed Bierloods22 parsing so beer-package products such as Beerbox, Surprise Box, and subscription boxes are ignored instead of being matched as beers.
 
 ## [0.5.2] - 2026-06-11
 

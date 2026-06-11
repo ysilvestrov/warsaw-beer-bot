@@ -1,9 +1,14 @@
 import type { Card, SiteAdapter } from './types';
 
 const CARD_SELECTOR = '.product-block';
+const PACKAGE_TITLE_RE = /^(?:beerbox\s*(?:-|:|$)|beertasting box\b|beer package\b|beerpackage\b|subscription\b|abonnement\b)|\b(?:surprise box|signature box|craftbeer box|benefit package|support your locals)\b/i;
 
 function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function isPackageTitle(title: string): boolean {
+  return PACKAGE_TITLE_RE.test(title.replace(/\s+/g, ' ').trim());
 }
 
 // bierloods22 cards expose the visible title (a.title text) as "{brewery} - {beer}" and
@@ -41,7 +46,11 @@ export const bierloods22: SiteAdapter = {
     const cards: Card[] = [];
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
       const a = el.querySelector('a.title');
-      const parsed = splitTitle(text(a), a?.getAttribute('title') ?? '');
+      const titleText = text(a);
+      const titleAttr = a?.getAttribute('title') ?? '';
+      if (isPackageTitle(titleText) || isPackageTitle(titleAttr)) continue;
+
+      const parsed = splitTitle(titleText, titleAttr);
       if (!parsed) continue;
       cards.push({ el, brewery: parsed.brewery, name: parsed.name });
     }
