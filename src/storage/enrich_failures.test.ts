@@ -16,7 +16,7 @@ function freshDbWithBeer() {
 
 const row = (over: Partial<EnrichFailureRow> & { beer_id: number }): EnrichFailureRow => ({
   brewery: 'Track', name: 'Taking Shape', search_url: 'https://untappd.com/search?q=Track+Taking+Shape&type=beer',
-  outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: '2026-06-11T00:00:00Z', ...over,
+  source_url: '', outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: '2026-06-11T00:00:00Z', ...over,
 });
 
 describe('enrich_failures', () => {
@@ -49,5 +49,20 @@ describe('enrich_failures', () => {
     recordEnrichFailure(db, row({ beer_id: id }));
     db.prepare('DELETE FROM beers WHERE id = ?').run(id);
     expect(db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id)).toBeUndefined();
+  });
+
+  test('record stores source_url', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, source_url: 'https://beerfreak.org/p/x' }));
+    const got = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.source_url).toBe('https://beerfreak.org/p/x');
+  });
+
+  test('upsert does not overwrite a known source_url with an empty one', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, source_url: 'https://beerfreak.org/p/x' }));
+    recordEnrichFailure(db, row({ beer_id: id, source_url: '' })); // cron re-fail, no URL
+    const got = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.source_url).toBe('https://beerfreak.org/p/x');
   });
 });
