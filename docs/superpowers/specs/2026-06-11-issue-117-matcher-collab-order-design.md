@@ -28,7 +28,7 @@
 | Staropolski `KULTOWE PILS` | `Kultowy Browar Staropolski` / `Kultowe Pils` | **brewery gate**: реальна пивоварня — `Kultowy Browar Staropolski`, ярлик магазину `Staropolski` — це **хвостовий** токен, а hard-gate матчить лише провідний префікс |
 
 **Out of scope цього дизайну:** Staropolski (потребує окремого, ризикованого
-послаблення brewery hard-gate — окремий issue).
+послаблення brewery hard-gate — окремий issue **#120**).
 
 ## 2. Goals / Non-goals
 
@@ -149,7 +149,7 @@ name    = segs.slice(n).join(" - ").trim()         // "Mediterranean Cedrus DIPA
   split, brewery-dedup) і collab-aware побудову запиту.
 - §6 bierloods22-адаптер: brand-prefix екстракція пивоварні (замість split по першому ` - `).
 - Appendix gotchas: `collab` у `BREWERY_NOISE`; name-keys як концепт матчингу; bierloods22
-  brand-префікс; нагадування, що Staropolski (хвостовий brewery-токен) — окремий issue.
+  brand-префікс; нагадування, що Staropolski (хвостовий brewery-токен) — окремий issue #120.
 
 ## 6. Rollout
 
