@@ -1,5 +1,5 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP } from './matcher';
+import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects } from './matcher';
 import { normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
@@ -63,7 +63,22 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     );
     if (breweryPassed.length === 0) continue;
 
-    // Stage 2: name fuzzy >= 0.85.
+    // Stage 2a: name-keys exact intersection (order-insensitive, collab/bilingual aware).
+    const inputKeys = nameKeys(name, brewery);
+    const keyHits = breweryPassed.filter((r) =>
+      intersects(nameKeys(r.beer_name, r.brewery_name), inputKeys),
+    );
+    if (keyHits.length > 0) {
+      if (abv != null) {
+        const abvHit = keyHits.find(
+          (r) => r.abv != null && Math.abs(r.abv - abv) <= ABV_TOLERANCE,
+        );
+        if (abvHit) return { kind: 'matched', result: abvHit };
+      }
+      return { kind: 'matched', result: keyHits[0] };
+    }
+
+    // Stage 2b: name fuzzy >= 0.85.
     const searcher = new Searcher(breweryPassed, {
       keySelector: (r) => normalizeName(r.beer_name),
       threshold: NAME_FUZZY_THRESHOLD,
