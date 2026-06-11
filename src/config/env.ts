@@ -15,6 +15,7 @@ const Schema = z.object({
     .transform((v) => v === 'true'),
   UNTAPPD_SESSION_COOKIE: z.string().optional(),
   ADMIN_TELEGRAM_ID: z.string().optional(),
+  ADMIN_API_TOKEN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof Schema>;

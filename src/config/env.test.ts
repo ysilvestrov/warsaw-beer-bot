@@ -36,4 +36,14 @@ describe('loadEnv', () => {
     const env = loadEnv({ ...baseEnv, UNTAPPD_LOOKUP_ENABLED: 'true' });
     expect(env.UNTAPPD_LOOKUP_ENABLED).toBe(true);
   });
+
+  it('ADMIN_API_TOKEN passes through when set', () => {
+    const env = loadEnv({ ...baseEnv, ADMIN_API_TOKEN: 'secret-token' });
+    expect(env.ADMIN_API_TOKEN).toBe('secret-token');
+  });
+
+  it('ADMIN_API_TOKEN is undefined when absent', () => {
+    const env = loadEnv(baseEnv);
+    expect(env.ADMIN_API_TOKEN).toBeUndefined();
+  });
 });
