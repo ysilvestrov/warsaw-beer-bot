@@ -347,6 +347,7 @@ upsert'ить рядок на `not_found`/`blocked` і **видаляє** йог
 відтворюваний без кукі, тож `search_url` достатньо для дебагу. Запит:
 `SELECT … FROM enrich_failures ORDER BY last_at DESC` — «0 кандидатів» = зашумлений запит;
 «N, але not_found» = brewery-gate / name-fuzzy відсік (видно по `candidates_summary`).
+Покроковий дебаг-ранбук: `docs/debug-orphan-matching.md`.
 
 ### 3.14 `schema_version` — версія міграцій
 Єдине поле `version INTEGER PRIMARY KEY`; по рядку на застосовану міграцію.
