@@ -80,7 +80,6 @@ export function prepareCatalog(
   return makePreparedCatalog(catalog.map(prepareBeer), build);
 }
 
-
 // Extracts the first 4-digit calendar year (1900–2099) from a raw beer name.
 // Called on the un-normalized name because normalizeName strips digit tokens.
 export function extractYear(name: string): number | null {
