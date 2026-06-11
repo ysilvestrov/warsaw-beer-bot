@@ -13,9 +13,9 @@ const NAME_FUZZY_THRESHOLD = 0.85;
 
 export type LookupOutcome =
   | { kind: 'matched'; result: SearchResult }
-  | { kind: 'not_found' }
+  | { kind: 'not_found'; searchUrls: string[]; candidates: SearchResult[] }
   | { kind: 'transient'; error: unknown }
-  | { kind: 'blocked' };
+  | { kind: 'blocked'; searchUrl: string };
 
 export interface LookupArgs {
   brewery: string;
@@ -40,21 +40,27 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   const inputBreweryAliases = breweryAliases(brewery);
   const targetName = normalizeName(name);
   const parts = brewerySearchParts(brewery);
+  const triedUrls: string[] = [];
+  const seenCandidates: SearchResult[] = [];
 
   for (const part of parts) {
+    const url = buildSearchUrl(`${stripBreweryNoise(part)} ${name}`.trim());
+    triedUrls.push(url);
+
     let html: string;
     try {
-      html = await fetch(buildSearchUrl(`${stripBreweryNoise(part)} ${name}`.trim()));
+      html = await fetch(url);
     } catch (error) {
       if (error instanceof HttpError && isBlockStatus(error.status)) {
-        return { kind: 'blocked' };
+        return { kind: 'blocked', searchUrl: url };
       }
       return { kind: 'transient', error };
     }
 
-    if (isBlockPage(html)) return { kind: 'blocked' };
+    if (isBlockPage(html)) return { kind: 'blocked', searchUrl: url };
 
     const results = parseSearchPage(html);
+    seenCandidates.push(...results);
     if (results.length === 0) continue;
 
     // Stage 1: brewery hard-gate — token-boundary prefix overlap.
@@ -105,5 +111,5 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     return { kind: 'matched', result: matches[0].item };
   }
 
-  return { kind: 'not_found' };
+  return { kind: 'not_found', searchUrls: triedUrls, candidates: seenCandidates };
 }

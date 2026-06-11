@@ -223,6 +223,36 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('blocked');
   });
 
+  describe('diagnostics (orphan logging)', () => {
+    test('not_found returns the tried search URL(s) and parsed candidates', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 1, name: 'Atak Chmielu', brewery: 'Magic Road' }]),
+      );
+      const out = await lookupBeer({ brewery: 'Magic Road', name: 'Totally Different Beer', fetch });
+      expect(out.kind).toBe('not_found');
+      if (out.kind !== 'not_found') return;
+      expect(out.searchUrls[0]).toContain('Magic%20Road');
+      expect(out.candidates.map((c) => c.beer_name)).toContain('Atak Chmielu');
+    });
+
+    test('not_found with zero results returns empty candidates', async () => {
+      const fetch = jest.fn(async () => '<html><body></body></html>');
+      const out = await lookupBeer({ brewery: 'Magic Road', name: 'Whatever', fetch });
+      expect(out.kind).toBe('not_found');
+      if (out.kind !== 'not_found') return;
+      expect(out.candidates).toEqual([]);
+      expect(out.searchUrls.length).toBeGreaterThan(0);
+    });
+
+    test('blocked returns the search URL that tripped the block', async () => {
+      const fetch = jest.fn(async () => '<title>Just a moment...</title>');
+      const out = await lookupBeer({ brewery: 'Magic Road', name: 'X', fetch });
+      expect(out.kind).toBe('blocked');
+      if (out.kind !== 'blocked') return;
+      expect(out.searchUrl).toContain('Magic%20Road');
+    });
+  });
+
   describe('name-keys stage (#117)', () => {
     test('matched: reordered name (below fuzzy 0.85) via key intersection', async () => {
       const fetch = jest.fn(async () =>
