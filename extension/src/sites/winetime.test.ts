@@ -74,6 +74,36 @@ describe('winetime adapter', () => {
     );
   });
 
+  it('removes a repeated trailing brewery from embedded product titles', () => {
+    const doc = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="119"></span>
+          <div class="product-micro--title">Пиво Varvar Blanche de Blanche Varvar світле фільтроване 0,33 л</div>
+          <div class="j-grow-1-xs j-size-0.75-xs">Varvar</div>
+        </a>
+        <script>
+          window.initialData = {};
+          window.initialData.category = {
+            "products": [{
+              "id": 119,
+              "title": "Пиво Varvar Blanche de Blanche Varvar світле фільтроване 0,33 л",
+              "manufacturer": { "title": "Varvar" }
+            }]
+          };
+        </script>
+      `,
+      'text/html',
+    );
+
+    expect(winetime.parseCards(doc)).toContainEqual(
+      expect.objectContaining({
+        brewery: 'Varvar',
+        name: 'Blanche de Blanche',
+      }),
+    );
+  });
+
   it('falls back to visible DOM text when embedded product metadata is unavailable', () => {
     const doc = new DOMParser().parseFromString(withoutInitialData(html), 'text/html');
     const parsed = winetime.parseCards(doc);
