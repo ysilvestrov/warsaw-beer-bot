@@ -94,8 +94,9 @@ if (adapter) {
         await clearKeys(keys);
         await runOverlay(document, adapter, sendMatch, enrichOrphans);
         sendResponse({ ok: true, cleared: keys.length });
-      } catch {
+      } catch (err) {
         // Always answer so the popup never hangs on "Refreshing…".
+        console.warn('[beer-overlay] refresh-page failed', err);
         sendResponse({ ok: false, cleared: 0 });
       }
     })();
