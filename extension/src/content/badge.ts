@@ -13,6 +13,12 @@ export function isSeen(el: HTMLElement): boolean {
   return el.hasAttribute(SEEN_MARKER);
 }
 
+/** Undo the overlay's marks on a card so the next run re-processes it from scratch. */
+export function resetCard(el: HTMLElement): void {
+  el.querySelector(`[${BADGE_MARKER}]`)?.remove();
+  el.removeAttribute(SEEN_MARKER);
+}
+
 function untappdUrl(untappdId: number): string {
   return `https://untappd.com/beer/${untappdId}`;
 }

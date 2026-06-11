@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER } from './badge';
+import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER, resetCard } from './badge';
 import { setSearching, setEnriched, setOrphan } from './badge';
 import type { MatchResult } from '../api/types';
 
@@ -137,5 +137,19 @@ describe('seen marker', () => {
     markSeen(host);
     expect(host.hasAttribute(SEEN_MARKER)).toBe(true);
     expect(isSeen(host)).toBe(true);
+  });
+});
+
+describe('resetCard', () => {
+  it('resetCard removes the badge and the seen marker', () => {
+    const host = document.createElement('div');
+    renderBadge(host, { is_drunk: true, user_rating: 4, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
+    markSeen(host);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
+    expect(isSeen(host)).toBe(true);
+
+    resetCard(host);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(isSeen(host)).toBe(false);
   });
 });
