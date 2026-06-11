@@ -341,6 +341,9 @@ src/
 | `fail_count` | INTEGER | NOT NULL DEFAULT 1 | скільки разів провалився (++ на upsert) |
 | `last_at` | TEXT | NOT NULL | час останнього провалу (ISO) |
 | `source_url` | TEXT | NOT NULL DEFAULT '' | URL сторінки магазину, з якої прийшла ця пара brewery/name; заповнюється лише client-relay (`/enrich/result` з `pageUrl`); серверний крон пише `''` (URL невідомий) |
+| `review_class` | TEXT | nullable CHECK IN (`parser_bug`,`matcher_bug`,`not_on_untappd`,`wontfix`) | клас тріажу після ручного розгляду; `NULL` = ще не розмічено; `parser_bug` — адаптер прочитав назву/пивоварню криво; `matcher_bug` — gate/fuzzy відсік валідного кандидата; `not_on_untappd` — відсутнє на Untappd; `wontfix` — навмисно без матчингу |
+| `review_note` | TEXT | nullable | довільна нотатка тріажу (агент або адмін) |
+| `reviewed_at` | TEXT | nullable | час розмітки (ISO); виставляється ендпоінтом `POST /admin/enrich-failures/review` |
 
 **Хто що пише:** `applyLookupOutcome` (спільний для серверного крона і client-relay)
 upsert'ить рядок на `not_found`/`blocked` і **видаляє** його на `matched`. Один рядок на
@@ -349,8 +352,10 @@ upsert'ить рядок на `not_found`/`blocked` і **видаляє** йог
 сторінки магазину) дозволяє відкрити першоджерело і перевірити, чи parser-баг
 (адаптер прочитав назву/пивоварню криво) чи matcher-баг; заповнюється лише
 client-relay (`/enrich/result`), серверний крон пише `''`. Запит:
-`SELECT … FROM enrich_failures ORDER BY last_at DESC` — «0 кандидатів» = зашумлений запит;
+`SELECT … FROM enrich_failures WHERE review_class IS NULL ORDER BY last_at DESC` — «0 кандидатів» = зашумлений запит;
 «N, але not_found» = brewery-gate / name-fuzzy відсік (видно по `candidates_summary`).
+**Важливо:** повторний провал того самого пива (`recordEnrichFailure`) скидає
+`review_class`/`review_note`/`reviewed_at` до `NULL` — рядок знову з'являється в тріажі.
 Покроковий дебаг-ранбук: `docs/debug-orphan-matching.md`.
 
 ### 3.14 `schema_version` — версія міграцій
@@ -572,6 +577,27 @@ upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked
 відтворення/прикладання HTML до ішьюзу (бо Untappd-пошук відтворюється без кукі — досить
 `search_url`). Backoff це НЕ зачіпає: `blocked` пише лише debug-рядок, не `untappd_lookup_*`.
 
+#### `POST /admin/enrich-failures/review` — тріажна розмітка провалу
+
+Авторизація: `Authorization: Bearer <ADMIN_API_TOKEN>` — окремий адмін-токен на
+маршрутах `/admin/*` (не per-user токен з `api_tokens`); constant-time порівняння
+(захист від timing-атак). Якщо `ADMIN_API_TOKEN` не задано в `.env` — ендпоінт
+повертає `503 { error: "admin endpoint not configured" }`.
+
+**Запит** (`Content-Type: application/json`):
+```json
+{ "beer_id": 123, "review_class": "parser_bug", "note": "optional note" }
+```
+`beer_id` — обов'язкове; `review_class` — один з: `parser_bug`, `matcher_bug`,
+`not_on_untappd`, `wontfix`; `note` — опційний рядок.
+
+**Відповіді:** `200 { ok: true }` — розмітка збережена; `400` — невалідний або
+відсутній `review_class`; `401` — токен невалідний або відсутній;
+`404` — `beer_id` не знайдено в `enrich_failures`; `503` — `ADMIN_API_TOKEN` не задано.
+
+Повторний `recordEnrichFailure` на тому самому пиві скидає `review_class`/`review_note`/
+`reviewed_at` до `NULL` — рядок знову з'являється в тріажі (§3.13).
+
 ### Фонові джоби (node-cron, у процесі)
 | Джоба | Розклад | Призначення |
 |-------|---------|-------------|
@@ -653,7 +679,8 @@ recovery (`open→closed`). Стан скидається на рестарті.
 - Обовʼязкові: `TELEGRAM_BOT_TOKEN`, `DATABASE_PATH`, `OSRM_BASE_URL`,
   `NOMINATIM_USER_AGENT`. Опційні: `LOG_LEVEL`, `DEFAULT_ROUTE_N` (=5),
   `API_PORT` (=3000), `UNTAPPD_LOOKUP_ENABLED` (=true), `UNTAPPD_SESSION_COOKIE`,
-  `ADMIN_TELEGRAM_ID`.
+  `ADMIN_TELEGRAM_ID`, `ADMIN_API_TOKEN` (Bearer-токен для `/admin/*`; якщо не задано —
+  адмін-ендпоінти повертають `503`).
 - Секрети **ніколи** не хардкодяться і не потрапляють у логи. На проді `.env`
   у `/etc/warsaw-beer-bot/.env` (`chmod 600`). `.env.example` тримати в синку.
 
