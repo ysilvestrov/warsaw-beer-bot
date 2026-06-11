@@ -9,6 +9,9 @@ interface ProductMeta {
   title: string;
 }
 
+const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)\s+/i;
+const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
+
 function text(el: Element | null): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
@@ -27,7 +30,22 @@ function cleanName(rawTitle: string, brewery: string): string {
   const prefix = rawTitle.slice(0, b.length);
   if (prefix.toLowerCase() !== b.toLowerCase()) return rawTitle.trim();
 
-  return rawTitle.slice(b.length).trim() || rawTitle.trim();
+  return rawTitle.slice(b.length).trim().replace(BREWERY_NOISE_PREFIX_RE, '').trim() || rawTitle.trim();
+}
+
+function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string } {
+  const title = rawTitle.replace(/\s+/g, ' ').trim();
+  const tokens = title.split(/\s+/).filter(Boolean);
+  const first = tokens[0]?.toLowerCase();
+
+  if (tokens.length >= 3 && first && LEADING_BREWERY_DESCRIPTORS.has(first)) {
+    return {
+      brewery: tokens.slice(0, -1).join(' '),
+      name: tokens[tokens.length - 1],
+    };
+  }
+
+  return { brewery: '', name: title };
 }
 
 function ownerDocument(root: ParentNode): Document | null {
@@ -67,8 +85,11 @@ export const beerfreak: SiteAdapter = {
       const rawTitle = product?.title ?? text(el.querySelector('.catalogCard-title a'));
       if (!rawTitle) continue;
 
-      const brewery = cleanBrewery(product?.brand_title ?? null);
-      const name = cleanName(rawTitle, brewery);
+      const parsed = product?.brand_title == null
+        ? splitBrandlessTitle(rawTitle)
+        : { brewery: cleanBrewery(product.brand_title), name: '' };
+      const brewery = parsed.brewery;
+      const name = parsed.name || cleanName(rawTitle, brewery);
       if (!name) continue;
       cards.push({ el, brewery, name });
     }
