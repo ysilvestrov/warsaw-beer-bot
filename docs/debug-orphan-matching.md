@@ -8,7 +8,7 @@
 
 ```bash
 sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db \
-  "SELECT brewery, name, outcome, candidates_count, candidates_summary, search_url, fail_count, last_at
+  "SELECT brewery, name, outcome, candidates_count, candidates_summary, search_url, source_url, fail_count, last_at
    FROM enrich_failures ORDER BY last_at DESC LIMIT 30;"
 ```
 
@@ -59,6 +59,27 @@ sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db \
   `nameKeys` (#117): order-insensitive + `COLLAB_SEP`-split + brewery-dedup, потім
   fuzzy ≥ 0.85. Якщо валідний кандидат усе одно відсічений — дивись `nameKeys`/
   `nameTokensDiverge` у `matcher.ts` та Stage 2a/2b у `untappd-lookup.ts`.
+
+### `source_url` — сторінка магазину (тільки client-relay)
+
+`source_url` заповнюється лише коли провал прийшов через `/enrich/result`
+(розширення ретранслює пошук Untappd із browser-session'у користувача).
+Серверний крон пише `''` — при його провалах URL сторінки магазину невідомий.
+
+Коли `source_url != ''`, можна **відкрити сторінку магазину** і перевірити,
+чи правильно адаптер розпарсив пивоварню та назву. Це вирішує ключову дихотомію:
+- **Parser-баг** — адаптер прочитав назву/пивоварню криво; діагностується тільки
+  з реальною сторінкою магазину. Лагодити в `extension/src/sites/<shop>.ts`.
+- **Matcher-баг** — парсинг правильний, але brewery-gate або name-fuzzy відсік
+  валідного кандидата; діагностується з `brewery`/`name`/`candidates_summary`
+  без потреби у `source_url`. Лагодити в `src/domain/matcher.ts` / `untappd-lookup.ts`.
+
+```sql
+SELECT beer_id, brewery, name, source_url, candidates_count
+FROM enrich_failures
+WHERE outcome = 'not_found' AND source_url != ''
+ORDER BY fail_count DESC;
+```
 
 ## Крок 3. Відтворити (пошук Untappd публічний, без кукі)
 

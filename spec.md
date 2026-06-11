@@ -340,11 +340,15 @@ src/
 | `candidates_summary` | TEXT | NOT NULL | топ-3 `"<brewery> — <name>"`, `;`-joined (порожньо для blocked) |
 | `fail_count` | INTEGER | NOT NULL DEFAULT 1 | скільки разів провалився (++ на upsert) |
 | `last_at` | TEXT | NOT NULL | час останнього провалу (ISO) |
+| `source_url` | TEXT | NOT NULL DEFAULT '' | URL сторінки магазину, з якої прийшла ця пара brewery/name; заповнюється лише client-relay (`/enrich/result` з `pageUrl`); серверний крон пише `''` (URL невідомий) |
 
 **Хто що пише:** `applyLookupOutcome` (спільний для серверного крона і client-relay)
 upsert'ить рядок на `not_found`/`blocked` і **видаляє** його на `matched`. Один рядок на
 пиво (upsert по `beer_id`), розмір обмежений поточним набором orphan'ів. Untappd-пошук
-відтворюваний без кукі, тож `search_url` достатньо для дебагу. Запит:
+відтворюваний без кукі, тож `search_url` достатньо для дебагу. `source_url` (URL
+сторінки магазину) дозволяє відкрити першоджерело і перевірити, чи parser-баг
+(адаптер прочитав назву/пивоварню криво) чи matcher-баг; заповнюється лише
+client-relay (`/enrich/result`), серверний крон пише `''`. Запит:
 `SELECT … FROM enrich_failures ORDER BY last_at DESC` — «0 кандидатів» = зашумлений запит;
 «N, але not_found» = brewery-gate / name-fuzzy відсік (видно по `candidates_summary`).
 Покроковий дебаг-ранбук: `docs/debug-orphan-matching.md`.
@@ -555,7 +559,7 @@ fuzzy-матч дає `matched_beer` (тобто глобальний рейти
 Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}`, апсертить
 кожне нове пиво як orphan (`untappd_id` NULL) і повертає `{candidates:[{brewery,name,
 eligible,searchUrl}]}`, де `eligible` = backoff-due (`isEligible`) і пиво ще orphan.
-`/enrich/result` приймає `{brewery,name,html}` (обрізана клієнтом сторінка Untappd-пошуку),
+`/enrich/result` приймає `{brewery,name,html,pageUrl?}` (обрізана клієнтом сторінка Untappd-пошуку; `pageUrl` — опційна URL сторінки магазину, зберігається як `source_url` в `enrich_failures`),
 проганяє наявний `lookupBeer` з `fetch=()=>html` і застосовує спільний `applyLookupOutcome`:
 matched → `recordLookupSuccess` (bid+рейтинг; UNIQUE-клеш → merge у канонічний рядок),
 not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не пише в backoff (блок
