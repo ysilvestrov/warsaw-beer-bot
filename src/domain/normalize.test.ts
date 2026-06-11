@@ -54,6 +54,23 @@ describe('stripBreweryNoise', () => {
   });
 });
 
+describe('collab-aware stripBreweryNoise (#117 Omnipollo)', () => {
+  test('drops the "collab" descriptor glued to a slash and joins collab parts', () => {
+    expect(stripBreweryNoise('Omnipollo collab/ Trillium Brewing Company')).toBe('Omnipollo Trillium');
+  });
+  test('drops bare "collab"/"collaboration" tokens', () => {
+    expect(stripBreweryNoise('Foo collab Bar')).toBe('Foo Bar');
+    expect(stripBreweryNoise('Foo Collaboration Bar')).toBe('Foo Bar');
+  });
+  test('collapses x- and &-connectors to space', () => {
+    expect(stripBreweryNoise('Alpha x Beta')).toBe('Alpha Beta');
+    expect(stripBreweryNoise('Alpha & Beta')).toBe('Alpha Beta');
+  });
+  test('leaves a non-collab " - " brewery intact', () => {
+    expect(stripBreweryNoise('Kykao - Handcrafted')).toBe('Kykao - Handcrafted');
+  });
+});
+
 describe('multilingual brewery descriptors', () => {
   test('normalizeBrewery strips foreign brewery words', () => {
     expect(normalizeBrewery('Pivovar Černá Hora')).toBe('cerna hora');

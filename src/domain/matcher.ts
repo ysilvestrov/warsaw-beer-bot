@@ -1,5 +1,7 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { normalizeName, normalizeBrewery } from './normalize';
+import { normalizeName, normalizeBrewery, COLLAB_SEP } from './normalize';
+
+export { COLLAB_SEP } from './normalize';
 
 export interface CatalogBeer {
   id: number;
@@ -76,13 +78,6 @@ export function prepareCatalog(
   return makePreparedCatalog(catalog.map(prepareBeer), build);
 }
 
-// Separator regex for collab/bilingual brewery names. Untappd uses:
-//   "A / B"  — slash with any spacing (bilingual or collab)
-//   "A x B"  — " x "/" X " connector (collab, case-insensitive)
-//   "A & B"  — " & " connector (collab)
-//   "A (B)"  — paren form for German aliases
-// Ontap.pl renders only one side. All forms collapse to: "any side is valid".
-export const COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+|\s+&\s+/;
 
 // Extracts the first 4-digit calendar year (1900–2099) from a raw beer name.
 // Called on the un-normalized name because normalizeName strips digit tokens.
