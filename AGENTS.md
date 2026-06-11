@@ -20,6 +20,8 @@ Before making changes, always read:
 
 - "spec.md"
 
+Documented solutions live under `docs/solutions/` with YAML frontmatter (`module`, `tags`, `problem_type`) and capture past bugs, workflow issues, and implementation patterns. `CONCEPTS.md` defines shared project vocabulary. These are relevant when implementing or debugging in documented areas.
+
 The project specification is maintained in OpenSpec format and is the primary source of truth for expected behavior.
 
 If implementation details and assumptions conflict with "spec.md", follow "spec.md".
