@@ -13,6 +13,15 @@ function parseFixture() {
   return beerrepublic.parseCards(doc);
 }
 
+function product(title: string, vendor = 'Beer Republic'): string {
+  return `
+    <div class="product-item">
+      <span class="product-item__vendor">${vendor}</span>
+      <a class="product-item__title">${title}</a>
+    </div>
+  `;
+}
+
 let cards: ReturnType<typeof beerrepublic.parseCards>;
 beforeAll(() => { cards = parseFixture(); });
 
@@ -31,5 +40,19 @@ describe('beerrepublic adapter', () => {
 
   it('does not define waitForGrid (SSR)', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
+  });
+
+  it('ignores non-beer pack and calendar products', () => {
+    const doc = new DOMParser().parseFromString(`
+      <section data-section-type="collection">
+        ${product('Limited Edition Anniversary Vertical Set', 'Firestone Walker')}
+        ${product("Firestone Walker Barrel Aged Brewer's Collective Brewery Pack", 'Firestone Walker')}
+        ${product('Surprise Box Barrel Aged Beers')}
+        ${product('Advent Calendar 2025 Green Edition')}
+        ${product('Mind Haze Galaxy Bender', 'Firestone Walker')}
+      </section>
+    `, 'text/html');
+
+    expect(beerrepublic.parseCards(doc).map((c) => c.name)).toEqual(['Mind Haze Galaxy Bender']);
   });
 });
