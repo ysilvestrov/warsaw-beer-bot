@@ -24,3 +24,14 @@ export async function setCached(
   const entry: Entry = { result, expiresAt: now + CACHE_TTL_MS };
   await chrome.storage.local.set({ [PREFIX + key]: entry });
 }
+
+export async function clearKeys(keys: string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await chrome.storage.local.remove(keys.map((k) => PREFIX + k));
+}
+
+export async function clearAll(): Promise<void> {
+  const all = await chrome.storage.local.get();
+  const ours = Object.keys(all).filter((k) => k.startsWith(PREFIX));
+  if (ours.length > 0) await chrome.storage.local.remove(ours);
+}

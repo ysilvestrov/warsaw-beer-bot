@@ -827,6 +827,13 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - **Auth:** токен з команди `/extension` зберігається в `chrome.storage.local`;
   base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
   options-сторінка має Test connection (`GET /health` + 1-beer `/match`).
+- **Popup керування кешем** (toolbar `action`, дозволи `activeTab`+`tabs`):
+  «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
+  видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
+  повідомлення `refresh-page` контент-скрипту → `refreshCards` + `clearKeys` +
+  `runOverlay`); «Clear all cache» — чистить усі `mc2:`-ключі (`clearAll`). Ключі
+  кешу site-незалежні (`normalizeKey(brewery,name)`), тож «per-site» реалізовано як
+  «оновити відкриту сторінку».
 - **Read-only гарантія:** лише додає власні бейдж-ноди; будь-яка помилка
   парсингу/рендеру проковтується й не ламає сторінку магазину.
 - **Тести:** контракт адаптера покрито **конформанс-тестом над реєстром**
