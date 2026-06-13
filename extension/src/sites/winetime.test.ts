@@ -117,6 +117,84 @@ describe('winetime adapter', () => {
     );
   });
 
+  it('strips an orphaned leading Brewery token left after the brand prefix', () => {
+    const doc = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="201"></span>
+          <div class="product-micro--title">Пиво ДІДЬКО Brewery Double Trouble</div>
+          <div class="j-grow-1-xs j-size-0.75-xs">ДІДЬКО</div>
+        </a>
+        <script>
+          window.initialData = {};
+          window.initialData.category = {
+            "products": [{
+              "id": 201,
+              "title": "Пиво ДІДЬКО Brewery Double Trouble",
+              "manufacturer": { "title": "ДІДЬКО" }
+            }]
+          };
+        </script>
+      `,
+      'text/html',
+    );
+    expect(winetime.parseCards(doc)).toContainEqual(
+      expect.objectContaining({ brewery: 'ДІДЬКО', name: 'Double Trouble' }),
+    );
+  });
+
+  it('strips a leading Brewery token for a Latin brand too', () => {
+    const doc = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="202"></span>
+          <div class="product-micro--title">Пиво TEN MEN Brewery RUBIS</div>
+          <div class="j-grow-1-xs j-size-0.75-xs">TEN MEN</div>
+        </a>
+        <script>
+          window.initialData = {};
+          window.initialData.category = {
+            "products": [{
+              "id": 202,
+              "title": "Пиво TEN MEN Brewery RUBIS",
+              "manufacturer": { "title": "TEN MEN" }
+            }]
+          };
+        </script>
+      `,
+      'text/html',
+    );
+    expect(winetime.parseCards(doc)).toContainEqual(
+      expect.objectContaining({ brewery: 'TEN MEN', name: 'RUBIS' }),
+    );
+  });
+
+  it('does not over-strip a normal name after the brand prefix (FP guard)', () => {
+    const doc = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="203"></span>
+          <div class="product-micro--title">Пиво Brewdog Punk IPA</div>
+          <div class="j-grow-1-xs j-size-0.75-xs">Brewdog</div>
+        </a>
+        <script>
+          window.initialData = {};
+          window.initialData.category = {
+            "products": [{
+              "id": 203,
+              "title": "Пиво Brewdog Punk IPA",
+              "manufacturer": { "title": "Brewdog" }
+            }]
+          };
+        </script>
+      `,
+      'text/html',
+    );
+    expect(winetime.parseCards(doc)).toContainEqual(
+      expect.objectContaining({ brewery: 'Brewdog', name: 'Punk IPA' }),
+    );
+  });
+
   it('does not define waitForGrid because WineTime renders cards in SSR HTML', () => {
     expect(winetime.waitForGrid).toBeUndefined();
   });
