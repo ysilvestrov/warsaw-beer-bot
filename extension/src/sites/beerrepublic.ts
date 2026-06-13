@@ -1,11 +1,8 @@
 import type { Card, SiteAdapter } from './types';
+import { isNonBeerName } from './non-beer';
 
 function text(el: Element | null): string {
   return el?.textContent?.trim() ?? '';
-}
-
-function isNonBeerProduct(name: string): boolean {
-  return /\b(vertical set|brewery pack|surprise box|advent calendar)\b/i.test(name);
 }
 
 export const beerrepublic: SiteAdapter = {
@@ -18,7 +15,7 @@ export const beerrepublic: SiteAdapter = {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('.product-item'))) {
       const name = text(el.querySelector('.product-item__title'));
       if (!name) continue;
-      if (isNonBeerProduct(name)) continue;
+      if (isNonBeerName(name)) continue;
       const brewery = text(el.querySelector('.product-item__vendor'));
       cards.push({ el, brewery, name });
     }
