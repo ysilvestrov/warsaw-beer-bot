@@ -195,6 +195,22 @@ describe('winetime adapter', () => {
     );
   });
 
+  it('strips the янтарне (amber) descriptor', () => {
+    const doc = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="204"></span>
+          <div class="product-micro--title">Femme Fatale янтарне</div>
+          <div class="j-grow-1-xs j-size-0.75-xs">De Leite</div>
+        </a>
+      `,
+      'text/html',
+    );
+    expect(winetime.parseCards(doc)).toContainEqual(
+      expect.objectContaining({ brewery: 'De Leite', name: 'Femme Fatale' }),
+    );
+  });
+
   it('does not define waitForGrid because WineTime renders cards in SSR HTML', () => {
     expect(winetime.waitForGrid).toBeUndefined();
   });

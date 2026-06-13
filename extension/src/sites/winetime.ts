@@ -4,7 +4,7 @@ import { isNonBeerName } from './non-beer';
 const CARD_SELECTOR = 'a.product-micro';
 const CONTAINER_SELECTOR = '.products-column';
 const DESCRIPTOR_RE =
-  /\s+(?:світле|темне|напівтемне|нефільтроване|фільтроване|пастеризоване|безалкогольне)$/iu;
+  /\s+(?:світле|темне|напівтемне|нефільтроване|фільтроване|пастеризоване|безалкогольне|янтарне)$/iu;
 
 // A leftover leading brewery-noise token after the brand prefix is stripped (e.g. title
 // "Пиво ДІДЬКО Brewery Double Trouble" with manufacturer "ДІДЬКО" → "Brewery Double Trouble").
