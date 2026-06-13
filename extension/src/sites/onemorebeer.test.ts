@@ -10,6 +10,40 @@ beforeAll(() => {
   cards = onemorebeer.parseCards(new DOMParser().parseFromString(html, 'text/html'));
 });
 
+function tile(brewery: string, title: string): string {
+  return `
+    <div class="one-product-list-view__tile">
+      <div data-information-type="brand-name">
+        <span class="one-product-tile-information__row__value">${brewery}</span>
+      </div>
+      <a class="product__title">${title}</a>
+    </div>`;
+}
+
+describe('onemorebeer non-beer filtering', () => {
+  it('drops accessory/merch tiles (glass, mug, shirt, book)', () => {
+    const html = `<div class="one-catalog-view-list">
+      ${tile('Schneider', 'SCHNEIDER WEISSE SZKLANKA 0,5 L')}
+      ${tile('Inne', 'BALTIC PORTER DAY 2025 POKAL 0,33 L (gazetka)')}
+      ${tile('Pinta', 'BALTIC PORTER DAY KOSZULKA BIAŁA XXL')}
+      ${tile('Pinta', 'KSIĄŻKA POLSKIE I WYJĄTKOWE. PIWO GRODZISKIE')}
+      ${tile('Schneider', 'SCHNEIDER WEISSE KUFEL CERAMIKA WYSOKI 0,5 L')}
+    </div>`;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    expect(onemorebeer.parseCards(doc)).toEqual([]);
+  });
+
+  it('keeps a real beer that lives among accessories (MAGIC ROAD, can + deposit)', () => {
+    const html = `<div class="one-catalog-view-list">
+      ${tile('Magic Road', 'MAGIC ROAD YES CANNONS SLOW MARKET PUSZKA 0,5 L KAUCJA')}
+    </div>`;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const cards = onemorebeer.parseCards(doc);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].brewery).toBe('Magic Road');
+  });
+});
+
 describe('onemorebeer adapter', () => {
   it('parses the rendered tiles', () => {
     expect(cards.length).toBeGreaterThanOrEqual(7);

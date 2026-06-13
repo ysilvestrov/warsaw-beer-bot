@@ -1,4 +1,5 @@
 import type { Card, SiteAdapter } from './types';
+import { isNonBeerName } from './non-beer';
 
 const CARD_SELECTOR = 'a.product-micro';
 const CONTAINER_SELECTOR = '.products-column';
@@ -143,6 +144,7 @@ export const winetime: SiteAdapter = {
       const product = Number.isFinite(id) ? meta.get(id) : undefined;
       const rawTitle = product?.title ?? text(el.querySelector('.product-micro--title'));
       if (!rawTitle) continue;
+      if (isNonBeerName(rawTitle)) continue;
 
       const brewery = product?.manufacturer?.title?.trim() || visibleBrewery(el);
       const name = cleanName(rawTitle, brewery);
