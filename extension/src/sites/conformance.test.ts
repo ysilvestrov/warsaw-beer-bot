@@ -7,6 +7,8 @@ import type { MatchResult, RawBeer } from '../api/types';
 
 const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const fixturePath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.html`);
+const nonBeerHtmlPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.html`);
+const nonBeerJsonPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.json`);
 
 // Load a fixture's <body> into the live jsdom document so MutationObserver works.
 function mountFixture(html: string) {
@@ -46,6 +48,21 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     if (!adapter.reRenderContainerSelector) return;
     const parsed = new DOMParser().parseFromString(readFileSync(fixturePath(id), 'utf8'), 'text/html');
     expect(parsed.querySelector(adapter.reRenderContainerSelector)).not.toBeNull();
+  });
+
+  it('drops non-beer products: parses zero cards from its non-beer fixture (or is exempt)', () => {
+    // Exemption: a shop with verified-zero non-beers ships {none:true, reason}. Reason required so
+    // an exemption is a deliberate, documented choice — not a silently skipped obligation.
+    if (existsSync(nonBeerJsonPath(id))) {
+      const meta = JSON.parse(readFileSync(nonBeerJsonPath(id), 'utf8')) as { none?: boolean; reason?: string };
+      if (meta.none) {
+        expect(typeof meta.reason === 'string' && meta.reason.trim().length).toBeTruthy();
+        return;
+      }
+    }
+    expect(existsSync(nonBeerHtmlPath(id))).toBe(true);
+    const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+    expect(adapter.parseCards(doc)).toEqual([]);
   });
 
   it('re-badges after the grid is replaced with fresh nodes', async () => {
