@@ -1,5 +1,6 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
+import { isNonBeerName } from './non-beer';
 
 const CARD_SELECTOR = '.one-product-list-view__tile';
 const BREWERY_SELECTOR = '[data-information-type="brand-name"] .one-product-tile-information__row__value';
@@ -7,6 +8,11 @@ const TITLE_SELECTOR = 'a.product__title';
 // .one-product-list-view appears once per tile; .one-catalog-view-list is the single top-level
 // catalog component container (count: 1) that wraps all tiles — use that for the re-render observer.
 const CONTAINER_SELECTOR = '.one-catalog-view-list';
+
+// onemorebeer-local merch tokens (Polish): glassware, mugs, apparel, books on the accessories page.
+// Stems handle inflection (szklanka/szklanki, koszulka/koszulkę). Deliberately excludes "puszka"
+// (can) and "kaucja" (deposit) — those mark a real beer (e.g. MAGIC ROAD … PUSZKA … KAUCJA).
+const MERCH_RE = /\b(?:szklank|pokal|kufel|koszulk|ksi[ąa]żk|ksiazk|akcesori|otwieracz|podstawk|podkładk)\w*/i;
 
 function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
@@ -28,6 +34,7 @@ function cleanName(rawTitle: string, brewery: string): string {
 export const onemorebeer: SiteAdapter = {
   id: 'onemorebeer',
   hostMatch: (url) => url.hostname === 'onemorebeer.pl' || url.hostname.endsWith('.onemorebeer.pl'),
+  isNonBeerPage: (url) => /(^|\/)delikatesy(\/|$)/i.test(url.pathname),
   reRenderContainerSelector: CONTAINER_SELECTOR,
 
   async waitForGrid(root) {
@@ -40,6 +47,7 @@ export const onemorebeer: SiteAdapter = {
       const brewery = text(el.querySelector(BREWERY_SELECTOR));
       const rawTitle = text(el.querySelector(TITLE_SELECTOR));
       if (!brewery || !rawTitle) continue;
+      if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle)) continue;
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
       cards.push({ el, brewery, name });
