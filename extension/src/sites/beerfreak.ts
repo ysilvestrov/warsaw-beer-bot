@@ -1,4 +1,5 @@
 import type { Card, SiteAdapter } from './types';
+import { isNonBeerName } from './non-beer';
 
 const CARD_SELECTOR = '.catalogCard.j-catalog-card';
 const CONTAINER_SELECTOR = '[data-catalog-view-block="products"]';
@@ -84,6 +85,7 @@ export const beerfreak: SiteAdapter = {
       const product = Number.isFinite(id) ? meta.get(id) : undefined;
       const rawTitle = product?.title ?? text(el.querySelector('.catalogCard-title a'));
       if (!rawTitle) continue;
+      if (isNonBeerName(rawTitle)) continue;
 
       const parsed = product?.brand_title == null
         ? splitBrandlessTitle(rawTitle)

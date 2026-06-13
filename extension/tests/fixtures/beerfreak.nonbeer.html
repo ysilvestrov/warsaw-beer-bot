@@ -1,0 +1,2868 @@
+<!DOCTYPE html>
+<html prefix="og: https://ogp.me/ns# article: https://ogp.me/ns/article# product: https://ogp.me/ns/product#" lang="uk">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width">
+    <title>Подарункові набори Крафтового пива з доставкою по Україні</title>
+<meta name="robots" content="all">
+<meta name="description" content="Кращий подарунок пивоману ⭐Набір крафтового Піва⭐ Широкий вибор✅ ТОП-броварні Європи і Америки✅ Ексклюзивні сети✅ Швидка доставка✅ ">
+<link rel="canonical" href="https://beerfreak.org/beer-sets/">
+<link rel="alternate" hreflang="uk" href="https://beerfreak.org/beer-sets/">
+<link rel="alternate" hreflang="en" href="https://beerfreak.org/en/beer-sets/">
+    <meta property="og:locale" content="ua_UA">
+<meta property="og:site_name" content="BEERFREAK">
+<meta property="og:title" content="Подарункові набори Крафтового пива з доставкою по Україні">
+<meta property="og:url" content="https://beerfreak.org/beer-sets/">
+<meta property="og:description" content="Кращий подарунок пивоману ⭐Набір крафтового Піва⭐ Широкий вибор✅ ТОП-броварні Європи і Америки✅ Ексклюзивні сети✅ Швидка доставка✅ ">
+<meta property="og:image" content="https://beerfreak.org/content/images/16/1200x1200l80mc30/33523784289873.jpg">
+<meta property="og:type" content="product.group">
+    <link rel='preload' as='image' href='/content/images/15/310x465l85nn0/beerua-by-beerfreak-76101615269857.png'><link rel='preload' as='image' href='/content/images/44/310x310l85nn0/luksoviy-podarunkoviy-nabir-importnogo-kraftovogo-piva-70963168268393.jpg'>    
+<script>
+(function (w) {
+    w.GLOBAL = {
+        SYSTEM_LANGUAGE: 3,
+        FIRST_LANGUAGE: 3,
+        DOMAIN: "beerfreak.org",
+        SITE_NAME: "BEERFREAK",
+        URI_PREFIX: "/",
+        URI_SUFFIX: "/",
+        theme: "horoshop_default",
+        currency: {"id":"1","i18n_language":"0","title":"UAH","abbr":" грн","position":"2","sortorder":"1","iso":"UAH","abbr_penny":"коп.","enabled_in_front":"0","sign":"₴"},
+        round_to: "0",
+        isGuest: true,
+        USER_ID: null,
+        open_cart_on_add: false,
+        cart_animation: false,
+        phone_mask: "+38 (099) 999-99-99",
+        use_countries: false,
+        enable_phone_mask_on_input: true,
+        marketingEvents: {"cart_creation":[function (model, eventId) {
+            try {
+                var products = model.Cart.products,
+    ids = [],
+    totalPrice = model.Cart.total.sum;
+
+for (key in products) {
+    ids.push(products[key].article + '');
+}
+
+gtag('event', 'Создание корзины', {
+    'event_category'  : 'Корзина',
+    'event_label'     : 'GLOBAL.DOMAIN',
+    'ecomm_prodid'    : ids,
+    'ecomm_pagetype'  : 'cart',
+    'ecomm_totalvalue': totalPrice
+});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"cart_product_add":[function (model, eventId) {
+            try {
+                (function () {
+    var products = null;
+    
+    fbq('track', 'AddToCart', {
+            contents: [
+                {
+                    'id': model.article,
+                    'quantity': model.quantity * 1,
+                    'item_price': model.price * 1
+                }
+            ],
+            content_type: 'product',
+            currency: GLOBAL.currency.iso,
+            value: model.quantity * model.price 
+        },
+        {eventID: eventId}
+   );
+})();
+            } catch(e) {
+                console.error(e);
+            }
+        },function (model, eventId) {
+            try {
+                var products = model.Cart.products,
+    ids = [],
+    totalPrice = model.Cart.total.sum;
+
+for (key in products) {
+    ids.push(products[key].article + '');
+}
+
+gtag('event', 'add_to_cart', {
+    'currency': GLOBAL.currency.iso,
+    'value': totalPrice,
+    'items': [
+        {
+            'item_id': model.article + '',
+            'item_name': model.title,
+            'quantity': model.quantity * 1,
+            'price': model.price * 1
+        }
+    ],
+    'ecomm_prodid': ids,
+    'ecomm_pagetype': 'cart',
+    'ecomm_totalvalue': totalPrice
+});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"cart_product_update":[],"cart_product_remove":[function (model, eventId) {
+            try {
+                var products = model.Cart.products,
+    ids = [],
+    totalPrice = model.Cart.total.sum;
+
+for (key in products) {
+    ids.push(products[key].article + '');
+}
+
+gtag('event', 'remove_from_cart', {
+    'currency': GLOBAL.currency.iso,
+    'value': totalPrice,
+    'items': [
+        {
+            'item_id': model.article + '',
+            'item_name': model.title,
+            'quantity': model.quantity * 1,
+            'price': model.price * 1
+        }
+    ],
+    'ecomm_prodid': ids,
+    'ecomm_pagetype': 'cart',
+    'ecomm_totalvalue': totalPrice
+});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"quick_search":[],"checkout_success":[function (order_id, cart, name, email, phone, eventId) {
+            try {
+                var products = cart.products, contents = [];
+
+for (var i = 0, l = products.length; i < l; ++i) {
+    var product = products[i];
+    contents.push({
+        'id': product.article,
+        'quantity': product.quantity * 1,
+        'item_price': product.price * 1
+    });
+}
+
+fbq('track', 'Purchase', {
+    contents: contents,
+    content_type: 'product',
+    value: cart.total.total.sum,
+    currency: GLOBAL.currency.iso},
+    {eventID: eventId}
+);
+            } catch(e) {
+                console.error(e);
+            }
+        },function (order_id, cart, name, email, phone, eventId) {
+            try {
+                var items = [],
+    products = cart.products,
+    ids = [];
+
+for (var i = 0, l = products.length; i < l; ++i) {
+    var product = products[i];
+
+    items.push({
+        'item_id': product.article,
+        'item_name': product.title + ' (артикул: ' + product.article_for_display + ')',
+        'quantity': product.quantity * 1,
+        'price': product.price * 1
+    });
+
+    ids.push(product.article);
+}
+
+gtag('event', 'purchase', {
+    'transaction_id': order_id,
+    'affiliation': GLOBAL.SITE_NAME,
+    'value': cart.total.total.sum,
+    'currency': GLOBAL.currency.iso,
+    'tax': 0,
+    'shipping': cart.delivery_price,
+    'coupon': cart.total.coupon_data.code,
+    'items': items,
+    'ecomm_prodid': ids,
+    'ecomm_pagetype': 'purchase',
+    'ecomm_totalvalue': cart.total.total.sum
+});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"newsletter_subscription":[function (model, eventId) {
+            try {
+                fbq('track', 'Lead');
+            } catch(e) {
+                console.error(e);
+            }
+        },function (model, eventId) {
+            try {
+                gtag('event', 'Подписка на рассылку', {
+        'event_category': 'Рассылка',
+        'event_label'   : 'GLOBAL.DOMAIN'
+    });
+            } catch(e) {
+                console.error(e);
+            }
+        }],"callback_submit":[function (model, eventId) {
+            try {
+                fbq('track', 'Lead', {}, {eventID: eventId});
+            } catch(e) {
+                console.error(e);
+            }
+        },function (model, eventId) {
+            try {
+                gtag('event', 'Запрос обратного звонка', {
+        'event_category': 'Обратный звонок',
+        'event_label'   : 'GLOBAL.DOMAIN'
+    });
+            } catch(e) {
+                console.error(e);
+            }
+        },function (model, eventId) {
+            try {
+                dataLayer.push({'event': 'callbackRequest'})
+            } catch(e) {
+                console.error(e);
+            }
+        }],"registration_success":[function (model, eventId) {
+            try {
+                fbq('track', 'CompleteRegistration', {}, {eventID: eventId});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"authorization_success":[],"ajax_page_view":[function (model, eventId) {
+            try {
+                gtag('config', 'G-4YM69D6ZY0', {
+  'page_path': model
+});
+            } catch(e) {
+                console.error(e);
+            }
+        }],"add_to_wishlist":[function (model, eventId) {
+            try {
+                fbq('track', 'AddToWishlist', {
+content_ids: [model.article],
+content_type: 'product',
+currency: GLOBAL.currency.iso,
+value: model.price
+},
+{eventID: eventId}
+);
+            } catch(e) {
+                console.error(e);
+            }
+        }],"hover_phones":[function (model, eventId) {
+            try {
+                gtag('event', 'hover_phones');
+            } catch(e) {
+                console.error(e);
+            }
+        }],"call_phones":[function (model, eventId) {
+            try {
+                gtag('event', 'call_phones');
+            } catch(e) {
+                console.error(e);
+            }
+        }]},
+        content_copy_protection: false,
+        GLOBAL_CSRF_TOKEN: '2f7575ad06a2678c1dac4b4c88f91578dbef8608',
+        isMobile: false    };
+    w.dataLayer = w.dataLayer || [];
+})(window);
+</script><link href='/assets/default/production/styles.aac666c38006e6f652a63e74032b4148.css' type='text/css' rel='stylesheet'>
+<link href='/assets/default/production/client.1047d1b6baed2922d27686dd5f89a7b9.css' type='text/css' rel='stylesheet'>
+    <script src="/globals.js/?version=58e6184bb1182bb611c04b1b10ee9d78"></script>
+
+<script src='/assets/cache/horoshop_default_main.js?1772272946'></script>
+
+    <link rel="shortcut icon" href="/assets/favicon.ico" type="image/x-icon">
+    <script>
+  (function (window, document) {
+    'use strict';
+
+    const file = '/frontend/themes/horoshop_default/layout/img/icons-default.svg';
+    const revision = 'e85b8045f8fada8a6afb0eb18c4ef3ea';
+    const isLocalStorage = 'localStorage' in window && window['localStorage'] !== null;
+
+    let cachedData;
+
+    const insertSVG = () => {
+      const template = document.createElement('template');
+      template.innerHTML = cachedData;
+      document.body.prepend(template.content.firstChild);
+    };
+
+    const insert = () => {
+      if (document.body) {
+        insertSVG();
+      } else {
+        document.addEventListener('DOMContentLoaded', insertSVG);
+      }
+    };
+
+    const updateCache = (svgData) => {
+      if (isLocalStorage) {
+        localStorage.setItem('inlineSVGdata', svgData);
+        localStorage.setItem('inlineSVGrev', revision);
+      }
+    };
+
+    const loadSVG = async () => {
+      try {
+        const response = await fetch(file);
+        if (!response.ok) {
+          console.error('Error loading SVG:', response.status);
+          if (cachedData) insert();
+
+          return;
+        }
+        
+        const serverData = await response.text();
+        
+        if (cachedData !== serverData) {
+          cachedData = serverData;
+          insert();
+          updateCache(cachedData);
+        } else {
+          insert();
+        }
+      } catch (error) {
+        console.error('Error loading SVG:', error);
+        if (cachedData) insert();
+        
+        return;
+      }
+    };
+
+    const init = async () => {
+      if (isLocalStorage) {
+        const cachedRev = localStorage.getItem('inlineSVGrev');
+        if (cachedRev === revision) {
+          cachedData = localStorage.getItem('inlineSVGdata');
+          insert();
+          
+          return;
+        }
+      }
+      
+      await loadSVG();
+    };
+
+    if (document.body) {
+      init();
+    } else {
+      document.addEventListener('DOMContentLoaded', init);
+    }
+
+  }(window, document));
+</script>        <!-- Google Tag Manager -->
+<script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+})(window,document,'script','dataLayer','GTM-M62JZL4');</script>
+<!-- End Google Tag Manager --><!-- Facebook Pixel Code -->
+<script>
+  !function(f,b,e,v,n,t,s)
+  {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+  n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+  if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';n.agent='plhoroshop';
+  n.queue=[];t=b.createElement(e);t.async=!0;
+  t.src=v;s=b.getElementsByTagName(e)[0];
+  s.parentNode.insertBefore(t,s)}(window, document,'script',
+  'https://connect.facebook.net/en_US/fbevents.js');
+  fbq('init', '2200686503365161');
+  fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+  src="https://www.facebook.com/tr?id=2200686503365161&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Facebook Pixel Code -->
+<!-- Global site tag (gtag.js) - Google Analytics -->
+<script async src='https://www.googletagmanager.com/gtag/js?id=G-4YM69D6ZY0'></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-4YM69D6ZY0');
+</script><script>var items = [],
+    products = [{"id":9714,"article":"010246","brand_title":"BEERFREAK (Україна)","title":"Набір beerUA by beerfreak (ТІЛЬКИ ДЛЯ ЗАМОВЛЕНЬ ЗА КОРДОН)","price":0,"url":"https:\/\/beerfreak.org\/beerua-by-beerfreak\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"010246","in_stock":true},{"id":3943,"article":"010044","brand_title":"BEERFREAK (Україна)","title":"Люксовий подарунковий набір імпортного крафтового пива!","price":3499,"url":"https:\/\/beerfreak.org\/gift-set-import-lux\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"010044","in_stock":true},{"id":3226,"article":"110114","brand_title":"BEERFREAK (Україна)","title":"Преміум подарунковий набір імпортного крафтового пива!","price":1999,"url":"https:\/\/beerfreak.org\/gift-set-import-premium\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"110114","in_stock":true},{"id":2622,"article":"10054","brand_title":"BEERFREAK (Україна)","title":"Подарунковий набір імпортного крафтового пива!","price":1399,"url":"https:\/\/beerfreak.org\/gift-set-import\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"10054","in_stock":true},{"id":2574,"article":"10051","brand_title":"BEERFREAK (Україна)","title":"Подарунковий набір українського крафтового пива!","price":1199,"url":"https:\/\/beerfreak.org\/craft-beer-gift-box\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"10051","in_stock":true},{"id":2664,"article":"10069","brand_title":"BEERFREAK (Україна)","title":"Маленький подарунковий набір українського крафтового пива!","price":799,"url":"https:\/\/beerfreak.org\/small-gift-set-ukr-craft-beer\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"10069","in_stock":true},{"id":2645,"article":"01384","brand_title":"BEERFREAK (Україна)","title":"Подарункове пакування замовлення!","price":89,"url":"https:\/\/beerfreak.org\/gift-wrapping\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"01384","in_stock":true},{"id":1655,"article":"100001","brand_title":"BEERFREAK (Україна)","title":"Сертифікат 1000","price":1000,"url":"https:\/\/beerfreak.org\/gift-voucher-1000\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"100001","in_stock":true},{"id":1656,"article":"100002","brand_title":"BEERFREAK (Україна)","title":"Сертифікат 2000","price":2000,"url":"https:\/\/beerfreak.org\/gift-voucher-2000\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"100002","in_stock":true},{"id":1657,"article":"100003","brand_title":"BEERFREAK (Україна)","title":"Сертифікат 3000","price":3000,"url":"https:\/\/beerfreak.org\/gift-voucher-3000\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"100003","in_stock":true},{"id":1658,"article":"100000","brand_title":"BEERFREAK (Україна)","title":"Сертифікат 500","price":500,"url":"https:\/\/beerfreak.org\/gift-voucher-500\/","category_string":"Колекцiї\/Подарунковi набори","article_for_display":"100000","in_stock":true}],
+    ids = [],
+    total = 0,
+    productsPerEvent = 5,
+
+    sendEvent = function(items, ids, total) {
+        gtag('event', 'view_item_list', {
+            'item_list_name': 'Catalog Page',
+            'items': items,
+            'ecomm_prodid': ids,
+            'ecomm_pagetype': 'category',
+            'ecomm_totalvalue': total
+        });
+    };
+
+for (var i = 0, l = products.length; i < l; ++i) {
+    var product = products[i];
+
+    items.push({
+        'item_id': product.article + '',
+        'item_name': product.title,
+        'item_category': product.category_string,
+        'item_brand': product.brand_title,
+        'item_list_id': i + 1,
+        'price': product.price
+    });
+
+    ids.push(product.article + '');
+    total = total + product.price;
+
+    if (items.length === productsPerEvent) {
+        sendEvent(items, ids, total);
+
+        items = [];
+        ids = [];
+        total = 0;
+    }
+}
+
+if (items.length > 0) {
+    sendEvent(items, ids, total);
+}</script>
+<!-- Hotjar Tracking Code for beerfreak.org -->
+<script>
+    (function(h,o,t,j,a,r){
+        h.hj=h.hj||function(){(h.hj.q=h.hj.q||[]).push(arguments)};
+        h._hjSettings={hjid:1668970,hjsv:6};
+        a=o.getElementsByTagName('head')[0];
+        r=o.createElement('script');r.async=1;
+        r.src=t+h._hjSettings.hjid+j+h._hjSettings.hjsv;
+        a.appendChild(r);
+    })(window,document,'https://static.hotjar.com/c/hotjar-','.js?sv=');
+</script>
+
+<!-- Install this snippet AFTER the Hotjar tracking code. -->
+<script>
+var userId = your_user_id || null; // Replace your_user_id with your own if available.
+window.hj('identify', userId, {
+    'Signed up': '2019—06-20Z', // Signup date in ISO-8601 format.
+    // Add your own custom attributes here. Some examples:
+    // 'Last purchase category': 'Electronics', // Send strings with quotes around them.
+    // 'Total purchases': 15, // Send numbers without quotes.
+    // 'Last purchase date': '2019-06-20Z', // Send dates in ISO-8601 format. 
+    // 'Last refund date': null, // Send null when no value exists for a user.
+});
+</script>                    </head>
+<body class=" ua-UA" itemscope itemtype="https://schema.org/WebPage">
+    <!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-4YM69D6ZY0"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-4YM69D6ZY0');
+</script>            <div class="session-messages" id="j-sm" style="display:none;"></div>
+    <div class="container">
+                
+<div class="header ">
+    <div class="header__container">
+                    <div class="header__top">
+                <div class="header__wrapper">
+                    <div class="header__layout header__layout--top">
+                                                    <div class="header__column header__column--left header__column--side">
+                                                                        <div class="header__section">
+        <div class="social-icons"><!--
+            --><a class="social-icons__item" data-fake-href="https://www.instagram.com/beerfreakorg" rel="nofollow" target="_blank" title="Мы в инстаграмме"><svg class="social-icons__img icon-ig"><use xlink:href="#icon-ig"></use></svg></a><!--
+            --><a class="social-icons__item" data-fake-href="https://t.me/beerfreakorg" rel="nofollow" target="_blank" title="Telegram"><svg class="social-icons__img icon-tg"><use xlink:href="#icon-tg"></use></svg></a><!--
+        --></div>    </div>     
+                                                            </div>
+                                                                            <div class="header__column header__column--center">
+                                                                    <div class="header__section">
+    <div class="header__slogan">ВІДПРАВКИ ЗДІЙСНЮЮТЬСЯ В БУДНІ ДНІ з 10 до 18. БЕЗКОШТОВНА ДОСТАВКА від 4000 ГРН</div></div>                                                            </div>
+                                                                            <div class="header__column header__column--right header__column--side">
+                                                                    <div class="header__section">
+    <ul class="lang-menu" data-widget="lang_menu" data-skin="header " data-show-icon=" ">
+                                            <li class="lang-menu__item is-active">
+                    <span class="lang-menu__link">Укр</span>
+                </li>
+                                                <li class="lang-menu__item">
+                    <a
+                                                href="/en/beer-sets/"
+                        class="lang-menu__link"
+                    >
+                        Eng                    </a>
+                </li>
+                        </ul></div>                                                            </div>
+                                            </div>
+                </div>
+            </div>
+                <div class="header__middle">
+            <div class="header__wrapper">
+                <div class="header__layout header__layout--middle">
+                                            <div class="header__column header__column--left header__column--side">
+                                                            <div class="header__section header__section--search">
+    <div class="search j-search">
+        <form method="get" data-action="/catalog/search/">
+            <input class="search__input" id="search_uidf60a708141f64fe4c0816c591206cd0b" type="text" name="q"
+                   placeholder="пошук товарів" autocomplete="off" value="">
+            <button type="submit" class="search__button" disabled>
+                <svg class="icon icon--search">
+                    <use xlink:href="#icon-search"></use>
+                </svg>
+            </button>
+        </form>
+    </div>
+    <div class="search__results" id="search_uidf60a708141f64fe4c0816c591206cd0b-search-results"></div>
+    <script>
+      (function (w) {
+        w.INIT.add(function () {
+          init_search_widget('#search_uidf60a708141f64fe4c0816c591206cd0b', {
+            hideQuery: true,
+          });
+        }, w.init_search_widget);
+      })(window);
+    </script></div>                                                    </div>
+                                                                                    <div class="header__column header__column--center">
+                                                            <div class="header__section">
+    <div class="header__logo">
+                    <a class="header__logo-link" href='/'>
+                <img alt='BEERFREAK'  class='header-logo-img' width='163' height='100' src='/content/images/2/163x100l90nn0/80381316113904.jpg'  
+                                    srcset="
+                                    /content/images/2/163x100l90nn0/80381316113904.jpg 1x,
+                                    /content/images/2/325x200l50nn0/80381316113904.jpg 2x
+                                    ">            </a>
+            </div></div>                                                    </div>
+                                                                <div class="header__column header__column--right header__column--side">
+                                                            <div class="header__section">
+    <div class="basket is-empty j-basket-header"
+         data-widget="mini_cart"
+         data-skin="default"
+         data-icon="basket-outline"
+         data-elements="icon"
+    >
+                    <div class="basket__icon basket__icon--basket-outline j-basket-icon">
+                <svg class="icon icon--basket-outline">
+                    <use xlink:href="#icon-basket-outline"></use>
+                </svg>
+                <div class="basket__items j-basket-quantity">
+                    0                </div>
+            </div>
+            </div></div>                                                            <div class="header__section">
+    <div class="favorites-view" id="uidd943e591fecdcb1e2b12b02e61d25ca8">
+    <a href="/profile/favorites/" class="favorites-view__button j-favorite-link  is-disabled">
+        <div class="favorites-view__icon">
+            <div class="favorites-view__icon-container">
+                <span class="favorites-view__count  j-count" style="display: none;">0</span>
+                                    <svg class="icon icon--heart-outline"><use xlink:href="#icon-heart-outline"></use></svg>
+                            </div>
+        </div>
+            </a>
+    <div class="favorites-view__tooltip j-tooltip" >
+        Додайте товари до списку бажань    </div>
+</div>
+<script>
+    (function (w) {
+        w.INIT.add(function () {
+            var container = $('#uidd943e591fecdcb1e2b12b02e61d25ca8'),
+                allow = false,
+                link = container.find('.j-favorite-link'),
+                count = container.find('.j-count'),
+                tooltip = container.find('.j-tooltip');
+
+            link.off('click').on('click', function (e) {
+                if ($(this).hasClass('is-disabled')) {
+                    e.preventDefault();
+                }
+
+            });
+            FavoritesList.attachEventHandlers({
+                onChange: function () {
+                    var countVal = this.count * 1;
+                    allow = countVal !== 0;
+                    if (countVal === 0) {
+                        link.addClass('is-disabled');
+                        count.hide();
+                        tooltip.show();
+                    } else {
+                        link.removeClass('is-disabled');
+                        count.show();
+                        tooltip.hide();
+                    }
+                    count.html(countVal);
+                }
+            });
+            $(function() {
+                $('.favorites-view__tooltip').dropdown({
+                    trigger: '.favorites-view__button',
+                    visibleClass: 'is-visible',
+                    hoverClass: 'is-hover'
+                });
+            })
+        }, w.FavoritesList)
+    })(window);
+</script></div>                                                            <div class="header__section">
+    <div data-widget="userbar" data-skin="default">
+            <div class="userbar j-user-tabs">
+            <a class="userbar__button" data-fake-href="#j-popup-tab-auth" data-modal="#sign-in">
+                                    <svg class="icon icon--user-outline">
+                        <use xlink:href="#icon-user-outline"></use>
+                    </svg>
+                                            </a>
+        </div>
+        <script>
+            (function(w) {
+                w.INIT.add(function() {
+                    initTabs('.j-user-tabs a', {triggerMap: true});
+                })
+            })(window);
+        </script>
+    </div>
+
+<script>
+    (function(w) {
+        w.INIT.add(function() {
+            $('.userbar__dropdown').dropdown({
+                trigger: '.userbar__button',
+                parentNode: null,
+                visibleClass: 'is-visible',
+                hoverClass: 'is-hover'
+            });
+        }, w.$)
+    })(window);
+</script></div>                                                    </div>
+                                    </div>
+            </div>
+        </div>
+                    <div class="header__bottom">
+                <div class="header__wrapper">
+                    <div class="header__layout header__layout--bottom">
+                                                                            <div class="header__column header__column--center ">
+                                                                    <div class="header__section header__section--catalog-menu">
+    <div class="products-menu j-products-menu">
+    <ul class="products-menu__container">
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/beer/">
+                                                Пиво                    </a>
+                </div>
+                                    <div class="productsMenu-submenu __fluidGrid">
+        <ul class="productsMenu-submenu-w">
+        <!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/classic-traditional/">
+                                        <span class="productsMenu-submenu-t">Classic & Traditional</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/barleywine-strong-ale/">Barleywine & Strong Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/red-amber-brown-ale/">Red, Amber & Brown Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/english-scotch-ale/">English & Scotch Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/fruit-spiced-beer/">Fruit & Spiced Beer</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/belgian-ale/">Belgian Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/trappist-beer/">Trappist Beer</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/pilsner-lager-beer/">Pilsner & Lager Beer</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/smoked-beer/">Smoked Beer</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/wheat-beer/">Wheat Beer</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/india-pale-ale/">
+                                        <span class="productsMenu-submenu-t">IPA</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/ipa/">India Pale Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/pale-ale-ipl/">Pale Ale & IPL</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/micro-session-ipa/">Micro & Session IPA</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/red-black-ipa/">Red & Black IPA</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/dipa-imperial-ipa/">DIPA & Imperial IPA</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/hazy-new-england-ipa/">Hazy & New England IPA </a></li>
+                                                    <li class="productsMenu-list-i "><a href="/milkshake-fruit-ipa/">Milkshake & Fruit IPA</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/ipa-other/">IPA - Other</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/sour-wild-ale/">
+                                        <span class="productsMenu-submenu-t">Sour & Wild Ale</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/geuze/">Geuze & Lambic</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/fruit-lambic/">Fruit Lambic</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/flemish-ale/">Flemish Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/fruited-sour-ale/">Fruited Sour Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/berliner-weisse-gose/">Berliner Weisse & Gose</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/wild-ale/">Wild Ale</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/smoothie-pastry-sour/">Smoothie & Pastry Sour</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/tomato-vegetable-gose/">Tomato & Vegetable Gose</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/stout-porter/">
+                                        <span class="productsMenu-submenu-t">Stout & Porter</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/stout/">Stout</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/porter-baltic-porter/">Porter & Baltic Porter</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/imperial-stout-porter/">Imperial Stout & Porter</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/sweet-pastry-stout/">Sweet & Pastry Stout</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/spiced-stout-porter/">Spiced Stout & Porter</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/barrel-aged-stout-porter/">Barrel Aged Stout & Porter</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/experimental-beer/">
+                                        <span class="productsMenu-submenu-t">Experimental Beer</span>
+                </a>
+                            </li><!--
+                    -->
+        </ul>
+    </div>                    
+            </li>
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/cider-mead-other/">
+                                                Сидр та Мед                    </a>
+                </div>
+                                    <div class="productsMenu-submenu __fluidGrid">
+        <ul class="productsMenu-submenu-w">
+        <!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/dry-brut-cider/">
+                                        <span class="productsMenu-submenu-t">Сухий сидр</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/sweet-semi-sweet-cider/">
+                                        <span class="productsMenu-submenu-t">Солодкий та напівсолодкий сидр</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/fruit-cider/">
+                                        <span class="productsMenu-submenu-t">Фруктовий сидр</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/mead/">
+                                        <span class="productsMenu-submenu-t">Мед</span>
+                </a>
+                            </li><!--
+                    -->
+        </ul>
+    </div>                    
+            </li>
+                    <li class="products-menu__item __active j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/beer-collections/">
+                                                Колекцiї                    </a>
+                </div>
+                                    <div class="productsMenu-submenu __fluidGrid">
+        <ul class="productsMenu-submenu-w">
+        <!--
+                    --><li class="productsMenu-submenu-i __active">
+                <a class="productsMenu-submenu-a" href="/beer-sets/">
+                                        <span class="productsMenu-submenu-t">Подарунковi набори</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/gift-certificates/">Подарункові сертифікати</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/countries/">
+                                        <span class="productsMenu-submenu-t">Країни</span>
+                </a>
+                                    <ul class="productsMenu-list">
+                                                    <li class="productsMenu-list-i "><a href="/austria/">Австрія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/england/">Англія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/belgium/">Бельгiя </a></li>
+                                                    <li class="productsMenu-list-i "><a href="/bulgaria/">Болгарія </a></li>
+                                                    <li class="productsMenu-list-i "><a href="/brazil/">Бразилія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/denmark/">Данія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/estonia/">Естонія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/ireland/">Ірландія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/italy/">Італія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/spain/">Іспанія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/latvia/">Латвія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/netherlands/">Нідерланди</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/germany/">Німеччина</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/norway/">Норвегія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/poland/">Польща </a></li>
+                                                    <li class="productsMenu-list-i "><a href="/slovakia/">Словаччина</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/usa/">США</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/ukraine/">Український крафт</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/sweden/">Швеція</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/scotland/">Шотландія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/romania/">Румунія</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/france/">Франція</a></li>
+                                                    <li class="productsMenu-list-i "><a href="/sroatia/">Хорватія</a></li>
+                        
+                    </ul>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/beer-sets-bundles/">
+                                        <span class="productsMenu-submenu-t">Сети пива</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/sommelier-recommends/">
+                                        <span class="productsMenu-submenu-t">Pекомендація сомельє</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/german-traditional/">
+                                        <span class="productsMenu-submenu-t">Традиційне німецьке</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/belgian-traditional/">
+                                        <span class="productsMenu-submenu-t">Традиційне бельгійське</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/british-traditional/">
+                                        <span class="productsMenu-submenu-t">Традиційне британське</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/barrel-aged/">
+                                        <span class="productsMenu-submenu-t">Barrel Aged & BBA</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/strong-imperial/">
+                                        <span class="productsMenu-submenu-t">Strong & Imperial</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/untappd-4.20/">
+                                        <span class="productsMenu-submenu-t">Untappd 4.20+</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/beer-glasses-merch/">
+                                        <span class="productsMenu-submenu-t">Келихи для пива і Мерч</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/video-degustation/">
+                                        <span class="productsMenu-submenu-t">Відео дегустації</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/last-call/">
+                                        <span class="productsMenu-submenu-t">Last Call!</span>
+                </a>
+                            </li><!--
+                    -->
+        </ul>
+    </div>                    
+            </li>
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/non-alcohol/">
+                                                Non-Alcohol                    </a>
+                </div>
+                                    <div class="productsMenu-submenu __fluidGrid">
+        <ul class="productsMenu-submenu-w">
+        <!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/beer-and-hop-water/">
+                                        <span class="productsMenu-submenu-t">Пиво та Hop Water</span>
+                </a>
+                            </li><!--
+                    --><li class="productsMenu-submenu-i ">
+                <a class="productsMenu-submenu-a" href="/lemonades-and-sparkling-water/">
+                                        <span class="productsMenu-submenu-t">Лимонади та газована вода</span>
+                </a>
+                            </li><!--
+                    -->
+        </ul>
+    </div>                    
+            </li>
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/new-arrivals/">
+                                                Новинки                    </a>
+                </div>
+                                                        
+            </li>
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/craft-up-to-199/">
+                                                Імпорт до 199                    </a>
+                </div>
+                                                        
+            </li>
+                    <li class="products-menu__item j-submenu-item">
+                <div class="products-menu__title">
+                    <a class="products-menu__title-link" href="/sale/">
+                                                SALE!                    </a>
+                </div>
+                                                        
+            </li>
+            </ul>
+</div>
+<script>
+  (function (w) {
+    w.INIT.add(function () {
+      $('.j-products-menu').productsMenu({
+        parent: $('.header__layout'),
+        onHover: function (e, $item) {
+          var $item = $item,
+              itemWidth = $item.width(),
+              $arrow = $item.find('.productsMenu-submenuArrow'),
+              $submenu = $item.find('.productsMenu-submenu');
+
+          if (!$submenu.length) {
+            return;
+          }
+
+          if (!$arrow.length) {
+            $arrow = $('<div class="productsMenu-submenuArrow" />').appendTo($submenu);
+          }
+
+          $arrow.css('left', $item.offset().left - $submenu.offset().left + itemWidth / 2);
+        }
+      });
+    }, w.$)
+  })(window);
+</script></div>                                                            </div>
+                                                                    </div>
+                </div>
+            </div>
+            </div>
+</div>        <main id="main" class="main">
+            <div class="wrapper">
+    <div class="catalog">
+                            <div class="catalog__top-row">
+                                    <div class="catalog__top-col catalog__top-col--side">
+                                            </div>
+                                                    <div class="catalog__top-col catalog__top-col--center">
+                                                    <nav class="breadcrumbs" itemscope itemtype="https://schema.org/BreadcrumbList">
+                        <div class="breadcrumbs-i" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <a itemprop="item" href="https://beerfreak.org/"><span
+                        itemprop="name">Головна</span></a>
+            <meta itemprop="position" content="1">
+                            <svg class="icon icon--breadcrumbs-arrow"><use xlink:href="#icon-breadcrumbs-arrow"></use></svg>
+            
+        </div>
+                    <div class="breadcrumbs-i" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <a itemprop="item" href="https://beerfreak.org/beer-collections/"><span
+                        itemprop="name">Колекцiї</span></a>
+            <meta itemprop="position" content="2">
+                            <svg class="icon icon--breadcrumbs-arrow"><use xlink:href="#icon-breadcrumbs-arrow"></use></svg>
+            
+        </div>
+                        <div class="breadcrumbs-i" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <span itemprop="item" content="https://beerfreak.org/beer-sets/"><span
+                    itemprop="name">Подарунковi набори</span></span>
+            <meta itemprop="position" content="3">
+        </div>
+    </nav>                                                    <h1 class="main-h" id="j-catalog-header" data-catalog-view-block="heading">Подарунковi набори</h1>                                            </div>
+                                                    <div class="catalog__top-col catalog__top-col--right">
+                                                    <div class="catalog__controls" data-catalog-view-block="controls">
+            <div class="catalog__controls-item" data-catalog-view-block="sorting-controls">
+            <div class="catalog-sorting">
+    <div class="catalog-sorting__title j-ajax-ignore">Сортування:</div>
+    <div class="catalog-sorting__list" id="uid22c634bd06f962d16305a30c80daeeb0">
+
+                                    <span
+                    class="catalog-sorting__item is-active j-catalog-sorting-button"
+                    role="button"
+                >за популярністю</span>
+                                                <span
+                    class="catalog-sorting__item j-catalog-sorting-button"
+                    role="button"
+                    data-sort-href="/beer-sets/filter/sort_price+=ASC/"
+                >Цiна &#x2191</span>
+                                                <span
+                    class="catalog-sorting__item j-catalog-sorting-button"
+                    role="button"
+                    data-sort-href="/beer-sets/filter/sort_price1+=DESC/"
+                >Цiна &#x2193</span>
+                                                <span
+                    class="catalog-sorting__item j-catalog-sorting-button"
+                    role="button"
+                    data-sort-href="/beer-sets/filter/sort_title=ASC/"
+                >за назвою</span>
+                        </div>
+</div>        </div>
+                <div class="catalog__controls-item" data-catalog-view-block="viewType-controls">
+            <div class="catalog-type">
+        <div class="catalog-type__title j-ajax-ignore">Відображення:</div>
+        <div class="catalog-type__list" id="uiddace81156c75677974a9751b1cc84fa2">
+                            <span
+                    role="button"
+                    data-layout-href="/beer-sets/filter/view_type=grid_view/"
+                    class="catalog-type__item is-active j-layout-toggle-button"
+                >
+                                    <svg class="icon icon--sort-grid">
+                        <use xlink:href="#icon-sort-grid"></use>
+                    </svg>
+                                </span>
+                            <span
+                    role="button"
+                    data-layout-href="/beer-sets/filter/view_type=list_view/"
+                    class="catalog-type__item j-layout-toggle-button"
+                >
+                                    <svg class="icon icon--sort-list">
+                        <use xlink:href="#icon-sort-list"></use>
+                    </svg>
+                                </span>
+                    </div>
+    </div>        </div>
+    </div>                                            </div>
+                            </div>
+                <div class="catalog__middle j-catalog-sticker-parent">
+            <div class="catalog-loader" id="j-catalog-loader"></div>
+            <script>
+              (function(w) {
+                w.INIT.add(function() {
+                  CatalogBuilder.loaderSelector = '#j-catalog-loader';
+                }, w.CatalogBuilder)
+              })(window);
+            </script>
+
+                        <div class="catalog__middle-col catalog__middle-col--content catalog__middle-col--shifted-right">
+                <div class="catalog__content">
+                        <div data-catalog-view-block="seoText"></div>
+    <ul class="catalogGrid catalog-grid catalog-grid--s catalog-grid--sidebar" 
+        id="uid78ffb33cdfe110302d42f550de38fcf6" 
+        data-catalog-view-block="products" 
+        itemscope itemtype="https://schema.org/ItemList">
+        <!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="9714">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/beerua-by-beerfreak/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Набір beerUA by beerfreak (ТІЛЬКИ ДЛЯ ЗАМОВЛЕНЬ ЗА КОРДОН)'  class='catalogCard-img' width='310' height='465' src='/content/images/15/310x465l85nn0/beerua-by-beerfreak-76101615269857.png' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/beerua-by-beerfreak/'
+                           title="Набір beerUA by beerfreak (ТІЛЬКИ ДЛЯ ЗАМОВЛЕНЬ ЗА КОРДОН)">
+                            Набір beerUA by beerfreak (ТІЛЬКИ ДЛЯ ЗАМОВЛЕНЬ ЗА КОРДОН)                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        0 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-9714"
+    data-id="9714"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="49"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-9714"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra j-download-required __loading">
+                    <div class="loader"></div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="1" />
+            <meta itemprop="url" content="/beerua-by-beerfreak/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="3943">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-set-import-lux/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Люксовий подарунковий набір імпортного крафтового пива!'  class='catalogCard-img' width='310' height='310' src='/content/images/44/310x310l85nn0/luksoviy-podarunkoviy-nabir-importnogo-kraftovogo-piva-70963168268393.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-set-import-lux/'
+                           title="Люксовий подарунковий набір імпортного крафтового пива!">
+                            Люксовий подарунковий набір імпортного крафтового пива!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        3 499 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-3943"
+    data-id="3943"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="85"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-3943"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uid7683c6abcfbe38fd610a2ce390d00a46-3943"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uid7683c6abcfbe38fd610a2ce390d00a46" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uid7683c6abcfbe38fd610a2ce390d00a46-3943').tooltip({
+                content: $('#tooltip-uid7683c6abcfbe38fd610a2ce390d00a46'),
+                container: $('#tooltip-uid7683c6abcfbe38fd610a2ce390d00a46').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uid7683c6abcfbe38fd610a2ce390d00a46').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="2" />
+            <meta itemprop="url" content="/gift-set-import-lux/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="3226">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-set-import-premium/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Преміум подарунковий набір імпортного крафтового пива!'  class='catalogCard-img' width='310' height='310' src='/content/images/27/310x310l85nn0/pr-94360227292496.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            <div class="productSticker __flag">
+                    <div class="productSticker-item __popular" data-tooltip="hint-uid99c4e1cf188167255668290528402acc"
+            style="color: #ffff00"        >
+            <div class="productSticker-container">
+                <div class="productSticker-content"
+                    style="color: #000000"                >
+                    Подарунки                </div>
+            </div>
+                    </div>            </div>
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-set-import-premium/'
+                           title="Преміум подарунковий набір імпортного крафтового пива!">
+                            Преміум подарунковий набір імпортного крафтового пива!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        1 999 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-3226"
+    data-id="3226"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="89"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-3226"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uidcb151ceb0bcb7200da4f9fb802d4789c-3226"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uidcb151ceb0bcb7200da4f9fb802d4789c" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uidcb151ceb0bcb7200da4f9fb802d4789c-3226').tooltip({
+                content: $('#tooltip-uidcb151ceb0bcb7200da4f9fb802d4789c'),
+                container: $('#tooltip-uidcb151ceb0bcb7200da4f9fb802d4789c').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uidcb151ceb0bcb7200da4f9fb802d4789c').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="3" />
+            <meta itemprop="url" content="/gift-set-import-premium/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="2622">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-set-import/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Подарунковий набір імпортного крафтового пива!'  class='catalogCard-img' width='310' height='310' src='/content/images/23/310x310l85nn0/gift-set-import-18456315660222.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            <div class="productSticker __flag">
+                    <div class="productSticker-item __popular" data-tooltip="hint-uid09af0a4119e383b691994cfbbc6f5b73"
+            style="color: #ffff00"        >
+            <div class="productSticker-container">
+                <div class="productSticker-content"
+                    style="color: #000000"                >
+                    Подарунки                </div>
+            </div>
+                    </div>            </div>
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-set-import/'
+                           title="Подарунковий набір імпортного крафтового пива!">
+                            Подарунковий набір імпортного крафтового пива!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        1 399 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-2622"
+    data-id="2622"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="98"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-2622"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uida6950daa800baa6f34b7380c72f654ec-2622"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uida6950daa800baa6f34b7380c72f654ec" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uida6950daa800baa6f34b7380c72f654ec-2622').tooltip({
+                content: $('#tooltip-uida6950daa800baa6f34b7380c72f654ec'),
+                container: $('#tooltip-uida6950daa800baa6f34b7380c72f654ec').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uida6950daa800baa6f34b7380c72f654ec').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="4" />
+            <meta itemprop="url" content="/gift-set-import/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="2574">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/craft-beer-gift-box/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Подарунковий набір українського крафтового пива!'  class='catalogCard-img' width='310' height='310' src='/content/images/25/310x310l85nn0/craft-beer-gift-box-59841867011061.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            <div class="productSticker __flag">
+                    <div class="productSticker-item __popular" data-tooltip="hint-uidb38c60b75ee7c6d8330a62b7b0c4921b"
+            style="color: #ffff00"        >
+            <div class="productSticker-container">
+                <div class="productSticker-content"
+                    style="color: #000000"                >
+                    Подарунки                </div>
+            </div>
+                    </div>            </div>
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/craft-beer-gift-box/'
+                           title="Подарунковий набір українського крафтового пива!">
+                            Подарунковий набір українського крафтового пива!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        1 199 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-2574"
+    data-id="2574"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="84"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-2574"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uid232b5a243d051369151dc2bafb7c9ec9-2574"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uid232b5a243d051369151dc2bafb7c9ec9" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uid232b5a243d051369151dc2bafb7c9ec9-2574').tooltip({
+                content: $('#tooltip-uid232b5a243d051369151dc2bafb7c9ec9'),
+                container: $('#tooltip-uid232b5a243d051369151dc2bafb7c9ec9').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uid232b5a243d051369151dc2bafb7c9ec9').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="5" />
+            <meta itemprop="url" content="/craft-beer-gift-box/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="2664">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/small-gift-set-ukr-craft-beer/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Маленький подарунковий набір українського крафтового пива!'  class='catalogCard-img' width='310' height='310' src='/content/images/15/310x310l85nn0/small-gift-set-ukr-craft-beer-38959848592692.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            <div class="productSticker __flag">
+                    <div class="productSticker-item __popular" data-tooltip="hint-uidada398505bd78da3e146e842543bee45"
+            style="color: #ffff00"        >
+            <div class="productSticker-container">
+                <div class="productSticker-content"
+                    style="color: #000000"                >
+                    Подарунки                </div>
+            </div>
+                    </div>            </div>
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/small-gift-set-ukr-craft-beer/'
+                           title="Маленький подарунковий набір українського крафтового пива!">
+                            Маленький подарунковий набір українського крафтового пива!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        799 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-2664"
+    data-id="2664"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="82"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-2664"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uid44757651f8ce92d2b5994906fb20a22d-2664"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uid44757651f8ce92d2b5994906fb20a22d" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uid44757651f8ce92d2b5994906fb20a22d-2664').tooltip({
+                content: $('#tooltip-uid44757651f8ce92d2b5994906fb20a22d'),
+                container: $('#tooltip-uid44757651f8ce92d2b5994906fb20a22d').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uid44757651f8ce92d2b5994906fb20a22d').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="6" />
+            <meta itemprop="url" content="/small-gift-set-ukr-craft-beer/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="2645">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-wrapping/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Подарункове пакування замовлення!'  class='catalogCard-img' width='310' height='310' src='/content/images/46/310x310l85nn0/pidarunkove-pakuvannya-21802528322274.jpg' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-wrapping/'
+                           title="Подарункове пакування замовлення!">
+                            Подарункове пакування замовлення!                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        89 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-2645"
+    data-id="2645"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="25"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-2645"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra j-download-required __loading">
+                    <div class="loader"></div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="7" />
+            <meta itemprop="url" content="/gift-wrapping/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="1655">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-voucher-1000/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Сертифікат 1000'  class='catalogCard-img' width='310' height='465' src='/content/images/6/310x465l85nn0/gift-voucher-1000-80129031244258.png' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-voucher-1000/'
+                           title="Сертифікат 1000">
+                            Сертифікат 1000                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        1 000 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-1655"
+    data-id="1655"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="14"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-1655"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra j-download-required __loading">
+                    <div class="loader"></div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="8" />
+            <meta itemprop="url" content="/gift-voucher-1000/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="1656">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-voucher-2000/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Сертифікат 2000'  class='catalogCard-img' width='310' height='465' src='/content/images/7/310x465l85nn0/gift-voucher-2000-27000962944122.png' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-voucher-2000/'
+                           title="Сертифікат 2000">
+                            Сертифікат 2000                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        2 000 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-1656"
+    data-id="1656"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="14"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-1656"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra j-download-required __loading">
+                    <div class="loader"></div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="9" />
+            <meta itemprop="url" content="/gift-voucher-2000/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="1657">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-voucher-3000/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Сертифікат 3000'  class='catalogCard-img' width='310' height='465' src='/content/images/8/310x465l85nn0/gift-voucher-3000-86726420146890.png' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-voucher-3000/'
+                           title="Сертифікат 3000">
+                            Сертифікат 3000                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        3 000 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-1657"
+    data-id="1657"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="30"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-1657"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra">
+                    <div class="catalogCard-toolbar j-catalog-card-toolbar">
+                    <div class="catalogCard-toolbar-item ">
+                <button
+        class="favorites-button j-widget-favorites-add"
+        data-skin="catalog"
+        data-button-size="s"
+        data-show-button-text="1"
+        id="uid64891f116bcf85fc37affbc8bcb55232-1657"
+        title="Додати товар в список бажань"
+    >
+        <span class="favorites-button__icon favorites-button__icon--s">
+            <svg class="icon icon--heart"><use xlink:href="#icon-heart-stroke"></use></svg>
+        </span>
+                    <div class="favorites-button__text">В бажання</div>
+            </button>
+            <div id="tooltip-uid64891f116bcf85fc37affbc8bcb55232" class="tooltip tooltip--left j-favourite-tooltip-unauthorized">
+            <div class="tooltip__wrapper">
+                <div class="tooltip__text text"><a href="#" class="a-pseudo" onclick="Modal.open('#sign-in'); return false;">Увійдіть на сайт</a> щоб <br> додати товар в список бажань</div>
+            </div>
+        </div>
+        <script>
+          (function(w) {
+            w.INIT.add(function() {
+              $('#uid64891f116bcf85fc37affbc8bcb55232-1657').tooltip({
+                content: $('#tooltip-uid64891f116bcf85fc37affbc8bcb55232'),
+                container: $('#tooltip-uid64891f116bcf85fc37affbc8bcb55232').parents('.j-catalog-card-toolbar'),
+                trigger: 'hover',
+                placement: 'top',
+                hideOnClick: true,
+                popperOptions: {
+                  modifiers: {
+                    preventOverflow: {
+                      boundariesElement: $('#tooltip-uid64891f116bcf85fc37affbc8bcb55232').parents('.j-catalog-card-toolbar')[0],
+                      priority: ['left', 'bottom'],
+                      padding: 7
+                    }
+                  }
+                }
+              });
+            }, w.$)
+          })(window);
+        </script>            </div>
+                    </div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="10" />
+            <meta itemprop="url" content="/gift-voucher-3000/" />
+        </li><!--
+            --><li class="catalog-grid__item" itemprop="itemListElement" itemscope itemtype="https://schema.org/ListItem">
+            <div class="catalogCard j-catalog-card">
+                <div class="catalogCard-box j-product-container" data-id="1658">
+        <div class="catalogCard-main">
+            <div class="catalogCard-main-b">
+                <div class="catalogCard-view">
+                                        <a href='/gift-voucher-500/'
+                       class="catalogCard-image ">
+                        <div class="catalogCard-image-i">
+                                                                                        <img alt='Сертифікат 500'  class='catalogCard-img' width='310' height='465' src='/content/images/9/310x465l85nn0/gift-voucher-500-49752066052661.png' >
+                                                    </div>
+                                                                                                </a>
+                                            
+                                    </div>
+                <div class="catalogCard-info">
+                                                            <div class="catalogCard-title">
+                        <a href='/gift-voucher-500/'
+                           title="Сертифікат 500">
+                            Сертифікат 500                        </a>
+                    </div>
+                    <div class="catalogCard-purchase  ">
+                            <div class="catalogCard-price">
+        500 грн    </div>                                        <div class="catalogCard-order">
+                                                                        <div
+    class="counter counter j-buy-button-counter"
+    id="j-buy-button-counter-1658"
+    data-id="1658"
+    data-skin="small"
+    data-gift="0"
+>
+    <div class="counter__container">
+        <button class="counter-btn __minus
+                    j-product-decrease __disabled"
+        >
+            <svg class="icon icon--minus"><use xlink:href="#icon-minus"></use></svg>
+        </button>
+        <div class="counter-input">
+            <input
+                class="counter-field j-product-counter
+                    "
+                type="number"
+                value="1"
+                data-max="24"
+                data-step="1"
+                data-min="1"
+            >
+        </div>
+        <button class="counter-btn __plus
+                    j-product-increase                    "
+        >
+            <svg class="icon icon--plus"><use xlink:href="#icon-plus"></use></svg>
+        </button>
+    </div>
+</div>                            <a
+        class="btn __special j-buy-button-add"
+        data-skin="small"
+        data-quantity="1"
+        id="j-buy-button-widget-1658"
+        data-gift="0"
+        data-cartProductType="product"
+        href="javascript:void(0);"
+    >
+        <span class="btn-content">
+            <svg class="icon icon--basket"><use xlink:href="#icon-basket"></use></svg>
+        </span>
+    </a>                                                                                </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+                                    <div class="catalogCard-extra j-download-required __loading">
+                    <div class="loader"></div>
+                </div>
+                        </div>            </div>
+            <meta itemprop="position" content="11" />
+            <meta itemprop="url" content="/gift-voucher-500/" />
+        </li><!--
+        -->
+    </ul>
+<div class="pagination-container" data-catalog-view-block="pagination">
+    <script>
+  (function (w) {
+    w.INIT.add(function() {
+      CatalogBuilder.paginationSelector && CatalogBuilder.paginationSelector.push('#uid21c7999f3d41ee56d0eceb7ee33d8859');
+    }, w.CatalogBuilder)
+  })(window);
+</script>
+
+    <div id="uid21c7999f3d41ee56d0eceb7ee33d8859"></div></div>
+                </div>
+            </div><!-- /.layout-main-->
+                            <div class="catalog__middle-col catalog__middle-col--left j-catalog-sticker-column">
+                    <aside class="catalog__sidebar ">
+                                                    <div class="catalog__group catalog__group--sidebar">
+            <nav class="filterMenu">
+                <ul class="filterMenu-container">
+                                                <li class="filterMenu-i">
+                        <span class="filterMenu-a __active">Подарунковi набори</span>
+                        <ul class="filterMenu-lv2">
+                                    <li class="filterMenu-lv2-i">
+                    <a class="filterMenu-a" href="/gift-certificates/">Подарункові сертифікати</a>
+                </li>
+                        </ul>                    </li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/countries/">Країни</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/beer-sets-bundles/">Сети пива</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/sommelier-recommends/">Pекомендація сомельє</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/german-traditional/">Традиційне німецьке</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/belgian-traditional/">Традиційне бельгійське</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/british-traditional/">Традиційне британське</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/barrel-aged/">Barrel Aged & BBA</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/strong-imperial/">Strong & Imperial</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/untappd-4.20/">Untappd 4.20+</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/beer-glasses-merch/">Келихи для пива і Мерч</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/video-degustation/">Відео дегустації</a></li>
+                                                                <li class="filterMenu-i"><a class="filterMenu-a" href="/last-call/">Last Call!</a></li>
+                                    </ul>
+    </nav>            <div class="filter-container" data-catalog-view-block="group.2">
+    <section class="filter __listScroll" id="uidf2d2431a904f08a432ab4ac1cbb425e1" data-scroll-visible="15">
+                            <div
+        class="filter-section j-filter-section j-filter-collapsing"
+        data-filter-id="6213"
+    >
+        <div class="filter-section-h">
+                            <div class="filter-section-trigger j-filter-collapse-trigger">
+                    <svg class="icon icon--arrow-down"><use xlink:href="#icon-arrow-down"></use></svg>
+                    Країна                </div>
+                                </div>
+        <div class="filter-list  pretty-scroll j-filter-list">
+            <ul class="filter-lv1">
+                                                            <li class="filter-lv1-i">
+                            <a class="filter-check"
+                                rel="nofollow" data-fake-href="/beer-sets/filter/strana=14/"                            >
+                                <span class="checkbox"></span>
+                                <span class="label">
+                                    <span class="filter-title">Україна</span><!--
+                                 --><!--
+                                    --><sup class="filter-count">5</sup>
+                                                                    </span>
+                            </a>
+                        </li>
+                                                </ul>
+        </div>
+    </div>                    <div class="filter-section">
+    <form class="j-number-form" data-url="/beer-sets/filter/price=min-max/" data-filer-name="price">
+        
+        <div class="filter-section-h">
+            Ціна, грн                    </div>
+        <div class="filter-price">
+            <div class="filter-price-inputs">
+                <input
+                    name="filter[price][min]"
+                    type="number"
+                    value="0"
+                    min="0"
+                    max="3499"
+                    class="filter-price-field field"
+                    id="uidb547f6145116d6756300c8fa7dda9e6b_min"
+                >
+                <i class="filter-price-sep"></i>
+                <input
+                    name="filter[price][max]"
+                    type="number"
+                    value="3499"
+                    min="0"
+                    max="3499"
+                    class="filter-price-field field"
+                    id="uidb547f6145116d6756300c8fa7dda9e6b_max"
+                >
+                <button class="btn __small" type="submit"><span class="btn-content">ОК</span></button>
+            </div>
+            <div class="filter-price-tracker" id="uidb547f6145116d6756300c8fa7dda9e6b"></div>
+        </div>
+    </form>
+</div>
+<script>
+  (function(w) {
+    w.INIT.add(function() {
+      init_number_filter(
+        "uidb547f6145116d6756300c8fa7dda9e6b",
+        0,
+        3499,
+        0,
+        3499,
+        false      );
+    }, w.init_number_filter)
+  })(window);
+</script>                    <div
+        class="filter-section j-filter-section j-filter-collapsing"
+        data-filter-id="5382"
+    >
+        <div class="filter-section-h">
+                            <div class="filter-section-trigger j-filter-collapse-trigger">
+                    <svg class="icon icon--arrow-down"><use xlink:href="#icon-arrow-down"></use></svg>
+                    Бренд                </div>
+                                </div>
+        <div class="filter-list  pretty-scroll j-filter-list">
+            <ul class="filter-lv1">
+                                                            <li class="filter-lv1-i">
+                            <a class="filter-check"
+                                rel="nofollow" data-fake-href="/beer-sets/filter/brand=340/"                            >
+                                <span class="checkbox"></span>
+                                <span class="label">
+                                    <span class="filter-title">BEERFREAK (Україна)</span><!--
+                                 --><!--
+                                    --><sup class="filter-count">11</sup>
+                                                                    </span>
+                            </a>
+                        </li>
+                                                </ul>
+        </div>
+    </div>            </section>
+
+    <script>
+      (function (w) {
+        w.INIT.add(function () {
+          CatalogBuilder.filterSelector = '#uidf2d2431a904f08a432ab4ac1cbb425e1';
+          CatalogBuilder.attachEventHandler('onFilterLinkClick', function (obj) {
+            if (obj.is('.filter-check') && !obj.data('loading')) {
+              obj.data('loading', true);
+              obj.append('<div class="loader"></div>');
+            }
+          });
+        }, w.CatalogBuilder)
+      })(window);
+    </script></div>
+    </div>
+                                            </aside>
+                </div>
+                                </div><!-- /.layout-->
+                  <script>
+            (function(w) {
+              w.INIT.add(function() {
+                const stickySidebar = new StickySidebar('.j-catalog-sticker-column', {
+                  containerSelector: '.j-catalog-sticker-parent',
+                  innerWrapperSelector: '.catalog__sidebar',
+                  topSpacing: 20,
+                  bottomSpacing: 20
+                });
+
+                const updateStickySidebar = function () {
+                  stickySidebar.updateSticky();
+                }
+
+                const attachExpandEvents = function () {
+                  $('.j-filter-section').on('opened closed toggled', updateStickySidebar);
+                  $('.j-seo-text-expander').on('transitionend', updateStickySidebar);
+                }
+
+                CatalogBuilder.attachEventHandlers({
+                  onChange: function () {
+                    updateStickySidebar();
+                    attachExpandEvents();
+                  }
+                });
+
+                attachExpandEvents();
+              }, w.StickySidebar)
+            })(window);
+          </script>
+        
+    </div>
+    </div><!-- /.wrapper-->
+
+                    <div id="uidb643d256fc1ec077f7a8a106e3efe110"></div>
+        <script>
+            document.addEventListener('DOMContentLoaded', function () {
+                sendAjax("\/_widget\/seen_items\/default\/", null, function (status, response) {
+                    var obj = document.getElementById('uidb643d256fc1ec077f7a8a106e3efe110');
+                    if (status === 'OK') {
+                        var fragment = document
+                            .createRange()
+                            .createContextualFragment(response.html);
+                        obj.replaceWith(fragment);
+                    }
+                });
+            });
+        </script>
+            
+<script>
+  (function(w) {
+    w.INIT.add(function() {
+      CatalogBuilder.init();
+    }, w.CatalogBuilder)
+  })(window);
+</script>        </main>
+        <footer class="footer">
+    <div class="footer__container">
+        <div class="footer__wrapper wrapper">
+            <div class="footer__columns">
+                                    <div class="footer__col footer__col--double">
+                        <div class="footer__col-wrap">
+                                                            <div class="footer__logo">
+                    <a class="footer__logo-link" href='/'>
+                <img alt='BEERFREAK'  class='footer__logo-img' width='342' height='200' src='/content/images/2/342x200l90nn0/24077375232849.jpg'  srcset="
+                                /content/images/2/342x200l90nn0/24077375232849.jpg 1x,
+                                /content/images/2/464x271l90nn0/24077375232849.jpg 2x
+                                ">            </a>
+            </div>                                                            <div class="footer__copyright">
+    </div>                                                                                                                        <div class="footer__mobile-version">
+    <a href="https://beerfreak.org/beer-sets/.?v=mobile" class="footer__link" rel="nofollow">
+        <svg class="icon icon--mobile"><use xlink:href="#icon-mobile"></use></svg>
+        Мобільна версія    </a>
+</div>                                                    </div>
+                    </div>
+                                                                    <div class="footer__col ">
+                        <div class="footer__col-wrap">
+                                                            <div class="footer__block">
+    <div class="footer__heading">Каталог</div>
+    <ul class="footer__menu">
+        <li class="footer__menu-item "><a href="/beer/" class="footer__link">Пиво</a></li><li class="footer__menu-item "><a href="/cider-mead-other/" class="footer__link">Сидр та Мед</a></li><li class="footer__menu-item "><a href="/beer-collections/" class="footer__link">Колекцiї</a></li><li class="footer__menu-item "><a href="/non-alcohol/" class="footer__link">Non-Alcohol</a></li><li class="footer__menu-item "><a href="/new-arrivals/" class="footer__link">Новинки</a></li><li class="footer__menu-item "><a href="/craft-up-to-199/" class="footer__link">Імпорт до 199</a></li><li class="footer__menu-item "><a href="/sale/" class="footer__link">SALE!</a></li>    </ul></div>                                                    </div>
+                    </div>
+                                                    <div class="footer__col ">
+                        <div class="footer__col-wrap">
+                                                            <div class="footer__block">
+    <div class="footer__heading">Клієнтам</div>
+    <ul class="footer__menu">
+        <li class="footer__menu-item "><a href="#" class="footer__link"  data-modal="#sign-in">Вхід до кабінету</a></li><li class="footer__menu-item "><a href="/catalog/" class="footer__link">Каталог</a></li><li class="footer__menu-item "><a href="/information/" class="footer__link">Iнформація</a></li><li class="footer__menu-item "><a href="/about/" class="footer__link">Про нас</a></li>    </ul></div>                                                            <div class="footer__block">
+    Ми в соцмережах    <div class="footer__social">
+        <a class="footer__social-icon" data-fake-href="https://www.instagram.com/beerfreakorg" rel="nofollow" target="_blank" title="Мы в инстаграмме"><svg class="icon-ig"><use xlink:href="#icon-ig"></use></svg></a>
+            <a class="footer__social-icon" data-fake-href="https://t.me/beerfreakorg" rel="nofollow" target="_blank" title="Telegram"><svg class="icon-tg"><use xlink:href="#icon-tg"></use></svg></a>    </div>
+</div>                                                    </div>
+                    </div>
+                                                    <div class="footer__col footer__col--double">
+                        <div class="footer__col-wrap">
+                                                            <div class="footer__heading">Контактна інформація</div>
+<div class="footer__contacts footer__contacts--columns">
+    <div class="footer__contacts-group">
+                    <svg class="icon icon--phone">
+                <use xlink:href="#icon-phone"></use>
+            </svg>
+                            <div class="footer__contacts-item">
+                                <a data-fake-href="tel:098-64-55-991" class="footer__contacts-item-link j-phone-item"
+                   data-index="1">
+                    098-64-55-991                </a>
+            </div>
+                            <a class="footer__link" href="#" data-modal="#call-me">Передзвонити вам?</a>
+            <section id="call-me" class="popup __password" style="display: none;">
+    <div class="popup-block login">
+        <a class="popup-close" onclick="Modal.close();" href="javascript:;">
+            <svg class="icon icon--cross">
+                <use xlink:href="#icon-cross"></use>
+            </svg>
+        </a>
+        <div class="popup-header">
+            <div class="popup-title">Передзвонити вам?</div>
+        </div>
+        <div class="popup-body j-text">
+            <div
+                class="popup-msg j-callback-message">Вкажіть ваш номер телефону та ім'я. Ми зателефонуємо вам найближчим часом.</div>
+            <form method="post" data-action="/_widget/contacts/submit-callback/">
+                <dl class="form">
+                    <dt class="form-head">Ім'я</dt>
+                    <dd class="form-item">
+                        <input
+                            type="text"
+                            value=""
+                            class="field j-focus" name="form[title]"
+                        >
+                    </dd>
+                    <dt class="form-head">Телефон</dt>
+                    <dd class="form-item">
+                        <input type="text" value="" class="field j-phone"
+                               name="form[phone]">
+                        <input type="hidden" value="/beer-sets/" name="form[url]">
+                    </dd>
+                    <dd class="form-item __submit">
+                        <span class="btn __special">
+                            <span class="btn-content">Надіслати</span>
+                            <input type="submit" value="Надіслати" class="btn-input">
+                        </span>
+                    </dd>
+                </dl>
+                <script>(function(w) {w.INIT.add(function() {(function ($) {var i=$('<input>').attr({name:"CSRFToken",type:'hidden'}).val("fa4ae9c571cad7d200b0ea5103a3e7bc7dfbd0a5");$("#call-me form").append(i);})(jQuery)}, 'jQuery' in window)})(window)</script>            </form>
+        </div>
+    </div>
+</section>
+<script>
+    (function (w) {
+        w.INIT.add(function () {
+            ActiveForm.init($('#call-me').find('form'), {
+                'submitSuccess': function (response) {
+                    $('#call-me').find('.j-text').html(response.message);
+                    triggerMarketingEvent('callback_submit', [null, response.eventId]);
+                }
+            }, 'form');
+        }, w.ActiveForm)
+    })(window);
+</script>            </div>
+    <div class="footer__contacts-group">
+                                                    <div class="footer__contacts-item">
+                                            <svg class="icon icon--telegram">
+                            <use xlink:href="#icon-telegram"></use>
+                        </svg>
+                                        <a data-fake-href="tg://resolve?domain=Beer_Freak_Bot" class="footer__link">
+                        Написати нам                    </a>
+                </div>
+                                                                <div class="footer__contacts-item">
+                                            <svg class="icon icon--email">
+                            <use xlink:href="#icon-email"></use>
+                        </svg>
+                                        <a data-fake-href="mailto:hello%40beerfreak.org" class="footer__link">
+                        <span class="__cf_email__" data-cfemail="741c1118181b3416111106120611151f5a1b0613">[email&#160;protected]</span>                    </a>
+                </div>
+                        </div>
+    <div class="footer__contacts-group">
+        <svg class="icon icon--location">
+            <use xlink:href="#icon-location"></use>
+        </svg>
+                    <div class="footer__address">Львів, Україна
+</div>
+                            <a class="footer__link" href="/contacts/">Мапа проїзду</a>
+            </div></div>                                                    </div>
+                    </div>
+                                            </div>
+        </div>
+    </div>
+</footer>
+
+<div class="upButton" id="upButton">
+    <a class="upButton-btn" href="#">
+        <span class="upButton-btn__hint">Вгору</span>
+        <svg class="icon icon--arrow-up"><use xlink:href="#icon-arrow-up"></use></svg>
+    </a>
+</div>
+    </div>
+        <section id="sign-in" class="popup __login" style="display: none;">
+        <div class="popup-block login">
+            <a class="popup-close" onclick="Modal.close();" href="javascript:;">
+                <svg class="icon icon--cross"><use xlink:href="#icon-cross"></use></svg>
+            </a>
+            <div class="login-header">
+                <div class="login-tabs j-auth-tabs">
+                    <a href="#j-popup-tab-auth" class="login-tabs-i __active">
+                        <span class="login-tabs-txt">Вхід</span>
+                    </a>
+                    <a href="#j-popup-tab-signup" class="login-tabs-i">
+                        <span class="login-tabs-txt">Реєстрація</span>
+                    </a>
+                </div>
+                <div class="socLogin">
+    <div class="socLogin-h">Увійти за допомогою</div>
+    <div class="socLogin-b">
+                                                <a rel="nofollow"
+                   data-fake-href="/security/OAuthRedirect/?soc=facebook&saveCart=0"
+                   onclick="OAuth.setScenario('default'); showPopup(this.href, 997, 490); return false;"
+                   class="socialIcon">
+                    <svg class="icon icon--fb">
+                        <use xlink:href="#icon-fb"></use>
+                    </svg>
+                </a>
+                                                                                                <a rel="nofollow"
+                   data-fake-href="/security/OAuthRedirect/?soc=google&saveCart=0"
+                   onclick="OAuth.setScenario('default'); showPopup(this.href, 997, 490); return false;"
+                   class="socialIcon">
+                    <svg class="icon icon--gp">
+                        <use xlink:href="#icon-gp"></use>
+                    </svg>
+                </a>
+                                                                                                <a rel="nofollow"
+                   data-fake-href="/security/OAuthRedirect/?soc=linked_in&saveCart=0"
+                   onclick="OAuth.setScenario('default'); showPopup(this.href, 997, 490); return false;"
+                   class="socialIcon">
+                    <svg class="icon icon--li">
+                        <use xlink:href="#icon-li"></use>
+                    </svg>
+                </a>
+                        </div>
+</div>            </div>
+            <div class="login-body">
+                <div class="login-tabs-content" data-content-id="j-popup-tab-auth">
+                    <form method="post" id="login_form_id" data-action="/security/login/" onsubmit="submit_authorization(this); return false;">
+    <div class="j-login-info-message"></div>
+    <dl class="form">
+        <dt class="form-head">Е-пошта</dt>
+        <dd class="form-item">
+            <input type="email" name="user[email]" class="field j-focus" tabindex="1" autocapitalize="off">
+        </dd>
+        <dt class="form-head">Пароль</dt>
+        <dd class="form-item">
+            <input type="password" name="user[pass]" class="field" tabindex="2">
+        </dd>
+        <dd class="form-item __submit">
+            <span class="btn __special">
+                <span class="btn-content">Увійти</span>
+                <input type="submit" value="Увійти" class="btn-input" tabindex="3">
+            </span>
+            <span class="form-passRecover">
+                <a
+                    href="javascript:void(0);"
+                    class="a-pseudo"
+                    data-modal="#password-recovery"
+                >
+                    Забули пароль?                </a>
+            </span>
+        </dd>
+    </dl>
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>(function(w) {w.INIT.add(function() {(function ($) {var i=$('<input>').attr({name:"CSRFToken",type:'hidden'}).val("f3e9675b39e3d679941e5bb5dd09a0cd8e7e73a7");$("#login_form_id").append(i);})(jQuery)}, 'jQuery' in window)})(window)</script></form>                </div>
+                <div class="login-tabs-content" data-content-id="j-popup-tab-signup">
+                    <form method="post" id="signup-form" data-action="/security/sign_up/" onsubmit="submit_new_registration(this); return false;" novalidate>
+    <div class="j-signup-info-message"></div>
+    <dl class="form">
+        <dt class="form-head __name">Ім'я та прізвище</dt>
+        <dd class="form-item">
+            <input type="text" name="user[title]" class="field" value="" tabindex="1">
+        </dd>
+        <dt class="form-head">Е-пошта</dt>
+        <dd class="form-item">
+            <input type="text" autocapitalize="off" name="user[email]" class="field" value="" tabindex="2">
+        </dd>
+                <dt class="form-head">Пароль</dt>
+        <dd class="form-item">
+            <input type="password" name="user[pass]" class="field" value="" tabindex="3">
+        </dd>
+                <dd class="form-item __submit">
+                                    <span class="btn __special j-submit ">
+                <span class="btn-content">Зареєструватись</span>
+                <input type="submit" value="Зареєструватись" class="btn-input" tabindex="7">
+            </span>
+                                                </dd>
+    </dl>
+    <script>(function(w) {w.INIT.add(function() {(function ($) {var i=$('<input>').attr({name:"CSRFToken",type:'hidden'}).val("29f2643ebb73e9418da48951cb9cbf398fa02028");$("#signup-form").append(i);})(jQuery)}, 'jQuery' in window)})(window)</script></form>
+
+<script>
+  (function (w) {
+    w.INIT.add(function () {
+          }, w.Face)
+  })(window);
+</script>
+                </div>
+            </div>
+        </div>
+        <script>
+          (function (w) {
+            w.INIT.add(function () {
+              initTabs('#sign-in .j-auth-tabs a', {
+                onChange: function (currentBtn, currentTabContainer, tabContainers) {
+                  $(tabContainers).find('.popup-msg').empty();
+                  $(tabContainers).find('form').reset();
+                  $(currentTabContainer).find(':input').errorBox().filter(':first').focus();
+                }
+              });
+            }, w.initTabs)
+          })(window);
+        </script>
+    </section>
+
+    <section id="password-recovery" class="popup __password" style="display: none;">
+        <div class="popup-block login">
+            <a class="popup-close" onclick="Modal.close();" href="javascript:;">
+                <svg class="icon icon--cross"><use xlink:href="#icon-cross"></use></svg>
+            </a>
+            <div class="popup-header">
+                <div class="popup-title">Відновлення пароля</div>
+            </div>
+            <div class="popup-body">
+                <div class="popup-msg j-recovery-message">
+                    Введіть адресу електронної пошти, яку ви вказали під час реєстрації. Ми надішлемо листа з інформацією для відновлення пароля                </div>
+                <form id="password-recovery-form" method="post"
+      data-action="/security/password-recovery/"
+      onsubmit="password_recovery_submit(this); return false;">
+    <dl class="form">
+        <dt class="form-head">Е-пошта</dt>
+        <dd class="form-item">
+            <input type="email" autocapitalize="off" value="" class="field j-focus" name="user[email]">
+        </dd>
+        <dd class="form-item __submit">
+                            <span class="btn __special">
+                                <span class="btn-content">Відновити</span>
+                                <input type="submit" value="Відновити" class="btn-input">
+                            </span>
+        </dd>
+    </dl>
+    <script>(function(w) {w.INIT.add(function() {(function ($) {var i=$('<input>').attr({name:"CSRFToken",type:'hidden'}).val("39b8f366402968182a68645173571faec288e170");$("#password-recovery-form").append(i);})(jQuery)}, 'jQuery' in window)})(window)</script></form>            </div>
+        </div>
+    </section>
+    <section id="age-confirmation" class="popup __age-confirmation">
+    <div class="popup-block">
+        <div class="popup-header">
+            <div class="popup-alert">
+                18+            </div>
+            <div class="popup-title">
+                Вам вже виповнилося 18 років?            </div>
+        </div>
+        <div class="popup-body">
+            <p>Цей інтернет-магазин містить товари для повнолітніх осіб. Щоб продовжити, підтвердіть свій вік</p>
+        </div>
+        <div class="popup-buttons">
+            <button class="btn __special __block j-age-confirm">
+                <span class="btn-content">Так, мені виповнилося 18 років</span>
+            </button>
+            <button class="btn __block j-age-decline">
+                <span class="btn-content">Ні, мені не виповнилося 18 років</span>
+            </button>
+        </div>
+    </div>
+</section>        <div id="modal-overlay" class="overlay"></div>
+    <script src='/bundles/default/production/main-2b4841d6.9992377e13eac0fb4f81.js'></script>
+<script src='/bundles/default/production/runtime.7120c8df6a0509f52a92.js'></script>
+<script src='/bundles/default/production/npm.spritespin.ae06fb361a59b14f6252.js'></script>
+<script src='/bundles/default/production/npm.inputmask.711c890d9833df84dc83.js'></script>
+<script src='/bundles/default/production/npm.jquery-13d81934.3f02b0283ddee7920906.js'></script>
+<script src='/bundles/default/production/npm.sticky-sidebar.9b1aed998b438a0502a9.js'></script>
+<script src='/bundles/default/production/npm.sourcebuster.190de06c3cb5f9541d9a.js'></script>
+<script src='/bundles/default/production/npm.popper.js.46626cd1331d2ebd1e93.js'></script>
+<script src='/bundles/default/production/npm.css-element-queries.e72e021709f421f869d0.js'></script>
+<script src='/bundles/default/production/npm.horoshop.547e29850f08ee21ece5.js'></script>
+<script src='/bundles/default/production/main-44867c3a.8364ddf8261767dd1ec7.js'></script>
+<script src='/bundles/default/production/main-e498c03b.29e90bd188df160e7d82.js'></script>
+<script src='/bundles/default/production/main-12f89153.cd01738afedb5681f77e.js'></script>
+<script src='/bundles/default/production/main-7199fefb.db9b7cd3f41130c605da.js'></script>
+<script src='/bundles/default/production/main-2d8f051b.b78618e8dd0fe6bc2eab.js'></script>
+<script src='/bundles/default/production/main-5ae6720c.ac7652bbe2552d46a5d5.js'></script>
+<script src='/bundles/default/production/main-886f090d.998d71870c275b9cbf2a.js'></script>
+<script src='/bundles/default/production/main-47f80845.129eaa2b04df61472e50.js'></script>
+<script src='/bundles/default/production/npm.jquery-b59a2ec2.c32010b03ac8c4e981f5.js'></script>
+
+<script>
+  (function (w) {
+    w.INIT.execute();
+  })(window)
+</script>
+        <script>
+if (window.location.href.includes('/checkout/complete/')) {
+  gtag('event', 'purchase', {
+    value: 1000,
+    currency: 'UAH'
+  });
+}
+</script>                <section
+    id="cart"
+    class="popup __cart"
+    style="display: none;"
+>
+    <div class="popup-block">
+        <a class="popup-close" onclick="Modal.close(); return false;" href="javascript:;">
+            <svg class="icon icon--cross"><use xlink:href="#icon-cross"></use></svg>
+        </a>
+        <div class="popup-title">Кошик</div>
+        <div class="cart">
+            <div class="cart-content">
+                <div class="loader-container j-cart-loader">
+                    <div class="loader-spinner loader-spinner--block"></div>
+                </div>
+                <table class="cart-items">
+                    <thead>
+                    <tr>
+                        <td></td>
+                        <td></td>
+                        <td class="cart-header">
+                            <div class="cart-header-b"><span
+                                        class="cart-header-content">Кількість</span></div>
+                        </td>
+                        <td class="cart-header __cost">
+                            <div class="cart-header-b"><span
+                                        class="cart-header-content">Вартість</span></div>
+                        </td>
+                    </tr>
+                    </thead>
+                                                                                <tfoot class="cart-foot">
+                                            <tr>
+                            <td class="cart-cell __image"></td>
+                            <td class="cart-cell" colspan="3">
+                                                                                                                                                        <div class="cart-discount">
+                                                <div class="cart-discount-l">
+                                                    <div class="cart-discount-info j-coupon-add-container">
+                                                        <a
+                                                            class="link link--pseudo j-coupon-add"
+                                                            href="#"
+                                                        >
+                                                            <span class="link__text">
+                                                        Є купон зі знижкою?                                                    </span></a>
+                                                </div>
+                                                <div
+                                                    class="cart-discount-coupon j-coupon-add-form"
+                                                    style="display: none;"
+                                                >
+                                                    <div class="coupon">
+                                                        <div class="coupon-input">
+                                                            <input
+                                                                class="coupon-field field errorBox-popup j-coupon-input"
+                                                                value=""
+                                                                autocomplete="off"
+                                                                placeholder="код купона чи сертифікату"
+                                                                type="text"
+                                                            >
+                                                            <div class="coupon-cancel j-coupon-cancel">
+                                                                <svg class="icon icon--cross-bold"><use xlink:href="#icon-cross-bold"></use></svg>
+                                                            </div>
+                                                        </div>
+                                                        <div class="coupon-submit">
+                                                            <button class="btn __small j-coupon-submit">
+                                                                <span class="btn-content">OK</span>
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                                                                                </td>
+                        </tr>
+                                        <tr>
+                        <td class="cart-footer" colspan="4">
+                            <div class="cart-summary">
+                                <div class="cart-footer-h">Всього</div>
+                                <div class="cart-footer-b cart-cost j-total-sum">
+                                    0 грн                                </div>
+                            </div>
+                            <div class="cart-buttons">
+                                <div class="cart-btnBack">
+                                    <button
+                                        class="btn __clear"
+                                        onclick="Modal.close(); return false;"
+                                    >
+                                        <span class="btn-content">
+                                            <svg class="icon icon--arrow-left2"><use xlink:href="#icon-arrow-left2"></use></svg>
+                                            Повернутись до покупок                                        </span>
+                                    </button>
+                                </div>
+                                <div class="cart-btnOrder">
+                                    <a
+                                        class="btn __special"
+                                        rel="nofollow"
+                                        href="/checkout/"
+                                    >
+                                        <span class="btn-content">Оформити замовлення</span>
+                                    </a>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    </tfoot>
+                </table>
+            </div>
+            <div class="j-cart-additional">
+                            </div>
+        </div>
+    </div>
+</section>
+<script>
+  (function (w) {
+    w.INIT.add(function () {
+      const ajaxCart = AjaxCart.getInstance();
+
+      ajaxCart.skin = "modal";
+      ajaxCart.remove_product_on_zero = true;
+    }, w.AjaxCart);
+  })(window);
+</script>    <section class="compare" id="uid2756ced4c1c998b23183f7c53e419e59" style="display: none;">
+    <div class="compare-container">
+        <div class="compare-close j-close" role="button">
+            <svg class="icon icon--cross"><use xlink:href="#icon-cross"></use></svg>
+        </div>
+        <div class="compare-header">
+            <div class="compare-header-wrp">
+                <div class="compare-h">Порівняння товарів</div>
+                <div class="compare-filter j-tabs"></div>
+            </div>
+        </div>
+        <div class="j-loader" style="position: absolute;top:55px;left:0;right:0;bottom:0; z-index: 1000; background: rgba(255,255,255,.5)"><div class="loader" style="width: 10px; height: 10px; position: absolute; top: 50%;left:50%;margin:-5px 0 0 -5px;"></div></div>
+        <div class="compare-body j-content"></div>
+    </div>
+</section>
+
+<script>
+  (function (w) {
+    w.INIT.add(function () {
+      ComparisonTable.createInstance("default", "#uid2756ced4c1c998b23183f7c53e419e59");
+    }, w.ComparisonTable)
+  })(window);
+</script>    </body>
+<!-- Memory: 6 МБ -->
+</html><!-- 0.43s -->
