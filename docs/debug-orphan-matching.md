@@ -183,11 +183,15 @@ sudo -u warsaw-beer-bot /usr/bin/bash -lc '
       AND NOT EXISTS (SELECT 1 FROM checkins  c WHERE c.beer_id          = ef.beer_id);"'
 ```
 
-Після звірки — той самий WHERE у DELETE (каскадить enrich_failures):
+Після звірки — той самий WHERE у DELETE. **`PRAGMA foreign_keys=ON` обовʼязковий** — sqlite3 CLI
+тримає FK **вимкненими** за замовчуванням, тож без нього каскад на `enrich_failures` (FK
+`ON DELETE CASCADE`) НЕ спрацює і лишить осиротілі рядки. `busy_timeout` — бо бот тримає БД відкритою (WAL).
 
 ```bash
 sudo -u warsaw-beer-bot /usr/bin/bash -lc '
   sqlite3 /var/lib/warsaw-beer-bot/bot.db "
+    PRAGMA foreign_keys=ON;
+    PRAGMA busy_timeout=5000;
     DELETE FROM beers WHERE id IN (
       SELECT ef.beer_id FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE b.untappd_id IS NULL
