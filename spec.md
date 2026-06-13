@@ -817,6 +817,13 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати
   адаптер: `docs/adapter-authoring.md`.
+  Кожен адаптер ПОВИНЕН виключати не-пива — детекція шоп-специфічна: назва через
+  `non-beer.ts isNonBeerName` (паки/сети/сертифікати), шоп-локальні токени (мерч onemorebeer:
+  `szklanka/pokal/kufel/koszulka/książka`), URL колекції (`hoptimaal`), або **гейт цілої
+  категорії** через опційний `SiteAdapter.isNonBeerPage(url)` — overlay пропускає сторінку
+  повністю (onemorebeer `/delikatesy`: софт-дрінки з реальними брендами, без сигналу в назві).
+  FP-гард: банка з заставою (`MAGIC ROAD … PUSZKA … KAUCJA`) лишається пивом. Форситься
+  конформанс-тестом (див. **Тести**).
 - **Потік:** content script парсить видиму сітку → short-TTL кеш
   (`chrome.storage.local`) → промахи йдуть у background service worker, який
   тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
@@ -845,6 +852,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `onemorebeer` — headless-Playwright рендер-дамп зі scroll. Плюс unit-тести
   кеша/normalize/client/worker/badge/grid-ready/re-render observer/startOverlay.
   Білд — `vite build`.
+  Плюс **кейс фільтрації не-пива**: кожен адаптер має `tests/fixtures/<id>.nonbeer.html`
+  (тільки не-пиво) і `parseCards` на ньому МУСИТЬ дати `[]`; або `<id>.nonbeer.json`
+  `{none:true, reason}` (виняток із обовʼязковою причиною). `isNonBeerPage` і FP-гарди
+  (MAGIC ROAD) — у bespoke-тестах адаптера. Відсутність фікстури/винятку = червоний CI.
 
 ### 6.1 Дистрибуція бета-версій (off-store, через бота)
 > Приватна роздача ~10 технічним тестерам; **без Chrome Web Store** (рев'ю,

@@ -60,6 +60,11 @@ sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db \
   `nameKeys` (#117): order-insensitive + `COLLAB_SEP`-split + brewery-dedup, потім
   fuzzy ≥ 0.85. Якщо валідний кандидат усе одно відсічений — дивись `nameKeys`/
   `nameTokensDiverge` у `matcher.ts` та Stage 2a/2b у `untappd-lookup.ts`.
+- **Не-пиво (пак/сет/мерч/софт-дрінк)** — `name` є набором/паком/мерчем/софт-дрінком
+  (`Brewery Pack`, `Сертифікат`, скло `SZKLANKA`, `KOMBUCHA`), якого на Untappd немає. Корінь —
+  **адаптер не відфільтрував не-пиво**, а НЕ матчер. Лагодити фільтром адаптера
+  (`isNonBeerName` / шоп-локальні токени / `isNonBeerPage`) + додати приклад у `<id>.nonbeer.html`.
+  Наявні рядки видаляються разовим purge — див. нижче.
 
 ### `source_url` — сторінка магазину (тільки client-relay)
 
@@ -147,6 +152,49 @@ curl -fsS -X POST "$API_BASE/admin/enrich-failures/review" \
 **Важливо:** якщо провал повторюється пізніше (наступний `recordEnrichFailure` на тому
 самому пиві), рядок повертається в тріаж — `review_class`, `review_note`, `reviewed_at`
 скидаються до `NULL`. Це нормально: новий провал означає, що ситуація змінилась.
+
+---
+
+## Purge наявних не-пив (разово, ПІСЛЯ broadcast)
+
+Не-пиво-орфани безпечні до видалення (`untappd_id IS NULL`, без посилань у
+`match_links`/`checkins`). **Спершу dry-run SELECT**, очима звір список, потім DELETE. Запуск під
+bot-користувачем (звичайний `sudo -u warsaw-beer-bot` не працює — лише через дозволений wrapper):
+
+> ⚠️ Порядок: фільтри адаптера клієнтські → діють лише після broadcast розширення.
+> Purge до broadcast = старі клієнти наповнять рядки назад через `/enrich/candidates`.
+> Послідовність: merge → broadcast → purge.
+
+```bash
+# DRY-RUN: подивитись, що буде видалено
+sudo -u warsaw-beer-bot /usr/bin/bash -lc '
+  sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db "
+    SELECT ef.beer_id, ef.brewery, ef.name
+    FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+    WHERE b.untappd_id IS NULL
+      AND (ef.name LIKE \"%brewery pack%\" OR ef.name LIKE \"%vertical set%\"
+        OR ef.name LIKE \"%tasting%set%\" OR ef.name LIKE \"%Набір%\"
+        OR ef.name LIKE \"%келих%\" OR ef.name LIKE \"%Collective%Pack%\"
+        OR ef.name LIKE \"%anniversary vertical%\")
+      AND NOT EXISTS (SELECT 1 FROM match_links m WHERE m.untappd_beer_id = ef.beer_id)
+      AND NOT EXISTS (SELECT 1 FROM checkins  c WHERE c.beer_id          = ef.beer_id);"'
+```
+
+Після звірки — той самий WHERE у DELETE (каскадить enrich_failures):
+
+```bash
+sudo -u warsaw-beer-bot /usr/bin/bash -lc '
+  sqlite3 /var/lib/warsaw-beer-bot/bot.db "
+    DELETE FROM beers WHERE id IN (
+      SELECT ef.beer_id FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+      WHERE b.untappd_id IS NULL
+        AND (ef.name LIKE \"%brewery pack%\" OR ef.name LIKE \"%vertical set%\"
+          OR ef.name LIKE \"%tasting%set%\" OR ef.name LIKE \"%Набір%\"
+          OR ef.name LIKE \"%келих%\" OR ef.name LIKE \"%Collective%Pack%\"
+          OR ef.name LIKE \"%anniversary vertical%\")
+        AND NOT EXISTS (SELECT 1 FROM match_links m WHERE m.untappd_beer_id = ef.beer_id)
+        AND NOT EXISTS (SELECT 1 FROM checkins  c WHERE c.beer_id          = ef.beer_id));"'
+```
 
 ---
 
