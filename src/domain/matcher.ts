@@ -126,7 +126,7 @@ export function breweryAliasesMatch(a: string[], b: string[]): boolean {
 
 // Strip leading brewery tokens duplicated into a normalized name (e.g. the product
 // title "PRIMÁTOR Free Mother In Law" with brewery "Primátor"). Token-prefix only.
-function stripLeadingBrewery(nameNorm: string, breweryNorm: string): string {
+export function stripLeadingBrewery(nameNorm: string, breweryNorm: string): string {
   if (!breweryNorm) return nameNorm;
   const nt = nameNorm.split(' ').filter(Boolean);
   const bt = breweryNorm.split(' ').filter(Boolean);

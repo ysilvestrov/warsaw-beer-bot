@@ -282,4 +282,52 @@ describe('lookupBeer', () => {
       expect(out.kind).toBe('not_found');
     });
   });
+
+  describe('fuzzy target normalization (#137)', () => {
+    test('matched: strips duplicated brewery before fuzzy matching candidate names', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 7201, name: 'Nealko', brewery: 'Rohozec' }]),
+      );
+
+      const out = await lookupBeer({
+        brewery: 'Rohozec Brewery',
+        name: 'Rohozec Nealko',
+        fetch,
+      });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(7201);
+    });
+
+    test('matched: fuzzy-checks each single-token collab side when name keys are weak', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 7202, name: 'Lièvre', brewery: 'Nano Cinco' }]),
+      );
+
+      const out = await lookupBeer({
+        brewery: 'Nano Cinco',
+        name: 'Lièvre / Slake',
+        fetch,
+      });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(7202);
+    });
+
+    test('not_found: single-token collab side does not fuzzy-match a longer variant', async () => {
+      const fetch = jest.fn(async () =>
+        htmlFor([{ bid: 7203, name: 'Lièvre Rouge', brewery: 'Nano Cinco' }]),
+      );
+
+      const out = await lookupBeer({
+        brewery: 'Nano Cinco',
+        name: 'Lièvre / Slake',
+        fetch,
+      });
+
+      expect(out.kind).toBe('not_found');
+    });
+  });
 });

@@ -1,6 +1,6 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects } from './matcher';
-import { normalizeName, stripBreweryNoise } from './normalize';
+import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripLeadingBrewery } from './matcher';
+import { normalizeBrewery, normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
   parseSearchPage,
@@ -10,6 +10,10 @@ import { HttpError } from '../sources/http';
 import { isBlockStatus, isBlockPage } from '../sources/untappd/block';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
+interface FuzzyTarget {
+  value: string;
+  exactOnly: boolean;
+}
 
 export type LookupOutcome =
   | { kind: 'matched'; result: SearchResult }
@@ -35,10 +39,24 @@ function brewerySearchParts(brewery: string): string[] {
   return parts.length > 1 ? parts : [brewery];
 }
 
+function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
+  const breweryNorm = normalizeBrewery(brewery);
+  const targets = new Map<string, FuzzyTarget>();
+  for (const [index, raw] of [name, ...name.split(COLLAB_SEP)].entries()) {
+    const value = stripLeadingBrewery(normalizeName(raw), breweryNorm);
+    if (!value) continue;
+    const tokenCount = value.split(' ').filter(Boolean).length;
+    const exactOnly = index > 0 && tokenCount < 2;
+    const existing = targets.get(value);
+    targets.set(value, { value, exactOnly: (existing?.exactOnly ?? true) && exactOnly });
+  }
+  return Array.from(targets.values());
+}
+
 export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   const { brewery, name, abv = null, fetch } = args;
   const inputBreweryAliases = breweryAliases(brewery);
-  const targetName = normalizeName(name);
+  const targetNames = fuzzyTargets(name, brewery);
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
@@ -90,7 +108,13 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
       threshold: NAME_FUZZY_THRESHOLD,
       returnMatchData: true,
     });
-    const matches = searcher.search(targetName);
+    const matches = targetNames
+      .flatMap((targetName) =>
+        searcher
+          .search(targetName.value)
+          .filter((m) => !targetName.exactOnly || normalizeName(m.item.beer_name) === targetName.value),
+      )
+      .sort((a, b) => b.score - a.score);
     if (matches.length === 0) continue;
 
     // ABV tiebreak: normalizeName strips vintage years, so different-year /
