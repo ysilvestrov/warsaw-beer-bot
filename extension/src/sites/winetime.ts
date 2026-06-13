@@ -4,7 +4,13 @@ import { isNonBeerName } from './non-beer';
 const CARD_SELECTOR = 'a.product-micro';
 const CONTAINER_SELECTOR = '.products-column';
 const DESCRIPTOR_RE =
-  /\s+(?:світле|темне|напівтемне|нефільтроване|фільтроване|пастеризоване|безалкогольне)$/iu;
+  /\s+(?:світле|темне|напівтемне|нефільтроване|фільтроване|пастеризоване|безалкогольне|янтарне)$/iu;
+
+// A leftover leading brewery-noise token after the brand prefix is stripped (e.g. title
+// "Пиво ДІДЬКО Brewery Double Trouble" with manufacturer "ДІДЬКО" → "Brewery Double Trouble").
+// Requires a trailing space so it never touches a brand-like word ("Brewdog"). Extension is a
+// separate package, so we keep a small local list rather than importing the server's BREWERY_NOISE.
+const LEADING_BREWERY_NOISE_RE = /^(?:brewery|browary?|brewing|броварня|пивоварня)\s+/iu;
 
 interface ProductMeta {
   id: number;
@@ -121,6 +127,7 @@ function cleanName(rawTitle: string, brewery: string): string {
   for (const suffix of breweryPrefixes(brewery)) {
     cleaned = stripSuffix(cleaned, suffix);
   }
+  cleaned = cleaned.replace(LEADING_BREWERY_NOISE_RE, '').trim();
 
   return cleaned || name || original;
 }
