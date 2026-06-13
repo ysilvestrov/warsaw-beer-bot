@@ -78,43 +78,62 @@ false-positive'и на реальних пивах (`Beer in a Box`, `Glass`, `I
 > Позитивний бік: `.nonbeer.html` фіксує приклад не-пива з магазину разом із фільтром —
 > регресія («хтось послабив фільтр») ловиться одразу.
 
-### 3.2 Спільний хелпер `non-beer.ts` — рекомендовано, фінальний словник тут
+### 3.2 Спільний хелпер `non-beer.ts` (шар 1 з 3)
 
-Користь реальна: name-based адаптери (`beerrepublic`, `bierloods22`, `winetime`) ділять
-**один консервативний словник багатослівних пакувальних фраз**, тож додавання нового маркера
-(`+ келих`) вмикає його скрізь. `hoptimaal` лишається на URL-сигналі.
+Name-based адаптери (`beerrepublic`, `bierloods22`, `winetime`, `beerfreak`) ділять **один
+консервативний словник пакувальних фраз/ваучерів**. `hoptimaal` лишається на URL-сигналі.
 
 `extension/src/sites/non-beer.ts`:
-- `isNonBeerName(name: string): boolean` — match лише **багатослівних** пакувальних фраз,
-  ніколи голих неоднозначних слів (`glass`, `box` окремо НЕ матчаться → захист від FP типу
-  `Beer in a Box`).
-- Запропонований словник (union наявних beerrepublic + bierloods22 + сигнали з даних, **на ревʼю**):
+- `isNonBeerName(name: string): boolean` — match **багатослівних пакувальних фраз** плюс кілька
+  однозначних одиничних слів; **ніколи** голих неоднозначних слів (`box`, `glass`, `puszka` окремо
+  НЕ матчаться → захист від FP: `Beer in a Box`, банка `… PUSZKA … KAUCJA`).
+- Фінальний словник (звірено з реальними сторінками 2026-06-13):
   - EN: `brewery pack`, `vertical set`, `tasting set`, `tasting box`, `beer package`,
     `beerpackage`, `beer box`/`beerbox`, `advent calendar`, `surprise box`, `signature box`,
-    `craftbeer box`, `gift set`, `gift box`, `subscription`, `abonnement`,
-    `brewer's collective … pack`, `… pack … edition`;
-  - UA/PL: `набір`, `+ келих`, `+ szklanka`, `+ glass`, `zestaw`, `pakiet`.
-- Адаптери лишають за собою **остаточне рішення** (можуть додати шоп-специфічні маркери або
-  переважити). Хелпер — це baseline, не обов'язковий гейт.
-- Unit-тести хелпера: і пакувальні фрази (мають матчитись), і FP-кейси
-  (`Beer in a Box`, `Glass`, бренд-як-назва — мають лишитись **не**-матчем).
+    `craftbeer box`, `gift set`, `gift box`, `gift pack`, `gift certificate`, `mixed pack`,
+    `mixed case`, `subscription`, `abonnement`, `certificate`;
+  - PL: `zestaw`, `pakiet`, `+ szklank…`, `+ glass`;
+  - UA: `набір`, `сертифікат` (ваучер beerfreak), `пакування` («Подарункове пакування замовлення»),
+    `+ келих` (бандл winetime).
+- Unit-тести хелпера: і пакувальні фрази/ваучери (мають матчитись), і FP-кейси
+  (`Beer in a Box`, `Glass`, `Imperial Hard Cider`, `MAGIC ROAD … PUSZKA … KAUCJA` — **не**-матч).
 
-> Якщо на етапі імплементації виявиться, що сигнали надто розходяться (URL vs name vs title)
-> і хелпер не дає чистого виграшу — лишаємо детекцію в адаптерах, а спільним робимо тільки
-> словник-константу. Рішення фіксується в плані.
+### 3.2.1 Шоп-локальні токени (шар 2) і page-gate (шар 3)
+
+Реальні дані показали, що частина не-пива **не ловиться спільним словником**:
+- **onemorebeer `/szklanki-i-akcesoria`** — скло/кухлі/футболки/книги (`szklanka`, `pokal`, `kufel`,
+  `koszulka`, `książka`), кожне з **реальною пивоварнею-брендом** (тож гард `!brewery` не рятує).
+  Це польські merch-токени → живуть **в адаптері** (`MERCH_RE` в `onemorebeer.ts`), не в спільному
+  словнику. **FP-гард:** на цій же сторінці є реальне пиво `MAGIC ROAD … PUSZKA 0,5 L KAUCJA`
+  (банка+застава) — `MERCH_RE` його НЕ чіпає, бо `puszka`/`kaucja` не merch-токени.
+- **onemorebeer `/delikatesy`** — софт-дрінки з реальними брендами (`KOFOLA`, `VIGO KOMBUCHA`,
+  `VITA ALOE`, `KWAS CHLEBOWY`) — **спільного токена в назві немає**. Єдиний надійний сигнал —
+  **категорія/URL**. → новий опційний метод контракту `SiteAdapter.isNonBeerPage(url): boolean`;
+  overlay (`content/main.ts`) пропускає сторінку повністю, коли `true`. onemorebeer матчить
+  `/delikatesy`. (`/szklanki-i-akcesoria` НЕ гейтиться повністю — там є пиво MAGIC ROAD, тож
+  per-product через `MERCH_RE`.)
+
+`isNonBeerPage` тестується bespoke-тестом адаптера (`/delikatesy`→true, `/piwa`,
+`/szklanki-i-akcesoria`→false); конформанс-фікстура для onemorebeer — сторінка аксесуарів
+(чистий merch → `parseCards`→`[]`).
 
 ### 3.3 Ретрофіт адаптерів
 
-- `winetime`, `onemorebeer`, `beerfreak` — додати фільтр (name-хелпер і/або шоп-специфічний
-  сигнал) + `.nonbeer.html`/`.json`.
-- `beerrepublic`, `bierloods22` — мігрувати на спільний хелпер (якщо прийнято) + `.nonbeer`-фікстура.
-- `hoptimaal` — лишити URL-фільтр + `.nonbeer.html` з merch/bundle-карткою.
+- `winetime` — `isNonBeerName(rawTitle)` (ловить `Набір`/`+ келих`/`сертифікат`) + синтетична `.nonbeer.html`.
+- `beerfreak` — `isNonBeerName(rawTitle)` (ловить `набір`/`сертифікат`/`пакування`) + реальна `.nonbeer.html`
+  з `beerfreak.org/beer-sets/` (curl + challenge-cookie).
+- `onemorebeer` — `MERCH_RE` (шоп-локальні merch-токени) в `parseCards` + `isNonBeerPage('/delikatesy')`;
+  реальна `.nonbeer.html` з `/szklanki-i-akcesoria` (Playwright capture); bespoke-тест на MAGIC ROAD.
+- `beerrepublic` — мігрувати на спільний хелпер + синтетична `.nonbeer.html`.
+- `bierloods22` — лишити `PACKAGE_TITLE_RE` + синтетична `.nonbeer.html` (без зміни коду).
+- `hoptimaal` — лишити URL-фільтр + синтетична `.nonbeer.html` з merch/bundle-карткою (без зміни коду).
 
 ## 4. spec.md / рунбуки
 
 - **`spec.md` §6** — додати інваріант контракту: *адаптер ПОВИНЕН виключати не-пива
-  (паки/сети/мерч); це форситься конформанс-тестом (`.nonbeer.html`+`.json` або `none:true`)*.
-  Розширити опис конформанс-тесту (зараз рядки ~839–847) новим кейсом.
+  (паки/сети/мерч/софт-дрінки) — `isNonBeerName` / шоп-локальні токени / `isNonBeerPage`;
+  форситься конформанс-тестом (`.nonbeer.html` або `none:true`)*. Розширити опис конформанс-тесту
+  (зараз рядки ~839–847) новим кейсом. Згадати опційний `SiteAdapter.isNonBeerPage(url)`.
 - **`docs/adapter-authoring.md`** — новий крок між поточними 4 і 5: «реалізувати фільтр
   не-пива + покласти `.nonbeer.html`/`.json` (або `none:true` з причиною); конформанс це форсить».
 - **`docs/debug-orphan-matching.md`** — нова гілка тріажу «orphan = не-пиво»: як упізнати
