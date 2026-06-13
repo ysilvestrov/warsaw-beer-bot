@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-13
+
+- Stopped matching non-beer products as beers across all supported shops: mixed and brewery packs, vertical and tasting sets, gift sets, gift certificates, subscriptions, and — on OneMoreBeer — glassware, apparel, books, and the delicatessen/soft-drinks section are now ignored. Real beers that share a page with these (including canned beers sold with a deposit) are unaffected.
+- Fixed WineTime beer names that kept a stray "Brewery"/"Броварня" word after the brewery, and added the "янтарне" (amber) descriptor to the name cleanup, so those beers now match on Untappd.
+
 ## [0.6.0] - 2026-06-11
 
 - Added a toolbar popup to manage the cache: "Refresh this page" re-fetches badges for the beers on the current supported-shop tab (without waiting out the 8h TTL), and "Clear all cache" empties the whole cache.
