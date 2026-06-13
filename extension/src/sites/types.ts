@@ -10,6 +10,12 @@ export interface SiteAdapter {
   id: string;
   hostMatch(url: URL): boolean;
   parseCards(root: ParentNode): Card[];
+  /**
+   * Optional: true when this URL is a whole non-beer category page (e.g. accessories,
+   * delicatessen/soft-drinks) whose products carry no usable beer signal. The overlay skips
+   * the page entirely. Per-product non-beers are handled in parseCards instead.
+   */
+  isNonBeerPage?(url: URL): boolean;
   /** Optional: resolve once the (client-rendered) grid has painted cards. */
   waitForGrid?(root: ParentNode): Promise<void>;
   /**

@@ -82,7 +82,7 @@ export function startOverlay(
 }
 
 const adapter = pickAdapter(new URL(window.location.href));
-if (adapter) {
+if (adapter && !adapter.isNonBeerPage?.(new URL(window.location.href))) {
   startOverlay(document, adapter, sendMatch, undefined, enrichOrphans);
   // Popup → "Refresh this page": drop the visible cards' cache entries and re-run
   // the overlay so badges reflect fresh server state without waiting out the TTL.
