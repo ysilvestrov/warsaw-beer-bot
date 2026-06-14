@@ -12,10 +12,19 @@ if (!dbPath || !jsonPath) {
   process.exit(1);
 }
 
-// input.json has a stray trailing `1` after the JSON — slice to the last `}`.
+// Tolerate a captured payload with trailing junk after the JSON (e.g. a stray `1`):
+// parse as-is first, and only on failure fall back to slicing to the last closing
+// brace/bracket. A clean array file (`[...]`) must not be truncated to its last `}`.
 const raw = readFileSync(jsonPath, 'utf8');
-const json = raw.slice(0, raw.lastIndexOf('}') + 1);
-const parsed = JSON.parse(json);
+function parsePayload(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    const end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+    return JSON.parse(text.slice(0, end + 1));
+  }
+}
+const parsed = parsePayload(raw);
 const beers: { brewery: string; name: string; abv?: number }[] =
   Array.isArray(parsed) ? parsed : parsed.beers;
 
