@@ -614,7 +614,7 @@ upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked
 ### Фонові джоби (node-cron, у процесі)
 | Джоба | Розклад | Призначення |
 |-------|---------|-------------|
-| `refreshOntap` | `0 */12 * * *` | обхід ontap.pl → snapshots → match |
+| `refreshOntap` | `0 */12 * * *` | обхід ontap.pl → non-beer gate → snapshots → match |
 | `refreshAllUntappd` | `0 3 * * *` | скрейп профілів → checkins/untappd_had (лише якщо є cookie) |
 | `enrichOrphans` | `30 */3 * * *` | lookup orphan-beers у Untappd (LIMIT 20/запуск) |
 | `refreshTapRatings` | `30 1,4,7,10,13,16,19,22 * * *` | дотягування рейтингів кранів (offset 1 год від enrich) |
@@ -653,6 +653,12 @@ recovery (`open→closed`). Стан скидається на рестарті.
 - **Реальний статус матчингу** = `beers.untappd_id IS NOT NULL`,
   **не** наявність `match_links`. `match_links.untappd_beer_id` — локальний
   `beers.id`, заповнений і для orphan'ів.
+- **Ontap non-beer gate.** `refreshOntap` ПОВИНЕН відкидати очевидні не-пивні
+  крани (wine/prosecco/frizzante/spritz/cocktails) **до** створення snapshot/tap
+  рядків, matcher/upsert orphan і enrich. Сигнали gate — тільки `taps.style` і
+  `taps.brewery_ref`; `beer_ref`/назва не використовується, щоб не провокувати
+  широкі Untappd-запити на кшталт `wino`/`merlot`. Cider, kvass/`Kwas chlebowy`
+  і mead/melomel лишаються eligible і не blacklist-яться цим правилом.
 - `/newbeers` показує **лише зматчені** крани; orphan'и приховані до енричу.
 - `/beers` — навпаки, показує **все сире**, без фільтрів і had-списку (діагностика).
 - Маршрут — **open-TSP без жорстких лімітів**; дистанцію завжди показувати явно.
