@@ -13,7 +13,8 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
   { slug: 'messorem',     brewery: 'Messorem',            name: 'Globe Coagulant / Finback', bid: 6538432 },
   { slug: 'primator',     brewery: 'Primator',            name: 'PRIMÁTOR FREE MOTHER IN LAW', bid: 5817947 },
   { slug: 'omnipollo',    brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar', bid: 6423273 },
-  { slug: 'staropolski',  brewery: 'Staropolski',         name: 'KULTOWE PILS',              bid: null }, // deferred #120
+  { slug: 'staropolski',  brewery: 'Staropolski',         name: 'KULTOWE PILS',              bid: 1673808 }, // #120 fixed
+  { slug: 'st-feuillien', brewery: '',                    name: 'St-Feuillien Blonde',       bid: 22540 },   // #149
 ];
 
 describe('#117 lookupBeer against real Untappd search pages', () => {

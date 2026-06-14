@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -410,6 +410,33 @@ describe('breweryAliasesMatch (token-boundary prefix)', () => {
 
   test('disjoint breweries do not match', () => {
     expect(breweryAliasesMatch(['pinta'], ['stu mostow'])).toBe(false);
+  });
+});
+
+describe('breweryAliasContained', () => {
+  test('trailing token matches (#120 Staropolski)', () => {
+    expect(breweryAliasContained(['kultowy staropolski'], ['staropolski'])).toBe(true);
+  });
+  test('leading prefix is also a contiguous sublist (in lookupBeer such a brewery is strict, not relaxed)', () => {
+    expect(breweryAliasContained(['harpagan craft'], ['harpagan'])).toBe(true);
+  });
+  test('contiguous middle run matches', () => {
+    expect(breweryAliasContained(['pure project park brewing'], ['project park'])).toBe(true);
+  });
+  test('non-contiguous tokens do not match', () => {
+    expect(breweryAliasContained(['pure project park'], ['pure park'])).toBe(false);
+  });
+  test('unrelated breweries do not match', () => {
+    expect(breweryAliasContained(['stu mostow'], ['pinta'])).toBe(false);
+  });
+  test('exact equality counts as contained', () => {
+    expect(breweryAliasContained(['staropolski'], ['staropolski'])).toBe(true);
+  });
+  test('empty-string alias never matches', () => {
+    expect(breweryAliasContained(['kultowy staropolski'], [''])).toBe(false);
+  });
+  test('empty alias list never matches', () => {
+    expect(breweryAliasContained([], ['staropolski'])).toBe(false);
   });
 });
 

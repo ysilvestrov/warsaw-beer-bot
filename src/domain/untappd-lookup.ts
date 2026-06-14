@@ -1,5 +1,5 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, breweryAliasesMatch, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripLeadingBrewery } from './matcher';
+import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripLeadingBrewery } from './matcher';
 import { normalizeBrewery, normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
@@ -53,6 +53,18 @@ function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   return Array.from(targets.values());
 }
 
+// Among equally-valid name matches, prefer one whose ABV is within tolerance of the
+// input's; otherwise the first (results are latest-first from the search page).
+// NOTE: Stage 2b uses a score-aware variant (topScore guard) instead; this helper is
+// only for Stage 2a / relaxedExact, where all candidates are equally ranked.
+function pickByAbv(results: SearchResult[], abv: number | null): SearchResult {
+  if (abv != null) {
+    const hit = results.find((r) => r.abv != null && Math.abs(r.abv - abv) <= ABV_TOLERANCE);
+    if (hit) return hit;
+  }
+  return results[0];
+}
+
 export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   const { brewery, name, abv = null, fetch } = args;
   const inputBreweryAliases = breweryAliases(brewery);
@@ -81,58 +93,78 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     seenCandidates.push(...results);
     if (results.length === 0) continue;
 
-    // Stage 1: brewery hard-gate — token-boundary prefix overlap.
-    const breweryPassed = results.filter((r) =>
-      breweryAliasesMatch(breweryAliases(r.brewery_name), inputBreweryAliases),
-    );
-    if (breweryPassed.length === 0) continue;
+    // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
+    // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
+    // #120 contained non-leading brewery token — EXACT name only, never approximate
+    // fuzzy). breweryAliasesMatch is recomputed once per result here.
+    const tagged = results.map((r) => {
+      const cand = breweryAliases(r.brewery_name);
+      const strict = breweryAliasesMatch(cand, inputBreweryAliases);
+      const relaxed =
+        !strict &&
+        (inputBreweryAliases.length === 0 ||
+          breweryAliasContained(cand, inputBreweryAliases));
+      return { r, strict, relaxed };
+    });
+    const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
+    const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
+    if (strictPool.length === 0 && relaxedPool.length === 0) continue;
 
-    // Stage 2a: name-keys exact intersection (order-insensitive, collab/bilingual aware).
+    // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
+    // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
+    // pickByAbv fallback keeps "strict wins"; with ABV evidence a relaxed exact-key
+    // hit can win — intentional, since exact-key+ABV is stronger than exact-key alone.
     const inputKeys = nameKeys(name, brewery);
-    const keyHits = breweryPassed.filter((r) =>
+    const keyHits = [...strictPool, ...relaxedPool].filter((r) =>
       intersects(nameKeys(r.beer_name, r.brewery_name), inputKeys),
     );
-    if (keyHits.length > 0) {
-      if (abv != null) {
-        const abvHit = keyHits.find(
-          (r) => r.abv != null && Math.abs(r.abv - abv) <= ABV_TOLERANCE,
-        );
-        if (abvHit) return { kind: 'matched', result: abvHit };
+    if (keyHits.length > 0) return { kind: 'matched', result: pickByAbv(keyHits, abv) };
+
+    // Stage 2b: name fuzzy >= 0.85 — STRICT pool only (a relaxed brewery never
+    // matches via approximate fuzzy).
+    if (strictPool.length > 0) {
+      const searcher = new Searcher(strictPool, {
+        keySelector: (r) => normalizeName(r.beer_name),
+        threshold: NAME_FUZZY_THRESHOLD,
+        returnMatchData: true,
+      });
+      const matches = targetNames
+        .flatMap((targetName) =>
+          searcher
+            .search(targetName.value)
+            .filter(
+              (m) => !targetName.exactOnly || normalizeName(m.item.beer_name) === targetName.value,
+            ),
+        )
+        .sort((a, b) => b.score - a.score);
+      if (matches.length > 0) {
+        // ABV tiebreak: normalizeName strips vintage years, so different-year /
+        // different-strength variants collapse to identical names and tie at the top
+        // score. ABV is the only separating signal among the equally-scored top matches.
+        const topScore = matches[0].score;
+        if (abv != null) {
+          const abvHit = matches.find(
+            (m) =>
+              m.score === topScore &&
+              m.item.abv != null &&
+              Math.abs(m.item.abv - abv) <= ABV_TOLERANCE,
+          );
+          if (abvHit) return { kind: 'matched', result: abvHit.item };
+        }
+        return { kind: 'matched', result: matches[0].item };
       }
-      return { kind: 'matched', result: keyHits[0] };
     }
 
-    // Stage 2b: name fuzzy >= 0.85.
-    const searcher = new Searcher(breweryPassed, {
-      keySelector: (r) => normalizeName(r.beer_name),
-      threshold: NAME_FUZZY_THRESHOLD,
-      returnMatchData: true,
-    });
-    const matches = targetNames
-      .flatMap((targetName) =>
-        searcher
-          .search(targetName.value)
-          .filter((m) => !targetName.exactOnly || normalizeName(m.item.beer_name) === targetName.value),
-      )
-      .sort((a, b) => b.score - a.score);
-    if (matches.length === 0) continue;
+    // Relaxed pool: EXACT normalized-name equality only (never approximate fuzzy).
+    // Recovers names that collapse below the key path — e.g. `KULTOWE PILS` → `kultowe`
+    // (style-word dropped), `St-Feuillien Blonde` (candidate strips its embedded brewery).
+    const relaxedTargetValues = new Set(targetNames.map((t) => t.value));
+    const relaxedExact = relaxedPool.filter((r) =>
+      relaxedTargetValues.has(normalizeName(r.beer_name)),
+    );
+    if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 
-    // ABV tiebreak: normalizeName strips vintage years, so different-year /
-    // different-strength variants of the same beer collapse to identical names
-    // and tie at the top score. ABV is the only signal that separates them, so
-    // among the equally-scored top matches prefer one within ABV_TOLERANCE.
-    const topScore = matches[0].score;
-    if (abv != null) {
-      const abvHit = matches.find(
-        (m) =>
-          m.score === topScore &&
-          m.item.abv != null &&
-          Math.abs(m.item.abv - abv) <= ABV_TOLERANCE,
-      );
-      if (abvHit) return { kind: 'matched', result: abvHit.item };
-    }
-
-    return { kind: 'matched', result: matches[0].item };
+    // No name match in this search part — fall through to the next part.
   }
 
   return { kind: 'not_found', searchUrls: triedUrls, candidates: seenCandidates };
