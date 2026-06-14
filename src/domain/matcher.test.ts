@@ -417,7 +417,7 @@ describe('breweryAliasContained', () => {
   test('trailing token matches (#120 Staropolski)', () => {
     expect(breweryAliasContained(['kultowy staropolski'], ['staropolski'])).toBe(true);
   });
-  test('leading prefix also counts as contained', () => {
+  test('leading prefix is also a contiguous sublist (in lookupBeer such a brewery is strict, not relaxed)', () => {
     expect(breweryAliasContained(['harpagan craft'], ['harpagan'])).toBe(true);
   });
   test('contiguous middle run matches', () => {

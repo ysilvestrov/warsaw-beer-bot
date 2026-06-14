@@ -111,7 +111,9 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     if (strictPool.length === 0 && relaxedPool.length === 0) continue;
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
-    // aware) on strict ∪ relaxed.
+    // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
+    // pickByAbv fallback keeps "strict wins"; with ABV evidence a relaxed exact-key
+    // hit can win — intentional, since exact-key+ABV is stronger than exact-key alone.
     const inputKeys = nameKeys(name, brewery);
     const keyHits = [...strictPool, ...relaxedPool].filter((r) =>
       intersects(nameKeys(r.beer_name, r.brewery_name), inputKeys),
