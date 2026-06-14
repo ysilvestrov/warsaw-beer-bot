@@ -19,8 +19,12 @@ const raw = readFileSync(jsonPath, 'utf8');
 function parsePayload(text: string): unknown {
   try {
     return JSON.parse(text);
-  } catch {
+  } catch (err) {
+    // Trailing junk only — there must be a closing brace/bracket to slice back to.
+    // Otherwise the file is genuinely malformed: surface the original parse error
+    // rather than JSON.parse('') ("Unexpected end of JSON input"), which hides it.
     const end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
+    if (end === -1) throw err;
     return JSON.parse(text.slice(0, end + 1));
   }
 }
