@@ -43,8 +43,21 @@ type PreparedSearcher = ReturnType<typeof defaultBuildSearcher>;
 // 20k-row index; if no beer falls through, it is never built.
 export interface PreparedCatalog {
   beers: PreparedBeer[];
+  // Catalog rows whose brewery aliases match `inputAliases`, via a first-token
+  // index instead of a full linear scan. Set-equal to
+  // `beers.filter((c) => breweryAliasesMatch(c.aliases, inputAliases))`.
+  breweryCandidates(inputAliases: string[]): PreparedBeer[];
   searcherFor(rows: PreparedBeer[]): PreparedSearcher;
   fullSearcher(): PreparedSearcher;
+}
+
+// First whitespace-delimited token of a normalized brewery alias. `breweryAliasesMatch`
+// reduces to `tokenPrefix`, which requires the shorter token list to be a leading prefix
+// of the longer — so two aliases can only match when their first tokens are equal. That
+// makes the first token a sound bucket key: matches never span buckets.
+function aliasFirstToken(alias: string): string {
+  const i = alias.indexOf(' ');
+  return i === -1 ? alias : alias.slice(0, i);
 }
 
 // Per-row preparation: precompute the normalizations once.
@@ -66,8 +79,37 @@ export function makePreparedCatalog(
   build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
 ): PreparedCatalog {
   let full: PreparedSearcher | undefined;
+
+  // First-token index: bucket each row under the first token of each of its brewery
+  // aliases. Aliases of one row are contiguous, so a tail check dedupes a row that has
+  // several aliases sharing a first token. One O(catalog) pass, built eagerly.
+  const byFirstToken = new Map<string, PreparedBeer[]>();
+  for (const b of beers) {
+    for (const alias of b.aliases) {
+      const key = aliasFirstToken(alias);
+      let bucket = byFirstToken.get(key);
+      if (!bucket) byFirstToken.set(key, (bucket = []));
+      if (bucket[bucket.length - 1] !== b) bucket.push(b);
+    }
+  }
+
   return {
     beers,
+    breweryCandidates: (inputAliases) => {
+      const seen = new Set<PreparedBeer>();
+      const out: PreparedBeer[] = [];
+      for (const alias of inputAliases) {
+        const bucket = byFirstToken.get(aliasFirstToken(alias));
+        if (!bucket) continue;
+        for (const c of bucket) {
+          if (!seen.has(c) && breweryAliasesMatch(c.aliases, inputAliases)) {
+            seen.add(c);
+            out.push(c);
+          }
+        }
+      }
+      return out;
+    },
     searcherFor: build,
     fullSearcher: () => (full ??= build(beers)),
   };
@@ -190,17 +232,16 @@ export function matchPrepared(
   const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
   const inputKeys = nameKeys(input.name, input.brewery);   // #117
-  const catalog = prepared.beers;
+
+  // Brewery-matching rows, via the first-token index (was a full O(catalog) scan).
+  // Computed once and reused by both the exact filter and the fuzzy pool below.
+  const breweryMatches = prepared.breweryCandidates(inputAliases);
 
   // Exact-normalized hits — multiple rows are common when Untappd has
   // several vintages of the same beer. Latest id first. #117: also accept an
   // order-insensitive / collab-aware name-key intersection as exact-equivalent.
-  const exacts = catalog
-    .filter(
-      (c) =>
-        breweryAliasesMatch(c.aliases, inputAliases) &&
-        (c.nameNorm === nn || intersects(c.keys, inputKeys)),
-    )
+  const exacts = breweryMatches
+    .filter((c) => c.nameNorm === nn || intersects(c.keys, inputKeys))
     .sort((a, b) => b.id - a.id);
 
   if (exacts.length) {
@@ -265,7 +306,7 @@ export function matchPrepared(
 
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's,
   // otherwise the full catalog (shared, lazily-built Searcher).
-  const pool = catalog.filter((c) => breweryAliasesMatch(c.aliases, inputAliases));
+  const pool = breweryMatches;
   const searcher = pool.length ? prepared.searcherFor(pool) : prepared.fullSearcher();
   // Use the first alias as the search seed — full normalized brewery already
   // appears at index 0 of breweryAliases when no slash is present.

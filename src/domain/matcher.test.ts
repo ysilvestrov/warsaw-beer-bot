@@ -459,6 +459,54 @@ describe('prepareCatalog — lazy/memoized fullSearcher', () => {
   });
 });
 
+describe('prepareCatalog — breweryCandidates index', () => {
+  // A catalog with several first-token collisions and collab/paren aliases so the
+  // first-token bucket holds a mix of true matches and same-prefix near-misses.
+  const cat: CatalogBeer[] = [
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu' }),
+    c({ id: 2, brewery: 'Pinta Barrel', name: 'Koniec Świata' }),
+    c({ id: 3, brewery: 'Pinto', name: 'Different Brewery' }),
+    c({ id: 4, brewery: 'Stu Mostów', name: 'Buty Skejta' }),
+    c({ id: 5, brewery: 'Piwne Podziemie / Beer Underground', name: 'Hopinka' }),
+    c({ id: 6, brewery: 'Beer Bros', name: 'Lager' }),
+  ];
+  const prepared = prepareCatalog(cat);
+
+  // The index must return exactly the rows a full linear breweryAliasesMatch scan
+  // would — set equality, regardless of order. This is the invariant that lets the
+  // index replace the O(catalog) per-beer filter without changing any match result.
+  const fullScan = (brewery: string) => {
+    const ia = breweryAliases(brewery);
+    return cat
+      .map(prepareBeer)
+      .filter((c) => breweryAliasesMatch(c.aliases, ia))
+      .map((c) => c.id)
+      .sort();
+  };
+  const indexed = (brewery: string) =>
+    prepared
+      .breweryCandidates(breweryAliases(brewery))
+      .map((c) => c.id)
+      .sort();
+
+  test.each([
+    'Pinta',                                  // token-prefix matches 'Pinta' + 'Pinta Barrel', not 'Pinto'
+    'Pinta Barrel',
+    'Pinto',
+    'Beer Underground',                       // matches the collab inner alias of id 5
+    'Piwne Podziemie / Beer Underground',
+    'Beer Bros',
+    'Nowhere',                                // no bucket → empty
+  ])('matches the full-scan result set for %s', (brewery) => {
+    expect(indexed(brewery)).toEqual(fullScan(brewery));
+  });
+
+  test('returns no duplicate rows when a row has multiple same-first-token aliases', () => {
+    const ids = prepared.breweryCandidates(breweryAliases('Pinta')).map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
 describe('nameTokensDiverge', () => {
   test('diverges on different flavour variants', () => {
     expect(nameTokensDiverge('vanilla mind over matter', 's mores mind over matter')).toBe(true);
