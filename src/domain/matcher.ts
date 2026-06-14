@@ -1,5 +1,5 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { normalizeName, normalizeBrewery, COLLAB_SEP } from './normalize';
+import { normalizeName, normalizeBrewery, COLLAB_SEP, BREWERY_NOISE } from './normalize';
 
 export { COLLAB_SEP } from './normalize';
 
@@ -187,20 +187,29 @@ export function breweryAliasContained(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenSublist(x, y)));
 }
 
-// Strip leading brewery tokens duplicated into a normalized name (e.g. the product
-// title "PRIMÁTOR Free Mother In Law" with brewery "Primátor"). Token-prefix only.
-export function stripLeadingBrewery(nameNorm: string, breweryNorm: string): string {
+// Strip a brewery duplicated into a normalized name (e.g. title "PRIMÁTOR Free Mother
+// In Law" with brewery "Primátor", or a trailing "… Trzech Kumpli"). Removes every
+// non-overlapping contiguous run of the brewery tokens — at ANY position — but never
+// strips the name to empty, then trims any leftover leading/trailing BREWERY_NOISE.
+export function stripBreweryFromName(nameNorm: string, breweryNorm: string): string {
   if (!breweryNorm) return nameNorm;
-  const nt = nameNorm.split(' ').filter(Boolean);
   const bt = breweryNorm.split(' ').filter(Boolean);
-  if (bt.length && bt.length < nt.length && bt.every((t, i) => nt[i] === t)) {
-    return nt.slice(bt.length).join(' ');
+  if (!bt.length) return nameNorm;
+  const nt = nameNorm.split(' ').filter(Boolean);
+  for (let i = 0; i + bt.length <= nt.length; ) {
+    if (nt.length - bt.length >= 1 && bt.every((t, j) => nt[i + j] === t)) {
+      nt.splice(i, bt.length);
+    } else {
+      i++;
+    }
   }
-  return nameNorm;
+  while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
+  while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
+  return nt.join(' ');
 }
 
 // Set of canonical name keys: split on COLLAB_SEP (collab/bilingual sides), normalize
-// each side, strip a leading brewery duplication, drop <2-token sides (weak keys), then
+// each side, strip an embedded brewery duplication (anywhere in the name), drop <2-token sides (weak keys), then
 // sort tokens (order-insensitive). Names match when their key sets intersect — set
 // EQUALITY per side, as FP-safe as exact match. Single-token whole names yield an empty
 // set and fall through to the fuzzy path. See spec §3.1.
@@ -208,7 +217,7 @@ export function nameKeys(rawName: string, brewery: string): Set<string> {
   const bNorm = normalizeBrewery(brewery);
   const keys = new Set<string>();
   for (const side of rawName.split(COLLAB_SEP)) {
-    const toks = stripLeadingBrewery(normalizeName(side), bNorm).split(' ').filter(Boolean);
+    const toks = stripBreweryFromName(normalizeName(side), bNorm).split(' ').filter(Boolean);
     if (toks.length < 2) continue;
     keys.add([...toks].sort().join(' '));
   }

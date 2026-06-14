@@ -4,7 +4,7 @@ const STYLE_WORDS = new Set([
   'pils', 'pilsner', 'lager', 'stout', 'porter', 'weizen', 'wheat',
   'saison', 'sour', 'gose', 'lambic', 'barleywine', 'bock',
 ]);
-const BREWERY_NOISE = new Set([
+export const BREWERY_NOISE = new Set([
   // English / Polish
   'browar', 'browary', 'brewery', 'brewing', 'co', 'company', 'contracts',
   'collab', 'collaboration',

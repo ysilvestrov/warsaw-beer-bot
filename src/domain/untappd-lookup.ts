@@ -1,5 +1,5 @@
 import { Searcher } from 'fast-fuzzy';
-import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripLeadingBrewery } from './matcher';
+import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripBreweryFromName } from './matcher';
 import { normalizeBrewery, normalizeName, stripBreweryNoise } from './normalize';
 import {
   buildSearchUrl,
@@ -43,7 +43,7 @@ function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   const breweryNorm = normalizeBrewery(brewery);
   const targets = new Map<string, FuzzyTarget>();
   for (const [index, raw] of [name, ...name.split(COLLAB_SEP)].entries()) {
-    const value = stripLeadingBrewery(normalizeName(raw), breweryNorm);
+    const value = stripBreweryFromName(normalizeName(raw), breweryNorm);
     if (!value) continue;
     const tokenCount = value.split(' ').filter(Boolean).length;
     const exactOnly = index > 0 && tokenCount < 2;
