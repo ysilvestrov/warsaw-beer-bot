@@ -7,7 +7,7 @@ import {
   getBeer,
   upsertBeer,
 } from '../../storage/beers';
-import { normalizeBrewery, normalizeName, stripBreweryNoise } from '../../domain/normalize';
+import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
 import { buildSearchUrl } from '../../sources/untappd/search';
 import { lookupBeer } from '../../domain/untappd-lookup';
@@ -55,7 +55,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           brewery: b.brewery,
           name: b.name,
           eligible,
-          searchUrl: buildSearchUrl(`${stripBreweryNoise(b.brewery)} ${b.name}`.trim()),
+          searchUrl: buildSearchUrl(cleanSearchQuery(b.brewery, b.name)),
         };
       }),
     )();

@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -121,5 +121,33 @@ describe('normalizeBrewery with legal forms', () => {
   test('does not clobber standalone z / o tokens', () => {
     expect(normalizeBrewery('Pinta z Warszawy')).toBe('pinta z warszawy');
     expect(normalizeBrewery('Browar O Beczki')).toBe('o beczki');
+  });
+});
+
+describe('cleanSearchQuery', () => {
+  test('dedups brewery repeated in the name and drops noise incl. "Co." (#126 Track)', () => {
+    expect(cleanSearchQuery('TRACK BREWING CO.', 'Track Brewing Company Taking Shape')).toBe(
+      'TRACK Taking Shape',
+    );
+  });
+  test('dedups a trailing brewery duplication (#155 Trzech Kumpli)', () => {
+    expect(
+      cleanSearchQuery('TRZECH KUMPLI Brewery', 'Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli'),
+    ).toBe('TRZECH KUMPLI Porter Bałtycki Żytnio-Orkiszowy');
+  });
+  test('non-duplicated beer is unchanged (no regression)', () => {
+    expect(cleanSearchQuery('Pinta', 'Atak Chmielu')).toBe('Pinta Atak Chmielu');
+  });
+  test('preserves digits and original casing in surviving tokens', () => {
+    expect(cleanSearchQuery('Pinta', 'Many Hops 2023')).toBe('Pinta Many Hops 2023');
+  });
+  test('strips a legal-form brewery suffix (Sp. z o.o.) instead of leaking it into the query', () => {
+    expect(cleanSearchQuery('Pinta Sp. z o.o.', 'Atak Chmielu')).toBe('Pinta Atak Chmielu');
+  });
+  test('all-noise input falls back to the raw name (never an empty query)', () => {
+    expect(cleanSearchQuery('Brewing Co', 'Company')).toBe('Company');
+  });
+  test('collapses a collab connector so "x" does not leak into the query', () => {
+    expect(cleanSearchQuery('Alpha x Beta', 'Some Beer')).toBe('Alpha Beta Some Beer');
   });
 });

@@ -1,4 +1,4 @@
-import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -619,5 +619,36 @@ describe('matchPrepared key-intersection (#117)', () => {
   test('collab partner in input name matches the base beer as exact', () => {
     const m = matchBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park' }, cat);
     expect(m).toEqual({ id: 11, confidence: 1, source: 'exact' });
+  });
+});
+
+describe('stripBreweryFromName', () => {
+  test('strips a leading run', () => {
+    expect(stripBreweryFromName('primator weizen', 'primator')).toBe('weizen');
+  });
+  test('strips a trailing run (#155 Trzech Kumpli)', () => {
+    expect(stripBreweryFromName('baltycki zytnio orkiszowy trzech kumpli', 'trzech kumpli')).toBe(
+      'baltycki zytnio orkiszowy',
+    );
+  });
+  test('strips a mid run', () => {
+    expect(stripBreweryFromName('cydr chyliczki stary sad', 'chyliczki')).toBe('cydr stary sad');
+  });
+  test('trims a stranded trailing brewery-noise token after the run', () => {
+    expect(stripBreweryFromName('kosmaty trzech kumpli brewery', 'trzech kumpli')).toBe('kosmaty');
+  });
+  test('removes multiple non-adjacent runs', () => {
+    expect(stripBreweryFromName('trzech kumpli kosmaty trzech kumpli', 'trzech kumpli')).toBe(
+      'kosmaty',
+    );
+  });
+  test('never strips the name to empty (name == brewery)', () => {
+    expect(stripBreweryFromName('trzech kumpli', 'trzech kumpli')).toBe('trzech kumpli');
+  });
+  test('keeps one run when the name is nothing but repeated brewery (≥1-token guard)', () => {
+    expect(stripBreweryFromName('trzech kumpli trzech kumpli', 'trzech kumpli')).toBe('trzech kumpli');
+  });
+  test('passthrough when brewery is empty (keeps #138B brand path intact)', () => {
+    expect(stripBreweryFromName('murphy s irish stout', '')).toBe('murphy s irish stout');
   });
 });
