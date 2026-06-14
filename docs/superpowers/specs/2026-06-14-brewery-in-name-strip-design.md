@@ -9,9 +9,14 @@
 | # | Stage | Mechanism | Example |
 |---|-------|-----------|---------|
 | #126 | **Query build** (`enrich.ts:58`, `lookupBeer` search URL) | query = `stripBreweryNoise(brewery) + " " + name`; when `name` repeats the brewery the query doubles it → Untappd term-AND search returns **0 results** | brewery `Track Brewing Co.`, name `Track Brewing Company Taking Shape` → query `Track Track Brewing Company Taking Shape` → 0 hits (real beer findable as `Track Taking Shape`) |
-| #155 | **Name match** (`nameKeys`, `fuzzyTargets`) | `stripLeadingBrewery` strips only a **full leading** brewery prefix, so trailing / mid / partial duplications survive and break the name-key intersection and divergence guard | `Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli` / brewery `Trzech Kumpli` (trailing); `Cydr Chyliczki - Stary Sad 2023` / `Chyliczki` (mid); `Primator Weizen` / `Primator` (leading, already handled) |
+| #155 | **Name match** (`nameKeys`, `fuzzyTargets`) | `stripLeadingBrewery` strips only a **full leading** brewery prefix, so a trailing duplication survives and breaks the name-key intersection / divergence guard | `Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli` / brewery `Trzech Kumpli` (trailing, **recovered**); `Primator Weizen` / `Primator` (leading, already handled) |
 
-Both want the same capability: **strip the brewery from the beer name wherever it appears.** Today only the leading-full-prefix case is handled, in one place (`stripLeadingBrewery`).
+Both stem from the same root: **the brewery name is embedded in the beer name.** They are fixed by two small, related functions (sharing `BREWERY_NOISE` + a token-fold), not literally one helper — verification showed the query side needs a denoise+dedup pass, while the match side needs a targeted brewery-run removal.
+
+**Verified against real Untappd pages 2026-06-14** (the discipline that caught PR1/PR2 surprises):
+- Track #126: OLD query → **0 items**, cleaned query `TRACK Taking Shape` → **1 item** (`Track Brewing Company — Taking Shape`, bid 6645521).
+- Trzech Kumpli #155: brewery-run strip → matches `Porter Bałtycki Żytnio-Orkiszowy` (bid 6568809).
+- **Chyliczki is NOT recovered** (deferred): name `Cydr Chyliczki - Stary Sad 2023` carries a fuller brewery phrase (`Cydr Chyliczki`) than the shop `Chyliczki` field; stripping `chyliczki` leaves `cydr` (not `BREWERY_NOISE`) → still no key intersection. Same partial-prefix class as `Hoppy Hog`.
 
 ## Scope decisions (agreed)
 
@@ -30,15 +35,20 @@ Leading-prefix is just "run at index 0", so this is a strict superset of today's
 
 **FP character unchanged:** only the brewery name is ever removed, and the downstream "<2-token side → no key → fall to fuzzy" rule still guards weak results.
 
-## Consumer — #126 query builders
+## Consumer — #126 query builder (`cleanSearchQuery`)
 
-Two sites build `stripBreweryNoise(brewery) + " " + name`: `enrich.ts:58` (extension preview `searchUrl`) and `lookupBeer`'s search-URL builder. Both strip the brewery run from `name` before appending.
+Two sites build `stripBreweryNoise(brewery) + " " + name`: `enrich.ts:58` (extension preview `searchUrl`) and `lookupBeer`'s per-part search-URL builder. Replace both with a single new `cleanSearchQuery(brewery, name)` (in `normalize.ts`, next to `stripBreweryNoise`).
 
-The query must run on the **raw** name (preserve surviving tokens like `2023`, flavour words, original casing — `normalizeName` strips digits/style words we want for search), comparing tokens case- and diacritic-folded against the brewery. So it is the **same core token operation** (remove brewery run + trim edge noise) with a **raw comparator** wrapper instead of the normalized path.
+`cleanSearchQuery` cleans the **combined** `brewery + " " + name` string in one pass:
+1. tokenize on whitespace;
+2. **fold** each token = lowercase + strip diacritics + strip non-alphanumerics (so `Co.` → `co`, `Bałtycki` → `baltycki`);
+3. drop tokens whose fold is in `BREWERY_NOISE`;
+4. **dedup** — drop a token whose fold already appeared;
+5. keep the surviving tokens in their **original raw form** (preserve `2023`, flavour words, casing) and join.
 
-Worked example — `Track`: `stripBreweryNoise("Track Brewing Co.") = "Track"`; raw name `Track Brewing Company Taking Shape` → remove the leading `track` run → `Brewing Company Taking Shape` → trim leading `BREWERY_NOISE` (`Brewing`, `Company`) → `Taking Shape` → query `Track Taking Shape` (finds `Track Brewing Co. — Taking Shape`). The leftover-noise trim is load-bearing here (`brewing`/`company` ∈ `BREWERY_NOISE`, verified).
+**Why combined + fold (verified — the spec's earlier "strip brewery from name" was wrong):** the naive `stripBreweryNoise(brewery) + strippedName` yields `TRACK CO. Taking Shape` because `stripBreweryNoise` leaves `CO.` (the `.` defeats its plain-token `co` check) — and `TRACK CO. Taking Shape` returns **0 items** on Untappd. The fold strips the `.` so `co` is dropped as noise, and dedup removes the second `Track`/`Brewing`/`Company`, giving `TRACK Taking Shape` → **1 item**. Worked: `cleanSearchQuery("TRACK BREWING CO.", "Track Brewing Company Taking Shape")` = `"TRACK Taking Shape"`; `cleanSearchQuery("TRZECH KUMPLI Brewery", "Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli")` = `"TRZECH KUMPLI Porter Bałtycki Żytnio-Orkiszowy"` (dedups the trailing `Trzech Kumpli`).
 
-Query behavior is hard to reason about abstractly, so the plan will **capture the real Track Untappd page and verify the cleaned query returns the candidate** before committing (the discipline that caught the PR1/PR2 surprises).
+For non-duplicated beers this is equivalent to today's query (no noise/dups beyond what `stripBreweryNoise` already removed), so it is not a regression for the common case. Query behavior can't be CI-tested (search is mocked in fixtures), so the plan unit-tests `cleanSearchQuery`'s output and **verifies the cleaned query against the captured real Track page** end-to-end.
 
 ## #138B interaction (safe by construction)
 
@@ -49,15 +59,16 @@ The PR2 brand path computes `nameKeys(name, '')` (empty brewery) → `stripBrewe
 - Strip would empty the name → keep it raw (≥1-token guard). The query never goes empty (it still carries the brewery field).
 - Strip leaves a single token → existing "<2-token side → no key → fuzzy" path, unchanged.
 - Per-`COLLAB_SEP`-side application preserved (helper slots into the same place).
-- **Hoppy Hog deferred** — strip removes trailing `Brewery` but `Family` survives → won't fully match; documented out of scope.
+- **Hoppy Hog & Chyliczki deferred** — partial-prefix cases where the name carries a fuller brewery phrase than the brewery field; the strip leaves a non-noise leftover (`Family`, `cydr`) → won't fully match; documented out of scope.
 
 ## Testing
 
-- **Unit** (`matcher.test.ts`): `stripBreweryFromName` — leading / trailing / mid run, leftover-noise trim, empty-guard (name == brewery), no-brewery passthrough, multi-occurrence.
-- **#155 real fixtures** (`tests/fixtures/untappd-search/`): Trzech Kumpli + Chyliczki captured pages → `lookupBeer` now matches (previously `not_found`).
-- **#126 real fixture:** the captured Track page — assert (a) the cleaned query string drops the duplication and (b) `lookupBeer` end-to-end now matches. Plus a unit test on the raw query-cleaner output.
-- **`/match` no-regression (scope-A blast-radius check):** full `npx jest` green **plus** `scripts/bench-match.ts` on the prod payload (`tmp/beerrepublic.json` or similar) showing the matched count is unchanged — `nameKeys` changed globally.
-- FP guard: a beer whose name legitimately contains a brewery-like single token is not over-stripped into a wrong match (pick a real example during planning; rely on the ≥2-token-key + exact-set-equality safety).
+- **Unit** (`matcher.test.ts`): `stripBreweryFromName` — leading / trailing run, leftover-noise trim, empty-guard (name == brewery), no-brewery passthrough, multi-occurrence; and the deferred-by-design Chyliczki shape (`Cydr Chyliczki - Stary Sad`, brewery `Chyliczki` → still contains `cydr`, asserting the documented partial behavior).
+- **Unit** (`normalize.test.ts`): `cleanSearchQuery` — `("TRACK BREWING CO.", "Track Brewing Company Taking Shape") === "TRACK Taking Shape"`; `("TRZECH KUMPLI Brewery", "Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli")` drops the trailing dup; a non-duplicated beer (`Pinta`, `Atak Chmielu`) → `"Pinta Atak Chmielu"` (no change).
+- **#155 real fixture** (`tests/fixtures/untappd-search/trzech.html`): `lookupBeer("TRZECH KUMPLI Brewery", "Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli")` → matched **bid 6568809** (was `not_found`).
+- **#126 real fixture** (`tests/fixtures/untappd-search/track-clean.html`, the cleaned-query page): `lookupBeer("TRACK BREWING CO.", "Track Brewing Company Taking Shape")` → matched **bid 6645521**. (The fixtures harness mocks `fetch`, so this proves the *match* works once candidates appear; the *query* cleaning is proven by the `cleanSearchQuery` unit test above.)
+- **`/match` no-regression (scope-A blast-radius check):** full `npx jest` green **plus** `scripts/bench-match.ts /var/lib/warsaw-beer-bot/bot.db tmp/beerrepublic.json` showing the matched count is unchanged from before the change — `nameKeys` changed globally.
+- FP guard: confirm `stripBreweryFromName` does not over-strip when a beer name legitimately repeats a brewery-like token (rely on the ≥2-token-key + exact-set-equality safety; the unit suite covers the empty-guard and no-passthrough cases).
 
 ## spec.md updates (same PR)
 
