@@ -330,4 +330,50 @@ describe('lookupBeer', () => {
       expect(out.kind).toBe('not_found');
     });
   });
+
+  test('matched: empty input brewery → exact name bypasses gate (#149)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 22540, name: 'St-Feuillien Blonde', brewery: 'Brasserie St-Feuillien' },
+        { bid: 999, name: 'Bière Léon', brewery: 'Chez Léon 1893' },
+      ]),
+    );
+    const out = await lookupBeer({ brewery: '', name: 'St-Feuillien Blonde', fetch });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(22540);
+  });
+
+  test('matched: contained (trailing) brewery token + exact name (#120)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 1673808, name: 'Kultowe Pils', brewery: 'Kultowy Browar Staropolski' },
+        { bid: 2, name: 'Rodowite Pils', brewery: 'Kultowy Browar Staropolski' },
+      ]),
+    );
+    const out = await lookupBeer({ brewery: 'Staropolski', name: 'KULTOWE PILS', fetch });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1673808);
+  });
+
+  test('not_found: relaxed brewery + approximate (not exact) name is NOT fuzzy-matched (#120 FP guard)', async () => {
+    // fuzzy('imperial stout reserve','imperial stout reserva') = 0.955, but the brewery
+    // only matches via the relaxed contained-token path, so an EXACT name is required.
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 77, name: 'Imperial Stout Reserva', brewery: 'Kultowy Browar Staropolski' },
+      ]),
+    );
+    const out = await lookupBeer({ brewery: 'Staropolski', name: 'Imperial Stout Reserve', fetch });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('not_found: empty brewery + different name → no match (#149 FP guard)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([{ bid: 5, name: 'Completely Different Beer', brewery: 'Some Brewery' }]),
+    );
+    const out = await lookupBeer({ brewery: '', name: 'St-Feuillien Blonde', fetch });
+    expect(out.kind).toBe('not_found');
+  });
 });
