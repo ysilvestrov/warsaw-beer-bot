@@ -16,6 +16,8 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
   { slug: 'staropolski',  brewery: 'Staropolski',         name: 'KULTOWE PILS',              bid: 1673808 }, // #120 fixed
   { slug: 'st-feuillien', brewery: '',                    name: 'St-Feuillien Blonde',       bid: 22540 },   // #149
   { slug: 'murphys',      brewery: "Murphy's Brewery",     name: "Murphy's Irish Stout",      bid: 5932 },    // #138B
+  { slug: 'trzech',       brewery: 'TRZECH KUMPLI Brewery',  name: 'Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli', bid: 6568809 }, // #155 trailing
+  { slug: 'track-clean',  brewery: 'TRACK BREWING CO.',      name: 'Track Brewing Company Taking Shape',            bid: 6645521 }, // #126 (cleaned-query page)
 ];
 
 describe('#117 lookupBeer against real Untappd search pages', () => {
