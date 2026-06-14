@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
 import type { Geocoder } from '../sources/geocoder';
 import { parseWarsawIndex, type IndexPub } from '../sources/ontap/index';
+import { isOntapNonBeerTap } from '../sources/ontap/non-beer';
 import { parsePubPage } from '../sources/ontap/pub';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
@@ -45,7 +46,12 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     i++;
     try {
       const html = await http.get(`https://${ip.slug}.ontap.pl/`);
-      const { pub, taps } = parsePubPage(html);
+      const { pub, taps: parsedTaps } = parsePubPage(html);
+      const taps = parsedTaps.filter((t) => !isOntapNonBeerTap(t));
+      const droppedNonBeer = parsedTaps.length - taps.length;
+      if (droppedNonBeer > 0) {
+        log.info({ slug: ip.slug, droppedNonBeer }, 'ontap non-beer taps filtered');
+      }
 
       let lat = pub.lat;
       let lon = pub.lon;
