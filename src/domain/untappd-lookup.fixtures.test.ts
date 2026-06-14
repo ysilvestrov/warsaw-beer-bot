@@ -15,6 +15,7 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
   { slug: 'omnipollo',    brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar', bid: 6423273 },
   { slug: 'staropolski',  brewery: 'Staropolski',         name: 'KULTOWE PILS',              bid: 1673808 }, // #120 fixed
   { slug: 'st-feuillien', brewery: '',                    name: 'St-Feuillien Blonde',       bid: 22540 },   // #149
+  { slug: 'murphys',      brewery: "Murphy's Brewery",     name: "Murphy's Irish Stout",      bid: 5932 },    // #138B
 ];
 
 describe('#117 lookupBeer against real Untappd search pages', () => {
