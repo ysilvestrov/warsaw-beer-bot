@@ -83,17 +83,22 @@ When `strict` and `relaxed` are both empty (and, in PR2, no brand-in-name hit), 
 
 ## PR2 — brand-as-beer-name (#138B), designed but isolated
 
-For candidates failing **both** strict and PR1-relaxed gates, compute an extra key from the input's **brewery + name surface treated as a single name** (do *not* strip the brewery) and intersect it with the candidate's beer-name keys.
+The brand on the shelf is the input *brewery*, but Untappd files the beer under a parent company, so the brand sits inside the candidate *beer name* (`Murphy's` / `Murphy's Irish Stout` → `Heineken Ireland — Murphy's Irish Stout`). The PR1 gates don't help — the input brewery isn't in the candidate's brewery at all.
 
-- Murphy's: input surface keys `{irish murphy s stout}` == candidate `Murphy's Irish Stout` keys → match. This is exact full-surface equality — naturally satisfies principle A and is very FP-safe.
+**Mechanism (verified 2026-06-14 against the real Untappd page).** For a candidate that fails **both** the strict and PR1-relaxed brewery gates, two conditions must BOTH hold:
 
-These brand-in-name hits join the exact-name-key stage (never fuzzy).
+1. **Brand-in-name gate.** The input brewery must appear as a **contiguous token-run inside the candidate's beer name** — `breweryAliasContained(inputBreweryAliases, [normalizeName(candidate.beer_name)])`. This is essential: without it, two unrelated breweries that merely share a beer name (input brewery NOT in the name) would match on name alone — a real false positive, since the brewery gate is fully bypassed here.
+2. **Exact name match.** `nameKeys(input.name, '')` (input name with the brewery **NOT** stripped, so the brand stays in the key) must intersect the candidate's `nameKeys(beer_name, brewery_name)`. Exact key only — never fuzzy (principle A).
 
-**Deliberately deferred to a future effort (NOT solved in PR2):** two of the issue's own examples need looser matching than exact full-surface equality and are left as open design points rather than forced now:
-- `Kwak` / `Pauwel Kwak Rouge` → `Kwak Rouge` — input carries an extra token (`Pauwel`); not an exact set match.
-- `Tradycynis` / `Ananasowe` → `Tradycynis Ananasowy` — Polish inflection (`ananasowe` ≠ `ananasowy`); exact key fails and principle A forbids fuzzy on a relaxed match.
+Verified end-to-end (fixture `tests/fixtures/untappd-search/murphys.html`): input `Murphy's Brewery` / `Murphy's Irish Stout` matches `Heineken Ireland — Murphy's Irish Stout` (bid 5932) and correctly **rejects** the four other Murphy variants on the same page (`Mike Murphy's…`, `Murphys Dry…`, `Murphy's Law…`, `Murphy And Son's…` — different name-keys). FP control: `Pinta` / `Atak Chmielu` vs an unrelated brewery with the same beer name (brand not in the name) → `not_found`.
 
-PR2 ships only the exact full-surface (Murphy's-class) case so the FP-risky piece stays small and testable; we evaluate whether the safe subset suffices before reaching for anything looser.
+These brand-in-name hits join the exact-name stage (never fuzzy). In `lookupBeer` they form a third pool evaluated after strict-fuzzy and relaxed-exact (strict still wins).
+
+**Deliberately deferred to a future effort (NOT solved in PR2):** both pass the brand-in-name gate but fail the exact name match, and are left as open design points rather than forced now:
+- `Kwak` / `Pauwel Kwak Rouge` → `Kwak Rouge` — input carries an extra token (`Pauwel`): `{kwak pauwel rouge}` ≠ `{kwak rouge}`.
+- `Tradycynis` / `Ananasowe` → `Tradycynis Ananasowy` — input name `Ananasowe` is a single token (no ≥2-token key) AND a Polish inflection (`ananasowe` ≠ `ananasowy`); exact key fails and principle A forbids fuzzy on a relaxed match.
+
+PR2 ships only the exact-name (Murphy's-class) case so the FP-risky piece stays small and testable; we evaluate whether the safe subset suffices before reaching for anything looser.
 
 ## Out of scope
 
