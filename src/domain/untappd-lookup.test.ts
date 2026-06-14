@@ -376,4 +376,34 @@ describe('lookupBeer', () => {
     const out = await lookupBeer({ brewery: '', name: 'St-Feuillien Blonde', fetch });
     expect(out.kind).toBe('not_found');
   });
+
+  test('matched: brand-as-beer-name — input brewery sits in candidate beer name, exact name (#138B)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([
+        { bid: 5932, name: "Murphy's Irish Stout", brewery: 'Heineken Ireland' },
+        { bid: 2, name: "Mike Murphy's Irish Stout", brewery: 'Northville' },
+        { bid: 3, name: 'Murphys Dry Irish Stout', brewery: 'Great Barn' },
+      ]),
+    );
+    const out = await lookupBeer({ brewery: "Murphy's Brewery", name: "Murphy's Irish Stout", fetch });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5932);
+  });
+
+  test('not_found: brand in candidate name but the name differs (#138B FP guard)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([{ bid: 2, name: "Mike Murphy's Irish Stout", brewery: 'Northville' }]),
+    );
+    const out = await lookupBeer({ brewery: "Murphy's Brewery", name: "Murphy's Irish Stout", fetch });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('not_found: brand token absent from all candidate beer names → brandPool empty (#138B FP guard)', async () => {
+    const fetch = jest.fn(async () =>
+      htmlFor([{ bid: 9, name: 'Atak Chmielu', brewery: 'Some Other Brewery' }]),
+    );
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Atak Chmielu', fetch });
+    expect(out.kind).toBe('not_found');
+  });
 });
