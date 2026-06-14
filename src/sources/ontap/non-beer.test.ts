@@ -18,10 +18,16 @@ describe('isOntapNonBeerTap', () => {
 
   test.each([
     ['cider Polish', { style: 'Cydr Wytrawny', brewery_ref: 'Chyliczki' }],
+    ['cider Polish neuter dry descriptor', { style: 'Cydr wytrawne', brewery_ref: 'Chyliczki' }],
+    ['cider Polish semi-dry descriptor', { style: 'Cydr półwytrawne', brewery_ref: 'Chyliczki' }],
+    ['cider Polish sweet descriptor', { style: 'Cydr słodkie', brewery_ref: 'Chyliczki' }],
     ['cider English', { style: 'Sweet cider', brewery_ref: 'PRZETWÓRNIA CHMIELU' }],
     ['kvass Polish', { style: 'Kwas chlebowy', brewery_ref: 'Vilniaus Alus Brewery' }],
+    ['kvass English', { style: 'Traditional Kvass', brewery_ref: 'Baltic Glass Brewery' }],
     ['kvass beer name but safe style', { style: 'Catharina Sour', brewery_ref: 'PINTA Brewery' }],
     ['mead', { style: 'Mead - Melomel', brewery_ref: 'Berryland' }],
+    ['mead Polish sweet descriptor', { style: 'Mead półsłodkie', brewery_ref: 'Berryland' }],
+    ['melomel sweet descriptor', { style: 'Melomel słodkie', brewery_ref: 'Berryland' }],
     ['normal beer', { style: 'West Coast IPA', brewery_ref: 'PINTA Brewery' }],
     ['drinkability prose does not match generic drink', {
       style: 'Dark, smooth, and deceptively light on the palate, endlessly drinkable Schwarzbier',

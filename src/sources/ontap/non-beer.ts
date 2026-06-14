@@ -18,6 +18,15 @@ const STYLE_TOKENS = [
   'słodkie',
 ];
 
+const ELIGIBLE_STYLE_TOKENS = [
+  'cydr',
+  'cider',
+  'kwas chlebowy',
+  'kvass',
+  'mead',
+  'melomel',
+];
+
 const EXACT_STYLE_PHRASES = new Set([
   'aperitivo',
   'aperitivo spritz',
@@ -59,6 +68,9 @@ function norm(raw: string | null): string {
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   const style = norm(tap.style);
+  if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
+    return false;
+  }
   if (style && (EXACT_STYLE_PHRASES.has(style) || STYLE_TOKENS.some((token) => style.includes(token)))) {
     return true;
   }
