@@ -19,9 +19,15 @@ All three are the *same* gate being too strict in different directions, so they 
 
 ## FP-safety spine (principle A)
 
-> A **strict** brewery match (current leading-prefix overlap) keeps full access to both name stages — exact name-keys (Stage 2a) **and** fuzzy ≥ 0.85 (Stage 2b). Any **relaxed** brewery match (empty / contained-token / brand-in-name) is only allowed to pair with an **exact name-key intersection** (Stage 2a: ≥2 tokens, order-insensitive — already FP-safe per spec §3.1). Fuzzy is never combined with a weak brewery signal.
+> A **strict** brewery match (current leading-prefix overlap) keeps full access to both name stages — exact name-keys (Stage 2a) **and** fuzzy ≥ 0.85 (Stage 2b). Any **relaxed** brewery match (empty / contained-token / brand-in-name) is only allowed to pair with an **exact** name match — either an exact **name-key intersection** (Stage 2a: ≥2 tokens, order-insensitive — FP-safe per spec §3.1) **or an exact normalized-name equality** (the candidate's normalized beer-name *equals* one of the input's name targets). An **approximate fuzzy** match (≥0.85 but <1.0) is **never** combined with a weak brewery signal.
 
 A relaxed brewery match therefore still requires a near-certain name match, so orphan recovery does not trade away false-positive safety.
+
+**Why exact-name equality is required in addition to name-keys (empirically verified 2026-06-14):** the real failing names routinely collapse below the name-key path, so key-only recovers *neither* live orphan:
+- `KULTOWE PILS` (#120): `pils` is a style-word → name reduces to the single token `kultowe` → no ≥2-token key. It only matches via `kultowe` == `kultowe`.
+- `St-Feuillien Blonde` (#149): the candidate strips its *own* embedded brewery (`Brasserie St-Feuillien` → beer-name `Blonde`) → single token → empty key, while the input keeps `{blonde feuillien st}` → no intersection. It only matches via `st feuillien blonde` == `st feuillien blonde`.
+
+Both recover through **exact normalized-name equality** (not keys, not fuzzy). The `Reserve`/`Reserva` near-miss (fuzzy 0.955) is correctly rejected because it is not *exact*. The input's name targets are the same `fuzzyTargets(name, brewery)` values Stage 2b already computes.
 
 ## Architecture — brewery-match strength in Stage 1
 
@@ -34,7 +40,8 @@ Name-matching then applies principle A:
 
 1. **Stage 2a (exact name-keys)** runs on **strict ∪ relaxed**.
 2. **Stage 2b (fuzzy ≥ 0.85)** runs on **strict only**.
-3. Strict wins ties: evaluate strict candidates first; a relaxed exact-key hit is used only when no strict match exists.
+3. **Relaxed exact-name:** a relaxed candidate whose normalized beer-name *equals* one of the input's name targets is accepted (exact only, never approximate).
+4. Strict wins ties: evaluate the strict fuzzy match first; a relaxed exact-name/key hit is used only when no strict match exists.
 
 The existing strict path is otherwise untouched, bounding the blast radius. `breweryAliasesMatch` / `tokenPrefix` are **not** modified — the relaxation lives in a new predicate applied alongside them.
 
@@ -51,7 +58,11 @@ keyHits = (strict ∪ relaxed).filter(r => intersects(nameKeys(r.beer_name, r.br
 if keyHits: return abvTiebreak(keyHits)
 
 // Stage 2b — fuzzy ≥0.85 on strict ONLY  (unchanged from today, but pool = strict, not breweryPassed)
-... existing fuzzy logic over `strict` ...
+strictMatch = fuzzy(strict, targetNames) >= 0.85  →  if found: return abvTiebreak(strictMatch)
+
+// Relaxed exact-name — EXACT normalized-name equality only (never approximate)
+relaxedExact = relaxed.filter(r => targetNames.some(t => normalizeName(r.beer_name) === t.value))
+if relaxedExact: return abvTiebreak(relaxedExact)
 ```
 
 When `strict` and `relaxed` are both empty (and, in PR2, no brand-in-name hit), the part yields nothing and the loop falls through to `not_found`, exactly as today.
@@ -61,12 +72,12 @@ When `strict` and `relaxed` are both empty (and, in PR2, no brand-in-name hit), 
 `relaxedBreweryMatch(candidateAliases, inputAliases)` is the union of:
 
 **#149 — empty input brewery.** If `inputAliases.length === 0`, every result is relaxed (gate bypassed).
-- Verified end-to-end: `brewery=''`, `St-Feuillien Blonde` → search is name-only → returns `Brasserie St-Feuillien — St-Feuillien Blonde`; input name-key `{blonde feuillien st}` exactly intersects the candidate's key → match.
-- FP guard: exact ≥2-token key only. A name collapsing to <2 tokens (single token, or all style-words stripped) yields no key → no match, as today.
+- Verified end-to-end against the captured real page (`tests/fixtures/untappd-search/st-feuillien.html`): `brewery=''`, `St-Feuillien Blonde` → search is name-only → returns `Brasserie St-Feuillien — St-Feuillien Blonde` (bid 22540). Match is via **exact normalized-name equality** (`st feuillien blonde` == `st feuillien blonde`); the name-key path does not fire because the candidate strips its embedded brewery to a single token.
+- FP guard: exact name (key or full-name equality) only — never approximate fuzzy. The page also lists `Bière Léon` (different brewery, different name) which is correctly *not* matched. Residual risk: a generic single-token input name could exact-match a different brewery's same-named beer; distinctive multi-token names (the actual winetime cases) are safe.
 
 **#120 — contained (non-leading) brewery token-run.** Generalize the prefix test: today the shorter alias must be a *leading* prefix of the longer; the relaxed predicate accepts the shorter alias appearing as a **contiguous token-sublist anywhere** within the longer (either direction, mirroring `breweryAliasesMatch`'s symmetry).
-- `staropolski` is the trailing token of candidate alias `kultowy staropolski` (`browar` already stripped as noise by `normalizeBrewery`) → relaxed; beer name `Kultowe Pils` exact-key matches → match.
-- FP guard: exact name-key still required, so a contained brewery-token match with a different beer name never matches. Noise tokens are already stripped, so the contained run is always content tokens. Single-token contained matches (e.g. `staropolski`) are allowed *because* the exact-name-key requirement compensates.
+- Verified against the real page (`staropolski.html`): input `Staropolski` is the trailing token of candidate alias `kultowy staropolski` (`browar` stripped as noise by `normalizeBrewery`) → relaxed; beer `Kultowe Pils` (bid 1673808) matches via **exact normalized-name equality** (`kultowe` == `kultowe`, after `pils` is dropped as a style-word). The other Staropolski beers on the page (`Rodowite Pils`, etc.) do not match.
+- FP guard: exact name (key or full-name equality) still required, so a contained brewery-token match with a *different or merely approximate* beer name never matches — e.g. a `Reserve`/`Reserva` near-miss (fuzzy 0.955) is rejected. Noise tokens are already stripped, so the contained run is always content tokens; single-token contained matches (e.g. `staropolski`) are allowed because the exact-name requirement compensates.
 
 **Implementation:** one new exported helper in `matcher.ts` — e.g. `breweryAliasContained(a: string[], b: string[]): boolean` (contiguous-sublist test over normalized aliases), and an empty-input check in `lookupBeer`. `breweryAliasesMatch` and `tokenPrefix` are unchanged.
 
@@ -94,13 +105,13 @@ PR2 ships only the exact full-surface (Murphy's-class) case so the FP-risky piec
 
 - **Unit tests** (`untappd-lookup.test.ts`) with synthetic `SearchResult[]`:
   - Positive: Staropolski (#120), St-Feuillien empty-brewery (#149), Murphy's (#138B, PR2) now return `matched`.
-  - FP guards: relaxed-brewery (empty or contained-token) + a *different* beer name → `not_found`; empty-brewery + sub-2-token name → `not_found`; a relaxed brewery match must NOT be reachable via fuzzy (only exact key).
-  - Regression: existing strict-path cases unchanged (strict brewery still matches via fuzzy).
-- **One real fixture per relaxation** in `tests/fixtures/untappd-search/`, captured via the runbook (`docs/debug-orphan-matching.md` step 3) download of the failing `search_url`, run through `lookupBeer` with `fetch = () => html`, asserting the previously-orphaned beer now matches.
+  - FP guards: relaxed-brewery (empty or contained-token) + an *approximate* beer name (e.g. `Reserve` vs `Reserva`, fuzzy 0.955) → `not_found`; relaxed-brewery + a clearly *different* beer name → `not_found`. These prove a relaxed brewery is NOT reachable via approximate fuzzy — only exact name/key.
+  - Regression: existing strict-path cases unchanged (strict brewery still matches via fuzzy ≥0.85).
+- **One real fixture per relaxation** in `tests/fixtures/untappd-search/` (#120: existing `staropolski.html`, flip `bid: null` → 1673808; #149: new `st-feuillien.html` captured via the runbook, assert bid 22540), run through `lookupBeer` with `fetch = () => html`, asserting the previously-orphaned beer now matches.
 
 ## spec.md updates (same PR as code)
 
-§5.2 (matching invariants): document brewery-match **strength** (strict = leading-prefix; relaxed = empty-input bypass / contained-token / brand-in-name) and the **"relaxed ⇒ exact-name-key only, never fuzzy"** rule. Note the gate stays leading-prefix-strict for the fuzzy path. PR2 adds the brand-in-name (full-surface) rule when it ships.
+§5.2 (matching invariants): document brewery-match **strength** (strict = leading-prefix; relaxed = empty-input bypass / contained-token / brand-in-name) and the **"relaxed ⇒ exact name (key intersection OR exact normalized-name equality), never approximate fuzzy"** rule. Note the gate stays leading-prefix-strict for the fuzzy (≥0.85) path. PR2 adds the brand-in-name (full-surface) rule when it ships.
 
 ## Refs
 
