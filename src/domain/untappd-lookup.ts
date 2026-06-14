@@ -104,11 +104,23 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
         !strict &&
         (inputBreweryAliases.length === 0 ||
           breweryAliasContained(cand, inputBreweryAliases));
-      return { r, strict, relaxed };
+      // #138B brand-as-beer-name: the brewery gate fails entirely, but the input
+      // brewery (the shelf brand) appears as a token-run inside the candidate beer
+      // name — Untappd files the beer under a parent company (Heineken Ireland —
+      // Murphy's Irish Stout). Matched on an EXACT name only (Stage below).
+      // Args are deliberately the reverse of the relaxed call above: here we test
+      // whether an input-brewery alias is a token-run within the beer NAME
+      // (breweryAliasContained / tokenSublist is symmetric, so either order is valid).
+      const brand =
+        !strict &&
+        !relaxed &&
+        breweryAliasContained(inputBreweryAliases, [normalizeName(r.beer_name)]);
+      return { r, strict, relaxed, brand };
     });
     const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
     const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
-    if (strictPool.length === 0 && relaxedPool.length === 0) continue;
+    const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
+    if (strictPool.length === 0 && relaxedPool.length === 0 && brandPool.length === 0) continue;
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
     // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
@@ -163,6 +175,16 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
       relaxedTargetValues.has(normalizeName(r.beer_name)),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
+
+    // #138B brand-as-beer-name: exact name-key intersection using the input name with
+    // the brewery NOT stripped (so the brand stays in the key), against candidates whose
+    // beer name contains the input brand. Exact only, never fuzzy (principle A). Evaluated
+    // after strict/relaxed, so a real brewery match always wins.
+    const brandKeys = nameKeys(name, '');
+    const brandHits = brandPool.filter((r) =>
+      intersects(nameKeys(r.beer_name, r.brewery_name), brandKeys),
+    );
+    if (brandHits.length > 0) return { kind: 'matched', result: pickByAbv(brandHits, abv) };
 
     // No name match in this search part — fall through to the next part.
   }
