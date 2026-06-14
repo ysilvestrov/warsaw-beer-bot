@@ -108,9 +108,9 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
       // brewery (the shelf brand) appears as a token-run inside the candidate beer
       // name — Untappd files the beer under a parent company (Heineken Ireland —
       // Murphy's Irish Stout). Matched on an EXACT name only (Stage below).
-      // Args are deliberately the reverse of the relaxed call above: here we test
-      // whether an input-brewery alias is a token-run within the beer NAME
-      // (breweryAliasContained / tokenSublist is symmetric, so either order is valid).
+      // Check whether an input-brewery alias is a token-run within the beer NAME
+      // (note the args are reversed vs the relaxed call above; tokenSublist is
+      // symmetric, so that ordering is fine).
       const brand =
         !strict &&
         !relaxed &&
