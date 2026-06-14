@@ -106,7 +106,10 @@ function foldToken(tok: string): string {
 export function cleanSearchQuery(brewery: string, name: string): string {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const tok of `${stripLegalForm(brewery)} ${name}`.split(/\s+/)) {
+  // Collapse COLLAB_SEP ("/", " x ", " & ") first so a bare collab connector ("x")
+  // never leaks into the query (as stripBreweryNoise did before tokenizing).
+  const combined = `${stripLegalForm(brewery)} ${name}`.split(COLLAB_SEP).join(' ');
+  for (const tok of combined.split(/\s+/)) {
     const f = foldToken(tok);
     if (!f || BREWERY_NOISE.has(f) || seen.has(f)) continue;
     seen.add(f);

@@ -147,4 +147,7 @@ describe('cleanSearchQuery', () => {
   test('all-noise input falls back to the raw name (never an empty query)', () => {
     expect(cleanSearchQuery('Brewing Co', 'Company')).toBe('Company');
   });
+  test('collapses a collab connector so "x" does not leak into the query', () => {
+    expect(cleanSearchQuery('Alpha x Beta', 'Some Beer')).toBe('Alpha Beta Some Beer');
+  });
 });
