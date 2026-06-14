@@ -89,3 +89,28 @@ export function stripBreweryNoise(brewery: string): string {
     .join(' ')
     .trim();
 }
+
+// Fold a token for noise/dedup comparison: strip diacritics (incl. ł→l, via the shared
+// helper), lowercase, drop non-alphanumerics (so "Co." -> "co", "Bałtycki" -> "baltycki").
+function foldToken(tok: string): string {
+  return stripDiacritics(tok).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+// Build an Untappd search query from a shop brewery+name without doubling the brewery.
+// Cleans the COMBINED "brewery name" string: strip legal-entity forms from the brewery
+// (as stripBreweryNoise did), drop BREWERY_NOISE tokens, and dedup repeated tokens (by
+// fold), keeping survivors in their original raw form. Fixes #126: a name that repeats
+// the brewery ("Track Brewing Company Taking Shape" + "Track Brewing Co.") otherwise
+// AND-searches duplicated terms and returns nothing. Falls back to the raw name if the
+// clean pass removes everything (all-noise input), to avoid an empty `?q=` search.
+export function cleanSearchQuery(brewery: string, name: string): string {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const tok of `${stripLegalForm(brewery)} ${name}`.split(/\s+/)) {
+    const f = foldToken(tok);
+    if (!f || BREWERY_NOISE.has(f) || seen.has(f)) continue;
+    seen.add(f);
+    out.push(tok);
+  }
+  return out.length ? out.join(' ') : (name.trim() || brewery.trim());
+}
