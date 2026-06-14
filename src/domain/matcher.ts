@@ -166,6 +166,27 @@ export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));
 }
 
+// True if the shorter token list appears as a CONTIGUOUS run anywhere within the
+// longer. Generalizes tokenPrefix (which requires a *leading* run) to any position.
+function tokenSublist(a: string, b: string): boolean {
+  if (a === '' || b === '') return false;
+  const ta = a.split(' ');
+  const tb = b.split(' ');
+  const [short, long] = ta.length <= tb.length ? [ta, tb] : [tb, ta];
+  for (let i = 0; i + short.length <= long.length; i++) {
+    if (short.every((t, j) => t === long[i + j])) return true;
+  }
+  return false;
+}
+
+// True if any alias from one side is a contiguous token-sublist of any alias from
+// the other (either direction). Looser than breweryAliasesMatch (leading-prefix):
+// the RELAXED brewery gate for #120, used only when paired with an exact name match.
+// breweryAliasesMatch / tokenPrefix are unchanged.
+export function breweryAliasContained(a: string[], b: string[]): boolean {
+  return a.some((x) => b.some((y) => tokenSublist(x, y)));
+}
+
 // Strip leading brewery tokens duplicated into a normalized name (e.g. the product
 // title "PRIMÁTOR Free Mother In Law" with brewery "Primátor"). Token-prefix only.
 export function stripLeadingBrewery(nameNorm: string, breweryNorm: string): string {
