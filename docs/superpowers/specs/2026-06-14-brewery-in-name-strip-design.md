@@ -20,7 +20,7 @@ Both stem from the same root: **the brewery name is embedded in the beer name.**
 
 ## Scope decisions (agreed)
 
-- **Aggressiveness (A):** strip the **exact input-brewery token-run wherever it appears** (leading/trailing/mid), then trim leftover **leading/trailing `BREWERY_NOISE`** tokens. FP-safe — only the actual brewery name is removed. The partial-prefix case (`Hoppy Hog` vs name `Hoppy Hog Family Brewery …`) is improved (loses trailing `Brewery`) but **deferred** where it still doesn't fully resolve (the `Family` token survives), like `Kwak` in PR2.
+- **Aggressiveness (A):** strip the **exact input-brewery token-run wherever it appears** (leading/trailing/mid), then trim leftover **leading/trailing `BREWERY_NOISE`** tokens (catches a stranded trailing `Brewery` *after* the run, e.g. `… Trzech Kumpli Brewery`). FP-safe — only the actual brewery name is removed. The partial-prefix case (`Hoppy Hog` vs name `Hoppy Hog Family Brewery …`) is **deferred**: stripping `Hoppy Hog` leaves `Family Brewery …` (the leftover `Family`/mid `Brewery` are not edge noise), like `Kwak` in PR2.
 - **Match-side scope (A — global):** the strip lands in the shared `stripLeadingBrewery`/`nameKeys` primitive, so #155 is fixed in **both** the enrich path (`lookupBeer`) and the `/match` catalog path (`matchPrepared`). The strip is FP-safe and symmetric, so the wider blast radius is acceptable; a `/match` no-regression check is required (below).
 
 ## Core helper — `stripBreweryFromName` (replaces `stripLeadingBrewery`)
