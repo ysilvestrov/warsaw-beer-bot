@@ -112,7 +112,7 @@ whether a re-run is worthwhile.
 
 ## Server design
 
-**Schema v11 — new table `checkin_sync_state`:**
+**Schema v13 — new table `checkin_sync_state`:**
 
 | Field | Type | Notes |
 |---|---|---|
@@ -231,7 +231,7 @@ cookies/quota, never the server cookie.
 
 ## Spec & docs (mandatory, same PR)
 
-- **`spec.md`:** add §3 table `checkin_sync_state` (v11) + migration-history bump; add
+- **`spec.md`:** add §3 table `checkin_sync_state` (v13) + migration-history bump; add
   HTTP API entries `POST /checkins/sync` and `GET /checkins/sync/state` under §4; note
   that `checkins` now has a second writer besides `/import` and the new background
   relay channel.
