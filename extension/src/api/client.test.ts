@@ -114,7 +114,7 @@ import { getCheckinSyncState, postCheckinSyncPage } from './client';
 describe('getCheckinSyncState', () => {
   it('GETs state and returns the parsed body', async () => {
     const body = { username: 'bob', deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null };
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const out = await getCheckinSyncState('http://x', 'tok');
     expect(out).toEqual(body);
@@ -134,12 +134,12 @@ describe('getCheckinSyncState', () => {
 describe('postCheckinSyncPage', () => {
   it('POSTs html+maxId and returns the page result', async () => {
     const body = { merged: 1, alreadyKnown: 0, pageSize: 1, nextMaxId: '200', profileTotal: 3, serverCount: 1, complete: false };
-    const spy = vi.fn(async () => new Response(JSON.stringify(body), { status: 200 }));
+    const spy = vi.fn(async (_url: string, _init?: RequestInit) => new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', spy);
     const out = await postCheckinSyncPage('http://x', 'tok', '<html>', null);
     expect(out).toEqual(body);
     expect(spy).toHaveBeenCalledWith('http://x/checkins/sync', expect.objectContaining({ method: 'POST' }));
-    const init = spy.mock.calls[0][1];
+    const init = spy.mock.calls[0][1] as RequestInit;
     expect(JSON.parse(init.body as string)).toEqual({ html: '<html>', maxId: null });
     vi.unstubAllGlobals();
   });
