@@ -113,12 +113,21 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
   };
 }
 
+let syncWriteChain: Promise<void> = Promise.resolve();
+function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
+  syncWriteChain = syncWriteChain.then(() => writeSyncStatus(s));
+  return syncWriteChain;
+}
+
+let syncRunning = false;
+
 function feedUrl(username: string, maxId: string | null): string {
   const base = `https://untappd.com/user/${encodeURIComponent(username)}`;
   return maxId === null ? base : `${base}?max_id=${encodeURIComponent(maxId)}`;
 }
 
 export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:started'; alreadyRunning: boolean }> {
+  if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
   const cur = await readSyncStatus();
   if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
 
@@ -128,33 +137,46 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
 
-  await writeSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  syncRunning = true;
+  await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
 
   void (async () => {
-    const onProgress = async (p: SyncProgress) => {
-      const s = await readSyncStatus();
-      await writeSyncStatus({ ...s, serverCount: p.serverCount, profileTotal: p.profileTotal, mergedThisRun: p.mergedThisRun });
-    };
-    const outcome = await runCheckinSync({
-      getState: () => getCheckinSyncState(baseUrl, token),
-      fetchFeed: async (username, maxId) => {
-        const res = await fetch(feedUrl(username, maxId), { credentials: 'include' });
-        if (!res.ok) throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
-        return res.text();
-      },
-      submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
-      onProgress: (p) => { void onProgress(p); },
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      pageCap: SYNC_PAGE_CAP,
-    });
-    await writeSyncStatus({
-      running: false,
-      serverCount: outcome.serverCount,
-      profileTotal: outcome.profileTotal,
-      mergedThisRun: outcome.mergedThisRun,
-      outcome: outcome.status,
-      complete: outcome.complete,
-    });
+    try {
+      const onProgress = (p: SyncProgress) => {
+        void enqueueSyncStatus({
+          running: true,
+          serverCount: p.serverCount,
+          profileTotal: p.profileTotal,
+          mergedThisRun: p.mergedThisRun,
+          outcome: null,
+          complete: false,
+        });
+      };
+      const outcome = await runCheckinSync({
+        getState: () => getCheckinSyncState(baseUrl, token),
+        fetchFeed: async (username, maxId) => {
+          const res = await fetch(feedUrl(username, maxId), { credentials: 'include' });
+          if (!res.ok) throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
+          return res.text();
+        },
+        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
+        onProgress,
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        pageCap: SYNC_PAGE_CAP,
+      });
+      await enqueueSyncStatus({
+        running: false,
+        serverCount: outcome.serverCount,
+        profileTotal: outcome.profileTotal,
+        mergedThisRun: outcome.mergedThisRun,
+        outcome: outcome.status,
+        complete: outcome.complete,
+      });
+    } catch {
+      await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+    } finally {
+      syncRunning = false;
+    }
   })();
 
   return { type: 'checkin-sync:started', alreadyRunning: false };
