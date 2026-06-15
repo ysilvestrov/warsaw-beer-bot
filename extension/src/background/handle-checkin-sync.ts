@@ -44,7 +44,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     state = await deps.getState();
   } catch (e) {
     const code = errCode(e);
-    return done(code === 'not_linked' ? 'not_linked' : 'error');
+    return finish(code === 'not_linked' ? 'not_linked' : 'error');
   }
   serverCount = state.serverCount;
   profileTotal = state.profileTotal;
@@ -56,29 +56,27 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
 
   for (let phase = 0; phase < startCursors.length; phase++) {
     let maxId = startCursors[phase];
-    let firstOfPhase = true;
     while (pages < deps.pageCap) {
-      const cursor = firstOfPhase && phase === 0 ? null : maxId;
       let html: string;
       try {
-        html = await deps.fetchFeed(state.username, cursor);
+        html = await deps.fetchFeed(state.username, maxId);
       } catch (e) {
         return finish(errCode(e) === 'blocked' ? 'blocked' : 'error');
       }
       let res: CheckinSyncPageResult;
       try {
-        res = await deps.submitPage(html, cursor);
+        res = await deps.submitPage(html, maxId);
       } catch (e) {
         const code = errCode(e);
         return finish(code === 'blocked' ? 'blocked' : code === 'not_linked' ? 'not_linked' : 'error');
       }
       pages++;
-      firstOfPhase = false;
       mergedThisRun += res.merged;
       serverCount = res.serverCount;
       if (res.profileTotal !== null) profileTotal = res.profileTotal;
       deps.onProgress({ serverCount, profileTotal, mergedThisRun });
 
+      if (res.pageSize === 0) return finish('done', res.nextMaxId === null);
       if (res.complete) return finish('done', true);
       if (res.pageSize > 0 && res.alreadyKnown === res.pageSize) break; // reached known territory
       if (res.nextMaxId === null) return finish('done', true);
@@ -91,8 +89,5 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
 
   function finish(status: SyncStatus, complete = false): SyncOutcome {
     return { status, complete, serverCount, profileTotal, mergedThisRun };
-  }
-  function done(status: SyncStatus): SyncOutcome {
-    return { status, complete: false, serverCount, profileTotal, mergedThisRun };
   }
 }
