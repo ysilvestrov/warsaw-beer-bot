@@ -29,7 +29,9 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
     }
     return { type: 'match:ok', results };
   } catch (e) {
-    const code = e instanceof ApiError ? e.code : 'server';
+    const rawCode = e instanceof ApiError ? e.code : 'server';
+    const code: 'unauthorized' | 'server' | 'network' =
+      rawCode === 'unauthorized' || rawCode === 'network' ? rawCode : 'server';
     return { type: 'match:err', code };
   }
 }
