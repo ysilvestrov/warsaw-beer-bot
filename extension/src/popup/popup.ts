@@ -77,7 +77,11 @@ async function initPopup(): Promise<void> {
     };
     const poll = () => {
       chrome.runtime.sendMessage({ type: 'checkin-sync:status' }, (s?: SyncStatusView) => {
-        if (!s) return;
+        if (chrome.runtime.lastError || !s) {
+          syncStatus.textContent = 'Sync interrupted — tap Sync to resume.';
+          syncBtn.disabled = false;
+          return;
+        }
         render(s);
         if (s.running) setTimeout(poll, 1500);
       });

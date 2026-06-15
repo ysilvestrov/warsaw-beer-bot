@@ -40,4 +40,20 @@ describe('formatSyncStatus', () => {
     expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'blocked', complete: false }))
       .toBe('Untappd is rate-limiting — try again later.');
   });
+  it('reports a transient error', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 10, outcome: 'error', complete: false }))
+      .toBe('Sync failed — check your connection and token, then retry.');
+  });
+  it('reports done-but-not-fully-synced when complete is false', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 200, outcome: 'done', complete: false }))
+      .toBe('Synced 5000 of 8200.');
+  });
+  it('returns empty string for the idle/never-started state', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false }))
+      .toBe('');
+  });
+  it('shows ? for total when capped and total is unknown', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: null, mergedThisRun: 5000, outcome: 'capped', complete: false }))
+      .toBe('Synced 5000 of ? — tap Sync again to continue.');
+  });
 });
