@@ -358,13 +358,29 @@ client-relay (`/enrich/result`), серверний крон пише `''`. За
 `review_class`/`review_note`/`reviewed_at` до `NULL` — рядок знову з'являється в тріажі.
 Покроковий дебаг-ранбук: `docs/debug-orphan-matching.md`.
 
-### 3.14 `schema_version` — версія міграцій
+### 3.14 `checkin_sync_state` — resume-курсор extension-синхронізації чекінів (v13)
+| Поле | Тип | Обмеження | Опис |
+|------|-----|-----------|------|
+| `telegram_id` | INTEGER | PK → `user_profiles(telegram_id)` **ON DELETE CASCADE** | власник |
+| `deepest_max_id` | TEXT | nullable | найглибший (найменший) Untappd-курсор `max_id`, до якого дійшла синхронізація; `NULL` доки жодного прогону |
+| `complete` | INTEGER | NOT NULL DEFAULT 0 | `1` коли досягнуто дна стрічки (вся історія покрита) |
+| `updated_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | |
+
+Per-user стан для **extension check-in sync** (див. §4, `POST /checkins/sync`): браузерне
+розширення гортає стрічку чекінів користувача newest→older і релеїть сторінки на сервер,
+а сервер тримає тут курсор, щоб повторні прогони **продовжували** глибше, а не перечитували
+верхівку. `deepest_max_id` оновлюється до мінімуму (курсор лише поглиблюється; Phase-1
+top-up з високим `max_id` не відкочує його); `complete` латчиться в `1` і назад не вертається.
+Це робить бекфіл великої історії (5K+ чекінів) досяжним за кілька натискань «Sync».
+
+### 3.15 `schema_version` — версія міграцій
 Єдине поле `version INTEGER PRIMARY KEY`; по рядку на застосовану міграцію.
 
-### 3.15 Зв'язки (ER, текстом)
+### 3.16 Зв'язки (ER, текстом)
 ```
 user_profiles 1───* checkins        (telegram_id)
 user_profiles 1───1 user_filters    (telegram_id, CASCADE)
+user_profiles 1───1 checkin_sync_state (telegram_id, CASCADE)
 user_profiles 1───* untappd_had     (telegram_id)
 user_profiles 1───* api_tokens      (telegram_id, CASCADE; ротація тримає 1 активний)
 beers         1───* checkins         (beer_id)
@@ -376,7 +392,7 @@ tap_snapshots 1───* taps             (snapshot_id, CASCADE)
 pubs          *───* pubs             via pub_distances (a<b)
 ```
 
-### 3.16 Історія міграцій
+### 3.17 Історія міграцій
 | v | Зміст |
 |---|-------|
 | 1 | базова схема: beers, pubs, tap_snapshots, taps, checkins, match_links, user_profiles, user_filters |
@@ -389,6 +405,9 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 8 | `api_tokens` (токен-авторизація браузерного розширення) |
 | 9 | `extension_releases` (дистрибуція бета-версій розширення) |
 | 10 | `enrich_failures` (лог провалів енричу для дебагу матчингу) |
+| 11 | `enrich_failures.source_url` (URL сторінки магазину для дебагу orphan'ів) |
+| 12 | `enrich_failures.review_class`/`review_note`/`reviewed_at` (тріаж провалів) |
+| 13 | `checkin_sync_state` (resume-курсор extension check-in sync) |
 
 ---
 
@@ -618,6 +637,34 @@ upsert'ять рядок у `enrich_failures` (§3.13) на `not_found`/`blocked
 лишаючи решту в оригінальній формі; якщо все зчистилось — фолбек на сиру назву. Без цього назва, що повторює
 пивоварню (`Track Brewing Company Taking Shape` + `Track Brewing Co.`), AND-шукала б здубльовані терміни і не
 повертала кандидатів.
+
+#### `GET /checkins/sync/state` / `POST /checkins/sync` — client-relay extension check-in sync
+
+Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий канал запису в `checkins`
+(поряд з `/import`): браузерне розширення гортає стрічку чекінів **прив'язаного** користувача
+(`user_profiles.untappd_username`) у його власній Untappd-сесії і релеїть HTML-сторінки на сервер.
+**`/link` — жорстка передумова**; без прив'язаного username обидва ендпоінти повертають
+`409 { error: "not_linked" }`. Скрейпиться завжди стрічка прив'язаного username (хто залогінений
+у браузері — байдуже). Робиться у сесії користувача (а не серверним кукі), щоб **розподілити
+навантаження** на його квоту й не наражатися на бан (пор. §3.7, #72/#89).
+
+`GET /checkins/sync/state` повертає `{ username, deepest_max_id, complete, serverCount, profileTotal }`
+(`profileTotal` — підказка прогресу, не жорсткий гейт), щоб клієнт знав, з якого курсора
+відновлювати Phase 2 і яку стрічку гортати.
+
+`POST /checkins/sync` приймає `{ html, maxId? }` (обрізана клієнтом сторінка стрічки + курсор,
+що її породив). Сервер: детектить блок-сторінку (спільний `block.ts`) → `502 { error: "blocked" }`
+(курсор не чіпає); парсить `parseCheckinFeedPage(html)`; на кожен чекін `upsertBeer` за **bid**
+(канонічний `untappd_id` — без fuzzy, попутно резолвить orphan'и) → локальний `beers.id`, далі
+`mergeCheckin` (ідемпотентно за `UNIQUE(telegram_id, checkin_id)`); просуває `checkin_sync_state`
+(§3.14; `complete` при відсутності `nextMaxId`). Повертає `{ merged, alreadyKnown, pageSize,
+nextMaxId, profileTotal, serverCount, complete }`.
+
+**Stop-логіка (клієнт).** Стрічка гортається newest→older курсором `max_id` (тільки в один бік).
+Зупинка: повністю відома сторінка (`alreadyKnown === pageSize`), дно стрічки (`nextMaxId === null`),
+або жорсткий cap (~200 сторінок/прогін). Two-phase: Phase 1 (top-up) з «зараз», Phase 2 (deep extend)
+з збереженого `deepest_max_id` — повторні «Sync» поглиблюють покриття. Деталі — §6 і
+`docs/extension-install-uk.md`.
 
 #### `POST /admin/enrich-failures/review` — тріажна розмітка провалу
 
