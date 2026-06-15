@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-06-15
+
+- Added a "Sync my check-ins" toolbar-popup button that loads your Untappd check-in history straight from your logged-in Untappd session and sends it to the bot — no Untappd Supporter required (unlike `/import`). Requires linking your account first (`/link <username>`). It walks your feed newest-to-oldest and shows live progress; for large histories it syncs in chunks, so tap it again ("Synced X of Y — tap Sync again to continue") until it reports "Fully synced". Useful both to backfill your whole history and to quickly top up recent check-ins (e.g. after a festival) that the server's background sync misses.
+
 ## [0.6.1] - 2026-06-13
 
 - Stopped matching non-beer products as beers across all supported shops: mixed and brewery packs, vertical and tasting sets, gift sets, gift certificates, subscriptions, and — on OneMoreBeer — glassware, apparel, books, and the delicatessen/soft-drinks section are now ignored. Real beers that share a page with these (including canned beers sold with a deposit) are unaffected.
