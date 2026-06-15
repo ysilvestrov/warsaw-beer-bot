@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -52,5 +52,17 @@ describe('latestRatingsByBeer', () => {
     mergeCheckin(db, { ...base, checkin_id: 'd1', beer_id: beer, user_rating: 3.7, checkin_at: '2026-01-01T00:00:00Z' });
     mergeCheckin(db, { ...base, checkin_id: 'd2', beer_id: beer, user_rating: null, checkin_at: '2026-05-01T00:00:00Z' });
     expect(latestRatingsByBeer(db, 1).get(beer)).toBe(3.7);
+  });
+});
+
+describe('countCheckins', () => {
+  it('counts rows for the given user only', () => {
+    const db = openDb(':memory:'); migrate(db);
+    mergeCheckin(db, { checkin_id: 'a', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-01', venue: null });
+    mergeCheckin(db, { checkin_id: 'b', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-02', venue: null });
+    mergeCheckin(db, { checkin_id: 'a', telegram_id: 2, beer_id: null, user_rating: null, checkin_at: '2026-01-01', venue: null });
+    expect(countCheckins(db, 1)).toBe(2);
+    expect(countCheckins(db, 2)).toBe(1);
+    expect(countCheckins(db, 3)).toBe(0);
   });
 });
