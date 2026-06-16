@@ -660,11 +660,17 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 (§3.14; `complete` при відсутності `nextMaxId`). Повертає `{ merged, alreadyKnown, pageSize,
 nextMaxId, profileTotal, serverCount, complete }`.
 
-**Stop-логіка (клієнт).** Стрічка гортається newest→older курсором `max_id` (тільки в один бік).
-Зупинка: повністю відома сторінка (`alreadyKnown === pageSize`), дно стрічки (`nextMaxId === null`),
-або жорсткий cap (~200 сторінок/прогін). Two-phase: Phase 1 (top-up) з «зараз», Phase 2 (deep extend)
-з збереженого `deepest_max_id` — повторні «Sync» поглиблюють покриття. Деталі — §6 і
-`docs/extension-install-uk.md`.
+**Пагінація (клієнт).** Сторінка 1 — повна сторінка профілю `untappd.com/user/<name>`; кожна
+наступна (старіша) сторінка — XHR-фрагмент `GET /profile/more_feed/<name>/<offset>?v2=true`
+(`offset` = найстаріший `checkin_id` попередньої сторінки), з заголовком `X-Requested-With:
+XMLHttpRequest` (без нього Untappd 307-редіректить на `/home`). ⚠️ `?max_id=` на сторінці профілю
+**ігнорується** (завжди віддає найновішу сторінку) — НЕ використовувати. `nextMaxId` = найстаріший
+`checkin_id` сторінки (фрагмент не має кнопки Show More), тож дно = сторінка з 0 чекінів.
+
+**Stop-логіка (клієнт).** Зупинка: повністю відома сторінка (`alreadyKnown === pageSize`), дно
+стрічки (`nextMaxId === null` / 0 чекінів), або жорсткий cap (~200 сторінок/прогін). Two-phase:
+Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збереженого `deepest_max_id` — повторні «Sync»
+поглиблюють покриття. Деталі — §6 і `docs/extension-install-uk.md`.
 
 #### `POST /admin/enrich-failures/review` — тріажна розмітка провалу
 

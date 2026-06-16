@@ -1,0 +1,666 @@
+[
+  {
+    "brewery": "Finback",
+    "name": "Dark Pyramid / Glass Pyramid"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Backcountry Trail"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Orange Crush / RaR"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Aqualung / Hackney"
+  },
+  {
+    "brewery": "Finback",
+    "name": "If Whales Could Fly"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Same Team"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Sit Back"
+  },
+  {
+    "brewery": "Finback",
+    "name": "No One Else Can Take Your Place"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Strange Beast / Nano Cinco"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Dream Taker / Sir John"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Dead Sea 2 / Le Ketch"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "SEVEN"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Empire Hazelnut Coffee / Brasserie du Bas"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Empire Macadamia Nut / Brasserie du Bas"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Afterglow"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Drip (Freestyle Nectaron, Motueka, Rakau)"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Waimea Flow"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Chromosphere"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Photosphere"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Canopy"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Any Day's Haze"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Kaleidoscope Kölsch: Peach"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Canyons"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Cerveza"
+  },
+  {
+    "brewery": "Eppig",
+    "name": "10:45 to Denver"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "BLAST"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "L'Autoroute De La Mort / Brasserie du Bas"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Copy of A Copy of A Copy"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Dairy Kwing"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Kafé Krème"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Broken Teeth / Bad Bones"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Acid Hologram"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Retrospect"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie HWhip: Blood Orange Raspberry Lemonade"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie HWhip: Zombie Milk"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie Wars"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Emperor"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "The Royalist"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Cask & Crown"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Chosen One"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Fruit Bomb: Black Currant"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Fruit Bomb: Peach Apricot"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Hop Dogs"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Tercel Verte Nitro"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "P'tit Monstre / Nano Cinco"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "With Eyes Wide Open / DankHouse"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Dancing Bears 2.0 / Boréale"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Haunter / Third Moon"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Rêves Électriques / WILLS"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Orlok / Blackout"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "La Dernière Danse"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Mets-y De La Zoune / Toltèk & Le Ketch"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "À L'ombre De L'Ange"
+  },
+  {
+    "brewery": "Third Moon",
+    "name": "Haunter / Sir John"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Funky"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Un Grand 2/2"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Double Freshly Frozen"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Anatomie Du Temps"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Dream Taker / Sir John"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Kafé Krème"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Dairy Kwing"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Copy of A Copy of A Copy"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "L'Autoroute De La Mort / Brasserie du Bas"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "BLAST"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Inner Paths"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Full Circle"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Usurper"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Daylily"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Captain Dan's Wings"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Venona"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Retrospect"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Broken Teeth / Bad Bones"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Acid Hologram"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Dark Pyramid / Glass Pyramid"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Backcountry Trail"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Orange Crush / RaR"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Aqualung / Hackney"
+  },
+  {
+    "brewery": "Finback",
+    "name": "If Whales Could Fly"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Same Team"
+  },
+  {
+    "brewery": "Finback",
+    "name": "Sit Back"
+  },
+  {
+    "brewery": "Finback",
+    "name": "No One Else Can Take Your Place"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Strange Beast / Nano Cinco"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Dream Taker / Sir John"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Dead Sea 2 / Le Ketch"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "SEVEN"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Empire Hazelnut Coffee / Brasserie du Bas"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Empire Macadamia Nut / Brasserie du Bas"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Afterglow"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Drip (Freestyle Nectaron, Motueka, Rakau)"
+  },
+  {
+    "brewery": "Counterpart",
+    "name": "Waimea Flow"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Chromosphere"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Photosphere"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Canopy"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Any Day's Haze"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Kaleidoscope Kölsch: Peach"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Canyons"
+  },
+  {
+    "brewery": "Beer Tree",
+    "name": "Cerveza"
+  },
+  {
+    "brewery": "Eppig",
+    "name": "10:45 to Denver"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "BLAST"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "L'Autoroute De La Mort / Brasserie du Bas"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Copy of A Copy of A Copy"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Dairy Kwing"
+  },
+  {
+    "brewery": "Sir John",
+    "name": "Kafé Krème"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Broken Teeth / Bad Bones"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Acid Hologram"
+  },
+  {
+    "brewery": "Autodidact",
+    "name": "Retrospect"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie HWhip: Blood Orange Raspberry Lemonade"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie HWhip: Zombie Milk"
+  },
+  {
+    "brewery": "Beer Zombies",
+    "name": "Zombie Wars"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Emperor"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "The Royalist"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Cask & Crown"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Chosen One"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Fruit Bomb: Black Currant"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Fruit Bomb: Peach Apricot"
+  },
+  {
+    "brewery": "Mason Ale Works",
+    "name": "Hop Dogs"
+  },
+  {
+    "brewery": "Cigar City",
+    "name": "Florida Man"
+  },
+  {
+    "brewery": "Oskar Blues",
+    "name": "Double Dale’s"
+  },
+  {
+    "brewery": "Firestone Walker",
+    "name": "Mind Haze Brain Melter"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Oh..."
+  },
+  {
+    "brewery": "Cigar City",
+    "name": "Cosmic Crown"
+  },
+  {
+    "brewery": "Founders",
+    "name": "Más Agave Grapefruit"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Green Dots"
+  },
+  {
+    "brewery": "AleSmith",
+    "name": ".394 Pale Ale"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Double Citra Daydream"
+  },
+  {
+    "brewery": "Toppling Goliath",
+    "name": "Mind Your Unwind /  Hop Butcher For The World"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Hop Showers"
+  },
+  {
+    "brewery": "Trillium",
+    "name": "Melcher Street"
+  },
+  {
+    "brewery": "Brujos",
+    "name": "Clavicula Nox"
+  },
+  {
+    "brewery": "SingleCut",
+    "name": "Eric More Cowbell!"
+  },
+  {
+    "brewery": "Rogue",
+    "name": "Pumpkin Patch Ale"
+  },
+  {
+    "brewery": "Trillium",
+    "name": "Mettle"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Nectar Diamonds"
+  },
+  {
+    "brewery": "Belching Beaver",
+    "name": "Deftones Imperial Phantom Bride"
+  },
+  {
+    "brewery": "Bronx",
+    "name": "Smile My Guy Happy Hoppy IPA"
+  },
+  {
+    "brewery": "Toppling Goliath",
+    "name": "Dino Break"
+  },
+  {
+    "brewery": "Toppling Goliath",
+    "name": "Krush Double Dry Hop Pseudo Sue"
+  },
+  {
+    "brewery": "Firestone Walker",
+    "name": "Whiskey Barrel Wheat Wine"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Tens of Hundreds"
+  },
+  {
+    "brewery": "Clown Shoes",
+    "name": "Pecan Pie Porter"
+  },
+  {
+    "brewery": "Grand Teton",
+    "name": "Amber Ale"
+  },
+  {
+    "brewery": "Knee Deep",
+    "name": "Lupulin River / Kern River"
+  },
+  {
+    "brewery": "Allagash",
+    "name": "Haunted House"
+  },
+  {
+    "brewery": "Belching Beaver",
+    "name": "Must Be the Honey"
+  },
+  {
+    "brewery": "The Shed",
+    "name": "Mountain Ale"
+  },
+  {
+    "brewery": "Dry Dock",
+    "name": "Apricot Blonde"
+  },
+  {
+    "brewery": "Smuttynose",
+    "name": "Old Brown Dog Ale"
+  },
+  {
+    "brewery": "Knee Deep",
+    "name": "Simtra"
+  },
+  {
+    "brewery": "Firestone Walker",
+    "name": "Rye Chai Cha"
+  },
+  {
+    "brewery": "Cellarmaker",
+    "name": "Coffee & Cigarettes"
+  },
+  {
+    "brewery": "Wachusett",
+    "name": "Pumpkin Ale"
+  },
+  {
+    "brewery": "Magnify",
+    "name": "Double Vanilla Mind Over Matter"
+  },
+  {
+    "brewery": "Noon Whistle",
+    "name": "Fuzzy Smack"
+  },
+  {
+    "brewery": "The Veil",
+    "name": "Master Shredder"
+  },
+  {
+    "brewery": "Fidens",
+    "name": "Power Beyond Control"
+  },
+  {
+    "brewery": "Firestone Walker",
+    "name": "Waukesha Press"
+  },
+  {
+    "brewery": "Reuben's",
+    "name": "Robust Porter"
+  },
+  {
+    "brewery": "Other Half",
+    "name": "Juice Giant"
+  },
+  {
+    "brewery": "Trillium",
+    "name": "Mosaic Dry Hopped Fort Point"
+  },
+  {
+    "brewery": "The Rare Barrel",
+    "name": "Strawberry Small Acts"
+  },
+  {
+    "brewery": "The Veil",
+    "name": "S.U.R.E."
+  },
+  {
+    "brewery": "Oud Beersel",
+    "name": "Winter Lambiek"
+  },
+  {
+    "brewery": "Prairie",
+    "name": "Seasick Crocodile"
+  },
+  {
+    "brewery": "The Veil",
+    "name": "New Mirage"
+  },
+  {
+    "brewery": "The Rare Barrel",
+    "name": "Feed the Monster 2021"
+  },
+  {
+    "brewery": "Brasserie du Bas-Canada",
+    "name": "Réflexion"
+  }
+]

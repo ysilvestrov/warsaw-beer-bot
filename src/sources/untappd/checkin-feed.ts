@@ -105,11 +105,13 @@ export function parseCheckinFeedPage(html: string): CheckinFeedPage {
 
   const profileTotal = parseProfileTotal($);
 
-  // Untappd renders an .more_checkins button only when older pages exist.
-  let nextMaxId: string | null = null;
-  if (checkins.length > 0 && $('.more_checkins').length > 0) {
-    nextMaxId = checkins[checkins.length - 1].checkin_id;
-  }
+  // Cursor for the next (older) page = the oldest check-in id on this page. Pages
+  // are newest→oldest, so the last item is the oldest. We deliberately do NOT gate
+  // on the `.more_checkins` button: the full profile page has it, but the
+  // `/profile/more_feed/<user>/<offset>` fragments (which serve every page after the
+  // first) do not — yet they still have older check-ins. The walk instead stops when
+  // a page yields zero check-ins (handled by the caller treating null as feed bottom).
+  const nextMaxId = checkins.length > 0 ? checkins[checkins.length - 1].checkin_id : null;
 
   return { checkins, nextMaxId, profileTotal };
 }

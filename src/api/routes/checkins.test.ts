@@ -28,17 +28,9 @@ const PAGE_ONE = `
 </body></html>`;
 
 // Same single check-in, NO Show More → feed bottom.
-const PAGE_BOTTOM = `
-<html><body>
-  <div class="item" data-checkin-id="555">
-    <a href="/b/some-ipa/42" class="label"><img></a>
-    <p class="text">
-      <a href="/user/bob" class="user">Bob</a> is drinking an <a href="/b/some-ipa/42">Some IPA</a>
-      by <a href="/SomeBrewery">Some Brewery</a>
-    </p>
-    <a href="/user/bob/checkin/555" class="time timezoner">Mon, 15 Jun 2026 18:00:00 +0000</a>
-  </div>
-</body></html>`;
+// Feed bottom = a page (more_feed fragment) with zero check-in items. The walk stops
+// here (nextMaxId null → complete), not on the absence of a Show More button.
+const PAGE_BOTTOM = `<html><body></body></html>`;
 
 const RAW_TOKEN = 'test-checkins-token-abc';
 const RAW_TOKEN_NO_USER = 'test-checkins-token-no-user';
@@ -150,12 +142,12 @@ describe('POST /checkins/sync', () => {
     expect(countCheckins(db, TELEGRAM_ID)).toBe(1);
   });
 
-  it('marks sync complete when no Show More is present', async () => {
+  it('marks sync complete on an empty (exhausted) page', async () => {
     const { db, app } = setup();
     const res = await post(app, '/checkins/sync', { html: PAGE_BOTTOM, maxId: null }, RAW_TOKEN);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ nextMaxId: null, complete: true });
+    expect(body).toMatchObject({ pageSize: 0, nextMaxId: null, complete: true });
     expect(getSyncState(db, TELEGRAM_ID).complete).toBe(true);
   });
 
