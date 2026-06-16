@@ -43,9 +43,38 @@ describe('parseCheckinFeedPage', () => {
     expect(out.profileTotal).toBe(12407);
   });
 
-  it('nextMaxId is the last (oldest) check-in id, since Show More is present', () => {
+  it('nextMaxId is the last (oldest) check-in id on the page', () => {
     expect(out.nextMaxId).toBe(out.checkins[out.checkins.length - 1].checkin_id);
     expect(out.nextMaxId).toMatch(/^\d+$/);
+  });
+
+  it('paginates a more_feed fragment (no .stats / no .more_checkins button)', () => {
+    // After page 1, pages come from /profile/more_feed/<user>/<offset> as raw item
+    // fragments with no stats block and no Show More button. nextMaxId must still be
+    // the oldest id so the walk can continue; profileTotal is unknown in a fragment.
+    const fragment = `
+      <div class="item " data-checkin-id="1577233492">
+        <p class="text">
+          <a class="user" href="/user/ysilvestrov">Y</a> is drinking
+          <a href="/b/oatkeeper/6438923">Oatkeeper</a> by
+          <a href="/PiwnePodziemie">Piwne Podziemie</a> at
+          <a href="/v/offside/1">Offside</a>
+        </p>
+        <div class="caps " data-rating="3.5"></div>
+        <a class="time">Fri, 12 Jun 2026 17:47:48 +0000</a>
+      </div>
+      <div class="item " data-checkin-id="1574693054">
+        <p class="text">
+          <a class="user" href="/user/ysilvestrov">Y</a> is drinking
+          <a href="/b/renety-2024/6391450">Renety 2024</a> by
+          <a href="/SlowFlow">Slow Flow Group</a>
+        </p>
+        <a class="time">Sun, 31 May 2026 18:03:24 +0000</a>
+      </div>`;
+    const frag = parseCheckinFeedPage(fragment);
+    expect(frag.checkins).toHaveLength(2);
+    expect(frag.profileTotal).toBeNull();
+    expect(frag.nextMaxId).toBe('1574693054'); // oldest (last) id, despite no button
   });
 
   it('returns empty + null cursor for a page with no check-ins', () => {

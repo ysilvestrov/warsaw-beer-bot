@@ -121,9 +121,15 @@ function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
 
 let syncRunning = false;
 
-function feedUrl(username: string, maxId: string | null): string {
-  const base = `https://untappd.com/user/${encodeURIComponent(username)}`;
-  return maxId === null ? base : `${base}?max_id=${encodeURIComponent(maxId)}`;
+// Page 1 (maxId === null) is the full profile page. Every older page is served by
+// Untappd's "Show More" XHR endpoint /profile/more_feed/<user>/<offset>?v2=true (a raw
+// item fragment). A `?max_id=` query on the profile page is IGNORED (always returns the
+// newest page), so it must NOT be used for pagination.
+export function feedUrl(username: string, maxId: string | null): string {
+  const u = encodeURIComponent(username);
+  return maxId === null
+    ? `https://untappd.com/user/${u}`
+    : `https://untappd.com/profile/more_feed/${u}/${encodeURIComponent(maxId)}?v2=true`;
 }
 
 export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:started'; alreadyRunning: boolean }> {
@@ -155,8 +161,18 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
       const outcome = await runCheckinSync({
         getState: () => getCheckinSyncState(baseUrl, token),
         fetchFeed: async (username, maxId) => {
-          const res = await fetch(feedUrl(username, maxId), { credentials: 'include' });
-          if (!res.ok) throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
+          // more_feed is XHR-only: without X-Requested-With Untappd 307-redirects it to
+          // /home. A redirect on that endpoint means the request wasn't honoured (e.g.
+          // logged-out session) — treat it as an error rather than parsing /home (which
+          // has no check-ins and would look like a clean "feed bottom").
+          const isMoreFeed = maxId !== null;
+          const res = await fetch(feedUrl(username, maxId), {
+            credentials: 'include',
+            headers: isMoreFeed ? { 'X-Requested-With': 'XMLHttpRequest' } : undefined,
+          });
+          if ((isMoreFeed && res.redirected) || !res.ok) {
+            throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
+          }
           return res.text();
         },
         submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
