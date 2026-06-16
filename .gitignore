@@ -15,3 +15,6 @@ extension/*.zip
 
 # Built browser-extension release artifact
 extension/warsaw-beer-overlay-*.zip
+
+# Scratch folder for the current task (see CLAUDE.md ./tmp/ policy)
+tmp/
