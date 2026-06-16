@@ -38,17 +38,22 @@ Two facts about the rest of the system shape this design:
 All three views expose the same title string:
 
 ```
-<BREWERY> <beer name> <ABV>% <volume>
+<BREWERY> <beer name> [– <style>] <ABV>% <volume>
 ```
 
-Real examples (the TDD corpus):
+The brewery is the **leading token(s)**; the beer name follows; a style may
+trail (sometimes after a dash). The dash, where present, separates **name from
+style** — it is *not* a brewery/name boundary. A style word is also not a
+brewery/name boundary: some breweries name beers purely by style.
 
-- `Burgomistr NEIPA 6% 500ml`
-- `VOLTA CHARISMA+1 IPA 5.1% 0.33л`
-- `REBREW Труханів Острів SIPA 4,3% 330ml`
-- `JAGER БОГЕМНИЙ МІЦИК ІРА 5.1% 500ml`
-- `Ципа 380 – Triple IPA 7.9% 500ml`        (dash separates brewery/name)
-- `ШО (IIIO) Totem IPA 6% 0.33l`
+Real examples (the TDD corpus), annotated brewery · name · style:
+
+- `Burgomistr NEIPA 6% 500ml`               (Burgomistr · — · NEIPA — beer named by style)
+- `VOLTA CHARISMA+1 IPA 5.1% 0.33л`          (VOLTA · CHARISMA+1 · IPA)
+- `REBREW Труханів Острів SIPA 4,3% 330ml`   (REBREW · Труханів Острів · SIPA)
+- `JAGER БОГЕМНИЙ МІЦИК ІРА 5.1% 500ml`       (JAGER · БОГЕМНИЙ МІЦИК · ІРА)
+- `Ципа 380 – Triple IPA 7.9% 500ml`         (Ципа · 380 · Triple IPA — dash before style)
+- `ШО (IIIO) Totem IPA 6% 0.33l`             (ШО (IIIO) · Totem · IPA — multi-word brewery)
 - `Orval {2025} 330ml`                       (no ABV; name ≈ brewery)
 - `Barely Beer 0% ABV 330ml`
 - `Vibrant IS 9° 330ml`                       (`°` = gravity, not ABV)
@@ -80,16 +85,20 @@ Mixed Latin/Cyrillic; comma decimals (`4,3%`); volume units `ml` / `мл` / `l` 
 3. The **head string** = the title with its trailing ABV-and-volume tail
    removed; the tail begins at whichever of ABV or volume appears first
    (ABV usually precedes volume, e.g. `… 6% 500ml`).
-4. **brewery / name split** of the head string:
-   - if an explicit separator is present (`–` `—` `-` `|` `/`), split there;
-   - else split at the first beer-style keyword (ipa, neipa, dipa, sipa, aipa,
-     stout, porter, gose, sour, lager, pils…, plus Cyrillic `іра`/`іпа`);
-   - else fall back to the first whitespace token as brewery.
-   Over-capturing the brewery is acceptable (leading-prefix gate). The Barn2
-   table's `data-product_tag` brewery name is a **bonus hint** where present, not
-   the primary path.
+4. **brewery / name split** of the head string. Default: **brewery = first
+   whitespace token**, name = the remainder. Neither the dash/`|` nor a style
+   word is used as the boundary (the dash precedes a *style*; some beers are
+   named by style). The matcher's leading-prefix gate is **symmetric**, so this
+   is safe even for multi-word breweries that under-capture: input `vibrant` is
+   still a prefix of catalog `vibrant pour` (same first-token bucket, gate
+   passes). A small set of known multi-word/parenthetical breweries
+   (`Vibrant Pour`, `ШО (IIIO)`, …) may be promoted to a two-token brewery where
+   it cleanly improves the name; TDD decides per the corpus. The Barn2 table's
+   `data-product_tag` brewery name is a **bonus hint** where present, not the
+   primary path.
 
-The exact heuristic is finalised by TDD against the corpus above.
+The exact heuristic — including multi-word-brewery handling and the
+parenthetical case — is finalised by TDD against the corpus above.
 
 ## Non-beer filtering (mandatory)
 
