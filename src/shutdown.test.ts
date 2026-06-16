@@ -1,15 +1,16 @@
+import { vi } from 'vitest';
 import { createShutdown } from './shutdown';
 
 describe('createShutdown', () => {
   function makeMocks() {
     const calls: string[] = [];
-    const bot = { stop: jest.fn((sig: string) => calls.push(`bot.stop:${sig}`)) };
+    const bot = { stop: vi.fn((sig: string) => calls.push(`bot.stop:${sig}`)) };
     const cronJobs = [
-      { stop: jest.fn(() => calls.push('cron0.stop')) },
-      { stop: jest.fn(() => calls.push('cron1.stop')) },
+      { stop: vi.fn(() => calls.push('cron0.stop')) },
+      { stop: vi.fn(() => calls.push('cron1.stop')) },
     ];
-    const db = { close: jest.fn(() => calls.push('db.close')) };
-    const log = { info: jest.fn(), error: jest.fn() };
+    const db = { close: vi.fn(() => calls.push('db.close')) };
+    const log = { info: vi.fn(), error: vi.fn() };
     return { bot, cronJobs, db, log, calls };
   }
 
@@ -33,7 +34,7 @@ describe('createShutdown', () => {
 
   test('closes db even if bot.stop throws', async () => {
     const { cronJobs, db, log } = makeMocks();
-    const bot = { stop: jest.fn(() => { throw new Error('boom'); }) };
+    const bot = { stop: vi.fn(() => { throw new Error('boom'); }) };
     const shutdown = createShutdown({ bot: bot as any, cronJobs: cronJobs as any, db: db as any, log: log as any });
 
     await shutdown('SIGTERM');
@@ -56,21 +57,21 @@ describe('createShutdown', () => {
 
   test('closes the http server between bot stop and db close', async () => {
     const order: string[] = [];
-    const bot = { stop: jest.fn(() => order.push('bot')) };
-    const db = { close: jest.fn(() => order.push('db')) };
+    const bot = { stop: vi.fn(() => order.push('bot')) };
+    const db = { close: vi.fn(() => order.push('db')) };
     const httpServer = {
-      close: jest.fn((cb?: (err?: Error) => void) => { order.push('http'); cb?.(); }),
+      close: vi.fn((cb?: (err?: Error) => void) => { order.push('http'); cb?.(); }),
     };
-    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const log = { info: vi.fn(), error: vi.fn() } as any;
     const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, httpServer: httpServer as any, log });
     await shutdown('SIGTERM');
     expect(order).toEqual(['bot', 'http', 'db']);
   });
 
   test('works when no http server is provided', async () => {
-    const bot = { stop: jest.fn() };
-    const db = { close: jest.fn() };
-    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const bot = { stop: vi.fn() };
+    const db = { close: vi.fn() };
+    const log = { info: vi.fn(), error: vi.fn() } as any;
     const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, log });
     await expect(shutdown('SIGINT')).resolves.toBeUndefined();
     expect(db.close).toHaveBeenCalled();
@@ -78,10 +79,10 @@ describe('createShutdown', () => {
 
   test('logs and continues when http server close errors', async () => {
     const order: string[] = [];
-    const bot = { stop: jest.fn(() => order.push('bot')) };
-    const db = { close: jest.fn(() => order.push('db')) };
-    const httpServer = { close: jest.fn((cb?: (err?: Error) => void) => cb?.(new Error('boom'))) };
-    const log = { info: jest.fn(), error: jest.fn() } as any;
+    const bot = { stop: vi.fn(() => order.push('bot')) };
+    const db = { close: vi.fn(() => order.push('db')) };
+    const httpServer = { close: vi.fn((cb?: (err?: Error) => void) => cb?.(new Error('boom'))) };
+    const log = { info: vi.fn(), error: vi.fn() } as any;
     const shutdown = createShutdown({ bot: bot as any, cronJobs: [], db: db as any, httpServer: httpServer as any, log });
     await shutdown('SIGTERM');
     expect(log.error).toHaveBeenCalled();

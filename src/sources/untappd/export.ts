@@ -2,8 +2,8 @@ import { Readable } from 'node:stream';
 import { parse as csvParse } from 'csv-parse';
 // stream-json v2 exports: { "./*": "./src/*" } — Node applies the mapping
 // but does NOT append `.js` afterwards, so the require path must be explicit.
-// ts-jest resolves without the suffix, so tests passed while `node dist/...`
-// failed at module load.
+// Vitest resolves without the suffix, so tests pass while `node dist/...`
+// would fail at module load without the explicit .js.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const streamArray: typeof import('stream-json/src/streamers/stream-array') =
   require('stream-json/streamers/stream-array.js');

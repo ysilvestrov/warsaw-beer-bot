@@ -1,3 +1,4 @@
+import { vi, type Mock } from 'vitest';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile, setUserLanguage, getUserLanguage } from '../../storage/user_profiles';
@@ -15,8 +16,8 @@ async function simulateLangCallback(
   db: ReturnType<typeof fresh>,
   telegramId: number,
   locale: Locale,
-  editMessageText: jest.Mock,
-  answerCbQuery: jest.Mock,
+  editMessageText: Mock,
+  answerCbQuery: Mock,
 ) {
   const LOCALE_NAMES: Record<Locale, string> = {
     uk: 'Українська',
@@ -37,8 +38,8 @@ async function simulateLangCallback(
 describe('/lang callback — DB persistence and edit-text', () => {
   test('lang:pl writes pl to DB and edits with Polish lang.changed text', async () => {
     const db = fresh();
-    const editMessageText = jest.fn();
-    const answerCbQuery = jest.fn();
+    const editMessageText = vi.fn();
+    const answerCbQuery = vi.fn();
 
     await simulateLangCallback(db, 42, 'pl', editMessageText, answerCbQuery);
 
@@ -55,8 +56,8 @@ describe('/lang callback — DB persistence and edit-text', () => {
 
   test('lang:en writes en to DB and edits with English lang.changed text', async () => {
     const db = fresh();
-    const editMessageText = jest.fn();
-    const answerCbQuery = jest.fn();
+    const editMessageText = vi.fn();
+    const answerCbQuery = vi.fn();
 
     await simulateLangCallback(db, 43, 'en', editMessageText, answerCbQuery);
 
@@ -69,8 +70,8 @@ describe('/lang callback — DB persistence and edit-text', () => {
 
   test('lang:uk writes uk to DB and edits with Ukrainian lang.changed text', async () => {
     const db = fresh();
-    const editMessageText = jest.fn();
-    const answerCbQuery = jest.fn();
+    const editMessageText = vi.fn();
+    const answerCbQuery = vi.fn();
 
     await simulateLangCallback(db, 44, 'uk', editMessageText, answerCbQuery);
 
@@ -86,8 +87,8 @@ describe('/lang callback — DB persistence and edit-text', () => {
     ensureProfile(db, 45);
     setUserLanguage(db, 45, 'uk');
 
-    const editMessageText = jest.fn();
-    const answerCbQuery = jest.fn();
+    const editMessageText = vi.fn();
+    const answerCbQuery = vi.fn();
 
     await simulateLangCallback(db, 45, 'pl', editMessageText, answerCbQuery);
 

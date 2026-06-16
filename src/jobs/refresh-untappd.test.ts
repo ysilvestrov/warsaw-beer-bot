@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -303,7 +304,7 @@ describe('refreshAllUntappd', () => {
         throw new E();
       },
     };
-    const notifyAdmin = jest.fn(async () => {});
+    const notifyAdmin = vi.fn(async () => {});
 
     await refreshAllUntappd({ db, log: silentLog, http, notifyAdmin });
 

@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -162,7 +163,7 @@ describe('enrichOrphans', () => {
     const db = dbWithOrphans(2);
     const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {} });
     breaker.onResult(true, T); // open
-    const http = { get: jest.fn(async () => '<html></html>') };
+    const http = { get: vi.fn(async () => '<html></html>') };
     const res = await enrichOrphans({ db, log: silentLog, http, breaker, sleepMs: 0, now: () => new Date(T.getTime() + 3600_000) });
     expect(res.processed).toBe(0);
     expect(http.get).not.toHaveBeenCalled();

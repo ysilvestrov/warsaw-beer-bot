@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
@@ -470,14 +471,14 @@ describe('prepareCatalog — lazy/memoized fullSearcher', () => {
   ];
 
   it('does not build any Searcher when every beer matches exactly', () => {
-    const build = jest.fn((rows) => prepareCatalog(rows).searcherFor(rows));
+    const build = vi.fn((rows) => prepareCatalog(rows).searcherFor(rows));
     const prepared = prepareCatalog(cat, build);
     matchPrepared({ brewery: 'Pinta', name: 'Atak Chmielu' }, prepared);
     expect(build).not.toHaveBeenCalled();
   });
 
   it('builds the full-catalog Searcher at most once across empty-pool fallbacks', () => {
-    const build = jest.fn((rows) => prepareCatalog(rows).searcherFor(rows));
+    const build = vi.fn((rows) => prepareCatalog(rows).searcherFor(rows));
     const prepared = prepareCatalog(cat, build);
     // Two unknown breweries → empty pool → full-catalog fallback, twice.
     matchPrepared({ brewery: 'Nowhere', name: 'Mystery One' }, prepared);

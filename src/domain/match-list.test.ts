@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { matchBeerList, type CatalogBeerWithRating } from './match-list';
 import { matchBeer } from './matcher';
 
@@ -115,7 +116,7 @@ describe('matchBeerList — cooperative yielding', () => {
       { brewery: 'Brew 0', name: 'Beer 0' },   // exact match
       { brewery: 'Nowhere', name: 'Unknown' }, // empty-pool fallback
     ];
-    const yieldSpy = jest.fn(() => Promise.resolve());
+    const yieldSpy = vi.fn(() => Promise.resolve());
     await matchBeerList(big, new Set(), new Map(), items, { yield: yieldSpy });
     // 2 prep-chunk yields + 1 yield per beer.
     expect(yieldSpy.mock.calls.length).toBe(2 + items.length);
