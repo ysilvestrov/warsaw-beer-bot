@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import type { Element } from 'domhandler';
 
 export interface FeedCheckin {
   checkin_id: string;
@@ -27,7 +28,7 @@ function parseRating(raw: string | undefined): number | null {
 // The brewery is the one anchor inside p.text that isn't the user, the beer (/b/),
 // or the venue (/v/) — Untappd renders breweries with varied hrefs (vanity like
 // /Pohjala or canonical /w/<slug>/<id>), so we identify it by exclusion.
-function breweryNameFrom($: cheerio.CheerioAPI, row: cheerio.Cheerio<cheerio.Element>): string {
+function breweryNameFrom($: cheerio.CheerioAPI, row: cheerio.Cheerio<Element>): string {
   let name = '';
   row.find('p.text a').each((_, a) => {
     if (name) return false;
