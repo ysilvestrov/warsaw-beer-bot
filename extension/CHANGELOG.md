@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-06-16
+
+- Added Flasker (flasker.com.ua) shop support — your check-in badges now appear across all its product views: the classic category/tag grids, the all-products page on the homepage, and the full product table. Non-beer items (snacks, sauces, glassware, bottle openers, gift sets) are ignored.
+
 ## [0.7.1] - 2026-06-16
 
 - Fixed check-in sync only ever loading the most recent page: it now paginates through your full history via Untappd's "Show More" endpoint (older pages were previously not fetched at all), so backfilling a large history and topping up festival gaps work as intended.
