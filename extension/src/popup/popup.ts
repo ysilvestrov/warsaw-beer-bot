@@ -86,9 +86,19 @@ async function initPopup(): Promise<void> {
         if (s.running) setTimeout(poll, 1500);
       });
     };
-    syncBtn.addEventListener('click', () => {
+    syncBtn.addEventListener('click', async () => {
       syncBtn.disabled = true;
       syncStatus.textContent = 'Starting…';
+      // Fetching the user's feed needs the untappd.com host permission (optional,
+      // shared with enrichment). Request it in this user-gesture context so a user
+      // who never enabled enrichment can still sync. Must be the first await so the
+      // gesture isn't consumed.
+      const granted = await chrome.permissions.request({ origins: ['https://untappd.com/*'] });
+      if (!granted) {
+        syncStatus.textContent = 'Allow access to untappd.com to sync your check-ins.';
+        syncBtn.disabled = false;
+        return;
+      }
       chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => poll());
     });
     poll(); // reflect an in-progress run when the popup (re)opens
