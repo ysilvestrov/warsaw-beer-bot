@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { parseTitle, isNonBeerTitle, isNonBeerCategory } from './flasker';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parseTitle, isNonBeerTitle, isNonBeerCategory, flasker } from './flasker';
+
+const load = (name: string) =>
+  new DOMParser().parseFromString(readFileSync(resolve(__dirname, `../../tests/fixtures/${name}`), 'utf8'), 'text/html');
 
 describe('parseTitle', () => {
   it('single-token brewery + style name', () => {
@@ -71,6 +76,10 @@ describe('isNonBeerTitle (secondary gate — sets/glassware that DO quote a volu
     expect(isNonBeerTitle('Flasker branded glass 0.33l')).toBe(true);   // \bglass\b, not in isNonBeerName
     expect(isNonBeerTitle('Сувенір set 330ml')).toBe(true);            // сувенір, not in isNonBeerName
   });
+  it('drops Ukrainian glassware and bottle-openers (block-view merch)', () => {
+    expect(isNonBeerTitle('Склянка Český Lager (500мл)')).toBe(true);
+    expect(isNonBeerTitle('Відкривачка Cap Gun + 2 х 0.33 б/а пива')).toBe(true);
+  });
 });
 
 describe('isNonBeerCategory (table data-product_cat hint)', () => {
@@ -80,5 +89,40 @@ describe('isNonBeerCategory (table data-product_cat hint)', () => {
   });
   it('keeps a beer-style category', () => {
     expect(isNonBeerCategory('812:Темне міцне, ')).toBe(false);
+  });
+});
+
+describe('flasker adapter', () => {
+  it('hostMatch matches the shop and its subdomains, not others', () => {
+    expect(flasker.hostMatch(new URL('https://flasker.com.ua/1-2/'))).toBe(true);
+    expect(flasker.hostMatch(new URL('https://www.flasker.com.ua/store/'))).toBe(true);
+    expect(flasker.hostMatch(new URL('https://example.com/'))).toBe(false);
+  });
+
+  it('parses cards from the SSR archive view (li.product)', () => {
+    const cards = flasker.parseCards(load('flasker.html'));
+    expect(cards.length).toBeGreaterThan(0);
+    for (const c of cards) {
+      expect(c.name.length).toBeGreaterThan(0);
+      expect(c.brewery.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('parses cards from the Barn2 product table view (tr[data-title])', () => {
+    expect(flasker.parseCards(load('flasker.table.html')).length).toBeGreaterThan(0);
+  });
+
+  it('parses cards from the client-rendered block view (li.wc-block-grid__product)', () => {
+    expect(flasker.parseCards(load('flasker.block.html')).length).toBeGreaterThan(0);
+  });
+
+  it('drops every product on a non-beer page', () => {
+    expect(flasker.parseCards(load('flasker.nonbeer.html'))).toEqual([]);
+  });
+
+  it('does not emit glassware/opener merch from the block view', () => {
+    const brands = flasker.parseCards(load('flasker.block.html')).map((c) => c.brewery);
+    expect(brands).not.toContain('Склянка');
+    expect(brands).not.toContain('Відкривачка');
   });
 });

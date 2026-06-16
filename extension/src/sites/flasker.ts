@@ -1,3 +1,5 @@
+import type { Card, SiteAdapter } from './types';
+import { waitForSelector } from '../content/grid-ready';
 import { isNonBeerName } from './non-beer';
 
 // --- volume / abv --------------------------------------------------------
@@ -42,7 +44,7 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
 // volume gate alone would let them through). Short ambiguous words are bounded
 // so they never fire inside a beer name (e.g. "Sunset"). isNonBeerName supplies
 // the shared multi-word phrases (gift set, "+ келих", набір, сертифікат, …).
-const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|zestaw|келих|сувенір|мерч|сертифікат|подарунк)/iu;
+const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|zestaw|келих|склянк|відкривач|сувенір|мерч|подарунк)/iu;
 
 // Category hint (Barn2 table data-product_cat). Category names are safe for
 // broader snack/merch tokens since they are not beer names.
@@ -75,3 +77,59 @@ export function parseTitle(rawTitle: string): { brewery: string; name: string; a
   const { brewery, name } = splitBreweryName(head);
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
+
+// --- view extractors -----------------------------------------------------
+const ARCHIVE_CARD = 'li.product';                               // SSR loop: /1-2/, /product-category, /product-tag
+const ARCHIVE_TITLE = 'h2.woocommerce-loop-product__title';
+const TABLE_ROW = 'tr[data-title]';                              // Barn2 product table: /таблиця-товару/
+const BLOCK_CARD = 'li.wc-block-grid__product';                  // "All Products" block: home/store (client-rendered)
+const BLOCK_TITLE = '.wc-block-grid__product-title';
+const GRID_SELECTOR = `${ARCHIVE_CARD}, ${TABLE_ROW}, ${BLOCK_CARD}`;
+
+interface RawEntry { el: HTMLElement; title: string; categoryHint?: string }
+
+function text(el: Element | null | undefined): string {
+  return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function archiveEntries(root: ParentNode): RawEntry[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(ARCHIVE_CARD))
+    .map((el) => ({ el, title: text(el.querySelector(ARCHIVE_TITLE)) }));
+}
+
+function blockEntries(root: ParentNode): RawEntry[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(BLOCK_CARD))
+    .map((el) => ({ el, title: text(el.querySelector(BLOCK_TITLE)) }));
+}
+
+function tableEntries(root: ParentNode): RawEntry[] {
+  return Array.from(root.querySelectorAll<HTMLElement>(TABLE_ROW)).map((el) => ({
+    el,
+    title: (el.getAttribute('data-title') ?? '').replace(/\s+/g, ' ').trim(),
+    categoryHint: el.getAttribute('data-product_cat') ?? undefined,
+  }));
+}
+
+// --- adapter -------------------------------------------------------------
+export const flasker: SiteAdapter = {
+  id: 'flasker',
+  hostMatch: (url) => url.hostname === 'flasker.com.ua' || url.hostname.endsWith('.flasker.com.ua'),
+
+  async waitForGrid(root) {
+    await waitForSelector(root, GRID_SELECTOR, { timeoutMs: 8000 });
+  },
+
+  parseCards(root) {
+    const entries = [...archiveEntries(root), ...tableEntries(root), ...blockEntries(root)];
+    const cards: Card[] = [];
+    for (const e of entries) {
+      if (!e.title) continue;
+      if (isNonBeerTitle(e.title)) continue;
+      if (e.categoryHint && isNonBeerCategory(e.categoryHint)) continue;
+      const parsed = parseTitle(e.title);
+      if (!parsed) continue;
+      cards.push({ el: e.el, ...parsed });
+    }
+    return cards;
+  },
+};
