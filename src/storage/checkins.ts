@@ -46,6 +46,19 @@ export function hasBeenDrunk(db: DB, telegramId: number, beerId: number): boolea
   return !!row;
 }
 
+export function checkinExists(db: DB, telegramId: number, checkinId: string): boolean {
+  return !!db
+    .prepare('SELECT 1 FROM checkins WHERE telegram_id = ? AND checkin_id = ? LIMIT 1')
+    .get(telegramId, checkinId);
+}
+
+export function countCheckins(db: DB, telegramId: number): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS n FROM checkins WHERE telegram_id = ?')
+    .get(telegramId) as { n: number };
+  return row.n;
+}
+
 export function drunkBeerIds(db: DB, telegramId: number): Set<number> {
   const rows = db.prepare(
     'SELECT DISTINCT beer_id FROM checkins WHERE telegram_id = ? AND beer_id IS NOT NULL',

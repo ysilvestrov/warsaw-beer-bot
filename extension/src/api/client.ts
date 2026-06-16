@@ -1,6 +1,6 @@
-import type { EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
+import type { CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
 
-export type ApiErrorCode = 'unauthorized' | 'server' | 'network';
+export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked';
 
 export class ApiError extends Error {
   constructor(public code: ApiErrorCode, message?: string) {
@@ -87,6 +87,49 @@ export async function postEnrichResult(
   if (res.status === 401) throw new ApiError('unauthorized');
   if (!res.ok) throw new ApiError('server', `status ${res.status}`);
   return (await res.json()) as EnrichResult;
+}
+
+export async function getCheckinSyncState(
+  baseUrl: string,
+  token: string,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<CheckinSyncState> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${trimBase(baseUrl)}/checkins/sync/state`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }, timeoutMs);
+  } catch {
+    throw new ApiError('network');
+  }
+  if (res.status === 401) throw new ApiError('unauthorized');
+  if (res.status === 409) throw new ApiError('not_linked');
+  if (!res.ok) throw new ApiError('server', `status ${res.status}`);
+  return (await res.json()) as CheckinSyncState;
+}
+
+export async function postCheckinSyncPage(
+  baseUrl: string,
+  token: string,
+  html: string,
+  maxId: string | null,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<CheckinSyncPageResult> {
+  let res: Response;
+  try {
+    res = await fetchWithTimeout(`${trimBase(baseUrl)}/checkins/sync`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html, maxId }),
+    }, timeoutMs);
+  } catch {
+    throw new ApiError('network');
+  }
+  if (res.status === 401) throw new ApiError('unauthorized');
+  if (res.status === 409) throw new ApiError('not_linked');
+  if (res.status === 502) throw new ApiError('blocked');
+  if (!res.ok) throw new ApiError('server', `status ${res.status}`);
+  return (await res.json()) as CheckinSyncPageResult;
 }
 
 export async function getHealth(baseUrl: string, timeoutMs: number = DEFAULT_TIMEOUT_MS): Promise<boolean> {

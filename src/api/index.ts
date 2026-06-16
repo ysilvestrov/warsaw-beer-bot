@@ -10,6 +10,7 @@ import { authMiddleware } from './middleware/auth';
 import { adminMiddleware } from './middleware/admin';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
+import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
 
 export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
@@ -27,6 +28,9 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
 
   app.use('/enrich/*', authMiddleware(deps.db));
   enrichRoute(app, deps);
+
+  app.use('/checkins/*', authMiddleware(deps.db));
+  checkinsRoute(app, deps);
 
   app.use('/admin/*', adminMiddleware(deps.env));
   adminRoute(app, deps);

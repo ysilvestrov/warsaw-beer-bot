@@ -192,6 +192,18 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN reviewed_at TEXT;
     `,
   },
+  {
+    version: 13,
+    sql: `
+      CREATE TABLE checkin_sync_state (
+        telegram_id    INTEGER PRIMARY KEY
+                         REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+        deepest_max_id TEXT,
+        complete       INTEGER NOT NULL DEFAULT 0,
+        updated_at     TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

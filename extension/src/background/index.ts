@@ -1,5 +1,6 @@
 import { getSettings } from '../shared/config';
-import { postMatch, postEnrichCandidates, postEnrichResult, ApiError } from '../api/client';
+import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
+import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
 import type { EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
 
 export interface MatchMessage {
@@ -29,7 +30,9 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
     }
     return { type: 'match:ok', results };
   } catch (e) {
-    const code = e instanceof ApiError ? e.code : 'server';
+    const rawCode = e instanceof ApiError ? e.code : 'server';
+    const code: 'unauthorized' | 'server' | 'network' =
+      rawCode === 'unauthorized' || rawCode === 'network' ? rawCode : 'server';
     return { type: 'match:err', code };
   }
 }
@@ -84,11 +87,112 @@ export async function handleEnrichResult(
   }
 }
 
+export interface CheckinSyncStartMessage { type: 'checkin-sync:start' }
+export interface CheckinSyncStatusMessage { type: 'checkin-sync:status' }
+
+const SYNC_PAGE_CAP = 200;
+const SYNC_STATE_KEY = 'checkinSync';
+
+interface StoredSyncStatus {
+  running: boolean;
+  serverCount: number;
+  profileTotal: number | null;
+  mergedThisRun: number;
+  outcome: SyncOutcome['status'] | null;
+  complete: boolean;
+}
+
+async function writeSyncStatus(s: StoredSyncStatus): Promise<void> {
+  await chrome.storage.session.set({ [SYNC_STATE_KEY]: s });
+}
+
+async function readSyncStatus(): Promise<StoredSyncStatus> {
+  const s = await chrome.storage.session.get(SYNC_STATE_KEY);
+  return (s[SYNC_STATE_KEY] as StoredSyncStatus | undefined) ?? {
+    running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false,
+  };
+}
+
+let syncWriteChain: Promise<void> = Promise.resolve();
+function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
+  syncWriteChain = syncWriteChain.then(() => writeSyncStatus(s));
+  return syncWriteChain;
+}
+
+let syncRunning = false;
+
+function feedUrl(username: string, maxId: string | null): string {
+  const base = `https://untappd.com/user/${encodeURIComponent(username)}`;
+  return maxId === null ? base : `${base}?max_id=${encodeURIComponent(maxId)}`;
+}
+
+export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:started'; alreadyRunning: boolean }> {
+  if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
+  const cur = await readSyncStatus();
+  if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
+
+  const { token, baseUrl } = await getSettings();
+  if (!token) {
+    await writeSyncStatus({ ...cur, running: false, outcome: 'error' });
+    return { type: 'checkin-sync:started', alreadyRunning: false };
+  }
+
+  syncRunning = true;
+  await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+
+  void (async () => {
+    try {
+      const onProgress = (p: SyncProgress) => {
+        void enqueueSyncStatus({
+          running: true,
+          serverCount: p.serverCount,
+          profileTotal: p.profileTotal,
+          mergedThisRun: p.mergedThisRun,
+          outcome: null,
+          complete: false,
+        });
+      };
+      const outcome = await runCheckinSync({
+        getState: () => getCheckinSyncState(baseUrl, token),
+        fetchFeed: async (username, maxId) => {
+          const res = await fetch(feedUrl(username, maxId), { credentials: 'include' });
+          if (!res.ok) throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
+          return res.text();
+        },
+        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
+        onProgress,
+        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        pageCap: SYNC_PAGE_CAP,
+      });
+      await enqueueSyncStatus({
+        running: false,
+        serverCount: outcome.serverCount,
+        profileTotal: outcome.profileTotal,
+        mergedThisRun: outcome.mergedThisRun,
+        outcome: outcome.status,
+        complete: outcome.complete,
+      });
+    } catch {
+      await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+    } finally {
+      syncRunning = false;
+    }
+  })();
+
+  return { type: 'checkin-sync:started', alreadyRunning: false };
+}
+
+export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
+  return { type: 'checkin-sync:status:ok', ...(await readSyncStatus()) };
+}
+
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const t = (message as { type?: unknown }).type;
   if (t === 'match') { handleMatch(message as MatchMessage).then(sendResponse); return true; }
   if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
+  if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
+  if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }
   return undefined;
 });

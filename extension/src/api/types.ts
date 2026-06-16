@@ -35,3 +35,21 @@ export interface EnrichResult {
   untappd_id?: number;
   rating_global?: number | null;
 }
+
+export interface CheckinSyncState {
+  username: string;
+  deepest_max_id: string | null;
+  complete: boolean;
+  serverCount: number;
+  profileTotal: number | null;
+}
+
+export interface CheckinSyncPageResult {
+  merged: number;
+  alreadyKnown: number;
+  pageSize: number;
+  nextMaxId: string | null;
+  profileTotal: number | null;
+  serverCount: number;
+  complete: boolean;
+}
