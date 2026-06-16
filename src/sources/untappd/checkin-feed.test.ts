@@ -59,4 +59,20 @@ describe('parseCheckinFeedPage', () => {
     const broken = '<div class="item" data-checkin-id="9"><p class="text"><a href="/x">no bid</a></p></div>';
     expect(parseCheckinFeedPage(broken).checkins).toEqual([]);
   });
+
+  it('yields user_rating: null when no .caps[data-rating] is present', () => {
+    // All 15 fixture check-ins have ratings, so exercise the null path with inline HTML.
+    const unrated = `
+      <div class="item" data-checkin-id="9999">
+        <p class="text">
+          <a class="user" href="/user/someone">Someone</a> is drinking
+          <a href="/b/some-beer/5">Some Beer</a> by
+          <a href="/Brewery">Some Brewery</a>
+        </p>
+        <a class="time">Sun, 01 Jan 2023 12:00:00 +0000</a>
+      </div>`;
+    const result = parseCheckinFeedPage(unrated);
+    expect(result.checkins).toHaveLength(1);
+    expect(result.checkins[0].user_rating).toBeNull();
+  });
 });
