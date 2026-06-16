@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import { getProfile } from '../../storage/user_profiles';
 import { upsertBeer } from '../../storage/beers';
-import { mergeCheckin, countCheckins } from '../../storage/checkins';
+import { mergeCheckin, countCheckins, checkinExists } from '../../storage/checkins';
 import { getSyncState, advanceSyncState } from '../../storage/checkin_sync_state';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
@@ -35,6 +35,8 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
 
+    // maxId is accepted for forward-compat/observability but the authoritative next cursor is
+    // re-derived from the parsed page (page.nextMaxId).
     const { html } = c.req.valid('json');
     if (isBlockPage(html)) return c.json({ error: 'blocked' }, 502);
 
@@ -44,9 +46,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
 
     deps.db.transaction(() => {
       for (const ci of page.checkins) {
-        const existed = deps.db
-          .prepare('SELECT 1 FROM checkins WHERE telegram_id = ? AND checkin_id = ?')
-          .get(telegramId, ci.checkin_id);
+        const existed = checkinExists(deps.db, telegramId, ci.checkin_id);
         const beerId = upsertBeer(deps.db, {
           untappd_id: ci.bid,
           name: ci.beer_name,

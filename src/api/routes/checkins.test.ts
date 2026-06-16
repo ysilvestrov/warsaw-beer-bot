@@ -132,6 +132,10 @@ describe('POST /checkins/sync', () => {
     expect(beer).toBeDefined();
     expect(beer!.untappd_id).toBe(42);
 
+    // user_rating round-trips through the parser and storage
+    const row = db.prepare('SELECT user_rating FROM checkins WHERE checkin_id = ?').get('555') as { user_rating: number };
+    expect(row.user_rating).toBe(4.25);
+
     // Sync cursor advanced
     expect(getSyncState(db, TELEGRAM_ID).deepest_max_id).toBe('555');
   });

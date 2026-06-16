@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -52,6 +52,16 @@ describe('latestRatingsByBeer', () => {
     mergeCheckin(db, { ...base, checkin_id: 'd1', beer_id: beer, user_rating: 3.7, checkin_at: '2026-01-01T00:00:00Z' });
     mergeCheckin(db, { ...base, checkin_id: 'd2', beer_id: beer, user_rating: null, checkin_at: '2026-05-01T00:00:00Z' });
     expect(latestRatingsByBeer(db, 1).get(beer)).toBe(3.7);
+  });
+});
+
+describe('checkinExists', () => {
+  it('is true only after a check-in is merged for that user', () => {
+    const db = openDb(':memory:'); migrate(db);
+    expect(checkinExists(db, 1, 'c1')).toBe(false);
+    mergeCheckin(db, { checkin_id: 'c1', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-01', venue: null });
+    expect(checkinExists(db, 1, 'c1')).toBe(true);
+    expect(checkinExists(db, 2, 'c1')).toBe(false);
   });
 });
 
