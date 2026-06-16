@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseTitle } from './flasker';
+import { parseTitle, isNonBeerTitle, isNonBeerCategory } from './flasker';
 
 describe('parseTitle', () => {
   it('single-token brewery + style name', () => {
@@ -53,5 +53,32 @@ describe('parseTitle', () => {
 
   it('single-token head → brewery equals name', () => {
     expect(parseTitle('Orval 330ml')).toEqual({ brewery: 'Orval', name: 'Orval' });
+  });
+});
+
+describe('isNonBeerTitle (secondary gate — sets/glassware that DO quote a volume)', () => {
+  it('drops a tasting set bundled with a glass', () => {
+    expect(isNonBeerTitle('Набір 4×0.33 + келих')).toBe(true);
+    expect(isNonBeerTitle('Tasting set 4×0.33l')).toBe(true);
+  });
+  it('keeps a real beer whose name merely contains "set"', () => {
+    expect(isNonBeerTitle('Sunset Hazy IPA 6% 330ml')).toBe(false);
+  });
+  it('keeps an ordinary beer', () => {
+    expect(isNonBeerTitle('Burgomistr NEIPA 6% 500ml')).toBe(false);
+  });
+  it('drops merch the shared detector misses (local regex branch)', () => {
+    expect(isNonBeerTitle('Flasker branded glass 0.33l')).toBe(true);   // \bglass\b, not in isNonBeerName
+    expect(isNonBeerTitle('Сувенір set 330ml')).toBe(true);            // сувенір, not in isNonBeerName
+  });
+});
+
+describe('isNonBeerCategory (table data-product_cat hint)', () => {
+  it('drops snack/merch categories', () => {
+    expect(isNonBeerCategory('812:Снеки, ')).toBe(true);
+    expect(isNonBeerCategory('900:Аксесуари, ')).toBe(true);
+  });
+  it('keeps a beer-style category', () => {
+    expect(isNonBeerCategory('812:Темне міцне, ')).toBe(false);
   });
 });

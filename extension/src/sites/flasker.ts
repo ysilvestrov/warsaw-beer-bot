@@ -1,3 +1,5 @@
+import { isNonBeerName } from './non-beer';
+
 // --- volume / abv --------------------------------------------------------
 // Beers always quote a volume; snacks/merch never do. Volume is both the primary
 // non-beer gate and the marker for where the beer name ends.
@@ -33,6 +35,25 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   const brewery = breweryTokens.join(' ');
   const name = tokens.slice(breweryTokens.length).join(' ').trim();
   return { brewery, name: name || brewery };
+}
+
+// --- non-beer gates ------------------------------------------------------
+// Secondary gate: catches sets/glassware/vouchers that DO quote a volume (the
+// volume gate alone would let them through). Short ambiguous words are bounded
+// so they never fire inside a beer name (e.g. "Sunset"). isNonBeerName supplies
+// the shared multi-word phrases (gift set, "+ келих", набір, сертифікат, …).
+const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|zestaw|келих|сувенір|мерч|сертифікат|подарунк)/iu;
+
+// Category hint (Barn2 table data-product_cat). Category names are safe for
+// broader snack/merch tokens since they are not beer names.
+const NONBEER_CATEGORY_RE = /(?:снек|снэк|закуск|набор|набір|сет|\bset\b|аксесуар|мерч|merch|подарунк|snack|\bglass\b|\bgift\b)/iu;
+
+export function isNonBeerTitle(title: string): boolean {
+  return isNonBeerName(title) || NONBEER_TITLE_RE.test(title);
+}
+
+export function isNonBeerCategory(cat: string): boolean {
+  return NONBEER_CATEGORY_RE.test(cat);
 }
 
 // Returns null when the title carries no volume token → treat as non-beer.
