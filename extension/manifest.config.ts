@@ -35,6 +35,8 @@ export default defineManifest({
         'https://*.winetime.com.ua/*',
         'https://hoptimaal.com/*',
         'https://*.hoptimaal.com/*',
+        'https://flasker.com.ua/*',
+        'https://*.flasker.com.ua/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
