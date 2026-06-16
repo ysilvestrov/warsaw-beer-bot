@@ -40,11 +40,13 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
 }
 
 // --- non-beer gates ------------------------------------------------------
-// Secondary gate: catches sets/glassware/vouchers that DO quote a volume (the
-// volume gate alone would let them through). Short ambiguous words are bounded
-// so they never fire inside a beer name (e.g. "Sunset"). isNonBeerName supplies
-// the shared multi-word phrases (gift set, "+ келих", набір, сертифікат, …).
-const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|zestaw|келих|склянк|відкривач|сувенір|мерч|подарунк)/iu;
+// Secondary gate: catches sets/glassware/snacks/vouchers that DO quote a volume
+// (the volume gate alone would let them through — e.g. a multi-beer set or a sauce
+// listed with a bottle size). Short ambiguous English words are bounded so they
+// never fire inside a beer name (e.g. "Sunset"); the Cyrillic merch/snack stems are
+// unambiguous. isNonBeerName supplies the shared multi-word phrases (gift set,
+// "+ келих", набір, сертифікат, …).
+const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|\bsnack\b|zestaw|сет|келих|склянк|відкривач|сувенір|мерч|соус|сало|гриб|шкварк|снек|закуск|подарунк)/iu;
 
 // Category hint (Barn2 table data-product_cat). Category names are safe for
 // broader snack/merch tokens since they are not beer names.

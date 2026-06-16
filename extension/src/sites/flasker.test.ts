@@ -59,6 +59,10 @@ describe('parseTitle', () => {
   it('single-token head → brewery equals name', () => {
     expect(parseTitle('Orval 330ml')).toEqual({ brewery: 'Orval', name: 'Orval' });
   });
+
+  it('does not parse a gravity (°) reading as ABV', () => {
+    expect(parseTitle('Vibrant IS 9° 330ml')).toEqual({ brewery: 'Vibrant', name: 'IS 9°' });
+  });
 });
 
 describe('isNonBeerTitle (secondary gate — sets/glassware that DO quote a volume)', () => {
@@ -79,6 +83,11 @@ describe('isNonBeerTitle (secondary gate — sets/glassware that DO quote a volu
   it('drops Ukrainian glassware and bottle-openers (block-view merch)', () => {
     expect(isNonBeerTitle('Склянка Český Lager (500мл)')).toBe(true);
     expect(isNonBeerTitle('Відкривачка Cap Gun + 2 х 0.33 б/а пива')).toBe(true);
+  });
+  it('drops sets and snacks that quote a bottle volume', () => {
+    expect(isNonBeerTitle('Сет 4 пива 0.33л')).toBe(true);
+    expect(isNonBeerTitle('Соус крафтовий 0.33л')).toBe(true);
+    expect(isNonBeerTitle('Сало в шоколаді 0.33')).toBe(true);
   });
 });
 
