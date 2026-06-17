@@ -161,6 +161,17 @@ function tokenPrefix(a: string, b: string): boolean {
   return short.every((t, i) => t === long[i]);
 }
 
+// True if `prefixNorm`'s tokens are a leading, token-boundary prefix of `haystackNorm`.
+// One-directional (unlike tokenPrefix): the candidate brewery must appear in full at the
+// front of the combined title. Empty operands never match.
+export function leadingRun(haystackNorm: string, prefixNorm: string): boolean {
+  if (haystackNorm === '' || prefixNorm === '') return false;
+  const h = haystackNorm.split(' ');
+  const p = prefixNorm.split(' ');
+  if (p.length > h.length) return false;
+  return p.every((t, i) => t === h[i]);
+}
+
 // True if any alias from one side is a token-prefix of any alias from the other.
 export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));

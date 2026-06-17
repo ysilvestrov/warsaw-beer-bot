@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -438,6 +438,28 @@ describe('breweryAliasContained', () => {
   });
   test('empty alias list never matches', () => {
     expect(breweryAliasContained([], ['staropolski'])).toBe(false);
+  });
+});
+
+describe('leadingRun', () => {
+  test('full brewery at front of title is a leading run', () => {
+    expect(leadingRun('pastry mastery schwarzbrot', 'pastry mastery')).toBe(true);
+  });
+  test('whole-string equality is a leading run', () => {
+    expect(leadingRun('pastry mastery', 'pastry mastery')).toBe(true);
+  });
+  test('non-leading occurrence is not a run', () => {
+    expect(leadingRun('pastry mastery schwarzbrot', 'mastery')).toBe(false);
+  });
+  test('partial token never matches (boundary)', () => {
+    expect(leadingRun('pastry mastery', 'past')).toBe(false);
+  });
+  test('prefix longer than haystack is false', () => {
+    expect(leadingRun('pastry mastery', 'pastry mastery schwarzbrot')).toBe(false);
+  });
+  test('empty operands are false', () => {
+    expect(leadingRun('schwarzbrot', '')).toBe(false);
+    expect(leadingRun('', 'schwarzbrot')).toBe(false);
   });
 });
 
