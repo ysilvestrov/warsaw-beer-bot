@@ -6,7 +6,7 @@ import type { SiteAdapter } from '../sites/types';
 
 function cardEl(): HTMLElement {
   const el = document.createElement('div');
-  renderBadge(el, { is_drunk: true, user_rating: 4, raw: { brewery: 'x', name: 'y' }, matched_beer: null });
+  renderBadge(el, { is_drunk: true, drunk_uncertain: false, user_rating: 4, raw: { brewery: 'x', name: 'y' }, matched_beer: null });
   markSeen(el);
   return el;
 }

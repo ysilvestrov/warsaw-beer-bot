@@ -6,6 +6,7 @@ const result: MatchResult = {
   raw: { brewery: 'PINTA', name: 'Hazy Morning' },
   matched_beer: null,
   is_drunk: false,
+  drunk_uncertain: false,
   user_rating: null,
 };
 

@@ -30,6 +30,7 @@ export interface MatchListResult {
   raw: { brewery: string; name: string };
   matched_beer: MatchedBeer | null;
   is_drunk: boolean;
+  drunk_uncertain: boolean;
   user_rating: number | null;
 }
 
@@ -75,7 +76,7 @@ export async function matchBeerList(
     const raw = { brewery: item.brewery, name: item.name };
     const m = matchPrepared(item, prepared);
     if (!m) {
-      out.push({ raw, matched_beer: null, is_drunk: false, user_rating: null });
+      out.push({ raw, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null });
     } else {
       const beer = byId.get(m.id)!;
       out.push({
@@ -88,6 +89,7 @@ export async function matchBeerList(
           untappd_id: beer.untappd_id ?? null,
         },
         is_drunk: m.source === 'exact' && drunkSet.has(m.id),
+        drunk_uncertain: m.source === 'fuzzy' && drunkSet.has(m.id),
         user_rating: m.source === 'exact' ? (ratingByBeerId.get(m.id) ?? null) : null,
       });
     }

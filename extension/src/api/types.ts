@@ -16,6 +16,7 @@ export interface MatchResult {
   raw: { brewery: string; name: string };
   matched_beer: MatchedBeer | null;
   is_drunk: boolean;
+  drunk_uncertain: boolean;
   user_rating: number | null;
 }
 

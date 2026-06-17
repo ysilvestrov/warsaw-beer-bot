@@ -57,14 +57,18 @@ function attach(host: HTMLElement, badge: HTMLElement): void {
   host.appendChild(badge);
 }
 
-// drunk → ✅ (+ personal rating); not-drunk with a bid + global rating → ⭐; not-drunk
-// matched orphan (no bid) → ⚪; truly unmatched (matched_beer null) → no badge.
+// Guard order: drunk → ✅ (+ personal rating); truly unmatched (matched_beer null) → no
+// badge; fuzzy-match-but-drunk → ❓ (+ global rating if present, uncertain); not-drunk with
+// a bid + global rating → ⭐; not-drunk matched orphan (no bid) → ⚪.
 function badgeFor(result: MatchResult): HTMLElement | null {
   if (result.is_drunk) {
     return makeBadge(result.user_rating != null ? `✅ ${result.user_rating.toFixed(1)}` : '✅', null);
   }
   const m = result.matched_beer;
   if (!m) return null;
+  if (result.drunk_uncertain) {
+    return makeBadge(m.rating_global != null ? `❓ ${m.rating_global.toFixed(1)}` : '❓', m.untappd_id);
+  }
   if (m.untappd_id != null && m.rating_global != null) {
     return makeBadge(`⭐ ${m.rating_global.toFixed(1)}`, m.untappd_id);
   }

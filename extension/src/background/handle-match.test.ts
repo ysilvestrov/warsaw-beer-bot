@@ -6,7 +6,7 @@ import { ApiError } from '../api/client';
 import type { MatchResult, RawBeer } from '../api/types';
 
 function mkResult(name: string): MatchResult {
-  return { raw: { brewery: 'B', name }, matched_beer: null, is_drunk: false, user_rating: null };
+  return { raw: { brewery: 'B', name }, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null };
 }
 
 beforeEach(() => setSettings({ token: 'tok', baseUrl: 'https://api.test' }));
