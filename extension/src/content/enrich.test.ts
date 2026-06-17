@@ -55,6 +55,6 @@ describe('runEnrichment', () => {
     const d = deps({ submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'not_found' })) });
     await runEnrichment(beers(1), d);
     expect(d.setEnriched).not.toHaveBeenCalled();
-    expect(d.setOrphan).toHaveBeenCalledWith('k0');
+    expect(d.setOrphan).toHaveBeenCalledWith('k0', 'B', 'N0');
   });
 });

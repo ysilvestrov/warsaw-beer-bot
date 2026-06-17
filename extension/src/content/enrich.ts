@@ -18,7 +18,7 @@ export interface EnrichDeps {
   submitResult: (brewery: string, name: string, html: string) => Promise<EnrichResult>;
   setSearching: (key: string) => void;
   setEnriched: (key: string, untappdId: number, ratingGlobal: number | null) => void;
-  setOrphan: (key: string) => void;
+  setOrphan: (key: string, brewery: string, name: string) => void;
   delayMs?: number;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -52,10 +52,10 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
       if (res && res.status === 'matched' && res.untappd_id != null) {
         deps.setEnriched(beer.key, res.untappd_id, res.rating_global ?? null);
       } else {
-        deps.setOrphan(beer.key);
+        deps.setOrphan(beer.key, cand.brewery, cand.name);
       }
     } catch {
-      deps.setOrphan(beer.key);
+      deps.setOrphan(beer.key, cand.brewery, cand.name);
     }
 
     if (i < eligible.length - 1) await sleep(delayMs);
