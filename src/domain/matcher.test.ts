@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -441,6 +441,28 @@ describe('breweryAliasContained', () => {
   });
 });
 
+describe('leadingRun', () => {
+  test('full brewery at front of title is a leading run', () => {
+    expect(leadingRun('pastry mastery schwarzbrot', 'pastry mastery')).toBe(true);
+  });
+  test('whole-string equality is a leading run', () => {
+    expect(leadingRun('pastry mastery', 'pastry mastery')).toBe(true);
+  });
+  test('non-leading occurrence is not a run', () => {
+    expect(leadingRun('pastry mastery schwarzbrot', 'mastery')).toBe(false);
+  });
+  test('partial token never matches (boundary)', () => {
+    expect(leadingRun('pastry mastery', 'past')).toBe(false);
+  });
+  test('prefix longer than haystack is false', () => {
+    expect(leadingRun('pastry mastery', 'pastry mastery schwarzbrot')).toBe(false);
+  });
+  test('empty operands are false', () => {
+    expect(leadingRun('schwarzbrot', '')).toBe(false);
+    expect(leadingRun('', 'schwarzbrot')).toBe(false);
+  });
+});
+
 describe('matchBeer with official-suffix brewery', () => {
   test('matches ontap brand-only brewery to catalog official-suffix brewery', () => {
     const cat: CatalogBeer[] = [
@@ -620,6 +642,76 @@ describe('matchPrepared key-intersection (#117)', () => {
   test('collab partner in input name matches the base beer as exact', () => {
     const m = matchBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park' }, cat);
     expect(m).toEqual({ id: 11, confidence: 1, source: 'exact' });
+  });
+});
+
+describe('candidatesByFirstToken', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu' }),
+    c({ id: 2, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter' }),
+  ];
+  test('returns rows whose brewery-alias first token equals the key', () => {
+    const ids = prepareCatalog(cat).candidatesByFirstToken('pastry').map((b) => b.id);
+    expect(ids).toEqual([2]);
+  });
+  test('unknown token returns empty array', () => {
+    expect(prepareCatalog(cat).candidatesByFirstToken('zzz')).toEqual([]);
+  });
+});
+
+describe('split-invariant anchored second try (#169)', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 12544, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 8.0 }),
+    c({ id: 300, brewery: 'Mad Brew', name: 'Galaxy Juice', abv: 6.0 }),
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 }),
+  ];
+
+  test('all three brewery/name splits resolve to the same exact id', () => {
+    const inputs = [
+      { brewery: '', name: 'Pastry Mastery Schwarzbrot Porter' },
+      { brewery: 'Pastry', name: 'Mastery Schwarzbrot Porter' },
+      { brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter' },
+    ];
+    for (const input of inputs) {
+      expect(matchBeer(input, cat)).toEqual({ id: 12544, confidence: 1, source: 'exact' });
+    }
+  });
+
+  test('two-word brewery split mid-title (Mad Brew) → exact', () => {
+    expect(matchBeer({ brewery: 'Mad', name: 'Brew Galaxy Juice' }, cat))
+      .toEqual({ id: 300, confidence: 1, source: 'exact' });
+  });
+
+  test('brewery genuinely absent does NOT anchor onto Pastry Mastery', () => {
+    // No brewery tokens in the title → the leading-token bucket has no candidate.
+    expect(matchBeer({ brewery: '', name: 'Schwarzbrot Porter' }, cat)?.source)
+      .not.toBe('exact');
+  });
+
+  test('same brewery, different name remainder → no false exact', () => {
+    expect(matchBeer({ brewery: 'Pastry', name: 'Mastery Hazelnut Stout' }, cat)?.source)
+      .not.toBe('exact');
+  });
+
+  test('anchored hit still respects ABV disambiguation across vintages', () => {
+    const vintages: CatalogBeer[] = [
+      c({ id: 200, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 8.0 }),
+      c({ id: 201, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 5.0 }),
+    ];
+    // Mis-split input with abv 5.0 must pick the matching-abv row, not just newest id.
+    expect(matchBeer({ brewery: 'Pastry', name: 'Mastery Schwarzbrot Porter', abv: 5.0 }, vintages))
+      .toEqual({ id: 201, confidence: 1, source: 'exact' });
+  });
+
+  test('anchors via a collab-brewery alias when the second partner leaks into the name', () => {
+    // Catalog brewery is a collab "Pinta / Mad Crow"; the adapter kept only "Pinta" as the
+    // brewery and leaked "Mad Crow" into the name. The full-collab alias "pinta mad crow"
+    // is a leading run of the combined title, so the anchored try must still hit exact.
+    const collab: CatalogBeer[] = [
+      c({ id: 700, brewery: 'Pinta / Mad Crow', name: 'Schwarzbrot', abv: 6.0 }),
+    ];
+    expect(matchBeer({ brewery: 'Pinta', name: 'Mad Crow Schwarzbrot' }, collab))
+      .toEqual({ id: 700, confidence: 1, source: 'exact' });
   });
 });
 

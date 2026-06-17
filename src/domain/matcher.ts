@@ -47,6 +47,9 @@ export interface PreparedCatalog {
   // index instead of a full linear scan. Set-equal to
   // `beers.filter((c) => breweryAliasesMatch(c.aliases, inputAliases))`.
   breweryCandidates(inputAliases: string[]): PreparedBeer[];
+  // Catalog rows bucketed under `token` as the first token of one of their brewery
+  // aliases. Raw bucket access for the split-invariant second try (#169).
+  candidatesByFirstToken(token: string): PreparedBeer[];
   searcherFor(rows: PreparedBeer[]): PreparedSearcher;
   fullSearcher(): PreparedSearcher;
 }
@@ -110,6 +113,7 @@ export function makePreparedCatalog(
       }
       return out;
     },
+    candidatesByFirstToken: (token) => byFirstToken.get(token) ?? [],
     searcherFor: build,
     fullSearcher: () => (full ??= build(beers)),
   };
@@ -161,6 +165,17 @@ function tokenPrefix(a: string, b: string): boolean {
   return short.every((t, i) => t === long[i]);
 }
 
+// True if `prefixNorm`'s tokens are a leading, token-boundary prefix of `haystackNorm`.
+// One-directional (unlike tokenPrefix): the candidate brewery must appear in full at the
+// front of the combined title. Empty operands never match.
+export function leadingRun(haystackNorm: string, prefixNorm: string): boolean {
+  if (haystackNorm === '' || prefixNorm === '') return false;
+  const h = haystackNorm.split(' ');
+  const p = prefixNorm.split(' ');
+  if (p.length > h.length) return false;
+  return p.every((t, i) => t === h[i]);
+}
+
 // True if any alias from one side is a token-prefix of any alias from the other.
 export function breweryAliasesMatch(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenPrefix(x, y)));
@@ -206,6 +221,11 @@ export function stripBreweryFromName(nameNorm: string, breweryNorm: string): str
   while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
   while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
   return nt.join(' ');
+}
+
+// Order-insensitive canonical form of a normalized string: tokens sorted, re-joined.
+function sortedTokens(norm: string): string {
+  return norm.split(' ').filter(Boolean).sort().join(' ');
 }
 
 // Set of canonical name keys: split on COLLAB_SEP (collab/bilingual sides), normalize
@@ -270,9 +290,35 @@ export function matchPrepared(
   // Exact-normalized hits — multiple rows are common when Untappd has
   // several vintages of the same beer. Latest id first. #117: also accept an
   // order-insensitive / collab-aware name-key intersection as exact-equivalent.
-  const exacts = breweryMatches
+  let exacts = breweryMatches
     .filter((c) => c.nameNorm === nn || intersects(c.keys, inputKeys))
     .sort((a, b) => b.id - a.id);
+
+  // Split-invariant second try (#169): only when the boundary-trusting exact path found
+  // nothing. Re-derive the brewery/name cut from the catalog instead of trusting the
+  // adapter's split — a candidate matches when its FULL brewery is a leading token-run of
+  // the combined title and the remainder equals the candidate's canonical name. Strictly
+  // stronger than the normal gate, so accepting single-token names here is FP-safe.
+  if (exacts.length === 0) {
+    // Normalize the WHOLE `brewery + name` as one string (not each field separately):
+    // since the concatenated token sequence is identical no matter where the adapter cut
+    // brewery vs name, this makes `combined` split-invariant. Trade-off: a brewery whose
+    // name contains a STYLE_WORD (stripped by normalizeName) can't anchor — acceptable, as
+    // the target shops' breweries don't, and split-trusting normalization would be worse.
+    const combined = normalizeName(`${input.brewery} ${input.name}`);
+    const firstToken = combined.split(' ')[0];
+    if (firstToken) {
+      const anchored = prepared.candidatesByFirstToken(firstToken).filter((cand) =>
+        cand.aliases.some((alias) => {
+          if (!leadingRun(combined, alias)) return false;
+          const remainder = stripBreweryFromName(combined, alias);
+          const canonName = stripBreweryFromName(cand.nameNorm, cand.breweryNorm);
+          return remainder !== '' && sortedTokens(remainder) === sortedTokens(canonName);
+        }),
+      );
+      if (anchored.length) exacts = anchored.sort((a, b) => b.id - a.id);
+    }
+  }
 
   if (exacts.length) {
     const wantAbv = input.abv ?? null;
