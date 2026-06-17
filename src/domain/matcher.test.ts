@@ -702,6 +702,17 @@ describe('split-invariant anchored second try (#169)', () => {
     expect(matchBeer({ brewery: 'Pastry', name: 'Mastery Schwarzbrot Porter', abv: 5.0 }, vintages))
       .toEqual({ id: 201, confidence: 1, source: 'exact' });
   });
+
+  test('anchors via a collab-brewery alias when the second partner leaks into the name', () => {
+    // Catalog brewery is a collab "Pinta / Mad Crow"; the adapter kept only "Pinta" as the
+    // brewery and leaked "Mad Crow" into the name. The full-collab alias "pinta mad crow"
+    // is a leading run of the combined title, so the anchored try must still hit exact.
+    const collab: CatalogBeer[] = [
+      c({ id: 700, brewery: 'Pinta / Mad Crow', name: 'Schwarzbrot', abv: 6.0 }),
+    ];
+    expect(matchBeer({ brewery: 'Pinta', name: 'Mad Crow Schwarzbrot' }, collab))
+      .toEqual({ id: 700, confidence: 1, source: 'exact' });
+  });
 });
 
 describe('stripBreweryFromName', () => {

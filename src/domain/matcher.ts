@@ -306,7 +306,7 @@ export function matchPrepared(
     // name contains a STYLE_WORD (stripped by normalizeName) can't anchor — acceptable, as
     // the target shops' breweries don't, and split-trusting normalization would be worse.
     const combined = normalizeName(`${input.brewery} ${input.name}`);
-    const firstToken = combined.split(' ')[0] ?? '';
+    const firstToken = combined.split(' ')[0];
     if (firstToken) {
       const anchored = prepared.candidatesByFirstToken(firstToken).filter((cand) =>
         cand.aliases.some((alias) => {
