@@ -47,7 +47,7 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
         { status: 'transient' },
       setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },
       setEnriched: (key, id, r) => { const el = elByKey.get(key); if (el) setEnriched(el, id, r); },
-      setOrphan: (key) => { const el = elByKey.get(key); if (el) setOrphan(el); },
+      setOrphan: (key, brewery, name) => { const el = elByKey.get(key); if (el) setOrphan(el, brewery, name); },
     });
   })();
 };

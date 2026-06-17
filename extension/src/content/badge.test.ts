@@ -118,7 +118,7 @@ describe('orphan + enrichment badge states', () => {
 
   it('setSearching replaces the badge with a loading glyph; setEnriched swaps to ⭐ + opens Untappd', () => {
     const host = el();
-    setOrphan(host);
+    setOrphan(host, 'PINTA', 'Orphan');
     expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
 
     setSearching(host);
@@ -159,6 +159,77 @@ describe('resetCard', () => {
   });
 });
 
+describe('badge click targets (#167)', () => {
+  const openSpy = () => vi.spyOn(window, 'open').mockReturnValue(null);
+  const clickBadge = (host: HTMLElement) => {
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    return badge;
+  };
+
+  it('✅ with a bid opens the matched beer page', () => {
+    const host = el();
+    const open = openSpy();
+    renderBadge(host, {
+      raw: { brewery: 'PINTA', name: 'Hazy Morning' },
+      matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
+      is_drunk: true, drunk_uncertain: false, user_rating: 4.0,
+    });
+    const badge = clickBadge(host);
+    expect(badge.style.cursor).toBe('pointer');
+    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/111', '_blank', 'noopener');
+  });
+
+  it('✅ on a had orphan (no bid) opens an Untappd search', () => {
+    const host = el();
+    const open = openSpy();
+    renderBadge(host, {
+      raw: { brewery: 'Mad Brew', name: 'Bendera ya Uhuru' },
+      matched_beer: { id: 2, name: 'Bendera ya Uhuru', brewery: 'Mad Brew', rating_global: null, untappd_id: null },
+      is_drunk: true, drunk_uncertain: false, user_rating: null,
+    });
+    clickBadge(host);
+    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Mad%20Brew%20Bendera%20ya%20Uhuru&type=beer', '_blank', 'noopener');
+  });
+
+  it('⚪ orphan opens an Untappd search prefilled with brewery+name', () => {
+    const host = el();
+    const open = openSpy();
+    renderBadge(host, {
+      raw: { brewery: 'PINTA', name: 'Orphan' },
+      matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null,
+    });
+    const badge = clickBadge(host);
+    expect(badge.style.cursor).toBe('pointer');
+    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=PINTA%20Orphan&type=beer', '_blank', 'noopener');
+  });
+
+  it('❓ orphan (drunk_uncertain, no bid) opens an Untappd search', () => {
+    const host = el();
+    const open = openSpy();
+    renderBadge(host, {
+      raw: { brewery: 'Rebrew', name: 'Fuzzy Orphan' },
+      matched_beer: { id: 4, name: 'Fuzzy Orphan', brewery: 'Rebrew', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: true, user_rating: null,
+    });
+    clickBadge(host);
+    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Rebrew%20Fuzzy%20Orphan&type=beer', '_blank', 'noopener');
+  });
+
+  it('⭐ still opens the matched beer page', () => {
+    const host = el();
+    const open = openSpy();
+    renderBadge(host, {
+      raw: { brewery: 'PINTA', name: 'New One' },
+      matched_beer: { id: 5, name: 'New One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 222 },
+      is_drunk: false, drunk_uncertain: false, user_rating: null,
+    });
+    clickBadge(host);
+    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
+  });
+});
+
 // Base for spreading — always overridden with a real matched_beer per case. (The server
 // never emits drunk_uncertain with matched_beer null; that combination is not rendered.)
 const baseUncertain: MatchResult = {
@@ -196,7 +267,7 @@ describe('❓ uncertain-drunk badge', () => {
     expect(badge.style.cursor).toBe('pointer'); // bid present → still clickable, even without a rating
   });
 
-  it('renders bare ❓ not clickable when drunk_uncertain but matched_beer has no untappd_id (orphan)', () => {
+  it('renders bare ❓ clickable to Untappd search when drunk_uncertain but matched_beer has no untappd_id (orphan)', () => {
     const host = el();
     const result: MatchResult = {
       ...baseUncertain,
@@ -206,7 +277,7 @@ describe('❓ uncertain-drunk badge', () => {
     const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('❓');
-    expect(badge.style.cursor).toBe('default');
+    expect(badge.style.cursor).toBe('pointer'); // no bid → search URL → still clickable
   });
 
   it('is_drunk wins over drunk_uncertain — renders ✅ + personal rating', () => {
