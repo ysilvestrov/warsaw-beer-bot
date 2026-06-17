@@ -659,6 +659,51 @@ describe('candidatesByFirstToken', () => {
   });
 });
 
+describe('split-invariant anchored second try (#169)', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 12544, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 8.0 }),
+    c({ id: 300, brewery: 'Mad Brew', name: 'Galaxy Juice', abv: 6.0 }),
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 }),
+  ];
+
+  test('all three brewery/name splits resolve to the same exact id', () => {
+    const inputs = [
+      { brewery: '', name: 'Pastry Mastery Schwarzbrot Porter' },
+      { brewery: 'Pastry', name: 'Mastery Schwarzbrot Porter' },
+      { brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter' },
+    ];
+    for (const input of inputs) {
+      expect(matchBeer(input, cat)).toEqual({ id: 12544, confidence: 1, source: 'exact' });
+    }
+  });
+
+  test('two-word brewery split mid-title (Mad Brew) → exact', () => {
+    expect(matchBeer({ brewery: 'Mad', name: 'Brew Galaxy Juice' }, cat))
+      .toEqual({ id: 300, confidence: 1, source: 'exact' });
+  });
+
+  test('brewery genuinely absent does NOT anchor onto Pastry Mastery', () => {
+    // No brewery tokens in the title → the leading-token bucket has no candidate.
+    expect(matchBeer({ brewery: '', name: 'Schwarzbrot Porter' }, cat)?.source)
+      .not.toBe('exact');
+  });
+
+  test('same brewery, different name remainder → no false exact', () => {
+    expect(matchBeer({ brewery: 'Pastry', name: 'Mastery Hazelnut Stout' }, cat)?.source)
+      .not.toBe('exact');
+  });
+
+  test('anchored hit still respects ABV disambiguation across vintages', () => {
+    const vintages: CatalogBeer[] = [
+      c({ id: 200, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 8.0 }),
+      c({ id: 201, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter', abv: 5.0 }),
+    ];
+    // Mis-split input with abv 5.0 must pick the matching-abv row, not just newest id.
+    expect(matchBeer({ brewery: 'Pastry', name: 'Mastery Schwarzbrot Porter', abv: 5.0 }, vintages))
+      .toEqual({ id: 201, confidence: 1, source: 'exact' });
+  });
+});
+
 describe('stripBreweryFromName', () => {
   test('strips a leading run', () => {
     expect(stripBreweryFromName('primator weizen', 'primator')).toBe('weizen');

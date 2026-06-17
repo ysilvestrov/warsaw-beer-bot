@@ -223,6 +223,11 @@ export function stripBreweryFromName(nameNorm: string, breweryNorm: string): str
   return nt.join(' ');
 }
 
+// Order-insensitive canonical form of a normalized string: tokens sorted, re-joined.
+function sortedTokens(norm: string): string {
+  return norm.split(' ').filter(Boolean).sort().join(' ');
+}
+
 // Set of canonical name keys: split on COLLAB_SEP (collab/bilingual sides), normalize
 // each side, strip an embedded brewery duplication (anywhere in the name), drop <2-token sides (weak keys), then
 // sort tokens (order-insensitive). Names match when their key sets intersect — set
@@ -285,9 +290,35 @@ export function matchPrepared(
   // Exact-normalized hits — multiple rows are common when Untappd has
   // several vintages of the same beer. Latest id first. #117: also accept an
   // order-insensitive / collab-aware name-key intersection as exact-equivalent.
-  const exacts = breweryMatches
+  let exacts = breweryMatches
     .filter((c) => c.nameNorm === nn || intersects(c.keys, inputKeys))
     .sort((a, b) => b.id - a.id);
+
+  // Split-invariant second try (#169): only when the boundary-trusting exact path found
+  // nothing. Re-derive the brewery/name cut from the catalog instead of trusting the
+  // adapter's split — a candidate matches when its FULL brewery is a leading token-run of
+  // the combined title and the remainder equals the candidate's canonical name. Strictly
+  // stronger than the normal gate, so accepting single-token names here is FP-safe.
+  if (exacts.length === 0) {
+    // Normalize the WHOLE `brewery + name` as one string (not each field separately):
+    // since the concatenated token sequence is identical no matter where the adapter cut
+    // brewery vs name, this makes `combined` split-invariant. Trade-off: a brewery whose
+    // name contains a STYLE_WORD (stripped by normalizeName) can't anchor — acceptable, as
+    // the target shops' breweries don't, and split-trusting normalization would be worse.
+    const combined = normalizeName(`${input.brewery} ${input.name}`);
+    const firstToken = combined.split(' ')[0] ?? '';
+    if (firstToken) {
+      const anchored = prepared.candidatesByFirstToken(firstToken).filter((cand) =>
+        cand.aliases.some((alias) => {
+          if (!leadingRun(combined, alias)) return false;
+          const remainder = stripBreweryFromName(combined, alias);
+          const canonName = stripBreweryFromName(cand.nameNorm, cand.breweryNorm);
+          return remainder !== '' && sortedTokens(remainder) === sortedTokens(canonName);
+        }),
+      );
+      if (anchored.length) exacts = anchored.sort((a, b) => b.id - a.id);
+    }
+  }
 
   if (exacts.length) {
     const wantAbv = input.abv ?? null;
