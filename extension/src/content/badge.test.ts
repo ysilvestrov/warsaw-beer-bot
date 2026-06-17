@@ -143,7 +143,7 @@ describe('seen marker', () => {
 describe('resetCard', () => {
   it('resetCard removes the badge and the seen marker', () => {
     const host = document.createElement('div');
-    renderBadge(host, { is_drunk: true, user_rating: 4, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
+    renderBadge(host, { is_drunk: true, drunk_uncertain: false, user_rating: 4, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
     markSeen(host);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
     expect(isSeen(host)).toBe(true);
@@ -151,5 +151,67 @@ describe('resetCard', () => {
     resetCard(host);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
     expect(isSeen(host)).toBe(false);
+  });
+});
+
+const baseUncertain: MatchResult = {
+  raw: { brewery: 'PINTA', name: 'Fuzzy One' },
+  is_drunk: false,
+  drunk_uncertain: true,
+  user_rating: null,
+  matched_beer: null,
+};
+
+describe('❓ uncertain-drunk badge', () => {
+  it('renders ❓ + global rating when drunk_uncertain with a bid and rating_global', () => {
+    const host = el();
+    const result: MatchResult = {
+      ...baseUncertain,
+      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
+    };
+    renderBadge(host, result);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('❓ 3.9');
+    expect(badge.style.cursor).toBe('pointer');
+  });
+
+  it('renders bare ❓ when drunk_uncertain with a bid but rating_global is null', () => {
+    const host = el();
+    const result: MatchResult = {
+      ...baseUncertain,
+      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: null, untappd_id: 555 },
+    };
+    renderBadge(host, result);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('❓');
+  });
+
+  it('renders bare ❓ not clickable when drunk_uncertain but matched_beer has no untappd_id (orphan)', () => {
+    const host = el();
+    const result: MatchResult = {
+      ...baseUncertain,
+      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: null, untappd_id: null },
+    };
+    renderBadge(host, result);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('❓');
+    expect(badge.style.cursor).toBe('default');
+  });
+
+  it('is_drunk wins over drunk_uncertain — renders ✅ + personal rating', () => {
+    const host = el();
+    const result: MatchResult = {
+      ...baseUncertain,
+      is_drunk: true,
+      user_rating: 4.2,
+      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
+    };
+    renderBadge(host, result);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge).not.toBeNull();
+    expect(badge.textContent).toBe('✅ 4.2');
   });
 });
