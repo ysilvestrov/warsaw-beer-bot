@@ -1,3 +1,4 @@
+import { vi } from 'vitest';
 import { lookupBeer } from './untappd-lookup';
 
 function htmlFor(
@@ -24,7 +25,7 @@ function htmlFor(
 
 describe('lookupBeer', () => {
   test('matched: brewery overlaps + name fuzzy >= 0.85 returns best result', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 5000, name: 'Fifty / Fifty - Pineapple', brewery: 'Magic Road' },
         { bid: 5001, name: 'Fifty / Fifty Clementine & Passionfruit', brewery: 'Magic Road', rating: '3.98' },
@@ -42,7 +43,7 @@ describe('lookupBeer', () => {
   });
 
   test('not_found: brewery hard-gate filters every candidate', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 9000, name: 'Fifty/Fifty Clementine & Passionfruit', brewery: 'Some Other Brewery' },
       ]),
@@ -58,7 +59,7 @@ describe('lookupBeer', () => {
   test('matched: token-prefix gate accepts official-suffix brewery', async () => {
     // Candidate brewery has extra non-noise tokens ("craft beer") that the
     // old exact-equality gate would reject; only the token-prefix gate passes.
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 6620595, name: 'Buzdygan Rozkoszy', brewery: 'Harpagan Craft Beer' },
         { bid: 3240662, name: 'Buzdygan Rozkoszy Rum BA', brewery: 'Harpagan Craft Beer' },
@@ -78,7 +79,7 @@ describe('lookupBeer', () => {
     // normalizeName strips the year, so both names collapse to "buzdygan
     // rozkoszy" and tie at score 1.0. Untappd returns the 9.8% 2026 vintage
     // first; only the ABV tiebreak should pull the 8.5% entry the tap shows.
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 6620595, name: 'Buzdygan Rozkoszy 2026', brewery: 'Harpagan Craft Beer', abv: '9.8' },
         { bid: 2388534, name: 'Buzdygan Rozkoszy', brewery: 'Harpagan Contracts', abv: '8.5' },
@@ -96,7 +97,7 @@ describe('lookupBeer', () => {
   });
 
   test('not_found: brewery passes hard-gate but every name is below 0.85 fuzzy', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 9000, name: 'Atak Chmielu IPA', brewery: 'Magic Road' },
         { bid: 9001, name: 'Buty Skejta Pils', brewery: 'Magic Road' },
@@ -112,7 +113,7 @@ describe('lookupBeer', () => {
 
   test('transient: fetch throws → kind=transient with the error captured', async () => {
     const boom = new Error('ETIMEDOUT');
-    const fetch = jest.fn(async () => {
+    const fetch = vi.fn(async () => {
       throw boom;
     });
     const out = await lookupBeer({
@@ -126,7 +127,7 @@ describe('lookupBeer', () => {
   });
 
   test('empty search results return not_found', async () => {
-    const fetch = jest.fn(async () => '<html><body></body></html>');
+    const fetch = vi.fn(async () => '<html><body></body></html>');
     const out = await lookupBeer({
       brewery: 'Magic Road',
       name: 'Fifty/Fifty',
@@ -136,7 +137,7 @@ describe('lookupBeer', () => {
   });
 
   test('strips brewery noise word from the search query', async () => {
-    const fetch = jest.fn(async (_url: string) =>
+    const fetch = vi.fn(async (_url: string) =>
       htmlFor([{ bid: 6172039, name: 'WOCKY TALKY', brewery: 'JBW Browar', rating: '3.18' }]),
     );
     const out = await lookupBeer({ brewery: 'JBW Brewery', name: 'Wocky Talky', fetch });
@@ -151,7 +152,7 @@ describe('lookupBeer', () => {
   });
 
   test('non-collab brewery: single fetch call (behaviour unchanged)', async () => {
-    const fetch = jest.fn(async (_url: string) =>
+    const fetch = vi.fn(async (_url: string) =>
       htmlFor([{ bid: 1, name: 'Fifty/Fifty', brewery: 'Magic Road' }]),
     );
     await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Fifty/Fifty', fetch });
@@ -162,7 +163,7 @@ describe('lookupBeer', () => {
   });
 
   test('slash collab: first part returns 0 results, second part matches', async () => {
-    const fetch = jest.fn()
+    const fetch = vi.fn()
       .mockResolvedValueOnce('<html><body></body></html>')
       .mockResolvedValueOnce(
         htmlFor([{ bid: 7777, name: 'S.M.O.K.E.', brewery: 'TankBusters / Blech.Brut' }]),
@@ -181,7 +182,7 @@ describe('lookupBeer', () => {
   });
 
   test('x-connector collab: first part finds the beer', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([{ bid: 8888, name: 'NOT YOUR MILKSHAKE', brewery: 'Ziemia Obiecana' }]),
     );
     const out = await lookupBeer({
@@ -198,7 +199,7 @@ describe('lookupBeer', () => {
 
   test('collab: transient on any part short-circuits immediately', async () => {
     const boom = new Error('ETIMEDOUT');
-    const fetch = jest.fn(async () => { throw boom; });
+    const fetch = vi.fn(async () => { throw boom; });
     const out = await lookupBeer({
       brewery: 'TankBusters/Blech.Brut Brewery',
       name: 'S.M.O.K.E.',
@@ -212,20 +213,20 @@ describe('lookupBeer', () => {
 
   test('blocked: HttpError 403 → blocked (not transient)', async () => {
     const { HttpError } = await import('../sources/http');
-    const fetch = jest.fn(async () => { throw new HttpError(403, 'u'); });
+    const fetch = vi.fn(async () => { throw new HttpError(403, 'u'); });
     const out = await lookupBeer({ brewery: 'X', name: 'Y', fetch });
     expect(out.kind).toBe('blocked');
   });
 
   test('blocked: captcha page → blocked (not not_found)', async () => {
-    const fetch = jest.fn(async () => '<title>Just a moment...</title>');
+    const fetch = vi.fn(async () => '<title>Just a moment...</title>');
     const out = await lookupBeer({ brewery: 'X', name: 'Y', fetch });
     expect(out.kind).toBe('blocked');
   });
 
   describe('diagnostics (orphan logging)', () => {
     test('not_found returns the tried search URL(s) and parsed candidates', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 1, name: 'Atak Chmielu', brewery: 'Magic Road' }]),
       );
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'Totally Different Beer', fetch });
@@ -236,7 +237,7 @@ describe('lookupBeer', () => {
     });
 
     test('not_found with zero results returns empty candidates', async () => {
-      const fetch = jest.fn(async () => '<html><body></body></html>');
+      const fetch = vi.fn(async () => '<html><body></body></html>');
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'Whatever', fetch });
       expect(out.kind).toBe('not_found');
       if (out.kind !== 'not_found') return;
@@ -245,7 +246,7 @@ describe('lookupBeer', () => {
     });
 
     test('blocked returns the search URL that tripped the block', async () => {
-      const fetch = jest.fn(async () => '<title>Just a moment...</title>');
+      const fetch = vi.fn(async () => '<title>Just a moment...</title>');
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'X', fetch });
       expect(out.kind).toBe('blocked');
       if (out.kind !== 'blocked') return;
@@ -255,7 +256,7 @@ describe('lookupBeer', () => {
 
   describe('name-keys stage (#117)', () => {
     test('matched: reordered name (below fuzzy 0.85) via key intersection', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 11827, name: 'Festweisse (TAP04)', brewery: 'Schneider Weisse G. Schneider & Sohn' }]),
       );
       const out = await lookupBeer({ brewery: 'Schneider', name: 'TAP04 FESTWEISSE', fetch });
@@ -265,7 +266,7 @@ describe('lookupBeer', () => {
     });
 
     test('matched: collab partner in input name → base-beer key hit', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 6683161, name: 'Fast Talking', brewery: 'Root + Branch Brewing' }]),
       );
       const out = await lookupBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park', fetch });
@@ -275,7 +276,7 @@ describe('lookupBeer', () => {
     });
 
     test('not_found: single-token name with no fuzzy hit stays not_found', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 1, name: 'Totally Different', brewery: 'Root + Branch' }]),
       );
       const out = await lookupBeer({ brewery: 'Root + Branch', name: 'Hazy', fetch });
@@ -285,7 +286,7 @@ describe('lookupBeer', () => {
 
   describe('fuzzy target normalization (#137)', () => {
     test('matched: strips duplicated brewery before fuzzy matching candidate names', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 7201, name: 'Nealko', brewery: 'Rohozec' }]),
       );
 
@@ -301,7 +302,7 @@ describe('lookupBeer', () => {
     });
 
     test('matched: fuzzy-checks each single-token collab side when name keys are weak', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 7202, name: 'Lièvre', brewery: 'Nano Cinco' }]),
       );
 
@@ -317,7 +318,7 @@ describe('lookupBeer', () => {
     });
 
     test('not_found: single-token collab side does not fuzzy-match a longer variant', async () => {
-      const fetch = jest.fn(async () =>
+      const fetch = vi.fn(async () =>
         htmlFor([{ bid: 7203, name: 'Lièvre Rouge', brewery: 'Nano Cinco' }]),
       );
 
@@ -332,7 +333,7 @@ describe('lookupBeer', () => {
   });
 
   test('matched: empty input brewery → exact name bypasses gate (#149)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 22540, name: 'St-Feuillien Blonde', brewery: 'Brasserie St-Feuillien' },
         { bid: 999, name: 'Bière Léon', brewery: 'Chez Léon 1893' },
@@ -345,7 +346,7 @@ describe('lookupBeer', () => {
   });
 
   test('matched: contained (trailing) brewery token + exact name (#120)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 1673808, name: 'Kultowe Pils', brewery: 'Kultowy Browar Staropolski' },
         { bid: 2, name: 'Rodowite Pils', brewery: 'Kultowy Browar Staropolski' },
@@ -360,7 +361,7 @@ describe('lookupBeer', () => {
   test('not_found: relaxed brewery + approximate (not exact) name is NOT fuzzy-matched (#120 FP guard)', async () => {
     // fuzzy('imperial stout reserve','imperial stout reserva') = 0.955, but the brewery
     // only matches via the relaxed contained-token path, so an EXACT name is required.
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 77, name: 'Imperial Stout Reserva', brewery: 'Kultowy Browar Staropolski' },
       ]),
@@ -370,7 +371,7 @@ describe('lookupBeer', () => {
   });
 
   test('not_found: empty brewery + different name → no match (#149 FP guard)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([{ bid: 5, name: 'Completely Different Beer', brewery: 'Some Brewery' }]),
     );
     const out = await lookupBeer({ brewery: '', name: 'St-Feuillien Blonde', fetch });
@@ -378,7 +379,7 @@ describe('lookupBeer', () => {
   });
 
   test('matched: brand-as-beer-name — input brewery sits in candidate beer name, exact name (#138B)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([
         { bid: 5932, name: "Murphy's Irish Stout", brewery: 'Heineken Ireland' },
         { bid: 2, name: "Mike Murphy's Irish Stout", brewery: 'Northville' },
@@ -392,7 +393,7 @@ describe('lookupBeer', () => {
   });
 
   test('not_found: brand in candidate name but the name differs (#138B FP guard)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([{ bid: 2, name: "Mike Murphy's Irish Stout", brewery: 'Northville' }]),
     );
     const out = await lookupBeer({ brewery: "Murphy's Brewery", name: "Murphy's Irish Stout", fetch });
@@ -400,7 +401,7 @@ describe('lookupBeer', () => {
   });
 
   test('not_found: brand token absent from all candidate beer names → brandPool empty (#138B FP guard)', async () => {
-    const fetch = jest.fn(async () =>
+    const fetch = vi.fn(async () =>
       htmlFor([{ bid: 9, name: 'Atak Chmielu', brewery: 'Some Other Brewery' }]),
     );
     const out = await lookupBeer({ brewery: 'Pinta', name: 'Atak Chmielu', fetch });
