@@ -24,6 +24,10 @@ const untappdUrl = (untappdId: number): string => `https://untappd.com/beer/${un
 const untappdSearchUrl = (brewery: string, name: string): string =>
   `https://untappd.com/search?q=${encodeURIComponent(`${brewery} ${name}`.trim())}&type=beer`;
 
+// A badge's click target: the beer's Untappd page when it has a bid, else a prefilled search.
+const hrefFor = (untappdId: number | null, brewery: string, name: string): string =>
+  untappdId != null ? untappdUrl(untappdId) : untappdSearchUrl(brewery, name);
+
 // Builds the styled badge element. Clickable (opens `href` in a new tab) when href is set.
 function makeBadge(text: string, href: string | null): HTMLElement {
   const badge = document.createElement('div');
@@ -65,15 +69,13 @@ function attach(host: HTMLElement, badge: HTMLElement): void {
 function badgeFor(result: MatchResult): HTMLElement | null {
   const { brewery, name } = result.raw;
   if (result.is_drunk) {
-    const m = result.matched_beer;
-    const href = m && m.untappd_id != null ? untappdUrl(m.untappd_id) : untappdSearchUrl(brewery, name);
+    const href = hrefFor(result.matched_beer?.untappd_id ?? null, brewery, name);
     return makeBadge(result.user_rating != null ? `✅ ${result.user_rating.toFixed(1)}` : '✅', href);
   }
   const m = result.matched_beer;
   if (!m) return null;
   if (result.drunk_uncertain) {
-    const href = m.untappd_id != null ? untappdUrl(m.untappd_id) : untappdSearchUrl(brewery, name);
-    return makeBadge(m.rating_global != null ? `❓ ${m.rating_global.toFixed(1)}` : '❓', href);
+    return makeBadge(m.rating_global != null ? `❓ ${m.rating_global.toFixed(1)}` : '❓', hrefFor(m.untappd_id, brewery, name));
   }
   if (m.untappd_id != null && m.rating_global != null) {
     return makeBadge(`⭐ ${m.rating_global.toFixed(1)}`, untappdUrl(m.untappd_id));

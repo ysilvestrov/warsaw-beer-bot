@@ -243,6 +243,7 @@ const baseUncertain: MatchResult = {
 describe('❓ uncertain-drunk badge', () => {
   it('renders ❓ + global rating when drunk_uncertain with a bid and rating_global', () => {
     const host = el();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
     const result: MatchResult = {
       ...baseUncertain,
       matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
@@ -252,6 +253,8 @@ describe('❓ uncertain-drunk badge', () => {
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('❓ 3.9');
     expect(badge.style.cursor).toBe('pointer');
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/555', '_blank', 'noopener'); // ❓ with a bid → beer page
   });
 
   it('renders bare ❓ when drunk_uncertain with a bid but rating_global is null', () => {
