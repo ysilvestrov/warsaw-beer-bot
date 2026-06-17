@@ -20,6 +20,7 @@ describe('matchBeerList', () => {
         raw: { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
         matched_beer: { id: 105, name: 'Pan IPAni', brewery: 'Trzech Kumpli', rating_global: 3.85, untappd_id: null },
         is_drunk: true,
+        drunk_uncertain: false,
         user_rating: 4.0,
       },
     ]);
@@ -37,6 +38,27 @@ describe('matchBeerList', () => {
     expect(res[0].matched_beer?.id).toBe(200);
     expect(res[0].is_drunk).toBe(false);
     expect(res[0].user_rating).toBeNull();
+    expect(res[0].drunk_uncertain).toBe(true);
+  });
+
+  it('drunk_uncertain is false for exact, non-drunk-fuzzy, and no-match', async () => {
+    const exactDrunk = await matchBeerList(catalog, new Set([200]), new Map(), [
+      { brewery: 'PINTA', name: 'Atak Chmielu' },
+    ]);
+    expect(exactDrunk[0].is_drunk).toBe(true);
+    expect(exactDrunk[0].drunk_uncertain).toBe(false);
+
+    const fuzzyNotDrunk = await matchBeerList(catalog, new Set<number>(), new Map(), [
+      { brewery: 'PINTA', name: 'Atak Chmiel' },
+    ]);
+    expect(fuzzyNotDrunk[0].is_drunk).toBe(false);
+    expect(fuzzyNotDrunk[0].drunk_uncertain).toBe(false);
+
+    const noMatch = await matchBeerList(catalog, new Set([200]), new Map(), [
+      { brewery: 'Nope', name: 'Does Not Exist At All' },
+    ]);
+    expect(noMatch[0].matched_beer).toBe(null);
+    expect(noMatch[0].drunk_uncertain).toBe(false);
   });
 
   it('passes untappd_id through to matched_beer', async () => {
@@ -67,6 +89,7 @@ describe('matchBeerList', () => {
       raw: { brewery: 'Nowhere', name: 'Unknown Stout' },
       matched_beer: null,
       is_drunk: false,
+      drunk_uncertain: false,
       user_rating: null,
     });
   });
