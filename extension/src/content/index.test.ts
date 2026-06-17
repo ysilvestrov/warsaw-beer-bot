@@ -102,4 +102,30 @@ describe('runOverlay', () => {
     expect(enrich).toHaveBeenCalledTimes(1);
     expect(enrich.mock.calls[0][0][0]).toMatchObject({ brewery: 'B', name: 'Orphan One' });
   });
+
+  it('does not pass drunk_uncertain orphans to the enrich callback', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const uncertainOrphan: MatchResult = {
+      raw: { brewery: 'B', name: 'Uncertain One' },
+      matched_beer: { id: 2, name: 'Uncertain One', brewery: 'B', rating_global: 3.8, untappd_id: null },
+      is_drunk: false, drunk_uncertain: true, user_rating: null,
+    };
+    const regularOrphan: MatchResult = {
+      raw: { brewery: 'B', name: 'Regular Orphan' },
+      matched_beer: { id: 3, name: 'Regular Orphan', brewery: 'B', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null,
+    };
+    const adapter = adapterFor([
+      { el: a, brewery: 'B', name: 'Uncertain One' },
+      { el: b, brewery: 'B', name: 'Regular Orphan' },
+    ]);
+    const sendMatch = async () => [uncertainOrphan, regularOrphan];
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, sendMatch, enrich);
+    expect(enrich).toHaveBeenCalledTimes(1);
+    const enriched = enrich.mock.calls[0][0] as Array<{ name: string }>;
+    expect(enriched).toHaveLength(1);
+    expect(enriched[0]).toMatchObject({ name: 'Regular Orphan' });
+  });
 });

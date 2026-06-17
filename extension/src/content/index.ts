@@ -59,6 +59,7 @@ export async function runOverlay(
           (x) =>
             x.miss &&
             !x.result.is_drunk &&
+            !x.result.drunk_uncertain &&
             (x.result.matched_beer == null || x.result.matched_beer.untappd_id == null),
         )
         .map((x) => ({ key: x.miss!.key, el: x.miss!.el, brewery: x.miss!.raw.brewery, name: x.miss!.raw.name }));

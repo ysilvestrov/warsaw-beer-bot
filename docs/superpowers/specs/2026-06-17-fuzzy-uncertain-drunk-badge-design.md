@@ -119,8 +119,8 @@ beers (today's behaviour) — no regression, no over-claim. New extensions rende
 
 - **Fuzzy+drunk orphan** (in drunk set, matched beer has no bid): renders bare `❓`,
   non-clickable until #167. The enrichment filter in `extension/src/content/index.ts`
-  (gated on `!is_drunk`) is **left unchanged**, so these orphans still get an Untappd
-  enrichment attempt — consistent with "not sure, keep trying to pin it down."
+  now excludes `drunk_uncertain` results (alongside `is_drunk`) so the `❓` badge is
+  not clobbered in-session by the enrichment pipeline (⏳ → ⭐/⚪ via `setEnriched`/`setOrphan`).
 - **Cached results** (`extension/src/cache/store.ts` `getCached`/`setCached`, returning
   `MatchResult | null`): a cached `MatchResult` written by a previous extension version may
   lack `drunk_uncertain`; reads must treat a missing field as `false` (e.g. type it
