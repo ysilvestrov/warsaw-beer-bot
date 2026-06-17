@@ -47,6 +47,9 @@ export interface PreparedCatalog {
   // index instead of a full linear scan. Set-equal to
   // `beers.filter((c) => breweryAliasesMatch(c.aliases, inputAliases))`.
   breweryCandidates(inputAliases: string[]): PreparedBeer[];
+  // Catalog rows bucketed under `token` as the first token of one of their brewery
+  // aliases. Raw bucket access for the split-invariant second try (#169).
+  candidatesByFirstToken(token: string): PreparedBeer[];
   searcherFor(rows: PreparedBeer[]): PreparedSearcher;
   fullSearcher(): PreparedSearcher;
 }
@@ -110,6 +113,7 @@ export function makePreparedCatalog(
       }
       return out;
     },
+    candidatesByFirstToken: (token) => byFirstToken.get(token) ?? [],
     searcherFor: build,
     fullSearcher: () => (full ??= build(beers)),
   };

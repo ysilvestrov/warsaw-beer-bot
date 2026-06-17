@@ -645,6 +645,20 @@ describe('matchPrepared key-intersection (#117)', () => {
   });
 });
 
+describe('candidatesByFirstToken', () => {
+  const cat: CatalogBeer[] = [
+    c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu' }),
+    c({ id: 2, brewery: 'Pastry Mastery', name: 'Schwarzbrot Porter' }),
+  ];
+  test('returns rows whose brewery-alias first token equals the key', () => {
+    const ids = prepareCatalog(cat).candidatesByFirstToken('pastry').map((b) => b.id);
+    expect(ids).toEqual([2]);
+  });
+  test('unknown token returns empty array', () => {
+    expect(prepareCatalog(cat).candidatesByFirstToken('zzz')).toEqual([]);
+  });
+});
+
 describe('stripBreweryFromName', () => {
   test('strips a leading run', () => {
     expect(stripBreweryFromName('primator weizen', 'primator')).toBe('weizen');
