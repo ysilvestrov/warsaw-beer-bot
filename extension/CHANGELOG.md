@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-17
+
+- Beers you've already had that only loosely match a shop listing (a "fuzzy" match — common when a shop lists a beer without its brewery) now show a ❓ badge ("you've probably had this, but we're not sure") with the global rating, instead of the plain ⭐ that made them look new. Click it to check the beer on Untappd.
+- Every badge is now clickable for a quick verify: ✅ (had), ❓, and ⭐ open the matched beer's Untappd page — or, if the beer isn't on Untappd yet, a search prefilled with its name; ⚪ (not yet on Untappd) opens a prefilled Untappd search too. Previously only ⭐ was clickable.
+
 ## [0.8.0] - 2026-06-16
 
 - Added Flasker (flasker.com.ua) shop support — your check-in badges now appear across all its product views: the classic category/tag grids, the all-products page on the homepage, and the full product table. Non-beer items (snacks, sauces, glassware, bottle openers, gift sets) are ignored.
