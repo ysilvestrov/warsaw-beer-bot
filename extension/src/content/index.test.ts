@@ -11,6 +11,7 @@ function drunkResult(brewery: string, name: string): MatchResult {
     raw: { brewery, name },
     matched_beer: { id: 1, name, brewery, rating_global: 4.0, untappd_id: 111 },
     is_drunk: true,
+    drunk_uncertain: false,
     user_rating: 4.2,
   };
 }
@@ -73,7 +74,7 @@ describe('runOverlay', () => {
     const a = cardEl();
     const b = cardEl();
     const notDrunk: MatchResult = {
-      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, user_rating: null,
+      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
     };
     const adapter = adapterFor([
       { el: a, brewery: 'X', name: 'One' },
@@ -92,7 +93,7 @@ describe('runOverlay', () => {
     const orphan: MatchResult = {
       raw: { brewery: 'B', name: 'Orphan One' },
       matched_beer: { id: 1, name: 'Orphan One', brewery: 'B', rating_global: null, untappd_id: null },
-      is_drunk: false, user_rating: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null,
     };
     const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan One' }]);
     const sendMatch = async () => [orphan];

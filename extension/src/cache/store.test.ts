@@ -6,6 +6,7 @@ const sample: MatchResult = {
   raw: { brewery: 'PINTA', name: 'Hazy Morning' },
   matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
   is_drunk: true,
+  drunk_uncertain: false,
   user_rating: 4.0,
 };
 

@@ -13,6 +13,7 @@ const drunk = (userRating: number | null): MatchResult => ({
   raw: { brewery: 'PINTA', name: 'Hazy Morning' },
   matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
   is_drunk: true,
+  drunk_uncertain: false,
   user_rating: userRating,
 });
 
@@ -20,6 +21,7 @@ const notDrunkRated: MatchResult = {
   raw: { brewery: 'PINTA', name: 'New One' },
   matched_beer: { id: 2, name: 'New One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 222 },
   is_drunk: false,
+  drunk_uncertain: false,
   user_rating: null,
 };
 
@@ -27,6 +29,7 @@ const notDrunkOrphan: MatchResult = {
   raw: { brewery: 'PINTA', name: 'Orphan' },
   matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
   is_drunk: false,
+  drunk_uncertain: false,
   user_rating: null,
 };
 
@@ -34,6 +37,7 @@ const unmatched: MatchResult = {
   raw: { brewery: 'Nowhere', name: 'Ghost' },
   matched_beer: null,
   is_drunk: false,
+  drunk_uncertain: false,
   user_rating: null,
 };
 
@@ -101,6 +105,7 @@ const orphan: MatchResult = {
   raw: { brewery: 'PINTA', name: 'Orphan' },
   matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
   is_drunk: false,
+  drunk_uncertain: false,
   user_rating: null,
 };
 
