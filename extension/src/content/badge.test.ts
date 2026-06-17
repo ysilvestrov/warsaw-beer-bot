@@ -159,6 +159,8 @@ describe('resetCard', () => {
   });
 });
 
+// Base for spreading — always overridden with a real matched_beer per case. (The server
+// never emits drunk_uncertain with matched_beer null; that combination is not rendered.)
 const baseUncertain: MatchResult = {
   raw: { brewery: 'PINTA', name: 'Fuzzy One' },
   is_drunk: false,
@@ -191,6 +193,7 @@ describe('❓ uncertain-drunk badge', () => {
     const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('❓');
+    expect(badge.style.cursor).toBe('pointer'); // bid present → still clickable, even without a rating
   });
 
   it('renders bare ❓ not clickable when drunk_uncertain but matched_beer has no untappd_id (orphan)', () => {
