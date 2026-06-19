@@ -138,3 +138,51 @@ describe('callOpenAI', () => {
     expect(fetchFn).toHaveBeenCalledTimes(1);
   });
 });
+
+import { upsertReview, wrapBody, MARKER } from './ai-pr-review';
+
+describe('wrapBody', () => {
+  it('embeds the hidden marker', () => {
+    expect(wrapBody('hello')).toContain(MARKER);
+    expect(wrapBody('hello')).toContain('hello');
+  });
+});
+
+describe('upsertReview', () => {
+  const ghDeps = (fetchFn: typeof fetch) => ({
+    repo: 'o/r',
+    prNumber: 7,
+    token: 't',
+    fetchFn,
+  });
+
+  it('creates a new top-level COMMENT review when none exists', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) return jsonResponse([]); // list
+      return jsonResponse({ id: 1 }); // create
+    }) as unknown as typeof fetch;
+
+    await expect(upsertReview(ghDeps(fetchFn), wrapBody('x'))).resolves.toBe('created');
+    const create = calls[1];
+    expect(create.init?.method).toBe('POST');
+    expect(JSON.parse(create.init!.body as string).event).toBe('COMMENT');
+  });
+
+  it('updates the existing marker review instead of stacking a new one', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) {
+        return jsonResponse([{ id: 42, body: `${MARKER}\nold`, user: { type: 'Bot' } }]);
+      }
+      return jsonResponse({ id: 42 });
+    }) as unknown as typeof fetch;
+
+    await expect(upsertReview(ghDeps(fetchFn), wrapBody('new'))).resolves.toBe('updated');
+    const update = calls[1];
+    expect(update.init?.method).toBe('PUT');
+    expect(update.url).toContain('/reviews/42');
+  });
+});

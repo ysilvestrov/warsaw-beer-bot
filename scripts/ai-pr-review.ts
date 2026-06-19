@@ -162,3 +162,59 @@ export async function callOpenAI(deps: OpenAiDeps, messages: ChatMessage[]): Pro
   }
   throw new Error(`OpenAI request failed after ${attempts} attempts: ${String(lastErr)}`);
 }
+
+export const MARKER = '<!-- ai-pr-review -->';
+
+export function wrapBody(summary: string): string {
+  return `${MARKER}\n\n## 🤖 AI PR Review\n\n${summary.trim()}\n`;
+}
+
+export interface GithubDeps {
+  repo: string;
+  prNumber: number;
+  token: string;
+  fetchFn?: typeof fetch;
+}
+
+interface ReviewRow {
+  id: number;
+  body?: string;
+  user?: { type?: string };
+}
+
+export async function upsertReview(deps: GithubDeps, body: string): Promise<'created' | 'updated'> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const base = `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}/reviews`;
+  const headers = {
+    Authorization: `Bearer ${deps.token}`,
+    Accept: 'application/vnd.github+json',
+    'X-GitHub-Api-Version': '2022-11-28',
+    'User-Agent': 'warsaw-beer-bot-ai-review',
+    'Content-Type': 'application/json',
+  };
+
+  const listRes = await fetchFn(`${base}?per_page=100`, { headers });
+  if (!listRes.ok) throw new Error(`GitHub list reviews HTTP ${listRes.status}`);
+  const reviews = (await listRes.json()) as ReviewRow[];
+  const existing = reviews.find(
+    (r) => r.user?.type === 'Bot' && (r.body ?? '').includes(MARKER),
+  );
+
+  if (existing) {
+    const res = await fetchFn(`${base}/${existing.id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ body }),
+    });
+    if (!res.ok) throw new Error(`GitHub update review HTTP ${res.status}`);
+    return 'updated';
+  }
+
+  const res = await fetchFn(base, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ body, event: 'COMMENT' }),
+  });
+  if (!res.ok) throw new Error(`GitHub create review HTTP ${res.status}`);
+  return 'created';
+}
