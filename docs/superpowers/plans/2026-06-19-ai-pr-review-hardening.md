@@ -329,7 +329,7 @@ export function buildMessages(p: {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run scripts/ai-pr-review.test.ts`
-Expected: PASS (8 tests total).
+Expected: PASS (7 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -466,7 +466,7 @@ export async function callOpenAI(deps: OpenAiDeps, messages: ChatMessage[]): Pro
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run scripts/ai-pr-review.test.ts`
-Expected: PASS (12 tests total).
+Expected: PASS (11 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -607,7 +607,7 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npx vitest run scripts/ai-pr-review.test.ts`
-Expected: PASS (15 tests total).
+Expected: PASS (14 tests total).
 
 - [ ] **Step 5: Commit**
 
@@ -707,7 +707,7 @@ if (require.main === module) {
 - [ ] **Step 3: Typecheck and full test run**
 
 Run: `npm run typecheck && npx vitest run scripts/ai-pr-review.test.ts`
-Expected: typecheck clean; 15 tests PASS.
+Expected: typecheck clean; 14 tests PASS.
 
 - [ ] **Step 4: Commit**
 
