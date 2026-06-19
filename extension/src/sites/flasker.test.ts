@@ -223,6 +223,22 @@ describe('flasker adapter', () => {
     });
   });
 
+  it('uses fixture tags for Flasker canonical identity', () => {
+    expect(findCard('flasker.table.html', 'Berry Sour')).toMatchObject({
+      brewery: 'Flasker',
+      name: 'Berry Sour',
+      abv: 6.5,
+    });
+  });
+
+  it('uses fixture tags for Hoppy Hog canonical identity', () => {
+    expect(findCard('flasker.table.html', 'Real Jam Fruit BOOM')).toMatchObject({
+      brewery: 'Hoppy Hog Family Brewery',
+      name: 'Real Jam Fruit BOOM',
+      abv: 5,
+    });
+  });
+
   it('uses the block product URL when tags are unavailable', () => {
     expect(findCard('flasker.block.html', 'Barely Beer')).toMatchObject({
       brewery: 'Mad Brew',
