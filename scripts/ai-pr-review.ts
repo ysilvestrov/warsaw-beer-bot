@@ -196,6 +196,9 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
     'Content-Type': 'application/json',
   };
 
+  // The bot's marker review is created on the first run, so it is among the
+  // earliest reviews and stays on the first page; per_page=100 is enough to find
+  // it without pagination on this repo's PRs.
   const listRes = await fetchFn(`${base}?per_page=100`, { headers });
   if (!listRes.ok) throw new Error(`GitHub list reviews HTTP ${listRes.status}`);
   const reviews = (await listRes.json()) as ReviewRow[];
@@ -241,7 +244,7 @@ function getDiff(baseRef: string, files: string[]): string {
 
 const INSTRUCTIONS_PATH = '.github/ai-review/AGENTS.md';
 
-export async function main(): Promise<void> {
+async function main(): Promise<void> {
   const cfg = readConfig(process.env);
 
   const reviewable = filterReviewableFiles(listChangedFiles(cfg.baseRef));
