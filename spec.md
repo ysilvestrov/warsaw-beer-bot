@@ -856,40 +856,54 @@ recovery (`open→closed`). Стан скидається на рестарті.
 
 ### 5.10 Автоматичне рев'ю PR (Adversarial Review)
 Кожен Pull Request автоматично рев'юється AI-агентом через GitHub Actions —
-доповнення до людського рев'ю, не заміна.
+доповнення до людського рев'ю, не заміна. **Архітектуру замінено 2026-06-19
+(#143 → PR #174): сторонню дію `anc95/ChatGPT-CodeReview` прибрано, рев'ювер тепер
+наш власний скрипт.** Дизайн/план:
+`docs/superpowers/specs/2026-06-19-ai-pr-review-hardening-design.md`,
+`docs/superpowers/plans/2026-06-19-ai-pr-review-hardening.md`.
 
-- **Workflow:** `.github/workflows/codex-review.yml` — `anc95/ChatGPT-CodeReview@main`
-  на події PR `opened` + `synchronize`. Найменші права:
-  `permissions: contents:read / pull-requests:write`. Секрети: `OPENAI_API_KEY`
-  (репо-секрет) + вбудований `GITHUB_TOKEN`.
-- **`AGENTS.md` (корінь репо)** — системний промпт рев'ювера (персона
-  Senior Backend Security Reviewer; фокус P0/P1: витоки ресурсів/незакриті
-  потоки, безпека транзакцій SQLite і race-умови через `await`, таймаути й
-  обробка помилок зовнішнього I/O; anti-focus: форматування, назви, type hints у
-  тестах). **Націлений на TS/Node** — згадка «Python» у постановці хибна (див.
-  корекцію стеку на початку файлу).
-- **Дія НЕ читає `AGENTS.md` нативно.** Файл підвантажується в рантаймі: крок
-  `actions/checkout` + `cat AGENTS.md` у `$GITHUB_ENV`, далі передається як
-  `PROMPT`. (Справжня інтеграція OpenAI Codex читала б `AGENTS.md` напряму й
-  зняла б цю обв'язку.)
-- **Кост-гард `MAX_PATCH_LENGTH: 8000`** — `PROMPT` шлеться **по файлу**, тож
-  великі генеровані/vendored-діфи пропускаються, щоб не множити токени. Це
-  **per-file skip-поріг**, а не контекст-ліміт: рев'ювер розглядає кожен файл
-  окремо незалежно від цього числа (тюнінг порога FP не прибирає).
-- **`IGNORE_PATTERNS: package-lock.json`** — лок-файли повністю виключені з
-  рев'ю (інакше дають лише шумні «validate your deps»). Кома-розділені glob'и
-  (minimatch + regex-fallback), матчаться по шляху файла (`anc95 src/bot.ts`).
+- **Workflow:** `.github/workflows/codex-review.yml` на подіях PR
+  `opened`/`reopened`/`synchronize` (`concurrency` cancel-in-progress; найменші
+  права `contents:read / pull-requests:write`) виконує наш `scripts/ai-pr-review.ts`
+  через `npx tsx` (після `actions/setup-node` + `npm ci` + `git fetch origin <base>`).
+  Секрети: `OPENAI_API_KEY` + `OPENAI_API_ENDPOINT` (=`https://api.openai.com/v1`) +
+  вбудований `GITHUB_TOKEN`. Модель `gpt-4o-mini`.
+- **Один топ-левел рев'ю, НЕ inline-коментарі.** Скрипт публікує єдине рев'ю
+  (`POST .../pulls/{n}/reviews`, `event: COMMENT`, лише `body`) з прихованим
+  маркером `<!-- ai-pr-review -->`; на повторних прогонах знаходить попереднє
+  маркер-рев'ю і **оновлює його** (PUT), не плодячи нові. Відсутність inline-рядків
+  конструктивно усуває старий збій `422 "Line could not be resolved"`.
+- **`AGENTS.md` (`.github/ai-review/AGENTS.md`)** — системний промпт рев'ювера
+  (персона Senior Backend Security Reviewer; фокус P0/P1: витоки ресурсів, безпека
+  транзакцій SQLite і race через `await`, таймаути зовнішнього I/O; anti-focus:
+  форматування, назви, type hints у тестах). **Читається скриптом напряму** (більше
+  жодної обв'язки `cat` у `$GITHUB_ENV`). Націлений на TS/Node.
+- **Fail-loud: скрипт сам володіє exit-кодом.** Немає більше «зелений чек без рев'ю»
+  і прибрано окремий крок `Verify review was posted`. Червоно (exit 1): відсутні
+  секрети/конфіг; OpenAI впав після 3 ретраїв (429/5xx/мережа; 4xx як 401 — без
+  ретраю); пост у GitHub не вдався (помилка містить статус+тіло відповіді). Зелено
+  (exit 0): рев'ю опубліковано (зокрема «немає зауважень») або в діфі немає файлів у
+  скоупі (skip із `::notice::`). Тож **поповнений** OpenAI-акаунт обов'язковий —
+  `429 quota` тепер навмисно валить чек ЧЕРВОНИМ.
+- **Скоуп-фільтри `INCLUDE_PATTERNS`/`IGNORE_PATTERNS` — у самому скрипті (одне
+  джерело правди), застосовуються через невеликий `globToRegExp`.** Include:
+  `src/**/*.ts,tests/**/*.ts,scripts/**/*.ts,extension/**/*.ts,.github/workflows/*.yml`;
+  ignore: `package-lock.json,*.md,docs/**`. Діф, що шлеться моделі, обмежено
+  100 000 символів (про обрізання сказано в промпті).
 - **Зміна будь-чого під `.github/workflows/` вимагає OAuth-scope `workflow`**
   (інакше push → `remote rejected`). Фікс:
-  `gh auth refresh -s workflow --hostname github.com`.
-- **Дія ковтає помилки OpenAI і все одно репортить job `success`.** `429`/auth-збій
-  → **жодного рев'ю при зеленому чеку**. Робочий ознака — лише **опублікований
-  коментар бота**, не галочка CI. Потрібен **поповнений** OpenAI-акаунт
-  (перший прогін упав на `429 quota exceeded`).
+  `gh auth refresh -s workflow --hostname github.com`. Same-repo `pull_request`
+  виконує workflow з head-гілки, тож зміна workflow само-тестується на власному PR.
+- **Відкритий follow-up #175 — ЯКІСТЬ зауважень, не інфраструктура.** `gpt-4o-mini`
+  видає low-confidence/галюциновані зауваження попри «prefer no comment over a
+  low-confidence comment» в `AGENTS.md` (на #174: 5 зауважень, 0 реальних багів,
+  включно з галюцинованим P0). Кандидати: сильніша модель, structured-JSON із
+  confidence-фільтром, few-shot негативні приклади в `AGENTS.md`.
 
-**Відомі хибні спрацювання рев'ювера (контекст, якого він не має).** PROMPT
-шлеться по файлу, тож рев'ювер не бачить решти діфа (зокрема тестів) і не знає
-рантайму. Це — навмисні конвенції, НЕ зауваження до виправлення. **Більшість із них тепер явно закодовані в
+**Відомі хибні спрацювання рев'ювера (контекст, якого діф не дає).** Рев'ювер
+тепер отримує **весь діф одним промптом** (а не по файлу), тож бачить тест-файли
+поряд із кодом — але все одно не знає рантайму/інваріантів проєкту. Це — навмисні
+конвенції, НЕ зауваження до виправлення. **Більшість із них явно закодовані в
 `AGENTS.md`** (§2 busy-baseline, §3.1 carve-out для in-memory working sets +
 test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «external I/O», §4
 анти-фокус для test-БД і generated/lock-файлів), щоб рев'ювер узагалі їх не
@@ -924,9 +938,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `AbortController`/таймауту стосується `fetch` до ontap/Untappd/OSRM/Nominatim.
   Внутрішні `await` (Hono `await next()`, синхронні better-sqlite3 виклики,
   `ctx.reply`) — НЕ external I/O; «add a timeout to `next()`» — некоректне.
-- **Кожен модуль логіки має колоковані `*.test.ts`.** «Немає тестів для X»
-  зазвичай означає, що рев'ювер не отримав діфа тест-файлу (per-file PROMPT), а не
-  що тестів немає.
+- **Кожен модуль логіки має колоковані `*.test.ts`.** Оскільки рев'ювер тепер
+  бачить увесь діф, «немає тестів для X» виникає рідше; якщо тест-файл присутній у
+  діфі — таке зауваження некоректне.
 
 ---
 
