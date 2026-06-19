@@ -38,3 +38,34 @@ export function filterReviewableFiles(files: string[]): string[] {
     (f) => matchesAny(f, INCLUDE_PATTERNS) && !matchesAny(f, IGNORE_PATTERNS),
   );
 }
+
+export interface Config {
+  openaiApiKey: string;
+  openaiEndpoint: string;
+  githubToken: string;
+  repo: string;
+  prNumber: number;
+  baseRef: string;
+  headRef: string;
+  prTitle: string;
+  prBody: string;
+}
+
+export function readConfig(env: NodeJS.ProcessEnv): Config {
+  const required = (name: string): string => {
+    const v = env[name];
+    if (!v || v.trim() === '') throw new Error(`Missing required env: ${name}`);
+    return v;
+  };
+  return {
+    openaiApiKey: required('OPENAI_API_KEY'),
+    openaiEndpoint: env.OPENAI_API_ENDPOINT?.trim() || 'https://api.openai.com/v1',
+    githubToken: required('GITHUB_TOKEN'),
+    repo: required('REPO'),
+    prNumber: Number(required('PR_NUMBER')),
+    baseRef: required('BASE_REF'),
+    headRef: env.HEAD_REF?.trim() || '',
+    prTitle: env.PR_TITLE ?? '',
+    prBody: env.PR_BODY ?? '',
+  };
+}

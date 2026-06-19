@@ -33,3 +33,30 @@ describe('filterReviewableFiles', () => {
     ]);
   });
 });
+
+import { readConfig } from './ai-pr-review';
+
+describe('readConfig', () => {
+  const full = {
+    OPENAI_API_KEY: 'sk-test',
+    GITHUB_TOKEN: 'ghs-test',
+    REPO: 'ysilvestrov/warsaw-beer-bot',
+    PR_NUMBER: '173',
+    BASE_REF: 'main',
+    HEAD_REF: 'feature',
+    PR_TITLE: 'Title',
+    PR_BODY: 'Body',
+  } as NodeJS.ProcessEnv;
+
+  it('reads a full env and defaults the endpoint', () => {
+    const cfg = readConfig(full);
+    expect(cfg.openaiEndpoint).toBe('https://api.openai.com/v1');
+    expect(cfg.prNumber).toBe(173);
+    expect(cfg.repo).toBe('ysilvestrov/warsaw-beer-bot');
+  });
+
+  it('throws loudly when OPENAI_API_KEY is missing', () => {
+    const { OPENAI_API_KEY, ...rest } = full;
+    expect(() => readConfig(rest as NodeJS.ProcessEnv)).toThrow(/OPENAI_API_KEY/);
+  });
+});
