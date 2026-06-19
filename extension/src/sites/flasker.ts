@@ -201,8 +201,17 @@ function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function productUrl(raw: string | null, el: Element): string | undefined {
+  if (!raw) return undefined;
+  try {
+    return new URL(raw, el.ownerDocument.baseURI).href;
+  } catch {
+    return raw;
+  }
+}
+
 function href(el: Element | null | undefined): string | undefined {
-  return el?.getAttribute('href') ?? undefined;
+  return el ? productUrl(el.getAttribute('href'), el) : undefined;
 }
 
 function parseTableTags(raw: string | null): string[] {
@@ -238,7 +247,7 @@ function tableEntries(root: ParentNode): RawEntry[] {
     title: (el.getAttribute('data-title') ?? '').replace(/\s+/g, ' ').trim(),
     categoryHint: el.getAttribute('data-product_cat') ?? undefined,
     productTags: parseTableTags(el.getAttribute('data-product_tag')),
-    productUrl: el.getAttribute('data-href') ?? undefined,
+    productUrl: productUrl(el.getAttribute('data-href'), el),
   }));
 }
 

@@ -231,6 +231,23 @@ describe('flasker adapter', () => {
     });
   });
 
+  it('resolves a root-relative block product URL against the Flasker document', () => {
+    const doc = new DOMParser().parseFromString(`
+      <base href="https://flasker.com.ua/store/">
+      <li class="wc-block-grid__product">
+        <h2 class="wc-block-grid__product-title">
+          <a href="/product/mad-barely-beer-0-abv-pale-ale-330ml/">Barely Beer 0% ABV 330ml</a>
+        </h2>
+      </li>
+    `, 'text/html');
+
+    expect(flasker.parseCards(doc)[0]).toMatchObject({
+      brewery: 'Mad Brew',
+      name: 'Barely Beer',
+      abv: 0,
+    });
+  });
+
   it('drops every product on a non-beer page', () => {
     expect(flasker.parseCards(load('flasker.nonbeer.html'))).toEqual([]);
   });
