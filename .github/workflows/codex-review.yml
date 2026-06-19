@@ -23,96 +23,29 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
-      - name: Build review prompt
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REVIEW_INSTRUCTIONS_PATH: .github/ai-review/AGENTS.md
-        run: |
-          set -euo pipefail
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-          if [ ! -f "$REVIEW_INSTRUCTIONS_PATH" ]; then
-            echo "::error::$REVIEW_INSTRUCTIONS_PATH is missing"
-            exit 1
-          fi
-
-          # Full fetch (not --depth=1): the `origin/base...HEAD` triple-dot diffs below
-          # need the merge base, which a shallow tip-only fetch omits once main has
-          # advanced past the branch point ("fatal: ...: no merge base", exit 128).
-          git fetch origin "${{ github.base_ref }}"
-
-          {
-            echo '# Pull request context'
-            gh pr view "${{ github.event.pull_request.number }}" \
-              --json title,body,baseRefName,headRefName \
-              --jq '"Title: \(.title)\nBase: \(.baseRefName)\nHead: \(.headRefName)\n\nBody:\n\(.body // "")"'
-
-            echo
-            echo '# Changed files'
-            git diff --name-status "origin/${{ github.base_ref }}...HEAD"
-
-            echo
-            echo '# Diff stat'
-            git diff --stat "origin/${{ github.base_ref }}...HEAD"
-
-            echo
-            echo '# Review instructions'
-            cat "$REVIEW_INSTRUCTIONS_PATH"
-          } | bash scripts/github-env-multiline.sh REVIEW_PROMPT
+      - name: Install dependencies
+        run: npm ci
 
       - name: AI code review
-        uses: anc95/ChatGPT-CodeReview@v1.0.23
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_API_ENDPOINT: https://api.openai.com/v1
-
-          MODEL: gpt-4o-mini
-          LANGUAGE: English
-          PROMPT: ${{ env.REVIEW_PROMPT }}
-
-          temperature: 0
-          top_p: 1
-          max_tokens: 10000
-          MAX_PATCH_LENGTH: 10000
-
-          INCLUDE_PATTERNS: src/**/*.ts,tests/**/*.ts,scripts/**/*.ts,extension/**/*.ts,.github/workflows/*.yml
-          IGNORE_PATTERNS: package-lock.json,*.md,docs/**
-
-      - name: Verify review was posted
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
         run: |
           set -euo pipefail
-
-          review_comments="$(
-            gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/comments" \
-              --jq '[.[] | select(.user.type == "Bot")] | length'
-          )"
-
-          reviews="$(
-            gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews" \
-              --jq '[.[] | select(.user.type == "Bot")] | length'
-          )"
-
-          total=$((review_comments + reviews))
-
-          if [ "$total" -eq 0 ]; then
-            # Count only files the reviewer actually looks at — must mirror
-            # INCLUDE_PATTERNS above. Files outside that scope (e.g. package.json,
-            # *.md, docs/, lockfiles) never get reviewed, so a PR touching only
-            # those legitimately produces no comment and must not fail here.
-            reviewable_files="$(
-              git diff --name-only "origin/${{ github.base_ref }}...HEAD" \
-                | awk '/^(src|tests|scripts|extension)\/.*\.ts$/ || /^\.github\/workflows\/[^/]+\.yml$/ { count += 1 } END { print count + 0 }'
-            )"
-
-            if [ "$reviewable_files" -eq 0 ]; then
-              echo "::notice::AI review skipped: no changed files are in the reviewer's scope (INCLUDE_PATTERNS)."
-              exit 0
-            fi
-
-            echo "::error::AI review finished without posting any PR review/comment. Check OpenAI quota, model name, token permissions, or action logs."
-            exit 1
-          fi
+          # Full base history is needed for the triple-dot (origin/base...HEAD) diffs
+          # the script runs; the checkout above already used fetch-depth: 0.
+          git fetch origin "$BASE_REF"
+          npx tsx scripts/ai-pr-review.ts
