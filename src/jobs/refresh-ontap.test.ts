@@ -6,6 +6,8 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { latestSnapshot, tapsForSnapshot } from '../storage/snapshots';
 import { listLookupCandidates } from '../storage/beers';
+import { CITIES } from '../domain/cities';
+import { listPubs } from '../storage/pubs';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -123,3 +125,93 @@ function panel(
     </div>
   `;
 }
+
+describe('refreshOntap multi-city', () => {
+  const cityIndex = (slug: string) => `
+    <div onclick="location.assign('https://${slug}pub.ontap.pl/')">
+      <div class="panel-body">${slug} Pub 2 taps</div>
+    </div>`;
+  const pubPage = (name: string) => `
+    <html><head><meta property="og:title" content="${name} / ontap.pl"></head>
+    <body></body></html>`;
+
+  function makeHttp(throwOn?: string) {
+    const calls: string[] = [];
+    const http = {
+      async get(url: string): Promise<string> {
+        calls.push(url);
+        if (throwOn && url === `https://ontap.pl/${throwOn}`) throw new Error('boom');
+        if (url === 'https://ontap.pl/warszawa') return cityIndex('warszawa');
+        if (url === 'https://ontap.pl/krakow') return cityIndex('krakow');
+        if (url.endsWith('.ontap.pl/')) return pubPage('Some Pub');
+        return '';
+      },
+    };
+    return { http, calls };
+  }
+  const geocoder = async () => null;
+  const twoCities = CITIES.filter((c) => c.slug === 'warszawa' || c.slug === 'krakow');
+
+  test('tags pubs with the city whose index they came from', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const { http } = makeHttp();
+    await refreshOntap({ db, log: silentLog, http, geocoder, cities: twoCities, lookupEnabled: false });
+    expect(listPubs(db, 'warszawa').map((p) => p.slug)).toEqual(['warszawapub']);
+    expect(listPubs(db, 'krakow').map((p) => p.slug)).toEqual(['krakowpub']);
+  });
+
+  test('a city whose index fetch throws is skipped; others still scrape', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const { http } = makeHttp('warszawa');
+    await refreshOntap({ db, log: silentLog, http, geocoder, cities: twoCities, lookupEnabled: false });
+    expect(listPubs(db, 'warszawa')).toEqual([]);
+    expect(listPubs(db, 'krakow').map((p) => p.slug)).toEqual(['krakowpub']);
+  });
+
+  // A pub page with two distinct beer taps → two fresh orphans (empty catalog).
+  function budgetHttp() {
+    const calls: string[] = [];
+    const http = {
+      async get(url: string): Promise<string> {
+        calls.push(url);
+        if (url === 'https://ontap.pl/warszawa') return cityIndex('warszawa');
+        if (url === 'https://warszawapub.ontap.pl/') {
+          return `<html><head><meta property="og:title" content="Budget Pub / ontap.pl"></head>
+            <body>
+              ${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}
+              ${panel(2, 'Bar Brewery', 'Bar Pils 5%', 'Pilsner')}
+            </body></html>`;
+        }
+        return ''; // untappd search etc. → not_found (still a real lookup)
+      },
+    };
+    return { http, calls };
+  }
+  const oneCity = CITIES.filter((c) => c.slug === 'warszawa');
+  const enrichedCount = (db: ReturnType<typeof openDb>) =>
+    (db.prepare('SELECT COUNT(*) AS n FROM beers WHERE untappd_lookup_count > 0').get() as { n: number }).n;
+  const beerCount = (db: ReturnType<typeof openDb>) =>
+    (db.prepare('SELECT COUNT(*) AS n FROM beers').get() as { n: number }).n;
+
+  test('inlineEnrichBudget 0 enriches nothing even though orphans exist', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const { http } = budgetHttp();
+    await refreshOntap({
+      db, log: silentLog, http, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 0, lookupSleepMs: 0,
+    });
+    expect(beerCount(db)).toBe(2);       // orphans WERE created (path is reachable)
+    expect(enrichedCount(db)).toBe(0);   // budget 0 → none enriched
+  });
+
+  test('inlineEnrichBudget caps enrichment across the run', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const { http } = budgetHttp();
+    await refreshOntap({
+      db, log: silentLog, http, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 1, lookupSleepMs: 0,
+    });
+    expect(beerCount(db)).toBe(2);       // two orphans
+    expect(enrichedCount(db)).toBe(1);   // only one enriched — budget cap holds
+  });
+});

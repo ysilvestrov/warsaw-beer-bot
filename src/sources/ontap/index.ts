@@ -6,7 +6,7 @@ export interface IndexPub {
   taps: number | null;
 }
 
-export function parseWarsawIndex(html: string): IndexPub[] {
+export function parseOntapCityIndex(html: string): IndexPub[] {
   const $ = cheerio.load(html);
   const pubs = new Map<string, IndexPub>();
 
