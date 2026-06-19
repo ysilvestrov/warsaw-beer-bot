@@ -15,7 +15,7 @@ function fresh() {
 
 const t = createTranslator('uk');
 const base = (db: ReturnType<typeof fresh>, pubQuery?: string) =>
-  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery });
+  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa' });
 
 describe('buildBeersMessage — resolution', () => {
   test('missing argument returns no_arg', () => {

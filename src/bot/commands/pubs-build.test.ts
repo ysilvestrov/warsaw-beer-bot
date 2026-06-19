@@ -14,7 +14,7 @@ describe('buildPubsMessage', () => {
   test('returns the pubs.empty fallback when there are no pubs', () => {
     const db = fresh();
     const t = createTranslator('uk');
-    const out = buildPubsMessage({ db, t });
+    const out = buildPubsMessage({ db, t, city: 'warszawa' });
     expect(out).toBe(t('pubs.empty'));
   });
 
@@ -26,7 +26,7 @@ describe('buildPubsMessage', () => {
     upsertPub(db, { slug: 'alfa', name: 'Alfa', address: null, lat: null, lon: null, city: 'warszawa' });
 
     const t = createTranslator('uk');
-    const out = buildPubsMessage({ db, t });
+    const out = buildPubsMessage({ db, t, city: 'warszawa' });
 
     expect(out).toContain('Доступні паби:');
     expect(out).toContain('Підказка:');
@@ -42,7 +42,7 @@ describe('buildPubsMessage', () => {
     const db = fresh();
     upsertPub(db, { slug: 'tricky', name: 'Cuda & <Co>', address: null, lat: null, lon: null, city: 'warszawa' });
     const t = createTranslator('uk');
-    const out = buildPubsMessage({ db, t });
+    const out = buildPubsMessage({ db, t, city: 'warszawa' });
     expect(out).toContain('Cuda &amp; &lt;Co&gt;');
     expect(out).not.toContain('Cuda & <Co>');
   });
@@ -51,7 +51,7 @@ describe('buildPubsMessage', () => {
     const db = fresh();
     upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null, city: 'warszawa' });
     const t = createTranslator('uk');
-    const out = buildPubsMessage({ db, t });
+    const out = buildPubsMessage({ db, t, city: 'warszawa' });
     // uk hint contains '<частина назви>' as metavar notation; Telegram's HTML
     // parser rejects unknown tags, so this MUST be escaped before send.
     expect(out).toContain('&lt;частина назви&gt;');

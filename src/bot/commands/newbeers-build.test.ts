@@ -49,7 +49,7 @@ describe('buildNewbeersMessage', () => {
   test('returns kind=empty when there are no snapshots at all', () => {
     const db = fresh();
     const t = createTranslator('uk');
-    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t })).toEqual({ kind: 'empty' });
+    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' })).toEqual({ kind: 'empty' });
   });
 
   test('returns kind=empty when snapshots exist but no tap survives filtering', () => {
@@ -58,14 +58,14 @@ describe('buildNewbeersMessage', () => {
     const snapId = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     void snapId; // no taps inserted
     const t = createTranslator('uk');
-    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t })).toEqual({ kind: 'empty' });
+    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' })).toEqual({ kind: 'empty' });
   });
 
   test('returns kind=ok with HTML containing the beer when a matched tap exists', () => {
     const db = fresh();
     seedTwoPubs(db);
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' });
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return; // type narrow
     expect(out.html).toContain('Atak Chmielu');
@@ -94,14 +94,14 @@ describe('buildNewbeersMessage', () => {
       'INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at) VALUES (?, ?, ?)',
     ).run(1, beerId, '2026-05-25T11:00:00Z');
     const t = createTranslator('uk');
-    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t })).toEqual({ kind: 'empty' });
+    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' })).toEqual({ kind: 'empty' });
   });
 
   test('pubQuery="A" (case-insensitive substring) keeps only Pub A', () => {
     const db = fresh();
     seedTwoPubs(db);
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'A' });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'A', city: 'warszawa' });
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     expect(out.html).toContain('Atak Chmielu');
@@ -130,7 +130,7 @@ describe('buildNewbeersMessage', () => {
     }
 
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'Pub' });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'Pub', city: 'warszawa' });
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     expect(out.html).toContain('Shared Brew');
@@ -142,7 +142,7 @@ describe('buildNewbeersMessage', () => {
     const db = fresh();
     seedTwoPubs(db);
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'nonexistent' });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: 'nonexistent', city: 'warszawa' });
     expect(out).toEqual({ kind: 'pub_not_found', query: 'nonexistent' });
   });
 
@@ -150,7 +150,7 @@ describe('buildNewbeersMessage', () => {
     const db = fresh();
     seedTwoPubs(db);
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: '  Nope  ' });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: '  Nope  ', city: 'warszawa' });
     expect(out).toEqual({ kind: 'pub_not_found', query: '  Nope  ' });
   });
 
@@ -158,7 +158,7 @@ describe('buildNewbeersMessage', () => {
     const db = fresh();
     seedTwoPubs(db);
     const t = createTranslator('uk');
-    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: '   ' });
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, pubQuery: '   ', city: 'warszawa' });
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     // Both pubs visible — same as no-arg call.

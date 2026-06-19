@@ -37,6 +37,7 @@ export interface NewbeersDeps {
   locale: Locale;
   t: Translator;
   pubQuery?: string;
+  city: string;
 }
 
 export type NewbeersResult =
@@ -55,7 +56,7 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
       abv_max: null,
       default_route_n: null,
     };
-  const pubs = new Map(listPubs(db).map((p) => [p.id, p]));
+  const pubs = new Map(listPubs(db, deps.city).map((p) => [p.id, p]));
 
   const q = deps.pubQuery?.trim().toLowerCase() ?? '';
   let matchedIds: Set<number> | null = null;

@@ -20,6 +20,7 @@ import {
   type DistanceSource,
 } from '../../storage/pub_distances';
 import { makeThrottledProgress } from './refresh';
+import { getUserCity } from '../../storage/user_profiles';
 import {
   groupTaps,
   rankGroups,
@@ -48,7 +49,8 @@ routeCommand.command('route', async (ctx) => {
       abv_max: null,
       default_route_n: null,
     };
-  const pubsById = new Map(listPubs(db).map((p) => [p.id, p]));
+  const city = getUserCity(db, ctx.from.id);
+  const pubsById = new Map(listPubs(db, city).map((p) => [p.id, p]));
 
   const routePubs: RoutePub[] = [];
   const interestingByPub = new Map<number, CandidateTap[]>();

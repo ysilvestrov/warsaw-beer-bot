@@ -10,6 +10,7 @@ export interface BeersDeps {
   locale: Locale;
   t: Translator;
   pubQuery?: string;
+  city: string;
 }
 
 export type BeersResult =
@@ -29,7 +30,7 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
   const q = deps.pubQuery?.trim() ?? '';
   if (!q) return { kind: 'no_arg' };
 
-  const matched = filterPubsByQuery(listPubs(db), q);
+  const matched = filterPubsByQuery(listPubs(db, deps.city), q);
   if (matched.length === 0) return { kind: 'pub_not_found', query: q };
   if (matched.length >= 2) {
     return {
