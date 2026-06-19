@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseTitle, isNonBeerTitle, isNonBeerCategory, flasker } from './flasker';
+import { parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker } from './flasker';
 
 const load = (name: string) =>
   new DOMParser().parseFromString(readFileSync(resolve(__dirname, `../../tests/fixtures/${name}`), 'utf8'), 'text/html');
@@ -62,6 +62,28 @@ describe('parseTitle', () => {
 
   it('does not parse a gravity (°) reading as ABV', () => {
     expect(parseTitle('Vibrant IS 9° 330ml')).toEqual({ brewery: 'Vibrant', name: 'IS 9°' });
+  });
+});
+
+describe('stripMerchandisingPrefix', () => {
+  it.each([
+    ['ПРЕДРЕЛІЗ Galaxy Juice', 'Galaxy Juice'],
+    ['предреліз: Galaxy Juice', 'Galaxy Juice'],
+    ['ПРЕДРЕДІЗ — Candlelit', 'Candlelit'],
+    ['ПРОБНИК: MGM Tapped Ed.', 'MGM Tapped Ed.'],
+  ])('strips an approved leading label from %s', (input, expected) => {
+    expect(stripMerchandisingPrefix(input)).toBe(expected);
+  });
+
+  it('does not strip unknown or mid-name labels', () => {
+    expect(stripMerchandisingPrefix('РЕЛІЗ Galaxy Juice')).toBe('РЕЛІЗ Galaxy Juice');
+    expect(stripMerchandisingPrefix('Galaxy ПРЕДРЕЛІЗ Juice')).toBe('Galaxy ПРЕДРЕЛІЗ Juice');
+    expect(stripMerchandisingPrefix('ПРОБНИК Galaxy Juice')).toBe('ПРОБНИК Galaxy Juice');
+  });
+
+  it('retains the original when cleanup would empty the name', () => {
+    expect(stripMerchandisingPrefix('ПРЕДРЕЛІЗ')).toBe('ПРЕДРЕЛІЗ');
+    expect(stripMerchandisingPrefix('ПРОБНИК:')).toBe('ПРОБНИК:');
   });
 });
 

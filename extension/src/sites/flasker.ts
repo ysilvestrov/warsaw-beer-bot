@@ -39,6 +39,13 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   return { brewery, name: name || brewery };
 }
 
+const MERCH_PREFIX_RE = /^(?:(?:ПРЕДРЕЛІЗ|ПРЕДРЕДІЗ)(?=$|[\s:–—-])|ПРОБНИК:)[\s:–—-]*/iu;
+
+export function stripMerchandisingPrefix(name: string): string {
+  const stripped = name.replace(MERCH_PREFIX_RE, '').trim();
+  return stripped || name;
+}
+
 // --- non-beer gates ------------------------------------------------------
 // Secondary gate: catches sets/glassware/snacks/vouchers that DO quote a volume
 // (the volume gate alone would let them through — e.g. a multi-beer set or a sauce
