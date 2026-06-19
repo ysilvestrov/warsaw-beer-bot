@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed Flasker matching when product titles omit or abbreviate the brewery: trusted shop tags and product links now identify known breweries, and leading preview/sample labels are removed before matching.
+
 ## [0.9.0] - 2026-06-17
 
 - Beers you've already had that only loosely match a shop listing (a "fuzzy" match — common when a shop lists a beer without its brewery) now show a ❓ badge ("you've probably had this, but we're not sure") with the global rating, instead of the plain ⭐ that made them look new. Click it to check the beer on Untappd.
