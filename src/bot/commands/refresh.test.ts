@@ -158,9 +158,9 @@ describe('runRefreshPipeline', () => {
 function dbWithPubs() {
   const db = openDb(':memory:');
   migrate(db);
-  upsertPub(db, { slug: 'bracka', name: 'Bracka 4', address: 'Bracka 4', lat: null, lon: null });
-  upsertPub(db, { slug: 'piwpaw', name: 'PiwPaw', address: 'Foksal 16', lat: null, lon: null });
-  upsertPub(db, { slug: 'piwpaw-bis', name: 'PiwPaw Bis', address: 'Żurawia 32', lat: null, lon: null });
+  upsertPub(db, { slug: 'bracka', name: 'Bracka 4', address: 'Bracka 4', lat: null, lon: null, city: 'warszawa' });
+  upsertPub(db, { slug: 'piwpaw', name: 'PiwPaw', address: 'Foksal 16', lat: null, lon: null, city: 'warszawa' });
+  upsertPub(db, { slug: 'piwpaw-bis', name: 'PiwPaw Bis', address: 'Żurawia 32', lat: null, lon: null, city: 'warszawa' });
   return db;
 }
 

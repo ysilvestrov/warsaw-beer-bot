@@ -245,7 +245,7 @@ describe('listLookupCandidates', () => {
     }
     const pubId = upsertPub(db, {
       slug: `pub-${beerId}`, name: `Pub ${beerId}`,
-      address: null, lat: null, lon: null,
+      address: null, lat: null, lon: null, city: 'warszawa',
     });
     const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
     const ref = `${opts.brewery} ${opts.name}`;
@@ -419,7 +419,7 @@ describe('listRatingRefreshCandidates', () => {
     }
     const pubId = upsertPub(db, {
       slug: `pub-${beerId}`, name: `Pub ${beerId}`,
-      address: null, lat: null, lon: null,
+      address: null, lat: null, lon: null, city: 'warszawa',
     });
     const snapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
     const ref = `${opts.brewery} ${opts.name}`;
@@ -453,7 +453,7 @@ describe('listRatingRefreshCandidates', () => {
       normalized_name: 'x', normalized_brewery: 'y',
     });
     const pubId = upsertPub(db, {
-      slug: 'p', name: 'P', address: null, lat: null, lon: null,
+      slug: 'p', name: 'P', address: null, lat: null, lon: null, city: 'warszawa',
     });
     const snapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
     upsertMatch(db, 'X', beerId, 1.0);

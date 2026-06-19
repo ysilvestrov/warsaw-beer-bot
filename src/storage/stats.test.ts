@@ -25,8 +25,8 @@ function seed() {
   db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (?, ?)').run(1, 'bob');
   db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (?, ?)').run(2, null);
   // pubs + snapshots
-  const a = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null });
-  const b = upsertPub(db, { slug: 'b', name: 'b', address: null, lat: null, lon: null });
+  const a = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null, city: 'warszawa' });
+  const b = upsertPub(db, { slug: 'b', name: 'b', address: null, lat: null, lon: null, city: 'warszawa' });
   const aOld = createSnapshot(db, a, '2026-06-01T12:00:00Z'); // >24h ago
   insertTaps(db, aOld, [tap('B1')]);                          // B1 seen in the past
   const aNew = createSnapshot(db, a, '2026-06-04T06:00:00Z'); // 6h ago, latest for a

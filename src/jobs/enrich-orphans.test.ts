@@ -47,7 +47,7 @@ function seedOrphanOnTap(
   });
   const pubId = upsertPub(db, {
     slug: `pub-${beerId}`, name: `Pub ${beerId}`,
-    address: null, lat: null, lon: null,
+    address: null, lat: null, lon: null, city: 'warszawa',
   });
   const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
   const ref = `${brewery} ${name}`;

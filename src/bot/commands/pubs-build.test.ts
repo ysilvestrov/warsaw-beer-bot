@@ -21,9 +21,9 @@ describe('buildPubsMessage', () => {
   test('lists pubs alphabetically with header and hint', () => {
     const db = fresh();
     // Insert in non-alphabetical order to prove the sort.
-    upsertPub(db, { slug: 'cuda', name: 'Cuda', address: null, lat: null, lon: null });
-    upsertPub(db, { slug: 'bar',  name: 'Bar',  address: null, lat: null, lon: null });
-    upsertPub(db, { slug: 'alfa', name: 'Alfa', address: null, lat: null, lon: null });
+    upsertPub(db, { slug: 'cuda', name: 'Cuda', address: null, lat: null, lon: null, city: 'warszawa' });
+    upsertPub(db, { slug: 'bar',  name: 'Bar',  address: null, lat: null, lon: null, city: 'warszawa' });
+    upsertPub(db, { slug: 'alfa', name: 'Alfa', address: null, lat: null, lon: null, city: 'warszawa' });
 
     const t = createTranslator('uk');
     const out = buildPubsMessage({ db, t });
@@ -40,7 +40,7 @@ describe('buildPubsMessage', () => {
 
   test('HTML-escapes pub names containing special characters', () => {
     const db = fresh();
-    upsertPub(db, { slug: 'tricky', name: 'Cuda & <Co>', address: null, lat: null, lon: null });
+    upsertPub(db, { slug: 'tricky', name: 'Cuda & <Co>', address: null, lat: null, lon: null, city: 'warszawa' });
     const t = createTranslator('uk');
     const out = buildPubsMessage({ db, t });
     expect(out).toContain('Cuda &amp; &lt;Co&gt;');
@@ -49,7 +49,7 @@ describe('buildPubsMessage', () => {
 
   test('HTML-escapes the hint string so angle-bracket metavars survive Telegram HTML mode', () => {
     const db = fresh();
-    upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null });
+    upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null, city: 'warszawa' });
     const t = createTranslator('uk');
     const out = buildPubsMessage({ db, t });
     // uk hint contains '<частина назви>' as metavar notation; Telegram's HTML
