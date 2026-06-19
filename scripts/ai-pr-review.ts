@@ -110,3 +110,55 @@ export function buildMessages(p: {
     { role: 'user', content: user },
   ];
 }
+
+class NonRetryableError extends Error {}
+
+export interface OpenAiDeps {
+  endpoint: string;
+  apiKey: string;
+  fetchFn?: typeof fetch;
+  sleep?: (ms: number) => Promise<void>;
+  attempts?: number;
+}
+
+export async function callOpenAI(deps: OpenAiDeps, messages: ChatMessage[]): Promise<string> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
+  const attempts = deps.attempts ?? 3;
+  const url = `${deps.endpoint.replace(/\/$/, '')}/chat/completions`;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      const res = await fetchFn(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${deps.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-4o-mini',
+          temperature: 0,
+          top_p: 1,
+          max_tokens: 10000,
+          messages,
+        }),
+      });
+      if (res.status === 429 || res.status >= 500) {
+        throw new Error(`OpenAI HTTP ${res.status}`);
+      }
+      if (!res.ok) {
+        const text = await res.text();
+        throw new NonRetryableError(`OpenAI HTTP ${res.status}: ${text.slice(0, 300)}`);
+      }
+      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+      const content = data.choices?.[0]?.message?.content;
+      if (!content) throw new NonRetryableError('OpenAI returned an empty completion');
+      return content;
+    } catch (err) {
+      if (err instanceof NonRetryableError) throw err;
+      lastErr = err;
+      if (attempt < attempts) await sleep(2 ** attempt * 100);
+    }
+  }
+  throw new Error(`OpenAI request failed after ${attempts} attempts: ${String(lastErr)}`);
+}

@@ -90,3 +90,51 @@ describe('buildMessages', () => {
     expect(msgs[1].content).toContain('truncated');
   });
 });
+
+import { callOpenAI } from './ai-pr-review';
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  } as unknown as Response;
+}
+
+const completion = { choices: [{ message: { content: 'LGTM' } }] };
+const deps = (fetchFn: typeof fetch) => ({
+  endpoint: 'https://api.openai.com/v1',
+  apiKey: 'sk',
+  fetchFn,
+  sleep: async () => {},
+});
+
+describe('callOpenAI', () => {
+  it('returns the completion content on success', async () => {
+    const fetchFn = vi.fn(async () => jsonResponse(completion)) as unknown as typeof fetch;
+    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries on 5xx then succeeds', async () => {
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({}, 500))
+      .mockResolvedValueOnce(jsonResponse(completion)) as unknown as typeof fetch;
+    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails loudly after exhausting retries on persistent 429', async () => {
+    const fetchFn = vi.fn(async () => jsonResponse({}, 429)) as unknown as typeof fetch;
+    await expect(callOpenAI({ ...deps(fetchFn), attempts: 3 }, [])).rejects.toThrow(/429|attempts/);
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not retry a 401 auth error', async () => {
+    const fetchFn = vi.fn(async () => jsonResponse({ error: 'bad key' }, 401)) as unknown as typeof fetch;
+    await expect(callOpenAI(deps(fetchFn), [])).rejects.toThrow(/401/);
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+  });
+});
