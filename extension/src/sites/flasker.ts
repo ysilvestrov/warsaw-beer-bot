@@ -66,18 +66,18 @@ const BREWERY_RULES: BreweryRule[] = [
 ];
 
 function normalizeTag(tag: string): string {
-  return tag.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+  return tag.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
 function productSlug(productUrl: string | undefined): string | null {
   if (!productUrl) return null;
   try {
     const url = new URL(productUrl);
-    const hostname = url.hostname.toLocaleLowerCase();
+    const hostname = url.hostname.toLowerCase();
     if (hostname !== 'flasker.com.ua' && !hostname.endsWith('.flasker.com.ua')) return null;
     const match = url.pathname.match(/\/product\/([^/]+)\/?$/u);
     if (!match) return null;
-    return decodeURIComponent(match[1]).toLocaleLowerCase();
+    return decodeURIComponent(match[1]).toLowerCase();
   } catch {
     return null;
   }
@@ -100,9 +100,9 @@ function resolveBreweryRule(evidence: FlaskerEvidence): BreweryRule | null {
 
 function stripTitleAlias(head: string, aliases: string[]): string {
   const ordered = [...aliases].sort((a, b) => b.length - a.length);
-  const lowerHead = head.toLocaleLowerCase();
+  const lowerHead = head.toLowerCase();
   for (const alias of ordered) {
-    const lowerAlias = alias.toLocaleLowerCase();
+    const lowerAlias = alias.toLowerCase();
     if (lowerHead === lowerAlias) return head;
     if (!lowerHead.startsWith(lowerAlias)) continue;
     const rest = head.slice(alias.length);

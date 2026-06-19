@@ -33,7 +33,7 @@ describe('parseTitle', () => {
 
   it('canonicalizes a brewery from a trusted product tag', () => {
     expect(parseTitle('Vibrant Pour Frost & Flame Imperial Porter 10% 0.33', {
-      productTags: ['330 ml', 'Vibrant Pour', 'Україна'],
+      productTags: ['330 ml', 'VIBRANT POUR', 'Україна'],
     })).toEqual({ brewery: 'VibrantPour', name: 'Frost & Flame Imperial Porter', abv: 10 });
   });
 
