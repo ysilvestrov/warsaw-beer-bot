@@ -204,6 +204,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 14,
+    sql: `
+      ALTER TABLE pubs ADD COLUMN city TEXT NOT NULL DEFAULT 'warszawa';
+      ALTER TABLE user_profiles ADD COLUMN city TEXT;
+      CREATE INDEX idx_pubs_city ON pubs(city);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
