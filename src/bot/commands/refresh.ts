@@ -6,6 +6,7 @@ import type { Translator } from '../../i18n/types';
 import type { DB } from '../../storage/db';
 import { listPubs } from '../../storage/pubs';
 import { type NewbeersDeps, type NewbeersResult, filterPubsByQuery } from './newbeers-build';
+import { getUserCity } from '../../storage/user_profiles';
 
 const FULL_COOLDOWN_MS = 5 * 60 * 1000;
 const SCOPED_COOLDOWN_MS = 30 * 1000;
@@ -137,7 +138,7 @@ export function createRefreshCommand(
 
     const postRunClosure = postRun
       ? async () => {
-          const result = postRun({ db, telegramId, locale, t, pubQuery });
+          const result = postRun({ db, telegramId, locale, t, pubQuery, city: getUserCity(db, telegramId) });
           if (result.kind === 'ok') {
             await telegram.sendMessage(chatId, result.html, { parse_mode: 'HTML' });
           } else if (result.kind === 'empty' && pubSlugs) {

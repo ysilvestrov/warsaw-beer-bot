@@ -15,7 +15,7 @@ function fresh() {
 
 const t = createTranslator('uk');
 const base = (db: ReturnType<typeof fresh>, pubQuery?: string) =>
-  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery });
+  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa' });
 
 describe('buildBeersMessage — resolution', () => {
   test('missing argument returns no_arg', () => {
@@ -30,14 +30,14 @@ describe('buildBeersMessage — resolution', () => {
 
   test('unknown query returns pub_not_found with trimmed query', () => {
     const db = fresh();
-    upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     expect(base(db, '  zzz  ')).toEqual({ kind: 'pub_not_found', query: 'zzz' });
   });
 
   test('two name-matches return ambiguous with both pubs', () => {
     const db = fresh();
-    upsertPub(db, { slug: 'a', name: 'PINTA Warszawa', address: 'Chmielna 7', lat: null, lon: null });
-    upsertPub(db, { slug: 'b', name: 'PINTA Warszawa', address: 'Nowogrodzka 4', lat: null, lon: null });
+    upsertPub(db, { slug: 'a', name: 'PINTA Warszawa', address: 'Chmielna 7', lat: null, lon: null, city: 'warszawa' });
+    upsertPub(db, { slug: 'b', name: 'PINTA Warszawa', address: 'Nowogrodzka 4', lat: null, lon: null, city: 'warszawa' });
     const out = base(db, 'pinta');
     expect(out.kind).toBe('ambiguous');
     if (out.kind !== 'ambiguous') return;
@@ -50,7 +50,7 @@ describe('buildBeersMessage — resolution', () => {
   test('ambiguous caps the list at 3 pubs', () => {
     const db = fresh();
     for (let i = 1; i <= 4; i++) {
-      upsertPub(db, { slug: `m${i}`, name: `Multi Bar ${i}`, address: null, lat: null, lon: null });
+      upsertPub(db, { slug: `m${i}`, name: `Multi Bar ${i}`, address: null, lat: null, lon: null, city: 'warszawa' });
     }
     const out = base(db, 'multi');
     expect(out.kind).toBe('ambiguous');
@@ -60,13 +60,13 @@ describe('buildBeersMessage — resolution', () => {
 
   test('matched pub without any snapshot returns empty with pub name', () => {
     const db = fresh();
-    upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     expect(base(db, 'kufel')).toEqual({ kind: 'empty', pub: 'Kufel' });
   });
 
   test('matched pub with snapshot but no taps returns empty', () => {
     const db = fresh();
-    const id = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const id = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     createSnapshot(db, id, '2026-05-25T12:00:00Z');
     expect(base(db, 'kufel')).toEqual({ kind: 'empty', pub: 'Kufel' });
   });
@@ -75,7 +75,7 @@ describe('buildBeersMessage — resolution', () => {
 describe('buildBeersMessage — ok rendering', () => {
   test('shows every tap incl. orphan and already-tried, with 🟢/⚪ icons', () => {
     const db = fresh();
-    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: 'Foo 1', lat: null, lon: null });
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: 'Foo 1', lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     const beerId = upsertBeer(db, {
       untappd_id: 1, name: 'Atak Chmielu', brewery: 'Pinta', style: 'AIPA',
@@ -108,7 +108,7 @@ describe('buildBeersMessage — ok rendering', () => {
 
   test('null tap_number / abv / rating render as em dash', () => {
     const db = fresh();
-    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     insertTaps(db, snap, [
       { tap_number: null, beer_ref: 'No Numbers', brewery_ref: null,
@@ -123,7 +123,7 @@ describe('buildBeersMessage — ok rendering', () => {
 
   test('empty tap (beer_ref "N/A") collapses to "{tap#} • N/A"', () => {
     const db = fresh();
-    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     insertTaps(db, snap, [
       { tap_number: 2, beer_ref: 'N/A', brewery_ref: null,
@@ -138,7 +138,7 @@ describe('buildBeersMessage — ok rendering', () => {
 
   test('tap matched to an orphan beers row (untappd_id NULL) shows ⚪, not 🟢', () => {
     const db = fresh();
-    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     // Orphan beers row: created from ontap, no untappd_id yet, but match_links
     // points the ontap_ref at this row's own id (as refreshOntap does).
@@ -163,7 +163,7 @@ describe('buildBeersMessage — ok rendering', () => {
 
   test('tap matched to a real catalog beer (untappd_id set) shows 🟢', () => {
     const db = fresh();
-    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null });
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     const beerId = upsertBeer(db, {
       untappd_id: 6172039, name: 'Wocky Talky', brewery: 'JBW Browar', style: null,

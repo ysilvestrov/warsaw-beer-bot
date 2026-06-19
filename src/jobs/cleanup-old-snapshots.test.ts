@@ -25,7 +25,7 @@ function snap(db: ReturnType<typeof fresh>, pubId: number, at: string): number {
 describe('cleanupOldSnapshots', () => {
   test('deletes snapshots older than retentionDays, keeps recent + latest', () => {
     const db = fresh();
-    const p = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null });
+    const p = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null, city: 'warszawa' });
     const old = snap(db, p, '2026-05-01T12:00:00Z');   // 34 days before now
     const recent = snap(db, p, '2026-06-03T12:00:00Z'); // 1 day before now, latest
     const now = () => new Date('2026-06-04T00:00:00Z');
@@ -39,7 +39,7 @@ describe('cleanupOldSnapshots', () => {
 
   test('returns 0 on an already-clean DB', () => {
     const db = fresh();
-    const p = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null });
+    const p = upsertPub(db, { slug: 'a', name: 'a', address: null, lat: null, lon: null, city: 'warszawa' });
     snap(db, p, '2026-06-03T12:00:00Z');
     const deleted = cleanupOldSnapshots(db, silentLog, 14, () => new Date('2026-06-04T00:00:00Z'));
     expect(deleted).toBe(0);

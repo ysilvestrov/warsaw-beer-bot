@@ -22,6 +22,9 @@ export interface Messages {
   'cmd.beers': string;
   'cmd.refresh': string;
   'cmd.lang': string;
+  'cmd.city': string;
+  'city.prompt': string;                 // {name} = current city
+  'city.changed': string;                // {name}
   'cmd.help': string;
   'cmd.start': string;
   'cmd.extension': string;

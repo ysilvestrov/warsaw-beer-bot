@@ -1,6 +1,7 @@
 import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
 import { buildNewbeersMessage } from './newbeers-build';
+import { getUserCity } from '../../storage/user_profiles';
 
 export const newbeersCommand = new Composer<BotContext>();
 
@@ -12,6 +13,7 @@ newbeersCommand.command('newbeers', async (ctx) => {
     locale: ctx.locale,
     t: ctx.t,
     pubQuery: arg || undefined,
+    city: getUserCity(ctx.deps.db, ctx.from.id),
   });
   switch (result.kind) {
     case 'ok':

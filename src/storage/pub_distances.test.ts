@@ -13,9 +13,9 @@ import {
 function setup() {
   const db = openDb(':memory:');
   migrate(db);
-  const a = upsertPub(db, { slug: 'a', name: 'A', address: null, lat: 52.0, lon: 21.0 });
-  const b = upsertPub(db, { slug: 'b', name: 'B', address: null, lat: 52.1, lon: 21.0 });
-  const c = upsertPub(db, { slug: 'c', name: 'C', address: null, lat: 52.0, lon: 21.1 });
+  const a = upsertPub(db, { slug: 'a', name: 'A', address: null, lat: 52.0, lon: 21.0, city: 'warszawa' });
+  const b = upsertPub(db, { slug: 'b', name: 'B', address: null, lat: 52.1, lon: 21.0, city: 'warszawa' });
+  const c = upsertPub(db, { slug: 'c', name: 'C', address: null, lat: 52.0, lon: 21.1, city: 'warszawa' });
   return { db, a, b, c };
 }
 

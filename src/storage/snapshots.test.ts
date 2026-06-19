@@ -7,7 +7,7 @@ import { upsertMatch } from './match_links';
 
 function setup() {
   const db = openDb(':memory:'); migrate(db);
-  const pubId = upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null });
+  const pubId = upsertPub(db, { slug: 'p', name: 'P', address: null, lat: null, lon: null, city: 'warszawa' });
   return { db, pubId };
 }
 
@@ -184,7 +184,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
 test('currentTapStyles returns styles from the latest snapshot of each pub only', () => {
   const { db, pubId } = setup();
-  const pubId2 = upsertPub(db, { slug: 'q', name: 'Q', address: null, lat: null, lon: null });
+  const pubId2 = upsertPub(db, { slug: 'q', name: 'Q', address: null, lat: null, lon: null, city: 'warszawa' });
 
   // older snapshot for pub 1 — must be ignored
   const old = createSnapshot(db, pubId, '2026-06-01T10:00:00Z');
@@ -217,7 +217,7 @@ describe('deleteOldSnapshots', () => {
   }
 
   function pub(db: ReturnType<typeof fresh>, slug: string): number {
-    return upsertPub(db, { slug, name: slug, address: null, lat: null, lon: null });
+    return upsertPub(db, { slug, name: slug, address: null, lat: null, lon: null, city: 'warszawa' });
   }
 
   function snap(db: ReturnType<typeof fresh>, pubId: number, at: string): number {

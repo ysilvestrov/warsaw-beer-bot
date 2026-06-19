@@ -221,4 +221,30 @@ describe('schema migrations', () => {
       expect(col!.notnull).toBe(0); // nullable
     }
   });
+
+  test('migration v14 adds city columns with correct constraints', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    type ColInfo = { name: string; notnull: number; dflt_value: unknown };
+    const info = (table: string) =>
+      db.prepare(`PRAGMA table_info(${table})`).all() as ColInfo[];
+
+    const pubCity = info('pubs').find((c) => c.name === 'city');
+    expect(pubCity).toBeDefined();
+    expect(pubCity!.notnull).toBe(1);
+    expect(pubCity!.dflt_value).toBe("'warszawa'");
+
+    const userCity = info('user_profiles').find((c) => c.name === 'city');
+    expect(userCity).toBeDefined();
+    expect(userCity!.notnull).toBe(0);
+  });
+
+  test('existing pubs default to warszawa', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    db.prepare("INSERT INTO pubs (slug, name) VALUES ('x', 'X')").run();
+    const row = db.prepare("SELECT city FROM pubs WHERE slug = 'x'").get() as { city: string };
+    expect(row.city).toBe('warszawa');
+  });
 });
