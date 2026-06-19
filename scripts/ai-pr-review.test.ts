@@ -185,4 +185,15 @@ describe('upsertReview', () => {
     expect(update.init?.method).toBe('PUT');
     expect(update.url).toContain('/reviews/42');
   });
+
+  it('fails loudly with status + body when the post is rejected', async () => {
+    const fetchFn = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined) return jsonResponse([]); // list ok
+      return jsonResponse({ message: 'Forbidden' }, 403); // create rejected
+    }) as unknown as typeof fetch;
+
+    await expect(upsertReview(ghDeps(fetchFn), wrapBody('x'))).rejects.toThrow(
+      /create review HTTP 403.*Forbidden/,
+    );
+  });
 });

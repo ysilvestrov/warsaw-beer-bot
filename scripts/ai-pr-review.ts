@@ -185,6 +185,13 @@ interface ReviewRow {
   user?: { type?: string };
 }
 
+// Surfaces the GitHub response status AND body so a failed post fails loudly with a
+// clear, actionable reason (mirrors the OpenAI non-ok path) rather than a bare code.
+async function githubError(action: string, res: Response): Promise<Error> {
+  const text = await res.text().catch(() => '');
+  return new Error(`GitHub ${action} HTTP ${res.status}: ${text.slice(0, 300)}`);
+}
+
 export async function upsertReview(deps: GithubDeps, body: string): Promise<'created' | 'updated'> {
   const fetchFn = deps.fetchFn ?? fetch;
   const base = `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}/reviews`;
@@ -200,7 +207,7 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
   // earliest reviews and stays on the first page; per_page=100 is enough to find
   // it without pagination on this repo's PRs.
   const listRes = await fetchFn(`${base}?per_page=100`, { headers });
-  if (!listRes.ok) throw new Error(`GitHub list reviews HTTP ${listRes.status}`);
+  if (!listRes.ok) throw await githubError('list reviews', listRes);
   const reviews = (await listRes.json()) as ReviewRow[];
   const existing = reviews.find(
     (r) => r.user?.type === 'Bot' && (r.body ?? '').includes(MARKER),
@@ -212,7 +219,7 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
       headers,
       body: JSON.stringify({ body }),
     });
-    if (!res.ok) throw new Error(`GitHub update review HTTP ${res.status}`);
+    if (!res.ok) throw await githubError('update review', res);
     return 'updated';
   }
 
@@ -221,7 +228,7 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
     headers,
     body: JSON.stringify({ body, event: 'COMMENT' }),
   });
-  if (!res.ok) throw new Error(`GitHub create review HTTP ${res.status}`);
+  if (!res.ok) throw await githubError('create review', res);
   return 'created';
 }
 
