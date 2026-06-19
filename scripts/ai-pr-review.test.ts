@@ -60,3 +60,33 @@ describe('readConfig', () => {
     expect(() => readConfig(rest as NodeJS.ProcessEnv)).toThrow(/OPENAI_API_KEY/);
   });
 });
+
+import { truncateDiff, buildMessages } from './ai-pr-review';
+
+describe('truncateDiff', () => {
+  it('returns the diff unchanged when within budget', () => {
+    expect(truncateDiff('abc', 10)).toEqual({ text: 'abc', truncated: false });
+  });
+  it('cuts to the budget and flags truncation when over', () => {
+    expect(truncateDiff('abcdef', 3)).toEqual({ text: 'abc', truncated: true });
+  });
+});
+
+describe('buildMessages', () => {
+  it('puts instructions in system and PR context + diff in user, noting truncation', () => {
+    const msgs = buildMessages({
+      instructions: 'REVIEW RULES',
+      prTitle: 'My PR',
+      prBody: 'desc',
+      baseRef: 'main',
+      headRef: 'feat',
+      diff: 'diff-body',
+      truncated: true,
+    });
+    expect(msgs[0]).toEqual({ role: 'system', content: 'REVIEW RULES' });
+    expect(msgs[1].role).toBe('user');
+    expect(msgs[1].content).toContain('Title: My PR');
+    expect(msgs[1].content).toContain('diff-body');
+    expect(msgs[1].content).toContain('truncated');
+  });
+});

@@ -69,3 +69,44 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
     prBody: env.PR_BODY ?? '',
   };
 }
+
+export const DIFF_BUDGET = 100_000;
+
+export function truncateDiff(diff: string, budget: number): { text: string; truncated: boolean } {
+  if (diff.length <= budget) return { text: diff, truncated: false };
+  return { text: diff.slice(0, budget), truncated: true };
+}
+
+export interface ChatMessage {
+  role: 'system' | 'user';
+  content: string;
+}
+
+export function buildMessages(p: {
+  instructions: string;
+  prTitle: string;
+  prBody: string;
+  baseRef: string;
+  headRef: string;
+  diff: string;
+  truncated: boolean;
+}): ChatMessage[] {
+  const user = [
+    '# Pull request',
+    `Title: ${p.prTitle}`,
+    `Base: ${p.baseRef}`,
+    `Head: ${p.headRef}`,
+    '',
+    '## Body',
+    p.prBody || '(no description)',
+    '',
+    `## Diff${p.truncated ? ' (truncated — only the first part is shown)' : ''}`,
+    '```diff',
+    p.diff,
+    '```',
+  ].join('\n');
+  return [
+    { role: 'system', content: p.instructions },
+    { role: 'user', content: user },
+  ];
+}
