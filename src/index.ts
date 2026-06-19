@@ -17,6 +17,7 @@ import { pubsCommand } from './bot/commands/pubs';
 import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
+import { cityCommand } from './bot/commands/city';
 import { extensionCommand } from './bot/commands/extension';
 import { extensionReleaseCommand } from './bot/commands/extension-release';
 import { helpCommand } from './bot/commands/help';
@@ -87,6 +88,7 @@ async function main(): Promise<void> {
     routeCommand,
     filtersCommand,
     langCommand,
+    cityCommand,
     extensionCommand,
     helpCommand,
     createRefreshCommand(

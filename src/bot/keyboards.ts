@@ -2,6 +2,7 @@ import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
 import { ABV_PRESETS } from '../domain/filters';
 import { OTHER_FAMILY } from '../domain/style-family';
+import { CITIES } from '../domain/cities';
 
 export const langKeyboard = () =>
   Markup.inlineKeyboard([
@@ -9,6 +10,16 @@ export const langKeyboard = () =>
     [Markup.button.callback('🇵🇱 Polski', 'lang:pl')],
     [Markup.button.callback('🇬🇧 English', 'lang:en')],
   ]);
+
+export const cityKeyboard = (current: string) =>
+  Markup.inlineKeyboard(
+    CITIES.map((c) => [
+      Markup.button.callback(
+        c.slug === current ? `✓ ${c.label}` : c.label,
+        `city:${c.slug}`,
+      ),
+    ]),
+  );
 
 export interface FiltersKeyboardState {
   families: string[];        // already ordered: top-N present ∪ active
