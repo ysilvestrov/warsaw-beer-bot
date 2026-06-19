@@ -31,6 +31,60 @@ describe('parseTitle', () => {
       .toEqual({ brewery: 'Vibrant Pour', name: 'Frost & Flame Imperial Porter', abv: 10 });
   });
 
+  it('canonicalizes a brewery from a trusted product tag', () => {
+    expect(parseTitle('Vibrant Pour Frost & Flame Imperial Porter 10% 0.33', {
+      productTags: ['330 ml', 'Vibrant Pour', 'Україна'],
+    })).toEqual({ brewery: 'VibrantPour', name: 'Frost & Flame Imperial Porter', abv: 10 });
+  });
+
+  it('uses a trusted product slug when block cards have no tags', () => {
+    expect(parseTitle('Barely Beer 0% ABV 330ml', {
+      productUrl: 'https://flasker.com.ua/product/mad-barely-beer-0-abv-pale-ale-330ml/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'Barely Beer', abv: 0 });
+  });
+
+  it('retains the complete name when the brewery is absent from the title', () => {
+    expect(parseTitle('Barely Beer 0% ABV 330ml', { productTags: ['mad brew'] }))
+      .toEqual({ brewery: 'Mad Brew', name: 'Barely Beer', abv: 0 });
+  });
+
+  it('prefers one trusted tag over a conflicting URL rule', () => {
+    expect(parseTitle('Barely Beer 0% ABV 330ml', {
+      productTags: ['mad brew'],
+      productUrl: 'https://flasker.com.ua/product/vibrant-pour-barely-beer/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'Barely Beer', abv: 0 });
+  });
+
+  it('falls back to title parsing when trusted tags conflict', () => {
+    expect(parseTitle('Mystery Beer 5% 330ml', {
+      productTags: ['mad brew', 'Vibrant Pour'],
+      productUrl: 'https://flasker.com.ua/product/mad-mystery-beer/',
+    })).toEqual({ brewery: 'Mystery', name: 'Beer', abv: 5 });
+  });
+
+  it('falls back for unknown tags, foreign URLs, and malformed URLs', () => {
+    for (const evidence of [
+      { productTags: ['Imperial Stout'] },
+      { productUrl: 'https://example.com/product/mad-mystery-beer/' },
+      { productUrl: 'not a URL' },
+    ]) {
+      expect(parseTitle('Mystery Beer 5% 330ml', evidence))
+        .toEqual({ brewery: 'Mystery', name: 'Beer', abv: 5 });
+    }
+  });
+
+  it('removes the longest matching title alias', () => {
+    expect(parseTitle('Hoppy Hog — Winter Cherry 8% 330ml', {
+      productTags: ['Hoppy Hog'],
+    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Winter Cherry', abv: 8 });
+  });
+
+  it('cleans a merchandising label after metadata resolution', () => {
+    expect(parseTitle('ПРЕДРЕЛІЗ Galaxy Juice 6% 330ml', {
+      productTags: ['mad brew'],
+    })).toEqual({ brewery: 'Mad Brew', name: 'Galaxy Juice', abv: 6 });
+  });
+
   it('no abv → volume marks the head end', () => {
     expect(parseTitle('Orval {2025} 330ml')).toEqual({ brewery: 'Orval', name: '{2025}' });
   });

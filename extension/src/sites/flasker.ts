@@ -26,6 +26,93 @@ function volumeIndex(title: string): number {
 const PAREN_RE = /^\([^)]*\)$/u;
 const TWO_WORD_BREWERIES = new Set(['vibrant pour']);
 
+export interface FlaskerEvidence {
+  productTags?: string[];
+  productUrl?: string;
+}
+
+interface BreweryRule {
+  canonical: string;
+  tags: string[];
+  slugPrefixes: string[];
+  titleAliases: string[];
+}
+
+const BREWERY_RULES: BreweryRule[] = [
+  {
+    canonical: 'VibrantPour',
+    tags: ['vibrant pour'],
+    slugPrefixes: ['vibrant-pour-', 'vibrantpour-'],
+    titleAliases: ['Vibrant Pour', 'VibrantPour'],
+  },
+  {
+    canonical: 'Mad Brew',
+    tags: ['mad brew'],
+    slugPrefixes: ['mad-brew-', 'mad-'],
+    titleAliases: ['Mad Brew'],
+  },
+  {
+    canonical: 'Flasker',
+    tags: ['flasker'],
+    slugPrefixes: ['flasker-'],
+    titleAliases: ['Flasker'],
+  },
+  {
+    canonical: 'Hoppy Hog Family Brewery',
+    tags: ['hoppy hog'],
+    slugPrefixes: ['hoppy-hog-'],
+    titleAliases: ['Hoppy Hog'],
+  },
+];
+
+function normalizeTag(tag: string): string {
+  return tag.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+}
+
+function productSlug(productUrl: string | undefined): string | null {
+  if (!productUrl) return null;
+  try {
+    const url = new URL(productUrl);
+    const hostname = url.hostname.toLocaleLowerCase();
+    if (hostname !== 'flasker.com.ua' && !hostname.endsWith('.flasker.com.ua')) return null;
+    const match = url.pathname.match(/\/product\/([^/]+)\/?$/u);
+    if (!match) return null;
+    return decodeURIComponent(match[1]).toLocaleLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function uniqueRule(rules: BreweryRule[]): BreweryRule | null {
+  const unique = [...new Set(rules)];
+  return unique.length === 1 ? unique[0] : null;
+}
+
+function resolveBreweryRule(evidence: FlaskerEvidence): BreweryRule | null {
+  const tags = new Set((evidence.productTags ?? []).map(normalizeTag));
+  const tagRules = BREWERY_RULES.filter((rule) => rule.tags.some((tag) => tags.has(tag)));
+  if (tagRules.length > 0) return uniqueRule(tagRules);
+
+  const slug = productSlug(evidence.productUrl);
+  if (!slug) return null;
+  return uniqueRule(BREWERY_RULES.filter((rule) => rule.slugPrefixes.some((prefix) => slug.startsWith(prefix))));
+}
+
+function stripTitleAlias(head: string, aliases: string[]): string {
+  const ordered = [...aliases].sort((a, b) => b.length - a.length);
+  const lowerHead = head.toLocaleLowerCase();
+  for (const alias of ordered) {
+    const lowerAlias = alias.toLocaleLowerCase();
+    if (lowerHead === lowerAlias) return head;
+    if (!lowerHead.startsWith(lowerAlias)) continue;
+    const rest = head.slice(alias.length);
+    if (!/^[\s:–—-]/u.test(rest)) continue;
+    const stripped = rest.replace(/^[\s:–—-]+/u, '').trim();
+    return stripped || head;
+  }
+  return head;
+}
+
 function splitBreweryName(head: string): { brewery: string; name: string } {
   const tokens = head.split(/\s+/).filter(Boolean);
   if (tokens.length <= 1) return { brewery: head, name: head };
@@ -68,7 +155,10 @@ export function isNonBeerCategory(cat: string): boolean {
 }
 
 // Returns null when the title carries no volume token → treat as non-beer.
-export function parseTitle(rawTitle: string): { brewery: string; name: string; abv?: number } | null {
+export function parseTitle(
+  rawTitle: string,
+  evidence: FlaskerEvidence = {},
+): { brewery: string; name: string; abv?: number } | null {
   const title = rawTitle.replace(/\s+/g, ' ').trim();
   if (!title) return null;
 
@@ -83,7 +173,11 @@ export function parseTitle(rawTitle: string): { brewery: string; name: string; a
 
   const abv = abvMatch ? Number(abvMatch[1].replace(',', '.')) : undefined;
 
-  const { brewery, name } = splitBreweryName(head);
+  const rule = resolveBreweryRule(evidence);
+  const fallback = splitBreweryName(head);
+  const brewery = rule?.canonical ?? fallback.brewery;
+  const nameBeforeCleanup = rule ? stripTitleAlias(head, rule.titleAliases) : fallback.name;
+  const name = stripMerchandisingPrefix(nameBeforeCleanup);
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
 
