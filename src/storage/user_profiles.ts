@@ -1,10 +1,12 @@
 import type { DB } from './db';
 import type { Locale } from '../i18n/types';
+import { DEFAULT_CITY, isKnownCity } from '../domain/cities';
 
 export interface ProfileRow {
   telegram_id: number;
   untappd_username: string | null;
   language: string | null;
+  city: string | null;
   created_at: string;
 }
 
@@ -22,6 +24,18 @@ export function setUntappdUsername(db: DB, telegramId: number, username: string)
 export function getProfile(db: DB, telegramId: number): ProfileRow | null {
   return (db.prepare('SELECT * FROM user_profiles WHERE telegram_id = ?')
     .get(telegramId) as ProfileRow | undefined) ?? null;
+}
+
+export function getUserCity(db: DB, telegramId: number): string {
+  const row = db
+    .prepare('SELECT city FROM user_profiles WHERE telegram_id = ?')
+    .get(telegramId) as { city: string | null } | undefined;
+  const v = row?.city;
+  return v != null && isKnownCity(v) ? v : DEFAULT_CITY;
+}
+
+export function setUserCity(db: DB, telegramId: number, slug: string): void {
+  db.prepare('UPDATE user_profiles SET city = ? WHERE telegram_id = ?').run(slug, telegramId);
 }
 
 export function allProfiles(db: DB): ProfileRow[] {
