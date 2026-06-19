@@ -189,20 +189,47 @@ const BLOCK_CARD = 'li.wc-block-grid__product';                  // "All Product
 const BLOCK_TITLE = '.wc-block-grid__product-title';
 const GRID_SELECTOR = `${ARCHIVE_CARD}, ${TABLE_ROW}, ${BLOCK_CARD}`;
 
-interface RawEntry { el: HTMLElement; title: string; categoryHint?: string }
+interface RawEntry {
+  el: HTMLElement;
+  title: string;
+  categoryHint?: string;
+  productTags: string[];
+  productUrl?: string;
+}
 
 function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
 
+function href(el: Element | null | undefined): string | undefined {
+  return el?.getAttribute('href') ?? undefined;
+}
+
+function parseTableTags(raw: string | null): string[] {
+  return (raw ?? '')
+    .split(',')
+    .map((part) => part.replace(/^\s*\d+:/u, '').trim())
+    .filter(Boolean);
+}
+
 function archiveEntries(root: ParentNode): RawEntry[] {
   return Array.from(root.querySelectorAll<HTMLElement>(ARCHIVE_CARD))
-    .map((el) => ({ el, title: text(el.querySelector(ARCHIVE_TITLE)) }));
+    .map((el) => ({
+      el,
+      title: text(el.querySelector(ARCHIVE_TITLE)),
+      productTags: Array.from(el.querySelectorAll('.mb-thumb-tag')).map((tag) => text(tag)),
+      productUrl: href(el.querySelector('.woocommerce-LoopProduct-link[href]')),
+    }));
 }
 
 function blockEntries(root: ParentNode): RawEntry[] {
   return Array.from(root.querySelectorAll<HTMLElement>(BLOCK_CARD))
-    .map((el) => ({ el, title: text(el.querySelector(BLOCK_TITLE)) }));
+    .map((el) => ({
+      el,
+      title: text(el.querySelector(BLOCK_TITLE)),
+      productTags: [],
+      productUrl: href(el.querySelector('.wc-block-grid__product-title a[href]')),
+    }));
 }
 
 function tableEntries(root: ParentNode): RawEntry[] {
@@ -210,6 +237,8 @@ function tableEntries(root: ParentNode): RawEntry[] {
     el,
     title: (el.getAttribute('data-title') ?? '').replace(/\s+/g, ' ').trim(),
     categoryHint: el.getAttribute('data-product_cat') ?? undefined,
+    productTags: parseTableTags(el.getAttribute('data-product_tag')),
+    productUrl: el.getAttribute('data-href') ?? undefined,
   }));
 }
 
@@ -229,7 +258,10 @@ export const flasker: SiteAdapter = {
       if (!e.title) continue;
       if (isNonBeerTitle(e.title)) continue;
       if (e.categoryHint && isNonBeerCategory(e.categoryHint)) continue;
-      const parsed = parseTitle(e.title);
+      const parsed = parseTitle(e.title, {
+        productTags: e.productTags,
+        productUrl: e.productUrl,
+      });
       if (!parsed) continue;
       cards.push({ el: e.el, ...parsed });
     }

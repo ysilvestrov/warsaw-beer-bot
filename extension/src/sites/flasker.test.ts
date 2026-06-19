@@ -6,6 +6,12 @@ import { parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory
 const load = (name: string) =>
   new DOMParser().parseFromString(readFileSync(resolve(__dirname, `../../tests/fixtures/${name}`), 'utf8'), 'text/html');
 
+const findCard = (fixture: string, expectedName: string) => {
+  const card = flasker.parseCards(load(fixture)).find((item) => item.name === expectedName);
+  expect(card, `${fixture}: ${expectedName}`).toBeDefined();
+  return card!;
+};
+
 describe('parseTitle', () => {
   it('single-token brewery + style name', () => {
     expect(parseTitle('Burgomistr NEIPA 6% 500ml')).toEqual({ brewery: 'Burgomistr', name: 'NEIPA', abv: 6 });
@@ -199,6 +205,30 @@ describe('flasker adapter', () => {
 
   it('parses cards from the client-rendered block view (li.wc-block-grid__product)', () => {
     expect(flasker.parseCards(load('flasker.block.html')).length).toBeGreaterThan(0);
+  });
+
+  it('uses visible archive tags for canonical identity', () => {
+    expect(findCard('flasker.html', 'Frost & Flame Imperial Porter')).toMatchObject({
+      brewery: 'VibrantPour',
+      name: 'Frost & Flame Imperial Porter',
+      abv: 10,
+    });
+  });
+
+  it('uses table data-product_tag when the title omits the brewery', () => {
+    expect(findCard('flasker.table.html', 'Barely Beer')).toMatchObject({
+      brewery: 'Mad Brew',
+      name: 'Barely Beer',
+      abv: 0,
+    });
+  });
+
+  it('uses the block product URL when tags are unavailable', () => {
+    expect(findCard('flasker.block.html', 'Barely Beer')).toMatchObject({
+      brewery: 'Mad Brew',
+      name: 'Barely Beer',
+      abv: 0,
+    });
   });
 
   it('drops every product on a non-beer page', () => {
