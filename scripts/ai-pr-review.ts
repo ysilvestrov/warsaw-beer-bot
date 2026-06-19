@@ -1,3 +1,6 @@
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+
 export const INCLUDE_PATTERNS = [
   'src/**/*.ts',
   'tests/**/*.ts',
@@ -217,4 +220,70 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
   });
   if (!res.ok) throw new Error(`GitHub create review HTTP ${res.status}`);
   return 'created';
+}
+
+function listChangedFiles(baseRef: string): string[] {
+  const out = execFileSync('git', ['diff', '--name-only', `origin/${baseRef}...HEAD`], {
+    encoding: 'utf8',
+  });
+  return out
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function getDiff(baseRef: string, files: string[]): string {
+  return execFileSync('git', ['diff', `origin/${baseRef}...HEAD`, '--', ...files], {
+    encoding: 'utf8',
+    maxBuffer: 50 * 1024 * 1024,
+  });
+}
+
+const INSTRUCTIONS_PATH = '.github/ai-review/AGENTS.md';
+
+export async function main(): Promise<void> {
+  const cfg = readConfig(process.env);
+
+  const reviewable = filterReviewableFiles(listChangedFiles(cfg.baseRef));
+  if (reviewable.length === 0) {
+    console.log('::notice::AI review skipped: no changed files are in the reviewer scope.');
+    return;
+  }
+
+  if (!existsSync(INSTRUCTIONS_PATH)) {
+    throw new Error(`${INSTRUCTIONS_PATH} is missing`);
+  }
+  const instructions = readFileSync(INSTRUCTIONS_PATH, 'utf8');
+
+  const { text: diff, truncated } = truncateDiff(getDiff(cfg.baseRef, reviewable), DIFF_BUDGET);
+
+  const messages = buildMessages({
+    instructions,
+    prTitle: cfg.prTitle,
+    prBody: cfg.prBody,
+    baseRef: cfg.baseRef,
+    headRef: cfg.headRef,
+    diff,
+    truncated,
+  });
+
+  const summary = await callOpenAI(
+    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey },
+    messages,
+  );
+
+  const how = await upsertReview(
+    { repo: cfg.repo, prNumber: cfg.prNumber, token: cfg.githubToken },
+    wrapBody(summary),
+  );
+
+  console.log(`AI review ${how} on PR #${cfg.prNumber} (${reviewable.length} file(s) in scope).`);
+}
+
+if (require.main === module) {
+  main().catch((err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`::error::AI review failed: ${msg}`);
+    process.exit(1);
+  });
 }
