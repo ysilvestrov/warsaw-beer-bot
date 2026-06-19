@@ -36,6 +36,10 @@ Untappd enrichment even when the correct candidate is present.
 - No fuzzy interpretation of merchandising labels.
 - No product-name corrections such as `Sommer` → `Summer`, `Tripel` → `Triple`,
   or localized Syrskald flavor mappings. Those require a separate design.
+- No special handling for `DE ZWARTE REGEL` products. Captured rows carry a
+  `Vibrant Pour` tag while Untappd catalogs the candidate under `Mad Brew`; this
+  contradictory source evidence remains unresolved rather than adding a
+  product-family URL override.
 - No network requests from the content script.
 
 ## Architecture
@@ -144,11 +148,11 @@ Example:
 
 ```text
 tag: mad brew
-title: ПРЕДРЕЛІЗ DE ZWARTE REGEL: Derde Wacht 9% 330ml
+title: ПРЕДРЕЛІЗ Galaxy Juice 6% 330ml
 
 brewery rule → Mad Brew
-name before cleanup → ПРЕДРЕЛІЗ DE ZWARTE REGEL: Derde Wacht
-final name → DE ZWARTE REGEL: Derde Wacht
+name before cleanup → ПРЕДРЕЛІЗ Galaxy Juice
+final name → Galaxy Juice
 ```
 
 Cleanup runs after metadata resolution and after the current fallback parser so its
@@ -202,8 +206,8 @@ Add focused tests to `extension/src/sites/flasker.test.ts`:
 - A label in the middle of a name remains.
 - An unknown leading label remains.
 - Empty-name cleanup retains the original non-empty name.
-- Both known `DE ZWARTE REGEL` prerelease titles resolve to brewery `Mad Brew` with
-  the label removed from the name.
+- A synthetic metadata-backed title verifies prefix removal independently of the
+  excluded `DE ZWARTE REGEL` products.
 
 Existing archive, table, block, ABV, volume, non-beer, and conformance tests must
 remain green. Fixture-level tests must assert exact brewery/name pairs rather than
