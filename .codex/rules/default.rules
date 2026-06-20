@@ -1,0 +1,13 @@
+# Автоматичний дозвіл для всіх команд Git
+prefix_rule(
+    pattern = ["git"],
+    decision = "allow",
+    justification = "Allow all git commands without prompting"
+)
+
+# Автоматичний дозвіл для всіх команд GitHub CLI
+prefix_rule(
+    pattern = ["gh"],
+    decision = "allow",
+    justification = "Allow all GitHub CLI commands without prompting"
+)
