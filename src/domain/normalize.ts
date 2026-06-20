@@ -33,9 +33,21 @@ function stripDiacritics(s: string): string {
     .replace(/ł/g, 'l').replace(/Ł/g, 'L');
 }
 
+// Private-use sentinel survives baseNormalize's punctuation pass, then becomes a
+// canonical dot. Percentage/strength suffixes deliberately bypass this protection.
+const DECIMAL_SEPARATOR = '\uE000';
+
+function preserveDecimalIdentifiers(s: string): string {
+  return s.replace(
+    /\b(\d+)[.,](\d+)\b(?!\s*(?:%|°|abv\b))/gi,
+    `$1${DECIMAL_SEPARATOR}$2`,
+  );
+}
+
 export function baseNormalize(s: string): string {
   return stripDiacritics(s).toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .replace(/[^\p{L}\p{N}\s\uE000]/gu, ' ')
+    .replaceAll(DECIMAL_SEPARATOR, '.')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -62,7 +74,7 @@ export function stripLegalForm(s: string): string {
 }
 
 export function normalizeName(s: string): string {
-  const tokens = baseNormalize(s)
+  const tokens = baseNormalize(preserveDecimalIdentifiers(s))
     .split(' ')
     .filter((t) => t && !STYLE_WORDS.has(t) && !isNumericNoise(t));
   return tokens.join(' ');

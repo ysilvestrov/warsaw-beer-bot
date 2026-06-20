@@ -1098,6 +1098,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   ABV-tiebreak (`ABV_TOLERANCE`). `normalizeName` зрізає рік, тож різні
   vintage/міцності одного пива (`Buzdygan Rozkoszy` 8.5% vs `… 2026` 9.8%)
   колапсують в однакову назву; ABV — єдиний сигнал, що їх розрізняє.
+  Десяткові release-ідентифікатори в назві (`Ambrosia 9.0`) натомість зберігаються
+  як токени і не можуть exact/fuzzy-матчитись до іншого релізу (`Ambrosia 8.0`).
+  Числовий tap-noise з `%`/`°`/`ABV` і чотиризначні vintage-роки далі зрізаються.
   `enrichOneOrphan` передає `beer.abv` у `lookupBeer`.
 - Збережений `normalized_brewery` — ключ ідемпотентності upsert; при зміні правил
   нормалізації перераховується на старті (`backfill-normalized-brewery.ts`).

@@ -24,6 +24,13 @@ test('strips numeric tokens (ABV / strength / years)', () => {
   expect(normalizeBrewery('Browar Stu 8,5%')).toBe('stu');
 });
 
+test('preserves decimal release identifiers in beer names', () => {
+  expect(normalizeName('Ambrosia 9.0')).toBe('ambrosia 9.0');
+  expect(normalizeName('Ambrosia 8.0')).toBe('ambrosia 8.0');
+  expect(normalizeName(' Ambrosia 9,0 ')).toBe('ambrosia 9.0');
+  expect(normalizeName('Ambrosia 9.0 — IPA')).toBe('ambrosia 9.0');
+});
+
 test('strips every Polish diacritic', () => {
   expect(normalizeBrewery('ąćęłńóśźż')).toBe('acelnoszz');
   expect(normalizeBrewery('ĄĆĘŁŃÓŚŹŻ')).toBe('acelnoszz');

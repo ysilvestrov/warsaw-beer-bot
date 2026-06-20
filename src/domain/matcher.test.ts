@@ -263,6 +263,19 @@ describe('vintage handling', () => {
   });
 });
 
+describe('decimal release identifiers', () => {
+  const releases: CatalogBeer[] = [
+    c({ id: 11185, brewery: 'FUNKY FLUID', name: 'Ambrosia 8.0', abv: 6.5 }),
+    c({ id: 10615, brewery: 'FUNKY FLUID', name: 'Ambrosia 7.0', abv: 6.7 }),
+    c({ id: 9859, brewery: 'FUNKY FLUID', name: 'Ambrosia 2025', abv: 6.5 }),
+    c({ id: 387, brewery: 'FUNKY FLUID', name: 'Ambrosia 5.0', abv: 6.8 }),
+  ];
+
+  test('does not match an unknown release to an older catalog row without ABV', () => {
+    expect(matchBeer({ brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0' }, releases)).toBeNull();
+  });
+});
+
 test('ontap-style raw beer_ref + ABV maps to clean Untappd entry', () => {
   // Real-world scenario from issue #18: ontap parser used to leave
   // "Buzdygan Rozkoszy 24°·8,5% — Caribbean Imperial Stout" in beer_ref,
