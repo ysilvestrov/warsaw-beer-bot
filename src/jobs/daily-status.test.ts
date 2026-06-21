@@ -3,6 +3,7 @@ import type { StatusMetrics } from '../storage/stats';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { buildStatusMessage, dailyStatus, shouldSendDailyStatus } from './daily-status';
+import { getJobState } from '../storage/job_state';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -62,16 +63,55 @@ test('dailyStatus: no-op when notifyAdmin is undefined', async () => {
   ).resolves.toBeUndefined();
 });
 
-test('dailyStatus: sends the built message once when notifyAdmin is set', async () => {
+test('dailyStatus: sends once in window and records the Warsaw date', async () => {
   const db = emptyDb();
   const sent: string[] = [];
   await dailyStatus({
     db, log: silentLog,
     notifyAdmin: async (msg: string) => { sent.push(msg); },
-    now: () => new Date('2026-06-04T07:00:00Z'),
+    now: () => new Date('2026-06-21T07:00:00Z'), // 09:00 Warsaw
   });
-  expect(sent).toHaveLength(1);
-  expect(sent[0].startsWith('🍺 Статус бота — ')).toBe(true);
+  expect(sent.length).toBe(1);
+  expect(getJobState(db, 'daily_status_last_sent')).toBe('2026-06-21');
+});
+
+test('dailyStatus: no-op outside the window', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  await dailyStatus({
+    db, log: silentLog,
+    notifyAdmin: async (msg: string) => { sent.push(msg); },
+    now: () => new Date('2026-06-21T11:00:00Z'), // 13:00 Warsaw
+  });
+  expect(sent.length).toBe(0);
+  expect(getJobState(db, 'daily_status_last_sent')).toBeNull();
+});
+
+test('dailyStatus: no-op when already sent today (idempotent across ticks)', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const deps = {
+    db, log: silentLog,
+    notifyAdmin: async (msg: string) => { sent.push(msg); },
+    now: () => new Date('2026-06-21T07:00:00Z'),
+  };
+  await dailyStatus(deps);
+  await dailyStatus(deps); // second tick same morning
+  expect(sent.length).toBe(1);
+});
+
+test('dailyStatus: does NOT record the date when send fails (retried next tick)', async () => {
+  const db = emptyDb();
+  let calls = 0;
+  const deps = {
+    db, log: silentLog,
+    notifyAdmin: async () => { calls += 1; throw new Error('telegram down'); },
+    now: () => new Date('2026-06-21T07:00:00Z'),
+  };
+  await dailyStatus(deps);
+  expect(getJobState(db, 'daily_status_last_sent')).toBeNull();
+  await dailyStatus(deps); // retry: should attempt again, not be blocked
+  expect(calls).toBe(2);
 });
 
 // June = CEST (UTC+2): 07:00Z = 09:00 Warsaw. January = CET (UTC+1): 08:00Z = 09:00 Warsaw.
