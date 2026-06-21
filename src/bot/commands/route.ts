@@ -4,7 +4,7 @@ import { listPubs } from '../../storage/pubs';
 import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
-import { filterInteresting } from '../../domain/filters';
+import { filterInteresting, type FilterOpts, type TapView } from '../../domain/filters';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import {
   buildRoute,
@@ -32,6 +32,14 @@ const PROGRESS_MIN_INTERVAL_MS = 2000;
 
 export const routeCommand = new Composer<BotContext>();
 
+export function filterRouteTaps<T extends TapView>(
+  taps: T[],
+  tried: Set<number>,
+  filters: FilterOpts,
+): T[] {
+  return filterInteresting(taps, tried, { ...filters, require_untappd_match: true });
+}
+
 routeCommand.command('route', async (ctx) => {
   const db = ctx.deps.db;
   const arg = ctx.message.text.split(' ')[1];
@@ -58,7 +66,7 @@ routeCommand.command('route', async (ctx) => {
     const pub = pubsById.get(snap.pub_id);
     if (!pub || pub.lat == null || pub.lon == null) continue;
     const taps = tapsForSnapshotWithBeer(db, snap.id);
-    const good = filterInteresting(taps, tried, filters);
+    const good = filterRouteTaps(taps, tried, filters);
     if (!good.length) continue;
     routePubs.push({
       id: pub.id,
