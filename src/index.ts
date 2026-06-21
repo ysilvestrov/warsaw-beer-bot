@@ -148,14 +148,17 @@ async function main(): Promise<void> {
         log.error({ err: e }, 'cleanup-old-snapshots cron');
       }
     }),
-    // daily-status: admin health digest at 09:00 Warsaw. The server runs in UTC
-    // (Etc/UTC), and node-cron fires in the server's local time unless told
-    // otherwise — so we pin the timezone explicitly, else 09:00 UTC lands at
-    // 11:00 CEST. Async → .catch. Self-noops when ADMIN_TELEGRAM_ID is unset.
-    cron.schedule('0 9 * * *', () => {
+    // daily-status: admin health digest, ~09:00 Warsaw. We run a plain UTC tick
+    // every 15 min instead of a node-cron timezone schedule — node-cron's
+    // timezone tick proved flaky (silently skipped 2026-06-21) while UTC ticks
+    // are reliable. dailyStatus itself checks the Warsaw [09:00,12:00) window and
+    // an idempotency date in job_state, so it sends exactly once per Warsaw day
+    // and catches up if the bot was down at 09:00. Self-noops when
+    // ADMIN_TELEGRAM_ID is unset.
+    cron.schedule('*/15 * * * *', () => {
       dailyStatus({ db, log, notifyAdmin })
         .catch((e) => log.error({ err: e }, 'daily-status cron'));
-    }, { timezone: 'Europe/Warsaw' }),
+    }),
   ];
 
   if (untappdHttp) {
@@ -169,6 +172,13 @@ async function main(): Promise<void> {
 
   bot.launch();
   log.info('bot launched');
+
+  // Startup catch-up: if the bot was down/redeploying at 09:00 Warsaw but is up
+  // within the morning window, emit today's digest now instead of waiting for the
+  // next 15-min tick. Idempotent via job_state, so a normal start is a no-op once
+  // the day's digest already went out.
+  dailyStatus({ db, log, notifyAdmin })
+    .catch((e) => log.error({ err: e }, 'daily-status startup'));
 
   const apiApp = createApiApp({ db, env, log });
   const apiServer = createApiServer(apiApp, env, log);
