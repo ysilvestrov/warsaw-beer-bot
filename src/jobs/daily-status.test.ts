@@ -2,7 +2,7 @@ import pino from 'pino';
 import type { StatusMetrics } from '../storage/stats';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { buildStatusMessage, dailyStatus } from './daily-status';
+import { buildStatusMessage, dailyStatus, shouldSendDailyStatus } from './daily-status';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -72,4 +72,40 @@ test('dailyStatus: sends the built message once when notifyAdmin is set', async 
   });
   expect(sent).toHaveLength(1);
   expect(sent[0].startsWith('🍺 Статус бота — ')).toBe(true);
+});
+
+// June = CEST (UTC+2): 07:00Z = 09:00 Warsaw. January = CET (UTC+1): 08:00Z = 09:00 Warsaw.
+test('shouldSendDailyStatus: before window (08:59 Warsaw) → no send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T06:59:00Z'), lastSentDate: null });
+  expect(r).toEqual({ send: false, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: window open (09:00 Warsaw), not yet sent → send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T07:00:00Z'), lastSentDate: null });
+  expect(r).toEqual({ send: true, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: late in window (11:59 Warsaw) → send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T09:59:00Z'), lastSentDate: null });
+  expect(r).toEqual({ send: true, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: window closed (12:00 Warsaw) → no send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T10:00:00Z'), lastSentDate: null });
+  expect(r).toEqual({ send: false, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: in window but already sent today → no send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T07:00:00Z'), lastSentDate: '2026-06-21' });
+  expect(r).toEqual({ send: false, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: in window, last sent yesterday → send', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-06-21T07:00:00Z'), lastSentDate: '2026-06-20' });
+  expect(r).toEqual({ send: true, dateKey: '2026-06-21' });
+});
+
+test('shouldSendDailyStatus: winter CET, 09:00 Warsaw = 08:00Z → send with correct date', () => {
+  const r = shouldSendDailyStatus({ now: new Date('2026-01-15T08:00:00Z'), lastSentDate: null });
+  expect(r).toEqual({ send: true, dateKey: '2026-01-15' });
 });
