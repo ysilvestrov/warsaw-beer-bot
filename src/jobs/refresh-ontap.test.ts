@@ -108,6 +108,44 @@ describe('refreshOntap non-beer filtering', () => {
       'Vilniaus Alus Brewery',
     ]);
   });
+
+  test('keeps N/A in the snapshot without creating catalog or match rows', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const indexHtml = `
+      <div onclick="location.assign('https://empty-tap.ontap.pl/')">
+        <div class="panel-body">Empty Tap Pub 2 taps</div>
+      </div>
+    `;
+    const pubHtml = `
+      <html><head><meta property="og:title" content="Empty Tap Pub / ontap.pl"></head>
+      <body>
+        ${panel(1, 'Real Brewery', 'Real Beer 5%', 'Pils')}
+        ${panel(2, '', 'N/A', '')}
+      </body></html>
+    `;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return indexHtml;
+        if (url === 'https://empty-tap.ontap.pl/') return pubHtml;
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, geocoder: async () => null,
+      lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+    });
+
+    const pub = db.prepare('SELECT id FROM pubs WHERE slug = ?').get('empty-tap') as { id: number };
+    const snap = latestSnapshot(db, pub.id);
+    expect(tapsForSnapshot(db, snap!.id).map((tap) => tap.beer_ref))
+      .toEqual(['Real Beer', 'N/A']);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM beers WHERE name = 'N/A'").get())
+      .toEqual({ n: 0 });
+    expect(db.prepare("SELECT COUNT(*) AS n FROM match_links WHERE ontap_ref = 'N/A'").get())
+      .toEqual({ n: 0 });
+  });
 });
 
 function panel(

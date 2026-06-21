@@ -5,7 +5,7 @@ import type { Geocoder } from '../sources/geocoder';
 import { parseOntapCityIndex, type IndexPub } from '../sources/ontap/index';
 import { CITIES, type City } from '../domain/cities';
 import { isOntapNonBeerTap } from '../sources/ontap/non-beer';
-import { parsePubPage } from '../sources/ontap/pub';
+import { isOntapEmptyTapRef, parsePubPage } from '../sources/ontap/pub';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
@@ -89,6 +89,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
         const catalog = listBeerCatalog(db);
         const prepared = prepareCatalog(catalog);
         for (const t of taps) {
+          if (isOntapEmptyTapRef(t.beer_ref)) continue;
           const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
           const m = matchPrepared({ brewery, name: t.beer_ref, abv: t.abv }, prepared);
           let beerId: number;
