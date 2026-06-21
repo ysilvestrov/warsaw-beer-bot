@@ -15,6 +15,18 @@ test('filterInteresting respects checkins + style + rating + abv', () => {
   expect(out.map((t) => t.beer_id)).toEqual([3]);
 });
 
+test('filterInteresting optionally requires a real Untappd match', () => {
+  const rows = [
+    { beer_id: 10, untappd_id: null, style: 'IPA', abv: 6, u_rating: null },
+    { beer_id: 11, untappd_id: 1011, style: 'IPA', abv: 6, u_rating: 4 },
+  ];
+
+  expect(filterInteresting(rows, new Set(), {}).map((r) => r.beer_id))
+    .toEqual([10, 11]);
+  expect(filterInteresting(rows, new Set(), { require_untappd_match: true }).map((r) => r.beer_id))
+    .toEqual([11]);
+});
+
 test('topStyleFamilies ranks present families by count, then alpha, caps at n', () => {
   const styles = [
     'IPA - American', 'IPA - Imperial', 'IPA - New England',  // IPA x3
