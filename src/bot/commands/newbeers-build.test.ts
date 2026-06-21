@@ -5,6 +5,8 @@ import { createSnapshot, insertTaps } from '../../storage/snapshots';
 import { upsertBeer } from '../../storage/beers';
 import { upsertMatch } from '../../storage/match_links';
 import { createTranslator } from '../../i18n';
+import { setFilters } from '../../storage/user_filters';
+import { ensureProfile } from '../../storage/user_profiles';
 import { buildNewbeersMessage, filterPubsByQuery } from './newbeers-build';
 
 function fresh() {
@@ -45,6 +47,27 @@ function seedTwoPubs(db: ReturnType<typeof fresh>) {
   }]);
 }
 
+function seedOrphanAndEmptyTap(db: ReturnType<typeof fresh>) {
+  const pubId = upsertPub(db, {
+    slug: 'orphan-pub', name: 'Orphan Pub', address: null, lat: null, lon: null, city: 'warszawa',
+  });
+  const snapId = createSnapshot(db, pubId, '2026-06-21T00:00:00Z');
+  const mysteryId = upsertBeer(db, {
+    name: 'Mystery Beer', brewery: 'Mystery Brewery', style: 'IPA', abv: 6,
+    rating_global: null, normalized_name: 'mystery beer', normalized_brewery: 'mystery brewery',
+  });
+  const emptyId = upsertBeer(db, {
+    name: 'N/A', brewery: 'N/A', style: null, abv: null, rating_global: null,
+    normalized_name: 'n a', normalized_brewery: 'n a',
+  });
+  upsertMatch(db, 'Mystery Beer', mysteryId, 1);
+  upsertMatch(db, 'N/A', emptyId, 1);
+  insertTaps(db, snapId, [
+    { tap_number: 1, beer_ref: 'Mystery Beer', brewery_ref: 'Mystery Brewery', abv: 6, ibu: null, style: 'IPA', u_rating: null },
+    { tap_number: 2, beer_ref: 'N/A', brewery_ref: null, abv: null, ibu: null, style: null, u_rating: null },
+  ]);
+}
+
 describe('buildNewbeersMessage', () => {
   test('returns kind=empty when there are no snapshots at all', () => {
     const db = fresh();
@@ -72,6 +95,29 @@ describe('buildNewbeersMessage', () => {
     expect(out.html).toContain('Pub A');
     expect(out.html).toContain('Buty Skejta');
     expect(out.html).toContain('Pub B');
+  });
+
+  test('unfiltered results keep ordinary orphans but always hide N/A taps', () => {
+    const db = fresh();
+    seedOrphanAndEmptyTap(db);
+    const t = createTranslator('uk');
+    const out = buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' });
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.html).toContain('Mystery Beer');
+    expect(out.html).not.toContain('<b>N/A</b>');
+  });
+
+  test('active user filters hide ordinary orphans', () => {
+    const db = fresh();
+    seedOrphanAndEmptyTap(db);
+    ensureProfile(db, 1);
+    setFilters(db, 1, {
+      styles: [], min_rating: null, abv_min: null, abv_max: 8, default_route_n: null,
+    });
+    const t = createTranslator('uk');
+    expect(buildNewbeersMessage({ db, telegramId: 1, locale: 'uk', t, city: 'warszawa' }))
+      .toEqual({ kind: 'empty' });
   });
 
   test('returns kind=empty when the user has already tried (triedBeerIds) the only tap', () => {

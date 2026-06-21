@@ -4,6 +4,7 @@ import { latestSnapshot, tapsForSnapshotWithBeer } from '../../storage/snapshots
 import { listPubs } from '../../storage/pubs';
 import { filterPubsByQuery } from './newbeers-build';
 import { escapeHtml } from './newbeers-format';
+import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
 
 export interface BeersDeps {
   db: DB;
@@ -56,7 +57,7 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
   const lines = taps.map((tap) => {
     // Empty tap: ontap.pl renders "N/A" as the beer name. Show just the tap
     // number — abv/rating/match-status would all be noise.
-    if (tap.beer_ref.trim().toUpperCase() === 'N/A') {
+    if (isOntapEmptyTapRef(tap.beer_ref)) {
       return `${fmtTapNum(tap.tap_number)} • N/A`;
     }
     const display = tap.brewery_ref

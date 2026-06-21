@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parsePubPage, extractBeerName } from './pub';
+import { parsePubPage, extractBeerName, isOntapEmptyTapRef } from './pub';
 
 const html = fs.readFileSync(
   path.join(__dirname, '../../../tests/fixtures/ontap/beer-bones.html'),
@@ -35,6 +35,13 @@ test('style is populated when subtitle exists', () => {
   // At least some taps in a real ontap page have a style subtitle.
   const withStyle = taps.filter((t) => t.style && t.style.length > 0);
   expect(withStyle.length).toBeGreaterThan(0);
+});
+
+test('recognizes only the exact case-insensitive N/A empty-tap sentinel', () => {
+  expect(isOntapEmptyTapRef(' N/A ')).toBe(true);
+  expect(isOntapEmptyTapRef('n/a')).toBe(true);
+  expect(isOntapEmptyTapRef('N/A Lager')).toBe(false);
+  expect(isOntapEmptyTapRef('')).toBe(false);
 });
 
 describe('tap_number parsing', () => {

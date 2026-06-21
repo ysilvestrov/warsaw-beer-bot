@@ -22,6 +22,10 @@ export interface ParsedPubPage {
   taps: ParsedTap[];
 }
 
+export function isOntapEmptyTapRef(beerRef: string): boolean {
+  return beerRef.trim().toUpperCase() === 'N/A';
+}
+
 // Strip ABV/strength suffix and brewery prefix from h4 text.
 // h4Text typically looks like "Brewery Name BeerName 24°·8,5%" — we want
 // just "BeerName" so the matcher sees a canonical key.

@@ -3,9 +3,10 @@ import type { Locale, Translator } from '../../i18n/types';
 import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { getFilters } from '../../storage/user_filters';
-import { filterInteresting } from '../../domain/filters';
+import { filterInteresting, type FilterOpts } from '../../domain/filters';
 import { listPubs, type PubRow } from '../../storage/pubs';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
+import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
 import {
   groupTaps,
   rankGroups,
@@ -45,6 +46,12 @@ export type NewbeersResult =
   | { kind: 'empty' }
   | { kind: 'pub_not_found'; query: string };
 
+const hasActiveBeerFilters = (filters: FilterOpts): boolean =>
+  Boolean(filters.styles?.length) ||
+  filters.min_rating != null ||
+  filters.abv_min != null ||
+  filters.abv_max != null;
+
 export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
   const { db, telegramId, locale, t } = deps;
   const tried = triedBeerIds(db, telegramId);
@@ -72,8 +79,12 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
     const pub = pubs.get(snap.pub_id);
     if (!pub) continue;
     const taps = tapsForSnapshotWithBeer(db, snap.id);
-    const good = filterInteresting(taps, tried, filters);
+    const good = filterInteresting(taps, tried, {
+      ...filters,
+      require_untappd_match: hasActiveBeerFilters(filters),
+    });
     for (const tap of good) {
+      if (isOntapEmptyTapRef(tap.beer_ref)) continue;
       const display = tap.brewery_ref ? `${tap.brewery_ref} ${tap.beer_ref}`.trim() : tap.beer_ref;
       candidates.push({
         beer_id: tap.beer_id,
