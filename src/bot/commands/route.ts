@@ -78,6 +78,7 @@ routeCommand.command('route', async (ctx) => {
       pub.id,
       good.map((t) => ({
         beer_id: t.beer_id,
+        untappd_id: t.untappd_id,
         display: t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref,
         brewery_norm: normalizeBrewery(t.brewery_ref ?? ''),
         name_norm: normalizeName(t.beer_ref),

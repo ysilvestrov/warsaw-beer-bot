@@ -106,7 +106,8 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(out.html).toContain('Кранів: 2');          // header count
     const matchedLine = out.html.split('\n').find((line) => line.startsWith('1 '))!;
     expect(matchedLine).toContain(
-      '<b>PINTA PINTA Atak Chmielu</b> • AIPA &amp; &lt;Ale&gt; • 6.1%',
+      '<a href="https://untappd.com/beer/1"><b>PINTA PINTA Atak Chmielu</b></a>' +
+      ' • AIPA &amp; &lt;Ale&gt; • 6.1%',
     );
   });
 
@@ -185,5 +186,39 @@ describe('buildBeersMessage — ok rendering', () => {
     if (out.kind !== 'ok') return;
     const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
     expect(line).toContain('🟢');
+  });
+
+  test('matched beer name is a tappable Untappd link', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    const beerId = upsertBeer(db, {
+      untappd_id: 6172039, name: 'Wocky Talky', brewery: 'JBW Browar', style: null,
+      abv: 5, rating_global: 4.1,
+      normalized_name: 'wocky talky', normalized_brewery: 'jbw',
+    });
+    upsertMatch(db, 'JBW Brewery Wocky Talky', beerId, 1.0);
+    insertTaps(db, snap, [
+      { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: null,
+        abv: 5, ibu: null, style: null, u_rating: null },
+    ]);
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.html).toContain('<a href="https://untappd.com/beer/6172039"><b>JBW Brewery Wocky Talky</b></a>');
+  });
+
+  test('orphan beer name has no link', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    insertTaps(db, snap, [
+      { tap_number: 1, beer_ref: 'Mystery Brew', brewery_ref: 'Nobody',
+        abv: null, ibu: null, style: null, u_rating: null },
+    ]);
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.html).not.toContain('<a href=');
   });
 });

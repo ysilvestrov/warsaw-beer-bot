@@ -1,6 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { collectStatus, type StatusMetrics } from '../storage/stats';
+import { getJobState, setJobState } from '../storage/job_state';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
@@ -36,6 +37,36 @@ function warsawStamp(d: Date): string {
   }).format(d).replace(',', '');
 }
 
+// Warsaw-local calendar date ("YYYY-MM-DD") and hour (0–23) for d. Uses the
+// same Europe/Warsaw zone as warsawStamp so DST is handled by Intl, not by us.
+function warsawDateAndHour(d: Date): { date: string; hour: number } {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/Warsaw',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
+  }).formatToParts(d);
+  const get = (t: string): string => parts.find((p) => p.type === t)!.value;
+  let hour = Number(get('hour'));
+  if (hour === 24) hour = 0; // some ICU builds render midnight as "24"
+  return { date: `${get('year')}-${get('month')}-${get('day')}`, hour };
+}
+
+export interface ShouldSendArgs {
+  now: Date;
+  lastSentDate: string | null;
+  windowStartHour?: number;
+  windowEndHour?: number;
+}
+
+// Pure decision: send the digest iff the current Warsaw hour is within
+// [windowStartHour, windowEndHour) and we have not already sent for this
+// Warsaw date. dateKey is the date to persist on a successful send.
+export function shouldSendDailyStatus(args: ShouldSendArgs): { send: boolean; dateKey: string } {
+  const { now, lastSentDate, windowStartHour = 9, windowEndHour = 12 } = args;
+  const { date, hour } = warsawDateAndHour(now);
+  const inWindow = hour >= windowStartHour && hour < windowEndHour;
+  return { send: inWindow && lastSentDate !== date, dateKey: date };
+}
+
 export interface DailyStatusDeps {
   db: DB;
   log: pino.Logger;
@@ -43,8 +74,12 @@ export interface DailyStatusDeps {
   now?: () => Date;
 }
 
-// Daily admin health digest. No-op when notifyAdmin is undefined
-// (ADMIN_TELEGRAM_ID not set), matching the other admin alerts.
+const DAILY_STATUS_KEY = 'daily_status_last_sent';
+
+// Daily admin health digest. Runs on a frequent UTC tick (and once at startup);
+// the Warsaw-window + last-sent-date check makes it self-throttle to one send per
+// Warsaw day and catch up after a restart inside the morning window. No-op when
+// notifyAdmin is undefined (ADMIN_TELEGRAM_ID not set).
 export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
   const { db, log, notifyAdmin } = deps;
   if (!notifyAdmin) {
@@ -52,11 +87,18 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     return;
   }
   const now = (deps.now ?? (() => new Date()))();
+  const lastSentDate = getJobState(db, DAILY_STATUS_KEY);
+  const { send, dateKey } = shouldSendDailyStatus({ now, lastSentDate });
+  if (!send) {
+    log.debug({ dateKey, lastSentDate }, 'daily-status: outside window or already sent');
+    return;
+  }
   const metrics = collectStatus(db, now);
   const text = buildStatusMessage(metrics, warsawStamp(now));
   try {
     await notifyAdmin(text);
-    log.info({ lastScrapeHoursAgo: metrics.lastScrapeHoursAgo }, 'daily-status sent');
+    setJobState(db, DAILY_STATUS_KEY, dateKey);
+    log.info({ lastScrapeHoursAgo: metrics.lastScrapeHoursAgo, dateKey }, 'daily-status sent');
   } catch (e) {
     log.error({ err: e }, 'daily-status send failed');
   }

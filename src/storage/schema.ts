@@ -212,6 +212,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX idx_pubs_city ON pubs(city);
     `,
   },
+  {
+    version: 15,
+    sql: `
+      CREATE TABLE job_state (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

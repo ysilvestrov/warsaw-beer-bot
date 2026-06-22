@@ -88,6 +88,7 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
       const display = tap.brewery_ref ? `${tap.brewery_ref} ${tap.beer_ref}`.trim() : tap.beer_ref;
       candidates.push({
         beer_id: tap.beer_id,
+        untappd_id: tap.untappd_id,
         display,
         brewery_norm: normalizeBrewery(tap.brewery_ref ?? ''),
         name_norm: normalizeName(tap.beer_ref),
