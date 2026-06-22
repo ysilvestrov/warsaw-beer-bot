@@ -1,6 +1,7 @@
 import type { Locale, Translator } from '../../i18n/types';
 import { fmtAbv as fmtAbvLocale } from '../../i18n/format';
-import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
+import { beerNameHtml } from './beer-link';
+import { escapeHtml } from './html';
 
 export interface CandidateTap {
   beer_id: number | null;
@@ -83,8 +84,8 @@ export function rankGroups(groups: BeerGroup[]): BeerGroup[] {
   });
 }
 
-export const escapeHtml = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Re-export so existing callers keep their single import surface here.
+export { escapeHtml };
 
 export const fmtRating = (r: number | null): string =>
   r === null ? '⭐ —' : `⭐ ${r.toFixed(2).replace(/\.?0+$/, '')}`;
@@ -102,11 +103,8 @@ export function formatGroupedBeers(
   const { topN = 15, maxPubs = 3 } = opts;
   const lines: string[] = [];
   groups.slice(0, topN).forEach((g, i) => {
-    const name =
-      g.untappd_id != null
-        ? `<a href="${buildBeerPageUrl(g.untappd_id)}"><b>${escapeHtml(g.display)}</b></a>`
-        : `<b>${escapeHtml(g.display)}</b>`;
-    const head = `${i + 1}. ${name}  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
+    const nameHtml = beerNameHtml(g.display, g.untappd_id);
+    const head = `${i + 1}. ${nameHtml}  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
     const shown = g.pubs.slice(0, maxPubs).map(escapeHtml).join(', ');
     const extra =
       g.pubs.length > maxPubs ? t('newbeers.more_pubs_suffix', { extra: g.pubs.length - maxPubs }) : '';

@@ -4,8 +4,8 @@ import { latestSnapshot, tapsForSnapshotWithBeer } from '../../storage/snapshots
 import { listPubs } from '../../storage/pubs';
 import { filterPubsByQuery } from './newbeers-build';
 import { escapeHtml } from './newbeers-format';
+import { beerNameHtml } from './beer-link';
 import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
-import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
 
 export interface BeersDeps {
   db: DB;
@@ -65,12 +65,9 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
       ? `${tap.brewery_ref} ${tap.beer_ref}`.trim()
       : tap.beer_ref;
     const icon = tap.untappd_id != null ? '🟢' : '⚪';
-    const name =
-      tap.untappd_id != null
-        ? `<a href="${buildBeerPageUrl(tap.untappd_id)}"><b>${escapeHtml(display)}</b></a>`
-        : `<b>${escapeHtml(display)}</b>`;
+    const nameHtml = beerNameHtml(display, tap.untappd_id);
     return (
-      `${fmtTapNum(tap.tap_number)} • ${name}` +
+      `${fmtTapNum(tap.tap_number)} • ${nameHtml}` +
       ` • ${fmtAbv(tap.abv)} • ${fmtRating(tap.u_rating)} • ${icon}`
     );
   });
