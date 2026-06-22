@@ -95,6 +95,8 @@ describe('buildNewbeersMessage', () => {
     expect(out.html).toContain('Pub A');
     expect(out.html).toContain('Buty Skejta');
     expect(out.html).toContain('Pub B');
+    expect(out.html).toContain('• AIPA');
+    expect(out.html).toContain('• Pils');
   });
 
   test('unfiltered results keep ordinary orphans but always hide N/A taps', () => {

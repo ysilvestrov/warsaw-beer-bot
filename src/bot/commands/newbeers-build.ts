@@ -91,6 +91,7 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
         display,
         brewery_norm: normalizeBrewery(tap.brewery_ref ?? ''),
         name_norm: normalizeName(tap.beer_ref),
+        style: tap.style,
         abv: tap.abv,
         rating: tap.u_rating,
         pub_name: pub.name,
