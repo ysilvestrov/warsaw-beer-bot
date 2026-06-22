@@ -3,7 +3,7 @@ import type { Locale, Translator } from '../../i18n/types';
 import { latestSnapshot, tapsForSnapshotWithBeer } from '../../storage/snapshots';
 import { listPubs } from '../../storage/pubs';
 import { filterPubsByQuery } from './newbeers-build';
-import { escapeHtml } from './newbeers-format';
+import { escapeHtml, fmtStyle } from './newbeers-format';
 import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
 
 export interface BeersDeps {
@@ -65,7 +65,7 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
       : tap.beer_ref;
     const icon = tap.untappd_id != null ? '🟢' : '⚪';
     return (
-      `${fmtTapNum(tap.tap_number)} • <b>${escapeHtml(display)}</b>` +
+      `${fmtTapNum(tap.tap_number)} • <b>${escapeHtml(display)}</b>${fmtStyle(tap.style)}` +
       ` • ${fmtAbv(tap.abv)} • ${fmtRating(tap.u_rating)} • ${icon}`
     );
   });
