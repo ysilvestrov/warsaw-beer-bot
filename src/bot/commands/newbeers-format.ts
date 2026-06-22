@@ -1,8 +1,11 @@
 import type { Locale, Translator } from '../../i18n/types';
 import { fmtAbv as fmtAbvLocale } from '../../i18n/format';
+import { beerNameHtml } from './beer-link';
+import { escapeHtml } from './html';
 
 export interface CandidateTap {
   beer_id: number | null;
+  untappd_id: number | null;
   display: string;          // human-readable "Brewery BeerName"
   brewery_norm: string;     // for fallback grouping key
   name_norm: string;        // for fallback grouping key
@@ -13,6 +16,7 @@ export interface CandidateTap {
 
 export interface BeerGroup {
   display: string;
+  untappd_id: number | null;
   rating: number | null;
   abv: number | null;
   pubs: string[];
@@ -30,7 +34,13 @@ const maxRating = (a: number | null, b: number | null): number | null => {
 export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
   const acc = new Map<
     string,
-    { display: string; bestRating: number | null; abv: number | null; pubs: Set<string> }
+    {
+      display: string;
+      untappd_id: number | null;
+      bestRating: number | null;
+      abv: number | null;
+      pubs: Set<string>;
+    }
   >();
   for (const t of taps) {
     const k = groupKey(t);
@@ -38,6 +48,7 @@ export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
     if (!cur) {
       acc.set(k, {
         display: t.display,
+        untappd_id: t.untappd_id,
         bestRating: t.rating,
         abv: t.abv,
         pubs: new Set([t.pub_name]),
@@ -56,6 +67,7 @@ export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
   }
   return [...acc.values()].map((g) => ({
     display: g.display,
+    untappd_id: g.untappd_id,
     rating: g.bestRating,
     abv: g.abv,
     pubs: [...g.pubs].sort((a, b) => a.localeCompare(b)),
@@ -72,8 +84,8 @@ export function rankGroups(groups: BeerGroup[]): BeerGroup[] {
   });
 }
 
-export const escapeHtml = (s: string): string =>
-  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Re-export so existing callers keep their single import surface here.
+export { escapeHtml };
 
 export const fmtRating = (r: number | null): string =>
   r === null ? '⭐ —' : `⭐ ${r.toFixed(2).replace(/\.?0+$/, '')}`;
@@ -91,7 +103,8 @@ export function formatGroupedBeers(
   const { topN = 15, maxPubs = 3 } = opts;
   const lines: string[] = [];
   groups.slice(0, topN).forEach((g, i) => {
-    const head = `${i + 1}. <b>${escapeHtml(g.display)}</b>  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
+    const nameHtml = beerNameHtml(g.display, g.untappd_id);
+    const head = `${i + 1}. ${nameHtml}  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
     const shown = g.pubs.slice(0, maxPubs).map(escapeHtml).join(', ');
     const extra =
       g.pubs.length > maxPubs ? t('newbeers.more_pubs_suffix', { extra: g.pubs.length - maxPubs }) : '';

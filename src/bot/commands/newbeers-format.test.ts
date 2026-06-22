@@ -14,6 +14,7 @@ const stubT: Translator = (key, params) => {
 
 const tap = (over: Partial<CandidateTap> = {}): CandidateTap => ({
   beer_id: null,
+  untappd_id: null,
   display: 'X',
   brewery_norm: 'b',
   name_norm: 'x',
@@ -91,6 +92,7 @@ describe('groupTaps', () => {
 describe('rankGroups', () => {
   const g = (display: string, rating: number | null, pubs: string[]): BeerGroup => ({
     display,
+    untappd_id: null,
     rating,
     abv: null,
     pubs,
@@ -115,7 +117,7 @@ describe('rankGroups', () => {
 describe('formatGroupedBeers', () => {
   test('numbered list with bold name, rating and ABV', () => {
     const text = formatGroupedBeers(
-      [{ display: 'Salamander', rating: 3.9, abv: 5.5, pubs: ['Cuda'] }],
+      [{ display: 'Salamander', untappd_id: null, rating: 3.9, abv: 5.5, pubs: ['Cuda'] }],
       'uk', stubT,
     );
     expect(text).toContain('1. <b>Salamander</b>');
@@ -126,7 +128,7 @@ describe('formatGroupedBeers', () => {
 
   test('renders integer ABV without decimal separator', () => {
     const text = formatGroupedBeers(
-      [{ display: 'X', rating: 4.0, abv: 6, pubs: ['A'] }],
+      [{ display: 'X', untappd_id: null, rating: 4.0, abv: 6, pubs: ['A'] }],
       'uk', stubT,
     );
     expect(text).toContain('6%');
@@ -135,7 +137,7 @@ describe('formatGroupedBeers', () => {
 
   test('omits ABV chip when abv is null', () => {
     const text = formatGroupedBeers(
-      [{ display: 'X', rating: 4.0, abv: null, pubs: ['A'] }],
+      [{ display: 'X', untappd_id: null, rating: 4.0, abv: null, pubs: ['A'] }],
       'uk', stubT,
     );
     expect(text).not.toMatch(/%/);
@@ -143,7 +145,7 @@ describe('formatGroupedBeers', () => {
 
   test('caps pub list at maxPubs and appends +N інших', () => {
     const text = formatGroupedBeers(
-      [{ display: 'X', rating: 4.0, abv: null, pubs: ['A', 'B', 'C', 'D', 'E'] }],
+      [{ display: 'X', untappd_id: null, rating: 4.0, abv: null, pubs: ['A', 'B', 'C', 'D', 'E'] }],
       'uk', stubT,
       { maxPubs: 3 },
     );
@@ -152,7 +154,7 @@ describe('formatGroupedBeers', () => {
 
   test('renders null rating as ⭐ —', () => {
     const text = formatGroupedBeers(
-      [{ display: 'X', rating: null, abv: null, pubs: ['A'] }],
+      [{ display: 'X', untappd_id: null, rating: null, abv: null, pubs: ['A'] }],
       'uk', stubT,
     );
     expect(text).toContain('⭐ —');
@@ -160,7 +162,7 @@ describe('formatGroupedBeers', () => {
 
   test('HTML-escapes special chars in name and pubs', () => {
     const text = formatGroupedBeers(
-      [{ display: 'Pivo & <Co>', rating: null, abv: null, pubs: ['Bar & Grill'] }],
+      [{ display: 'Pivo & <Co>', untappd_id: null, rating: null, abv: null, pubs: ['Bar & Grill'] }],
       'uk', stubT,
     );
     expect(text).toContain('Pivo &amp; &lt;Co&gt;');
@@ -170,6 +172,7 @@ describe('formatGroupedBeers', () => {
   test('respects topN', () => {
     const groups: BeerGroup[] = Array.from({ length: 20 }, (_, i) => ({
       display: `B${i}`,
+      untappd_id: null,
       rating: 5 - i * 0.1,
       abv: null,
       pubs: ['P'],
@@ -186,12 +189,39 @@ describe('formatGroupedBeers', () => {
 
   test('two-line layout per beer', () => {
     const text = formatGroupedBeers(
-      [{ display: 'X', rating: 4.0, abv: null, pubs: ['A', 'B'] }],
+      [{ display: 'X', untappd_id: null, rating: 4.0, abv: null, pubs: ['A', 'B'] }],
       'uk', stubT,
     );
     const lines = text.split('\n');
     expect(lines).toHaveLength(2);
     expect(lines[0]).toMatch(/^1\. <b>X<\/b>/);
     expect(lines[1]).toMatch(/^\s+· /);
+  });
+});
+
+describe('untappd links', () => {
+  test('groupTaps carries untappd_id from the representative tap', () => {
+    const r = groupTaps([
+      tap({ beer_id: 1, untappd_id: 555, display: 'Salamander', rating: 3.9, pub_name: 'Cuda' }),
+      tap({ beer_id: 1, untappd_id: 555, display: 'Salamander', rating: 3.8, pub_name: 'PiwPaw' }),
+    ]);
+    expect(r).toHaveLength(1);
+    expect(r[0].untappd_id).toBe(555);
+  });
+
+  test('orphan group has null untappd_id', () => {
+    const r = groupTaps([tap({ beer_id: null, untappd_id: null, display: 'X' })]);
+    expect(r[0].untappd_id).toBeNull();
+  });
+
+  test('formatGroupedBeers links matched names and leaves orphans plain', () => {
+    const groups: BeerGroup[] = [
+      { display: 'Linked Beer', rating: 4, abv: 5, pubs: ['P'], untappd_id: 777 },
+      { display: 'Orphan Beer', rating: 3, abv: 5, pubs: ['P'], untappd_id: null },
+    ];
+    const out = formatGroupedBeers(groups, 'uk', stubT);
+    expect(out).toContain('<a href="https://untappd.com/beer/777"><b>Linked Beer</b></a>');
+    expect(out).toContain('<b>Orphan Beer</b>');
+    expect(out).not.toContain('<a href="https://untappd.com/beer/"');
   });
 });
