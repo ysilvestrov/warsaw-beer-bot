@@ -81,6 +81,7 @@ routeCommand.command('route', async (ctx) => {
         display: t.brewery_ref ? `${t.brewery_ref} ${t.beer_ref}`.trim() : t.beer_ref,
         brewery_norm: normalizeBrewery(t.brewery_ref ?? ''),
         name_norm: normalizeName(t.beer_ref),
+        style: t.style,
         abv: t.abv,
         rating: t.u_rating,
         pub_name: pub.name,
@@ -207,7 +208,12 @@ routeCommand.command('route', async (ctx) => {
         const ranked = rankGroups(groupTaps(taps));
         return {
           name: pubsById.get(id)!.name,
-          beers: ranked.map((g) => ({ display: g.display, rating: g.rating, abv: g.abv })),
+          beers: ranked.map((g) => ({
+            display: g.display,
+            style: g.style,
+            rating: g.rating,
+            abv: g.abv,
+          })),
         };
       });
       const text = formatRouteResult({

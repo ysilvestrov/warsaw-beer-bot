@@ -11,15 +11,15 @@ const stubT: Translator = (key, params) => {
 const beerBones: RoutePubFormat = {
   name: 'Beer & Bones',
   beers: [
-    { display: 'Pinta Atak Chmielu', rating: 4.12, abv: 6.1 },
-    { display: 'Browar Stu Mostów Salamander', rating: null, abv: 4.5 },
+    { display: 'Pinta Atak Chmielu', style: 'IPA', rating: 4.12, abv: 6.1 },
+    { display: 'Browar Stu Mostów Salamander', style: null, rating: null, abv: 4.5 },
   ],
 };
 
 const cuda: RoutePubFormat = {
   name: 'Cuda na Kiju',
   beers: [
-    { display: 'AleBrowar IPA', rating: 3.9, abv: 6.0 },
+    { display: 'AleBrowar IPA', style: 'Double IPA', rating: 3.9, abv: 6.0 },
   ],
 };
 
@@ -64,10 +64,10 @@ describe('formatRouteResult', () => {
       locale: 'uk',
       t: stubT,
     });
-    expect(out).toContain('<b>Pinta Atak Chmielu</b>');
+    expect(out).toContain('<b>Pinta Atak Chmielu</b> • IPA  ⭐ 4.12');
     expect(out).toContain('⭐ 4.12');
     expect(out).toContain('6,1%');
-    expect(out).toContain('<b>Browar Stu Mostów Salamander</b>');
+    expect(out).toContain('<b>Browar Stu Mostów Salamander</b>  ⭐ —');
     expect(out).toContain('⭐ —');
     expect(out).toContain('4,5%');
   });
@@ -78,13 +78,14 @@ describe('formatRouteResult', () => {
       distanceMeters: 0,
       pubsInOrder: [{
         name: '<Pub>',
-        beers: [{ display: 'A & B <c>', rating: null, abv: null }],
+        beers: [{ display: 'A & B <c>', style: 'IPA & <Ale>', rating: null, abv: null }],
       }],
       locale: 'uk',
       t: stubT,
     });
     expect(out).toContain('&lt;Pub&gt;');
     expect(out).toContain('A &amp; B &lt;c&gt;');
+    expect(out).toContain('• IPA &amp; &lt;Ale&gt;');
     expect(out).not.toMatch(/<Pub>/);
   });
 

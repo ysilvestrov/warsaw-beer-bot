@@ -1,9 +1,10 @@
 import type { Locale, Translator } from '../../i18n/types';
 import { fmtKm } from '../../i18n/format';
-import { escapeHtml, fmtAbv, fmtRating } from './newbeers-format';
+import { escapeHtml, fmtAbv, fmtRating, fmtStyle } from './newbeers-format';
 
 export interface RouteBeerLine {
   display: string;       // "Brewery BeerName"
+  style: string | null;
   rating: number | null;
   abv: number | null;
 }
@@ -31,7 +32,7 @@ export function formatRouteResult(opts: FormatRouteOpts): string {
     lines.push(`<b>${i + 1}. ${escapeHtml(p.name)}</b>`);
     for (const beer of p.beers) {
       lines.push(
-        `     • <b>${escapeHtml(beer.display)}</b>  ${fmtRating(beer.rating)}${fmtAbv(locale, beer.abv)}`,
+        `     • <b>${escapeHtml(beer.display)}</b>${fmtStyle(beer.style)}  ${fmtRating(beer.rating)}${fmtAbv(locale, beer.abv)}`,
       );
     }
   });
