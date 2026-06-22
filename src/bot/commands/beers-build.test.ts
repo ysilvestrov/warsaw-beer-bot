@@ -86,7 +86,7 @@ describe('buildBeersMessage — ok rendering', () => {
     // tap 1: matched; tap 2: orphan (no match_link)
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'PINTA Atak Chmielu', brewery_ref: 'PINTA',
-        abv: 6.1, ibu: null, style: 'AIPA', u_rating: 3.9 },
+        abv: 6.1, ibu: null, style: 'AIPA & <Ale>', u_rating: 3.9 },
       { tap_number: 2, beer_ref: 'Mystery Brew', brewery_ref: 'Unknown Co',
         abv: 5.0, ibu: null, style: null, u_rating: 4.2 },
     ]);
@@ -104,6 +104,11 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(out.html).toContain('Kufel');              // header pub name
     expect(out.html).toContain('Foo 1');              // header address
     expect(out.html).toContain('Кранів: 2');          // header count
+    const matchedLine = out.html.split('\n').find((line) => line.startsWith('1 '))!;
+    expect(matchedLine).toContain(
+      '<a href="https://untappd.com/beer/1"><b>PINTA PINTA Atak Chmielu</b></a>' +
+      ' • AIPA &amp; &lt;Ale&gt; • 6.1%',
+    );
   });
 
   test('null tap_number / abv / rating render as em dash', () => {

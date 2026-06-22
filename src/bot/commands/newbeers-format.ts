@@ -9,6 +9,7 @@ export interface CandidateTap {
   display: string;          // human-readable "Brewery BeerName"
   brewery_norm: string;     // for fallback grouping key
   name_norm: string;        // for fallback grouping key
+  style: string | null;
   abv: number | null;
   rating: number | null;
   pub_name: string;
@@ -16,6 +17,7 @@ export interface CandidateTap {
 
 export interface BeerGroup {
   display: string;
+  style: string | null;
   untappd_id: number | null;
   rating: number | null;
   abv: number | null;
@@ -38,6 +40,7 @@ export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
       display: string;
       untappd_id: number | null;
       bestRating: number | null;
+      style: string | null;
       abv: number | null;
       pubs: Set<string>;
     }
@@ -50,6 +53,7 @@ export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
         display: t.display,
         untappd_id: t.untappd_id,
         bestRating: t.rating,
+        style: t.style,
         abv: t.abv,
         pubs: new Set([t.pub_name]),
       });
@@ -58,15 +62,18 @@ export function groupTaps(taps: CandidateTap[]): BeerGroup[] {
     cur.pubs.add(t.pub_name);
     if (t.rating !== null && (cur.bestRating === null || t.rating > cur.bestRating)) {
       cur.display = t.display;
-      // Track the rep tap's ABV alongside its display string so they stay
+      // Track the rep tap's style and ABV alongside its display string so they stay
       // consistent for the user.
+      if (t.style !== null) cur.style = t.style;
       if (t.abv !== null) cur.abv = t.abv;
     }
     cur.bestRating = maxRating(cur.bestRating, t.rating);
+    if (cur.style === null && t.style !== null) cur.style = t.style;
     if (cur.abv === null && t.abv !== null) cur.abv = t.abv;
   }
   return [...acc.values()].map((g) => ({
     display: g.display,
+    style: g.style,
     untappd_id: g.untappd_id,
     rating: g.bestRating,
     abv: g.abv,
@@ -87,6 +94,9 @@ export function rankGroups(groups: BeerGroup[]): BeerGroup[] {
 // Re-export so existing callers keep their single import surface here.
 export { escapeHtml };
 
+export const fmtStyle = (style: string | null): string =>
+  style === null ? '' : ` • ${escapeHtml(style)}`;
+
 export const fmtRating = (r: number | null): string =>
   r === null ? '⭐ —' : `⭐ ${r.toFixed(2).replace(/\.?0+$/, '')}`;
 
@@ -104,7 +114,7 @@ export function formatGroupedBeers(
   const lines: string[] = [];
   groups.slice(0, topN).forEach((g, i) => {
     const nameHtml = beerNameHtml(g.display, g.untappd_id);
-    const head = `${i + 1}. ${nameHtml}  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
+    const head = `${i + 1}. ${nameHtml}${fmtStyle(g.style)}  ${fmtRating(g.rating)}${fmtAbvLocale(locale, g.abv)}`;
     const shown = g.pubs.slice(0, maxPubs).map(escapeHtml).join(', ');
     const extra =
       g.pubs.length > maxPubs ? t('newbeers.more_pubs_suffix', { extra: g.pubs.length - maxPubs }) : '';
