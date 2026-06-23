@@ -21,6 +21,7 @@ import { cityCommand } from './bot/commands/city';
 import { extensionCommand } from './bot/commands/extension';
 import { extensionReleaseCommand } from './bot/commands/extension-release';
 import { helpCommand } from './bot/commands/help';
+import { statusCommand } from './bot/commands/status';
 import { createApiApp, createApiServer } from './api';
 import { registerCommandMenu } from './bot/register-command-menu';
 import { createRefreshCommand } from './bot/commands/refresh';
@@ -90,6 +91,7 @@ async function main(): Promise<void> {
     langCommand,
     cityCommand,
     extensionCommand,
+    statusCommand,
     helpCommand,
     createRefreshCommand(
       async (notify, opts) => {

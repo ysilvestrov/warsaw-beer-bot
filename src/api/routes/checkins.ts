@@ -68,7 +68,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         if (existed) alreadyKnown++;
         else merged++;
       }
-      advanceSyncState(deps.db, telegramId, page.nextMaxId, page.nextMaxId === null);
+      advanceSyncState(deps.db, telegramId, page.nextMaxId, page.nextMaxId === null, page.profileTotal);
     })();
 
     return c.json({

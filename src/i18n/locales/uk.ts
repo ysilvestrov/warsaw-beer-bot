@@ -21,6 +21,7 @@ export const uk: Messages = {
   'cmd.help': 'ця довідка',
   'cmd.start': 'почати',
   'cmd.extension': 'токен для браузерного розширення',
+  'cmd.status': 'твій статус і налаштування',
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
@@ -85,6 +86,30 @@ export const uk: Messages = {
   // lang
   'lang.prompt': 'Оберіть мову інтерфейсу:',
   'lang.changed': '✅ Мову змінено на {name}.',
+
+  // status
+  'status.title': '📊 Твій статус',
+  'status.settings_header': '⚙️ Налаштування',
+  'status.city': 'Місто: {name}',
+  'status.language': 'Мова: {name}',
+  'status.language_auto': 'авто',
+  'status.filters': 'Фільтри: {summary}',
+  'status.filters_none': 'немає',
+  'status.filter_styles': 'стилі: {list}',
+  'status.filter_rating': 'рейтинг від ★{rating}',
+  'status.filter_abv': 'ABV {min}–{max}%',
+  'status.filter_route': 'маршрут {n}',
+  'status.filters_edit': 'Змінити: /filters',
+  'status.untappd_header': '🍺 Untappd',
+  'status.not_linked': 'Не прив’язано. Використай /link, або /import для історії.',
+  'status.username': 'Акаунт: {username}',
+  'status.checkins': 'Синхронізовано чекінів: {synced}',
+  'status.checkins_of': 'Синхронізовано чекінів: {synced} / {total}',
+  'status.sync_complete': 'Синхронізація: завершено ✅',
+  'status.sync_in_progress': 'Синхронізація: триває глибока синхронізація ⏳',
+  'status.distinct_beers': 'Унікального пива випито: {count}',
+  'status.last_checkin': 'Останній чекін: {date}',
+  'status.no_checkins': 'Ще немає чекінів — спробуй /import або розширення.',
 
   // extension
   'extension.success':

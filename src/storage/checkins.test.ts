@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt, countDistinctBeers } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -74,5 +74,41 @@ describe('countCheckins', () => {
     expect(countCheckins(db, 1)).toBe(2);
     expect(countCheckins(db, 2)).toBe(1);
     expect(countCheckins(db, 3)).toBe(0);
+  });
+});
+
+describe('countDistinctBeers', () => {
+  it('returns 0 when the user has no check-ins', () => {
+    const db = openDb(':memory:'); migrate(db);
+    expect(countDistinctBeers(db, 999)).toBe(0);
+  });
+
+  it('counts distinct non-null beer_ids for the user', () => {
+    const db = openDb(':memory:'); migrate(db);
+    const beerA = upsertBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
+    const beerB = upsertBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
+    const beerC = upsertBeer(db, { name: 'D', brewery: 'B', normalized_name: 'd', normalized_brewery: 'b' });
+    // two check-ins of beerA, one of beerB, one with null beer_id, and another user's beerC
+    mergeCheckin(db, { checkin_id: 'a', telegram_id: 1, beer_id: beerA, user_rating: null, checkin_at: '2024-01-01 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'b', telegram_id: 1, beer_id: beerA, user_rating: null, checkin_at: '2024-01-02 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'c', telegram_id: 1, beer_id: beerB, user_rating: null, checkin_at: '2024-01-03 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'd', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2024-01-04 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'e', telegram_id: 2, beer_id: beerC, user_rating: null, checkin_at: '2024-01-05 10:00:00', venue: null });
+    expect(countDistinctBeers(db, 1)).toBe(2);
+  });
+});
+
+describe('latestCheckinAt', () => {
+  it('returns null when the user has no check-ins', () => {
+    const db = openDb(':memory:'); migrate(db);
+    expect(latestCheckinAt(db, 999)).toBeNull();
+  });
+
+  it('returns the most recent checkin_at for the user', () => {
+    const db = openDb(':memory:'); migrate(db);
+    mergeCheckin(db, { checkin_id: 'a', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2023-01-01 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'b', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2024-05-05 20:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'c', telegram_id: 2, beer_id: null, user_rating: null, checkin_at: '2025-09-09 09:00:00', venue: null });
+    expect(latestCheckinAt(db, 1)).toBe('2024-05-05 20:00:00');
   });
 });

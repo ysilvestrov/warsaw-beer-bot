@@ -21,6 +21,7 @@ export const en: Messages = {
   'cmd.help': 'this help',
   'cmd.start': 'start',
   'cmd.extension': 'browser-extension access token',
+  'cmd.status': 'your status & settings',
 
   // link
   'link.usage': 'Usage: /link <username> (or full URL untappd.com/user/<username>)',
@@ -85,6 +86,30 @@ export const en: Messages = {
   // lang
   'lang.prompt': 'Choose interface language:',
   'lang.changed': '✅ Language switched to {name}.',
+
+  // status
+  'status.title': '📊 Your status',
+  'status.settings_header': '⚙️ Settings',
+  'status.city': 'City: {name}',
+  'status.language': 'Language: {name}',
+  'status.language_auto': 'auto',
+  'status.filters': 'Filters: {summary}',
+  'status.filters_none': 'none',
+  'status.filter_styles': 'styles: {list}',
+  'status.filter_rating': 'min ★{rating}',
+  'status.filter_abv': 'ABV {min}–{max}%',
+  'status.filter_route': 'route {n}',
+  'status.filters_edit': 'Edit via /filters',
+  'status.untappd_header': '🍺 Untappd',
+  'status.not_linked': 'Not linked. Use /link to connect, or /import your history.',
+  'status.username': 'Account: {username}',
+  'status.checkins': 'Check-ins synced: {synced}',
+  'status.checkins_of': 'Check-ins synced: {synced} / {total}',
+  'status.sync_complete': 'Sync: complete ✅',
+  'status.sync_in_progress': 'Sync: deep sync in progress ⏳',
+  'status.distinct_beers': 'Distinct beers had: {count}',
+  'status.last_checkin': 'Last check-in: {date}',
+  'status.no_checkins': 'No check-ins yet — try /import or the extension.',
 
   // extension
   'extension.success':

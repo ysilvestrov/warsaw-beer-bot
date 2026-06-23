@@ -221,6 +221,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 16,
+    sql: `
+      ALTER TABLE checkin_sync_state ADD COLUMN profile_total INTEGER;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

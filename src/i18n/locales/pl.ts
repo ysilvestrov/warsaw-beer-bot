@@ -21,6 +21,7 @@ export const pl: Messages = {
   'cmd.help': 'ta pomoc',
   'cmd.start': 'start',
   'cmd.extension': 'token dla rozszerzenia przeglądarki',
+  'cmd.status': 'twój status i ustawienia',
 
   // link
   'link.usage': 'Użycie: /link <username> (lub pełny URL untappd.com/user/<username>)',
@@ -85,6 +86,30 @@ export const pl: Messages = {
   // lang
   'lang.prompt': 'Wybierz język interfejsu:',
   'lang.changed': '✅ Zmieniono język na {name}.',
+
+  // status
+  'status.title': '📊 Twój status',
+  'status.settings_header': '⚙️ Ustawienia',
+  'status.city': 'Miasto: {name}',
+  'status.language': 'Język: {name}',
+  'status.language_auto': 'auto',
+  'status.filters': 'Filtry: {summary}',
+  'status.filters_none': 'brak',
+  'status.filter_styles': 'style: {list}',
+  'status.filter_rating': 'min ★{rating}',
+  'status.filter_abv': 'ABV {min}–{max}%',
+  'status.filter_route': 'trasa {n}',
+  'status.filters_edit': 'Zmień: /filters',
+  'status.untappd_header': '🍺 Untappd',
+  'status.not_linked': 'Brak powiązania. Użyj /link, lub /import dla historii.',
+  'status.username': 'Konto: {username}',
+  'status.checkins': 'Zsynchronizowane meldunki: {synced}',
+  'status.checkins_of': 'Zsynchronizowane meldunki: {synced} / {total}',
+  'status.sync_complete': 'Synchronizacja: zakończona ✅',
+  'status.sync_in_progress': 'Synchronizacja: trwa głęboka synchronizacja ⏳',
+  'status.distinct_beers': 'Unikalne wypite piwa: {count}',
+  'status.last_checkin': 'Ostatni meldunek: {date}',
+  'status.no_checkins': 'Brak meldunków — spróbuj /import lub rozszerzenia.',
 
   // extension
   'extension.success':

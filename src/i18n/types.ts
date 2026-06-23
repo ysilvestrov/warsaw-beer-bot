@@ -28,6 +28,7 @@ export interface Messages {
   'cmd.help': string;
   'cmd.start': string;
   'cmd.extension': string;
+  'cmd.status': string;
 
   // link
   'link.usage': string;
@@ -93,6 +94,30 @@ export interface Messages {
   // extension (browser-extension API token)
   'extension.success': string;   // {url} — instructional text; token sent separately in <code>
   'extension.download': string;  // {version} — caption for the latest release zip
+
+  // status (/status — per-user freshness + settings)
+  'status.title': string;
+  'status.settings_header': string;
+  'status.city': string;              // {name}
+  'status.language': string;          // {name}
+  'status.language_auto': string;
+  'status.filters': string;           // {summary}
+  'status.filters_none': string;
+  'status.filter_styles': string;     // {list}
+  'status.filter_rating': string;     // {rating}
+  'status.filter_abv': string;        // {min}, {max}
+  'status.filter_route': string;      // {n}
+  'status.filters_edit': string;
+  'status.untappd_header': string;
+  'status.not_linked': string;
+  'status.username': string;          // {username}
+  'status.checkins': string;          // {synced}
+  'status.checkins_of': string;       // {synced}, {total}
+  'status.sync_complete': string;
+  'status.sync_in_progress': string;
+  'status.distinct_beers': string;    // {count}
+  'status.last_checkin': string;      // {date}
+  'status.no_checkins': string;
 
   // extension release / distribution (admin-facing + broadcast)
   'extrel.no_match': string;

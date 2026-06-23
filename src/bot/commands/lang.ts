@@ -4,12 +4,7 @@ import { langKeyboard } from '../keyboards';
 import { ensureProfile, setUserLanguage } from '../../storage/user_profiles';
 import { createTranslator } from '../../i18n';
 import type { Locale } from '../../i18n/types';
-
-const LOCALE_NAMES: Record<Locale, string> = {
-  uk: 'Українська',
-  pl: 'Polski',
-  en: 'English',
-};
+import { LOCALE_NAMES } from '../../i18n/locale-names';
 
 export const langCommand = new Composer<BotContext>();
 
