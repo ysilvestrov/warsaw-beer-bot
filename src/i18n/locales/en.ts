@@ -105,8 +105,6 @@ export const en: Messages = {
   'status.username': 'Account: {username}',
   'status.checkins': 'Check-ins synced: {synced}',
   'status.checkins_of': 'Check-ins synced: {synced} / {total}',
-  'status.sync_complete': 'Sync: complete ✅',
-  'status.sync_in_progress': 'Sync: deep sync in progress ⏳',
   'status.distinct_beers': 'Distinct beers had: {count}',
   'status.last_checkin': 'Last check-in: {date}',
   'status.no_checkins': 'No check-ins yet — try /import or the extension.',

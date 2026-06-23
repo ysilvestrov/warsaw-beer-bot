@@ -22,7 +22,6 @@ statusCommand.command('status', async (ctx) => {
     username: profile?.untappd_username ?? null,
     synced: countCheckins(db, id),
     profileTotal: sync.profile_total,
-    complete: sync.complete,
     distinctBeers: countDistinctBeers(db, id),
     lastCheckinAt: latestCheckinAt(db, id),
   };

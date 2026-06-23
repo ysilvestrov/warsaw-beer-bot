@@ -12,7 +12,6 @@ const base: StatusView = {
   username: 'beerfan',
   synced: 11287,
   profileTotal: 11290,
-  complete: true,
   distinctBeers: 842,
   lastCheckinAt: '2024-05-05 20:00:00',
 };
@@ -49,6 +48,7 @@ describe('buildStatusMessage', () => {
     expect(out).toContain('842');
     expect(out).toContain('2024-05-05');
     expect(out).toContain('<b>');
+    expect(out).not.toContain('✅');
   });
 
   it('omits the total when profileTotal is null', () => {
@@ -69,9 +69,21 @@ describe('buildStatusMessage', () => {
     expect(out).toContain(t('status.no_checkins'));
   });
 
-  it('shows deep-sync-in-progress when not complete', () => {
-    const out = buildStatusMessage(t, { ...base, complete: false });
-    expect(out).toContain(t('status.sync_in_progress'));
+  it('appends ✅ to the count line when synced >= profileTotal (caught up)', () => {
+    const out = buildStatusMessage(t, { ...base, synced: 12428, profileTotal: 12428 });
+    expect(out).toContain('12428 / 12428 ✅');
+  });
+
+  it('does not append ✅ when synced exceeds profileTotal is false (behind)', () => {
+    const out = buildStatusMessage(t, { ...base, synced: 100, profileTotal: 12428 });
+    expect(out).toContain('100 / 12428');
+    expect(out).not.toContain('✅');
+  });
+
+  it('shows no ✅ and no separate sync line when profileTotal is unknown', () => {
+    const out = buildStatusMessage(t, { ...base, profileTotal: null });
+    expect(out).toContain('Check-ins synced: 11287');
+    expect(out).not.toContain('✅');
   });
 
   it('renders "auto" when language is unset', () => {

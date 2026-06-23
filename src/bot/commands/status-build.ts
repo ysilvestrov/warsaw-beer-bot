@@ -12,7 +12,6 @@ export interface StatusView {
   username: string | null;
   synced: number;
   profileTotal: number | null;
-  complete: boolean;
   distinctBeers: number;
   lastCheckinAt: string | null; // ISO-ish; only the date part is shown
 }
@@ -67,14 +66,15 @@ export function buildStatusMessage(t: Translator, view: StatusView): string {
     return lines.join('\n');
   }
   lines.push(esc(t('status.username', { username: view.username ?? '' })));
+  const caughtUp = view.profileTotal != null && view.synced >= view.profileTotal;
   lines.push(
     esc(
       view.profileTotal != null
-        ? t('status.checkins_of', { synced: view.synced, total: view.profileTotal })
+        ? t('status.checkins_of', { synced: view.synced, total: view.profileTotal }) +
+            (caughtUp ? ' ✅' : '')
         : t('status.checkins', { synced: view.synced }),
     ),
   );
-  lines.push(esc(view.complete ? t('status.sync_complete') : t('status.sync_in_progress')));
   lines.push(esc(t('status.distinct_beers', { count: view.distinctBeers })));
   lines.push(
     esc(

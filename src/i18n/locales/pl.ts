@@ -105,8 +105,6 @@ export const pl: Messages = {
   'status.username': 'Konto: {username}',
   'status.checkins': 'Zsynchronizowane meldunki: {synced}',
   'status.checkins_of': 'Zsynchronizowane meldunki: {synced} / {total}',
-  'status.sync_complete': 'Synchronizacja: zakończona ✅',
-  'status.sync_in_progress': 'Synchronizacja: trwa głęboka synchronizacja ⏳',
   'status.distinct_beers': 'Unikalne wypite piwa: {count}',
   'status.last_checkin': 'Ostatni meldunek: {date}',
   'status.no_checkins': 'Brak meldunków — spróbuj /import lub rozszerzenia.',

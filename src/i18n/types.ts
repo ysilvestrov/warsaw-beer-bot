@@ -113,8 +113,6 @@ export interface Messages {
   'status.username': string;          // {username}
   'status.checkins': string;          // {synced}
   'status.checkins_of': string;       // {synced}, {total}
-  'status.sync_complete': string;
-  'status.sync_in_progress': string;
   'status.distinct_beers': string;    // {count}
   'status.last_checkin': string;      // {date}
   'status.no_checkins': string;
