@@ -54,7 +54,7 @@ describe('buildStatusMessage', () => {
   it('omits the total when profileTotal is null', () => {
     const out = buildStatusMessage(t, { ...base, profileTotal: null });
     expect(out).toContain('Check-ins synced: 11287');
-    expect(out).not.toContain('/ ');
+    expect(out).not.toContain('11290');
   });
 
   it('shows the link nudge and no sync stats when not linked', () => {

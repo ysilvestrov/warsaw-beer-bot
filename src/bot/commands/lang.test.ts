@@ -4,6 +4,7 @@ import { migrate } from '../../storage/schema';
 import { ensureProfile, setUserLanguage, getUserLanguage } from '../../storage/user_profiles';
 import { createTranslator } from '../../i18n';
 import type { Locale } from '../../i18n/types';
+import { LOCALE_NAMES } from '../../i18n/locale-names';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -19,12 +20,6 @@ async function simulateLangCallback(
   editMessageText: Mock,
   answerCbQuery: Mock,
 ) {
-  const LOCALE_NAMES: Record<Locale, string> = {
-    uk: 'Українська',
-    pl: 'Polski',
-    en: 'English',
-  };
-
   ensureProfile(db, telegramId);
   setUserLanguage(db, telegramId, locale);
 

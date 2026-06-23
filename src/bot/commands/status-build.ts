@@ -2,12 +2,7 @@ import type { Locale, Translator } from '../../i18n/types';
 import type { Filters } from '../../storage/user_filters';
 import { cityLabel } from '../../domain/cities';
 import { escapeHtml } from './html';
-
-const LOCALE_NAMES: Record<Locale, string> = {
-  uk: 'Українська',
-  pl: 'Polski',
-  en: 'English',
-};
+import { LOCALE_NAMES } from '../../i18n/locale-names';
 
 export interface StatusView {
   city: string;                 // city slug
