@@ -2,7 +2,7 @@ import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
 import { getProfile, getUserCity, getUserLanguage } from '../../storage/user_profiles';
 import { getFilters } from '../../storage/user_filters';
-import { countCheckins, drunkBeerIds, latestCheckinAt } from '../../storage/checkins';
+import { countCheckins, countDistinctBeers, latestCheckinAt } from '../../storage/checkins';
 import { getSyncState } from '../../storage/checkin_sync_state';
 import { buildStatusMessage, type StatusView } from './status-build';
 
@@ -23,7 +23,7 @@ statusCommand.command('status', async (ctx) => {
     synced: countCheckins(db, id),
     profileTotal: sync.profile_total,
     complete: sync.complete,
-    distinctBeers: drunkBeerIds(db, id).size,
+    distinctBeers: countDistinctBeers(db, id),
     lastCheckinAt: latestCheckinAt(db, id),
   };
 

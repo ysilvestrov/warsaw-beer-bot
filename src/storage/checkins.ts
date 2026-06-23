@@ -66,6 +66,13 @@ export function latestCheckinAt(db: DB, telegramId: number): string | null {
   return row.m;
 }
 
+export function countDistinctBeers(db: DB, telegramId: number): number {
+  const row = db
+    .prepare('SELECT COUNT(DISTINCT beer_id) AS n FROM checkins WHERE telegram_id = ? AND beer_id IS NOT NULL')
+    .get(telegramId) as { n: number };
+  return row.n;
+}
+
 export function drunkBeerIds(db: DB, telegramId: number): Set<number> {
   const rows = db.prepare(
     'SELECT DISTINCT beer_id FROM checkins WHERE telegram_id = ? AND beer_id IS NOT NULL',

@@ -91,8 +91,8 @@ async function main(): Promise<void> {
     langCommand,
     cityCommand,
     extensionCommand,
-    helpCommand,
     statusCommand,
+    helpCommand,
     createRefreshCommand(
       async (notify, opts) => {
         await refreshOntap({
