@@ -32,14 +32,29 @@ That parsed total is exactly the "do I need a re-import?" signal #93 asks for.
   that parses `null` leaves the stored value untouched.
 - **Nudge logic:** none. Show both numbers (`synced` and `profile_total` when known)
   and let the user judge. No tolerance, no computed "⚠️ re-import recommended" line.
+- **Settings block:** `/status` also echoes the user's configured choices — **city**,
+  **language**, and **filters** — so it doubles as a "here's everything about me" view.
+  This block shows **regardless of link state** (these choices are independent of
+  Untappd linking). Filters are rendered as a **compact one-line summary** with a
+  pointer to `/filters`, not the full `/filters` UI.
 
 ## What `/status` shows
 
 A single Telegram message, localized (uk / pl / en), produced by a **pure**
 `buildStatusMessage(...)` function (fully unit-tested, no DB/Telegraf in it).
 
+**Settings block (always shown):**
+
+- **City** — active city (`getUserCity`), human-readable name.
+- **Language** — UI locale (`getUserLanguage`; "auto/default" when unset).
+- **Filters** — one-line summary of active filters, e.g.
+  `styles: IPA, Stout · min ★3.5 · ABV 5–8% · route 3`, or "none" when unset.
+  Footer pointer: edit via `/filters`.
+
+**Untappd / sync block:**
+
 - **Not linked** (`untappd_username` is null): a short nudge to `/link` (mentioning
-  `/import` too). Nothing else — stop here.
+  `/import` too). No sync stats.
 - **Linked**, show:
   - Untappd username (HTML-escaped inside the builder — see HTML-mode i18n gotcha).
   - **Check-ins synced**: `synced`. If a stored `profile_total` exists, render as
@@ -69,11 +84,14 @@ A single Telegram message, localized (uk / pl / en), produced by a **pure**
 ### Command wiring
 
 - `src/bot/commands/status.ts` — `statusCommand` `Composer`, mirrors `beers.ts`:
-  gathers profile + counts + sync state, calls `buildStatusMessage`, sends via
-  `replyWithHTML`.
-- `src/bot/commands/status-build.ts` — the pure builder. Input: a plain data object
-  (`linked` flag, `username`, `synced`, `profileTotal`, `complete`, `distinctBeers`,
-  `lastCheckinAt`) plus the translator + locale. Output: HTML string.
+  gathers profile + counts + sync state + settings (`getUserCity`, `getUserLanguage`,
+  `getFilters`), calls `buildStatusMessage`, sends via `replyWithHTML`.
+- `src/bot/commands/status-build.ts` — the pure builder. Input: a plain data object:
+  - settings — `city`, `language` (`Locale | null`), `filters` (`Filters | null`);
+  - sync — `linked` flag, `username`, `synced`, `profileTotal`, `complete`,
+    `distinctBeers`, `lastCheckinAt`;
+  - plus the translator + locale. Output: HTML string. The filter-summary formatting
+    lives here (pure), reusing the city display-name helper already used elsewhere.
 - `src/index.ts` — import and register `statusCommand`.
 - `src/bot/commands/catalog.ts` — add `{ command: 'status', descKey: 'cmd.status' }`
   to `COMMAND_CATALOG`. This automatically flows into `/help` text and the native
@@ -102,7 +120,8 @@ A single Telegram message, localized (uk / pl / en), produced by a **pure**
 
 - `status-build.test.ts` — covers every state: not-linked; linked with and without
   `profile_total`; zero check-ins; sync in-progress vs complete; HTML escaping of an
-  adversarial username.
+  adversarial username; settings block with filters set vs "none" and with
+  language unset (auto/default).
 - `checkin_sync_state` test — `profile_total` persistence and the latest-non-null-wins
   policy (non-null overwrites; null preserves prior value; round-trips through
   `getSyncState`).
