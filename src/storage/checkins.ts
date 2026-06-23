@@ -1,4 +1,5 @@
 import type { DB } from './db';
+import { canonicalCheckinAt } from '../domain/checkin-time';
 
 export interface CheckinInput {
   checkin_id: string;
@@ -20,7 +21,7 @@ export function mergeCheckin(db: DB, c: CheckinInput): void {
        user_rating = excluded.user_rating,
        checkin_at = excluded.checkin_at,
        venue = excluded.venue`,
-  ).run(c.checkin_id, c.telegram_id, c.beer_id, c.user_rating, c.checkin_at, c.venue);
+  ).run(c.checkin_id, c.telegram_id, c.beer_id, c.user_rating, canonicalCheckinAt(c.checkin_at), c.venue);
 }
 
 export function checkinsForUser(db: DB, telegramId: number): CheckinRow[] {

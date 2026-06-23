@@ -111,4 +111,23 @@ describe('latestCheckinAt', () => {
     mergeCheckin(db, { checkin_id: 'c', telegram_id: 2, beer_id: null, user_rating: null, checkin_at: '2025-09-09 09:00:00', venue: null });
     expect(latestCheckinAt(db, 1)).toBe('2024-05-05 20:00:00');
   });
+
+  it('picks the chronologically-latest row even when sources mix RFC and ISO (the /status bug)', () => {
+    const db = openDb(':memory:'); migrate(db);
+    // ISO from /import, RFC-2822 from the extension feed — pre-normalization
+    // these were stored verbatim and lexicographic MAX picked the wrong one.
+    mergeCheckin(db, { checkin_id: 'iso', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-04-18 17:52:26', venue: null });
+    mergeCheckin(db, { checkin_id: 'rfc-late', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: 'Tue, 05 May 2026 21:40:37 +0000', venue: null });
+    mergeCheckin(db, { checkin_id: 'rfc-mid', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: 'Wed, 29 Apr 2026 18:53:59 +0000', venue: null });
+    expect(latestCheckinAt(db, 1)).toBe('2026-05-05 21:40:37');
+  });
+});
+
+describe('mergeCheckin checkin_at normalization', () => {
+  it('stores RFC-2822 timestamps in canonical UTC form', () => {
+    const db = openDb(':memory:'); migrate(db);
+    mergeCheckin(db, { checkin_id: 'x', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: 'Wed, 29 Apr 2026 18:53:59 +0000', venue: null });
+    const row = db.prepare("SELECT checkin_at FROM checkins WHERE checkin_id = 'x'").get() as { checkin_at: string };
+    expect(row.checkin_at).toBe('2026-04-29 18:53:59');
+  });
 });
