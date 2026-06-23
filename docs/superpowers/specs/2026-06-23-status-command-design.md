@@ -69,7 +69,7 @@ A single Telegram message, localized (uk / pl / en), produced by a **pure**
 
 ### Data layer
 
-- **Migration v14**: add nullable `profile_total INTEGER` to `checkin_sync_state`.
+- **Migration v16**: add nullable `profile_total INTEGER` to `checkin_sync_state`.
 - `src/storage/checkin_sync_state.ts`:
   - Extend `SyncState` with `profile_total: number | null`.
   - `getSyncState` reads the new column back.
@@ -104,7 +104,7 @@ A single Telegram message, localized (uk / pl / en), produced by a **pure**
 
 - `spec.md` §4: new `### /status` command section.
 - `spec.md` §3.14: document the `profile_total` column on `checkin_sync_state`.
-- `spec.md` §3.17: add a **v14** row to the migration-history table.
+- `spec.md` §3.17: add a **v16** row to the migration-history table.
 
 ## Error handling / edge cases
 
