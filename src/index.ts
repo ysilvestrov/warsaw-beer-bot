@@ -29,6 +29,7 @@ import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
+import { backfillCheckinAt } from './jobs/backfill-checkin-at';
 import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
 import { refreshTapRatings } from './jobs/refresh-tap-ratings';
@@ -43,6 +44,7 @@ async function main(): Promise<void> {
   const db = openDb(env.DATABASE_PATH);
   migrate(db);
   backfillNormalizedBrewery(db, log);
+  backfillCheckinAt(db, log);
   dedupeBreweryAliases(db, log);
   cleanupPollutedOntap(db, log);
   cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
