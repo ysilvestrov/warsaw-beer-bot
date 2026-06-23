@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -74,5 +74,20 @@ describe('countCheckins', () => {
     expect(countCheckins(db, 1)).toBe(2);
     expect(countCheckins(db, 2)).toBe(1);
     expect(countCheckins(db, 3)).toBe(0);
+  });
+});
+
+describe('latestCheckinAt', () => {
+  it('returns null when the user has no check-ins', () => {
+    const db = openDb(':memory:'); migrate(db);
+    expect(latestCheckinAt(db, 999)).toBeNull();
+  });
+
+  it('returns the most recent checkin_at for the user', () => {
+    const db = openDb(':memory:'); migrate(db);
+    mergeCheckin(db, { checkin_id: 'a', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2023-01-01 10:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'b', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2024-05-05 20:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: 'c', telegram_id: 2, beer_id: null, user_rating: null, checkin_at: '2025-09-09 09:00:00', venue: null });
+    expect(latestCheckinAt(db, 1)).toBe('2024-05-05 20:00:00');
   });
 });
