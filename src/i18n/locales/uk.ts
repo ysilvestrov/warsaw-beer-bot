@@ -105,8 +105,6 @@ export const uk: Messages = {
   'status.username': 'Акаунт: {username}',
   'status.checkins': 'Синхронізовано чекінів: {synced}',
   'status.checkins_of': 'Синхронізовано чекінів: {synced} / {total}',
-  'status.sync_complete': 'Синхронізація: завершено ✅',
-  'status.sync_in_progress': 'Синхронізація: триває глибока синхронізація ⏳',
   'status.distinct_beers': 'Унікального пива випито: {count}',
   'status.last_checkin': 'Останній чекін: {date}',
   'status.no_checkins': 'Ще немає чекінів — спробуй /import або розширення.',
