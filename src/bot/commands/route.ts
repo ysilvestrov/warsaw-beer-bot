@@ -238,7 +238,7 @@ routeCommand.command('route', async (ctx) => {
           parse_mode: 'HTML',
           ...(keyboard ? { reply_markup: keyboard.reply_markup } : {}),
         })
-        .catch(() => {});
+        .catch((err) => log.warn({ err }, 'route result edit failed'));
     } catch (e) {
       log.error({ err: e }, 'route failed');
       await notify(t('route.failed'), { force: true });
