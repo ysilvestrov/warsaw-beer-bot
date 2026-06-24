@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ADAPTERS } from './registry';
@@ -28,7 +28,14 @@ const sendMatch = (cards: RawBeer[]): Promise<MatchResult[]> =>
     })),
   );
 
-beforeEach(() => { document.body.innerHTML = ''; });
+beforeEach(() => {
+  document.body.innerHTML = '';
+  vi.spyOn(globalThis, 'fetch').mockResolvedValue({ ok: false, text: async () => '' } as Response);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (id, adapter) => {
   it('has a fixture at tests/fixtures/<id>.html', () => {

@@ -50,6 +50,25 @@ describe('runOverlay', () => {
     expect(card.el.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
   });
 
+  it('loads details for uncached cards before sending them to match', async () => {
+    const cached: Card = { el: cardEl(), brewery: 'Cached', name: 'Beer' };
+    const uncached: Card = { el: cardEl(), brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0' };
+    await setCached(normalizeKey('Cached', 'Beer'), drunkResult('Cached', 'Beer'));
+    const adapter = {
+      ...adapterFor([cached, uncached]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].abv = 7.3;
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FUNKY FLUID', 'Ambrosia 9.0')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(adapter.loadCardDetails).toHaveBeenCalledTimes(1);
+    expect(adapter.loadCardDetails).toHaveBeenCalledWith([uncached]);
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0', abv: 7.3 }]);
+  });
+
   it('awaits waitForGrid before parsing when the adapter defines it', async () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };

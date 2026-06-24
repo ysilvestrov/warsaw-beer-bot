@@ -8,10 +8,14 @@ interface ProductMeta {
   id: number;
   brand_title: string | null;
   title: string;
+  url?: string;
 }
 
 const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)\s+/i;
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
+const MAX_DETAIL_FETCHES_PER_PASS = 20;
+const detailUrls = new WeakMap<HTMLElement, string>();
+const abvByUrl = new Map<string, Promise<number | undefined>>();
 
 function text(el: Element | null): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
@@ -72,6 +76,40 @@ function productMeta(root: ParentNode): Map<number, ProductMeta> {
   return new Map();
 }
 
+function parseDecimal(value: string): number | undefined {
+  const normalized = value.replace(',', '.').trim();
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return undefined;
+  const abv = Number(normalized);
+  return Number.isFinite(abv) ? abv : undefined;
+}
+
+export function parseProductAbv(root: ParentNode): number | undefined {
+  for (const row of Array.from(root.querySelectorAll('.product-features__row, tr'))) {
+    const label = text(row.querySelector('.product-features__cell-title, th'));
+    if (label !== 'Міцність') continue;
+    const valueCell = row.querySelector('td.product-features__cell, td');
+    const abv = parseDecimal(text(valueCell));
+    if (abv !== undefined) return abv;
+  }
+  return undefined;
+}
+
+function loadAbv(url: string): Promise<number | undefined> {
+  const cached = abvByUrl.get(url);
+  if (cached) return cached;
+  if (typeof fetch !== 'function') return Promise.resolve(undefined);
+
+  const promise = fetch(url, { credentials: 'include' })
+    .then(async (res) => {
+      if (!res.ok) return undefined;
+      const html = await res.text();
+      return parseProductAbv(new DOMParser().parseFromString(html, 'text/html'));
+    })
+    .catch(() => undefined);
+  abvByUrl.set(url, promise);
+  return promise;
+}
+
 export const beerfreak: SiteAdapter = {
   id: 'beerfreak',
   hostMatch: (url) => url.hostname === 'beerfreak.org' || url.hostname.endsWith('.beerfreak.org'),
@@ -93,8 +131,22 @@ export const beerfreak: SiteAdapter = {
       const brewery = parsed.brewery;
       const name = parsed.name || cleanName(rawTitle, brewery);
       if (!name) continue;
+      if (product?.url) detailUrls.set(el, product.url);
       cards.push({ el, brewery, name });
     }
     return cards;
+  },
+
+  async loadCardDetails(cards) {
+    const limited = cards
+      .filter((card) => card.abv === undefined && detailUrls.has(card.el))
+      .slice(0, MAX_DETAIL_FETCHES_PER_PASS);
+
+    await Promise.all(limited.map(async (card) => {
+      const url = detailUrls.get(card.el);
+      if (!url) return;
+      const abv = await loadAbv(url);
+      if (abv !== undefined) card.abv = abv;
+    }));
   },
 };
