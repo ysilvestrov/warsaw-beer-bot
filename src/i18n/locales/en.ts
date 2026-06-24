@@ -65,6 +65,7 @@ export const en: Messages = {
   'route.fill_missing': '🗺 Fetching unsaved pairs: {done}/{total}',
   'route.searching_tour': '🧠 Searching for the shortest tour…',
   'route.failed': '❌ Could not build a route — check the logs.',
+  'route.open_in_maps': '🗺 Open route in Google Maps',
   'route.header':
     'Found a route for <b>{count}</b> (or more) untried beers, distance ≈ <b>{km}</b>, pubs on the route: <b>{pubs}</b>.',
 

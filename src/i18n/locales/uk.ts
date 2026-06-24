@@ -65,6 +65,7 @@ export const uk: Messages = {
   'route.fill_missing': '🗺 Догружаю незбережені пари: {done}/{total}',
   'route.searching_tour': '🧠 Шукаю найкоротший обхід…',
   'route.failed': '❌ Не вдалось побудувати маршрут — подивись логи.',
+  'route.open_in_maps': '🗺 Маршрут у Google Maps',
   'route.header':
     'Знайдено маршрут для <b>{count}</b> (чи більше) нових пив, відстань ≈ <b>{km}</b>, пабів у маршруті: <b>{pubs}</b>.',
 
