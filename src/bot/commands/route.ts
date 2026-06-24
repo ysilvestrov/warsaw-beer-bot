@@ -1,4 +1,4 @@
-import { Composer } from 'telegraf';
+import { Composer, Markup } from 'telegraf';
 import type { BotContext } from '../index';
 import { listPubs } from '../../storage/pubs';
 import { latestSnapshotsPerPub, tapsForSnapshotWithBeer } from '../../storage/snapshots';
@@ -27,6 +27,7 @@ import {
   type CandidateTap,
 } from './newbeers-format';
 import { formatRouteResult, type RoutePubFormat } from './route-format';
+import { googleMapsWalkingUrl } from '../../domain/maps';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -224,7 +225,20 @@ routeCommand.command('route', async (ctx) => {
         locale,
         t,
       });
-      await notify(text, { force: true });
+      const coords = result.pubIds.map((id) => {
+        const p = pubsById.get(id)!;
+        return { lat: p.lat!, lon: p.lon! };
+      });
+      const mapsUrl = googleMapsWalkingUrl(coords);
+      const keyboard = mapsUrl
+        ? Markup.inlineKeyboard([[Markup.button.url(t('route.open_in_maps'), mapsUrl)]])
+        : undefined;
+      await telegram
+        .editMessageText(chatId, messageId, undefined, text, {
+          parse_mode: 'HTML',
+          ...(keyboard ? { reply_markup: keyboard.reply_markup } : {}),
+        })
+        .catch(() => {});
     } catch (e) {
       log.error({ err: e }, 'route failed');
       await notify(t('route.failed'), { force: true });

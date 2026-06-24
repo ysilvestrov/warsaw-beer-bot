@@ -68,6 +68,7 @@ export interface Messages {
   'route.fill_missing': string;          // {done}, {total}
   'route.searching_tour': string;
   'route.failed': string;
+  'route.open_in_maps': string;
   // {count}=number, {km}=pre-formatted string from fmtKm() (e.g. "14,4 км"
   // in uk, "14.4 km" in en) — translators must NOT append the unit themselves,
   // {pubs}=number

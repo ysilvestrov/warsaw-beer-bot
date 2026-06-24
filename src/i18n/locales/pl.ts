@@ -65,6 +65,7 @@ export const pl: Messages = {
   'route.fill_missing': '🗺 Pobieram brakujące pary: {done}/{total}',
   'route.searching_tour': '🧠 Szukam najkrótszej trasy…',
   'route.failed': '❌ Nie udało się zbudować trasy — sprawdź logi.',
+  'route.open_in_maps': '🗺 Trasa w Google Maps',
   'route.header':
     'Znaleziono trasę dla <b>{count}</b> (lub więcej) nowych piw, dystans ≈ <b>{km}</b>, liczba pubów na trasie: <b>{pubs}</b>.',
 
