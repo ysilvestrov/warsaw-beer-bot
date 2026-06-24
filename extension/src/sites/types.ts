@@ -19,6 +19,11 @@ export interface SiteAdapter {
   /** Optional: resolve once the (client-rendered) grid has painted cards. */
   waitForGrid?(root: ParentNode): Promise<void>;
   /**
+   * Optional bounded detail hydration for fields that are absent from listing cards.
+   * Called only for uncached cards before they are sent to /match.
+   */
+  loadCardDetails?(cards: Card[]): Promise<void>;
+  /**
    * Optional perf scope for the re-render check — narrows where cards are
    * re-parsed. Does NOT enable re-render (that is always on). Omit it freely.
    */

@@ -1,4 +1,4 @@
-import type { SiteAdapter } from '../sites/types';
+import type { Card, SiteAdapter } from '../sites/types';
 import type { MatchResult, RawBeer } from '../api/types';
 import { getCached, setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
@@ -20,7 +20,7 @@ export async function runOverlay(
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
     const cards = adapter.parseCards(doc);
 
-    const misses: { el: HTMLElement; key: string; raw: RawBeer }[] = [];
+    const misses: { el: HTMLElement; key: string; card: Card }[] = [];
     for (const card of cards) {
       const key = normalizeKey(card.brewery, card.name);
       const cached = await getCached(key);
@@ -28,24 +28,30 @@ export async function runOverlay(
         renderBadge(card.el, cached);
         markSeen(card.el);
       } else {
-        const raw: RawBeer =
-          card.abv !== undefined
-            ? { brewery: card.brewery, name: card.name, abv: card.abv }
-            : { brewery: card.brewery, name: card.name };
-        misses.push({ el: card.el, key, raw });
+        misses.push({ el: card.el, key, card });
       }
     }
     if (misses.length === 0) return;
 
+    if (adapter.loadCardDetails) await adapter.loadCardDetails(misses.map((m) => m.card));
+
+    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer }[] = misses.map(({ el, key, card }) => ({
+      el,
+      key,
+      raw: card.abv !== undefined
+        ? { brewery: card.brewery, name: card.name, abv: card.abv }
+        : { brewery: card.brewery, name: card.name },
+    }));
+
     let results: MatchResult[];
     try {
-      results = await sendMatch(misses.map((m) => m.raw));
+      results = await sendMatch(rawMisses.map((m) => m.raw));
     } catch {
       return; // network/server error: leave the page untouched, retry next load
     }
 
     results.forEach((result, i) => {
-      const miss = misses[i];
+      const miss = rawMisses[i];
       if (!miss) return;
       renderBadge(miss.el, result);
       markSeen(miss.el);
@@ -54,7 +60,7 @@ export async function runOverlay(
 
     if (enrich) {
       const orphans = results
-        .map((result, i) => ({ result, miss: misses[i] }))
+        .map((result, i) => ({ result, miss: rawMisses[i] }))
         .filter(
           (x) =>
             x.miss &&

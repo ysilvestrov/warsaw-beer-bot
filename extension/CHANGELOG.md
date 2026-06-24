@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fixed BeerFreak matching for same-name releases: when product details expose `Міцність`, the extension now sends that ABV to the matcher using bounded, cached detail-page lookups.
 - Fixed Flasker matching when product titles omit or abbreviate the brewery: trusted shop tags and product links now identify known breweries, and leading preview/sample labels are removed before matching.
 
 ## [0.9.0] - 2026-06-17
