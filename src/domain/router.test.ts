@@ -18,6 +18,23 @@ test('handles partial coverage when N > union', () => {
   expect(r.coveredCount).toBe(5);
 });
 
+test('does not blow up for a large selected set (heuristic path)', () => {
+  // 20 pubs, each with a distinct interesting beer, spread on a line.
+  // N=20 forces greedySetCover to pick all 20 → |S|=20 > Held-Karp cap → heuristic.
+  const many = Array.from({ length: 20 }, (_, i) => ({
+    id: i + 1,
+    lat: 0,
+    lon: i * 0.01,
+    interesting: new Set([100 + i]),
+  }));
+  const start = Date.now();
+  const r = buildRoute(many, 20, { distance: haversineMeters });
+  expect(Date.now() - start).toBeLessThan(2000); // would be minutes with exact DP
+  expect(r.pubIds.length).toBe(20);
+  expect(new Set(r.pubIds).size).toBe(20); // every pub exactly once
+  expect(Number.isFinite(r.distanceMeters)).toBe(true);
+});
+
 describe('createOsrmTable', () => {
   test('builds the /table URL with lon,lat ordering and parses N×N matrix', async () => {
     let captured = '';
