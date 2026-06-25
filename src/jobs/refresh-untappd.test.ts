@@ -4,8 +4,9 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
 import { ensureProfile, setUntappdUsername } from '../storage/user_profiles';
-import type { Http } from '../sources/http';
+import { HttpError, type Http } from '../sources/http';
 import { refreshAllUntappd } from './refresh-untappd';
+import { createCircuitBreaker } from '../domain/untappd-circuit';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -243,6 +244,80 @@ describe('refreshAllUntappd', () => {
     expect(seenUrls).toEqual(['https://untappd.com/user/real/beers']);
   });
 
+  test('breaker open: skips the whole profile scrape without HTTP', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    const T = new Date('2026-06-25T03:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => {},
+      onRecover: () => {},
+    });
+    breaker.onResult(true, T);
+    const http: Http = { get: vi.fn(async () => PAGE_ONE_BEER(1, 'No Call', 'No Brew', '3.1')) };
+
+    await refreshAllUntappd({
+      db, log: silentLog, http, breaker,
+      now: () => new Date(T.getTime() + 3600_000),
+    });
+
+    expect(http.get).not.toHaveBeenCalled();
+    expect(breaker.state).toBe('open');
+  });
+
+  test('profile scrape 403 trips breaker and stops remaining users', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 2, 'bob');
+    const events: string[] = [];
+    const T = new Date('2026-06-25T03:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => events.push('trip'),
+      onRecover: () => events.push('recover'),
+    });
+    const seenUrls: string[] = [];
+    const http: Http = {
+      async get(url: string) {
+        seenUrls.push(url);
+        throw new HttpError(403, url);
+      },
+    };
+
+    await refreshAllUntappd({ db, log: silentLog, http, breaker, now: () => T });
+
+    expect(seenUrls).toEqual(['https://untappd.com/user/alice/beers']);
+    expect(events).toEqual(['trip']);
+    expect(breaker.state).toBe('open');
+  });
+
+  test('profile scrape captcha page trips breaker', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    const events: string[] = [];
+    const T = new Date('2026-06-25T03:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => events.push('trip'),
+      onRecover: () => events.push('recover'),
+    });
+    const http: Http = {
+      async get() {
+        return '<html><title>Just a moment...</title><body>cf-challenge</body></html>';
+      },
+    };
+
+    await refreshAllUntappd({ db, log: silentLog, http, breaker, now: () => T });
+
+    expect(events).toEqual(['trip']);
+    expect(breaker.state).toBe('open');
+    expect(findBeerByNormalized(db, 'anything', 'anything')).toBeNull();
+  });
+
   test('survives a per-profile fetch error and continues', async () => {
     const db = fresh();
     ensureProfile(db, 1);
@@ -311,6 +386,25 @@ describe('refreshAllUntappd', () => {
     expect(notifyAdmin).toHaveBeenCalledTimes(1);
     expect(notifyAdmin).toHaveBeenCalledWith(expect.stringContaining('cookie'));
     expect(seenUrls).toHaveLength(1); // stopped after first user
+  });
+
+  test('CookieExpiredError does not trip the VPS circuit by itself', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    const events: string[] = [];
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => events.push('trip'),
+      onRecover: () => events.push('recover'),
+    });
+    const { CookieExpiredError: E } = await import('../sources/http');
+    const http: Http = { async get() { throw new E(); } };
+
+    await refreshAllUntappd({ db, log: silentLog, http, breaker });
+
+    expect(events).toEqual([]);
+    expect(breaker.state).toBe('closed');
   });
 
   test('CookieExpiredError without notifyAdmin does not throw', async () => {
