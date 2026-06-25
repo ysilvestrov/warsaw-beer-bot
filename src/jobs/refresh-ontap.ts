@@ -14,6 +14,7 @@ import { matchPrepared, prepareCatalog } from '../domain/matcher';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 import { enrichOneOrphan } from './untappd-enrich';
+import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
 
 interface Deps {
   db: DB;
@@ -27,6 +28,7 @@ interface Deps {
   pubSlugs?: Set<string>;       // when set, refresh only these pubs (scoped /refresh)
   cities?: readonly City[];     // default CITIES
   inlineEnrichBudget?: number;  // default 20 — total inline Untappd enriches per run
+  breaker?: CircuitBreaker;     // default noopBreaker
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
@@ -38,9 +40,11 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     now = () => new Date(),
     cities = CITIES,
     inlineEnrichBudget = 20,
+    breaker = noopBreaker,
   } = deps;
 
   let enrichBudget = inlineEnrichBudget;
+  let inlineEnrichStopped = false;
 
   for (const city of cities) {
     let indexPubs: IndexPub[];
@@ -114,9 +118,20 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           // Inline Untappd enrichment ONLY for freshly-created orphans, and only
           // while the per-run budget remains — the multi-city seeding burst is
           // otherwise drained by the rate-limited enrich-orphans cron (#146).
-          if (lookupEnabled && isFreshOrphan && enrichBudget > 0) {
+          if (
+            lookupEnabled &&
+            isFreshOrphan &&
+            enrichBudget > 0 &&
+            !inlineEnrichStopped &&
+            breaker.canAttempt(now())
+          ) {
             const outcome = await enrichOneOrphan({ db, log, http, now }, beerId);
-            if (outcome !== 'skipped') {
+            if (outcome === 'blocked') {
+              breaker.onResult(true, now());
+              inlineEnrichStopped = true;
+              enrichBudget--;
+            } else if (outcome !== 'skipped') {
+              breaker.onResult(false, now());
               enrichBudget--;
               if (lookupSleepMs > 0) {
                 await new Promise<void>((r) => setTimeout(r, lookupSleepMs));

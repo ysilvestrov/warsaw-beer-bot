@@ -103,11 +103,15 @@ async function main(): Promise<void> {
           db, log, http, geocoder, onProgress: notify,
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
           pubSlugs: opts?.pubSlugs,
+          breaker: untappdBreaker,
         });
         // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
         // is not pub-specific and is refreshed daily + on a full /refresh.
         if (!opts?.pubSlugs && untappdHttp) {
-          await refreshAllUntappd({ db, log, http: untappdHttp, onProgress: notify, notifyAdmin });
+          await refreshAllUntappd({
+            db, log, http: untappdHttp, onProgress: notify, notifyAdmin,
+            breaker: untappdBreaker,
+          });
         }
       },
       buildNewbeersMessage,
@@ -119,6 +123,7 @@ async function main(): Promise<void> {
       refreshOntap({
         db, log, http, geocoder,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
+        breaker: untappdBreaker,
       }).catch((e) => log.error({ err: e }, 'ontap cron'));
     }),
     // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
@@ -169,8 +174,10 @@ async function main(): Promise<void> {
 
   if (untappdHttp) {
     cronJobs.push(cron.schedule('0 3 * * *', () => {
-      refreshAllUntappd({ db, log, http: untappdHttp, notifyAdmin })
-        .catch((e) => log.error({ err: e }, 'untappd cron'));
+      refreshAllUntappd({
+        db, log, http: untappdHttp, notifyAdmin,
+        breaker: untappdBreaker,
+      }).catch((e) => log.error({ err: e }, 'untappd cron'));
     }));
   }
 
