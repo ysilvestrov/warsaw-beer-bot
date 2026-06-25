@@ -16,3 +16,7 @@ export function setJobState(db: DB, key: string, value: string): void {
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
   ).run(key, value);
 }
+
+export function deleteJobState(db: DB, key: string): void {
+  db.prepare('DELETE FROM job_state WHERE key = ?').run(key);
+}
