@@ -35,7 +35,7 @@ import { enrichOrphans } from './jobs/enrich-orphans';
 import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
-import { createCircuitBreaker } from './domain/untappd-circuit';
+import { createPersistentCircuitBreaker } from './domain/untappd-circuit';
 import { createShutdown } from './shutdown';
 import { interruptActiveProgress } from './bot/active-progress';
 import { createTranslator } from './i18n';
@@ -73,7 +73,9 @@ async function main(): Promise<void> {
     : undefined;
 
   const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
-  const untappdBreaker = createCircuitBreaker({
+  const untappdBreaker = createPersistentCircuitBreaker({
+    db,
+    key: 'untappd_circuit_open_until',
     cooldownMs: 6 * 60 * 60 * 1000,
     onTrip: () => adminAlert('⚠️ Untappd: можливий бан IP (403/429 або captcha). Енрич призупинено на ~6 год.'),
     onRecover: () => adminAlert('✅ Untappd: доступ відновлено, енрич продовжено.'),
