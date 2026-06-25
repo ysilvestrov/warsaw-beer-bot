@@ -85,6 +85,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
       breaker.onResult(false, tickNow);
     } catch (e) {
       if (e instanceof CookieExpiredError) {
+        // Cookie expiry is a session-auth problem, not an IP-ban signal for the shared VPS circuit.
         log.warn('untappd cookie expired — stopping scrape');
         await notifyAdmin?.(
           '⚠️ Untappd cookie expired. Run: ./deploy/refresh-cookie.sh <new-value>',
