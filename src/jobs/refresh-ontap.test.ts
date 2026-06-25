@@ -1,13 +1,14 @@
 import pino from 'pino';
 import { filterIndexBySlugs, refreshOntap } from './refresh-ontap';
 import type { IndexPub } from '../sources/ontap/index';
-import type { Http } from '../sources/http';
+import { HttpError, type Http } from '../sources/http';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { latestSnapshot, tapsForSnapshot } from '../storage/snapshots';
 import { listLookupCandidates } from '../storage/beers';
 import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
+import { createCircuitBreaker } from '../domain/untappd-circuit';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -251,5 +252,69 @@ describe('refreshOntap multi-city', () => {
     });
     expect(beerCount(db)).toBe(2);       // two orphans
     expect(enrichedCount(db)).toBe(1);   // only one enriched — budget cap holds
+  });
+
+  test('inline enrich block trips breaker and disables later inline enrich while ontap continues', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const calls: string[] = [];
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        calls.push(url);
+        if (url === 'https://ontap.pl/warszawa') return cityIndex('warszawa');
+        if (url === 'https://warszawapub.ontap.pl/') {
+          return `<html><head><meta property="og:title" content="Budget Pub / ontap.pl"></head>
+            <body>
+              ${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}
+              ${panel(2, 'Bar Brewery', 'Bar Pils 5%', 'Pilsner')}
+            </body></html>`;
+        }
+        if (url.startsWith('https://untappd.com/search')) {
+          throw new HttpError(403, url);
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+    const events: string[] = [];
+    const T = new Date('2026-06-25T12:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => events.push('trip'),
+      onRecover: () => events.push('recover'),
+    });
+
+    await refreshOntap({
+      db, log: silentLog, http, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 20, lookupSleepMs: 0,
+      breaker, now: () => T,
+    });
+
+    expect(beerCount(db)).toBe(2);
+    expect(calls.filter((url) => url.startsWith('https://untappd.com/search'))).toHaveLength(1);
+    expect(events).toEqual(['trip']);
+    expect(breaker.state).toBe('open');
+    expect(enrichedCount(db)).toBe(0);
+  });
+
+  test('open breaker skips inline enrich without failing ontap refresh', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const { http, calls } = budgetHttp();
+    const T = new Date('2026-06-25T12:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => {},
+      onRecover: () => {},
+    });
+    breaker.onResult(true, T);
+
+    await refreshOntap({
+      db, log: silentLog, http, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 20, lookupSleepMs: 0,
+      breaker, now: () => new Date(T.getTime() + 3600_000),
+    });
+
+    expect(beerCount(db)).toBe(2);
+    expect(calls.filter((url) => url.startsWith('https://untappd.com/search'))).toHaveLength(0);
+    expect(enrichedCount(db)).toBe(0);
+    expect(breaker.state).toBe('open');
   });
 });
