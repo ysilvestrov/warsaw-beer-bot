@@ -488,17 +488,22 @@ Vintage-логіка: збіг ABV із найсвіжішим роком → «
 
 ### `/route [N]` — пішохідний маршрут
 Будує маршрут, що покриває **≥ N** непитих пив, мінімізуючи сумарну дистанцію.
-`N` ← аргумент → `user_filters.default_route_n` → `env.DEFAULT_ROUTE_N` (=5).
+`N` ← аргумент → `user_filters.default_route_n` → `env.DEFAULT_ROUTE_N` (=5);
+**клемпиться до `1..70`** (`clampRouteN`), бо більший N тягне десятки пабів.
 **Під капотом (`domain/router.ts`):**
 1. `interesting(p)` для кожного паба з останнього snapshot;
 2. жадібний **set-cover** ≥ N → `S₀`;
 3. **локальна оптимізація** заміною пабів під дистанцію;
-4. **open-TSP** на `|S| ≤ ~8` (DP за бітмасками), без фіксованих кінців.
+4. **тур** (`solveTour`): точний **open-TSP** (Held-Karp за бітмасками) для
+   `|S| ≤ 12`, інакше — поліноміальна евристика **nearest-neighbour + 2-opt**
+   (Held-Karp `O(2^|S|)` без стелі раніше вибухав на великому N).
 
 Дистанції: кеш `pub_distances` → один OSRM `/table` на пропуски → per-pair
-`/route` / **haversine** fallback. **Жорстких лімітів немає** — дистанція й
-кількість пабів завжди в хедері. **Fire-and-forget** + throttled
-`editMessageText` (обхід `handlerTimeout` 90 c).
+`/route` / **haversine** fallback. Дистанція й кількість пабів завжди в хедері.
+**Fire-and-forget** + throttled `editMessageText` (обхід `handlerTimeout` 90 c);
+прогрес-повідомлення `/route` і `/refresh`, що були в польоті при graceful
+shutdown, помічаються **«⚠️ перервано рестартом»** (реєстр `bot/active-progress.ts`),
+а не лишаються застиглими назавжди.
 У списку пив кожного паба відомий стиль показується inline після назви;
 невідомий стиль пропускається без placeholder-а.
 До результату додається inline-кнопка **🗺 Маршрут у Google Maps** —
