@@ -11,6 +11,9 @@ export interface Messages {
   // app
   'app.no_data_in_snapshot': string;
 
+  // common
+  'common.interrupted_by_restart': string;
+
   // help / command catalog
   'help.intro': string;
   'cmd.newbeers': string;
