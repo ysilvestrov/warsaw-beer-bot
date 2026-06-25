@@ -1,3 +1,4 @@
+import type { Telegram } from 'telegraf';
 import { trackProgress, interruptActiveProgress } from './active-progress';
 import type { Locale } from '../i18n/types';
 
@@ -8,9 +9,9 @@ function fakeTelegram() {
   const telegram = {
     editMessageText: async (chatId: number, messageId: number, _inline: undefined, text: string) => {
       calls.push({ chatId, messageId, text });
-      return true as unknown;
+      return true;
     },
-  };
+  } as unknown as Pick<Telegram, 'editMessageText'>;
   return { telegram, calls };
 }
 
