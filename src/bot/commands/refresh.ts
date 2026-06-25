@@ -7,6 +7,7 @@ import type { DB } from '../../storage/db';
 import { listPubs } from '../../storage/pubs';
 import { type NewbeersDeps, type NewbeersResult, filterPubsByQuery } from './newbeers-build';
 import { getUserCity } from '../../storage/user_profiles';
+import { trackProgress } from '../active-progress';
 
 const FULL_COOLDOWN_MS = 5 * 60 * 1000;
 const SCOPED_COOLDOWN_MS = 30 * 1000;
@@ -126,9 +127,11 @@ export function createRefreshCommand(
     const locale = ctx.locale;
     const pubSlugs = scope.kind === 'scoped' ? scope.slugs : undefined;
     const pubQuery = scope.kind === 'scoped' ? scope.query : undefined;
+    const tracker = trackProgress(chatId, messageId, locale);
 
     const notify = makeThrottledProgress(
       async (text) => {
+        tracker.update(text);
         await telegram
           .editMessageText(chatId, messageId, undefined, text)
           .catch(() => {});
@@ -156,13 +159,19 @@ export function createRefreshCommand(
     // handlerTimeout (default 90s) would otherwise kill the handler and
     // raise TimeoutError into bot.catch. Captured locals above keep the
     // background promise independent of ctx's lifetime.
-    void runRefreshPipeline({
-      run: (n) => run(n, { pubSlugs }),
-      notify,
-      t,
-      log,
-      postRun: postRunClosure,
-    });
+    void (async () => {
+      try {
+        await runRefreshPipeline({
+          run: (n) => run(n, { pubSlugs }),
+          notify,
+          t,
+          log,
+          postRun: postRunClosure,
+        });
+      } finally {
+        tracker.release();
+      }
+    })();
   });
   return cmd;
 }

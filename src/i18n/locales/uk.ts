@@ -4,6 +4,9 @@ export const uk: Messages = {
   // app
   'app.no_data_in_snapshot': 'Наразі немає цікавих непитих пив.',
 
+  // common
+  'common.interrupted_by_restart': '⚠️ Перервано рестартом — повтори команду.',
+
   // help / command catalog
   'help.intro': 'Команди бота:',
   'cmd.newbeers': 'топ непитих пив',

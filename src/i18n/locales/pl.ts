@@ -4,6 +4,9 @@ export const pl: Messages = {
   // app
   'app.no_data_in_snapshot': 'Aktualnie brak ciekawych niespróbowanych piw.',
 
+  // common
+  'common.interrupted_by_restart': '⚠️ Przerwano przez restart — uruchom polecenie ponownie.',
+
   // help / command catalog
   'help.intro': 'Komendy bota:',
   'cmd.newbeers': 'top niepitych piw',

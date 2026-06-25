@@ -28,8 +28,17 @@ import {
 } from './newbeers-format';
 import { formatRouteResult, type RoutePubFormat } from './route-format';
 import { googleMapsWalkingUrl } from '../../domain/maps';
+import { trackProgress } from '../active-progress';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
+
+export const MAX_ROUTE_N = 70;
+
+// Clamp the requested coverage to a sane range. Beyond MAX_ROUTE_N the route would
+// span dozens of pubs and the tour search gets expensive; below 1 is meaningless.
+export function clampRouteN(n: number): number {
+  return Math.min(Math.max(1, Math.floor(n)), MAX_ROUTE_N);
+}
 
 export const routeCommand = new Composer<BotContext>();
 
@@ -44,10 +53,11 @@ export function filterRouteTaps<T extends TapView>(
 routeCommand.command('route', async (ctx) => {
   const db = ctx.deps.db;
   const arg = ctx.message.text.split(' ')[1];
-  const N =
+  const N = clampRouteN(
     parseInt(arg ?? '', 10) ||
-    getFilters(db, ctx.from.id)?.default_route_n ||
-    ctx.deps.env.DEFAULT_ROUTE_N;
+      getFilters(db, ctx.from.id)?.default_route_n ||
+      ctx.deps.env.DEFAULT_ROUTE_N,
+  );
 
   const tried = triedBeerIds(db, ctx.from.id);
   const filters =
@@ -104,8 +114,10 @@ routeCommand.command('route', async (ctx) => {
   const env = ctx.deps.env;
   const t = ctx.t;
   const locale = ctx.locale;
+  const tracker = trackProgress(chatId, messageId, locale);
   const notify = makeThrottledProgress(
     async (text) => {
+      tracker.update(text);
       await telegram
         .editMessageText(chatId, messageId, undefined, text, { parse_mode: 'HTML' })
         .catch(() => {});
@@ -242,6 +254,8 @@ routeCommand.command('route', async (ctx) => {
     } catch (e) {
       log.error({ err: e }, 'route failed');
       await notify(t('route.failed'), { force: true });
+    } finally {
+      tracker.release();
     }
   })();
 });

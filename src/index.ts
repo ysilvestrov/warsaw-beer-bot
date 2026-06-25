@@ -37,6 +37,8 @@ import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { createCircuitBreaker } from './domain/untappd-circuit';
 import { createShutdown } from './shutdown';
+import { interruptActiveProgress } from './bot/active-progress';
+import { createTranslator } from './i18n';
 
 async function main(): Promise<void> {
   const env = loadEnv(process.env);
@@ -190,7 +192,14 @@ async function main(): Promise<void> {
   // Without an explicit exit, node-cron schedules and the SQLite handle keep
   // the event loop alive — systemd then SIGKILLs us at TimeoutStopSec (90s
   // default), which risks a non-clean SQLite WAL flush.
-  const shutdown = createShutdown({ bot, cronJobs, db, httpServer: apiServer, log });
+  const shutdown = createShutdown({
+    bot,
+    cronJobs,
+    db,
+    httpServer: apiServer,
+    log,
+    interruptActiveProgress: () => interruptActiveProgress(bot.telegram, createTranslator),
+  });
   const onSignal = (signal: string) => {
     shutdown(signal).finally(() => process.exit(0));
   };

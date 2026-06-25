@@ -15,6 +15,10 @@ export interface RouteOpts {
   distance: (a: [number, number], b: [number, number]) => number;
 }
 
+// Exact Held-Karp is O(2^k · k²); only use it for small selected sets. Above this
+// many pubs, fall back to a polynomial nearest-neighbour + 2-opt heuristic.
+const HELD_KARP_MAX = 12;
+
 export function haversineMeters(a: [number, number], b: [number, number]): number {
   const R = 6371000;
   const toRad = (x: number) => (x * Math.PI) / 180;
@@ -28,7 +32,7 @@ export function haversineMeters(a: [number, number], b: [number, number]): numbe
 export function buildRoute(pubs: RoutePub[], N: number, opts: RouteOpts): RouteResult {
   const selected = greedySetCover(pubs, N);
   const improved = localSwapForDistance(selected, pubs, N, opts);
-  const tour = openTsp(improved, opts);
+  const tour = solveTour(improved, opts);
   return {
     pubIds: tour.order.map((p) => p.id),
     coveredCount: union(improved).size,
@@ -63,7 +67,7 @@ function greedySetCover(pubs: RoutePub[], N: number): RoutePub[] {
 function localSwapForDistance(
   selected: RoutePub[], all: RoutePub[], N: number, opts: RouteOpts,
 ): RoutePub[] {
-  let best = selected; let bestDist = openTsp(best, opts).distance;
+  let best = selected; let bestDist = solveTour(best, opts).distance;
   let improved = true;
   while (improved) {
     improved = false;
@@ -72,7 +76,7 @@ function localSwapForDistance(
         if (best.some((p) => p.id === cand.id)) continue;
         const trial = [...best]; trial[i] = cand;
         if (union(trial).size < N) continue;
-        const d = openTsp(trial, opts).distance;
+        const d = solveTour(trial, opts).distance;
         if (d < bestDist) { best = trial; bestDist = d; improved = true; }
       }
     }
@@ -108,6 +112,57 @@ function openTsp(pubs: RoutePub[], opts: RouteOpts): { order: RoutePub[]; distan
   const order: number[] = []; let cur = bestEnd; let mask = full;
   while (cur !== -1) { order.unshift(cur); const p = parent[mask][cur]; mask ^= 1 << cur; cur = p; }
   return { order: order.map((i) => pubs[i]), distance: best };
+}
+
+function nearestNeighbourTwoOpt(
+  pubs: RoutePub[],
+  opts: RouteOpts,
+): { order: RoutePub[]; distance: number } {
+  const n = pubs.length;
+  if (n <= 1) return { order: pubs, distance: 0 };
+
+  const dist: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) =>
+      i === j ? 0 : opts.distance([pubs[i].lat, pubs[i].lon], [pubs[j].lat, pubs[j].lon]),
+    ),
+  );
+  const pathLen = (ord: number[]): number => {
+    let s = 0;
+    for (let i = 0; i + 1 < ord.length; i++) s += dist[ord[i]][ord[i + 1]];
+    return s;
+  };
+
+  // Nearest-neighbour construction from node 0.
+  const visited = new Array(n).fill(false);
+  let cur = 0;
+  visited[0] = true;
+  let order = [0];
+  for (let k = 1; k < n; k++) {
+    let best = -1;
+    let bd = Infinity;
+    for (let j = 0; j < n; j++) if (!visited[j] && dist[cur][j] < bd) { bd = dist[cur][j]; best = j; }
+    order.push(best);
+    visited[best] = true;
+    cur = best;
+  }
+
+  // 2-opt on the open path; bounded number of sweeps.
+  for (let sweep = 0; sweep < n; sweep++) {
+    let improved = false;
+    for (let i = 0; i < n - 1; i++) {
+      for (let k = i + 1; k < n; k++) {
+        const cand = [...order.slice(0, i), ...order.slice(i, k + 1).reverse(), ...order.slice(k + 1)];
+        if (pathLen(cand) < pathLen(order) - 1e-9) { order = cand; improved = true; }
+      }
+    }
+    if (!improved) break;
+  }
+
+  return { order: order.map((i) => pubs[i]), distance: pathLen(order) };
+}
+
+function solveTour(pubs: RoutePub[], opts: RouteOpts): { order: RoutePub[]; distance: number } {
+  return pubs.length <= HELD_KARP_MAX ? openTsp(pubs, opts) : nearestNeighbourTwoOpt(pubs, opts);
 }
 
 export function createOsrmDistance(base: string, fetchImpl: typeof fetch = fetch) {
