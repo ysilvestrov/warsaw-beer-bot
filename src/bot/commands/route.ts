@@ -28,6 +28,7 @@ import {
 } from './newbeers-format';
 import { formatRouteResult, type RoutePubFormat } from './route-format';
 import { googleMapsWalkingUrl } from '../../domain/maps';
+import { trackProgress } from '../active-progress';
 
 const PROGRESS_MIN_INTERVAL_MS = 2000;
 
@@ -113,8 +114,10 @@ routeCommand.command('route', async (ctx) => {
   const env = ctx.deps.env;
   const t = ctx.t;
   const locale = ctx.locale;
+  const tracker = trackProgress(chatId, messageId, locale);
   const notify = makeThrottledProgress(
     async (text) => {
+      tracker.update(text);
       await telegram
         .editMessageText(chatId, messageId, undefined, text, { parse_mode: 'HTML' })
         .catch(() => {});
@@ -251,6 +254,8 @@ routeCommand.command('route', async (ctx) => {
     } catch (e) {
       log.error({ err: e }, 'route failed');
       await notify(t('route.failed'), { force: true });
+    } finally {
+      tracker.release();
     }
   })();
 });

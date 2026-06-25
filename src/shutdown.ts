@@ -9,6 +9,7 @@ export interface ShutdownDeps {
   db: Pick<DB, 'close'>;
   httpServer?: { close: (cb?: (err?: Error) => void) => void };
   log: pino.Logger;
+  interruptActiveProgress?: () => Promise<void>;
 }
 
 export type Shutdown = (signal: string) => Promise<void>;
@@ -19,6 +20,14 @@ export function createShutdown(deps: ShutdownDeps): Shutdown {
     if (started) return;
     started = true;
     deps.log.info({ signal }, 'shutdown initiated');
+
+    if (deps.interruptActiveProgress) {
+      try {
+        await deps.interruptActiveProgress();
+      } catch (err) {
+        deps.log.error({ err }, 'interrupt active progress failed');
+      }
+    }
 
     for (const job of deps.cronJobs) {
       try { job.stop(); } catch (err) { deps.log.error({ err }, 'cron stop failed'); }
