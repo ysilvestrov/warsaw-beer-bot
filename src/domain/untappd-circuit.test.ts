@@ -141,3 +141,50 @@ test('persistent circuit: failed half-open probe reopens and writes a new open_u
   expect(getJobState(db, KEY)).toBe('2026-06-04T12:00:00.000Z');
   expect(events).toEqual([]);
 });
+
+describe('blockThreshold', () => {
+  const now = new Date('2026-06-26T00:00:00Z');
+  function make(threshold: number, onTrip = () => {}) {
+    return createCircuitBreaker({ cooldownMs: 3600_000, onTrip, onRecover: () => {}, blockThreshold: threshold });
+  }
+
+  test('default threshold 1 trips on the first block', () => {
+    const b = createCircuitBreaker({ cooldownMs: 3600_000, onTrip: () => {}, onRecover: () => {} });
+    b.onResult(true, now);
+    expect(b.state).toBe('open');
+  });
+
+  test('threshold 3 stays closed for the first two blocks, opens on the third', () => {
+    const b = make(3);
+    b.onResult(true, now); expect(b.state).toBe('closed');
+    b.onResult(true, now); expect(b.state).toBe('closed');
+    b.onResult(true, now); expect(b.state).toBe('open');
+  });
+
+  test('a success resets the consecutive-block counter', () => {
+    const b = make(3);
+    b.onResult(true, now);
+    b.onResult(true, now);
+    b.onResult(false, now);   // reset
+    b.onResult(true, now); expect(b.state).toBe('closed');
+    b.onResult(true, now); expect(b.state).toBe('closed');
+    b.onResult(true, now); expect(b.state).toBe('open');
+  });
+
+  test('onTrip fires once, only on the closed→open transition', () => {
+    let trips = 0;
+    const b = make(2, () => { trips++; });
+    b.onResult(true, now);
+    b.onResult(true, now);   // opens here
+    expect(trips).toBe(1);
+  });
+
+  test('half_open re-opens on a single block regardless of threshold', () => {
+    const b = make(3);
+    b.onResult(true, now); b.onResult(true, now); b.onResult(true, now); // open
+    const later = new Date(now.getTime() + 3600_000);
+    expect(b.canAttempt(later)).toBe(true); // half_open
+    b.onResult(true, later);
+    expect(b.state).toBe('open');
+  });
+});
