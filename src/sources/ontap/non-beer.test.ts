@@ -18,6 +18,10 @@ describe('isOntapNonBeerTap', () => {
     ['style szprycer', { style: 'Szprycer', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Big Diva' }],
     ['style kombucha', { style: 'Kombucha', brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['style wine grapes glera', { style: 'Chardonnay, Glera and Garganega', brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
+    ['brewery aperitivo with suffix', { style: null, brewery_ref: 'Aperitivo Spritz Brewery', beer_ref: 'Aperol Spritz' }],
+    ['brewery cantina singular', { style: null, brewery_ref: 'Cantina della Valle Brewery', beer_ref: 'Glera Trevenezie' }],
+    ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
+    ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
