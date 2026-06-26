@@ -107,10 +107,12 @@ Name-based адаптери (`beerrepublic`, `bierloods22`, `winetime`, `beerfre
   словнику. **FP-гард:** на цій же сторінці є реальне пиво `MAGIC ROAD … PUSZKA 0,5 L KAUCJA`
   (банка+застава) — `MERCH_RE` його НЕ чіпає, бо `puszka`/`kaucja` не merch-токени.
 - **onemorebeer `/delikatesy`** — софт-дрінки з реальними брендами (`KOFOLA`, `VIGO KOMBUCHA`,
-  `VITA ALOE`, `KWAS CHLEBOWY`) — **спільного токена в назві немає**. Єдиний надійний сигнал —
-  **категорія/URL**. → новий опційний метод контракту `SiteAdapter.isNonBeerPage(url): boolean`;
-  overlay (`content/main.ts`) пропускає сторінку повністю, коли `true`. onemorebeer матчить
-  `/delikatesy`. (`/szklanki-i-akcesoria` НЕ гейтиться повністю — там є пиво MAGIC ROAD, тож
+  `VITA ALOE`) живуть поруч із eligible `KWAS CHLEBOWY`. Тому `/delikatesy` НЕ можна
+  скіпати цілою категорією: broad page-gate сховав би kvass. onemorebeer фільтрує
+  неeligible soft drinks per product (`KOFOLA`/`KOMBUCHA`/`VITA ALOE`) і лишає
+  `KWAS CHLEBOWY` карткою для matching/enrichment. Whole-page `SiteAdapter.isNonBeerPage(url)`
+  дозволений тільки для категорій, які не можуть містити eligible cider/mead/kvass.
+  (`/szklanki-i-akcesoria` теж НЕ гейтиться повністю — там є пиво MAGIC ROAD, тож
   per-product через `MERCH_RE`.)
 
 `isNonBeerPage` тестується bespoke-тестом адаптера (`/delikatesy`→true, `/piwa`,
@@ -122,8 +124,10 @@ Name-based адаптери (`beerrepublic`, `bierloods22`, `winetime`, `beerfre
 - `winetime` — `isNonBeerName(rawTitle)` (ловить `Набір`/`+ келих`/`сертифікат`) + синтетична `.nonbeer.html`.
 - `beerfreak` — `isNonBeerName(rawTitle)` (ловить `набір`/`сертифікат`/`пакування`) + реальна `.nonbeer.html`
   з `beerfreak.org/beer-sets/` (curl + challenge-cookie).
-- `onemorebeer` — `MERCH_RE` (шоп-локальні merch-токени) в `parseCards` + `isNonBeerPage('/delikatesy')`;
-  реальна `.nonbeer.html` з `/szklanki-i-akcesoria` (Playwright capture); bespoke-тест на MAGIC ROAD.
+- `onemorebeer` — `MERCH_RE` (шоп-локальні merch-токени) + soft-drink tokens
+  (`KOFOLA`/`KOMBUCHA`/`VITA ALOE`) в `parseCards`; без `isNonBeerPage('/delikatesy')`, бо
+  kvass/`KWAS CHLEBOWY` eligible. Реальна `.nonbeer.html` з `/szklanki-i-akcesoria`
+  (Playwright capture); bespoke-тести на MAGIC ROAD і kvass.
 - `beerrepublic` — мігрувати на спільний хелпер + синтетична `.nonbeer.html`.
 - `bierloods22` — лишити `PACKAGE_TITLE_RE` + синтетична `.nonbeer.html` (без зміни коду).
 - `hoptimaal` — лишити URL-фільтр + синтетична `.nonbeer.html` з merch/bundle-карткою (без зміни коду).

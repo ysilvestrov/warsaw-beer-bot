@@ -112,7 +112,7 @@ name-based matching.
 These categories are explicitly eligible and must not be filtered by this issue:
 
 - cider (`Cydr`, `Cider`, etc.);
-- kvass / `Kwas chlebowy`;
+- kvass / `Kwas chlebowy` / `квас`;
 - mead / melomel.
 
 They may still fail matching or enrichment, but that is a matching/enrichment quality problem,

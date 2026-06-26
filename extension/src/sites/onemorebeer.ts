@@ -13,6 +13,7 @@ const CONTAINER_SELECTOR = '.one-catalog-view-list';
 // Stems handle inflection (szklanka/szklanki, koszulka/koszulkę). Deliberately excludes "puszka"
 // (can) and "kaucja" (deposit) — those mark a real beer (e.g. MAGIC ROAD … PUSZKA … KAUCJA).
 const MERCH_RE = /\b(?:szklank|pokal|kufel|koszulk|ksi[ąa]żk|ksiazk|akcesori|otwieracz|podstawk|podkładk)\w*/i;
+const SOFT_DRINK_RE = /\b(?:kofola|vigo kombucha|vita aloe)\b/i;
 
 function text(el: Element | null | undefined): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
@@ -34,7 +35,6 @@ function cleanName(rawTitle: string, brewery: string): string {
 export const onemorebeer: SiteAdapter = {
   id: 'onemorebeer',
   hostMatch: (url) => url.hostname === 'onemorebeer.pl' || url.hostname.endsWith('.onemorebeer.pl'),
-  isNonBeerPage: (url) => /(^|\/)delikatesy(\/|$)/i.test(url.pathname),
   reRenderContainerSelector: CONTAINER_SELECTOR,
 
   async waitForGrid(root) {
@@ -47,7 +47,7 @@ export const onemorebeer: SiteAdapter = {
       const brewery = text(el.querySelector(BREWERY_SELECTOR));
       const rawTitle = text(el.querySelector(TITLE_SELECTOR));
       if (!brewery || !rawTitle) continue;
-      if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle)) continue;
+      if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) continue;
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
       cards.push({ el, brewery, name });
