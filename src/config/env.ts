@@ -14,6 +14,8 @@ const Schema = z.object({
     .default('true')
     .transform((v) => v === 'true'),
   UNTAPPD_SESSION_COOKIE: z.string().optional(),
+  WEBSHARE_PROXY: z.string().optional(),
+  UNTAPPD_BLOCK_THRESHOLD: z.coerce.number().int().positive().default(3),
   ADMIN_TELEGRAM_ID: z.string().optional(),
   ADMIN_API_TOKEN: z.string().optional(),
 });

@@ -47,3 +47,26 @@ describe('loadEnv', () => {
     expect(env.ADMIN_API_TOKEN).toBeUndefined();
   });
 });
+
+describe('env: proxy + block threshold', () => {
+  const base = {
+    TELEGRAM_BOT_TOKEN: 'x'.repeat(12),
+    DATABASE_PATH: '/tmp/x.db',
+    OSRM_BASE_URL: 'https://osrm.example.com',
+    NOMINATIM_USER_AGENT: 'test-agent',
+  };
+
+  test('WEBSHARE_PROXY is optional and passes through', () => {
+    expect(loadEnv({ ...base } as never).WEBSHARE_PROXY).toBeUndefined();
+    expect(
+      loadEnv({ ...base, WEBSHARE_PROXY: 'u:p@p.webshare.io:80' } as never).WEBSHARE_PROXY,
+    ).toBe('u:p@p.webshare.io:80');
+  });
+
+  test('UNTAPPD_BLOCK_THRESHOLD defaults to 3 and coerces', () => {
+    expect(loadEnv({ ...base } as never).UNTAPPD_BLOCK_THRESHOLD).toBe(3);
+    expect(
+      loadEnv({ ...base, UNTAPPD_BLOCK_THRESHOLD: '5' } as never).UNTAPPD_BLOCK_THRESHOLD,
+    ).toBe(5);
+  });
+});
