@@ -16,6 +16,10 @@ sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db \
 (само-видаляється, коли матчиться). Далі — тріаж по `outcome` + `candidates_count`.
 Вже розмічені рядки (`review_class IS NOT NULL`) відфільтровано — вони не потребують уваги.
 
+Read-only запити до прод-БД запускай напряму як оператор (`ysi`): файл БД, WAL і SHM
+доступні на читання. `sudo -u warsaw-beer-bot /usr/bin/bash -lc ...` потрібен тільки
+для write-операцій (наприклад purge/delete), які мають іти під bot-користувачем.
+
 ---
 
 ## Крок 0. Підтвердити, що це проблема матчингу, а не транспорту
@@ -158,8 +162,8 @@ curl -fsS -X POST "$API_BASE/admin/enrich-failures/review" \
 ## Purge наявних не-пив (разово, ПІСЛЯ broadcast)
 
 Не-пиво-орфани безпечні до видалення (`untappd_id IS NULL`, без посилань у
-`match_links`/`checkins`). **Спершу dry-run SELECT**, очима звір список, потім DELETE. Запуск під
-bot-користувачем (звичайний `sudo -u warsaw-beer-bot` не працює — лише через дозволений wrapper):
+`match_links`/`checkins`). **Спершу dry-run SELECT** напряму через `sqlite3 -readonly`,
+очима звір список, потім DELETE під bot-користувачем через дозволений wrapper.
 
 > ⚠️ Порядок: фільтри адаптера клієнтські → діють лише після broadcast розширення.
 > Purge до broadcast = старі клієнти наповнять рядки назад через `/enrich/candidates`.
@@ -170,20 +174,20 @@ bot-користувачем (звичайний `sudo -u warsaw-beer-bot` не 
 
 ```bash
 # DRY-RUN: подивитись, що буде видалено
-sudo -u warsaw-beer-bot /usr/bin/bash -lc '
-  sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db "
-    SELECT ef.beer_id, ef.brewery, ef.name
-    FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
-    WHERE b.untappd_id IS NULL
-      AND (ef.name LIKE \"%brewery pack%\" OR ef.name LIKE \"%vertical set%\"
-        OR ef.name LIKE \"%tasting%set%\" OR ef.name LIKE \"%Набір%\"
-        OR ef.name LIKE \"%келих%\" OR ef.name LIKE \"%Collective%Pack%\"
-        OR ef.name LIKE \"%anniversary vertical%\")
-      AND NOT EXISTS (SELECT 1 FROM match_links m WHERE m.untappd_beer_id = ef.beer_id)
-      AND NOT EXISTS (SELECT 1 FROM checkins  c WHERE c.beer_id          = ef.beer_id);"'
+sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db "
+  SELECT ef.beer_id, ef.brewery, ef.name
+  FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+  WHERE b.untappd_id IS NULL
+    AND (ef.name LIKE \"%brewery pack%\" OR ef.name LIKE \"%vertical set%\"
+      OR ef.name LIKE \"%tasting%set%\" OR ef.name LIKE \"%Набір%\"
+      OR ef.name LIKE \"%келих%\" OR ef.name LIKE \"%Collective%Pack%\"
+      OR ef.name LIKE \"%anniversary vertical%\")
+    AND NOT EXISTS (SELECT 1 FROM match_links m WHERE m.untappd_beer_id = ef.beer_id)
+    AND NOT EXISTS (SELECT 1 FROM checkins  c WHERE c.beer_id          = ef.beer_id);"
 ```
 
-Після звірки — той самий WHERE у DELETE. **`PRAGMA foreign_keys=ON` обовʼязковий** — sqlite3 CLI
+Після звірки — той самий WHERE у DELETE під bot-користувачем через wrapper.
+**`PRAGMA foreign_keys=ON` обовʼязковий** — sqlite3 CLI
 тримає FK **вимкненими** за замовчуванням, тож без нього каскад на `enrich_failures` (FK
 `ON DELETE CASCADE`) НЕ спрацює і лишить осиротілі рядки. `busy_timeout` — бо бот тримає БД відкритою (WAL).
 
@@ -207,8 +211,9 @@ sudo -u warsaw-beer-bot /usr/bin/bash -lc '
 
 ## Довідка
 - Схема таблиці: `spec.md` §3.13; механіка логування: §4 (`/enrich/*`).
-- Read-only доступ до прод-БД: memory `reference_prod_deploy_and_db_ops`
-  (`/var/lib/warsaw-beer-bot/bot.db`; `sudo -u warsaw-beer-bot` НЕ працює).
+- Read-only доступ до прод-БД: `sqlite3 -readonly /var/lib/warsaw-beer-bot/bot.db ...`
+  напряму як оператор (`ysi`). `sudo -u warsaw-beer-bot /usr/bin/bash -lc ...` —
+  лише для write-операцій через дозволений sudoers-wrapper.
 - Прод у UTC; корелюй час напряму з `journalctl` (memory `reference_server_timezone`).
 - `match_links.untappd_beer_id` — це ЛОКАЛЬНИЙ `beers.id` (заповнений і для орфанів);
   реальний статус матчингу — `beers.untappd_id IS NOT NULL` (memory `reference_matching_gotchas`).
