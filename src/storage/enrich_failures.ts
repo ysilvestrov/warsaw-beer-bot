@@ -44,6 +44,18 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
 }
 
+// True when the beer was triaged as `wontfix` (intentionally never matched).
+// Such orphans are excluded from enrich pools so we stop re-querying Untappd.
+export function isWontfix(db: DB, beerId: number): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM enrich_failures WHERE beer_id = ? AND review_class = 'wontfix'`,
+      )
+      .get(beerId) !== undefined
+  );
+}
+
 // Values must stay in sync with the CHECK on enrich_failures.review_class (schema migration 12).
 export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix';
 

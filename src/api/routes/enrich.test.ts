@@ -3,6 +3,7 @@ import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
+import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiEnv } from '../types';
@@ -60,6 +61,23 @@ describe('POST /enrich/candidates', () => {
     const oneHourAgo = new Date(Date.now() - 3600_000).toISOString();
     db.prepare('UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 1 WHERE id = ?').run(oneHourAgo, id);
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Bar', name: 'Foo' }] });
+    const body = await res.json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('is not eligible when triaged as wontfix', async () => {
+    const { db, app } = setup();
+    const id = upsertBeer(db, {
+      untappd_id: null, name: 'Never', brewery: 'Hopeless', style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Never'), normalized_brewery: normalizeBrewery('Hopeless'),
+    });
+    recordEnrichFailure(db, {
+      beer_id: id, brewery: 'Hopeless', name: 'Never',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: new Date().toISOString(),
+    });
+    setEnrichFailureReview(db, id, 'wontfix', null, new Date().toISOString());
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Hopeless', name: 'Never' }] });
     const body = await res.json();
     expect(body.candidates[0].eligible).toBe(false);
   });
