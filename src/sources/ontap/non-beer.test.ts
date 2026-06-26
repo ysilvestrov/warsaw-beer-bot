@@ -22,6 +22,7 @@ describe('isOntapNonBeerTap', () => {
     ['brewery cantina singular', { style: null, brewery_ref: 'Cantina della Valle Brewery', beer_ref: 'Glera Trevenezie' }],
     ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
+    ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
@@ -41,6 +42,7 @@ describe('isOntapNonBeerTap', () => {
     ['mead Polish sweet descriptor', { style: 'Mead półsłodkie', brewery_ref: 'Berryland' }],
     ['melomel sweet descriptor', { style: 'Melomel słodkie', brewery_ref: 'Berryland' }],
     ['normal beer', { style: 'West Coast IPA', brewery_ref: 'PINTA Brewery' }],
+    ['normal brewery with dash but no arrow/time', { style: 'IPA', brewery_ref: 'Browar Stu Mostow - Wroclaw' }],
     ['drinkability prose does not match generic drink', {
       style: 'Dark, smooth, and deceptively light on the palate, endlessly drinkable Schwarzbier',
       brewery_ref: 'FUERST WIACEK Berlin Brewery',
