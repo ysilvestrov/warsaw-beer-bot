@@ -200,4 +200,30 @@ describe('refreshTapRatings', () => {
     expect(res.blocked).toBe(1);
     expect(res.not_found).toBe(0);
   });
+
+  test('blockThreshold > 1: a single block does not stop the run', async () => {
+    const db = fresh();
+    seedIdBeerOnTap(db, 'Brew A', 'Beer A', 201);
+    seedIdBeerOnTap(db, 'Brew B', 'Beer B', 202);
+    seedIdBeerOnTap(db, 'Brew C', 'Beer C', 203);
+    let calls = 0;
+    const http: Http = {
+      async get(): Promise<string> {
+        calls++;
+        if (calls === 1) return '<title>Just a moment...</title>'; // first: block page
+        return beerPageHtml('3.75');                               // rest: valid rating
+      },
+    };
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {}, blockThreshold: 2,
+    });
+    const res = await refreshTapRatings({
+      db, log: silentLog, http, breaker, sleepMs: 0,
+      now: () => new Date('2026-05-27T12:00:00Z'),
+    });
+    expect(res.blocked).toBe(1);
+    expect(res.processed).toBeGreaterThan(1); // loop continued past the first block
+    expect(res.matched).toBeGreaterThan(0);
+    expect(breaker.state).toBe('closed');     // successes reset the counter
+  });
 });
