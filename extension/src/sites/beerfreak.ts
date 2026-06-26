@@ -13,6 +13,8 @@ interface ProductMeta {
 
 const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)\s+/i;
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
+const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
+const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
 const MAX_DETAIL_FETCHES_PER_PASS = 20;
 const detailUrls = new WeakMap<HTMLElement, string>();
 const abvByUrl = new Map<string, Promise<number | undefined>>();
@@ -35,11 +37,54 @@ function cleanName(rawTitle: string, brewery: string): string {
   const prefix = rawTitle.slice(0, b.length);
   if (prefix.toLowerCase() !== b.toLowerCase()) return rawTitle.trim();
 
-  return rawTitle.slice(b.length).trim().replace(BREWERY_NOISE_PREFIX_RE, '').trim() || rawTitle.trim();
+  return stripLeadingCollaborator(rawTitle.slice(b.length))
+    .replace(BREWERY_NOISE_PREFIX_RE, '')
+    .trim() || rawTitle.trim();
+}
+
+function normalizedToken(token: string): string {
+  return token.toLowerCase().replace(/[(),]/g, '');
+}
+
+function stripCollaboratorName(rawTitle: string): string {
+  const tokens = rawTitle.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return rawTitle.trim();
+
+  const first = normalizedToken(tokens[0]);
+  if (LEADING_BREWERY_DESCRIPTORS.has(first) && tokens.length >= 3) {
+    return tokens.slice(2).join(' ');
+  }
+
+  for (let i = 0; i < tokens.length - 1; i += 1) {
+    const token = normalizedToken(tokens[i]);
+    const next = normalizedToken(tokens[i + 1] ?? '');
+    if (COLLABORATOR_COMPANY_WORDS.has(token) && COLLABORATOR_TERMINAL_WORDS.has(next)) {
+      return tokens.slice(i + 2).join(' ');
+    }
+    if (COLLABORATOR_TERMINAL_WORDS.has(token)) {
+      return tokens.slice(i + 1).join(' ');
+    }
+  }
+
+  return tokens.slice(1).join(' ');
+}
+
+function stripLeadingCollaborator(rawTitle: string): string {
+  const title = rawTitle.replace(/\s+/g, ' ').trim();
+  const match = title.match(/^[\\/]\s*(.+)$/);
+  return match ? stripCollaboratorName(match[1]) : title;
 }
 
 function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string } {
   const title = rawTitle.replace(/\s+/g, ' ').trim();
+  const collaborator = title.match(/^(.+?)\s*[\\/]\s*(.+)$/);
+  if (collaborator) {
+    return {
+      brewery: collaborator[1].trim(),
+      name: stripCollaboratorName(collaborator[2].trim()) || title,
+    };
+  }
+
   const tokens = title.split(/\s+/).filter(Boolean);
   const first = tokens[0]?.toLowerCase();
 
@@ -47,6 +92,13 @@ function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string 
     return {
       brewery: tokens.slice(0, -1).join(' '),
       name: tokens[tokens.length - 1],
+    };
+  }
+
+  if (tokens.length >= 2) {
+    return {
+      brewery: tokens[0],
+      name: tokens.slice(1).join(' '),
     };
   }
 
@@ -125,9 +177,11 @@ export const beerfreak: SiteAdapter = {
       if (!rawTitle) continue;
       if (isNonBeerName(rawTitle)) continue;
 
-      const parsed = product?.brand_title == null
-        ? splitBrandlessTitle(rawTitle)
-        : { brewery: cleanBrewery(product.brand_title), name: '' };
+      const parsed = product
+        ? product.brand_title == null
+          ? splitBrandlessTitle(rawTitle)
+          : { brewery: cleanBrewery(product.brand_title), name: '' }
+        : { brewery: '', name: rawTitle.trim() };
       const brewery = parsed.brewery;
       const name = parsed.name || cleanName(rawTitle, brewery);
       if (!name) continue;
