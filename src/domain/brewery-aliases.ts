@@ -33,6 +33,7 @@ const NEIGHBORS: Map<string, string[]> = (() => {
 })();
 
 // Directly-paired curated partners of a normalized brewery form (empty if none).
+// Returns a fresh copy so callers can sort/mutate without corrupting the shared map.
 export function aliasNeighbors(normForm: string): string[] {
-  return NEIGHBORS.get(normForm) ?? [];
+  return (NEIGHBORS.get(normForm) ?? []).slice();
 }

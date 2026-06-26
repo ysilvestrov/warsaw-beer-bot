@@ -324,4 +324,46 @@ describe('dedupeBreweryAliases', () => {
     expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(aId)).toBeDefined();
     expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeDefined();
   });
+
+  // #202: the curated brewery-alias layer is shared via breweryAliases(), so the
+  // dedupe job inherits it. This pair overlaps ONLY through the curated nepo↔nepomucen
+  // equivalence — without it the alias sets are disjoint and no merge happens. Locks
+  // in that broadening as intentional (same brewery, same beer → safe merge).
+  test('merges via curated brewery alias (Nepo collab ↔ Nepomucen orphan)', () => {
+    const db = fresh();
+    // Canonical Untappd-side row — a Nepo collab (compound, trips the SQL pre-filter).
+    const aId = upsertBeer(db, {
+      untappd_id: 7001,
+      name: 'Milo',
+      brewery: 'Nepo Brewing / Stu Mostów',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'milo',
+      normalized_brewery: 'nepo stu mostow',
+    });
+    // Orphan ontap-side row — labelled with the brewery's other name.
+    const bId = upsertBeer(db, {
+      untappd_id: null,
+      name: 'Milo',
+      brewery: 'Nepomucen Brewery',
+      style: null,
+      abv: null,
+      rating_global: null,
+      normalized_name: 'milo',
+      normalized_brewery: 'nepomucen',
+    });
+    upsertMatch(db, 'Milo', bId, 1.0);
+
+    const result = dedupeBreweryAliases(db, silentLog);
+    expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+
+    // Orphan merged into canonical; link repointed.
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(bId)).toBeUndefined();
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(aId)).toEqual({ id: aId });
+    const link = db
+      .prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
+      .get('Milo') as { untappd_beer_id: number };
+    expect(link.untappd_beer_id).toBe(aId);
+  });
 });
