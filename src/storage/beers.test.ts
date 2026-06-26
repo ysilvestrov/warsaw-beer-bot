@@ -223,6 +223,7 @@ describe('recordLookupTransient', () => {
 import { upsertPub } from './pubs';
 import { createSnapshot, insertTaps } from './snapshots';
 import { upsertMatch } from './match_links';
+import { recordEnrichFailure, setEnrichFailureReview } from './enrich_failures';
 import { listLookupCandidates } from './beers';
 
 describe('listLookupCandidates', () => {
@@ -291,13 +292,45 @@ describe('listLookupCandidates', () => {
 
   test('backoff-eligible orphan IS returned', () => {
     const db = fresh();
+    // count=1 → 72h delay; 73h ago is past due.
     const id = seedBeerOnTap(db, {
       brewery: 'Magic Road', name: 'Clementine',
-      lookupAt: '2026-05-25T11:00:00Z', lookupCount: 1,
+      lookupAt: '2026-05-23T11:00:00Z', lookupCount: 1,
     });
     const now = new Date('2026-05-26T12:00:00Z');
     const out = listLookupCandidates(db, 10, now);
     expect(out.map((c) => c.id)).toEqual([id]);
+  });
+
+  test('excludes orphans triaged as wontfix', () => {
+    const db = fresh();
+    const wontfix = seedBeerOnTap(db, { brewery: 'Hopeless', name: 'Never' });
+    const live = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
+    recordEnrichFailure(db, {
+      beer_id: wontfix, brewery: 'Hopeless', name: 'Never',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-05-26T11:30:00Z');
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([live]);
+  });
+
+  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug)', () => {
+    const db = fresh();
+    const matcherBug = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
+    recordEnrichFailure(db, {
+      beer_id: matcherBug, brewery: 'Magic Road', name: 'Clementine',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 1, candidates_summary: 'x — y', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, matcherBug, 'matcher_bug', null, '2026-05-26T11:30:00Z');
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([matcherBug]);
   });
 
   test('applies the limit', () => {
@@ -478,7 +511,7 @@ describe('listRatingRefreshCandidates', () => {
 
   test('respects backoff via shared lookup-backoff isEligible', () => {
     const db = fresh();
-    // count=1 → 24h delay. Last refresh 1h ago → not eligible.
+    // count=1 → 72h delay. Last refresh 1h ago → not eligible.
     seedBeerOnTap(db, {
       brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
       refreshAt: '2026-05-27T11:00:00Z', refreshCount: 1,
@@ -487,11 +520,12 @@ describe('listRatingRefreshCandidates', () => {
     expect(listRatingRefreshCandidates(db, 10, now)).toEqual([]);
   });
 
-  test('returns backoff-eligible beer 25h after last refresh attempt', () => {
+  test('returns backoff-eligible beer 73h after last refresh attempt', () => {
     const db = fresh();
+    // count=1 → 72h delay; 73h ago is past due.
     const id = seedBeerOnTap(db, {
       brewery: 'Magic Road', name: 'Clementine', untappdId: 6645513,
-      refreshAt: '2026-05-26T11:00:00Z', refreshCount: 1,
+      refreshAt: '2026-05-24T11:00:00Z', refreshCount: 1,
     });
     const now = new Date('2026-05-27T12:00:00Z');
     const out = listRatingRefreshCandidates(db, 10, now);

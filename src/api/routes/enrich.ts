@@ -7,6 +7,7 @@ import {
   getBeer,
   upsertBeer,
 } from '../../storage/beers';
+import { isWontfix } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
 import { buildSearchUrl } from '../../sources/untappd/search';
@@ -50,6 +51,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         const row = ensureBeerRow(deps.db, b.brewery, b.name);
         const eligible =
           row.untappd_id == null &&
+          !isWontfix(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
         return {
           brewery: b.brewery,
