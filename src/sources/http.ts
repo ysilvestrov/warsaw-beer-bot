@@ -1,4 +1,5 @@
 import PQueue from 'p-queue';
+import { ProxyAgent } from 'undici';
 
 export class CookieExpiredError extends Error {
   constructor() {
@@ -24,12 +25,20 @@ export interface HttpOpts {
   fetchImpl?: typeof fetch;
   cookie?: string;
   redirect?: RequestRedirect;
+  proxyUrl?: string;
+}
+
+// Webshare creds arrive as `user:pass@host:port` (no scheme). undici's
+// ProxyAgent needs an absolute URL — prefix http:// when no scheme is present.
+export function normalizeProxyUrl(raw: string): string {
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
 }
 
 export function createHttp(opts: HttpOpts): Http {
   const queue = new PQueue({ concurrency: 1 });
   const f = opts.fetchImpl ?? fetch;
   const gap = opts.minGapMs ?? 2000;
+  const dispatcher = opts.proxyUrl ? new ProxyAgent(normalizeProxyUrl(opts.proxyUrl)) : undefined;
   let lastAt = 0;
 
   return {
@@ -41,8 +50,9 @@ export function createHttp(opts: HttpOpts): Http {
         const headers: Record<string, string> = { 'User-Agent': opts.userAgent };
         if (opts.cookie) headers['Cookie'] = `untappd_user_v3_e=${opts.cookie}`;
 
-        const fetchOpts: RequestInit = { headers };
+        const fetchOpts: RequestInit & { dispatcher?: unknown } = { headers };
         if (opts.redirect) fetchOpts.redirect = opts.redirect;
+        if (dispatcher) fetchOpts.dispatcher = dispatcher;
 
         const res = await f(url, fetchOpts);
         lastAt = Date.now();
