@@ -114,6 +114,17 @@ describe('breweryAliases', () => {
   test('empty input returns empty array', () => {
     expect(breweryAliases('')).toEqual([]);
   });
+
+  test('expands curated aliases one hop (#202)', () => {
+    expect(breweryAliases('Nepomucen Brewery').sort()).toEqual(['nepo', 'nepomucen']);
+    expect(breweryAliases('Nepo Brewing').sort()).toEqual(['nepo', 'nepomucen']);
+    expect(breweryAliases('Hopbrook Brewery').sort()).toEqual(['hop brook', 'hopbrook']);
+    expect(breweryAliases('Starkaft Brewery').sort()).toEqual(['starkaft', 'starkraft']);
+  });
+
+  test('curated expansion leaves non-aliased breweries untouched', () => {
+    expect(breweryAliases('Pinta')).toEqual(['pinta']);
+  });
 });
 
 test('exact normalized match is confidence 1', () => {
@@ -424,6 +435,29 @@ describe('breweryAliasesMatch (token-boundary prefix)', () => {
 
   test('disjoint breweries do not match', () => {
     expect(breweryAliasesMatch(['pinta'], ['stu mostow'])).toBe(false);
+  });
+});
+
+describe('curated brewery-alias gate (#202)', () => {
+  const passes = (shop: string, untappd: string) =>
+    breweryAliasesMatch(breweryAliases(shop), breweryAliases(untappd));
+
+  test('known-alias pairs now pass the brewery gate', () => {
+    expect(passes('Nepomucen Brewery', 'Nepo Brewing')).toBe(true);
+    expect(passes('Brouwerij Van Honsebrouck Brewery', 'Kasteel Brouwerij Vanhonsebrouck')).toBe(true);
+    expect(passes('Bacchus Brewery', 'Kasteel Brouwerij Vanhonsebrouck')).toBe(true);
+    expect(passes('Weihenstephaner Brewery', 'Bayerische Staatsbrauerei Weihenstephan')).toBe(true);
+    expect(passes('Hopbrook Brewery', 'Hop Brook')).toBe(true);
+    expect(passes('Starkaft Brewery', 'Starkraft')).toBe(true);
+  });
+
+  test('non-transitive: van honsebrouck does not gate-match a bacchus brewery', () => {
+    expect(passes('Brouwerij Van Honsebrouck Brewery', 'Bacchus Brewery')).toBe(false);
+  });
+
+  test('unrelated breweries still rejected', () => {
+    expect(passes('Pinta', 'Harpagan')).toBe(false);
+    expect(passes('Nepomucen Brewery', 'Pinta')).toBe(false);
   });
 });
 

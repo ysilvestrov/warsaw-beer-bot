@@ -1,5 +1,6 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery, COLLAB_SEP, BREWERY_NOISE } from './normalize';
+import { aliasNeighbors } from './brewery-aliases';
 
 export { COLLAB_SEP } from './normalize';
 
@@ -149,6 +150,25 @@ export function breweryAliases(brewery: string): string[] {
     } else {
       const norm = normalizeBrewery(part);
       if (norm) aliases.add(norm);
+    }
+  }
+
+  // One hop of curated-alias expansion (#202): union direct partners, but only
+  // when the partnership is non-transitive-safe.
+  //   - Simple pairs (each side has exactly 1 partner): both sides expand to each other.
+  //   - Hub nodes (>1 partners): hub expands to include all its spokes.
+  //   - Spoke nodes (1 partner that itself has >1 partners): spoke does NOT expand to
+  //     hub — prevents two spokes from sharing the hub alias and falsely matching.
+  // Snapshot aliases first so we iterate only the originally normalized forms.
+  for (const a of Array.from(aliases)) {
+    const neighbors = aliasNeighbors(a);
+    if (neighbors.length > 1) {
+      // Hub: expand to all direct spokes.
+      for (const n of neighbors) aliases.add(n);
+    } else if (neighbors.length === 1) {
+      const n = neighbors[0];
+      // Only expand if partner is also a leaf (simple pair), not a hub.
+      if (aliasNeighbors(n).length === 1) aliases.add(n);
     }
   }
 
