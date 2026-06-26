@@ -407,6 +407,43 @@ describe('refreshAllUntappd', () => {
     expect(breaker.state).toBe('closed');
   });
 
+  test('blockThreshold > 1: a single block page does not stop remaining profiles', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 2, 'bob');
+    const T = new Date('2026-06-25T03:00:00Z');
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000,
+      onTrip: () => {},
+      onRecover: () => {},
+      blockThreshold: 2,
+    });
+    const seenUrls: string[] = [];
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        seenUrls.push(url);
+        if (url.includes('alice')) {
+          // Cloudflare block page for alice
+          return '<html><title>Just a moment...</title><body>cf-challenge</body></html>';
+        }
+        // Valid page for bob — one beer so we can assert processing continued
+        return PAGE_ONE_BEER(303, 'Survivor Ale', 'Steady Hops', '3.80');
+      },
+    };
+
+    await refreshAllUntappd({ db, log: silentLog, http, breaker, now: () => T });
+
+    // Both profiles were fetched — loop did NOT stop after alice's block
+    expect(seenUrls).toContain('https://untappd.com/user/alice/beers');
+    expect(seenUrls).toContain('https://untappd.com/user/bob/beers');
+    // Bob's beer was upserted
+    expect(findBeerByNormalized(db, 'steady hops', 'survivor ale')).not.toBeNull();
+    // Breaker is still closed (only 1 block, threshold is 2)
+    expect(breaker.state).toBe('closed');
+  });
+
   test('CookieExpiredError without notifyAdmin does not throw', async () => {
     const db = fresh();
     ensureProfile(db, 1);
