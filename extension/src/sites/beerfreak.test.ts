@@ -49,12 +49,17 @@ const PRODUCT_PAGE_WITH_ABV = `
   </table>
 `;
 
-function docWithProducts(products: unknown[]): Document {
+interface TestProduct {
+  id: number;
+  brand_title?: string | null;
+  title: string;
+  url?: string;
+}
+
+function docWithProducts(products: TestProduct[]): Document {
   return new DOMParser().parseFromString(`
     <div data-catalog-view-block="products">
-      ${metadataCard(1737, 'fallback title')}
-      ${metadataCard(10079, 'fallback title')}
-      ${metadataCard(10112, 'fallback title')}
+      ${products.map((product) => metadataCard(product.id, 'fallback title')).join('')}
     </div>
     <script>
       products = ${JSON.stringify(products)},
@@ -84,12 +89,44 @@ describe('beerfreak adapter', () => {
     });
   });
 
-  it('keeps collab slash names intact when metadata has no brewery', () => {
-    const collab = cards.find((c) => c.name.includes('Popihn/Brasserie Cambier'));
+  it('uses the first brewery and strips slash collaborator prefixes when metadata has no brand', () => {
+    const collab = cards.find((c) => c.name.includes('DOLCITA'));
     expect(collab).toMatchObject({
-      brewery: '',
-      name: 'Popihn/Brasserie Cambier DIPA DDH - DOLCITA',
+      brewery: 'Popihn',
+      name: 'DIPA DDH - DOLCITA',
     });
+  });
+
+  it('splits brandless BeerFreak titles into usable brewery and beer names', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10412, brand_title: null, title: 'RIOAZUL Scorpion' },
+      { id: 10413, brand_title: null, title: 'La Quince Brewing Co./RIOAZUL Final Form' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'RIOAZUL',
+      name: 'Scorpion',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'La Quince Brewing Co.',
+      name: 'Final Form',
+    }));
+  });
+
+  it('strips leading slash collaborator segments after the branded brewery prefix', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10457, brand_title: 'PINTA (Польща)', title: 'PINTA/Varietal Beer Company Hazy Discovery Sunnyside' },
+      { id: 10458, brand_title: 'VARVAR BREW (Україна)', title: 'VARVAR BREW\\Saugatuck Brewing Company Sugar Moon' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'PINTA',
+      name: 'Hazy Discovery Sunnyside',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'VARVAR BREW',
+      name: 'Sugar Moon',
+    }));
   });
 
   it('removes brewery suffix noise that remains after brand prefix trimming', () => {
