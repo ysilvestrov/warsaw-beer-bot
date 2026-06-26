@@ -26,6 +26,9 @@ describe('isNonBeerName', () => {
     'Glass',
     'India Pale Ale',
     'Imperial Hard Cider',
+    'Traditional Kvass',
+    'Kwas Chlebowy Retro',
+    'Квас / Kvass',
     'MAGIC ROAD YES CANNONS SLOW MARKET PUSZKA 0,5 L KAUCJA',
     'Pomelo Nealko',
   ])('keeps real beer %j', (name) => {

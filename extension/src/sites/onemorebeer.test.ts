@@ -42,6 +42,31 @@ describe('onemorebeer non-beer filtering', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].brewery).toBe('Magic Road');
   });
+
+  it('filters delicatessen soft drinks per card while keeping eligible kvass', () => {
+    const html = `<div class="one-catalog-view-list">
+      ${tile('Kofola', 'KOFOLA ORYGINAL PUSZKA 0,5 L')}
+      ${tile('Vigo Kombucha', 'VIGO KOMBUCHA MANGO BUT. 0,33 L')}
+      ${tile('Vita Aloe', 'VITA ALOE ORIGINAL BUT. 0,5 L')}
+      ${tile('Koreb', 'KOREB KWAS CHLEBOWY BUT. 0,5 L')}
+    </div>`;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const cards = onemorebeer.parseCards(doc);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].brewery).toBe('Koreb');
+    expect(cards[0].name).toBe('KWAS CHLEBOWY');
+  });
+
+  it('does not filter by bare kombucha without the observed soft-drink brand', () => {
+    const html = `<div class="one-catalog-view-list">
+      ${tile('Funky Fluid', 'FUNKY FLUID KOMBUCHA SOUR BUT. 0,5 L')}
+    </div>`;
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const cards = onemorebeer.parseCards(doc);
+    expect(cards).toHaveLength(1);
+    expect(cards[0].brewery).toBe('Funky Fluid');
+    expect(cards[0].name).toBe('KOMBUCHA SOUR');
+  });
 });
 
 describe('onemorebeer adapter', () => {

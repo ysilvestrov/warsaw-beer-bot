@@ -23,6 +23,7 @@ const ELIGIBLE_STYLE_TOKENS = [
   'cider',
   'kwas chlebowy',
   'kvass',
+  'квас',
   'mead',
   'melomel',
 ];

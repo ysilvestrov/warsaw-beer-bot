@@ -23,6 +23,8 @@ describe('isOntapNonBeerTap', () => {
     ['cider Polish sweet descriptor', { style: 'Cydr słodkie', brewery_ref: 'Chyliczki' }],
     ['cider English', { style: 'Sweet cider', brewery_ref: 'PRZETWÓRNIA CHMIELU' }],
     ['kvass Polish', { style: 'Kwas chlebowy', brewery_ref: 'Vilniaus Alus Brewery' }],
+    ['kvass Cyrillic', { style: 'Квас', brewery_ref: 'Stacja Winiarska' }],
+    ['kvass Cyrillic with descriptor', { style: 'Квас хлібний', brewery_ref: 'Dolium Vini' }],
     ['kvass English', { style: 'Traditional Kvass', brewery_ref: 'Baltic Glass Brewery' }],
     ['kvass beer name but safe style', { style: 'Catharina Sour', brewery_ref: 'PINTA Brewery' }],
     ['mead', { style: 'Mead - Melomel', brewery_ref: 'Berryland' }],
