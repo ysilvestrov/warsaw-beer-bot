@@ -80,6 +80,10 @@ async function main(): Promise<void> {
     : undefined;
 
   const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
+  // One shared breaker across all Untappd jobs: blockThreshold counts CONSECUTIVE
+  // blocks across the whole Untappd circuit (any job), not per-job — a healthy
+  // success in any job resets the count. With a rotating proxy each block is a
+  // different exit IP, so N consecutive blocks signal a systemic problem.
   const untappdBreaker = createPersistentCircuitBreaker({
     db,
     key: 'untappd_circuit_open_until',
