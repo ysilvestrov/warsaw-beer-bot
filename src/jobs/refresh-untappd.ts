@@ -56,7 +56,9 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
       if (isBlockPage(html)) {
         breaker.onResult(true, tickNow);
         log.warn({ user: p.untappd_username }, 'untappd scrape blocked');
-        break;
+        if (breaker.state === 'open') break;
+        await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
+        continue;
       }
       const items = parseUserBeersPage(html);
       for (const it of items) {
@@ -95,7 +97,8 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
       if (e instanceof HttpError && isBlockStatus(e.status)) {
         breaker.onResult(true, now());
         log.warn({ err: e, user: p.untappd_username }, 'untappd scrape blocked');
-        break;
+        if (breaker.state === 'open') break;
+        continue;
       }
       log.warn({ err: e, user: p.untappd_username }, 'untappd scrape failed');
     }

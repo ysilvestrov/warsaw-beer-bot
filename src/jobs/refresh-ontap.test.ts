@@ -295,6 +295,45 @@ describe('refreshOntap multi-city', () => {
     expect(enrichedCount(db)).toBe(0);
   });
 
+  test('untappdHttp dep: Untappd lookups use untappdHttp, not http', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const ontapCalls: string[] = [];
+    const untappdCalls: string[] = [];
+
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url.startsWith('https://untappd.com')) {
+          throw new Error(`Unexpected untappd call on shop http: ${url}`);
+        }
+        ontapCalls.push(url);
+        if (url === 'https://ontap.pl/warszawa') return cityIndex('warszawa');
+        if (url === 'https://warszawapub.ontap.pl/') {
+          return `<html><head><meta property="og:title" content="Warsaw Pub / ontap.pl"></head>
+            <body>
+              ${panel(1, 'Fresh Brewery', 'Fresh Beer 5%', 'IPA')}
+            </body></html>`;
+        }
+        return '';
+      },
+    };
+    const untappdHttp: Http = {
+      async get(url: string): Promise<string> {
+        untappdCalls.push(url);
+        return '<html></html>'; // no results → not_found
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, untappdHttp, geocoder: async () => null,
+      cities: oneCity, lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
+      now: () => new Date('2026-06-25T12:00:00Z'),
+    });
+
+    // Untappd search went to untappdHttp, not to http
+    expect(untappdCalls.some((u) => u.startsWith('https://untappd.com'))).toBe(true);
+    expect(ontapCalls.some((u) => u.startsWith('https://untappd.com'))).toBe(false);
+  });
+
   test('open breaker skips inline enrich without failing ontap refresh', async () => {
     const db = openDb(':memory:'); migrate(db);
     const { http, calls } = budgetHttp();

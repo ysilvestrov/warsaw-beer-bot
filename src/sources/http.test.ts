@@ -59,3 +59,40 @@ test('passes redirect option to fetch when set', async () => {
   await http.get('https://example.com/ok');
   expect(calls[0].redirect).toBe('manual');
 });
+
+import { ProxyAgent } from 'undici';
+import { normalizeProxyUrl } from './http';
+
+describe('normalizeProxyUrl', () => {
+  test('prepends http:// when no scheme', () => {
+    expect(normalizeProxyUrl('u:p@p.webshare.io:80')).toBe('http://u:p@p.webshare.io:80');
+  });
+  test('leaves an explicit scheme untouched', () => {
+    expect(normalizeProxyUrl('http://u:p@host:80')).toBe('http://u:p@host:80');
+  });
+});
+
+describe('createHttp proxy wiring', () => {
+  function capturingFetch() {
+    const calls: { url: string; init: RequestInit & { dispatcher?: unknown } }[] = [];
+    const f = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return { ok: true, status: 200, text: async () => '<html>ok</html>' } as Response;
+    }) as unknown as typeof fetch;
+    return { f, calls };
+  }
+
+  test('passes a ProxyAgent dispatcher when proxyUrl is set', async () => {
+    const { f, calls } = capturingFetch();
+    const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl: f, proxyUrl: 'u:p@p.webshare.io:80' });
+    await http.get('https://untappd.com/search?q=x');
+    expect(calls[0].init.dispatcher).toBeInstanceOf(ProxyAgent);
+  });
+
+  test('no dispatcher when proxyUrl is unset', async () => {
+    const { f, calls } = capturingFetch();
+    const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl: f });
+    await http.get('https://untappd.com/search?q=x');
+    expect(calls[0].init.dispatcher).toBeUndefined();
+  });
+});

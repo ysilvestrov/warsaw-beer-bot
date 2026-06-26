@@ -20,6 +20,7 @@ interface Deps {
   db: DB;
   log: pino.Logger;
   http: Http;
+  untappdHttp?: Http;          // proxied client for inline Untappd enrich; default: http
   geocoder: Geocoder;
   onProgress?: ProgressFn;
   lookupEnabled?: boolean;     // default true
@@ -34,6 +35,7 @@ interface Deps {
 export async function refreshOntap(deps: Deps): Promise<void> {
   const {
     db, log, http, geocoder,
+    untappdHttp = http,
     onProgress = noopProgress,
     lookupEnabled = true,
     lookupSleepMs = 500,
@@ -125,11 +127,11 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             !inlineEnrichStopped &&
             breaker.canAttempt(now())
           ) {
-            const outcome = await enrichOneOrphan({ db, log, http, now }, beerId);
+            const outcome = await enrichOneOrphan({ db, log, http: untappdHttp, now }, beerId);
             if (outcome === 'blocked') {
               breaker.onResult(true, now());
-              inlineEnrichStopped = true;
               enrichBudget--;
+              if (breaker.state === 'open') inlineEnrichStopped = true;
             } else if (outcome !== 'skipped') {
               breaker.onResult(false, now());
               enrichBudget--;

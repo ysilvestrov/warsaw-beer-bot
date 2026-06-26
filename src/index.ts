@@ -52,6 +52,12 @@ async function main(): Promise<void> {
   cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
 
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
+  // Untappd search/lookup goes through the Webshare proxy (when configured) on a
+  // dedicated, cookie-less client; shop scraping keeps the direct `http`.
+  const untappdSearchHttp = createHttp({
+    userAgent: env.NOMINATIM_USER_AGENT,
+    proxyUrl: env.WEBSHARE_PROXY,
+  });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
 
   const untappdHttp = env.UNTAPPD_SESSION_COOKIE
@@ -59,6 +65,7 @@ async function main(): Promise<void> {
         userAgent: env.NOMINATIM_USER_AGENT,
         cookie: env.UNTAPPD_SESSION_COOKIE,
         redirect: 'manual',
+        proxyUrl: env.WEBSHARE_PROXY,
       })
     : null;
   if (!untappdHttp) {
@@ -73,10 +80,15 @@ async function main(): Promise<void> {
     : undefined;
 
   const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
+  // One shared breaker across all Untappd jobs: blockThreshold counts CONSECUTIVE
+  // blocks across the whole Untappd circuit (any job), not per-job — a healthy
+  // success in any job resets the count. With a rotating proxy each block is a
+  // different exit IP, so N consecutive blocks signal a systemic problem.
   const untappdBreaker = createPersistentCircuitBreaker({
     db,
     key: 'untappd_circuit_open_until',
     cooldownMs: 6 * 60 * 60 * 1000,
+    blockThreshold: env.UNTAPPD_BLOCK_THRESHOLD,
     onTrip: () => adminAlert('⚠️ Untappd: можливий бан IP (403/429 або captcha). Енрич призупинено на ~6 год.'),
     onRecover: () => adminAlert('✅ Untappd: доступ відновлено, енрич продовжено.'),
   });
@@ -106,6 +118,7 @@ async function main(): Promise<void> {
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
           pubSlugs: opts?.pubSlugs,
           breaker: untappdBreaker,
+          untappdHttp: untappdSearchHttp,
         });
         // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
         // is not pub-specific and is refreshed daily + on a full /refresh.
@@ -126,6 +139,7 @@ async function main(): Promise<void> {
         db, log, http, geocoder,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: untappdBreaker,
+        untappdHttp: untappdSearchHttp,
       }).catch((e) => log.error({ err: e }, 'ontap cron'));
     }),
     // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
@@ -135,7 +149,7 @@ async function main(): Promise<void> {
     // Bumped from '0 6,18 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
     cron.schedule('30 */3 * * *', () => {
       enrichOrphans({
-        db, log, http,
+        db, log, http: untappdSearchHttp,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: untappdBreaker,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
@@ -146,7 +160,7 @@ async function main(): Promise<void> {
     // Bumped from '0 9,21 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
     cron.schedule('30 1,4,7,10,13,16,19,22 * * *', () => {
       refreshTapRatings({
-        db, log, http,
+        db, log, http: untappdSearchHttp,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: untappdBreaker,
       }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));

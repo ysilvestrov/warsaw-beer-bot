@@ -63,7 +63,9 @@ export async function enrichOrphans(
       breaker.onResult(true, now());
       result.blocked++;
       result.processed++;
-      break;
+      if (breaker.state === 'open') break;
+      if (sleepMs > 0 && i < candidates.length - 1) await sleep(sleepMs);
+      continue;
     }
     breaker.onResult(false, now());
     result.processed++;

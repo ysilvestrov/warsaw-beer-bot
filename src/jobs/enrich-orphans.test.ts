@@ -192,4 +192,28 @@ describe('enrichOrphans', () => {
     expect(events).toContain('recover');
     expect(res.processed).toBe(2);
   });
+
+  test('blockThreshold > 1: a single block does not stop the run', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'Brew A', 'Beer A');
+    seedOrphanOnTap(db, 'Brew B', 'Beer B');
+    seedOrphanOnTap(db, 'Brew C', 'Beer C');
+    let calls = 0;
+    const http: Http = {
+      async get(): Promise<string> {
+        calls++;
+        if (calls === 1) throw new HttpError(403, 'u'); // first lookup blocked
+        return '<html></html>';                          // rest: no results → not_found
+      },
+    };
+    const breaker = createCircuitBreaker({
+      cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {}, blockThreshold: 2,
+    });
+    const T = new Date('2026-05-26T12:00:00Z');
+    const res = await enrichOrphans({ db, log: silentLog, http, breaker, sleepMs: 0, now: () => T });
+    expect(res.blocked).toBe(1);
+    expect(res.processed).toBe(3);        // loop continued past the first block
+    expect(res.not_found).toBe(2);
+    expect(breaker.state).toBe('closed'); // the two successes reset the counter
+  });
 });

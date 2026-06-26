@@ -13,6 +13,7 @@ export interface CircuitOptions {
   cooldownMs: number;
   onTrip: () => void;
   onRecover: () => void;
+  blockThreshold?: number; // consecutive blocks before tripping; default 1
 }
 
 export interface PersistentCircuitOptions extends CircuitOptions {
@@ -23,6 +24,8 @@ export interface PersistentCircuitOptions extends CircuitOptions {
 export function createCircuitBreaker(opts: CircuitOptions): CircuitBreaker {
   let state: CircuitState = 'closed';
   let openedAt = 0;
+  const threshold = opts.blockThreshold ?? 1;
+  let consecutiveBlocks = 0;
 
   return {
     get state() { return state; },
@@ -34,13 +37,17 @@ export function createCircuitBreaker(opts: CircuitOptions): CircuitBreaker {
     },
     onResult(blocked: boolean, now: Date): void {
       if (blocked) {
-        if (state === 'closed') opts.onTrip();
-        state = 'open';
-        openedAt = now.getTime();
+        consecutiveBlocks++;
+        if (state === 'half_open' || consecutiveBlocks >= threshold) {
+          if (state === 'closed') opts.onTrip();
+          state = 'open';
+          openedAt = now.getTime();
+        }
       } else {
         if (state !== 'closed') opts.onRecover();
         state = 'closed';
         openedAt = 0;
+        consecutiveBlocks = 0;
       }
     },
   };
@@ -55,6 +62,8 @@ function parseTimestamp(value: string | null): number | null {
 export function createPersistentCircuitBreaker(opts: PersistentCircuitOptions): CircuitBreaker {
   let state: CircuitState = 'closed';
   let openedAt = 0;
+  const threshold = opts.blockThreshold ?? 1;
+  let consecutiveBlocks = 0;
 
   return {
     get state() { return state; },
@@ -83,14 +92,18 @@ export function createPersistentCircuitBreaker(opts: PersistentCircuitOptions): 
     },
     onResult(blocked: boolean, now: Date): void {
       if (blocked) {
-        if (state === 'closed') opts.onTrip();
-        state = 'open';
-        openedAt = now.getTime();
-        setJobState(opts.db, opts.key, new Date(now.getTime() + opts.cooldownMs).toISOString());
+        consecutiveBlocks++;
+        if (state === 'half_open' || consecutiveBlocks >= threshold) {
+          if (state === 'closed') opts.onTrip();
+          state = 'open';
+          openedAt = now.getTime();
+          setJobState(opts.db, opts.key, new Date(now.getTime() + opts.cooldownMs).toISOString());
+        }
       } else {
         if (state !== 'closed') opts.onRecover();
         state = 'closed';
         openedAt = 0;
+        consecutiveBlocks = 0;
         deleteJobState(opts.db, opts.key);
       }
     },
