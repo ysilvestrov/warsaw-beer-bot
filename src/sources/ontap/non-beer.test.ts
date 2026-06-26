@@ -12,6 +12,12 @@ describe('isOntapNonBeerTap', () => {
     ['san martino brewery', { style: null, brewery_ref: 'SAN MARTINO' }],
     ['hugo sentinel brewery', { style: null, brewery_ref: 'HUGO' }],
     ['mojito sentinel brewery', { style: null, brewery_ref: 'MOJITO' }],
+    ['style cocktail english', { style: 'Cocktail', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Mai Tai' }],
+    ['style cocktail english 2', { style: 'Cocktail', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Bramble' }],
+    ['style nalewka', { style: 'Nalewka', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Nalewka gruszkowa' }],
+    ['style szprycer', { style: 'Szprycer', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Big Diva' }],
+    ['style kombucha', { style: 'Kombucha', brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
+    ['style wine grapes glera', { style: 'Chardonnay, Glera and Garganega', brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
