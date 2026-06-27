@@ -49,6 +49,7 @@ describe('beerrepublic adapter', () => {
         ${product("Firestone Walker Barrel Aged Brewer's Collective Brewery Pack", 'Firestone Walker')}
         ${product('Surprise Box Barrel Aged Beers')}
         ${product('Advent Calendar 2025 Green Edition')}
+        ${product('Winter Break Variety Twelve Pack', 'Samuel Adams')}
         ${product('Mind Haze Galaxy Bender', 'Firestone Walker')}
       </section>
     `, 'text/html');
