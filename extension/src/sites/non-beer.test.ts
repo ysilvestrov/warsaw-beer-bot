@@ -36,6 +36,8 @@ describe('isNonBeerName', () => {
     'Pomelo Nealko',
     'Pack Mentality IPA',
     'Backpack Stout',
+    'Variety Packaging IPA',
+    'Twelve Packard Stout',
   ])('keeps real beer %j', (name) => {
     expect(isNonBeerName(name)).toBe(false);
   });

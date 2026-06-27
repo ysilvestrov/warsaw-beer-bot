@@ -24,9 +24,9 @@ const NON_BEER_NAME_RE = new RegExp(
     'gift certificate',
     'mixed pack',
     'mixed case',
-    'twelve pack',
-    'variety pack',
-    'variety twelve pack',
+    'twelve pack\\b',
+    'variety pack\\b',
+    'variety twelve pack\\b',
     'subscription',   // unambiguous: no beer is named "Subscription"
     'abonnement',
     'certificate',    // EN gift voucher
