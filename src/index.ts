@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import cron from 'node-cron';
 import pino from 'pino';
-import { loadEnv } from './config/env';
+import { loadEnv, missingExpectedKeys } from './config/env';
 import { openDb } from './storage/db';
 import { migrate } from './storage/schema';
 import { createHttp } from './sources/http';
@@ -43,6 +43,9 @@ import { createTranslator } from './i18n';
 async function main(): Promise<void> {
   const env = loadEnv(process.env);
   const log = pino({ level: env.LOG_LEVEL });
+  for (const { key, disables } of missingExpectedKeys(env)) {
+    log.warn({ key }, `env ${key} unset — ${disables} disabled`);
+  }
   const db = openDb(env.DATABASE_PATH);
   migrate(db);
   backfillNormalizedBrewery(db, log);
