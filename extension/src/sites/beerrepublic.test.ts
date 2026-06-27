@@ -42,13 +42,14 @@ describe('beerrepublic adapter', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
   });
 
-  it('ignores non-beer pack and calendar products', () => {
+  it('ignores non-beer pack, variety pack, and calendar products', () => {
     const doc = new DOMParser().parseFromString(`
       <section data-section-type="collection">
         ${product('Limited Edition Anniversary Vertical Set', 'Firestone Walker')}
         ${product("Firestone Walker Barrel Aged Brewer's Collective Brewery Pack", 'Firestone Walker')}
         ${product('Surprise Box Barrel Aged Beers')}
         ${product('Advent Calendar 2025 Green Edition')}
+        ${product('Winter Break Variety Twelve Pack', 'Samuel Adams')}
         ${product('Mind Haze Galaxy Bender', 'Firestone Walker')}
       </section>
     `, 'text/html');

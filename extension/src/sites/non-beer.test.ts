@@ -15,6 +15,9 @@ describe('isNonBeerName', () => {
     'Сертифікат 1000',
     'Gift Certificate 500',
     'Mixed Pack IPA',
+    'Variety Pack',
+    'Twelve Pack',
+    'Samuel Adams Winter Break Variety Twelve Pack',
     'Beer Club Subscription',
     'Underwood Culture tasting big set + келих',
   ])('flags packaging/voucher product %j', (name) => {
@@ -31,6 +34,10 @@ describe('isNonBeerName', () => {
     'Квас / Kvass',
     'MAGIC ROAD YES CANNONS SLOW MARKET PUSZKA 0,5 L KAUCJA',
     'Pomelo Nealko',
+    'Pack Mentality IPA',
+    'Backpack Stout',
+    'Variety Packaging IPA',
+    'Twelve Packard Stout',
   ])('keeps real beer %j', (name) => {
     expect(isNonBeerName(name)).toBe(false);
   });
