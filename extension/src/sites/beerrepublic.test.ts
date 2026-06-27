@@ -42,7 +42,7 @@ describe('beerrepublic adapter', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
   });
 
-  it('ignores non-beer pack and calendar products', () => {
+  it('ignores non-beer pack, variety pack, and calendar products', () => {
     const doc = new DOMParser().parseFromString(`
       <section data-section-type="collection">
         ${product('Limited Edition Anniversary Vertical Set', 'Firestone Walker')}
