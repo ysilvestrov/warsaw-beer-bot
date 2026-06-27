@@ -142,3 +142,20 @@ sudo -u warsaw-beer-bot litestream restore -config /etc/litestream.yml \
 # inspect bot.db.restored, swap into place when satisfied, then:
 sudo systemctl start warsaw-beer-bot
 ```
+
+## Editing the prod `.env` safely
+
+Edit `/etc/warsaw-beer-bot/.env` **additively** — never hand-rewrite the whole
+file (that risks silently dropping a key, e.g. the 2026-06-27 `ADMIN_TELEGRAM_ID`
+incident that disabled the daily digest). Use the upsert helper, which backs up
+first and preserves every other line:
+
+```bash
+sudo -n -u warsaw-beer-bot bash -lc \
+  '/opt/warsaw-beer-bot/scripts/set-env.sh ADMIN_TELEGRAM_ID 207079110 /etc/warsaw-beer-bot/.env'
+sudo -n systemctl restart warsaw-beer-bot
+```
+
+`.env.example` (repo root) lists every key. On startup the bot logs a `warn` for
+any expected-but-unset optional key, so a dropped key shows up in
+`journalctl -u warsaw-beer-bot`.
