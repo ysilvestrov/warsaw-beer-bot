@@ -12,6 +12,11 @@ const STYLE_TOKENS = [
   'spritz',
   'aperitivo',
   'koktajl',
+  'cocktail',
+  'nalewka',
+  'szprycer',
+  'kombucha',
+  'glera',
   'musujące',
   'wytrawne',
   'półwytrawne',
@@ -49,6 +54,9 @@ const BREWERY_TOKENS = [
   'maccari',
   'frizzanti',
   'cantine',
+  'cantina',
+  'aperitivo',
+  'kombucha',
   'san martino',
   'conegliano',
   'puglia',
@@ -67,6 +75,14 @@ function norm(raw: string | null): string {
   return raw?.replace(/\s+/g, ' ').trim().toLowerCase() ?? '';
 }
 
+// Parser pollution: a brewery_ref that is actually a schedule / navigation
+// breadcrumb (e.g. "Basement -> Czwartek-Sobota od 18.00 Brewery"), never a real
+// brewery. Conservative signals: a "->" nav arrow, or an opening-hours time range
+// like "od 18.00".
+function looksLikeScheduleOrNav(brewery: string): boolean {
+  return brewery.includes('->') || /\bod\s+\d{1,2}[.:]\d{2}\b/.test(brewery);
+}
+
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   const style = norm(tap.style);
   if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
@@ -77,7 +93,12 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   }
 
   const brewery = norm(tap.brewery_ref);
-  if (brewery && (EXACT_BREWERY_SENTINELS.has(brewery) || BREWERY_TOKENS.some((token) => brewery.includes(token)))) {
+  if (
+    brewery &&
+    (EXACT_BREWERY_SENTINELS.has(brewery) ||
+      BREWERY_TOKENS.some((token) => brewery.includes(token)) ||
+      looksLikeScheduleOrNav(brewery))
+  ) {
     return true;
   }
 

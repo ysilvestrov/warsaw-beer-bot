@@ -12,6 +12,17 @@ describe('isOntapNonBeerTap', () => {
     ['san martino brewery', { style: null, brewery_ref: 'SAN MARTINO' }],
     ['hugo sentinel brewery', { style: null, brewery_ref: 'HUGO' }],
     ['mojito sentinel brewery', { style: null, brewery_ref: 'MOJITO' }],
+    ['style cocktail english', { style: 'Cocktail', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Mai Tai' }],
+    ['style cocktail english 2', { style: 'Cocktail', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Bramble' }],
+    ['style nalewka', { style: 'Nalewka', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Nalewka gruszkowa' }],
+    ['style szprycer', { style: 'Szprycer', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Big Diva' }],
+    ['style kombucha', { style: 'Kombucha', brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
+    ['style wine grapes glera', { style: 'Chardonnay, Glera and Garganega', brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
+    ['brewery aperitivo with suffix', { style: null, brewery_ref: 'Aperitivo Spritz Brewery', beer_ref: 'Aperol Spritz' }],
+    ['brewery cantina singular', { style: null, brewery_ref: 'Cantina della Valle Brewery', beer_ref: 'Glera Trevenezie' }],
+    ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
+    ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
+    ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
@@ -31,6 +42,7 @@ describe('isOntapNonBeerTap', () => {
     ['mead Polish sweet descriptor', { style: 'Mead półsłodkie', brewery_ref: 'Berryland' }],
     ['melomel sweet descriptor', { style: 'Melomel słodkie', brewery_ref: 'Berryland' }],
     ['normal beer', { style: 'West Coast IPA', brewery_ref: 'PINTA Brewery' }],
+    ['normal brewery with dash but no arrow/time', { style: 'IPA', brewery_ref: 'Browar Stu Mostow - Wroclaw' }],
     ['drinkability prose does not match generic drink', {
       style: 'Dark, smooth, and deceptively light on the palate, endlessly drinkable Schwarzbier',
       brewery_ref: 'FUERST WIACEK Berlin Brewery',
