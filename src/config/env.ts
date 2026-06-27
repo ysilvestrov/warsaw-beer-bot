@@ -22,6 +22,24 @@ const Schema = z.object({
 
 export type Env = z.infer<typeof Schema>;
 
+// Optional keys that are expected to be set in production. Missing ones do NOT
+// fail startup (unlike the required schema keys) — they only warn — because each
+// merely disables a feature. Single source of truth for the startup warning and
+// docs. Keep in sync with .env.example.
+export const EXPECTED_PROD_KEYS = [
+  { key: 'UNTAPPD_SESSION_COOKIE', disables: 'Untappd profile scraping (had-list / ratings refresh)' },
+  { key: 'WEBSHARE_PROXY', disables: 'proxied Untappd traffic (block protection)' },
+  { key: 'ADMIN_TELEGRAM_ID', disables: 'daily status digest + admin alerts' },
+  { key: 'ADMIN_API_TOKEN', disables: 'admin HTTP endpoints (enrich-failures review)' },
+] as const satisfies ReadonlyArray<{ key: keyof Env; disables: string }>;
+
+// Expected keys that are unset or empty-string in the parsed env.
+export function missingExpectedKeys(env: Env): { key: string; disables: string }[] {
+  return EXPECTED_PROD_KEYS
+    .filter(({ key }) => env[key] === undefined || env[key] === '')
+    .map(({ key, disables }) => ({ key, disables }));
+}
+
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
   return Schema.parse(source);
 }

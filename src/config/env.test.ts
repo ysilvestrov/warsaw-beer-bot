@@ -1,4 +1,4 @@
-import { loadEnv } from './env';
+import { loadEnv, missingExpectedKeys, EXPECTED_PROD_KEYS } from './env';
 
 describe('loadEnv', () => {
   const baseEnv = {
@@ -68,5 +68,36 @@ describe('env: proxy + block threshold', () => {
     expect(
       loadEnv({ ...base, UNTAPPD_BLOCK_THRESHOLD: '5' } as never).UNTAPPD_BLOCK_THRESHOLD,
     ).toBe(5);
+  });
+});
+
+describe('missingExpectedKeys', () => {
+  const base = {
+    TELEGRAM_BOT_TOKEN: 'x'.repeat(10),
+    DATABASE_PATH: '/tmp/bot.db',
+    OSRM_BASE_URL: 'http://localhost:5000',
+    NOMINATIM_USER_AGENT: 'test-agent',
+  };
+  test('reports all four expected keys when none set', () => {
+    const env = loadEnv({ ...base });
+    expect(missingExpectedKeys(env).map((m) => m.key).sort()).toEqual(
+      ['ADMIN_API_TOKEN', 'ADMIN_TELEGRAM_ID', 'UNTAPPD_SESSION_COOKIE', 'WEBSHARE_PROXY'],
+    );
+  });
+  test('empty array when all expected keys present', () => {
+    const env = loadEnv({ ...base, UNTAPPD_SESSION_COOKIE: 'c', WEBSHARE_PROXY: 'p', ADMIN_TELEGRAM_ID: '207079110', ADMIN_API_TOKEN: 't' });
+    expect(missingExpectedKeys(env)).toEqual([]);
+  });
+  test('treats empty string as missing', () => {
+    const env = loadEnv({ ...base, ADMIN_TELEGRAM_ID: '' });
+    expect(missingExpectedKeys(env).map((m) => m.key)).toContain('ADMIN_TELEGRAM_ID');
+  });
+  test('each entry carries a non-empty disables description', () => {
+    for (const e of EXPECTED_PROD_KEYS) expect(e.disables.length).toBeGreaterThan(0);
+  });
+  test('only optional keys are expected (no required key listed)', () => {
+    const keys = EXPECTED_PROD_KEYS.map((e) => e.key);
+    expect(keys).not.toContain('TELEGRAM_BOT_TOKEN');
+    expect(keys).not.toContain('DATABASE_PATH');
   });
 });
