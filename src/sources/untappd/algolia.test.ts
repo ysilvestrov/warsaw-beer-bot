@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAlgoliaResponse } from './algolia';
+import { parseAlgoliaResponse, extractAlgoliaKeys } from './algolia';
 
 const HIT = {
   bid: 5469263,
@@ -29,5 +29,21 @@ describe('parseAlgoliaResponse', () => {
 
   it('skips hits without a numeric bid', () => {
     expect(parseAlgoliaResponse({ hits: [{ beer_name: 'X', brewery_name: 'Y' }], nbHits: 1 })).toEqual([]);
+  });
+});
+
+describe('extractAlgoliaKeys', () => {
+  it('pulls appId and searchKey from inline JS', () => {
+    const html = `<script>var c={ applicationID: '9WBO4RQ3HO', apiKey: '1d347324d67ec472bb7132c66aead485' };</script>`;
+    expect(extractAlgoliaKeys(html)).toEqual({ appId: '9WBO4RQ3HO', searchKey: '1d347324d67ec472bb7132c66aead485' });
+  });
+
+  it('also matches JSON-style appId/searchKey', () => {
+    const html = `"appId":"9WBO4RQ3HO","searchKey":"1d347324d67ec472bb7132c66aead485"`;
+    expect(extractAlgoliaKeys(html)).toEqual({ appId: '9WBO4RQ3HO', searchKey: '1d347324d67ec472bb7132c66aead485' });
+  });
+
+  it('returns null when keys are absent', () => {
+    expect(extractAlgoliaKeys('<html>nothing here</html>')).toBeNull();
   });
 });
