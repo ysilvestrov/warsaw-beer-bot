@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { parseAlgoliaResponse, extractAlgoliaKeys } from './algolia';
+import { parseAlgoliaResponse, extractAlgoliaKeys, createAlgoliaSearch } from './algolia';
+import { HttpError } from '../http';
 
 const HIT = {
   bid: 5469263,
@@ -45,5 +46,37 @@ describe('extractAlgoliaKeys', () => {
 
   it('returns null when keys are absent', () => {
     expect(extractAlgoliaKeys('<html>nothing here</html>')).toBeNull();
+  });
+});
+
+function jsonRes(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+describe('createAlgoliaSearch (direct)', () => {
+  it('POSTs query to the index and returns mapped hits', async () => {
+    const calls: { url: string; init: RequestInit }[] = [];
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return jsonRes({ hits: [{ bid: 7, beer_name: 'B', brewery_name: 'Br' }], nbHits: 1 });
+    }) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({ appId: 'APP', searchKey: 'KEY', fetchImpl });
+    const out = await s.search('hazy ipa');
+    expect(out).toEqual([{ bid: 7, beer_name: 'B', brewery_name: 'Br', style: null, abv: null, global_rating: null }]);
+    expect(calls[0].url).toBe('https://APP-dsn.algolia.net/1/indexes/beer/query');
+    expect((calls[0].init.headers as Record<string, string>)['X-Algolia-Application-Id']).toBe('APP');
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({ query: 'hazy ipa', hitsPerPage: 5 });
+  });
+
+  it('returns [] for a genuine empty result (200, nbHits 0)', async () => {
+    const fetchImpl = (async () => jsonRes({ hits: [], nbHits: 0 })) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl });
+    expect(await s.search('nope')).toEqual([]);
+  });
+
+  it('throws HttpError(500) on 5xx (→ transient upstream)', async () => {
+    const fetchImpl = (async () => new Response('err', { status: 500 })) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl });
+    await expect(s.search('x')).rejects.toBeInstanceOf(HttpError);
   });
 });

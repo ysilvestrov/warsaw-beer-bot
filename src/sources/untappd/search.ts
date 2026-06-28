@@ -9,6 +9,14 @@ export interface SearchResult {
   global_rating: number | null;
 }
 
+// Decouples the matching pipeline (lookupBeer) from the search transport.
+// Implementations: createAlgoliaSearch (server), htmlSearch (relay adapter).
+// Throws HttpError on a hard block (after exhausting retries); throws other
+// errors for transient failures; resolves [] for a genuine no-result query.
+export interface BeerSearch {
+  search(query: string): Promise<SearchResult[]>;
+}
+
 const MAX_ITEMS = 5;
 
 function parseRating(raw: string | undefined): number | null {

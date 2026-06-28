@@ -1,4 +1,6 @@
-import type { SearchResult } from './search';
+import { ProxyAgent } from 'undici';
+import { HttpError, normalizeProxyUrl } from '../http';
+import type { BeerSearch, SearchResult } from './search';
 
 interface AlgoliaHit {
   bid?: unknown;
@@ -49,4 +51,71 @@ export function extractAlgoliaKeys(html: string): AlgoliaKeys | null {
     html.match(/apiKey["'\s:=]+([a-f0-9]{16,})/)?.[1] ??
     html.match(/"searchKey"\s*:\s*"([a-f0-9]{16,})"/)?.[1];
   return appId && searchKey ? { appId, searchKey } : null;
+}
+
+const ALGOLIA_HITS_PER_PAGE = 5;
+
+export interface AlgoliaSearchOpts {
+  appId: string;
+  searchKey: string;
+  fetchImpl?: typeof fetch;
+  proxyUrl?: string;                                 // Webshare fallback (Task 4)
+  refreshKeys?: () => Promise<AlgoliaKeys | null>;   // Task 4
+  minGapMs?: number;
+}
+
+function endpoint(appId: string): string {
+  return `https://${appId}-dsn.algolia.net/1/indexes/beer/query`;
+}
+
+export function createAlgoliaSearch(opts: AlgoliaSearchOpts): BeerSearch {
+  const f = opts.fetchImpl ?? fetch;
+  const gap = opts.minGapMs ?? 250;
+  const proxy = opts.proxyUrl ? new ProxyAgent(normalizeProxyUrl(opts.proxyUrl)) : undefined;
+  let keys: AlgoliaKeys = { appId: opts.appId, searchKey: opts.searchKey };
+  let lastAt = 0;
+
+  async function rawSearch(query: string, useProxy: boolean): Promise<SearchResult[]> {
+    const wait = Math.max(0, lastAt + gap - Date.now());
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const init: RequestInit & { dispatcher?: unknown } = {
+      method: 'POST',
+      headers: {
+        'X-Algolia-Application-Id': keys.appId,
+        'X-Algolia-API-Key': keys.searchKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, hitsPerPage: ALGOLIA_HITS_PER_PAGE }),
+    };
+    if (useProxy && proxy) init.dispatcher = proxy;
+    const res = await f(endpoint(keys.appId), init);
+    lastAt = Date.now();
+    if (!res.ok) throw new HttpError(res.status, endpoint(keys.appId));
+    return parseAlgoliaResponse((await res.json()) as AlgoliaResponse);
+  }
+
+  function isAuthBlock(e: unknown): e is HttpError {
+    return e instanceof HttpError && (e.status === 401 || e.status === 403);
+  }
+
+  return {
+    async search(query: string): Promise<SearchResult[]> {
+      try {
+        return await rawSearch(query, false);
+      } catch (e1) {
+        if (!isAuthBlock(e1)) throw e1; // 5xx/network → transient upstream
+        // 1) try refreshing keys, retry direct if they actually changed
+        if (opts.refreshKeys) {
+          const fresh = await opts.refreshKeys().catch(() => null);
+          if (fresh && fresh.searchKey !== keys.searchKey) {
+            keys = fresh;
+            try { return await rawSearch(query, false); } catch (e2) { if (!isAuthBlock(e2)) throw e2; }
+          }
+        }
+        // 2) fall back to the proxy (possible IP ban)
+        if (proxy) return await rawSearch(query, true);
+        throw e1;
+      }
+    },
+  };
 }
