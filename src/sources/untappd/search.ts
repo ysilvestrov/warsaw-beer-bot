@@ -47,6 +47,13 @@ export function buildSearchUrl(query: string): string {
   return `https://untappd.com/search?q=${q}&type=beer`;
 }
 
+// Adapter so the client relay (#89) keeps flowing relayed HTML through the same
+// pipeline. Phase 1: relayed search pages are the empty Algolia shell, so this
+// resolves []. Phase 2 will replace the relay with Algolia JSON directly.
+export function htmlSearch(html: string): BeerSearch {
+  return { search: async () => parseSearchPage(html) };
+}
+
 export function parseSearchPage(html: string): SearchResult[] {
   const $ = cheerio.load(html);
   const out: SearchResult[] = [];

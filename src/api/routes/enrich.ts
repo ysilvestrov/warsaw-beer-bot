@@ -10,7 +10,7 @@ import {
 import { isWontfix } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
-import { buildSearchUrl } from '../../sources/untappd/search';
+import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import { lookupBeer } from '../../domain/untappd-lookup';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
 
@@ -74,7 +74,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     }
     // Reuse the full server pick pipeline; the client already fetched, so the
     // injected fetch just returns the relayed HTML regardless of URL.
-    const outcome = await lookupBeer({ brewery, name, abv: row.abv, fetch: async () => html });
+    const outcome = await lookupBeer({ brewery, name, abv: row.abv, search: htmlSearch(html) });
     const nowIso = new Date().toISOString();
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
