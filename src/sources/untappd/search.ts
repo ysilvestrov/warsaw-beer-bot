@@ -1,4 +1,6 @@
 import * as cheerio from 'cheerio';
+import { isBlockPage } from './block';
+import { HttpError } from '../http';
 
 export interface SearchResult {
   bid: number;
@@ -51,7 +53,12 @@ export function buildSearchUrl(query: string): string {
 // pipeline. Phase 1: relayed search pages are the empty Algolia shell, so this
 // resolves []. Phase 2 will replace the relay with Algolia JSON directly.
 export function htmlSearch(html: string): BeerSearch {
-  return { search: async () => parseSearchPage(html) };
+  return {
+    search: async () => {
+      if (isBlockPage(html)) throw new HttpError(403, 'untappd-search');
+      return parseSearchPage(html);
+    },
+  };
 }
 
 export function parseSearchPage(html: string): SearchResult[] {

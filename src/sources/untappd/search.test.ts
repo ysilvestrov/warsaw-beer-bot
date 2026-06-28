@@ -170,4 +170,10 @@ describe('htmlSearch', () => {
     const s = htmlSearch('<html></html>'); // empty Algolia shell → no .beer-item
     expect(await s.search('anything')).toEqual([]);
   });
+
+  it('throws a block HttpError on a block page (so lookupBeer marks it blocked)', async () => {
+    const BLOCK_PAGE_HTML = '<title>Just a moment...</title>';
+    const s = htmlSearch(BLOCK_PAGE_HTML);
+    await expect(s.search('x')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+  });
 });
