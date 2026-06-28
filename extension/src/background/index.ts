@@ -1,7 +1,8 @@
 import { getSettings } from '../shared/config';
+import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
 import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
-import type { EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
 
 export interface MatchMessage {
   type: 'match';
@@ -37,28 +38,35 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
   }
 }
 
-export interface EnrichFetchMessage { type: 'enrich:fetch'; url: string }
+export interface EnrichFetchMessage { type: 'enrich:fetch'; algolia: AlgoliaQuery }
 export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; html: string; pageUrl?: string }
-
-const UNTAPPD_ORIGIN = 'https://untappd.com/*';
+export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; pageUrl?: string }
 
 async function enrichAllowed(): Promise<boolean> {
   const { enrichEnabled } = await getSettings();
   if (!enrichEnabled) return false;
-  return chrome.permissions.contains({ origins: [UNTAPPD_ORIGIN] });
+  return chrome.permissions.contains({ origins: [...ENRICH_ORIGINS] });
 }
 
 export async function handleEnrichFetch(
   msg: EnrichFetchMessage,
-): Promise<{ type: 'enrich:fetch:ok'; html: string | null }> {
-  if (!(await enrichAllowed())) return { type: 'enrich:fetch:ok', html: null };
+): Promise<{ type: 'enrich:fetch:ok'; algolia: AlgoliaResponse | null }> {
+  if (!(await enrichAllowed())) return { type: 'enrich:fetch:ok', algolia: null };
   try {
-    const res = await fetch(msg.url, { credentials: 'include' });
-    if (!res.ok) return { type: 'enrich:fetch:ok', html: null };
-    return { type: 'enrich:fetch:ok', html: await res.text() };
+    const { appId, searchKey, indexName, query, hitsPerPage } = msg.algolia;
+    const res = await fetch(`https://${appId}-dsn.algolia.net/1/indexes/${indexName}/query`, {
+      method: 'POST',
+      headers: {
+        'X-Algolia-Application-Id': appId,
+        'X-Algolia-API-Key': searchKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ query, hitsPerPage }),
+    });
+    if (!res.ok) return { type: 'enrich:fetch:ok', algolia: null };
+    return { type: 'enrich:fetch:ok', algolia: (await res.json()) as AlgoliaResponse };
   } catch {
-    return { type: 'enrich:fetch:ok', html: null };
+    return { type: 'enrich:fetch:ok', algolia: null };
   }
 }
 
@@ -80,7 +88,7 @@ export async function handleEnrichResult(
   const { token, baseUrl, enrichEnabled } = await getSettings();
   if (!enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
   try {
-    const result = await postEnrichResult(baseUrl, token, { brewery: msg.brewery, name: msg.name, html: msg.html, pageUrl: msg.pageUrl });
+    const result = await postEnrichResult(baseUrl, token, { brewery: msg.brewery, name: msg.name, algolia: msg.algolia, pageUrl: msg.pageUrl });
     return { type: 'enrich:result:ok', result };
   } catch {
     return { type: 'enrich:result:ok', result: null };

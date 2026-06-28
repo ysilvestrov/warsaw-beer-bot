@@ -1,4 +1,4 @@
-import type { EnrichResult } from '../api/types';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichResult } from '../api/types';
 
 export const MAX_SEARCHES_PER_PAGE = 20;
 export const DEFAULT_DELAY_MS = 4000;
@@ -12,10 +12,9 @@ export interface OrphanBeer {
 export interface EnrichDeps {
   getCandidates: (
     beers: { brewery: string; name: string }[],
-  ) => Promise<{ brewery: string; name: string; eligible: boolean; searchUrl: string }[]>;
-  fetchSearch: (searchUrl: string) => Promise<string | null>;
-  trim: (rawHtml: string) => string;
-  submitResult: (brewery: string, name: string, html: string) => Promise<EnrichResult>;
+  ) => Promise<{ brewery: string; name: string; eligible: boolean; algolia: AlgoliaQuery }[]>;
+  fetchSearch: (algolia: AlgoliaQuery) => Promise<AlgoliaResponse | null>;
+  submitResult: (brewery: string, name: string, algolia: AlgoliaResponse) => Promise<EnrichResult>;
   setSearching: (key: string) => void;
   setEnriched: (key: string, untappdId: number, ratingGlobal: number | null) => void;
   setOrphan: (key: string, brewery: string, name: string) => void;
@@ -47,8 +46,8 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
 
     deps.setSearching(beer.key);
     try {
-      const raw = await deps.fetchSearch(cand.searchUrl);
-      const res = raw ? await deps.submitResult(cand.brewery, cand.name, deps.trim(raw)) : null;
+      const algolia = await deps.fetchSearch(cand.algolia);
+      const res = algolia ? await deps.submitResult(cand.brewery, cand.name, algolia) : null;
       if (res && res.status === 'matched' && res.untappd_id != null) {
         deps.setEnriched(beer.key, res.untappd_id, res.rating_global ?? null);
       } else {

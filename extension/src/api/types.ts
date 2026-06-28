@@ -24,11 +24,24 @@ export interface MatchResponse {
   results: MatchResult[];
 }
 
+export interface AlgoliaQuery {
+  appId: string;
+  searchKey: string;
+  indexName: 'beer';
+  query: string;
+  hitsPerPage: number;
+}
+
+export interface AlgoliaResponse {
+  hits?: Record<string, unknown>[];
+  nbHits?: number;
+}
+
 export interface EnrichCandidate {
   brewery: string;
   name: string;
   eligible: boolean;
-  searchUrl: string;
+  algolia: AlgoliaQuery;
 }
 
 export interface EnrichResult {

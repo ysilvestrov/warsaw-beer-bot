@@ -1,4 +1,4 @@
-import type { CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
+import type { AlgoliaResponse, CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
 
 export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked';
 
@@ -71,7 +71,7 @@ export async function postEnrichCandidates(
 export async function postEnrichResult(
   baseUrl: string,
   token: string,
-  payload: { brewery: string; name: string; html: string; pageUrl?: string },
+  payload: { brewery: string; name: string; algolia: AlgoliaResponse; pageUrl?: string },
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<EnrichResult> {
   let res: Response;

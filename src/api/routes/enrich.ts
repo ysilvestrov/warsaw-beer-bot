@@ -10,7 +10,15 @@ import {
 import { isWontfix } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
-import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
+import { htmlSearch } from '../../sources/untappd/search';
+import {
+  ALGOLIA_DEFAULTS,
+  ALGOLIA_HITS_PER_PAGE,
+  ALGOLIA_INDEX_NAME,
+  parseAlgoliaResponse,
+  type AlgoliaQuery,
+  type AlgoliaResponse,
+} from '../../sources/untappd/algolia';
 import { lookupBeer } from '../../domain/untappd-lookup';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
 
@@ -24,9 +32,25 @@ const CandidatesBody = z.object({
 const ResultBody = z.object({
   brewery: z.string(),
   name: z.string(),
-  html: z.string(),
+  html: z.string().optional(),
+  algolia: z.object({
+    hits: z.array(z.record(z.string(), z.unknown())).optional(),
+    nbHits: z.number().optional(),
+  }).optional(),
   pageUrl: z.string().optional(),
+}).refine((v) => typeof v.html === 'string' || v.algolia !== undefined, {
+  message: 'html or algolia is required',
 });
+
+function algoliaQuery(deps: ApiDeps, query: string): AlgoliaQuery {
+  return {
+    appId: deps.env.UNTAPPD_ALGOLIA_APP_ID ?? ALGOLIA_DEFAULTS.appId,
+    searchKey: deps.env.UNTAPPD_ALGOLIA_SEARCH_KEY ?? ALGOLIA_DEFAULTS.searchKey,
+    indexName: ALGOLIA_INDEX_NAME,
+    query,
+    hitsPerPage: ALGOLIA_HITS_PER_PAGE,
+  };
+}
 
 // Ensures a beer row exists for (brewery, name) and returns it.
 // May return a pre-existing matched row, not only a freshly created orphan.
@@ -53,11 +77,12 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           row.untappd_id == null &&
           !isWontfix(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
+        const query = cleanSearchQuery(b.brewery, b.name);
         return {
           brewery: b.brewery,
           name: b.name,
           eligible,
-          searchUrl: buildSearchUrl(cleanSearchQuery(b.brewery, b.name)),
+          algolia: algoliaQuery(deps, query),
         };
       }),
     )();
@@ -65,7 +90,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   });
 
   app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
-    const { brewery, name, html, pageUrl } = c.req.valid('json');
+    const { brewery, name, html, algolia, pageUrl } = c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name);
     // Only orphans are enrichable. Never overwrite / merge a canonical (already
     // matched) row from client-relayed input.
@@ -73,8 +98,11 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       return c.json({ status: 'skipped' });
     }
     // Reuse the full server pick pipeline; the client already fetched, so the
-    // injected fetch just returns the relayed HTML regardless of URL.
-    const outcome = await lookupBeer({ brewery, name, abv: row.abv, search: htmlSearch(html) });
+    // injected search adapter just returns the relayed result payload.
+    const search = algolia
+      ? { search: async () => parseAlgoliaResponse(algolia as AlgoliaResponse) }
+      : htmlSearch(html!);
+    const outcome = await lookupBeer({ brewery, name, abv: row.abv, search });
     const nowIso = new Date().toISOString();
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });

@@ -49,9 +49,8 @@ export function buildSearchUrl(query: string): string {
   return `https://untappd.com/search?q=${q}&type=beer`;
 }
 
-// Adapter so the client relay (#89) keeps flowing relayed HTML through the same
-// pipeline. Phase 1: relayed search pages are the empty Algolia shell, so this
-// resolves []. Phase 2 will replace the relay with Algolia JSON directly.
+// Legacy adapter for old client-relay payloads. Current extension releases send
+// Algolia JSON directly, but keeping this preserves block-page handling for stale clients.
 export function htmlSearch(html: string): BeerSearch {
   return {
     search: async () => {

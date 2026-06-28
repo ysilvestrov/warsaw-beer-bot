@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { testConnection } from './options';
+import { ENRICH_ORIGINS, requestEnrichPermission, testConnection } from './options';
 import * as client from '../api/client';
 import { ApiError } from '../api/client';
 
@@ -21,5 +21,19 @@ describe('testConnection', () => {
     vi.spyOn(client, 'getHealth').mockResolvedValue(true);
     vi.spyOn(client, 'postMatch').mockRejectedValue(new ApiError('unauthorized'));
     expect(await testConnection('https://api.test', 'bad')).toEqual({ ok: false, reason: 'unauthorized' });
+  });
+});
+
+describe('requestEnrichPermission', () => {
+  it('requests both Untappd and Algolia origins for missing-beer enrichment', async () => {
+    const request = vi.fn(async () => true);
+    vi.stubGlobal('chrome', { permissions: { request } });
+
+    expect(await requestEnrichPermission()).toBe(true);
+    expect(request).toHaveBeenCalledWith({ origins: ENRICH_ORIGINS });
+    expect(ENRICH_ORIGINS).toContain('https://untappd.com/*');
+    expect(ENRICH_ORIGINS).toContain('https://*.algolia.net/*');
+
+    vi.unstubAllGlobals();
   });
 });

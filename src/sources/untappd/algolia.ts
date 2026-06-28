@@ -11,6 +11,20 @@ interface AlgoliaHit {
   rating_score?: unknown;
 }
 export interface AlgoliaResponse { hits?: AlgoliaHit[]; nbHits?: number }
+export interface AlgoliaQuery {
+  appId: string;
+  searchKey: string;
+  indexName: 'beer';
+  query: string;
+  hitsPerPage: number;
+}
+
+export const ALGOLIA_DEFAULTS = {
+  appId: '9WBO4RQ3HO',
+  searchKey: '1d347324d67ec472bb7132c66aead485',
+} as const;
+export const ALGOLIA_INDEX_NAME = 'beer';
+export const ALGOLIA_HITS_PER_PAGE = 5;
 
 function num(v: unknown): number | null {
   const n = typeof v === 'number' ? v : typeof v === 'string' ? parseFloat(v) : NaN;
@@ -52,8 +66,6 @@ export function extractAlgoliaKeys(html: string): AlgoliaKeys | null {
     html.match(/"searchKey"\s*:\s*"([a-f0-9]{16,})"/)?.[1];
   return appId && searchKey ? { appId, searchKey } : null;
 }
-
-const ALGOLIA_HITS_PER_PAGE = 5;
 
 export interface AlgoliaSearchOpts {
   appId: string;

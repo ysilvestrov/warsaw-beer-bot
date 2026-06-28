@@ -88,24 +88,42 @@ describe('postEnrichCandidates', () => {
     const calls: { url: string; body: unknown }[] = [];
     const fetchMock = vi.fn(async (url: string, init: RequestInit) => {
       calls.push({ url, body: JSON.parse(init.body as string) });
-      return new Response(JSON.stringify({ candidates: [{ brewery: 'B', name: 'N', eligible: true, searchUrl: 'u' }] }), { status: 200 });
+      return new Response(JSON.stringify({
+        candidates: [{
+          brewery: 'B',
+          name: 'N',
+          eligible: true,
+          algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'B N', hitsPerPage: 5 },
+        }],
+      }), { status: 200 });
     });
     vi.stubGlobal('fetch', fetchMock);
     const out = await postEnrichCandidates('https://api', 'tok', [{ brewery: 'B', name: 'N' }]);
-    expect(out[0]).toEqual({ brewery: 'B', name: 'N', eligible: true, searchUrl: 'u' });
+    expect(out[0]).toEqual({
+      brewery: 'B',
+      name: 'N',
+      eligible: true,
+      algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'B N', hitsPerPage: 5 },
+    });
     expect(calls[0].url).toBe('https://api/enrich/candidates');
     vi.unstubAllGlobals();
   });
 });
 
 describe('postEnrichResult', () => {
-  it('posts html and returns the status payload', async () => {
-    const fetchMock = vi.fn(async () =>
+  it('posts Algolia JSON and returns the status payload', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
       new Response(JSON.stringify({ status: 'matched', untappd_id: 5001, rating_global: 3.9 }), { status: 200 }),
     );
     vi.stubGlobal('fetch', fetchMock);
-    const out = await postEnrichResult('https://api', 'tok', { brewery: 'B', name: 'N', html: '<x>' });
+    const out = await postEnrichResult('https://api', 'tok', { brewery: 'B', name: 'N', algolia: { hits: [{ bid: 5001 }] } });
     expect(out).toEqual({ status: 'matched', untappd_id: 5001, rating_global: 3.9 });
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      brewery: 'B',
+      name: 'N',
+      algolia: { hits: [{ bid: 5001 }] },
+    });
     vi.unstubAllGlobals();
   });
 });

@@ -36,7 +36,7 @@ import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { createPersistentCircuitBreaker } from './domain/untappd-circuit';
-import { createAlgoliaSearch, extractAlgoliaKeys } from './sources/untappd/algolia';
+import { ALGOLIA_DEFAULTS, createAlgoliaSearch, extractAlgoliaKeys } from './sources/untappd/algolia';
 import { buildSearchUrl } from './sources/untappd/search';
 import { createShutdown } from './shutdown';
 import { interruptActiveProgress } from './bot/active-progress';
@@ -63,7 +63,6 @@ async function main(): Promise<void> {
     userAgent: env.NOMINATIM_USER_AGENT,
     proxyUrl: env.WEBSHARE_PROXY,
   });
-  const ALGOLIA_DEFAULTS = { appId: '9WBO4RQ3HO', searchKey: '1d347324d67ec472bb7132c66aead485' };
   const algoliaSearch = createAlgoliaSearch({
     appId: env.UNTAPPD_ALGOLIA_APP_ID ?? ALGOLIA_DEFAULTS.appId,
     searchKey: env.UNTAPPD_ALGOLIA_SEARCH_KEY ?? ALGOLIA_DEFAULTS.searchKey,
