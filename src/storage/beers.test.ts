@@ -145,12 +145,13 @@ describe('recordLookupSuccess', () => {
     });
     recordLookupSuccess(db, id, {
       bid: 5001, style: 'IPA', abv: 6.5, global_rating: 3.98,
-    });
+    }, '2026-06-28T10:00:00.000Z');
     const row = getBeer(db, id);
     expect(row?.untappd_id).toBe(5001);
     expect(row?.style).toBe('IPA');
     expect(row?.abv).toBeCloseTo(6.5);
     expect(row?.rating_global).toBeCloseTo(3.98);
+    expect(row?.untappd_lookup_at).toBe('2026-06-28T10:00:00.000Z');
   });
 
   test('NULL rating_global does NOT overwrite existing non-null rating', () => {
@@ -161,7 +162,7 @@ describe('recordLookupSuccess', () => {
     });
     recordLookupSuccess(db, id, {
       bid: 5001, style: 'IPA', abv: 6.5, global_rating: null,
-    });
+    }, '2026-06-28T10:00:00.000Z');
     const row = getBeer(db, id);
     expect(row?.rating_global).toBeCloseTo(3.5);    // preserved
     expect(row?.untappd_id).toBe(5001);             // set
@@ -176,7 +177,7 @@ describe('recordLookupSuccess', () => {
     });
     recordLookupSuccess(db, id, {
       bid: 5001, style: null, abv: null, global_rating: 3.5,
-    });
+    }, '2026-06-28T10:00:00.000Z');
     const row = getBeer(db, id);
     expect(row?.abv).toBeCloseTo(4.6);    // preserved
   });
