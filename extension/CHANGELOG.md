@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-28
+
 - Fixed BeerRepublic filtering so variety/twelve-pack products are ignored instead of being matched as individual beers.
 - Fixed BeerFreak parsing for slash/backslash collaborator titles, so brandless products and branded collabs emit the primary brewery with a clean beer name.
 - Fixed BeerFreak matching for same-name releases: when product details expose `Міцність`, the extension now sends that ABV to the matcher using bounded, cached detail-page lookups.
