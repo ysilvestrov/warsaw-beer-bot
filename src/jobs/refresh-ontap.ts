@@ -1,6 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
+import { HttpError } from '../sources/http';
 import type { Geocoder } from '../sources/geocoder';
 import { parseOntapCityIndex, type IndexPub } from '../sources/ontap/index';
 import { CITIES, type City } from '../domain/cities';
@@ -15,6 +16,20 @@ import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 import { enrichOneOrphan } from './untappd-enrich';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
+import { buildSearchUrl, parseSearchPage, type BeerSearch } from '../sources/untappd/search';
+import { isBlockPage } from '../sources/untappd/block';
+
+// Temporary bridge: wraps an Http client into BeerSearch until T11 wires Algolia.
+function httpBeerSearch(http: Http): BeerSearch {
+  return {
+    search: async (query) => {
+      const url = buildSearchUrl(query);
+      const html = await http.get(url);
+      if (isBlockPage(html)) throw new HttpError(403, url);
+      return parseSearchPage(html);
+    },
+  };
+}
 
 interface Deps {
   db: DB;
@@ -127,7 +142,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             !inlineEnrichStopped &&
             breaker.canAttempt(now())
           ) {
-            const outcome = await enrichOneOrphan({ db, log, http: untappdHttp, now }, beerId);
+            const outcome = await enrichOneOrphan({ db, log, search: httpBeerSearch(untappdHttp), now }, beerId);
             if (outcome === 'blocked') {
               breaker.onResult(true, now());
               enrichBudget--;
