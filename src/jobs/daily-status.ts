@@ -18,6 +18,7 @@ export function buildStatusMessage(m: StatusMetrics, date: string): string {
     `• Останній скрейп: ${scrapeLine}`,
     `• Каталог: ${group(m.beersTotal)} пив · ${matchPct}% зматчено · ${group(m.orphansPending)} orphan'ів у черзі`,
     `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
+    `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     '',

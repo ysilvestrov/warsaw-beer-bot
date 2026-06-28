@@ -19,6 +19,7 @@ const base: StatusMetrics = {
   snapshots: 1976, taps: 29459, dbSizeMb: 13.2,
   usersTotal: 31, usersLinked: 24,
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
+  enrichMatched24h: 5, enrichFailures24h: 3, untappdSearchHealthy: true,
 };
 
 test('buildStatusMessage: full message exact string', () => {
@@ -31,6 +32,7 @@ test('buildStatusMessage: full message exact string', () => {
       '• Останній скрейп: 9 год тому ✅ (42 паби за 24 год)',
       "• Каталог: 12 840 пив · 78% зматчено · 287 orphan'ів у черзі",
       '• Рейтинги: 134 зматчених пив без рейтингу',
+      '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
       '',
@@ -148,4 +150,15 @@ test('shouldSendDailyStatus: in window, last sent yesterday → send', () => {
 test('shouldSendDailyStatus: winter CET, 09:00 Warsaw = 08:00Z → send with correct date', () => {
   const r = shouldSendDailyStatus({ now: new Date('2026-01-15T08:00:00Z'), lastSentDate: null });
   expect(r).toEqual({ send: true, dateKey: '2026-01-15' });
+});
+
+it('renders the enrich line with health icon', () => {
+  const m = { ...base, enrichMatched24h: 7, enrichFailures24h: 12, untappdSearchHealthy: true };
+  const text = buildStatusMessage(m, '2026-06-28 10:00');
+  expect(text).toContain('Enrich: +7 зматчено / 12 провалів за 24 год · пошук ✅');
+});
+
+it('shows ⚠️ when search is unhealthy', () => {
+  const m = { ...base, enrichMatched24h: 0, enrichFailures24h: 0, untappdSearchHealthy: false };
+  expect(buildStatusMessage(m, '2026-06-28 10:00')).toContain('пошук ⚠️');
 });
