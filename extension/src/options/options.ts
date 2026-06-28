@@ -1,5 +1,7 @@
 import { getSettings, setSettings, DEFAULT_BASE_URL } from '../shared/config';
+import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { getHealth, postMatch, ApiError } from '../api/client';
+export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 
 export interface ConnectionResult {
   ok: boolean;
@@ -15,6 +17,14 @@ export async function testConnection(baseUrl: string, token: string): Promise<Co
   } catch (e) {
     return { ok: false, reason: e instanceof ApiError ? e.code : 'server' };
   }
+}
+
+export async function requestEnrichPermission(): Promise<boolean> {
+  return chrome.permissions.request({ origins: [...ENRICH_ORIGINS] });
+}
+
+export async function removeEnrichPermission(): Promise<boolean> {
+  return chrome.permissions.remove({ origins: [...ENRICH_ORIGINS] });
 }
 
 // --- DOM wiring (runs only in the options page, not under test) ---
@@ -37,12 +47,12 @@ async function initOptionsPage(): Promise<void> {
     enrich.checked = s.enrichEnabled;
     enrich.addEventListener('change', async () => {
       if (enrich.checked) {
-        const granted = await chrome.permissions.request({ origins: ['https://untappd.com/*'] });
+        const granted = await requestEnrichPermission();
         enrich.checked = granted;
         await setSettings({ enrichEnabled: granted });
         status.textContent = granted ? 'Enrichment on.' : 'Permission denied.';
       } else {
-        await chrome.permissions.remove({ origins: ['https://untappd.com/*'] });
+        await removeEnrichPermission();
         await setSettings({ enrichEnabled: false });
         status.textContent = 'Enrichment off.';
       }

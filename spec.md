@@ -709,14 +709,17 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 
 Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}`, апсертить
 кожне нове пиво як orphan (`untappd_id` NULL) і повертає `{candidates:[{brewery,name,
-eligible,searchUrl}]}`, де `eligible` = backoff-due (`isEligible`), пиво ще orphan і **не** `wontfix`.
-`/enrich/result` приймає `{brewery,name,html,pageUrl?}` (обрізана клієнтом сторінка Untappd-пошуку; `pageUrl` — опційна URL сторінки магазину, зберігається як `source_url` в `enrich_failures`),
-проганяє наявний `lookupBeer` через `htmlSearch` (relay-адаптер, `search.ts`) і застосовує спільний `applyLookupOutcome`.
-**Phase 1 — ефективний no-op для результатів:** Untappd перемістив пошук на клієнтський
-Algolia-widget, тож релейована HTML-сторінка більше не містить `.beer-item` (порожня Algolia-оболонка) і
-`htmlSearch` завжди повертає порожній список кандидатів. Блок-сторінки (403/login) однак
-досі виявляються коректно. Повноцінна міграція client-relay на Algolia JSON API — **Phase 2**
-(відкладено). Логіка `applyLookupOutcome`:
+eligible,algolia}]}`, де `eligible` = backoff-due (`isEligible`), пиво ще orphan і **не** `wontfix`.
+`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`; `query`
+будується через `cleanSearchQuery(brewery,name)` і лишається серверним контрактом.
+Розширення, якщо користувач увімкнув opt-in і дав runtime-дозвіл `untappd.com` + `*.algolia.net`, робить
+браузерний `POST https://{appId}-dsn.algolia.net/1/indexes/beer/query` з цими параметрами
+та публічними Algolia headers, а потім шле JSON hits у `/enrich/result`.
+`/enrich/result` приймає `{brewery,name,algolia,pageUrl?}` (`pageUrl` — опційна URL сторінки магазину,
+зберігається як `source_url` в `enrich_failures`), проганяє `parseAlgoliaResponse(algolia)` через
+наявний `lookupBeer` pipeline і застосовує спільний `applyLookupOutcome`. Legacy `{html}` payload
+зберігається як сумісний fallback через `htmlSearch`, але основний relay-контракт — Algolia JSON.
+Логіка `applyLookupOutcome`:
 matched → `recordLookupSuccess` (bid+рейтинг; UNIQUE-клеш → merge у канонічний рядок),
 not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не пише в backoff (блок
 ніколи не мутує backoff). Той самий orphan-пул і backoff, що й у серверного enrich-крона —

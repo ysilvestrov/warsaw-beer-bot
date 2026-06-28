@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-06-28
+
+- Fixed optional missing-beer enrichment after Untappd moved search results into Algolia: the extension now asks for the required Algolia host permission, queries Untappd's Algolia API from the user's browser/IP, and relays JSON hits to the server, so orphan beers can become ⭐ again instead of staying ⚪ forever.
+
 ## [0.9.1] - 2026-06-28
 
 - Fixed BeerRepublic filtering so variety/twelve-pack products are ignored instead of being matched as individual beers.

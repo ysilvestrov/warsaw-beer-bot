@@ -10,6 +10,7 @@ const manifest = manifestExport as {
   key: string;
   content_scripts: Array<{ matches: string[] }>;
   permissions: string[];
+  optional_host_permissions: string[];
   action?: { default_popup?: string };
 };
 
@@ -45,5 +46,10 @@ describe('manifest', () => {
   it('requests activeTab + tabs permissions for the popup', () => {
     expect(manifest.permissions).toContain('activeTab');
     expect(manifest.permissions).toContain('tabs');
+  });
+
+  it('declares optional origins needed by Untappd enrichment relay', () => {
+    expect(manifest.optional_host_permissions).toContain('https://untappd.com/*');
+    expect(manifest.optional_host_permissions).toContain('https://*.algolia.net/*');
   });
 });

@@ -34,7 +34,13 @@ describe('POST /enrich/candidates', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.candidates[0]).toMatchObject({ brewery: 'PINTA', name: 'Atak Chmielu', eligible: true });
-    expect(body.candidates[0].searchUrl).toContain('untappd.com/search');
+    expect(body.candidates[0].algolia).toMatchObject({
+      appId: '9WBO4RQ3HO',
+      searchKey: '1d347324d67ec472bb7132c66aead485',
+      indexName: 'beer',
+      query: 'PINTA Atak Chmielu',
+      hitsPerPage: 5,
+    });
 
     const row = findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Atak Chmielu'));
     expect(row).not.toBeNull();
@@ -82,16 +88,16 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
-  it('candidate searchUrl strips collab junk and both collab breweries (#117)', async () => {
+  it('candidate Algolia query strips collab junk and both collab breweries (#117)', async () => {
     const { app } = setup();
     const res = await post(app, '/enrich/candidates', {
       beers: [{ brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar' }],
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    const url = body.candidates[0].searchUrl as string;
-    expect(url).toContain('Omnipollo%20Trillium%20Kanelbullar');
-    expect(url.toLowerCase()).not.toContain('collab');
+    const query = body.candidates[0].algolia.query as string;
+    expect(query).toBe('Omnipollo Trillium Kanelbullar');
+    expect(query.toLowerCase()).not.toContain('collab');
   });
 
   it('400 on an empty beer list', async () => {
@@ -122,6 +128,33 @@ function searchHtml(
 }
 
 describe('POST /enrich/result', () => {
+  it('enriches the orphan from relayed Algolia JSON', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA Barrel Brewing',
+      name: 'After Hours: Rose Wild Ale',
+      algolia: {
+        hits: [{
+          bid: 5469263,
+          beer_name: 'After Hours: Rose Wild Ale',
+          brewery_name: 'PINTA Barrel Brewing',
+          type_name: 'Wild Ale - Other',
+          beer_abv: 5.7,
+          rating_score: 3.89,
+        }],
+        nbHits: 1,
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: 'matched', untappd_id: 5469263, rating_global: 3.89 });
+
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('PINTA Barrel Brewing'), normalizeName('After Hours: Rose Wild Ale'),
+    )!;
+    expect(getBeer(db, row.id)!.untappd_id).toBe(5469263);
+  });
+
   it('enriches the orphan on a matched search result', async () => {
     const { db, app } = setup();
     const html = searchHtml([

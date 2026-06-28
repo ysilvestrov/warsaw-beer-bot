@@ -5,10 +5,14 @@ import type { EnrichResult } from '../api/types';
 function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
   return {
     getCandidates: vi.fn(async (beers: { brewery: string; name: string }[]) =>
-      beers.map((b) => ({ brewery: b.brewery, name: b.name, eligible: true, searchUrl: `u:${b.name}` })),
+      beers.map((b) => ({
+        brewery: b.brewery,
+        name: b.name,
+        eligible: true,
+        algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer' as const, query: `q:${b.name}`, hitsPerPage: 5 },
+      })),
     ),
-    fetchSearch: vi.fn(async () => '<raw>'),
-    trim: vi.fn(() => '<small>'),
+    fetchSearch: vi.fn(async () => ({ hits: [{ bid: 7 }] })),
     submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'matched', untappd_id: 7, rating_global: 4.0 })),
     setSearching: vi.fn(),
     setEnriched: vi.fn(),
@@ -35,7 +39,7 @@ describe('runEnrichment', () => {
     await runEnrichment(beers(2), d);
     expect(d.getCandidates).toHaveBeenCalledTimes(1);
     expect(d.fetchSearch).toHaveBeenCalledTimes(2);
-    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', '<small>');
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] });
     expect(d.setSearching).toHaveBeenCalledTimes(2);
     expect(d.setEnriched).toHaveBeenCalledWith('k0', 7, 4.0);
     expect(d.sleep).toHaveBeenCalledTimes(1); // between the two
@@ -44,7 +48,12 @@ describe('runEnrichment', () => {
   it('skips ineligible beers', async () => {
     const d = deps({
       getCandidates: vi.fn(async (bs: { brewery: string; name: string }[]) =>
-        bs.map((b) => ({ brewery: b.brewery, name: b.name, eligible: false, searchUrl: 'u' })),
+        bs.map((b) => ({
+          brewery: b.brewery,
+          name: b.name,
+          eligible: false,
+          algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer' as const, query: 'u', hitsPerPage: 5 },
+        })),
       ),
     });
     await runEnrichment(beers(2), d);

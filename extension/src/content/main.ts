@@ -5,11 +5,10 @@ import { refreshCards } from './refresh';
 import { clearKeys } from '../cache/store';
 import { isSeen, setSearching, setEnriched, setOrphan } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
-import { trimSearchHtml } from './untappd-trim';
 import { getSettings } from '../shared/config';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchReply, MatchMessage } from '../background/index';
-import type { MatchResult, RawBeer, EnrichCandidate, EnrichResult } from '../api/types';
+import type { AlgoliaResponse, MatchResult, RawBeer, EnrichCandidate, EnrichResult } from '../api/types';
 
 const sendMatch: SendMatch = (cards: RawBeer[]) =>
   new Promise<MatchResult[]>((resolve, reject) => {
@@ -39,11 +38,10 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
     await runEnrichment(beers, {
       getCandidates: async (bs) =>
         (await sendBg<{ candidates: EnrichCandidate[] }>({ type: 'enrich:candidates', beers: bs }))?.candidates ?? [],
-      fetchSearch: async (url) =>
-        (await sendBg<{ html: string | null }>({ type: 'enrich:fetch', url }))?.html ?? null,
-      trim: trimSearchHtml,
-      submitResult: async (brewery, name, html) =>
-        (await sendBg<{ result: EnrichResult | null }>({ type: 'enrich:result', brewery, name, html, pageUrl: window.location.href }))?.result ??
+      fetchSearch: async (algolia) =>
+        (await sendBg<{ algolia: AlgoliaResponse | null }>({ type: 'enrich:fetch', algolia }))?.algolia ?? null,
+      submitResult: async (brewery, name, algolia) =>
+        (await sendBg<{ result: EnrichResult | null }>({ type: 'enrich:result', brewery, name, algolia, pageUrl: window.location.href }))?.result ??
         { status: 'transient' },
       setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },
       setEnriched: (key, id, r) => { const el = elByKey.get(key); if (el) setEnriched(el, id, r); },

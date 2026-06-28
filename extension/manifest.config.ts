@@ -16,7 +16,7 @@ export default defineManifest({
   // activeTab-only once the popup is verified in Chrome — see PR #135 manual checklist.)
   permissions: ['storage', 'activeTab', 'tabs'],
   host_permissions: ['https://beer-api.ysilvestrov-ai.uk/*'],
-  optional_host_permissions: ['https://*/*'],
+  optional_host_permissions: ['https://untappd.com/*', 'https://*.algolia.net/*', 'https://*/*'],
   action: { default_popup: 'src/popup/popup.html' },
   options_page: 'src/options/options.html',
   background: { service_worker: 'src/background/index.ts', type: 'module' },
