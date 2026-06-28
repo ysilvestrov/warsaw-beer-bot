@@ -1,4 +1,6 @@
 import * as cheerio from 'cheerio';
+import { isBlockPage } from './block';
+import { HttpError } from '../http';
 
 export interface SearchResult {
   bid: number;
@@ -7,6 +9,14 @@ export interface SearchResult {
   style: string | null;
   abv: number | null;
   global_rating: number | null;
+}
+
+// Decouples the matching pipeline (lookupBeer) from the search transport.
+// Implementations: createAlgoliaSearch (server), htmlSearch (relay adapter).
+// Throws HttpError on a hard block (after exhausting retries); throws other
+// errors for transient failures; resolves [] for a genuine no-result query.
+export interface BeerSearch {
+  search(query: string): Promise<SearchResult[]>;
 }
 
 const MAX_ITEMS = 5;
@@ -37,6 +47,18 @@ function extractBidFromHref(href: string | undefined): number | null {
 export function buildSearchUrl(query: string): string {
   const q = encodeURIComponent(query);
   return `https://untappd.com/search?q=${q}&type=beer`;
+}
+
+// Adapter so the client relay (#89) keeps flowing relayed HTML through the same
+// pipeline. Phase 1: relayed search pages are the empty Algolia shell, so this
+// resolves []. Phase 2 will replace the relay with Algolia JSON directly.
+export function htmlSearch(html: string): BeerSearch {
+  return {
+    search: async () => {
+      if (isBlockPage(html)) throw new HttpError(403, 'untappd-search');
+      return parseSearchPage(html);
+    },
+  };
 }
 
 export function parseSearchPage(html: string): SearchResult[] {

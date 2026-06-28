@@ -18,6 +18,8 @@ const Schema = z.object({
   UNTAPPD_BLOCK_THRESHOLD: z.coerce.number().int().positive().default(3),
   ADMIN_TELEGRAM_ID: z.string().optional(),
   ADMIN_API_TOKEN: z.string().optional(),
+  UNTAPPD_ALGOLIA_APP_ID: z.string().optional(),
+  UNTAPPD_ALGOLIA_SEARCH_KEY: z.string().optional(),
 });
 
 export type Env = z.infer<typeof Schema>;

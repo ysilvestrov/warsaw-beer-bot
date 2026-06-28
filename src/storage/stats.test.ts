@@ -4,6 +4,7 @@ import { upsertPub } from './pubs';
 import { upsertBeer } from './beers';
 import { createSnapshot, insertTaps } from './snapshots';
 import { collectStatus } from './stats';
+import { setJobState } from './job_state';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -54,6 +55,9 @@ test('collectStatus computes all metrics', () => {
     onTapDistinct: 3, // A1, A2, B1 (latest snapshots of a and b)
     onTapPubs: 2,
     newOnTap24h: 2,   // A1, A2 (B1 also appears in the old snapshot → excluded)
+    enrichMatched24h: 0,
+    enrichFailures24h: 0,
+    untappdSearchHealthy: true,
   });
 });
 
@@ -65,4 +69,19 @@ test('collectStatus with empty DB: null scrape, zero counts', () => {
   expect(m.onTapDistinct).toBe(0);
   expect(m.newOnTap24h).toBe(0);
   expect(m.dbSizeMb).toBeNull();
+});
+
+it('reports enrich health metrics', () => {
+  const db = fresh();
+  const { lastInsertRowid: beerId } = db.prepare(
+    `INSERT INTO beers (untappd_id,name,brewery,normalized_name,normalized_brewery,untappd_lookup_at) VALUES (10,'A','B','a','b',?)`,
+  ).run(new Date().toISOString());
+  db.prepare(
+    `INSERT INTO enrich_failures (beer_id,brewery,name,search_url,outcome,candidates_count,candidates_summary,fail_count,last_at) VALUES (?,'B','A','u','not_found',0,'',1,?)`,
+  ).run(beerId, new Date().toISOString());
+  setJobState(db, 'untappd_search_canary', JSON.stringify({ ok: true, at: new Date().toISOString() }));
+  const m = collectStatus(db, new Date());
+  expect(m.enrichMatched24h).toBe(1);
+  expect(m.enrichFailures24h).toBe(1);
+  expect(m.untappdSearchHealthy).toBe(true);
 });

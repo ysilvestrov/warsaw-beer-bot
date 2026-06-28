@@ -68,6 +68,7 @@ describe('refreshOntap non-beer filtering', () => {
       db,
       log: silentLog,
       http,
+      search: { search: async () => [] },
       geocoder: async () => null,
       lookupEnabled: false,
       now: () => new Date('2026-06-14T12:00:00Z'),
@@ -134,7 +135,7 @@ describe('refreshOntap non-beer filtering', () => {
     };
 
     await refreshOntap({
-      db, log: silentLog, http, geocoder: async () => null,
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder: async () => null,
       lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
     });
 
@@ -194,7 +195,7 @@ describe('refreshOntap multi-city', () => {
   test('tags pubs with the city whose index they came from', async () => {
     const db = openDb(':memory:'); migrate(db);
     const { http } = makeHttp();
-    await refreshOntap({ db, log: silentLog, http, geocoder, cities: twoCities, lookupEnabled: false });
+    await refreshOntap({ db, log: silentLog, http, search: { search: async () => [] }, geocoder, cities: twoCities, lookupEnabled: false });
     expect(listPubs(db, 'warszawa').map((p) => p.slug)).toEqual(['warszawapub']);
     expect(listPubs(db, 'krakow').map((p) => p.slug)).toEqual(['krakowpub']);
   });
@@ -202,7 +203,7 @@ describe('refreshOntap multi-city', () => {
   test('a city whose index fetch throws is skipped; others still scrape', async () => {
     const db = openDb(':memory:'); migrate(db);
     const { http } = makeHttp('warszawa');
-    await refreshOntap({ db, log: silentLog, http, geocoder, cities: twoCities, lookupEnabled: false });
+    await refreshOntap({ db, log: silentLog, http, search: { search: async () => [] }, geocoder, cities: twoCities, lookupEnabled: false });
     expect(listPubs(db, 'warszawa')).toEqual([]);
     expect(listPubs(db, 'krakow').map((p) => p.slug)).toEqual(['krakowpub']);
   });
@@ -236,7 +237,7 @@ describe('refreshOntap multi-city', () => {
     const db = openDb(':memory:'); migrate(db);
     const { http } = budgetHttp();
     await refreshOntap({
-      db, log: silentLog, http, geocoder, cities: oneCity,
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder, cities: oneCity,
       lookupEnabled: true, inlineEnrichBudget: 0, lookupSleepMs: 0,
     });
     expect(beerCount(db)).toBe(2);       // orphans WERE created (path is reachable)
@@ -247,7 +248,7 @@ describe('refreshOntap multi-city', () => {
     const db = openDb(':memory:'); migrate(db);
     const { http } = budgetHttp();
     await refreshOntap({
-      db, log: silentLog, http, geocoder, cities: oneCity,
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder, cities: oneCity,
       lookupEnabled: true, inlineEnrichBudget: 1, lookupSleepMs: 0,
     });
     expect(beerCount(db)).toBe(2);       // two orphans
@@ -268,10 +269,14 @@ describe('refreshOntap multi-city', () => {
               ${panel(2, 'Bar Brewery', 'Bar Pils 5%', 'Pilsner')}
             </body></html>`;
         }
-        if (url.startsWith('https://untappd.com/search')) {
-          throw new HttpError(403, url);
-        }
         throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+    const searchCalls: string[] = [];
+    const search = {
+      search: async (q: string) => {
+        searchCalls.push(q);
+        throw new HttpError(403, 'u');
       },
     };
     const events: string[] = [];
@@ -283,22 +288,23 @@ describe('refreshOntap multi-city', () => {
     });
 
     await refreshOntap({
-      db, log: silentLog, http, geocoder, cities: oneCity,
+      db, log: silentLog, http, search, geocoder, cities: oneCity,
       lookupEnabled: true, inlineEnrichBudget: 20, lookupSleepMs: 0,
       breaker, now: () => T,
     });
 
     expect(beerCount(db)).toBe(2);
-    expect(calls.filter((url) => url.startsWith('https://untappd.com/search'))).toHaveLength(1);
+    expect(searchCalls).toHaveLength(1);
+    expect(calls.some((url) => url.startsWith('https://untappd.com'))).toBe(false);
     expect(events).toEqual(['trip']);
     expect(breaker.state).toBe('open');
     expect(enrichedCount(db)).toBe(0);
   });
 
-  test('untappdHttp dep: Untappd lookups use untappdHttp, not http', async () => {
+  test('search dep: Untappd lookups use search, not http', async () => {
     const db = openDb(':memory:'); migrate(db);
     const ontapCalls: string[] = [];
-    const untappdCalls: string[] = [];
+    const searchCalls: string[] = [];
 
     const http: Http = {
       async get(url: string): Promise<string> {
@@ -316,21 +322,21 @@ describe('refreshOntap multi-city', () => {
         return '';
       },
     };
-    const untappdHttp: Http = {
-      async get(url: string): Promise<string> {
-        untappdCalls.push(url);
-        return '<html></html>'; // no results → not_found
+    const search = {
+      search: async (q: string) => {
+        searchCalls.push(q);
+        return []; // no results → not_found
       },
     };
 
     await refreshOntap({
-      db, log: silentLog, http, untappdHttp, geocoder: async () => null,
+      db, log: silentLog, http, search, geocoder: async () => null,
       cities: oneCity, lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
       now: () => new Date('2026-06-25T12:00:00Z'),
     });
 
-    // Untappd search went to untappdHttp, not to http
-    expect(untappdCalls.some((u) => u.startsWith('https://untappd.com'))).toBe(true);
+    // Untappd search went to search dep, not to http
+    expect(searchCalls.length).toBeGreaterThan(0);
     expect(ontapCalls.some((u) => u.startsWith('https://untappd.com'))).toBe(false);
   });
 
@@ -346,7 +352,7 @@ describe('refreshOntap multi-city', () => {
     breaker.onResult(true, T);
 
     await refreshOntap({
-      db, log: silentLog, http, geocoder, cities: oneCity,
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder, cities: oneCity,
       lookupEnabled: true, inlineEnrichBudget: 20, lookupSleepMs: 0,
       breaker, now: () => new Date(T.getTime() + 3600_000),
     });

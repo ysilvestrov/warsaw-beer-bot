@@ -1,6 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import type { Http } from '../sources/http';
+import type { BeerSearch } from '../sources/untappd/search';
 import { isEligible } from '../domain/lookup-backoff';
 import { lookupBeer } from '../domain/untappd-lookup';
 import { applyLookupOutcome } from '../domain/lookup-outcome';
@@ -12,7 +12,7 @@ export type { EnrichOutcomeKind } from '../domain/lookup-outcome';
 export interface EnrichDeps {
   db: DB;
   log: pino.Logger;
-  http: Http;
+  search: BeerSearch;
   now?: () => Date;
 }
 
@@ -32,7 +32,7 @@ export async function enrichOneOrphan(
     brewery: beer.brewery,
     name: beer.name,
     abv: beer.abv,
-    fetch: (url) => deps.http.get(url),
+    search: deps.search,
   });
 
   const nowIso = now.toISOString();

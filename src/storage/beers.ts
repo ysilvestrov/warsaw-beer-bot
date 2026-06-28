@@ -96,15 +96,17 @@ export function recordLookupSuccess(
     abv: number | null;
     global_rating: number | null;
   },
+  at: string,
 ): void {
   db.prepare(
     `UPDATE beers SET
        untappd_id = ?,
        style = COALESCE(?, style),
        abv = COALESCE(?, abv),
-       rating_global = COALESCE(?, rating_global)
+       rating_global = COALESCE(?, rating_global),
+       untappd_lookup_at = ?
      WHERE id = ?`,
-  ).run(r.bid, r.style, r.abv, r.global_rating, beerId);
+  ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
 }
 
 // Merges an orphan beer into a canonical catalog entry by redirecting all

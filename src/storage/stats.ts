@@ -1,5 +1,6 @@
 import fs from 'fs';
 import type { DB } from './db';
+import { getJobState } from './job_state';
 
 export interface StatusMetrics {
   lastScrapeHoursAgo: number | null;
@@ -16,6 +17,9 @@ export interface StatusMetrics {
   onTapDistinct: number;
   onTapPubs: number;
   newOnTap24h: number;
+  enrichMatched24h: number;
+  enrichFailures24h: number;
+  untappdSearchHealthy: boolean;
 }
 
 export function collectStatus(db: DB, now: Date): StatusMetrics {
@@ -24,6 +28,11 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
 
   const count = (sql: string, params: unknown[] = []): number =>
     (db.prepare(sql).get(...params) as { c: number }).c;
+
+  const canaryRaw = getJobState(db, 'untappd_search_canary');
+  const canaryOk = canaryRaw ? (JSON.parse(canaryRaw) as { ok: boolean }).ok : true;
+  const circuitOpenUntil = getJobState(db, 'untappd_circuit_open_until');
+  const circuitOpen = circuitOpenUntil != null && Date.parse(circuitOpenUntil) > nowMs;
 
   const maxAt = (db.prepare('SELECT MAX(snapshot_at) AS m FROM tap_snapshots').get() as { m: string | null }).m;
   const lastScrapeHoursAgo = maxAt === null ? null : (nowMs - Date.parse(maxAt)) / 3600000;
@@ -63,5 +72,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
              WHERE s2.snapshot_at < ?
            )
        )`, [cutoff24, cutoff24]),
+    enrichMatched24h: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND untappd_lookup_at >= ?', [cutoff24]),
+    enrichFailures24h: count('SELECT COUNT(*) AS c FROM enrich_failures WHERE last_at >= ?', [cutoff24]),
+    untappdSearchHealthy: canaryOk && !circuitOpen,
   };
 }

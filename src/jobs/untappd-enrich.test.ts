@@ -2,7 +2,8 @@ import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
-import { HttpError, type Http } from '../sources/http';
+import { HttpError } from '../sources/http';
+import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 import { enrichOneOrphan } from './untappd-enrich';
 
 const silentLog = pino({ level: 'silent' });
@@ -13,34 +14,12 @@ function fresh() {
   return db;
 }
 
-function fakeHttp(html: string): Http {
-  return { async get(): Promise<string> { return html; } };
+function fakeSearch(results: SearchResult[]): BeerSearch {
+  return { search: async () => results };
 }
 
-function throwingHttp(err: Error): Http {
-  return {
-    async get(): Promise<string> { throw err; },
-  };
-}
-
-function searchHtml(items: Array<{ bid: number; name: string; brewery: string; rating?: string }>): string {
-  const cards = items
-    .map((it) => `
-      <div class="beer-item">
-        <div class="beer-details">
-          <p class="name"><a href="/b/x/${it.bid}">${it.name}</a></p>
-          <p class="brewery"><a>${it.brewery}</a></p>
-          <p class="style">IPA</p>
-        </div>
-        <div class="details beer">
-          <p class="abv">5% ABV</p>
-          <div class="rating">
-            <div class="caps" data-rating="${it.rating ?? '3.5'}"></div>
-          </div>
-        </div>
-      </div>`)
-    .join('');
-  return `<html><body>${cards}</body></html>`;
+function throwingSearch(err: Error): BeerSearch {
+  return { search: async () => { throw err; } };
 }
 
 describe('enrichOneOrphan', () => {
@@ -52,11 +31,11 @@ describe('enrichOneOrphan', () => {
       normalized_name: 'fifty fifty clementine passionfruit',
       normalized_brewery: 'magic road',
     });
-    const http = fakeHttp(searchHtml([
-      { bid: 6645513, name: 'Fifty Fifty - Clementine & Passionfruit', brewery: 'Magic Road', rating: '3.98' },
-    ]));
+    const search = fakeSearch([
+      { bid: 6645513, beer_name: 'Fifty Fifty - Clementine & Passionfruit', brewery_name: 'Magic Road', style: 'IPA', abv: 4.6, global_rating: 3.98 },
+    ]);
 
-    const out = await enrichOneOrphan({ db, log: silentLog, http }, beerId);
+    const out = await enrichOneOrphan({ db, log: silentLog, search }, beerId);
 
     expect(out).toBe('matched');
     const row = getBeer(db, beerId);
@@ -72,11 +51,11 @@ describe('enrichOneOrphan', () => {
       style: null, abv: null, rating_global: null,
       normalized_name: 'something obscure', normalized_brewery: 'unknown',
     });
-    const http = fakeHttp('<html><body></body></html>');
+    const search = fakeSearch([]);
     const fixedNow = new Date('2026-05-26T12:00:00Z');
 
     const out = await enrichOneOrphan(
-      { db, log: silentLog, http, now: () => fixedNow }, beerId,
+      { db, log: silentLog, search, now: () => fixedNow }, beerId,
     );
 
     expect(out).toBe('not_found');
@@ -86,17 +65,17 @@ describe('enrichOneOrphan', () => {
     expect(row?.untappd_lookup_at).toBe('2026-05-26T12:00:00.000Z');
   });
 
-  test('transient: HTTP error, records lookup_at without incrementing count', async () => {
+  test('transient: search error, records lookup_at without incrementing count', async () => {
     const db = fresh();
     const beerId = upsertBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
-    const http = throwingHttp(new Error('ETIMEDOUT'));
+    const search = throwingSearch(new Error('ETIMEDOUT'));
     const fixedNow = new Date('2026-05-26T12:00:00Z');
 
     const out = await enrichOneOrphan(
-      { db, log: silentLog, http, now: () => fixedNow }, beerId,
+      { db, log: silentLog, search, now: () => fixedNow }, beerId,
     );
 
     expect(out).toBe('transient');
@@ -112,15 +91,15 @@ describe('enrichOneOrphan', () => {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
-    let httpCalled = false;
-    const http: Http = {
-      async get(): Promise<string> { httpCalled = true; return ''; },
+    let searchCalled = false;
+    const search: BeerSearch = {
+      search: async () => { searchCalled = true; return []; },
     };
 
-    const out = await enrichOneOrphan({ db, log: silentLog, http }, beerId);
+    const out = await enrichOneOrphan({ db, log: silentLog, search }, beerId);
 
     expect(out).toBe('skipped');
-    expect(httpCalled).toBe(false);
+    expect(searchCalled).toBe(false);
   });
 
   test('skipped: backoff not yet elapsed', async () => {
@@ -132,18 +111,18 @@ describe('enrichOneOrphan', () => {
     db.prepare(
       'UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = ? WHERE id = ?',
     ).run('2026-05-26T11:00:00Z', 1, beerId);
-    let httpCalled = false;
-    const http: Http = {
-      async get(): Promise<string> { httpCalled = true; return ''; },
+    let searchCalled = false;
+    const search: BeerSearch = {
+      search: async () => { searchCalled = true; return []; },
     };
     const fixedNow = new Date('2026-05-26T12:00:00Z');
 
     const out = await enrichOneOrphan(
-      { db, log: silentLog, http, now: () => fixedNow }, beerId,
+      { db, log: silentLog, search, now: () => fixedNow }, beerId,
     );
 
     expect(out).toBe('skipped');
-    expect(httpCalled).toBe(false);
+    expect(searchCalled).toBe(false);
   });
 
   test('duplicate untappd_id: merges orphan into canonical, returns not_found', async () => {
@@ -166,12 +145,12 @@ describe('enrichOneOrphan', () => {
     db.prepare('INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence) VALUES (?,?,1)')
       .run('Marine ontap', orphanId);
 
-    // Untappd returns bid=999 — same as canonical.
-    const http = fakeHttp(searchHtml([
-      { bid: 999, name: 'Marine', brewery: 'Moon Lark Brewery' },
-    ]));
+    // Search returns bid=999 — same as canonical.
+    const search = fakeSearch([
+      { bid: 999, beer_name: 'Marine', brewery_name: 'Moon Lark Brewery', style: null, abv: null, global_rating: null },
+    ]);
 
-    const out = await enrichOneOrphan({ db, log: silentLog, http }, orphanId);
+    const out = await enrichOneOrphan({ db, log: silentLog, search }, orphanId);
 
     expect(out).toBe('not_found');
     // Orphan row deleted.
@@ -184,13 +163,13 @@ describe('enrichOneOrphan', () => {
 
   test('skipped: beer does not exist (defensive)', async () => {
     const db = fresh();
-    let httpCalled = false;
-    const http: Http = {
-      async get(): Promise<string> { httpCalled = true; return ''; },
+    let searchCalled = false;
+    const search: BeerSearch = {
+      search: async () => { searchCalled = true; return []; },
     };
-    const out = await enrichOneOrphan({ db, log: silentLog, http }, 9999);
+    const out = await enrichOneOrphan({ db, log: silentLog, search }, 9999);
     expect(out).toBe('skipped');
-    expect(httpCalled).toBe(false);
+    expect(searchCalled).toBe(false);
   });
 
   test('blocked: returns "blocked" and records nothing (no backoff mutation)', async () => {
@@ -199,9 +178,9 @@ describe('enrichOneOrphan', () => {
       untappd_id: null, name: 'A', brewery: 'X', style: null, abv: null,
       rating_global: null, normalized_name: 'a', normalized_brewery: 'x',
     });
-    const http: Http = { get: async () => { throw new HttpError(403, 'u'); } };
+    const search: BeerSearch = { search: async () => { throw new HttpError(403, 'u'); } };
     const kind = await enrichOneOrphan(
-      { db, log: silentLog, http, now: () => new Date('2026-06-04T00:00:00Z') },
+      { db, log: silentLog, search, now: () => new Date('2026-06-04T00:00:00Z') },
       id,
     );
     expect(kind).toBe('blocked');

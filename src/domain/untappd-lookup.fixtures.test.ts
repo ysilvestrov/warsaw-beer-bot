@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { lookupBeer } from './untappd-lookup';
+import { htmlSearch } from '../sources/untappd/search';
 
 const dir = resolve(__dirname, '../../tests/fixtures/untappd-search');
 const html = (slug: string) => readFileSync(resolve(dir, `${slug}.html`), 'utf8');
@@ -23,7 +24,7 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
 describe('#117 lookupBeer against real Untappd search pages', () => {
   for (const { slug, brewery, name, bid } of cases) {
     test(`${slug} → ${bid === null ? 'not_found (deferred #120)' : `bid ${bid}`}`, async () => {
-      const out = await lookupBeer({ brewery, name, fetch: async () => html(slug) });
+      const out = await lookupBeer({ brewery, name, search: htmlSearch(html(slug)) });
       if (bid === null) {
         expect(out.kind).toBe('not_found');
       } else {

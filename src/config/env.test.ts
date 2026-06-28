@@ -71,6 +71,31 @@ describe('env: proxy + block threshold', () => {
   });
 });
 
+describe('env: Algolia keys', () => {
+  const base = {
+    TELEGRAM_BOT_TOKEN: 'x'.repeat(12),
+    DATABASE_PATH: '/tmp/x.db',
+    OSRM_BASE_URL: 'https://osrm.example.com',
+    NOMINATIM_USER_AGENT: 'test-agent',
+  };
+
+  test('UNTAPPD_ALGOLIA_APP_ID and SEARCH_KEY are undefined when absent', () => {
+    const env = loadEnv({ ...base } as never);
+    expect(env.UNTAPPD_ALGOLIA_APP_ID).toBeUndefined();
+    expect(env.UNTAPPD_ALGOLIA_SEARCH_KEY).toBeUndefined();
+  });
+
+  test('UNTAPPD_ALGOLIA_APP_ID and SEARCH_KEY round-trip when present', () => {
+    const env = loadEnv({
+      ...base,
+      UNTAPPD_ALGOLIA_APP_ID: '9WBO4RQ3HO',
+      UNTAPPD_ALGOLIA_SEARCH_KEY: '1d347324d67ec472bb7132c66aead485',
+    } as never);
+    expect(env.UNTAPPD_ALGOLIA_APP_ID).toBe('9WBO4RQ3HO');
+    expect(env.UNTAPPD_ALGOLIA_SEARCH_KEY).toBe('1d347324d67ec472bb7132c66aead485');
+  });
+});
+
 describe('missingExpectedKeys', () => {
   const base = {
     TELEGRAM_BOT_TOKEN: 'x'.repeat(10),

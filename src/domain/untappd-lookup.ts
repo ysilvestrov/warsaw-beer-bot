@@ -3,11 +3,11 @@ import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERAN
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from './normalize';
 import {
   buildSearchUrl,
-  parseSearchPage,
   type SearchResult,
+  type BeerSearch,
 } from '../sources/untappd/search';
 import { HttpError } from '../sources/http';
-import { isBlockStatus, isBlockPage } from '../sources/untappd/block';
+import { isBlockStatus } from '../sources/untappd/block';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 interface FuzzyTarget {
@@ -25,7 +25,7 @@ export interface LookupArgs {
   brewery: string;
   name: string;
   abv?: number | null;
-  fetch: (url: string) => Promise<string>;
+  search: BeerSearch;
 }
 
 // Split a brewery name into individual parts for search queries.
@@ -66,7 +66,7 @@ function pickByAbv(results: SearchResult[], abv: number | null): SearchResult {
 }
 
 export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
-  const { brewery, name, abv = null, fetch } = args;
+  const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
   const targetNames = fuzzyTargets(name, brewery);
   const parts = brewerySearchParts(brewery);
@@ -74,22 +74,19 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
   const seenCandidates: SearchResult[] = [];
 
   for (const part of parts) {
-    const url = buildSearchUrl(cleanSearchQuery(part, name));
-    triedUrls.push(url);
+    const query = cleanSearchQuery(part, name);
+    triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
 
-    let html: string;
+    let results: SearchResult[];
     try {
-      html = await fetch(url);
+      results = await args.search.search(query);
     } catch (error) {
       if (error instanceof HttpError && isBlockStatus(error.status)) {
-        return { kind: 'blocked', searchUrl: url };
+        return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
       }
       return { kind: 'transient', error };
     }
 
-    if (isBlockPage(html)) return { kind: 'blocked', searchUrl: url };
-
-    const results = parseSearchPage(html);
     seenCandidates.push(...results);
     if (results.length === 0) continue;
 

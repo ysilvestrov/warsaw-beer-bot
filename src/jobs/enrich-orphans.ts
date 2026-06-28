@@ -1,9 +1,13 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import type { Http } from '../sources/http';
+import type { BeerSearch } from '../sources/untappd/search';
 import { listLookupCandidates } from '../storage/beers';
 import { enrichOneOrphan } from './untappd-enrich';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
+import { setJobState } from '../storage/job_state';
+
+export const CANARY_QUERY = 'Guinness Draught';
+export const CANARY_STATE_KEY = 'untappd_search_canary'; // JSON {ok:boolean, at:string}
 
 export interface EnrichOrphansResult {
   processed: number;
@@ -17,7 +21,8 @@ export interface EnrichOrphansResult {
 export interface EnrichOrphansDeps {
   db: DB;
   log: pino.Logger;
-  http: Http;
+  search: BeerSearch;
+  notifyAdmin?: (msg: string) => Promise<void>;
   lookupEnabled?: boolean;     // default true
   limit?: number;               // default 20
   sleepMs?: number;             // default 500
@@ -50,13 +55,31 @@ export async function enrichOrphans(
     return { ...ZERO_RESULT };
   }
 
+  // Canary: one search for a known-present beer. A systemic failure (rotated key,
+  // renamed index, soft IP ban) returns 200+empty for everything and must NOT be
+  // mistaken for per-beer not_found — that would corrupt orphan backoff.
+  let canaryOk = false;
+  try {
+    const hits = await deps.search.search(CANARY_QUERY);
+    canaryOk = hits.length > 0;
+  } catch {
+    canaryOk = false;
+  }
+  setJobState(deps.db, CANARY_STATE_KEY, JSON.stringify({ ok: canaryOk, at: now().toISOString() }));
+  if (!canaryOk) {
+    breaker.onResult(true, now());
+    deps.log.error('enrich-orphans canary failed — Untappd search appears broken; aborting run');
+    if (deps.notifyAdmin) await deps.notifyAdmin('⚠️ Untappd-пошук не відповідає (канарка порожня) — enrich призупинено.');
+    return { ...ZERO_RESULT, blocked: 1 };
+  }
+
   const candidates = listLookupCandidates(deps.db, limit, now());
   const result: EnrichOrphansResult = { ...ZERO_RESULT };
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     const kind = await enrichOneOrphan(
-      { db: deps.db, log: deps.log, http: deps.http, now },
+      { db: deps.db, log: deps.log, search: deps.search, now },
       c.id,
     );
     if (kind === 'blocked') {

@@ -32,7 +32,7 @@ export function applyLookupOutcome(
   switch (outcome.kind) {
     case 'matched':
       try {
-        recordLookupSuccess(deps.db, beerId, outcome.result);
+        recordLookupSuccess(deps.db, beerId, outcome.result, nowIso);
         clearEnrichFailure(deps.db, beerId);
         return 'matched';
       } catch (e: unknown) {

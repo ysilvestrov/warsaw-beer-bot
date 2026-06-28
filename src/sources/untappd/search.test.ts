@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
-import { buildSearchUrl, parseSearchPage } from './search';
+import { buildSearchUrl, parseSearchPage, htmlSearch } from './search';
 
 const fixturePath = path.join(__dirname, '../../../tests/fixtures/untappd/search-magic-road.html');
 const html = fs.readFileSync(fixturePath, 'utf8');
@@ -162,5 +162,18 @@ describe('parseSearchPage', () => {
       </div>`;
     const [it] = parseSearchPage(html);
     expect(it.style).toBeNull();
+  });
+});
+
+describe('htmlSearch', () => {
+  it('parses relayed HTML via parseSearchPage', async () => {
+    const s = htmlSearch('<html></html>'); // empty Algolia shell → no .beer-item
+    expect(await s.search('anything')).toEqual([]);
+  });
+
+  it('throws a block HttpError on a block page (so lookupBeer marks it blocked)', async () => {
+    const BLOCK_PAGE_HTML = '<title>Just a moment...</title>';
+    const s = htmlSearch(BLOCK_PAGE_HTML);
+    await expect(s.search('x')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
   });
 });
