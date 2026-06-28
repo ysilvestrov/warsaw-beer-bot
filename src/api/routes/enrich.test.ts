@@ -176,16 +176,26 @@ describe('POST /enrich/result', () => {
     expect(getBeer(db, row.id)!.rating_global).toBeCloseTo(3.98);
   });
 
-  it('skips an already-matched beer and does not overwrite it', async () => {
+  it('reports an already-matched beer without overwriting it', async () => {
     const { db, app } = setup();
     upsertBeer(db, {
       untappd_id: 111, name: 'Atak Chmielu', brewery: 'PINTA', style: null, abv: null, rating_global: 4.0,
       normalized_name: normalizeName('Atak Chmielu'), normalized_brewery: normalizeBrewery('PINTA'),
     });
-    // HTML that would otherwise match a DIFFERENT bid:
-    const html = searchHtml([{ bid: 999, name: 'Atak Chmielu', brewery: 'PINTA', rating: '2.0' }]);
-    const res = await post(app, '/enrich/result', { brewery: 'PINTA', name: 'Atak Chmielu', html });
-    expect((await res.json()).status).toBe('skipped');
+    // Algolia JSON that would otherwise match a DIFFERENT bid:
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA',
+      name: 'Atak Chmielu',
+      algolia: {
+        hits: [{
+          bid: 999,
+          beer_name: 'Atak Chmielu',
+          brewery_name: 'PINTA',
+          rating_score: 2.0,
+        }],
+      },
+    });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 111, rating_global: 4.0 });
 
     const row = findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Atak Chmielu'))!;
     expect(getBeer(db, row.id)!.untappd_id).toBe(111);          // unchanged

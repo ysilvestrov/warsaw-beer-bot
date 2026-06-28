@@ -92,10 +92,11 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
     const { brewery, name, html, algolia, pageUrl } = c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name);
-    // Only orphans are enrichable. Never overwrite / merge a canonical (already
-    // matched) row from client-relayed input.
+    // Only orphans need enrichment. If the row was already enriched by an earlier
+    // relay/cron, report the existing canonical match so the extension can update
+    // the page without reprocessing or overwriting it.
     if (row.untappd_id != null) {
-      return c.json({ status: 'skipped' });
+      return c.json({ status: 'matched', untappd_id: row.untappd_id, rating_global: row.rating_global });
     }
     // Reuse the full server pick pipeline; the client already fetched, so the
     // injected search adapter just returns the relayed result payload.
