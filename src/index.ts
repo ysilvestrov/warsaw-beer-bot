@@ -36,6 +36,8 @@ import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { createPersistentCircuitBreaker } from './domain/untappd-circuit';
+import { createAlgoliaSearch, extractAlgoliaKeys } from './sources/untappd/algolia';
+import { buildSearchUrl } from './sources/untappd/search';
 import { createShutdown } from './shutdown';
 import { interruptActiveProgress } from './bot/active-progress';
 import { createTranslator } from './i18n';
@@ -60,6 +62,17 @@ async function main(): Promise<void> {
   const untappdSearchHttp = createHttp({
     userAgent: env.NOMINATIM_USER_AGENT,
     proxyUrl: env.WEBSHARE_PROXY,
+  });
+  const ALGOLIA_DEFAULTS = { appId: '9WBO4RQ3HO', searchKey: '1d347324d67ec472bb7132c66aead485' };
+  const algoliaSearch = createAlgoliaSearch({
+    appId: env.UNTAPPD_ALGOLIA_APP_ID ?? ALGOLIA_DEFAULTS.appId,
+    searchKey: env.UNTAPPD_ALGOLIA_SEARCH_KEY ?? ALGOLIA_DEFAULTS.searchKey,
+    proxyUrl: env.WEBSHARE_PROXY,
+    refreshKeys: async () => {
+      // Pull fresh keys from the live search page via the cookie-less proxied client.
+      const html = await untappdSearchHttp.get(buildSearchUrl('beer'));
+      return extractAlgoliaKeys(html);
+    },
   });
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
 
@@ -121,7 +134,7 @@ async function main(): Promise<void> {
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
           pubSlugs: opts?.pubSlugs,
           breaker: untappdBreaker,
-          untappdHttp: untappdSearchHttp,
+          search: algoliaSearch,
         });
         // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
         // is not pub-specific and is refreshed daily + on a full /refresh.
@@ -142,7 +155,7 @@ async function main(): Promise<void> {
         db, log, http, geocoder,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: untappdBreaker,
-        untappdHttp: untappdSearchHttp,
+        search: algoliaSearch,
       }).catch((e) => log.error({ err: e }, 'ontap cron'));
     }),
     // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
@@ -152,9 +165,10 @@ async function main(): Promise<void> {
     // Bumped from '0 6,18 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
     cron.schedule('30 */3 * * *', () => {
       enrichOrphans({
-        db, log, http: untappdSearchHttp,
+        db, log, search: algoliaSearch,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: untappdBreaker,
+        notifyAdmin,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
     // refresh-tap-ratings runs every 3h at xx:30 too, but on hours
