@@ -80,3 +80,46 @@ describe('createAlgoliaSearch (direct)', () => {
     await expect(s.search('x')).rejects.toBeInstanceOf(HttpError);
   });
 });
+
+describe('createAlgoliaSearch (403 handling)', () => {
+  it('refreshes keys on 403 and retries direct with the new key', async () => {
+    const seen: string[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      const key = (init.headers as Record<string, string>)['X-Algolia-API-Key'];
+      seen.push(key);
+      if (key === 'OLD') return new Response('forbidden', { status: 403 });
+      return jsonRes({ hits: [{ bid: 1, beer_name: 'B', brewery_name: 'Br' }], nbHits: 1 });
+    }) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({
+      appId: 'A', searchKey: 'OLD', fetchImpl,
+      refreshKeys: async () => ({ appId: 'A', searchKey: 'NEW' }),
+    });
+    const out = await s.search('x');
+    expect(out).toHaveLength(1);
+    expect(seen).toEqual(['OLD', 'NEW']);
+  });
+
+  it('falls back to the proxy when the key did not change', async () => {
+    let direct = 0;
+    const fetchImpl = (async (_url: string, init: RequestInit & { dispatcher?: unknown }) => {
+      if (!init.dispatcher) { direct++; return new Response('forbidden', { status: 403 }); }
+      return jsonRes({ hits: [{ bid: 2, beer_name: 'B', brewery_name: 'Br' }], nbHits: 1 });
+    }) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({
+      appId: 'A', searchKey: 'SAME', proxyUrl: 'user:pass@host:1', fetchImpl,
+      refreshKeys: async () => ({ appId: 'A', searchKey: 'SAME' }),
+    });
+    const out = await s.search('x');
+    expect(out).toHaveLength(1);
+    expect(direct).toBe(1);
+  });
+
+  it('throws HttpError(403) when direct, refresh, and proxy all fail', async () => {
+    const fetchImpl = (async () => new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({
+      appId: 'A', searchKey: 'OLD', proxyUrl: 'user:pass@host:1', fetchImpl,
+      refreshKeys: async () => ({ appId: 'A', searchKey: 'NEW' }),
+    });
+    await expect(s.search('x')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+  });
+});
