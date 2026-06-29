@@ -1,4 +1,5 @@
 import { createHttp, CookieExpiredError } from './http';
+import { isBlockStatus, isBlockPage } from './untappd/block';
 
 test('createHttp serialises requests through the queue (concurrency 1)', async () => {
   let active = 0;
@@ -60,7 +61,6 @@ test('passes redirect option to fetch when set', async () => {
   expect(calls[0].redirect).toBe('manual');
 });
 
-import { ProxyAgent } from 'undici';
 import { normalizeProxyUrl } from './http';
 
 describe('normalizeProxyUrl', () => {
@@ -72,27 +72,104 @@ describe('normalizeProxyUrl', () => {
   });
 });
 
-describe('createHttp proxy wiring', () => {
-  function capturingFetch() {
-    const calls: { url: string; init: RequestInit & { dispatcher?: unknown } }[] = [];
-    const f = (async (url: string, init: RequestInit) => {
-      calls.push({ url, init });
-      return { ok: true, status: 200, text: async () => '<html>ok</html>' } as Response;
-    }) as unknown as typeof fetch;
-    return { f, calls };
-  }
+function fakeRotator(initialRotations = 0) {
+  let n = initialRotations;
+  return {
+    rotations: () => n,
+    current: () => ({}) as unknown as import('undici').Dispatcher,
+    rotate: () => { n++; },
+    close: () => {},
+  };
+}
 
-  test('passes a ProxyAgent dispatcher when proxyUrl is set', async () => {
-    const { f, calls } = capturingFetch();
-    const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl: f, proxyUrl: 'u:p@p.webshare.io:80' });
-    await http.get('https://untappd.com/search?q=x');
-    expect(calls[0].init.dispatcher).toBeInstanceOf(ProxyAgent);
-  });
+const untappdBlock = (status: number, body: string | null) =>
+  isBlockStatus(status) || (body !== null && isBlockPage(body));
 
-  test('no dispatcher when proxyUrl is unset', async () => {
-    const { f, calls } = capturingFetch();
-    const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl: f });
-    await http.get('https://untappd.com/search?q=x');
-    expect(calls[0].init.dispatcher).toBeUndefined();
+test('rotates and retries once on a block status, returning the retry body', async () => {
+  const rotator = fakeRotator();
+  let call = 0;
+  const fetchImpl: typeof fetch = async () => {
+    call++;
+    return call === 1
+      ? new Response('', { status: 403 })
+      : new Response('ok-body', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  expect(await http.get('https://untappd.com/beer/1')).toBe('ok-body');
+  expect(rotator.rotations()).toBe(1);
+  expect(call).toBe(2);
+});
+
+test('a 200 Cloudflare block page rotates + retries like a 403', async () => {
+  const rotator = fakeRotator();
+  let call = 0;
+  const fetchImpl: typeof fetch = async () => {
+    call++;
+    return call === 1
+      ? new Response('<html>Just a moment...</html>', { status: 200 })
+      : new Response('real', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  expect(await http.get('https://untappd.com/beer/1')).toBe('real');
+  expect(rotator.rotations()).toBe(1);
+});
+
+test('throws a block HttpError when the retry also blocks; rotates exactly once', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 403 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  await expect(http.get('https://untappd.com/beer/1')).rejects.toMatchObject({
+    name: 'HttpError', status: 403,
   });
+  expect(rotator.rotations()).toBe(1);
+});
+
+test('does not rotate on a 3xx under redirect:manual (cookie expiry, not an IP block)', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 307 });
+  const http = createHttp({
+    userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock, redirect: 'manual',
+  });
+  await expect(http.get('https://untappd.com/user/x/beers')).rejects.toBeInstanceOf(CookieExpiredError);
+  expect(rotator.rotations()).toBe(0);
+});
+
+test('does not rotate on a non-block non-ok status (e.g. 500)', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 500 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  await expect(http.get('https://untappd.com/beer/1')).rejects.toMatchObject({ name: 'HttpError', status: 500 });
+  expect(rotator.rotations()).toBe(0);
+});
+
+test('passes rotator.current() as the fetch dispatcher', async () => {
+  const marker = { marker: true } as unknown as import('undici').Dispatcher;
+  const rotator = { rotations: () => 0, current: () => marker, rotate: () => {}, close: () => {} };
+  const calls: (RequestInit & { dispatcher?: unknown })[] = [];
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    calls.push(init);
+    return new Response('ok', { status: 200 });
+  }) as unknown as typeof fetch;
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator });
+  await http.get('https://untappd.com/search?q=x');
+  expect(calls[0].dispatcher).toBe(marker);
+});
+
+test('no dispatcher and no rotation when rotator is unset', async () => {
+  const calls: (RequestInit & { dispatcher?: unknown })[] = [];
+  const fetchImpl = (async (_url: string, init: RequestInit) => {
+    calls.push(init);
+    return new Response('ok', { status: 200 });
+  }) as unknown as typeof fetch;
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl });
+  await http.get('https://untappd.com/search?q=x');
+  expect(calls[0].dispatcher).toBeUndefined();
+});
+
+test('rotations() reflects the rotator counter', async () => {
+  const rotator = fakeRotator(7);
+  const fetchImpl: typeof fetch = async () => new Response('ok', { status: 200 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator });
+  await http.get('https://x');
+  expect(http.rotations?.()).toBe(7);
 });
