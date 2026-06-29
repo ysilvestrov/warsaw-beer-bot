@@ -18,6 +18,7 @@ export interface RefreshTapRatingsResult {
   not_found: number;
   transient: number;
   blocked: number;
+  rotated: number;
 }
 
 export interface RefreshTapRatingsDeps {
@@ -33,7 +34,7 @@ export interface RefreshTapRatingsDeps {
 }
 
 const ZERO_RESULT: RefreshTapRatingsResult = {
-  processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0,
+  processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0, rotated: 0,
 };
 
 export async function refreshTapRatings(
@@ -60,6 +61,7 @@ export async function refreshTapRatings(
 
   const candidates = listRatingRefreshCandidates(deps.db, limit, now());
   const result: RefreshTapRatingsResult = { ...ZERO_RESULT };
+  const rotatedBefore = deps.http.rotations?.() ?? 0;
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
@@ -107,6 +109,7 @@ export async function refreshTapRatings(
     }
   }
 
+  result.rotated = (deps.http.rotations?.() ?? 0) - rotatedBefore;
   deps.log.info(result, 'refresh-tap-ratings done');
   return result;
 }

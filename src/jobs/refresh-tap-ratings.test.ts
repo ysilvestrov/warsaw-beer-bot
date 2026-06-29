@@ -68,7 +68,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 1, not_found: 0, transient: 0, blocked: 0,
+      processed: 1, matched: 1, not_found: 0, transient: 0, blocked: 0, rotated: 0,
     });
     expect(calls).toEqual(['https://untappd.com/beer/6645513']);
     expect(getBeer(db, beerId)?.rating_global).toBeCloseTo(3.98);
@@ -87,7 +87,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 0, not_found: 1, transient: 0, blocked: 0,
+      processed: 1, matched: 0, not_found: 1, transient: 0, blocked: 0, rotated: 0,
     });
     const row = getBeer(db, beerId);
     expect(row?.rating_global).toBeNull();
@@ -108,7 +108,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 0, not_found: 0, transient: 1, blocked: 0,
+      processed: 1, matched: 0, not_found: 0, transient: 1, blocked: 0, rotated: 0,
     });
     const row = getBeer(db, beerId);
     expect(row?.rating_refresh_count).toBe(0);
@@ -143,7 +143,7 @@ describe('refreshTapRatings', () => {
       db, log: silentLog, http, lookupEnabled: false, sleepMs: 0,
       now: () => new Date('2026-05-27T12:00:00Z'),
     });
-    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0 });
+    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0, rotated: 0 });
     expect(calls).toBe(0);
   });
 
@@ -225,5 +225,26 @@ describe('refreshTapRatings', () => {
     expect(res.processed).toBeGreaterThan(1); // loop continued past the first block
     expect(res.matched).toBeGreaterThan(0);
     expect(breaker.state).toBe('closed');     // successes reset the counter
+  });
+
+  test('rotated: reports the http.rotations() delta over the run', async () => {
+    const db = fresh();
+    seedIdBeerOnTap(db, 'Magic Road', 'Clementine', 6645513);
+    seedIdBeerOnTap(db, 'Other Road', 'Tangerine', 6645514);
+    let rot = 0;
+    const http: Http = {
+      async get(_url: string): Promise<string> {
+        rot += 1; // simulate one absorbed (rotated + retried) block per request
+        return beerPageHtml('3.98');
+      },
+      rotations: () => rot,
+    };
+    const fixedNow = new Date('2026-05-27T12:00:00Z');
+
+    const result = await refreshTapRatings({ db, log: silentLog, http, sleepMs: 0, now: () => fixedNow });
+
+    expect(result.rotated).toBe(2);
+    expect(result.blocked).toBe(0); // absorbed blocks never reach the breaker
+    expect(result.matched).toBe(2);
   });
 });
