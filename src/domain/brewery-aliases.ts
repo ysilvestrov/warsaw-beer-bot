@@ -37,3 +37,12 @@ const NEIGHBORS: Map<string, string[]> = (() => {
 export function aliasNeighbors(normForm: string): string[] {
   return (NEIGHBORS.get(normForm) ?? []).slice();
 }
+
+// Every normalized form that appears in ALIAS_PAIRS (both sides of every pair).
+const ALIAS_KEYS: ReadonlySet<string> = new Set(NEIGHBORS.keys());
+
+// The set of curated-alias keys — used to decide whether a brewery is covered by
+// the curated layer at all (see hasCuratedAlias in matcher.ts).
+export function aliasKeys(): ReadonlySet<string> {
+  return ALIAS_KEYS;
+}
