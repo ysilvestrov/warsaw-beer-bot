@@ -65,3 +65,18 @@ test('normalizes a scheme-less proxy url before building an agent', () => {
   rd.current();
   expect(seen[0]).toBe('http://u:p@h:80');
 });
+
+test('per-request: rotate() still increments rotations() for block counting', () => {
+  const { factory } = fakeFactory();
+  const rd = createRotatingDispatcher({ proxyUrl: 'u:p@h:80', mode: 'per-request', agentFactory: factory });
+  rd.current();
+  rd.rotate('block-status');
+  expect(rd.rotations()).toBe(1);
+});
+
+test('close() before any current() is a safe no-op', () => {
+  const { factory, created } = fakeFactory();
+  const rd = createRotatingDispatcher({ proxyUrl: 'u:p@h:80', mode: 'on-block', agentFactory: factory });
+  expect(() => rd.close()).not.toThrow();
+  expect(created.length).toBe(0);
+});
