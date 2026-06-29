@@ -5,7 +5,9 @@ import { upsertBeer, getBeer } from '../storage/beers';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
-import { HttpError, type Http } from '../sources/http';
+import { HttpError, type Http, createHttp } from '../sources/http';
+import { createRotatingDispatcher } from '../sources/proxy-rotator';
+import { isBlockStatus, isBlockPage } from '../sources/untappd/block';
 import { refreshTapRatings } from './refresh-tap-ratings';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 
@@ -68,7 +70,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 1, not_found: 0, transient: 0, blocked: 0,
+      processed: 1, matched: 1, not_found: 0, transient: 0, blocked: 0, rotated: 0,
     });
     expect(calls).toEqual(['https://untappd.com/beer/6645513']);
     expect(getBeer(db, beerId)?.rating_global).toBeCloseTo(3.98);
@@ -87,7 +89,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 0, not_found: 1, transient: 0, blocked: 0,
+      processed: 1, matched: 0, not_found: 1, transient: 0, blocked: 0, rotated: 0,
     });
     const row = getBeer(db, beerId);
     expect(row?.rating_global).toBeNull();
@@ -108,7 +110,7 @@ describe('refreshTapRatings', () => {
     });
 
     expect(result).toEqual({
-      processed: 1, matched: 0, not_found: 0, transient: 1, blocked: 0,
+      processed: 1, matched: 0, not_found: 0, transient: 1, blocked: 0, rotated: 0,
     });
     const row = getBeer(db, beerId);
     expect(row?.rating_refresh_count).toBe(0);
@@ -143,7 +145,7 @@ describe('refreshTapRatings', () => {
       db, log: silentLog, http, lookupEnabled: false, sleepMs: 0,
       now: () => new Date('2026-05-27T12:00:00Z'),
     });
-    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0 });
+    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, blocked: 0, rotated: 0 });
     expect(calls).toBe(0);
   });
 
@@ -225,5 +227,51 @@ describe('refreshTapRatings', () => {
     expect(res.processed).toBeGreaterThan(1); // loop continued past the first block
     expect(res.matched).toBeGreaterThan(0);
     expect(breaker.state).toBe('closed');     // successes reset the counter
+  });
+
+  test('persistent 200 block page (via real createHttp) is counted as blocked and trips the breaker', async () => {
+    const db = fresh();
+    seedIdBeerOnTap(db, 'Magic Road', 'Clementine', 6645513);
+    // Real createHttp + a fake fetch that always serves a Cloudflare 200 challenge.
+    const fetchImpl: typeof fetch = async () => new Response('<html>Just a moment...</html>', { status: 200 });
+    const rotator = createRotatingDispatcher({
+      proxyUrl: 'u:p@h:80', mode: 'per-request',
+      agentFactory: () => ({ close: async () => {} }) as unknown as import('undici').Dispatcher,
+    });
+    const http = createHttp({
+      userAgent: 'ua', minGapMs: 0, fetchImpl, rotator,
+      isBlock: (s: number, b: string | null) => isBlockStatus(s) || (b !== null && isBlockPage(b)),
+    });
+    let tripped = false;
+    const breaker = createCircuitBreaker({
+      cooldownMs: 1000, blockThreshold: 1, onTrip: () => { tripped = true; }, onRecover: () => {},
+    });
+    const fixedNow = new Date('2026-05-27T12:00:00Z');
+
+    const result = await refreshTapRatings({ db, log: silentLog, http, sleepMs: 0, now: () => fixedNow, breaker });
+
+    expect(result.blocked).toBe(1);
+    expect(tripped).toBe(true);
+  });
+
+  test('rotated: reports the http.rotations() delta over the run', async () => {
+    const db = fresh();
+    seedIdBeerOnTap(db, 'Magic Road', 'Clementine', 6645513);
+    seedIdBeerOnTap(db, 'Other Road', 'Tangerine', 6645514);
+    let rot = 0;
+    const http: Http = {
+      async get(_url: string): Promise<string> {
+        rot += 1; // simulate one absorbed (rotated + retried) block per request
+        return beerPageHtml('3.98');
+      },
+      rotations: () => rot,
+    };
+    const fixedNow = new Date('2026-05-27T12:00:00Z');
+
+    const result = await refreshTapRatings({ db, log: silentLog, http, sleepMs: 0, now: () => fixedNow });
+
+    expect(result.rotated).toBe(2);
+    expect(result.blocked).toBe(0); // absorbed blocks never reach the breaker
+    expect(result.matched).toBe(2);
   });
 });

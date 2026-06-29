@@ -1,5 +1,7 @@
 import PQueue from 'p-queue';
-import { ProxyAgent } from 'undici';
+import type { RotatingDispatcher } from './proxy-rotator';
+
+export { normalizeProxyUrl } from './proxy-rotator';
 
 export class CookieExpiredError extends Error {
   constructor() {
@@ -17,6 +19,8 @@ export class HttpError extends Error {
 
 export interface Http {
   get(url: string): Promise<string>;
+  /** Cumulative proxy rotations; 0 for non-proxied clients. */
+  rotations?(): number;
 }
 
 export interface HttpOpts {
@@ -25,47 +29,74 @@ export interface HttpOpts {
   fetchImpl?: typeof fetch;
   cookie?: string;
   redirect?: RequestRedirect;
-  proxyUrl?: string;
-}
-
-// Webshare creds arrive as `user:pass@host:port` (no scheme). undici's
-// ProxyAgent needs an absolute URL — prefix http:// when no scheme is present.
-export function normalizeProxyUrl(raw: string): string {
-  return /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `http://${raw}`;
+  rotator?: RotatingDispatcher;
+  isBlock?: (status: number, body: string | null) => boolean;
 }
 
 export function createHttp(opts: HttpOpts): Http {
   const queue = new PQueue({ concurrency: 1 });
   const f = opts.fetchImpl ?? fetch;
   const gap = opts.minGapMs ?? 2000;
-  const dispatcher = opts.proxyUrl ? new ProxyAgent(normalizeProxyUrl(opts.proxyUrl)) : undefined;
   let lastAt = 0;
 
+  type Outcome =
+    | { kind: 'ok'; body: string }
+    | { kind: 'block'; reason: string; status: number };
+
+  async function doFetch(url: string): Promise<Response> {
+    const headers: Record<string, string> = { 'User-Agent': opts.userAgent };
+    if (opts.cookie) headers['Cookie'] = `untappd_user_v3_e=${opts.cookie}`;
+    const fetchOpts: RequestInit & { dispatcher?: unknown } = { headers };
+    if (opts.redirect) fetchOpts.redirect = opts.redirect;
+    const dispatcher = opts.rotator?.current();
+    if (dispatcher) fetchOpts.dispatcher = dispatcher;
+    const res = await f(url, fetchOpts);
+    lastAt = Date.now();
+    return res;
+  }
+
+  async function classify(url: string, res: Response): Promise<Outcome> {
+    // With redirect:'manual', any 3xx means the session cookie is invalid — an
+    // auth problem, never an IP block (so it must not trigger rotation).
+    if (res.status >= 300 && res.status < 400) {
+      if (opts.redirect === 'manual') throw new CookieExpiredError();
+      throw new HttpError(res.status, url);
+    }
+    if (!res.ok) {
+      if (opts.rotator && opts.isBlock?.(res.status, null)) {
+        return { kind: 'block', reason: 'block-status', status: res.status };
+      }
+      throw new HttpError(res.status, url);
+    }
+    const body = await res.text();
+    if (opts.rotator && opts.isBlock?.(res.status, body)) {
+      return { kind: 'block', reason: 'block-page', status: res.status };
+    }
+    return { kind: 'ok', body };
+  }
+
   return {
+    rotations: () => opts.rotator?.rotations() ?? 0,
     async get(url: string): Promise<string> {
       return queue.add(async () => {
         const wait = Math.max(0, lastAt + gap - Date.now());
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 
-        const headers: Record<string, string> = { 'User-Agent': opts.userAgent };
-        if (opts.cookie) headers['Cookie'] = `untappd_user_v3_e=${opts.cookie}`;
-
-        const fetchOpts: RequestInit & { dispatcher?: unknown } = { headers };
-        if (opts.redirect) fetchOpts.redirect = opts.redirect;
-        if (dispatcher) fetchOpts.dispatcher = dispatcher;
-
-        const res = await f(url, fetchOpts);
-        lastAt = Date.now();
-
-        // With redirect:'manual', any 3xx means the session cookie is invalid.
-        // (Node fetch with redirect:'manual' returns opaque redirect responses
-        // where headers are not exposed, so we use the option flag as the signal.)
-        if (res.status >= 300 && res.status < 400) {
-          if (opts.redirect === 'manual') throw new CookieExpiredError();
-          throw new HttpError(res.status, url);
+        let outcome = await classify(url, await doFetch(url));
+        if (outcome.kind === 'block') {
+          // Rotate to a fresh exit IP and retry exactly once. A second block
+          // (different IP) signals a systemic ban and is surfaced to the breaker.
+          // safe: classify() only returns 'block' when opts.rotator is truthy. Retry uses a fresh IP, so no extra throttle gap is applied.
+          opts.rotator!.rotate(outcome.reason);
+          outcome = await classify(url, await doFetch(url));
+          if (outcome.kind === 'block') {
+            // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
+            // systemic block — including a 200 Cloudflare challenge page — reaches
+            // the circuit breaker. outcome.status may be 200 for a block page.
+            throw new HttpError(outcome.status === 429 ? 429 : 403, url);
+          }
         }
-        if (!res.ok) throw new HttpError(res.status, url);
-        return res.text();
+        return outcome.body;
       }) as Promise<string>;
     },
   };

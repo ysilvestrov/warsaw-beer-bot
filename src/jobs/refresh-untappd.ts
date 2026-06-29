@@ -21,7 +21,12 @@ interface Deps {
   now?: () => Date;
 }
 
-export async function refreshAllUntappd(deps: Deps): Promise<void> {
+export interface RefreshUntappdResult {
+  ok: number;
+  rotated: number;
+}
+
+export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResult> {
   const {
     db,
     log,
@@ -34,10 +39,11 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
 
   if (!breaker.canAttempt(now())) {
     log.info('refresh-untappd skipped (untappd circuit open)');
-    return;
+    return { ok: 0, rotated: 0 };
   }
 
   const profiles = allProfiles(db).filter((p) => p.untappd_username);
+  const rotatedBefore = http.rotations?.() ?? 0;
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 
   // Refresh the rating and backfill abv when Untappd has it; COALESCE keeps an
@@ -104,5 +110,9 @@ export async function refreshAllUntappd(deps: Deps): Promise<void> {
     }
     await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
   }
+  // rotated = all first-blocks (rotations); systemic ones also count in `blocked`, so truly-absorbed = rotated - blocked.
+  const rotated = (http.rotations?.() ?? 0) - rotatedBefore;
   await onProgress(`👤 untappd: ✓ ${ok}/${profiles.length} профілів`, { force: true });
+  log.info({ profiles: profiles.length, ok, rotated }, 'refresh-untappd done');
+  return { ok, rotated };
 }

@@ -452,8 +452,31 @@ describe('refreshAllUntappd', () => {
     const { CookieExpiredError: E } = await import('../sources/http');
     const http: Http = { async get() { throw new E(); } };
 
-    await expect(
-      refreshAllUntappd({ db, log: silentLog, http }),
-    ).resolves.toBeUndefined();
+    // should resolve (not throw) regardless of the return value shape
+    await refreshAllUntappd({ db, log: silentLog, http });
+  });
+
+  test('returns rotated as the http.rotations() delta over the run', async () => {
+    const db = fresh();
+    const tg1 = 111, tg2 = 222;
+    ensureProfile(db, tg1);
+    setUntappdUsername(db, tg1, 'alice');
+    ensureProfile(db, tg2);
+    setUntappdUsername(db, tg2, 'bob');
+
+    let rot = 0;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        rot += 1; // simulate one absorbed (rotated + retried) block per request
+        const bid = url.includes('alice') ? 1 : 2;
+        return `<div>${PAGE_ONE_BEER(bid, `Beer${bid}`, `Brewer${bid}`, '4.0')}</div>`;
+      },
+      rotations: () => rot,
+    };
+
+    const result = await refreshAllUntappd({ db, log: silentLog, http });
+
+    expect(result.rotated).toBe(2);
+    expect(result.ok).toBe(2);
   });
 });
