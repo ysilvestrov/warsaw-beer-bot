@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Added Piwne Mosty (piwnemosty.pl) shop support. Snack and glass/merch category pages are skipped so non-beer products are not matched.
+
 ## [0.9.3] - 2026-06-28
 
 - Fixed optional missing-beer enrichment after Untappd moved search results into Algolia: the extension now asks for the required Algolia host permission, queries Untappd's Algolia API from the user's browser/IP, and relays JSON hits to the server, so orphan beers can become ⭐ again instead of staying ⚪ forever.
