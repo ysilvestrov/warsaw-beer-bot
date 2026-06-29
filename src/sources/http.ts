@@ -89,7 +89,12 @@ export function createHttp(opts: HttpOpts): Http {
           // safe: classify() only returns 'block' when opts.rotator is truthy. Retry uses a fresh IP, so no extra throttle gap is applied.
           opts.rotator!.rotate(outcome.reason);
           outcome = await classify(url, await doFetch(url));
-          if (outcome.kind === 'block') throw new HttpError(outcome.status, url);
+          if (outcome.kind === 'block') {
+            // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
+            // systemic block — including a 200 Cloudflare challenge page — reaches
+            // the circuit breaker. outcome.status may be 200 for a block page.
+            throw new HttpError(outcome.status === 429 ? 429 : 403, url);
+          }
         }
         return outcome.body;
       }) as Promise<string>;

@@ -110,6 +110,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
     }
     await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
   }
+  // rotated = all first-blocks (rotations); systemic ones also count in `blocked`, so truly-absorbed = rotated - blocked.
   const rotated = (http.rotations?.() ?? 0) - rotatedBefore;
   await onProgress(`👤 untappd: ✓ ${ok}/${profiles.length} профілів`, { force: true });
   log.info({ profiles: profiles.length, ok, rotated }, 'refresh-untappd done');

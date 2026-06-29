@@ -1,4 +1,4 @@
-import { createHttp, CookieExpiredError } from './http';
+import { createHttp, CookieExpiredError, HttpError } from './http';
 import { isBlockStatus, isBlockPage } from './untappd/block';
 
 test('createHttp serialises requests through the queue (concurrency 1)', async () => {
@@ -122,6 +122,23 @@ test('throws a block HttpError when the retry also blocks; rotates exactly once'
     name: 'HttpError', status: 403,
   });
   expect(rotator.rotations()).toBe(1);
+});
+
+test('a persistent 200 block page throws a block-status HttpError (so the breaker sees it)', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('<html>Just a moment...</html>', { status: 200 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  const err = await http.get('https://untappd.com/beer/1').catch((e) => e);
+  expect(err).toBeInstanceOf(HttpError);
+  expect(isBlockStatus((err as HttpError).status)).toBe(true);
+  expect(rotator.rotations()).toBe(1);
+});
+
+test('a persistent 429 retains 429 status', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 429 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock });
+  await expect(http.get('https://untappd.com/beer/1')).rejects.toMatchObject({ name: 'HttpError', status: 429 });
 });
 
 test('does not rotate on a 3xx under redirect:manual (cookie expiry, not an IP block)', async () => {

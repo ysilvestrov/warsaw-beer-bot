@@ -109,6 +109,7 @@ export async function refreshTapRatings(
     }
   }
 
+  // rotated = all first-blocks (rotations); systemic ones also count in `blocked`, so truly-absorbed = rotated - blocked.
   result.rotated = (deps.http.rotations?.() ?? 0) - rotatedBefore;
   deps.log.info(result, 'refresh-tap-ratings done');
   return result;

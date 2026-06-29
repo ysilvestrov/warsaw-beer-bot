@@ -5,7 +5,9 @@ import { upsertBeer, getBeer } from '../storage/beers';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
-import { HttpError, type Http } from '../sources/http';
+import { HttpError, type Http, createHttp } from '../sources/http';
+import { createRotatingDispatcher } from '../sources/proxy-rotator';
+import { isBlockStatus, isBlockPage } from '../sources/untappd/block';
 import { refreshTapRatings } from './refresh-tap-ratings';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 
@@ -225,6 +227,31 @@ describe('refreshTapRatings', () => {
     expect(res.processed).toBeGreaterThan(1); // loop continued past the first block
     expect(res.matched).toBeGreaterThan(0);
     expect(breaker.state).toBe('closed');     // successes reset the counter
+  });
+
+  test('persistent 200 block page (via real createHttp) is counted as blocked and trips the breaker', async () => {
+    const db = fresh();
+    seedIdBeerOnTap(db, 'Magic Road', 'Clementine', 6645513);
+    // Real createHttp + a fake fetch that always serves a Cloudflare 200 challenge.
+    const fetchImpl: typeof fetch = async () => new Response('<html>Just a moment...</html>', { status: 200 });
+    const rotator = createRotatingDispatcher({
+      proxyUrl: 'u:p@h:80', mode: 'per-request',
+      agentFactory: () => ({ close: async () => {} }) as unknown as import('undici').Dispatcher,
+    });
+    const http = createHttp({
+      userAgent: 'ua', minGapMs: 0, fetchImpl, rotator,
+      isBlock: (s: number, b: string | null) => isBlockStatus(s) || (b !== null && isBlockPage(b)),
+    });
+    let tripped = false;
+    const breaker = createCircuitBreaker({
+      cooldownMs: 1000, blockThreshold: 1, onTrip: () => { tripped = true; }, onRecover: () => {},
+    });
+    const fixedNow = new Date('2026-05-27T12:00:00Z');
+
+    const result = await refreshTapRatings({ db, log: silentLog, http, sleepMs: 0, now: () => fixedNow, breaker });
+
+    expect(result.blocked).toBe(1);
+    expect(tripped).toBe(true);
   });
 
   test('rotated: reports the http.rotations() delta over the run', async () => {
