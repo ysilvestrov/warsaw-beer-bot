@@ -1,4 +1,4 @@
-import { describe, test, it, expect } from 'vitest';
+import { describe, test, expect } from 'vitest';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 
 describe('aliasNeighbors', () => {
@@ -32,13 +32,11 @@ describe('aliasNeighbors', () => {
   });
 });
 
-describe('aliasKeys', () => {
-  it('contains both sides of every curated pair, excludes non-aliases', () => {
-    const keys = aliasKeys();
-    expect(keys.has('nepomucen')).toBe(true);
-    expect(keys.has('nepo')).toBe(true);
-    expect(keys.has('starkraft')).toBe(true);
-    expect(keys.has('starkaft')).toBe(true);
-    expect(keys.has('pinta')).toBe(false);
-  });
+test('aliasKeys contains both sides of every curated pair, excludes non-aliases', () => {
+  const keys = aliasKeys();
+  expect(keys.has('nepomucen')).toBe(true);
+  expect(keys.has('nepo')).toBe(true);
+  expect(keys.has('starkraft')).toBe(true);
+  expect(keys.has('starkaft')).toBe(true);
+  expect(keys.has('pinta')).toBe(false);
 });

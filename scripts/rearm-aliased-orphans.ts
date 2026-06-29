@@ -26,7 +26,7 @@ export function selectRearmTargets(db: DB): RearmTarget[] {
 }
 
 // Reset the lookup-backoff state so the enrich cron re-attempts these beers.
-// Returns the number of rows updated. Runs in a single transaction.
+// Returns the number of targets re-armed. Runs in a single transaction.
 export function applyRearm(db: DB, targets: RearmTarget[]): number {
   const upd = db.prepare(
     `UPDATE beers SET untappd_lookup_count = 0, untappd_lookup_at = NULL WHERE id = ?`,

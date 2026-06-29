@@ -41,6 +41,8 @@ function insertBeer(db: DB, b: SeedBeer): void {
 function seedAll(db: DB): void {
   // alias-covered, attempted orphan -> SELECTED
   insertBeer(db, { name: 'Hoppiness Pils', brewery: 'Nepomucen Brewery', untappd_lookup_count: 4, untappd_lookup_at: '2026-06-23T06:30:18.348Z' });
+  // second alias-covered, attempted orphan -> also SELECTED
+  insertBeer(db, { name: 'SZOSA', brewery: 'Nepomucen Brewery', untappd_lookup_count: 3, untappd_lookup_at: '2026-06-20T00:00:00.000Z' });
   // alias-covered but untried (count 0) -> not selected
   insertBeer(db, { name: 'Tonkowiec Bałtycki', brewery: 'Starkaft Brewery', untappd_lookup_count: 0 });
   // plain collab, attempted -> not selected (no curated alias)
@@ -54,25 +56,31 @@ describe('selectRearmTargets', () => {
     const db = fresh();
     seedAll(db);
     const targets = selectRearmTargets(db);
-    expect(targets.map((t) => t.name)).toEqual(['Hoppiness Pils']);
-    expect(targets[0].untappd_lookup_count).toBe(4);
+    expect(targets.map((t) => t.name).sort()).toEqual(['Hoppiness Pils', 'SZOSA']);
+    expect(targets.find((t) => t.name === 'Hoppiness Pils')!.untappd_lookup_count).toBe(4);
   });
 });
 
 describe('applyRearm', () => {
-  it('resets count + lookup_at and is idempotent', () => {
+  it('resets count + lookup_at for all targets and is idempotent', () => {
     const db = fresh();
     seedAll(db);
     const targets = selectRearmTargets(db);
-    expect(applyRearm(db, targets)).toBe(1);
+    expect(applyRearm(db, targets)).toBe(2);
 
-    const row = db
+    const rowHoppiness = db
       .prepare('SELECT untappd_lookup_count AS c, untappd_lookup_at AS a FROM beers WHERE name = ?')
       .get('Hoppiness Pils') as { c: number; a: string | null };
-    expect(row.c).toBe(0);
-    expect(row.a).toBeNull();
+    expect(rowHoppiness.c).toBe(0);
+    expect(rowHoppiness.a).toBeNull();
 
-    // count > 0 filter now excludes the re-armed row -> second pass is a no-op.
+    const rowSzosa = db
+      .prepare('SELECT untappd_lookup_count AS c, untappd_lookup_at AS a FROM beers WHERE name = ?')
+      .get('SZOSA') as { c: number; a: string | null };
+    expect(rowSzosa.c).toBe(0);
+    expect(rowSzosa.a).toBeNull();
+
+    // count > 0 filter now excludes all re-armed rows -> second pass is a no-op.
     expect(selectRearmTargets(db)).toEqual([]);
   });
 });
