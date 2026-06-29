@@ -5,6 +5,8 @@ import { loadEnv, missingExpectedKeys } from './config/env';
 import { openDb } from './storage/db';
 import { migrate } from './storage/schema';
 import { createHttp } from './sources/http';
+import { createRotatingDispatcher } from './sources/proxy-rotator';
+import { isBlockStatus, isBlockPage } from './sources/untappd/block';
 import { createGeocoder } from './sources/geocoder';
 import { createBot } from './bot';
 import { startCommand } from './bot/commands/start';
@@ -57,11 +59,25 @@ async function main(): Promise<void> {
   cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
 
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });
+
+  const untappdBlock = (status: number, body: string | null) =>
+    isBlockStatus(status) || (body !== null && isBlockPage(body));
+
   // Untappd search/lookup goes through the Webshare proxy (when configured) on a
   // dedicated, cookie-less client; shop scraping keeps the direct `http`.
+  // Cookieless search/lookup client: rotate the WebShare exit IP on EVERY
+  // request (HTTPS CONNECT tunnels pin one IP per tunnel, so a fresh agent per
+  // request is the only way to actually rotate). See #222.
   const untappdSearchHttp = createHttp({
     userAgent: env.NOMINATIM_USER_AGENT,
-    proxyUrl: env.WEBSHARE_PROXY,
+    rotator: env.WEBSHARE_PROXY
+      ? createRotatingDispatcher({
+          proxyUrl: env.WEBSHARE_PROXY,
+          mode: 'per-request',
+          onRotate: (reason) => log.warn({ reason, client: 'untappd-search' }, 'untappd proxy rotate-on-block'),
+        })
+      : undefined,
+    isBlock: untappdBlock,
   });
   const ALGOLIA_DEFAULTS = { appId: '9WBO4RQ3HO', searchKey: '1d347324d67ec472bb7132c66aead485' };
   const algoliaSearch = createAlgoliaSearch({
@@ -81,7 +97,17 @@ async function main(): Promise<void> {
         userAgent: env.NOMINATIM_USER_AGENT,
         cookie: env.UNTAPPD_SESSION_COOKIE,
         redirect: 'manual',
-        proxyUrl: env.WEBSHARE_PROXY,
+        // Cookie'd session: keep one exit IP (rapid country-hopping of a
+        // logged-in session looks like account takeover) and only rotate when
+        // actually blocked. See #222.
+        rotator: env.WEBSHARE_PROXY
+          ? createRotatingDispatcher({
+              proxyUrl: env.WEBSHARE_PROXY,
+              mode: 'on-block',
+              onRotate: (reason) => log.warn({ reason, client: 'untappd-profile' }, 'untappd proxy rotate-on-block'),
+            })
+          : undefined,
+        isBlock: untappdBlock,
       })
     : null;
   if (!untappdHttp) {
