@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, hasCuratedAlias, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -790,5 +790,16 @@ describe('stripBreweryFromName', () => {
   });
   test('passthrough when brewery is empty (keeps #138B brand path intact)', () => {
     expect(stripBreweryFromName('murphy s irish stout', '')).toBe('murphy s irish stout');
+  });
+});
+
+describe('hasCuratedAlias', () => {
+  it('true for breweries with a curated alias pair', () => {
+    expect(hasCuratedAlias('Nepomucen Brewery')).toBe(true);
+    expect(hasCuratedAlias('Starkaft Brewery')).toBe(true);
+  });
+  it('false for plain collabs and unrelated breweries', () => {
+    expect(hasCuratedAlias('Stu Mostów / Ophiussa')).toBe(false);
+    expect(hasCuratedAlias('Pinta')).toBe(false);
   });
 });

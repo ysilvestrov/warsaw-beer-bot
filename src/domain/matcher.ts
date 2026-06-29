@@ -1,6 +1,6 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery, COLLAB_SEP, BREWERY_NOISE } from './normalize';
-import { aliasNeighbors } from './brewery-aliases';
+import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 
 export { COLLAB_SEP } from './normalize';
 
@@ -415,6 +415,15 @@ export function matchPrepared(
   // Matter" vs "S'mores Mind Over Matter"), which must not inherit drunk/rating data.
   if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
+}
+
+// True iff the curated alias layer adds coverage for this brewery, i.e. one of its
+// normalized alias forms is a curated alias key. NOTE: `breweryAliases(b).length > 1`
+// is the WRONG predicate — plain collaborations ("A / B") also split into multiple
+// tokens without any curated pair. This intersection check excludes them.
+export function hasCuratedAlias(brewery: string): boolean {
+  const keys = aliasKeys();
+  return breweryAliases(brewery).some((a) => keys.has(a));
 }
 
 // Back-compat single-beer entry point. Prepares the catalog per call, so callers
