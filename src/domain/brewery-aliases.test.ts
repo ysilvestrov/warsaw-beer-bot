@@ -1,5 +1,5 @@
-import { describe, test, expect } from 'vitest';
-import { aliasNeighbors } from './brewery-aliases';
+import { describe, test, it, expect } from 'vitest';
+import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 
 describe('aliasNeighbors', () => {
   test('returns direct partners symmetrically', () => {
@@ -29,5 +29,16 @@ describe('aliasNeighbors', () => {
   test('unknown form returns empty array', () => {
     expect(aliasNeighbors('pinta')).toEqual([]);
     expect(aliasNeighbors('')).toEqual([]);
+  });
+});
+
+describe('aliasKeys', () => {
+  it('contains both sides of every curated pair, excludes non-aliases', () => {
+    const keys = aliasKeys();
+    expect(keys.has('nepomucen')).toBe(true);
+    expect(keys.has('nepo')).toBe(true);
+    expect(keys.has('starkraft')).toBe(true);
+    expect(keys.has('starkaft')).toBe(true);
+    expect(keys.has('pinta')).toBe(false);
   });
 });
