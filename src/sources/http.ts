@@ -19,7 +19,7 @@ export class HttpError extends Error {
 
 export interface Http {
   get(url: string): Promise<string>;
-  /** Cumulative proxy rotations (present only on proxied clients). */
+  /** Cumulative proxy rotations; 0 for non-proxied clients. */
   rotations?(): number;
 }
 
@@ -86,6 +86,7 @@ export function createHttp(opts: HttpOpts): Http {
         if (outcome.kind === 'block') {
           // Rotate to a fresh exit IP and retry exactly once. A second block
           // (different IP) signals a systemic ban and is surfaced to the breaker.
+          // safe: classify() only returns 'block' when opts.rotator is truthy. Retry uses a fresh IP, so no extra throttle gap is applied.
           opts.rotator!.rotate(outcome.reason);
           outcome = await classify(url, await doFetch(url));
           if (outcome.kind === 'block') throw new HttpError(outcome.status, url);
