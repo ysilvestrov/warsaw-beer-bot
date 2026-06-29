@@ -1128,7 +1128,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   обробкою two-word/parenthetical cases); відомий display-prefix brewery
   видаляється з name, leading `ПРЕДРЕЛІЗ`/`ПРЕДРЕДІЗ`/`ПРОБНИК:` labels теж;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
-  відкидається; ABV із `%` у title), домен `flasker.com.ua`). `registry.pickAdapter(url)`.
+  відкидається; ABV із `%` у title), домен `flasker.com.ua`), `piwnemosty`
+  (Piwne Mosty IdoSell SSR — `.product`, brewery/title з GA
+  `view_item_list` metadata keyed by `data-product_id`, fallback на visible title
+  `"{brewery}: {name} - puszka/butelka N ml"`; категорії `/pol_m_PRZEKASKI*` і
+  `/pol_m_SZKLO-I-MERCH*` є whole-page non-beer gate), домен `piwnemosty.pl`.
+  `registry.pickAdapter(url)`.
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати
   адаптер: `docs/adapter-authoring.md`.

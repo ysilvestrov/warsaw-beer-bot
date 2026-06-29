@@ -37,6 +37,8 @@ describe('manifest', () => {
     expect(contentScript.matches).toContain('https://*.winetime.com.ua/*');
     expect(contentScript.matches).toContain('https://hoptimaal.com/*');
     expect(contentScript.matches).toContain('https://*.hoptimaal.com/*');
+    expect(contentScript.matches).toContain('https://piwnemosty.pl/*');
+    expect(contentScript.matches).toContain('https://*.piwnemosty.pl/*');
   });
 
   it('exposes a popup action', () => {

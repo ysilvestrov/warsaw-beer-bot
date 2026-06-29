@@ -37,6 +37,8 @@ export default defineManifest({
         'https://*.hoptimaal.com/*',
         'https://flasker.com.ua/*',
         'https://*.flasker.com.ua/*',
+        'https://piwnemosty.pl/*',
+        'https://*.piwnemosty.pl/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
