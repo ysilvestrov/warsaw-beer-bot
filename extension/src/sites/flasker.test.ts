@@ -73,6 +73,10 @@ describe('parseTitle', () => {
       { productTags: ['Imperial Stout'] },
       { productUrl: 'https://example.com/product/mad-mystery-beer/' },
       { productUrl: 'not a URL' },
+      {
+        productTags: ['Imperial Stout'],
+        productUrl: 'https://flasker.com.ua/product/unknown-mystery-beer-5-330ml/',
+      },
     ]) {
       expect(parseTitle('Mystery Beer 5% 330ml', evidence))
         .toEqual({ brewery: 'Mystery', name: 'Beer', abv: 5 });
