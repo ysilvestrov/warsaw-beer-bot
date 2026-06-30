@@ -1124,7 +1124,7 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   домен `hoptimaal.com`), `flasker` (Flasker WooCommerce SSR — `li.product`/`h2.woocommerce-loop-product__title`
   (archive), `tr[data-title]` (Barn2 product table), `li.wc-block-grid__product` (block
   grid); brewery з explicit allowlist Flasker product-tag/product-slug metadata
-  (tag > slug), fallback — existing title parser (зазвичай перше слово, з відомою
+  (known product-family slug overrides > tag > brewery slug), fallback — existing title parser (зазвичай перше слово, з відомою
   обробкою two-word/parenthetical cases); відомий display-prefix brewery
   видаляється з name, leading `ПРЕДРЕЛІЗ`/`ПРЕДРЕДІЗ`/`ПРОБНИК:` labels теж;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму

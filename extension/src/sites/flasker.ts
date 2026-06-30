@@ -35,6 +35,7 @@ interface BreweryRule {
   canonical: string;
   tags: string[];
   slugPrefixes: string[];
+  familySlugPrefixes?: string[];
   titleAliases: string[];
 }
 
@@ -49,7 +50,19 @@ const BREWERY_RULES: BreweryRule[] = [
     canonical: 'Mad Brew',
     tags: ['mad brew'],
     slugPrefixes: ['mad-brew-', 'mad-'],
+    familySlugPrefixes: [
+      'lost-philosopher-',
+      'the-lost-philosopher-',
+      'de-zwarte-regel-',
+      'предреліз-de-zwarte-regel-',
+    ],
     titleAliases: ['Mad Brew'],
+  },
+  {
+    canonical: 'Copper Head. Beer Workshop',
+    tags: ['copper head'],
+    slugPrefixes: ['copper-head-'],
+    titleAliases: ['Copper Head'],
   },
   {
     canonical: 'Flasker',
@@ -89,11 +102,18 @@ function uniqueRule(rules: BreweryRule[]): BreweryRule | null {
 }
 
 function resolveBreweryRule(evidence: FlaskerEvidence): BreweryRule | null {
+  const slug = productSlug(evidence.productUrl);
+  if (slug) {
+    const familyRules = BREWERY_RULES.filter((rule) =>
+      rule.familySlugPrefixes?.some((prefix) => slug.startsWith(prefix)),
+    );
+    if (familyRules.length > 0) return uniqueRule(familyRules);
+  }
+
   const tags = new Set((evidence.productTags ?? []).map(normalizeTag));
   const tagRules = BREWERY_RULES.filter((rule) => rule.tags.some((tag) => tags.has(tag)));
   if (tagRules.length > 0) return uniqueRule(tagRules);
 
-  const slug = productSlug(evidence.productUrl);
   if (!slug) return null;
   return uniqueRule(BREWERY_RULES.filter((rule) => rule.slugPrefixes.some((prefix) => slug.startsWith(prefix))));
 }
