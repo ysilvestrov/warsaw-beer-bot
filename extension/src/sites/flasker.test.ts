@@ -73,6 +73,10 @@ describe('parseTitle', () => {
       { productTags: ['Imperial Stout'] },
       { productUrl: 'https://example.com/product/mad-mystery-beer/' },
       { productUrl: 'not a URL' },
+      {
+        productTags: ['Imperial Stout'],
+        productUrl: 'https://flasker.com.ua/product/unknown-mystery-beer-5-330ml/',
+      },
     ]) {
       expect(parseTitle('Mystery Beer 5% 330ml', evidence))
         .toEqual({ brewery: 'Mystery', name: 'Beer', abv: 5 });
@@ -89,6 +93,35 @@ describe('parseTitle', () => {
     expect(parseTitle('ПРЕДРЕЛІЗ Galaxy Juice 6% 330ml', {
       productTags: ['mad brew'],
     })).toEqual({ brewery: 'Mad Brew', name: 'Galaxy Juice', abv: 6 });
+  });
+
+  it('keeps Lost Philosopher names under Mad Brew when tags identify the brewery', () => {
+    expect(parseTitle('The Lost Philosopher X 330ml', {
+      productTags: ['mad brew'],
+    })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher X' });
+
+    expect(parseTitle('The Lost Philosopher Xmas Eve 10% [2025] 330ml', {
+      productTags: ['mad brew'],
+    })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve', abv: 10 });
+  });
+
+  it('uses the explicit Copper Head rule instead of splitting the first word', () => {
+    expect(parseTitle('Copper Head Royal Cookie 9% 0.33l', {
+      productTags: ['COPPER HEAD'],
+    })).toEqual({ brewery: 'Copper Head. Beer Workshop', name: 'Royal Cookie', abv: 9 });
+  });
+
+  it('uses Hoppy Hog product slugs when tags are missing', () => {
+    expect(parseTitle('Hoppy Hog Charred Memory IS 10% 330ml', {
+      productUrl: 'https://flasker.com.ua/product/hoppy-hog-charred-memory-is-10-330ml/',
+    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory IS', abv: 10 });
+  });
+
+  it('uses known Mad Brew product-family slugs over misleading generic tags', () => {
+    expect(parseTitle('DE ZWARTE REGEL: Tweede Kring 6.5% 0.33', {
+      productTags: ['Vibrant Pour'],
+      productUrl: 'https://flasker.com.ua/product/предреліз-de-zwarte-regel-tweede-kring-6-5-0-33/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'DE ZWARTE REGEL: Tweede Kring', abv: 6.5 });
   });
 
   it('no abv → volume marks the head end', () => {
@@ -244,6 +277,31 @@ describe('flasker adapter', () => {
       brewery: 'Mad Brew',
       name: 'Barely Beer',
       abv: 0,
+    });
+  });
+
+  it('uses fixture metadata for known malformed Flasker identities', () => {
+    expect(findCard('flasker.table.html', 'The Lost Philosopher X')).toMatchObject({
+      brewery: 'Mad Brew',
+      name: 'The Lost Philosopher X',
+    });
+
+    expect(findCard('flasker.html', 'Royal Cookie')).toMatchObject({
+      brewery: 'Copper Head. Beer Workshop',
+      name: 'Royal Cookie',
+      abv: 9,
+    });
+
+    expect(findCard('flasker.table.html', 'DE ZWARTE REGEL: Tweede Kring')).toMatchObject({
+      brewery: 'Mad Brew',
+      name: 'DE ZWARTE REGEL: Tweede Kring',
+      abv: 6.5,
+    });
+
+    expect(findCard('flasker.table.html', 'Amber Ritual Hop Benediction')).toMatchObject({
+      brewery: 'VibrantPour',
+      name: 'Amber Ritual Hop Benediction',
+      abv: 8,
     });
   });
 

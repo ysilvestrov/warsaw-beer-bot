@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fixed Flasker parsing for more metadata-backed breweries and product families, including Copper Head, Lost Philosopher, and DE ZWARTE REGEL listings that previously fell back to first-word brewery guesses.
 - Added Funkyshop (funkyshop.pl) shop support. Glass/merch category pages are skipped so non-beer products are not matched.
 - Added Piwne Mosty (piwnemosty.pl) shop support. Snack and glass/merch category pages are skipped so non-beer products are not matched.
 
