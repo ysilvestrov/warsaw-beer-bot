@@ -1248,7 +1248,11 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   отже несе drunk/personal-заяви) і в `lookupBeer` Stage 2a (перед fuzzy 2b).
 - `BREWERY_NOISE` стрипить дескриптори пивоварні багатьма мовами (`browar`,
   `brewery`, `contracts`, `collab`/`collaboration`, `pivovar`, `brauerei`, `brasserie`,
-  `birrificio`, `brouwerij`, `bryggeri`, `cerveceria`, …); `cleanSearchQuery` (продакшн-будівник
+  `birrificio`, `brouwerij`, `bryggeri`, `cerveceria`, …), а також **складені**
+  «нано-пивоварня» токени (`nanobrowar`/`nanobrowary`/`nanobryggeri`) — лише як
+  єдиний склеєний токен; голе `nano` НЕ є шумом (це окреме слово/частина бренду:
+  `Nano Cinco`, `Mandrill Nano Brewing`), бо його зрізання зіпсувало б бренд (#228).
+  `cleanSearchQuery` (продакшн-будівник
   пошукового запиту; `stripBreweryNoise` збережено, але не в гарячому шляху) додатково
   колапсує `COLLAB_SEP`-роздільники ДО токенізації, тож приклеєне сміття типу `collab/`
   відсіюється і пошуковий запит enrich'у не ANDить обидві колаб-пивоварні (#117 Omnipollo).

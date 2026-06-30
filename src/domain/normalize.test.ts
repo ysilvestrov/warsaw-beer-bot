@@ -98,6 +98,21 @@ describe('multilingual brewery descriptors', () => {
   });
 });
 
+describe('compound nano-brewery noise tokens', () => {
+  test('strips compound "Nanobrowar"/"Nanobryggeri" descriptors (#228)', () => {
+    // "Nanobrowar" is Polish for "nano-brewery" — a single compound token that
+    // normalizeBrewery must strip so the brand survives and hits its curated alias.
+    expect(normalizeBrewery('Nanobrowar Starkraft Brewery')).toBe('starkraft');
+    expect(normalizeBrewery('Kamfjord Nanobryggeri')).toBe('kamfjord');
+  });
+
+  test('does NOT strip bare "nano" — it can be part of a brand', () => {
+    // Negative guard: bare "nano" is a separate word or brand fragment, never noise.
+    expect(normalizeBrewery('Nano Cinco')).toBe('nano cinco');
+    expect(normalizeBrewery('Mandrill Nano Brewing Co.')).toBe('mandrill nano');
+  });
+});
+
 describe('contracts noise word', () => {
   test('drops "contracts" so official-suffix collapses to the brand', () => {
     expect(normalizeBrewery('Harpagan Contracts')).toBe('harpagan');

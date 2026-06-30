@@ -12,6 +12,10 @@ export const BREWERY_NOISE = new Set([
   // Scandinavian (+ definite form), Spanish (post-diacritic-strip form)
   'pivovar', 'pivovary', 'brauerei', 'brasserie', 'birrificio',
   'brouwerij', 'bryggeri', 'bryggeriet', 'cerveceria',
+  // Compound "nano-brewery" descriptors only (a single glued token). Bare "nano"
+  // is deliberately NOT noise — it's a separate word or brand fragment in
+  // "Nano Cinco"/"Mandrill Nano Brewing", which stripping would corrupt (#228).
+  'nanobrowar', 'nanobrowary', 'nanobryggeri',
 ]);
 
 // Separator for collab/bilingual brewery names. Untappd uses:
