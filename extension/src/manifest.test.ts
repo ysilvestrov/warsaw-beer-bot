@@ -39,6 +39,8 @@ describe('manifest', () => {
     expect(contentScript.matches).toContain('https://*.hoptimaal.com/*');
     expect(contentScript.matches).toContain('https://piwnemosty.pl/*');
     expect(contentScript.matches).toContain('https://*.piwnemosty.pl/*');
+    expect(contentScript.matches).toContain('https://funkyshop.pl/*');
+    expect(contentScript.matches).toContain('https://*.funkyshop.pl/*');
   });
 
   it('exposes a popup action', () => {

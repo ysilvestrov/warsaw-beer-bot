@@ -39,6 +39,8 @@ export default defineManifest({
         'https://*.flasker.com.ua/*',
         'https://piwnemosty.pl/*',
         'https://*.piwnemosty.pl/*',
+        'https://funkyshop.pl/*',
+        'https://*.funkyshop.pl/*',
       ],
       js: ['src/content/main.ts'],
       run_at: 'document_idle',
