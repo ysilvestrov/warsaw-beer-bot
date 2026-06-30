@@ -12,6 +12,7 @@ Untappd. Працює на:
 - `hoptimaal.com` (і піддомени)
 - `flasker.com.ua` (і піддомени)
 - `piwnemosty.pl` (і піддомени)
+- `funkyshop.pl` (і піддомени)
 
 Щоб усе запрацювало, потрібні три речі: (1) завантажити свою історію пив у бота,
 (2) отримати токен доступу, (3) встановити й налаштувати розширення. Нижче — по кроках.
@@ -146,7 +147,8 @@ Untappd. Працює на:
 
 1. Зайди на підтримуваний магазин:
    `beerrepublic.eu`, `onemorebeer.pl`, `beerfreak.org`, `bierloods22.nl`,
-   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua` або `piwnemosty.pl`.
+   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`
+   або `funkyshop.pl`.
 2. Розширення **автоматично** зчитує сітку пив на сторінці, надсилає її боту на звірку
    й малює **кутовий бейдж** на картках. Що означають бейджі:
 

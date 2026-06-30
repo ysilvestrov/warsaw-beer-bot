@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Added Funkyshop (funkyshop.pl) shop support. Glass/merch category pages are skipped so non-beer products are not matched.
 - Added Piwne Mosty (piwnemosty.pl) shop support. Snack and glass/merch category pages are skipped so non-beer products are not matched.
 
 ## [0.9.3] - 2026-06-28

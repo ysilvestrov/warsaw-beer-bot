@@ -1132,7 +1132,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   (Piwne Mosty IdoSell SSR — `.product`, brewery/title з GA
   `view_item_list` metadata keyed by `data-product_id`, fallback на visible title
   `"{brewery}: {name} - puszka/butelka N ml"`; категорії `/pol_m_PRZEKASKI*` і
-  `/pol_m_SZKLO-I-MERCH*` є whole-page non-beer gate), домен `piwnemosty.pl`.
+  `/pol_m_SZKLO-I-MERCH*` є whole-page non-beer gate), домен `piwnemosty.pl`),
+  `funkyshop` (Funkyshop PrestaShop SSR — `article.product-miniature`, назва з
+  `.product-title`, brewery з `.manufacturer-product`, ABV із `.product-description-short`,
+  trailing package volume прибирається з name; glass/merch категорії `/pl/17-szklomerch`
+  і `/en/17-glassmerch` є whole-page non-beer gate; локально відкидаються set/glassware
+  products), домен `funkyshop.pl`.
   `registry.pickAdapter(url)`.
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати

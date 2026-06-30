@@ -8,6 +8,7 @@ import { winetime } from './winetime';
 import { hoptimaal } from './hoptimaal';
 import { flasker } from './flasker';
 import { piwnemosty } from './piwnemosty';
+import { funkyshop } from './funkyshop';
 
 describe('pickAdapter', () => {
   it('selects beerrepublic for beerrepublic.eu', () => {
@@ -46,6 +47,11 @@ describe('pickAdapter', () => {
     expect(pickAdapter(new URL('https://www.piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(piwnemosty);
   });
 
+  it('selects funkyshop for funkyshop.pl', () => {
+    expect(pickAdapter(new URL('https://funkyshop.pl/pl/4-piwo-rzemieslnicze'))).toBe(funkyshop);
+    expect(pickAdapter(new URL('https://www.funkyshop.pl/en/4-craft-beer'))).toBe(funkyshop);
+  });
+
   it('returns null for an unknown host', () => {
     expect(pickAdapter(new URL('https://example.com/'))).toBeNull();
   });
@@ -53,8 +59,8 @@ describe('pickAdapter', () => {
 
 describe('adapter ids', () => {
   it('every adapter has a unique non-empty id', () => {
-    const ids = [beerrepublic, onemorebeer, beerfreak, bierloods22, winetime, hoptimaal, flasker, piwnemosty].map((a) => a.id);
-    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'bierloods22', 'winetime', 'hoptimaal', 'flasker', 'piwnemosty']);
+    const ids = [beerrepublic, onemorebeer, beerfreak, bierloods22, winetime, hoptimaal, flasker, piwnemosty, funkyshop].map((a) => a.id);
+    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'bierloods22', 'winetime', 'hoptimaal', 'flasker', 'piwnemosty', 'funkyshop']);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id.length).toBeGreaterThan(0);
   });
