@@ -21,7 +21,7 @@ const Schema = z.object({
   UNTAPPD_ALGOLIA_APP_ID: z.string().optional(),
   UNTAPPD_ALGOLIA_SEARCH_KEY: z.string().optional(),
 
-  // Orphan-triage job (all optional; missing keys disable the job, never crash startup)
+  // Orphan-triage job: keys are optional or defaulted; absence disables the job, never crashes startup.
   TRIAGE_LLM_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
   TRIAGE_LLM_MODEL: z.string().min(1).default('claude-opus-4-8'),
   ANTHROPIC_API_KEY: z.string().optional(),
@@ -49,6 +49,14 @@ export const EXPECTED_PROD_KEYS = [
 export function missingExpectedKeys(env: Env): { key: string; disables: string }[] {
   return EXPECTED_PROD_KEYS
     .filter(({ key }) => env[key] === undefined || env[key] === '')
+    // ANTHROPIC_API_KEY is only meaningful when the triage LLM provider is
+    // Anthropic (the default). When the operator has switched to OpenAI and
+    // supplied OPENAI_API_KEY, the job is fully configured and flagging the
+    // (irrelevant) missing Anthropic key would be a misleading warning.
+    .filter(
+      ({ key }) =>
+        !(key === 'ANTHROPIC_API_KEY' && env.TRIAGE_LLM_PROVIDER === 'openai' && !!env.OPENAI_API_KEY),
+    )
     .map(({ key, disables }) => ({ key, disables }));
 }
 

@@ -167,4 +167,39 @@ describe('env: orphan-triage job', () => {
     const env = loadEnv({ ...validBase });
     expect(missingExpectedKeys(env).map((k) => k.key)).toContain('GITHUB_TOKEN');
   });
+
+  test('triage env: round-trips all fields when set', () => {
+    const env = loadEnv({
+      ...validBase,
+      TRIAGE_LLM_PROVIDER: 'openai',
+      TRIAGE_LLM_MODEL: 'gpt-4o-mini',
+      GITHUB_REPO: 'o/r',
+      OPENAI_API_KEY: 'k',
+      ANTHROPIC_API_KEY: 'k2',
+      GITHUB_TOKEN: 't',
+    });
+    expect(env.TRIAGE_LLM_PROVIDER).toBe('openai');
+    expect(env.TRIAGE_LLM_MODEL).toBe('gpt-4o-mini');
+    expect(env.GITHUB_REPO).toBe('o/r');
+    expect(env.OPENAI_API_KEY).toBe('k');
+    expect(env.ANTHROPIC_API_KEY).toBe('k2');
+    expect(env.GITHUB_TOKEN).toBe('t');
+  });
+
+  test('missingExpectedKeys does not flag ANTHROPIC_API_KEY when provider=openai and OPENAI_API_KEY is set', () => {
+    const env = loadEnv({
+      ...validBase,
+      TRIAGE_LLM_PROVIDER: 'openai',
+      OPENAI_API_KEY: 'sk-openai',
+    });
+    expect(missingExpectedKeys(env).map((k) => k.key)).not.toContain('ANTHROPIC_API_KEY');
+  });
+
+  test('missingExpectedKeys still flags ANTHROPIC_API_KEY when provider=openai but OPENAI_API_KEY is unset', () => {
+    const env = loadEnv({
+      ...validBase,
+      TRIAGE_LLM_PROVIDER: 'openai',
+    });
+    expect(missingExpectedKeys(env).map((k) => k.key)).toContain('ANTHROPIC_API_KEY');
+  });
 });
