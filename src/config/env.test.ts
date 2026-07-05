@@ -103,14 +103,29 @@ describe('missingExpectedKeys', () => {
     OSRM_BASE_URL: 'http://localhost:5000',
     NOMINATIM_USER_AGENT: 'test-agent',
   };
-  test('reports all four expected keys when none set', () => {
+  test('reports all expected keys when none set', () => {
     const env = loadEnv({ ...base });
     expect(missingExpectedKeys(env).map((m) => m.key).sort()).toEqual(
-      ['ADMIN_API_TOKEN', 'ADMIN_TELEGRAM_ID', 'UNTAPPD_SESSION_COOKIE', 'WEBSHARE_PROXY'],
+      [
+        'ADMIN_API_TOKEN',
+        'ADMIN_TELEGRAM_ID',
+        'ANTHROPIC_API_KEY',
+        'GITHUB_TOKEN',
+        'UNTAPPD_SESSION_COOKIE',
+        'WEBSHARE_PROXY',
+      ],
     );
   });
   test('empty array when all expected keys present', () => {
-    const env = loadEnv({ ...base, UNTAPPD_SESSION_COOKIE: 'c', WEBSHARE_PROXY: 'p', ADMIN_TELEGRAM_ID: '207079110', ADMIN_API_TOKEN: 't' });
+    const env = loadEnv({
+      ...base,
+      UNTAPPD_SESSION_COOKIE: 'c',
+      WEBSHARE_PROXY: 'p',
+      ADMIN_TELEGRAM_ID: '207079110',
+      ADMIN_API_TOKEN: 't',
+      GITHUB_TOKEN: 'gh',
+      ANTHROPIC_API_KEY: 'sk-ant',
+    });
     expect(missingExpectedKeys(env)).toEqual([]);
   });
   test('treats empty string as missing', () => {
@@ -124,5 +139,32 @@ describe('missingExpectedKeys', () => {
     const keys = EXPECTED_PROD_KEYS.map((e) => e.key);
     expect(keys).not.toContain('TELEGRAM_BOT_TOKEN');
     expect(keys).not.toContain('DATABASE_PATH');
+  });
+});
+
+describe('env: orphan-triage job', () => {
+  const validBase = {
+    TELEGRAM_BOT_TOKEN: 'x'.repeat(10),
+    DATABASE_PATH: '/tmp/bot.db',
+    OSRM_BASE_URL: 'http://localhost:5000',
+    NOMINATIM_USER_AGENT: 'test-agent',
+  };
+
+  test('triage env: defaults', () => {
+    const env = loadEnv({ ...validBase });
+    expect(env.TRIAGE_LLM_PROVIDER).toBe('anthropic');
+    expect(env.TRIAGE_LLM_MODEL).toBe('claude-opus-4-8');
+    expect(env.GITHUB_REPO).toBe('ysilvestrov/warsaw-beer-bot');
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.GITHUB_TOKEN).toBeUndefined();
+  });
+
+  test('triage env: rejects unknown provider', () => {
+    expect(() => loadEnv({ ...validBase, TRIAGE_LLM_PROVIDER: 'gemini' } as never)).toThrow();
+  });
+
+  test('missingExpectedKeys reports GITHUB_TOKEN', () => {
+    const env = loadEnv({ ...validBase });
+    expect(missingExpectedKeys(env).map((k) => k.key)).toContain('GITHUB_TOKEN');
   });
 });

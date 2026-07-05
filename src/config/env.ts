@@ -20,6 +20,14 @@ const Schema = z.object({
   ADMIN_API_TOKEN: z.string().optional(),
   UNTAPPD_ALGOLIA_APP_ID: z.string().optional(),
   UNTAPPD_ALGOLIA_SEARCH_KEY: z.string().optional(),
+
+  // Orphan-triage job (all optional; missing keys disable the job, never crash startup)
+  TRIAGE_LLM_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
+  TRIAGE_LLM_MODEL: z.string().min(1).default('claude-opus-4-8'),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GITHUB_TOKEN: z.string().optional(),
+  GITHUB_REPO: z.string().min(1).default('ysilvestrov/warsaw-beer-bot'),
 });
 
 export type Env = z.infer<typeof Schema>;
@@ -33,6 +41,8 @@ export const EXPECTED_PROD_KEYS = [
   { key: 'WEBSHARE_PROXY', disables: 'proxied Untappd traffic (block protection)' },
   { key: 'ADMIN_TELEGRAM_ID', disables: 'daily status digest + admin alerts' },
   { key: 'ADMIN_API_TOKEN', disables: 'admin HTTP endpoints (enrich-failures review)' },
+  { key: 'GITHUB_TOKEN', disables: 'orphan-triage job (GitHub issue filing)' },
+  { key: 'ANTHROPIC_API_KEY', disables: 'orphan-triage job (LLM analysis; not needed if TRIAGE_LLM_PROVIDER=openai)' },
 ] as const satisfies ReadonlyArray<{ key: keyof Env; disables: string }>;
 
 // Expected keys that are unset or empty-string in the parsed env.
