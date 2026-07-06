@@ -8,25 +8,19 @@ import type { TriageLlm } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import { planTriageActions } from '../domain/triage-plan';
 import type { Verdict } from '../domain/triage-analysis';
+import { warsawDateAndHour } from '../domain/warsaw-time';
 
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
 export const TRIAGE_BATCH_LIMIT = 50;
 
+// Non-Error throws (strings, objects) must not escape our catch blocks — the
+// run-marked-for-the-day guarantee depends on finish() always being reached.
+const errMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
 // Same Warsaw-window pattern as daily-status, but earlier — [06:00,09:00) — so
 // the result line is ready before the digest window [09:00,12:00).
-function warsawDateAndHour(d: Date): { date: string; hour: number } {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
-  }).formatToParts(d);
-  const get = (t: string): string => parts.find((p) => p.type === t)!.value;
-  let hour = Number(get('hour'));
-  if (hour === 24) hour = 0;
-  return { date: `${get('year')}-${get('month')}-${get('day')}`, hour };
-}
-
 export function shouldRunTriage(args: {
   now: Date; lastRunDate: string | null;
   windowStartHour?: number; windowEndHour?: number;
@@ -119,14 +113,17 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     plan = planTriageActions(analysis, openIssues.map((i) => i.number));
   } catch (e) {
     log.error({ err: e }, 'orphan-triage: analysis failed');
-    finish({ ...outcome, error: (e as Error).message.slice(0, 120) });
+    finish({ ...outcome, error: errMessage(e).slice(0, 120) });
     return;
   }
   outcome.skipped = plan.skipped;
 
   const review = (v: Verdict, issueNumber: number | null): void => {
     const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-    setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso);
+    if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso)) {
+      // Row self-cleared between selection and write (the beer matched meanwhile).
+      log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
+    }
   };
 
   for (const issue of plan.newIssues) {

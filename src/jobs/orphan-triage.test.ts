@@ -125,6 +125,44 @@ test('LLM failure: nothing written except error result line', async () => {
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
 });
 
+test('LLM rejecting with a non-Error (plain string) still writes error line and marks the run', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh();
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: { analyze: vi.fn().mockImplementation(() => Promise.reject('raw string failure')) },
+  });
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.line).toContain('помилка');
+  expect(result.line).toContain('raw string failure');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+});
+
+test('github createIssue failure: its verdicts stay untriaged, other groups proceed', async () => {
+  const d = db();
+  [1, 2, 3].forEach((n) => seedOrphan(d, n));
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
+      { beer_id: 2, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
+      { beer_id: 3, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
+    ],
+    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+  };
+  const github = gh({ createIssue: vi.fn().mockRejectedValue(new Error('boom')) });
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+  const cls = (id: number) => (d.prepare(
+    'SELECT review_class FROM enrich_failures WHERE beer_id = ?',
+  ).get(id) as { review_class: string | null }).review_class;
+  expect(cls(1)).toBeNull();          // createIssue failed → no DB write
+  expect(cls(2)).toBe('matcher_bug'); // comment group still proceeds
+  expect(cls(3)).toBe('wontfix');     // quiet group still proceeds
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.line).toContain('1 пропущено');
+});
+
 test('disabled (no llm/github): skip line written once', async () => {
   const d = db();
   await orphanTriage({ db: d, log, llm: null, github: null, now: inWindow });

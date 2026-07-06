@@ -2,6 +2,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { collectStatus, type StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
+import { warsawDateAndHour } from '../domain/warsaw-time';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
@@ -38,19 +39,6 @@ function warsawStamp(d: Date): string {
     year: 'numeric', month: '2-digit', day: '2-digit',
     hour: '2-digit', minute: '2-digit', hour12: false,
   }).format(d).replace(',', '');
-}
-
-// Warsaw-local calendar date ("YYYY-MM-DD") and hour (0–23) for d. Uses the
-// same Europe/Warsaw zone as warsawStamp so DST is handled by Intl, not by us.
-function warsawDateAndHour(d: Date): { date: string; hour: number } {
-  const parts = new Intl.DateTimeFormat('en-GB', {
-    timeZone: 'Europe/Warsaw',
-    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hour12: false,
-  }).formatToParts(d);
-  const get = (t: string): string => parts.find((p) => p.type === t)!.value;
-  let hour = Number(get('hour'));
-  if (hour === 24) hour = 0; // some ICU builds render midnight as "24"
-  return { date: `${get('year')}-${get('month')}-${get('day')}`, hour };
 }
 
 export interface ShouldSendArgs {
