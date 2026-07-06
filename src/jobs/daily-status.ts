@@ -2,10 +2,11 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { collectStatus, type StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
+import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-export function buildStatusMessage(m: StatusMetrics, date: string): string {
+export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: string | null): string {
   const matchPct = m.beersTotal > 0 ? Math.round((m.beersMatched / m.beersTotal) * 100) : 0;
   const scrapeLine = m.lastScrapeHoursAgo === null
     ? 'немає даних ⚠️'
@@ -19,6 +20,7 @@ export function buildStatusMessage(m: StatusMetrics, date: string): string {
     `• Каталог: ${group(m.beersTotal)} пив · ${matchPct}% зматчено · ${group(m.orphansPending)} orphan'ів у черзі`,
     `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
     `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
+    ...(triageLine ? [`• ${triageLine}`] : []),
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     '',
@@ -95,7 +97,17 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     return;
   }
   const metrics = collectStatus(db, now);
-  const text = buildStatusMessage(metrics, warsawStamp(now));
+  // Triage line: written by the orphan-triage job (earlier Warsaw window) into
+  // job_state; only shown when it belongs to today's digest date.
+  let triageLine: string | null = null;
+  const rawTriage = getJobState(db, TRIAGE_LAST_RESULT_KEY);
+  if (rawTriage) {
+    try {
+      const parsed = JSON.parse(rawTriage) as { date: string; line: string };
+      if (parsed.date === dateKey) triageLine = parsed.line;
+    } catch { /* malformed state — ignore */ }
+  }
+  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine);
   try {
     await notifyAdmin(text);
     setJobState(db, DAILY_STATUS_KEY, dateKey);
