@@ -110,7 +110,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
   try {
     const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
     const analysis = await llm.analyze({ orphans, openIssues });
-    plan = planTriageActions(analysis, openIssues.map((i) => i.number));
+    plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
   } catch (e) {
     log.error({ err: e }, 'orphan-triage: analysis failed');
     finish({ ...outcome, error: errMessage(e).slice(0, 120) });

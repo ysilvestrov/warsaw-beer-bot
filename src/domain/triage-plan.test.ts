@@ -17,7 +17,7 @@ test('routes verdicts: existing issue, new issue, quiet', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [228]);
+  const plan = planTriageActions(a, [228], [1, 2, 3, 4]);
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.newIssues).toHaveLength(1);
   expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([2]);
@@ -33,7 +33,7 @@ test('forces labels from verdict classes, ignoring model labels', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, []);
+  const plan = planTriageActions(a, [], [1, 2]);
   expect(plan.newIssues[0].labels.sort())
     .toEqual(['matcher-bug', 'orphan-triage', 'parser-bug']);
 });
@@ -49,7 +49,7 @@ test('skips invalid verdicts: unknown issue, unknown key, both refs, actionable 
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [228]);
+  const plan = planTriageActions(a, [228], [1, 2, 3, 4, 5]);
   expect(plan.skipped).toBe(4);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([5]);
   expect(plan.newIssues).toHaveLength(0); // k1 unused → not created
@@ -73,7 +73,7 @@ test('dedupes duplicate new_issues keys: first occurrence wins, no wasted cap sl
       { key: 'k3', title: 't-k3', body: 'b', labels: [] },
     ],
   };
-  const plan = planTriageActions(a, []);
+  const plan = planTriageActions(a, [], [1, 2, 3]);
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
   expect(plan.newIssues[0].title).toBe('first');
   expect(plan.newIssues[0].body).toBe('first-body');
@@ -90,7 +90,7 @@ test('groups multiple verdicts on the same existing issue into one comment', () 
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [228, 231]);
+  const plan = planTriageActions(a, [228, 231], [1, 2, 3]);
   expect(plan.comments).toHaveLength(2);
   const c228 = plan.comments.find((c) => c.issueNumber === 228)!;
   expect(c228.verdicts.map((x) => x.beer_id)).toEqual([1, 2]);
@@ -104,7 +104,37 @@ test('caps new issues at 3 in array order; overflow verdicts are skipped', () =>
     verdicts: [1, 2, 3, 4].map((n) => v({ beer_id: n, new_issue_key: `k${n}` })),
     new_issues: [issue('k1'), issue('k2'), issue('k3'), issue('k4')],
   };
-  const plan = planTriageActions(a, []);
+  const plan = planTriageActions(a, [], [1, 2, 3, 4]);
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
+  expect(plan.skipped).toBe(1);
+});
+
+test('drops verdicts whose beer_id is outside the current batch (actionable and quiet alike)', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, issue_number: 228 }),                          // in batch, fine
+      v({ beer_id: 999, issue_number: 228 }),                        // actionable, foreign row
+      v({ beer_id: 998, review_class: 'wontfix' }),                  // quiet, foreign row
+    ],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [228], [1]);
+  expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
+  expect(plan.quiet).toEqual([]);
+  expect(plan.skipped).toBe(2);
+});
+
+test('dedupes duplicate beer_id verdicts: first wins, later ones skipped', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, issue_number: 228, review_note: 'first' }),
+      v({ beer_id: 1, review_class: 'wontfix', review_note: 'second' }),
+      v({ beer_id: 2, review_class: 'not_on_untappd' }),
+    ],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [228], [1, 2]);
+  expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([2]);
   expect(plan.skipped).toBe(1);
 });

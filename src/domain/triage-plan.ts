@@ -42,11 +42,18 @@ function pushInto<K>(map: Map<K, ActionableVerdict[]>, key: K, verdict: Actionab
 }
 
 // Pure validation/routing of the LLM proposal. The LLM only proposes — this is
-// where hallucinated issue numbers, ghost keys, duplicate keys and issue spam
-// get filtered. Skipped verdicts keep review_class NULL and re-enter
-// tomorrow's selection.
-export function planTriageActions(analysis: Analysis, openIssueNumbers: number[]): TriagePlan {
+// where hallucinated issue numbers, ghost keys, duplicate keys, issue spam,
+// out-of-batch beer_ids and duplicate beer_ids get filtered. The prompt quotes
+// older beer_ids inside open-issue bodies/comment tables, so the model can echo
+// a stray id that isn't part of the current selection — that verdict must never
+// reach the unconditional `UPDATE ... WHERE beer_id=?` write, actionable or
+// quiet alike (a stray wontfix would permanently exclude a foreign row).
+// Skipped verdicts keep review_class NULL and re-enter tomorrow's selection.
+export function planTriageActions(
+  analysis: Analysis, openIssueNumbers: number[], batchBeerIds: number[],
+): TriagePlan {
   const open = new Set(openIssueNumbers);
+  const batch = new Set(batchBeerIds);
 
   // Dedupe proposed issues by key (first occurrence wins) BEFORE applying the
   // cap, so duplicates neither spawn duplicate GitHub issues nor waste slots.
@@ -61,8 +68,13 @@ export function planTriageActions(analysis: Analysis, openIssueNumbers: number[]
   const byIssue = new Map<number, ActionableVerdict[]>();
   const quiet: Verdict[] = [];
   let skipped = 0;
+  const seenBeerIds = new Set<number>();
 
   for (const verdict of analysis.verdicts) {
+    if (!batch.has(verdict.beer_id)) { skipped++; continue; } // foreign row — never write
+    if (seenBeerIds.has(verdict.beer_id)) { skipped++; continue; } // first verdict per beer wins
+    seenBeerIds.add(verdict.beer_id);
+
     if (!isActionable(verdict)) {
       quiet.push(verdict); // quiet classes never touch GitHub; stray refs are ignored
       continue;
