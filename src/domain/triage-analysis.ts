@@ -1,0 +1,120 @@
+import { z } from 'zod';
+import type { UntriagedFailure } from '../storage/enrich_failures';
+
+export const REVIEW_CLASSES = ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix'] as const;
+
+export const VerdictSchema = z.object({
+  beer_id: z.number().int(),
+  review_class: z.enum(REVIEW_CLASSES),
+  review_note: z.string().min(1).max(500),
+  // At most one of these is non-null. parser_bug/matcher_bug verdicts point at
+  // an existing open issue OR a new_issues entry; not_on_untappd/wontfix use neither.
+  issue_number: z.number().int().nullable(),
+  new_issue_key: z.string().nullable(),
+});
+export type Verdict = z.infer<typeof VerdictSchema>;
+
+export const AnalysisSchema = z.object({
+  verdicts: z.array(VerdictSchema),
+  new_issues: z.array(z.object({
+    key: z.string().min(1),
+    title: z.string().min(1).max(200),
+    body: z.string().min(1),
+    labels: z.array(z.string()),
+  })),
+});
+export type Analysis = z.infer<typeof AnalysisSchema>;
+
+export interface OpenIssue {
+  number: number;
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+export interface TriageInput {
+  orphans: UntriagedFailure[];
+  openIssues: OpenIssue[];
+}
+
+// JSON Schema mirror of AnalysisSchema for Anthropic strict tool use.
+// Strict mode requires additionalProperties:false and every property required
+// (hence nullable fields instead of optional ones). Keep in sync with the zod
+// schema above — the strict-compat test guards the shape invariants.
+export const ANALYSIS_TOOL_SCHEMA = {
+  type: 'object',
+  properties: {
+    verdicts: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          beer_id: { type: 'integer' },
+          review_class: { type: 'string', enum: [...REVIEW_CLASSES] },
+          review_note: { type: 'string' },
+          issue_number: { type: ['integer', 'null'] },
+          new_issue_key: { type: ['string', 'null'] },
+        },
+        required: ['beer_id', 'review_class', 'review_note', 'issue_number', 'new_issue_key'],
+        additionalProperties: false,
+      },
+    },
+    new_issues: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          key: { type: 'string' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          labels: { type: 'array', items: { type: 'string' } },
+        },
+        required: ['key', 'title', 'body', 'labels'],
+        additionalProperties: false,
+      },
+    },
+  },
+  required: ['verdicts', 'new_issues'],
+  additionalProperties: false,
+} as const;
+
+const ISSUE_BODY_CAP = 2000; // bound prompt tokens; titles carry most signal
+
+export function buildTriagePrompt(input: TriageInput): string {
+  const issues = input.openIssues.map((i) =>
+    `#${i.number} [${i.labels.join(', ')}] ${i.title}\n${i.body.slice(0, ISSUE_BODY_CAP)}`,
+  ).join('\n---\n') || '(none)';
+  return [
+    'You are the triage analyst for a Warsaw beer-catalog → Untappd matching pipeline.',
+    'Each orphan below is a beer our matcher failed to match. `candidates_summary` lists',
+    'what the Untappd search returned (empty = the search query itself found nothing);',
+    '`source_url` is the shop the beer was scraped from ("" = internal cron);',
+    '`fail_count` is how many attempts have failed.',
+    '',
+    'Classify EVERY orphan with exactly one review_class:',
+    '- parser_bug: the shop adapter produced a garbage row — merch/glassware/wine/food,',
+    '  brewery and name split wrongly, HTML noise in fields. The fix is in the adapter.',
+    '- matcher_bug: the beer plausibly exists on Untappd but we missed it — brewery alias',
+    '  gap (e.g. rebrand), noise tokens in the query, name divergence between shop and',
+    '  Untappd. The fix is in the matcher/aliases. Candidates that nearly match are a',
+    '  strong hint.',
+    '- not_on_untappd: a real beer that simply is not listed on Untappd. No fix possible.',
+    '- wontfix: not worth fixing (one-off collab long gone, non-beer that is not the',
+    '  adapter\'s fault, hopeless data).',
+    '',
+    'Cluster actionable orphans (parser_bug / matcher_bug) into patterns:',
+    '- If an open issue below already covers the pattern, set issue_number to it.',
+    '- Otherwise define an entry in new_issues (stable key, title, markdown body with the',
+    '  examples and your hypothesis) and reference it via new_issue_key.',
+    '- AT MOST 3 new_issues. Prefer fewer, broader patterns over many narrow ones.',
+    '- not_on_untappd / wontfix verdicts must have issue_number: null and new_issue_key: null.',
+    'review_note: one short sentence naming the pattern (English, ≤200 chars).',
+    'Submit via the submit_triage tool. Do not invent issue numbers not listed below.',
+    '',
+    '## Open triage issues',
+    issues,
+    '',
+    '## Orphans',
+    JSON.stringify(input.orphans, null, 1),
+  ].join('\n');
+}
