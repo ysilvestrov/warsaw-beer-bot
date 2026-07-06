@@ -94,14 +94,14 @@ export interface UntriagedFailure {
 // Newest untriaged not_found failures for the daily triage job. `blocked` rows
 // are proxy/ban trouble, not matching trouble, and are excluded. Newest-first so
 // fresh signal is triaged before the stale backlog.
-export function selectUntriagedFailures(db: DB, limit: number): UntriagedFailure[] {
+export function listUntriagedFailures(db: DB, limit: number): UntriagedFailure[] {
   return db
     .prepare(
       `SELECT beer_id, brewery, name, search_url, source_url,
               candidates_count, candidates_summary, fail_count, last_at
          FROM enrich_failures
         WHERE review_class IS NULL AND outcome = 'not_found'
-        ORDER BY last_at DESC
+        ORDER BY last_at DESC, beer_id DESC
         LIMIT ?`,
     )
     .all(limit) as UntriagedFailure[];
