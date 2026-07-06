@@ -179,6 +179,30 @@ test('no untriaged orphans: nothing-to-do line, no LLM call', async () => {
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('0 нових');
 });
 
+test('reentrancy guard: overlapping tick is skipped while a run is in progress', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  let resolveAnalyze!: (v: Analysis) => void;
+  const deferred = new Promise<Analysis>((resolve) => { resolveAnalyze = resolve; });
+  const theLlm = { analyze: vi.fn().mockReturnValue(deferred) };
+  const github = gh();
+
+  const first = orphanTriage({ db: d, log, llm: theLlm, github, now: inWindow });
+  // Let the first run's synchronous prefix (including the `await
+  // github.listOpenIssues()` continuation) progress up to the pending
+  // `llm.analyze()` call before the "next tick" fires.
+  await new Promise((resolve) => { setImmediate(resolve); });
+
+  const second = orphanTriage({ db: d, log, llm: theLlm, github, now: inWindow });
+  await second;
+  expect(theLlm.analyze).toHaveBeenCalledTimes(1);
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+
+  resolveAnalyze({ verdicts: [], new_issues: [] });
+  await first;
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+});
+
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],

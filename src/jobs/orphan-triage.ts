@@ -19,6 +19,11 @@ export const TRIAGE_BATCH_LIMIT = 50;
 // run-marked-for-the-day guarantee depends on finish() always being reached.
 const errMessage = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+// Re-entrancy guard: a run slower than the 15-min cron tick must not overlap
+// with the next tick (duplicate GitHub issues/comments). Module-level is fine —
+// the bot is a single process.
+let triageRunning = false;
+
 // Same Warsaw-window pattern as daily-status, but earlier — [06:00,09:00) — so
 // the result line is ready before the digest window [09:00,12:00).
 export function shouldRunTriage(args: {
@@ -76,84 +81,93 @@ export interface OrphanTriageDeps {
 // GitHub-first-DB-second ordering so a GitHub failure leaves orphans untriaged
 // (they re-enter tomorrow's batch). Result line is persisted for the digest.
 export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
-  const { db, log, llm, github } = deps;
-  const now = (deps.now ?? (() => new Date()))();
-  const { run, dateKey } = shouldRunTriage({ now, lastRunDate: getJobState(db, TRIAGE_LAST_RUN_KEY) });
-  if (!run) return;
-
-  const finish = (outcome: TriageOutcome): void => {
-    setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
-    setJobState(db, TRIAGE_LAST_RESULT_KEY,
-      JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
-    log.info({ outcome, dateKey }, 'orphan-triage finished');
-  };
-  const empty: TriageOutcome = {
-    total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, error: null, disabledReason: null,
-  };
-
-  if (!llm || !github) {
-    finish({ ...empty, disabledReason: !llm ? 'нема ключа LLM' : 'нема GITHUB_TOKEN' });
+  if (triageRunning) {
+    deps.log.debug('orphan-triage: previous run still in progress, skipping tick');
     return;
   }
-
-  const orphans = listUntriagedFailures(db, TRIAGE_BATCH_LIMIT);
-  if (orphans.length === 0) {
-    finish(empty);
-    return;
-  }
-  const byId = new Map(orphans.map((o) => [o.beer_id, o]));
-  const outcome: TriageOutcome = { ...empty, total: orphans.length };
-  const nowIso = now.toISOString();
-
-  let plan;
+  triageRunning = true;
   try {
-    const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
-    const analysis = await llm.analyze({ orphans, openIssues });
-    plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
-  } catch (e) {
-    log.error({ err: e }, 'orphan-triage: analysis failed');
-    finish({ ...outcome, error: errMessage(e).slice(0, 120) });
-    return;
-  }
-  outcome.skipped = plan.skipped;
+    const { db, log, llm, github } = deps;
+    const now = (deps.now ?? (() => new Date()))();
+    const { run, dateKey } = shouldRunTriage({ now, lastRunDate: getJobState(db, TRIAGE_LAST_RUN_KEY) });
+    if (!run) return;
 
-  const review = (v: Verdict, issueNumber: number | null): void => {
-    const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-    if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso)) {
-      // Row self-cleared between selection and write (the beer matched meanwhile).
-      log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
+    const finish = (outcome: TriageOutcome): void => {
+      setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+      setJobState(db, TRIAGE_LAST_RESULT_KEY,
+        JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
+      log.info({ outcome, dateKey }, 'orphan-triage finished');
+    };
+    const empty: TriageOutcome = {
+      total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+      skipped: 0, error: null, disabledReason: null,
+    };
+
+    if (!llm || !github) {
+      finish({ ...empty, disabledReason: !llm ? 'нема ключа LLM' : 'нема GITHUB_TOKEN' });
+      return;
     }
-  };
 
-  for (const issue of plan.newIssues) {
+    const orphans = listUntriagedFailures(db, TRIAGE_BATCH_LIMIT);
+    if (orphans.length === 0) {
+      finish(empty);
+      return;
+    }
+    const byId = new Map(orphans.map((o) => [o.beer_id, o]));
+    const outcome: TriageOutcome = { ...empty, total: orphans.length };
+    const nowIso = now.toISOString();
+
+    let plan;
     try {
-      const number = await github.createIssue({ title: issue.title, body: issue.body, labels: issue.labels });
-      issue.verdicts.forEach((v) => review(v, number));
-      outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
+      const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
+      const analysis = await llm.analyze({ orphans, openIssues });
+      plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
-      log.error({ err: e, key: issue.key }, 'orphan-triage: createIssue failed');
-      outcome.skipped += issue.verdicts.length;
+      log.error({ err: e }, 'orphan-triage: analysis failed');
+      finish({ ...outcome, error: errMessage(e).slice(0, 120) });
+      return;
     }
-  }
+    outcome.skipped = plan.skipped;
 
-  for (const c of plan.comments) {
-    try {
-      const body = `Автотріаж ${dateKey}: +${c.verdicts.length} нових прикладів\n\n${exampleTable(c.verdicts, byId)}`;
-      await github.commentOnIssue(c.issueNumber, body);
-      c.verdicts.forEach((v) => review(v, c.issueNumber));
-      outcome.commented.push({ issueNumber: c.issueNumber, count: c.verdicts.length });
-    } catch (e) {
-      log.error({ err: e, issue: c.issueNumber }, 'orphan-triage: comment failed');
-      outcome.skipped += c.verdicts.length;
+    const review = (v: Verdict, issueNumber: number | null): void => {
+      const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
+      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso)) {
+        // Row self-cleared between selection and write (the beer matched meanwhile).
+        log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
+      }
+    };
+
+    for (const issue of plan.newIssues) {
+      try {
+        const number = await github.createIssue({ title: issue.title, body: issue.body, labels: issue.labels });
+        issue.verdicts.forEach((v) => review(v, number));
+        outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
+      } catch (e) {
+        log.error({ err: e, key: issue.key }, 'orphan-triage: createIssue failed');
+        outcome.skipped += issue.verdicts.length;
+      }
     }
-  }
 
-  for (const v of plan.quiet) {
-    review(v, null);
-    if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
-    else outcome.wontfix++;
-  }
+    for (const c of plan.comments) {
+      try {
+        const body = `Автотріаж ${dateKey}: +${c.verdicts.length} нових прикладів\n\n${exampleTable(c.verdicts, byId)}`;
+        await github.commentOnIssue(c.issueNumber, body);
+        c.verdicts.forEach((v) => review(v, c.issueNumber));
+        outcome.commented.push({ issueNumber: c.issueNumber, count: c.verdicts.length });
+      } catch (e) {
+        log.error({ err: e, issue: c.issueNumber }, 'orphan-triage: comment failed');
+        outcome.skipped += c.verdicts.length;
+      }
+    }
 
-  finish(outcome);
+    for (const v of plan.quiet) {
+      review(v, null);
+      if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
+      else outcome.wontfix++;
+    }
+
+    finish(outcome);
+  } finally {
+    triageRunning = false;
+  }
 }
