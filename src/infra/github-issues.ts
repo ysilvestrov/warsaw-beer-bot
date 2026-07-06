@@ -10,18 +10,30 @@ export interface GithubIssuesClient {
 // The triage job files at most a handful of requests per day, so no pagination
 // beyond per_page=100 and no rate-limit handling — a failure surfaces in the
 // digest and retries tomorrow.
-export function createGithubIssuesClient(cfg: { token: string; repo: string }): GithubIssuesClient {
+export function createGithubIssuesClient(cfg: {
+  token: string;
+  repo: string;
+  fetchImpl?: typeof fetch;
+}): GithubIssuesClient {
+  const fetchImpl = cfg.fetchImpl ?? fetch;
   const base = `https://api.github.com/repos/${cfg.repo}`;
   const headers = {
     Authorization: `Bearer ${cfg.token}`,
     Accept: 'application/vnd.github+json',
     'Content-Type': 'application/json',
     'User-Agent': 'warsaw-beer-bot-triage',
+    'X-GitHub-Api-Version': '2022-11-28',
   };
 
   async function call<T>(url: string, init?: RequestInit): Promise<T> {
-    const res = await fetch(url, { ...init, headers });
-    if (!res.ok) throw new Error(`GitHub ${init?.method ?? 'GET'} ${url}: ${res.status}`);
+    // NOTE: `headers` wins over `init` here — callers must not pass init.headers.
+    const res = await fetchImpl(url, { ...init, headers });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(
+        `GitHub ${init?.method ?? 'GET'} ${url}: ${res.status}${text ? ` ${text.slice(0, 300)}` : ''}`,
+      );
+    }
     return res.json() as Promise<T>;
   }
 
