@@ -3,7 +3,8 @@ import type { StatusMetrics } from '../storage/stats';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { buildStatusMessage, dailyStatus, shouldSendDailyStatus } from './daily-status';
-import { getJobState } from '../storage/job_state';
+import { getJobState, setJobState } from '../storage/job_state';
+import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -161,4 +162,36 @@ it('renders the enrich line with health icon', () => {
 it('shows ⚠️ when search is unhealthy', () => {
   const m = { ...base, enrichMatched24h: 0, enrichFailures24h: 0, untappdSearchHealthy: false };
   expect(buildStatusMessage(m, '2026-06-28 10:00')).toContain('пошук ⚠️');
+});
+
+test('buildStatusMessage: includes triage line when provided', () => {
+  const out = buildStatusMessage(base, '2026-07-05 09:00', 'Тріаж: 7 нових → 2 до #228');
+  const lines = out.split('\n');
+  const enrichIdx = lines.findIndex((l) => l.startsWith('• Enrich:'));
+  expect(lines[enrichIdx + 1]).toBe('• Тріаж: 7 нових → 2 до #228');
+});
+
+test('buildStatusMessage: no triage line when null/omitted', () => {
+  expect(buildStatusMessage(base, '2026-07-05 09:00')).not.toContain('Тріаж');
+  expect(buildStatusMessage(base, '2026-07-05 09:00', null)).not.toContain('Тріаж');
+});
+
+test('dailyStatus: picks up today\'s triage result from job_state', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const now = () => new Date('2026-07-05T07:30:00Z'); // 09:30 Warsaw
+  setJobState(db, TRIAGE_LAST_RESULT_KEY,
+    JSON.stringify({ date: '2026-07-05', line: 'Тріаж: 1 нових' }));
+  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  expect(sent[0]).toContain('• Тріаж: 1 нових');
+});
+
+test('dailyStatus: stale (yesterday) triage result is ignored', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const now = () => new Date('2026-07-05T07:30:00Z');
+  setJobState(db, TRIAGE_LAST_RESULT_KEY,
+    JSON.stringify({ date: '2026-07-04', line: 'Тріаж: 9 нових' }));
+  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  expect(sent[0]).not.toContain('Тріаж');
 });

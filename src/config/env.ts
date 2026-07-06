@@ -20,6 +20,14 @@ const Schema = z.object({
   ADMIN_API_TOKEN: z.string().optional(),
   UNTAPPD_ALGOLIA_APP_ID: z.string().optional(),
   UNTAPPD_ALGOLIA_SEARCH_KEY: z.string().optional(),
+
+  // Orphan-triage job: keys are optional or defaulted; absence disables the job, never crashes startup.
+  TRIAGE_LLM_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
+  TRIAGE_LLM_MODEL: z.string().min(1).default('claude-opus-4-8'),
+  ANTHROPIC_API_KEY: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  GITHUB_TOKEN: z.string().optional(),
+  GITHUB_REPO: z.string().min(1).default('ysilvestrov/warsaw-beer-bot'),
 });
 
 export type Env = z.infer<typeof Schema>;
@@ -33,12 +41,22 @@ export const EXPECTED_PROD_KEYS = [
   { key: 'WEBSHARE_PROXY', disables: 'proxied Untappd traffic (block protection)' },
   { key: 'ADMIN_TELEGRAM_ID', disables: 'daily status digest + admin alerts' },
   { key: 'ADMIN_API_TOKEN', disables: 'admin HTTP endpoints (enrich-failures review)' },
+  { key: 'GITHUB_TOKEN', disables: 'orphan-triage job (GitHub issue filing)' },
+  { key: 'ANTHROPIC_API_KEY', disables: 'orphan-triage job (LLM analysis; not needed if TRIAGE_LLM_PROVIDER=openai)' },
 ] as const satisfies ReadonlyArray<{ key: keyof Env; disables: string }>;
 
 // Expected keys that are unset or empty-string in the parsed env.
 export function missingExpectedKeys(env: Env): { key: string; disables: string }[] {
   return EXPECTED_PROD_KEYS
     .filter(({ key }) => env[key] === undefined || env[key] === '')
+    // ANTHROPIC_API_KEY is only meaningful when the triage LLM provider is
+    // Anthropic (the default). When the operator has switched to OpenAI and
+    // supplied OPENAI_API_KEY, the job is fully configured and flagging the
+    // (irrelevant) missing Anthropic key would be a misleading warning.
+    .filter(
+      ({ key }) =>
+        !(key === 'ANTHROPIC_API_KEY' && env.TRIAGE_LLM_PROVIDER === 'openai' && !!env.OPENAI_API_KEY),
+    )
     .map(({ key, disables }) => ({ key, disables }));
 }
 

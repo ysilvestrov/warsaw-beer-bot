@@ -1096,6 +1096,33 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   бачить увесь діф, «немає тестів для X» виникає рідше; якщо тест-файл присутній у
   діфі — таке зауваження некоректне.
 
+### 5.11 Щоденний тріаж orphans (LLM-агент)
+
+- Раз на день (варшавське вікно 06:00–09:00, UTC-тік + `job_state` ідемпотентність,
+  як у daily-status) джоба `orphan-triage` бере **50 найновіших** рядків
+  `enrich_failures` з `review_class IS NULL AND outcome='not_found'`
+  (`blocked` — проблема проксі, не матчингу) і віддає їх LLM разом із відкритими
+  GitHub-issues з міткою `orphan-triage`.
+- LLM класифікує кожен orphan (`parser_bug` / `matcher_bug` / `not_on_untappd` /
+  `wontfix`) і кластеризує actionable-класи в патерни: коментар до наявної issue
+  або нова issue (**≤3 нових за запуск**; мітки примусово `orphan-triage` +
+  `parser-bug`/`matcher-bug`).
+- **LLM лише пропонує** — скрипт валідує (клас із CHECK-списку, номер issue з
+  відкритого списку, beer_id лише з поточної вибірки, дублікати відкидаються) і
+  виконує. Порядок на orphan: спочатку GitHub, потім запис
+  `review_class`/`review_note` у БД; збій GitHub лишає orphan нетріаженим на завтра.
+- Класи `not_on_untappd`/`wontfix` — тихі: лише запис у БД, без GitHub. Людське
+  рішення відбувається на рівні GitHub-issues, не сирих помилок.
+- Провайдер/модель конфігуруються: `TRIAGE_LLM_PROVIDER` (`anthropic`|`openai`),
+  `TRIAGE_LLM_MODEL` (дефолт `claude-opus-4-8`), ключі `ANTHROPIC_API_KEY` /
+  `OPENAI_API_KEY`, `GITHUB_TOKEN` + `GITHUB_REPO`. Відсутній ключ = джоба
+  вимкнена (не падає), що видно в digest.
+- Результат запуску — рядок у daily-status digest (через `job_state`,
+  ключ `orphan_triage_last_result`): «Тріаж: 7 нових → 2 до #228, 1 нова #232,
+  3 not_on_untappd, 1 пропущено», або «помилка (…)» / «вимкнено (…)».
+- Мітки `orphan-triage`, `parser-bug`, `matcher-bug` мають існувати в репо
+  (джоба їх не створює).
+
 ---
 
 ## 6. Browser Extension Client (`extension/`)

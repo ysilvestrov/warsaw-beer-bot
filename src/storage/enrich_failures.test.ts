@@ -2,7 +2,13 @@ import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertBeer } from './beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
-import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, type EnrichFailureRow } from './enrich_failures';
+import {
+  recordEnrichFailure,
+  clearEnrichFailure,
+  setEnrichFailureReview,
+  listUntriagedFailures,
+  type EnrichFailureRow,
+} from './enrich_failures';
 
 function freshDbWithBeer() {
   const db = openDb(':memory:');
@@ -12,6 +18,26 @@ function freshDbWithBeer() {
     normalized_name: normalizeName('Taking Shape'), normalized_brewery: normalizeBrewery('Track'),
   });
   return { db, id };
+}
+
+function testDb() {
+  const db = openDb(':memory:');
+  migrate(db);
+  return db;
+}
+
+// Inserts a beer with a distinct name/brewery so autoincrement assigns id `n`
+// (fresh in-memory db, called in order n = 1, 2, 3, ...). Word-based labels:
+// numeric suffixes are stripped as noise by normalization, which would collapse
+// all beers into one upserted row.
+const BEER_WORDS = ['one', 'two', 'three', 'four', 'five', 'six'];
+function insertBeer(db: ReturnType<typeof openDb>, n: number) {
+  const name = `Beer ${BEER_WORDS[n - 1]}`;
+  const brewery = `Craft ${BEER_WORDS[n - 1]}`;
+  return upsertBeer(db, {
+    untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
+    normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+  });
 }
 
 const row = (over: Partial<EnrichFailureRow> & { beer_id: number }): EnrichFailureRow => ({
@@ -106,5 +132,31 @@ describe('enrich_failures', () => {
     expect(() =>
       db.prepare('UPDATE enrich_failures SET review_class = ? WHERE beer_id = ?').run('bogus', id),
     ).toThrow();
+  });
+
+  test('listUntriagedFailures: newest-first, cap, excludes blocked and reviewed', () => {
+    const db = testDb();
+    insertBeer(db, 1); insertBeer(db, 2); insertBeer(db, 3); insertBeer(db, 4);
+    recordEnrichFailure(db, { beer_id: 1, brewery: 'A', name: 'a', search_url: 'u1',
+      source_url: '', outcome: 'not_found', candidates_count: 0, candidates_summary: '',
+      at: '2026-07-01T00:00:00Z' });
+    recordEnrichFailure(db, { beer_id: 2, brewery: 'B', name: 'b', search_url: 'u2',
+      source_url: '', outcome: 'not_found', candidates_count: 2, candidates_summary: 'x|y',
+      at: '2026-07-03T00:00:00Z' });
+    recordEnrichFailure(db, { beer_id: 3, brewery: 'C', name: 'c', search_url: 'u3',
+      source_url: '', outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-07-04T00:00:00Z' }); // blocked → excluded
+    recordEnrichFailure(db, { beer_id: 4, brewery: 'D', name: 'd', search_url: 'u4',
+      source_url: '', outcome: 'not_found', candidates_count: 0, candidates_summary: '',
+      at: '2026-07-02T00:00:00Z' });
+    setEnrichFailureReview(db, 4, 'wontfix', null, '2026-07-02T01:00:00Z'); // reviewed → excluded
+
+    const rows = listUntriagedFailures(db, 10);
+    expect(rows.map((r) => r.beer_id)).toEqual([2, 1]); // newest first
+    expect(listUntriagedFailures(db, 1).map((r) => r.beer_id)).toEqual([2]); // cap
+    expect(rows[0]).toMatchObject({
+      brewery: 'B', name: 'b', search_url: 'u2', candidates_count: 2,
+      candidates_summary: 'x|y', fail_count: 1, last_at: '2026-07-03T00:00:00Z',
+    });
   });
 });
