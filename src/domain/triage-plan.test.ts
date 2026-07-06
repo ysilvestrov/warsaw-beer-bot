@@ -1,0 +1,67 @@
+import { planTriageActions } from './triage-plan';
+import type { Analysis, Verdict } from './triage-analysis';
+
+const v = (over: Partial<Verdict>): Verdict => ({
+  beer_id: 1, review_class: 'matcher_bug', review_note: 'note',
+  issue_number: null, new_issue_key: null, ...over,
+});
+const issue = (key: string) => ({ key, title: `t-${key}`, body: 'b', labels: ['wrong'] });
+
+test('routes verdicts: existing issue, new issue, quiet', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, issue_number: 228 }),
+      v({ beer_id: 2, new_issue_key: 'k1', review_class: 'parser_bug' }),
+      v({ beer_id: 3, review_class: 'not_on_untappd' }),
+      v({ beer_id: 4, review_class: 'wontfix' }),
+    ],
+    new_issues: [issue('k1')],
+  };
+  const plan = planTriageActions(a, [228]);
+  expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
+  expect(plan.newIssues).toHaveLength(1);
+  expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([2]);
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([3, 4]);
+  expect(plan.skipped).toBe(0);
+});
+
+test('forces labels from verdict classes, ignoring model labels', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, new_issue_key: 'k1', review_class: 'parser_bug' }),
+      v({ beer_id: 2, new_issue_key: 'k1', review_class: 'matcher_bug' }),
+    ],
+    new_issues: [issue('k1')],
+  };
+  const plan = planTriageActions(a, []);
+  expect(plan.newIssues[0].labels.sort())
+    .toEqual(['matcher-bug', 'orphan-triage', 'parser-bug']);
+});
+
+test('skips invalid verdicts: unknown issue, unknown key, both refs, actionable without ref', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, issue_number: 999 }),                       // not open
+      v({ beer_id: 2, new_issue_key: 'ghost' }),                  // no such entry
+      v({ beer_id: 3, issue_number: 228, new_issue_key: 'k1' }),  // both refs
+      v({ beer_id: 4 }),                                          // actionable, no ref
+      v({ beer_id: 5, review_class: 'not_on_untappd', issue_number: 228 }), // quiet class ignores refs
+    ],
+    new_issues: [issue('k1')],
+  };
+  const plan = planTriageActions(a, [228]);
+  expect(plan.skipped).toBe(4);
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([5]);
+  expect(plan.newIssues).toHaveLength(0); // k1 unused → not created
+  expect(plan.comments).toHaveLength(0);
+});
+
+test('caps new issues at 3 in array order; overflow verdicts are skipped', () => {
+  const a: Analysis = {
+    verdicts: [1, 2, 3, 4].map((n) => v({ beer_id: n, new_issue_key: `k${n}` })),
+    new_issues: [issue('k1'), issue('k2'), issue('k3'), issue('k4')],
+  };
+  const plan = planTriageActions(a, []);
+  expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
+  expect(plan.skipped).toBe(1);
+});
