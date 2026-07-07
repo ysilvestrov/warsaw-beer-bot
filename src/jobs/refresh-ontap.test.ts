@@ -148,6 +148,43 @@ describe('refreshOntap non-beer filtering', () => {
     expect(db.prepare("SELECT COUNT(*) AS n FROM match_links WHERE ontap_ref = 'N/A'").get())
       .toEqual({ n: 0 });
   });
+
+  test('drops ontap parser-polluted brewery-only and location rows before catalog writes', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    const indexHtml = `
+      <div onclick="location.assign('https://polluted.ontap.pl/')">
+        <div class="panel-body">Polluted Pub 4 taps</div>
+      </div>
+    `;
+    const pubHtml = `
+      <html><head><meta property="og:title" content="Polluted Pub / ontap.pl"></head>
+      <body>
+        ${panel(1, 'Przetwórnia Chmielu Brewery', 'Przetwórnia Chmielu Brewery 5%', 'Pszeniczne')}
+        ${panel(2, 'Frankies Brewery', 'Frankies Brewery 4,5%', 'Svetlý Ležák')}
+        ${panel(3, 'W Brzesku Brewery', 'Žatecký Nealko 0%', 'Pilzner bezalkoholowy')}
+        ${panel(4, 'PINTA Brewery', 'PINTA Atak Chmielu 6%', 'West Coast IPA')}
+      </body></html>
+    `;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return indexHtml;
+        if (url === 'https://polluted.ontap.pl/') return pubHtml;
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder: async () => null,
+      lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+    });
+
+    const beers = db.prepare('SELECT brewery, name FROM beers ORDER BY id').all();
+    expect(beers).toEqual([
+      expect.objectContaining({ brewery: 'PINTA Brewery', name: 'PINTA Atak Chmielu' }),
+    ]);
+  });
 });
 
 function panel(

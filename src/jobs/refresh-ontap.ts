@@ -5,7 +5,7 @@ import type { Geocoder } from '../sources/geocoder';
 import { parseOntapCityIndex, type IndexPub } from '../sources/ontap/index';
 import { CITIES, type City } from '../domain/cities';
 import { isOntapNonBeerTap } from '../sources/ontap/non-beer';
-import { isOntapEmptyTapRef, parsePubPage } from '../sources/ontap/pub';
+import { isOntapEmptyTapRef, normalizeOntapTapIdentity, parsePubPage } from '../sources/ontap/pub';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
@@ -96,8 +96,10 @@ export async function refreshOntap(deps: Deps): Promise<void> {
         const prepared = prepareCatalog(catalog);
         for (const t of taps) {
           if (isOntapEmptyTapRef(t.beer_ref)) continue;
-          const brewery = t.brewery_ref ?? t.beer_ref.split(/[—-]\s|:\s/)[0] ?? '';
-          const m = matchPrepared({ brewery, name: t.beer_ref, abv: t.abv }, prepared);
+          const identity = normalizeOntapTapIdentity(t.brewery_ref, t.beer_ref);
+          if (!identity) continue;
+          const { brewery, name } = identity;
+          const m = matchPrepared({ brewery, name, abv: t.abv }, prepared);
           let beerId: number;
           let isFreshOrphan = false;
           if (m) {
@@ -105,12 +107,12 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             beerId = m.id;
           } else {
             beerId = upsertBeer(db, {
-              name: t.beer_ref,
+              name,
               brewery,
               style: t.style,
               abv: t.abv,
               rating_global: t.u_rating,
-              normalized_name: normalizeName(t.beer_ref),
+              normalized_name: normalizeName(name),
               normalized_brewery: normalizeBrewery(brewery),
             });
             upsertMatch(db, t.beer_ref, beerId, 1.0);

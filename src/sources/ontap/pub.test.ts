@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parsePubPage, extractBeerName, isOntapEmptyTapRef } from './pub';
+import { parsePubPage, extractBeerName, isOntapEmptyTapRef, normalizeOntapTapIdentity } from './pub';
 
 const html = fs.readFileSync(
   path.join(__dirname, '../../../tests/fixtures/ontap/beer-bones.html'),
@@ -74,6 +74,11 @@ describe('extractBeerName', () => {
     expect(extractBeerName('Salamander 6%', null)).toBe('Salamander');
   });
 
+  test('keeps anniversary degree marks that are part of the beer name', () => {
+    expect(extractBeerName('Birra Menabrea Brewery La 150° Bionda 4,8%', 'Birra Menabrea Brewery'))
+      .toBe('La 150° Bionda');
+  });
+
   test('strips brewery prefix when present', () => {
     expect(extractBeerName('Harpagan Brewery Buzdygan Rozkoszy 24°·8,5%', 'Harpagan Brewery'))
       .toBe('Buzdygan Rozkoszy');
@@ -92,5 +97,34 @@ describe('extractBeerName', () => {
 
   test('returns empty string when only brewery is present', () => {
     expect(extractBeerName('Pinta', 'Pinta')).toBe('');
+  });
+});
+
+describe('normalizeOntapTapIdentity', () => {
+  test('drops blank tap names before catalog writes', () => {
+    expect(normalizeOntapTapIdentity('Some Brewery', '')).toBeNull();
+    expect(normalizeOntapTapIdentity('Some Brewery', '   ')).toBeNull();
+  });
+
+  test('strips cider category and duplicate brewery prefix from Chyliczki names', () => {
+    expect(normalizeOntapTapIdentity('Chyliczki', 'Cydr Chyliczki - Japoński Sad'))
+      .toEqual({ brewery: 'Chyliczki', name: 'Japoński Sad' });
+  });
+
+  test('maps Cydr Dzik generic rows to the real cidery and product name', () => {
+    expect(normalizeOntapTapIdentity('CYDR DZIK', 'polski cydr'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik' });
+  });
+
+  test('drops brewery-only rows and known location/category brewery pollution', () => {
+    expect(normalizeOntapTapIdentity('Przetwórnia Chmielu Brewery', 'Przetwórnia Chmielu')).toBeNull();
+    expect(normalizeOntapTapIdentity('Frankies Brewery', 'Frankies')).toBeNull();
+    expect(normalizeOntapTapIdentity('W Brzesku Brewery', 'Žatecký Nealko')).toBeNull();
+    expect(normalizeOntapTapIdentity('vaisiu sultys', 'Cydr Gruszkowy')).toBeNull();
+  });
+
+  test('keeps unknown brewery/name shapes unchanged', () => {
+    expect(normalizeOntapTapIdentity('Unknown Brewery', 'Some New Beer'))
+      .toEqual({ brewery: 'Unknown Brewery', name: 'Some New Beer' });
   });
 });
