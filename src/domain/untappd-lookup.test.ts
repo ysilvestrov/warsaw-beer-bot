@@ -370,4 +370,64 @@ describe('lookupBeer', () => {
     const out = await lookupBeer({ brewery: 'Pinta', name: 'Atak Chmielu', search });
     expect(out.kind).toBe('not_found');
   });
+
+  describe('reviewed matcher near-misses (#234)', () => {
+    test.each([
+      {
+        brewery: 'Umanpivo Brewery',
+        name: 'Waissburg Blanche',
+        candidate: { bid: 31202, beer_name: 'Waissburg Blanche', brewery_name: 'Уманьпиво', style: 'Witbier', abv: 5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Grimbergen Brewery',
+        name: 'Blanche',
+        candidate: { bid: 31278, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', style: 'Witbier', abv: 6, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Wroclove Brewery',
+        name: 'Dunkel',
+        candidate: { bid: 31297, beer_name: 'Wroclove Dunkel 13.5', brewery_name: 'Browar Witnica', style: 'Dunkel', abv: 5.3, global_rating: 3.5 },
+      },
+      {
+        brewery: 'NAPOMUCEN Brewery',
+        name: 'LABIRYNT',
+        candidate: { bid: 31262, beer_name: 'Labirynth', brewery_name: 'Nepo Brewing', style: 'IPA', abv: 6, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Pivovar Poutnik Brewery',
+        name: 'Pilhrimov',
+        candidate: { bid: 31271, beer_name: 'Poutník Světlý ležák Premium 12°', brewery_name: 'Pivovar Pelhřimov', style: 'Lager', abv: 5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Brauerei Knoblach Brewery',
+        name: 'Pfingstoffla',
+        candidate: { bid: 30902, beer_name: 'Pfingststöffla', brewery_name: 'Brauerei Knoblach Schammelsdorf', style: 'Lager', abv: 5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Brauerei Knoblach Schammelsdorf Brewery',
+        name: 'Lagerbier ungespundet',
+        candidate: { bid: 31165, beer_name: 'Schammelsdorfer Lagerbier', brewery_name: 'Brauerei Knoblach Schammelsdorf', style: 'Lager', abv: 5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Cydr z Mazowsza Brewery',
+        name: 'Cydr jabłkowy',
+        candidate: { bid: 31347, beer_name: 'Jabłkowy cydr z Mazowsza', brewery_name: 'Cydr z Mazowsza', style: 'Cider', abv: 5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'NEPO Brewing Brewery',
+        name: 'Tropical Wave',
+        candidate: { bid: 31531, beer_name: 'TropiCool Wave Oaza Garden', brewery_name: 'Nepo Brewing', style: 'IPA', abv: 6.5, global_rating: 3.5 },
+      },
+      {
+        brewery: 'Jeżek Kwaśnicowy Brewery',
+        name: 'Jeżek kwasnicowy',
+        candidate: { bid: 494, beer_name: 'Ježek Kvasnicový', brewery_name: 'Pivovar Jihlava', style: 'Lager', abv: 4.8, global_rating: 3.5 },
+      },
+    ])('matched: reviewed near candidate $candidate.bid', async ({ brewery, name, candidate }) => {
+      const out = await lookupBeer({ brewery, name, search: fakeSearch(() => [candidate]) });
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(candidate.bid);
+    });
+  });
 });

@@ -10,11 +10,17 @@
 // pair at a time (see docs/debug-orphan-matching.md).
 const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['nepomucen', 'nepo'],
+  ['napomucen', 'nepo'],
   ['van honsebrouck', 'kasteel vanhonsebrouck'],
   ['kasteel vanhonsebrouck', 'bacchus'],
   ['weihenstephaner', 'bayerische staatsbrauerei weihenstephan'],
   ['hopbrook', 'hop brook'],
   ['starkaft', 'starkraft'],
+  ['umanpivo', 'уманьпиво'],
+  ['grimbergen', 'alken maes'],
+  ['wroclove', 'witnica'],
+  ['poutnik', 'pelhrimov'],
+  ['jezek kwasnicowy', 'jihlava'],
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
