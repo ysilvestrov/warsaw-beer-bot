@@ -119,17 +119,38 @@ function foldToken(tok: string): string {
 // the brewery ("Track Brewing Company Taking Shape" + "Track Brewing Co.") otherwise
 // AND-searches duplicated terms and returns nothing. Falls back to the raw name if the
 // clean pass removes everything (all-noise input), to avoid an empty `?q=` search.
+// Strip structural search noise from a raw brewery/name string before it becomes an
+// Untappd (Algolia) query. Algolia ANDs every term, so bracketed adjunct lists, collab
+// parentheticals, and ABV/spec strings over-constrain the search to zero hits (#236).
+// These groups never carry the core beer name, so they are dropped wholesale — the raw
+// name (with adjuncts) is still used separately for downstream fuzzy disambiguation.
+export function stripSearchNoise(s: string): string {
+  return s
+    .replace(/\[[^\]]*\]/g, ' ')                     // [adjunct, lists]
+    .replace(/\([^)]*\)/g, ' ')                      // (collab …), (batch/2023)
+    .replace(/[[\](){}]/g, ' ')                      // stray/unbalanced brackets
+    .replace(/[<>]?\s*\d+(?:[.,]\d+)?\s*%/g, ' ')    // <0,5%  4.5%  0,5 %
+    .replace(/\d+(?:[.,]\d+)?\s*°/g, ' ')            // 24°
+    .replace(/\b(?:alc|abv|ibu)\b/gi, ' ')           // spec labels
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function cleanSearchQuery(brewery: string, name: string): string {
   const seen = new Set<string>();
   const out: string[] = [];
+  const cleanBrewery = stripSearchNoise(stripLegalForm(brewery));
+  const cleanName = stripSearchNoise(name);
   // Collapse COLLAB_SEP ("/", " x ", " & ") first so a bare collab connector ("x")
   // never leaks into the query (as stripBreweryNoise did before tokenizing).
-  const combined = `${stripLegalForm(brewery)} ${name}`.split(COLLAB_SEP).join(' ');
+  const combined = `${cleanBrewery} ${cleanName}`.split(COLLAB_SEP).join(' ');
   for (const tok of combined.split(/\s+/)) {
     const f = foldToken(tok);
     if (!f || BREWERY_NOISE.has(f) || seen.has(f)) continue;
     seen.add(f);
     out.push(tok);
   }
-  return out.length ? out.join(' ') : (name.trim() || brewery.trim());
+  // Fall back to the CLEANED name/brewery (never the raw name) so brackets/spec are
+  // never re-injected into ?q= when the strip+dedup pass empties the query.
+  return out.length ? out.join(' ') : (cleanName || cleanBrewery || name.trim());
 }
