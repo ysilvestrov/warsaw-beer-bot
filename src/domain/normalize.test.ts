@@ -210,4 +210,7 @@ describe('stripSearchNoise', () => {
   test('leaves an ordinary name untouched', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
   });
+  test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
+    expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');
+  });
 });
