@@ -162,3 +162,7 @@ For every code change:
 - after creating the PR, wait for review comments/checks to complete before reporting final status
 - evaluate review comments technically before changing code
 - address review findings that are valid and worth addressing
+
+When automating GitHub PR operations:
+
+- avoid GitHub GraphQL for PR edits or metadata updates; prefer `gh pr` commands, and if those fail due GitHub GraphQL/deprecation issues, use REST via `gh api repos/<owner>/<repo>/pulls/<number>` instead
