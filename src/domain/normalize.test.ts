@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -171,5 +171,46 @@ describe('cleanSearchQuery', () => {
   });
   test('collapses a collab connector so "x" does not leak into the query', () => {
     expect(cleanSearchQuery('Alpha x Beta', 'Some Beer')).toBe('Alpha Beta Some Beer');
+  });
+  test('strips a bracketed adjunct list from the query (#236 Magic Road 30888)', () => {
+    expect(
+      cleanSearchQuery('Magic Road Brewery', 'Wonders [passionfruit,banana, coconut cream]'),
+    ).toBe('Magic Road Wonders');
+  });
+  test('drops a collab parenthetical (#236 Funky Fluid 31266/31267)', () => {
+    expect(
+      cleanSearchQuery('Funky Fluid', 'Dynaboost: Mosaic (collab Yakima Chief)'),
+    ).toBe('Funky Fluid Dynaboost: Mosaic');
+  });
+  test('strips ABV/spec strings (#236 Piwne Podziemie 12082)', () => {
+    expect(
+      cleanSearchQuery('Piwne Podziemie Brewery', 'NoLo – Hemperor <0,5% alc <0,5%'),
+    ).toBe('Piwne Podziemie NoLo Hemperor');
+  });
+  test('cleans a dangling/unbalanced paren without leaking the bracket char', () => {
+    const q = cleanSearchQuery('Funky Fluid', 'Mosaic (collab Yakima Chief');
+    expect(q).toBe('Funky Fluid Mosaic Yakima Chief');
+    expect(q).not.toContain('(');
+  });
+  test('all-noise input never yields an empty query (fallback)', () => {
+    expect(cleanSearchQuery('Brewing Co', '[only adjuncts]')).toBe('Brewing Co');
+  });
+});
+
+describe('stripSearchNoise', () => {
+  test('removes balanced [..] and (..) groups', () => {
+    expect(stripSearchNoise('Wonders [a, b] (collab X)')).toBe('Wonders');
+  });
+  test('removes stray/unbalanced brackets', () => {
+    expect(stripSearchNoise('Mosaic (collab X')).toBe('Mosaic collab X');
+  });
+  test('removes ABV/spec strings and labels', () => {
+    expect(stripSearchNoise('Hemperor <0,5% alc 4.5% abv 24°')).toBe('Hemperor');
+  });
+  test('leaves an ordinary name untouched', () => {
+    expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
+  });
+  test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
+    expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');
   });
 });
