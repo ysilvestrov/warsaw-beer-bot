@@ -344,7 +344,7 @@ src/
 | `fail_count` | INTEGER | NOT NULL DEFAULT 1 | скільки разів провалився (++ на upsert) |
 | `last_at` | TEXT | NOT NULL | час останнього провалу (ISO) |
 | `source_url` | TEXT | NOT NULL DEFAULT '' | URL сторінки магазину, з якої прийшла ця пара brewery/name; заповнюється лише client-relay (`/enrich/result` з `pageUrl`); серверний крон пише `''` (URL невідомий) |
-| `review_class` | TEXT | nullable CHECK IN (`parser_bug`,`matcher_bug`,`not_on_untappd`,`wontfix`) | клас тріажу після ручного розгляду; `NULL` = ще не розмічено; `parser_bug` — адаптер прочитав назву/пивоварню криво; `matcher_bug` — gate/fuzzy відсік валідного кандидата; `not_on_untappd` — відсутнє на Untappd; `wontfix` — навмисно без матчингу |
+| `review_class` | TEXT | nullable CHECK IN (`parser_bug`,`matcher_bug`,`not_on_untappd`,`wontfix`) | клас тріажу після ручного розгляду; `NULL` = ще не розмічено; `parser_bug` — НАШ адаптер зіпсував інакше чистий рядок (криво розбита пивоварня/назва, обрізання, HTML-сміття, merch/скло/вино/їжа); зіпсований лістинг самої крамниці (типоси в її даних) — НЕ parser_bug; `matcher_bug` — пиво правдоподібно є на Untappd, але ми промахнулись: alias-геп, розбіжність назв, або шум у запиті, який треба лише нормалізувати перед пошуком; `not_on_untappd` — відсутнє на Untappd; `wontfix` — навмисно без матчингу |
 | `review_note` | TEXT | nullable | довільна нотатка тріажу (агент або адмін) |
 | `reviewed_at` | TEXT | nullable | час розмітки (ISO); виставляється ендпоінтом `POST /admin/enrich-failures/review` |
 
@@ -1107,6 +1107,15 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `wontfix`) і кластеризує actionable-класи в патерни: коментар до наявної issue
   або нова issue (**≤3 нових за запуск**; мітки примусово `orphan-triage` +
   `parser-bug`/`matcher-bug`).
+- Межа parser/matcher: якщо brewery+name на сторінці крамниці по суті правильні,
+  але матч не стався (alias-геп, розбіжність назв, шум у запиті — дужкові adjunct-
+  списки, ABV/spec-рядки, collab-дужки, випалі/зайві токени) — це `matcher_bug`;
+  якщо сам рядок є хибними даними нашого адаптера — `parser_bug`. Зіпсований лістинг
+  самої крамниці (типоси в її даних) адаптер прочитав вірно → `matcher_bug` (якщо
+  fuzzy-кандидат міг би врятувати) або `wontfix`, але не `parser_bug`.
+- Тіло кожної нової issue завершується рядком `Scope:` з machine-findable фільтром
+  (`enrich_failures WHERE review_class='…'`); приклади — «з сьогоднішнього батчу».
+  Агент бачить лише поточну вибірку 50 orphans, тож глобальний count НЕ вказується.
 - **LLM лише пропонує** — скрипт валідує (клас із CHECK-списку, номер issue з
   відкритого списку, beer_id лише з поточної вибірки, дублікати відкидаються) і
   виконує. Порядок на orphan: спочатку GitHub, потім запис
