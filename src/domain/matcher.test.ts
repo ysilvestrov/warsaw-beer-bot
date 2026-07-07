@@ -117,7 +117,8 @@ describe('breweryAliases', () => {
 
   test('expands curated aliases one hop (#202)', () => {
     expect(breweryAliases('Nepomucen Brewery').sort()).toEqual(['nepo', 'nepomucen']);
-    expect(breweryAliases('Nepo Brewing').sort()).toEqual(['nepo', 'nepomucen']);
+    expect(breweryAliases('Nepo Brewing').sort()).toEqual(['napomucen', 'nepo', 'nepomucen']);
+    expect(breweryAliases('Napomucen Brewery').sort()).toEqual(['napomucen', 'nepo']);
     expect(breweryAliases('Hopbrook Brewery').sort()).toEqual(['hop brook', 'hopbrook']);
     expect(breweryAliases('Starkaft Brewery').sort()).toEqual(['starkaft', 'starkraft']);
   });

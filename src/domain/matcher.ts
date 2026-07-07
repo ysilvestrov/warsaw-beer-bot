@@ -19,6 +19,7 @@ export interface MatchResult {
 
 const FUZZY_THRESHOLD = 0.75;
 export const ABV_TOLERANCE = 0.3;
+const TRANSITIVE_SAFE_ALIAS_HUBS = new Set(['nepo']);
 
 // A catalog row with its normalizations precomputed once, so a batch of input
 // beers does not re-normalize the whole catalog per beer.
@@ -159,6 +160,8 @@ export function breweryAliases(brewery: string): string[] {
   //   - Hub nodes (>1 partners): hub expands to include all its spokes.
   //   - Spoke nodes (1 partner that itself has >1 partners): spoke does NOT expand to
   //     hub — prevents two spokes from sharing the hub alias and falsely matching.
+  //     Exception: typo/rebrand families listed in TRANSITIVE_SAFE_ALIAS_HUBS are safe
+  //     to share because every spoke is the same brewery brand.
   // Snapshot aliases first so we iterate only the originally normalized forms.
   for (const a of Array.from(aliases)) {
     const neighbors = aliasNeighbors(a);
@@ -168,7 +171,7 @@ export function breweryAliases(brewery: string): string[] {
     } else if (neighbors.length === 1) {
       const n = neighbors[0];
       // Only expand if partner is also a leaf (simple pair), not a hub.
-      if (aliasNeighbors(n).length === 1) aliases.add(n);
+      if (aliasNeighbors(n).length === 1 || TRANSITIVE_SAFE_ALIAS_HUBS.has(n)) aliases.add(n);
     }
   }
 

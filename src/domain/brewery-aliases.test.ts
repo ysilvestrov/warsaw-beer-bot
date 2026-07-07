@@ -11,6 +11,16 @@ describe('aliasNeighbors', () => {
     expect(aliasNeighbors('starkraft')).toContain('starkaft');
     expect(aliasNeighbors('weihenstephaner')).toContain('bayerische staatsbrauerei weihenstephan');
     expect(aliasNeighbors('bayerische staatsbrauerei weihenstephan')).toContain('weihenstephaner');
+    expect(aliasNeighbors('umanpivo')).toContain('уманьпиво');
+    expect(aliasNeighbors('уманьпиво')).toContain('umanpivo');
+    expect(aliasNeighbors('grimbergen')).toContain('alken maes');
+    expect(aliasNeighbors('alken maes')).toContain('grimbergen');
+    expect(aliasNeighbors('wroclove')).toContain('witnica');
+    expect(aliasNeighbors('witnica')).toContain('wroclove');
+    expect(aliasNeighbors('poutnik')).toContain('pelhrimov');
+    expect(aliasNeighbors('pelhrimov')).toContain('poutnik');
+    expect(aliasNeighbors('jezek kwasnicowy')).toContain('jihlava');
+    expect(aliasNeighbors('jihlava')).toContain('jezek kwasnicowy');
   });
 
   test('kasteel vanhonsebrouck pairs with both van honsebrouck and bacchus', () => {
@@ -36,7 +46,10 @@ test('aliasKeys contains both sides of every curated pair, excludes non-aliases'
   const keys = aliasKeys();
   expect(keys.has('nepomucen')).toBe(true);
   expect(keys.has('nepo')).toBe(true);
+  expect(keys.has('napomucen')).toBe(true);
   expect(keys.has('starkraft')).toBe(true);
   expect(keys.has('starkaft')).toBe(true);
+  expect(keys.has('уманпиво')).toBe(false);
+  expect(keys.has('уманьпиво')).toBe(true);
   expect(keys.has('pinta')).toBe(false);
 });
