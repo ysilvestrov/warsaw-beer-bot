@@ -40,6 +40,15 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
   for (const cls of ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix']) {
     expect(p).toContain(cls);
   }
+  // Change 1: explicit parser/matcher boundary test
+  expect(p).toContain('essentially correct');
+  // Change 2: garbled shop-source rows are not parser_bug
+  expect(p).toContain('read it correctly');
+  // Change 3: findability Scope line, no global counts
+  expect(p).toContain('machine-findable');
+  expect(p).toContain('only see the current batch');
+  // NOTE: each asserted phrase lives on ONE array line — the prompt is join('\n'),
+  // so a phrase spanning two array elements would be split by a newline and fail.
 });
 
 test('buildTriagePrompt: truncates over-long issue bodies', () => {
