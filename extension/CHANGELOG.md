@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+- Fixed Piwne Mosty parsing so out-of-stock placeholders such as "Chwilowy brak:(" and "Wypite" are ignored instead of being sent as brewery or beer names.
+
 ## [0.10.0] - 2026-06-30
 
 - Fixed Flasker parsing for more metadata-backed breweries and product families, including Copper Head, Lost Philosopher, and DE ZWARTE REGEL listings that previously fell back to first-word brewery guesses.
