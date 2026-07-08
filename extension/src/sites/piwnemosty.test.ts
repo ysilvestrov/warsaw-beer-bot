@@ -24,6 +24,36 @@ function withVisibleTitle(source: string, productId: string, title: string): str
   return doc.documentElement.outerHTML;
 }
 
+function productHtml({
+  id,
+  title,
+  brand,
+}: {
+  id: string;
+  title: string;
+  brand: string;
+}): string {
+  return `
+    <div id="search" class="products">
+      <div class="product" data-product_id="${id}">
+        <a class="product__name" title="${title}">${title}</a>
+      </div>
+    </div>
+    <script>
+      gtag("event", "view_item_list", {
+        "items": [
+          {
+            "item_id": "${id}",
+            "item_name": "${title}",
+            "item_brand": "${brand}",
+            "item_category": "Piwo"
+          }
+        ]
+      });
+    </script>
+  `;
+}
+
 let cards: ReturnType<typeof piwnemosty.parseCards>;
 beforeAll(() => {
   cards = piwnemosty.parseCards(new DOMParser().parseFromString(html, 'text/html'));
@@ -72,6 +102,91 @@ describe('piwnemosty adapter', () => {
         name: 'x Upside Down: Road to Upside',
       }),
     );
+  });
+
+  it('skips cards that only contain out-of-stock placeholders', () => {
+    const doc = new DOMParser().parseFromString(
+      productHtml({
+        id: '31622',
+        title: 'Wypite',
+        brand: 'Chwilowy Brak:( Brewery',
+      }),
+      'text/html',
+    );
+
+    expect(piwnemosty.parseCards(doc)).toEqual([]);
+  });
+
+  it('strips out-of-stock placeholders while keeping the real beer title', () => {
+    const doc = new DOMParser().parseFromString(
+      productHtml({
+        id: '30931',
+        title: 'Guinness Chwilowy brak:(',
+        brand: '-',
+      }),
+      'text/html',
+    );
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      expect.objectContaining({
+        brewery: '',
+        name: 'Guinness',
+      }),
+    ]);
+  });
+
+  it('strips multiple out-of-stock placeholders from a real beer title', () => {
+    const doc = new DOMParser().parseFromString(
+      productHtml({
+        id: '30933',
+        title: 'Guinness Chwilowy brak:( Wypite',
+        brand: '-',
+      }),
+      'text/html',
+    );
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      expect.objectContaining({
+        brewery: '',
+        name: 'Guinness',
+      }),
+    ]);
+  });
+
+  it('keeps an exact Brewery brand when it did not come from an out-of-stock placeholder', () => {
+    const doc = new DOMParser().parseFromString(
+      productHtml({
+        id: '30934',
+        title: 'Brewery: House Lager',
+        brand: 'Brewery',
+      }),
+      'text/html',
+    );
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      expect.objectContaining({
+        brewery: 'Brewery',
+        name: 'House Lager',
+      }),
+    ]);
+  });
+
+  it('keeps valid titles that only contain one out-of-stock marker word', () => {
+    const doc = new DOMParser().parseFromString(
+      productHtml({
+        id: '30932',
+        title: 'Chwilowy Porter: Brak Point',
+        brand: 'Browar Chwilowy',
+      }),
+      'text/html',
+    );
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      expect.objectContaining({
+        brewery: 'Browar Chwilowy',
+        name: 'Porter: Brak Point',
+      }),
+    ]);
   });
 
   it('treats the issue-listed snack and merch categories as whole non-beer pages', () => {
