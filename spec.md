@@ -1300,6 +1300,20 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `build` не тягнув браузер). Маніфест декларує `icons` + `action.default_icon` усіх 4
   розмірів; 128px — також іконка листингу CWS.
 
+### 6.3 Потоки даних розширення (privacy)
+> Канонічний перелік для privacy policy (#244). Політика: https://ysilvestrov.github.io/warsaw-beer-bot/ ; чернетка CWS-дисклоужерів: `docs/cws-data-usage.md`; хостинг — GitHub Pages з `site/` через `.github/workflows/pages.yml`.
+
+| Дані | Куди | Коли |
+|---|---|---|
+| Токен (`/extension`) | `chrome.storage.local`; `Authorization: Bearer` лише на beer-api | завжди |
+| Назви пива/броварні (+ABV) з видимих карток | POST `beer-api/match` | на підтримуваній сторінці |
+| Кеш матчів (`mc2:`) | локально | — |
+| Enrichment (opt-in): назви orphan | beer-api `/enrich/candidates` → Algolia (сесія юзера) → beer-api `/enrich/result` | лише увімкнено, ≤20/стор. |
+| Sync check-ins (opt-in): HTML власної стрічки Untappd | beer-api `/checkins/sync` (сервер парсить пиття+оцінки) | лише по кнопці Sync |
+
+Немає аналітики/трекінгу/реклами/продажу даних. Інших мережевих призначень, окрім beer-api та
+(за згодою) Untappd+Algolia, немає. Зміна цих потоків у коді МУСИТЬ оновити і політику, і цю таблицю.
+
 ---
 
 ## Appendix — Operational gotchas (чек-лист на новий деплой)
