@@ -1218,7 +1218,7 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - **Auth:** токен з команди `/extension` зберігається в `chrome.storage.local`;
   base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
   options-сторінка має Test connection (`GET /health` + 1-beer `/match`).
-- **Popup керування кешем** (toolbar `action`, дозволи `activeTab`+`tabs`):
+- **Popup керування кешем** (toolbar `action`, дозвіл `activeTab`):
   «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
   видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
   повідомлення `refresh-page` контент-скрипту → `refreshCards` + `clearKeys` +
@@ -1275,6 +1275,30 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `/extension` також віддає актуальний прикріплений реліз новим тестерам.
 - **Оновлення в тестера:** розпакувати новий zip поверх тієї ж теки + `↻ reload`
   (Chromium не авто-оновлює off-store розширення — прийнятно для техаудиторії).
+
+### 6.2 Store/dev варіанти збірки (підготовка до Chrome Web Store)
+> Серія `chrome-web-store` (#242–247). Дизайн: `docs/superpowers/specs/2026-07-08-cws-icons-store-manifest-design.md`.
+
+- **Дві збірки з однієї кодової бази.** `manifest.config.ts` — фабрика
+  `buildManifest({ store })`; `default export` читає `process.env.CWS_BUILD`.
+  Dev (за замовч., `npm run build`/`package`/`release`) — незмінний off-store канал.
+  Store (`npm run build:store`/`package:store`, `CWS_BUILD=1`) — пакет для CWS.
+- **Різниця збірок:** dev несе `key` (фіксує ID unpacked-інсталяції → токен переживає
+  переустановку) і широкий `optional_host_permissions: 'https://*/*'` (кастомний baseUrl
+  для дебагу); store **обидва прибирає** — CWS відхиляє пакети з `key`, а «доступ до всіх
+  сайтів» затягує рев'ю. `key: undefined` випадає при серіалізації маніфесту → у store-JSON
+  поля `key` немає взагалі. Enrich-оріджини (`untappd.com`, `*.algolia.net`) лишаються в обох.
+- **`tabs` → `activeTab`** в обох збірках: popup читає лише активну вкладку
+  (`chrome.tabs.query`) і шле повідомлення її контент-скрипту (`chrome.tabs.sendMessage`) —
+  `activeTab` це покриває, тож ширший `tabs` («read your browsing history») прибрано.
+- **Кастомний baseUrl в options** ховається у store-збірці через compile-time прапорець
+  `__CWS_BUILD__` (Vite `define`): без `https://*/*` поле все одно неробоче, тож у store
+  його input+label приховані, а arbitrary-origin `permissions.request` пропускається.
+  Dev-збірка — як раніше.
+- **Іконки.** Джерело — один SVG `extension/icons/icon.svg`; `npm run render-icons`
+  (Playwright) растеризує його в `public/icons/icon-{16,32,48,128}.png` (закомічені, щоб
+  `build` не тягнув браузер). Маніфест декларує `icons` + `action.default_icon` усіх 4
+  розмірів; 128px — також іконка листингу CWS.
 
 ---
 

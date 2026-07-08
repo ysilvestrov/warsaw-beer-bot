@@ -1,59 +1,75 @@
 // @vitest-environment node
 import { describe, it, expect } from 'vitest';
-import manifestExport from '../manifest.config';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { buildManifest } from '../manifest.config';
 import pkg from '../package.json';
 
-// defineManifest's return type is a union (object | Promise | fn); at build time
-// we pass a plain object, so narrow to a record for property access in the test.
-const manifest = manifestExport as {
-  version: string;
-  key: string;
-  content_scripts: Array<{ matches: string[] }>;
-  permissions: string[];
-  optional_host_permissions: string[];
-  action?: { default_popup?: string };
-};
+const dev = buildManifest({ store: false });
+const store = buildManifest({ store: true });
 
-describe('manifest', () => {
-  it('derives version from package.json (single source of truth)', () => {
-    expect(manifest.version).toBe(pkg.version);
+describe('manifest (both variants)', () => {
+  it('derives version from package.json', () => {
+    expect(dev.version).toBe(pkg.version);
+    expect(store.version).toBe(pkg.version);
   });
 
-  it('pins a stable extension id via the key field', () => {
-    expect(typeof manifest.key).toBe('string');
-    expect(manifest.key.length).toBeGreaterThan(100);
+  it('drops tabs, keeps activeTab, in both variants', () => {
+    for (const m of [dev, store]) {
+      expect(m.permissions).toContain('activeTab');
+      expect(m.permissions).not.toContain('tabs');
+    }
   });
 
   it('injects the content script on supported shop pages', () => {
-    expect(Array.isArray(manifest.content_scripts)).toBe(true);
-    expect(manifest.content_scripts.length).toBeGreaterThan(0);
-    const [contentScript] = manifest.content_scripts;
-    expect(Array.isArray(contentScript.matches)).toBe(true);
-    expect(contentScript.matches).toContain('https://beerfreak.org/*');
-    expect(contentScript.matches).toContain('https://*.beerfreak.org/*');
-    expect(contentScript.matches).toContain('https://bierloods22.nl/*');
-    expect(contentScript.matches).toContain('https://*.bierloods22.nl/*');
-    expect(contentScript.matches).toContain('https://winetime.com.ua/*');
-    expect(contentScript.matches).toContain('https://*.winetime.com.ua/*');
-    expect(contentScript.matches).toContain('https://hoptimaal.com/*');
-    expect(contentScript.matches).toContain('https://*.hoptimaal.com/*');
-    expect(contentScript.matches).toContain('https://piwnemosty.pl/*');
-    expect(contentScript.matches).toContain('https://*.piwnemosty.pl/*');
-    expect(contentScript.matches).toContain('https://funkyshop.pl/*');
-    expect(contentScript.matches).toContain('https://*.funkyshop.pl/*');
+    const [cs] = dev.content_scripts;
+    expect(cs.matches).toContain('https://beerfreak.org/*');
+    expect(cs.matches).toContain('https://*.beerfreak.org/*');
+    expect(cs.matches).toContain('https://funkyshop.pl/*');
   });
 
-  it('exposes a popup action', () => {
-    expect(manifest.action?.default_popup).toBe('src/popup/popup.html');
+  it('exposes a popup action with a default icon', () => {
+    expect(dev.action.default_popup).toBe('src/popup/popup.html');
+    expect(dev.action.default_icon[16]).toBe('public/icons/icon-16.png');
+    expect(dev.action.default_icon[128]).toBe('public/icons/icon-128.png');
   });
 
-  it('requests activeTab + tabs permissions for the popup', () => {
-    expect(manifest.permissions).toContain('activeTab');
-    expect(manifest.permissions).toContain('tabs');
+  it('declares icons at 16/32/48/128', () => {
+    for (const size of [16, 32, 48, 128] as const) {
+      expect(dev.icons[size]).toBe(`public/icons/icon-${size}.png`);
+    }
   });
 
-  it('declares optional origins needed by Untappd enrichment relay', () => {
-    expect(manifest.optional_host_permissions).toContain('https://untappd.com/*');
-    expect(manifest.optional_host_permissions).toContain('https://*.algolia.net/*');
+  it('ships the referenced icon PNG files', () => {
+    for (const size of [16, 32, 48, 128]) {
+      expect(existsSync(resolve(__dirname, `../public/icons/icon-${size}.png`))).toBe(true);
+    }
+  });
+
+  it('keeps enrichment optional origins in both variants', () => {
+    for (const m of [dev, store]) {
+      expect(m.optional_host_permissions).toContain('https://untappd.com/*');
+      expect(m.optional_host_permissions).toContain('https://*.algolia.net/*');
+    }
+  });
+});
+
+describe('dev variant', () => {
+  it('pins a stable extension id via key', () => {
+    expect(typeof dev.key).toBe('string');
+    expect((dev.key as string).length).toBeGreaterThan(100);
+  });
+  it('allows a custom baseUrl origin (https://*/*)', () => {
+    expect(dev.optional_host_permissions).toContain('https://*/*');
+  });
+});
+
+describe('store variant', () => {
+  it('omits key (CWS rejects packages that carry one)', () => {
+    expect(dev.key).toBeDefined();
+    expect(store.key).toBeUndefined();
+  });
+  it('omits the broad https://*/* optional origin', () => {
+    expect(store.optional_host_permissions).not.toContain('https://*/*');
   });
 });

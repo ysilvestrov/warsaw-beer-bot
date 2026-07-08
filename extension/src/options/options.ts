@@ -3,6 +3,11 @@ import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { getHealth, postMatch, ApiError } from '../api/client';
 export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 
+// Replaced at build time by Vite `define`. Undefined under Vitest (no define), hence the
+// typeof guard at every read. True only in the store build.
+declare const __CWS_BUILD__: boolean;
+const IS_STORE_BUILD = typeof __CWS_BUILD__ !== 'undefined' && __CWS_BUILD__;
+
 export interface ConnectionResult {
   ok: boolean;
   reason?: 'health' | ApiError['code'];
@@ -42,6 +47,13 @@ async function initOptionsPage(): Promise<void> {
   tokenInput.value = s.token;
   urlInput.value = s.baseUrl || DEFAULT_BASE_URL;
 
+  // Store build can't grant arbitrary hosts (no 'https://*/*'), so the custom API URL
+  // is fixed to the default — hide the field and its label to avoid a dead control.
+  if (IS_STORE_BUILD) {
+    urlInput.style.display = 'none';
+    document.querySelector('label[for="baseUrl"]')?.setAttribute('style', 'display:none');
+  }
+
   const enrich = el<HTMLInputElement>('enrichEnabled');
   if (enrich) {
     enrich.checked = s.enrichEnabled;
@@ -61,12 +73,15 @@ async function initOptionsPage(): Promise<void> {
 
   el<HTMLButtonElement>('save')?.addEventListener('click', async () => {
     await setSettings({ token: tokenInput.value.trim(), baseUrl: urlInput.value.trim() });
-    // Best-effort: request permission for a custom (non-default) host so the worker can fetch it.
-    try {
-      const origin = new URL(urlInput.value.trim()).origin + '/*';
-      await chrome.permissions.request({ origins: [origin] });
-    } catch {
-      /* invalid URL or denied — surfaced by Test connection */
+    // Best-effort: request permission for a custom (non-default) host so the worker can
+    // fetch it. Skipped in the store build, which has no 'https://*/*' to grant.
+    if (!IS_STORE_BUILD) {
+      try {
+        const origin = new URL(urlInput.value.trim()).origin + '/*';
+        await chrome.permissions.request({ origins: [origin] });
+      } catch {
+        /* invalid URL or denied — surfaced by Test connection */
+      }
     }
     status.textContent = 'Saved.';
   });
