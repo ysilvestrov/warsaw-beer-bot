@@ -130,7 +130,7 @@ src/
 ├── api/                    # вбудований read-only HTTP API (Hono)
 │   ├── index.ts            # createApiApp (cors/health/auth/onError) + createApiServer
 │   ├── types.ts            # ApiDeps, ApiEnv (Hono Variables)
-│   ├── middleware/auth.ts  # Bearer → sha256 → api_tokens → c.set('telegramId')
+│   ├── middleware/auth.ts  # Bearer → sha256 → api_tokens → c.set('telegramId'); для /match авторизація опційна — див. §4 (анонімний global-only match).
 │   └── routes/match.ts     # POST /match (скоуп по власнику токена)
 │
 ├── jobs/                   # фонові джоби (node-cron + startup)
@@ -615,6 +615,15 @@ drunk-model (`checkins ∪ untappd_had`) для власника токена (�
 (ймовірно випите, без певності); у розширенні дає бейдж `❓` з глобальним рейтингом (якщо є) і
 кліком на Untappd (якщо є). `user_rating` — особиста оцінка з `checkins` (або `null`); лише для
 exact-матчів. Серверна помилка → `500 { error: "internal" }`.
+
+**Optional-auth (#245).** `/match` is the only endpoint that accepts *anonymous*
+requests. With no `Authorization` header the server matches against the catalog and
+returns **global-only** fields (`matched_beer.rating_global`, `matched_beer.untappd_id`);
+`is_drunk`, `drunk_uncertain` and `user_rating` are always false/null. A present but
+invalid token still yields `401` (so a broken token is diagnosable). A valid token
+returns personal drunk-status + rating as before. This lets a freshly-installed
+extension (e.g. a Chrome Web Store reviewer with no bot token) show ⭐/⚪ badges
+immediately. `/enrich/*` and `/checkins/*` remain token-only.
 
 **Name-keys матчинг (order/collab-aware, #117).** Збіг назв — це перетин **множин
 канонічних ключів** (`nameKeys`, `matcher.ts`): назва ріжеться на `COLLAB_SEP`-сторони
