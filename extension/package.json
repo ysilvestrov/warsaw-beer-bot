@@ -11,6 +11,8 @@
     "typecheck": "tsc --noEmit",
     "render-icons": "tsx scripts/render-icons.ts",
     "package": "vite build && tsx scripts/release-notes.ts && python3 scripts/zip-dist.py",
+    "build:store": "CWS_BUILD=1 vite build",
+    "package:store": "CWS_BUILD=1 vite build && python3 scripts/zip-dist.py",
     "release": "npm run package && cd .. && npx tsx scripts/publish-extension-release.ts",
     "capture-omb": "tsx scripts/capture-omb-fixture.ts",
     "capture-flasker": "tsx scripts/capture-flasker-fixture.ts"
