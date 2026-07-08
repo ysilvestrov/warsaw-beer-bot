@@ -1,5 +1,6 @@
 import { pickAdapter } from '../sites/registry';
 import { clearAll } from '../cache/store';
+import { getSettings } from '../shared/config';
 
 export interface SyncStatusView {
   running: boolean;
@@ -38,6 +39,13 @@ export function canRefresh(url: string): boolean {
   }
 }
 
+/** Popup note shown when the extension has no token: global-only, with how to authorize. */
+export function authNoteText(hasToken: boolean): string | null {
+  return hasToken
+    ? null
+    : 'Не авторизовано — показуються лише глобальні рейтинги (⭐). Додай токен, щоб бачити «вже пив» ✅ і свою оцінку.';
+}
+
 function el<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
@@ -52,6 +60,22 @@ async function initPopup(): Promise<void> {
   const url = tab?.url ?? '';
   refreshBtn.disabled = !canRefresh(url);
   if (refreshBtn.disabled) status.textContent = 'Open a supported shop page to refresh it.';
+
+  const authNote = el<HTMLElement>('authNote');
+  const getTokenBtn = el<HTMLButtonElement>('getToken');
+  const { token } = await getSettings();
+  const note = authNoteText(Boolean(token));
+  if (authNote && getTokenBtn) {
+    if (note) {
+      authNote.textContent = note;
+      authNote.style.display = '';
+      getTokenBtn.style.display = '';
+      getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+    } else {
+      authNote.style.display = 'none';
+      getTokenBtn.style.display = 'none';
+    }
+  }
 
   refreshBtn.addEventListener('click', () => {
     if (tab?.id == null) return;

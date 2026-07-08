@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canRefresh, formatSyncStatus } from './popup';
+import { canRefresh, formatSyncStatus, authNoteText } from './popup';
 
 describe('canRefresh', () => {
   it('true on a supported shop URL', () => {
@@ -55,5 +55,16 @@ describe('formatSyncStatus', () => {
   it('shows ? for total when capped and total is unknown', () => {
     expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: null, mergedThisRun: 5000, outcome: 'capped', complete: false }))
       .toBe('Synced 5000 of ? — tap Sync again to continue.');
+  });
+});
+
+describe('authNoteText', () => {
+  it('returns the not-authorized note when there is no token', () => {
+    expect(authNoteText(false)).toBe(
+      'Не авторизовано — показуються лише глобальні рейтинги (⭐). Додай токен, щоб бачити «вже пив» ✅ і свою оцінку.',
+    );
+  });
+  it('returns null when a token is present', () => {
+    expect(authNoteText(true)).toBeNull();
   });
 });
