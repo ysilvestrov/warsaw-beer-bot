@@ -20,16 +20,20 @@ const MatchBody = z.object({
     .max(200),
 });
 
-// Registers POST /match on the given app. Assumes auth middleware has set
-// 'telegramId' on the context for this route.
+// Registers POST /match on the given app. Auth is optional here: a missing
+// token yields telegramId===null (anonymous, global-only results); a valid
+// token yields personal drunk/rating data (see optionalAuthMiddleware).
 export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   app.post('/match', zValidator('json', MatchBody), async (c) => {
-    const telegramId = c.get('telegramId');
+    const telegramId = c.get('telegramId') ?? null;
     const { beers } = c.req.valid('json');
 
     const catalog = loadCatalog(deps.db);
-    const drunkSet = triedBeerIds(deps.db, telegramId);
-    const ratings = latestRatingsByBeer(deps.db, telegramId);
+    // Anonymous callers get global-only results: empty drunk/ratings sets mean
+    // is_drunk=false, user_rating=null, but matched_beer still carries the global
+    // rating + untappd_id (⭐/⚪ badges render unchanged).
+    const drunkSet = telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId);
+    const ratings = telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId);
 
     const results = await matchBeerList(catalog, drunkSet, ratings, beers);
     return c.json({ results });

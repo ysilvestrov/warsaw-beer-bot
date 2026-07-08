@@ -32,7 +32,13 @@ function setup() {
     matchRoute(app, { db, env: {} as never, log });
     return app;
   }
-  return { appAs, panIpani };
+  function appAnon() {
+    const app = new Hono<ApiEnv>();
+    // No middleware sets telegramId → route must treat it as anonymous.
+    matchRoute(app, { db, env: {} as never, log });
+    return app;
+  }
+  return { appAs, appAnon, panIpani };
 }
 
 function post(app: Hono<ApiEnv>, body: unknown) {
@@ -82,5 +88,18 @@ describe('POST /match', () => {
     const beers = Array.from({ length: 201 }, (_, i) => ({ brewery: `B${i}`, name: `N${i}` }));
     const res = await post(appAs(1), { beers });
     expect(res.status).toBe(400);
+  });
+
+  it('returns global-only data anonymously when no telegramId is set', async () => {
+    const { appAnon } = setup();
+    const res = await post(appAnon(), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.results[0]).toMatchObject({
+      matched_beer: { name: 'Pan IPAni', rating_global: 3.85, untappd_id: 9001 },
+      is_drunk: false,
+      drunk_uncertain: false,
+      user_rating: null,
+    });
   });
 });

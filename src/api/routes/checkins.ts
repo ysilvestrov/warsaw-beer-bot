@@ -17,7 +17,7 @@ const SyncBody = z.object({
 
 export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   app.get('/checkins/sync/state', (c) => {
-    const telegramId = c.get('telegramId');
+    const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
     const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
     const state = getSyncState(deps.db, telegramId);
@@ -31,7 +31,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   });
 
   app.post('/checkins/sync', zValidator('json', SyncBody), (c) => {
-    const telegramId = c.get('telegramId');
+    const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
     const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
 

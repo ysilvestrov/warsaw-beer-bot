@@ -21,11 +21,23 @@ describe('createApiApp', () => {
     expect(await res.json()).toEqual({ ok: true });
   });
 
-  it('POST /match requires a valid token', async () => {
+  it('POST /match works anonymously when no token is sent (global-only)', async () => {
     const app = createApiApp(deps());
     const res = await app.request('/match', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.results)).toBe(true);
+  });
+
+  it('POST /match rejects a present-but-invalid token with 401', async () => {
+    const app = createApiApp(deps());
+    const res = await app.request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     expect(res.status).toBe(401);

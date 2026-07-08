@@ -7,6 +7,7 @@ import type pino from 'pino';
 import type { Env } from '../config/env';
 import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
+import { optionalAuthMiddleware } from './middleware/optional-auth';
 import { adminMiddleware } from './middleware/admin';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
@@ -22,8 +23,8 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
 
   app.get('/health', (c) => c.json({ ok: true }));
 
-  // Auth applies to /match only — /health stays open.
-  app.use('/match', authMiddleware(deps.db));
+  // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
+  app.use('/match', optionalAuthMiddleware(deps.db));
   matchRoute(app, deps);
 
   app.use('/enrich/*', authMiddleware(deps.db));
