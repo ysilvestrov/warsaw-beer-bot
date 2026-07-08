@@ -116,6 +116,25 @@ describe('normalizeOntapTapIdentity', () => {
       .toEqual({ brewery: 'Cydrownia', name: 'Dzik' });
   });
 
+  test('maps Cydr Dzik fruit rows to the real cidery and product name', () => {
+    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Cydr Jabłko'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
+    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Jabłko'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
+    expect(normalizeOntapTapIdentity('CYDR DZIK', 'Cydr Gruszka'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Gruszka' });
+  });
+
+  test('does not invent a Cydr Dzik product name from a bare cider label', () => {
+    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Cydr'))
+      .toEqual({ brewery: 'CYDR DZIK Brewery', name: 'Cydr' });
+  });
+
+  test('maps Cydr Flirt Tradycynis rows to Kauno Alus product names', () => {
+    expect(normalizeOntapTapIdentity('Cydr Flirt Tradycynis', 'Cydr malina i skórka pomarańczowa'))
+      .toEqual({ brewery: 'Kauno Alus', name: 'Tradycynis Cydr Flirt malina i skórka pomarańczowa' });
+  });
+
   test('drops brewery-only rows and known location/category brewery pollution', () => {
     expect(normalizeOntapTapIdentity('Przetwórnia Chmielu Brewery', 'Przetwórnia Chmielu')).toBeNull();
     expect(normalizeOntapTapIdentity('Frankies Brewery', 'Frankies')).toBeNull();
