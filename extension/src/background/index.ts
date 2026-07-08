@@ -11,7 +11,7 @@ export interface MatchMessage {
 
 export type MatchReply =
   | { type: 'match:ok'; results: MatchResult[] }
-  | { type: 'match:err'; code: 'unauthorized' | 'server' | 'network' | 'no-token' };
+  | { type: 'match:err'; code: 'unauthorized' | 'server' | 'network' };
 
 const MAX_PER_REQUEST = 200;
 
@@ -23,7 +23,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
 
 export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
   const { token, baseUrl } = await getSettings();
-  if (!token) return { type: 'match:err', code: 'no-token' };
   try {
     const results: MatchResult[] = [];
     for (const part of chunk(msg.cards, MAX_PER_REQUEST)) {
