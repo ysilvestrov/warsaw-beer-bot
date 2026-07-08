@@ -44,6 +44,10 @@ function breweryCore(raw: string): string {
     .trim();
 }
 
+function stripLeadingCider(raw: string): string {
+  return compact(raw).replace(/^(?:cydr|cider)(?:\s+|$)/iu, '').trim();
+}
+
 function breweryPrefixes(breweryRef: string | null): string[] {
   const brewery = compact(breweryRef ?? '');
   return brewery ? [brewery] : [];
@@ -95,8 +99,19 @@ export function normalizeOntapTapIdentity(
   const core = breweryCore(brewery);
   if (core && normalized(name) === normalized(core)) return null;
 
-  if (breweryNorm === 'cydr dzik' && normalized(name) === 'polski cydr') {
-    return { brewery: 'Cydrownia', name: 'Dzik' };
+  if (breweryNorm === 'cydr dzik' || breweryNorm === 'cydr dzik brewery') {
+    if (normalized(name) === 'polski cydr') return { brewery: 'Cydrownia', name: 'Dzik' };
+    const ciderName = stripLeadingCider(name);
+    if (!ciderName) return { brewery, name };
+    return { brewery: 'Cydrownia', name: `Dzik ${ciderName}` };
+  }
+
+  if (breweryNorm === 'cydr flirt tradycynis') {
+    const ciderName = stripLeadingCider(name);
+    return {
+      brewery: 'Kauno Alus',
+      name: ciderName ? `Tradycynis Cydr Flirt ${ciderName}` : 'Tradycynis Cydr Flirt',
+    };
   }
 
   if (core) {

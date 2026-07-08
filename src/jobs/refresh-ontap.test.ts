@@ -185,6 +185,46 @@ describe('refreshOntap non-beer filtering', () => {
       expect.objectContaining({ brewery: 'PINTA Brewery', name: 'PINTA Atak Chmielu' }),
     ]);
   });
+
+  test('writes normalized cider producer identities instead of ontap product-line breweries', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    const indexHtml = `
+      <div onclick="location.assign('https://cider.ontap.pl/')">
+        <div class="panel-body">Cider Pub 2 taps</div>
+      </div>
+    `;
+    const pubHtml = `
+      <html><head><meta property="og:title" content="Cider Pub / ontap.pl"></head>
+      <body>
+        ${panel(1, 'CYDR DZIK Brewery', 'Cydr Jabłko 4,5%', 'Cydr Jabłkowy')}
+        ${panel(2, 'Cydr Flirt Tradycynis', 'Cydr malina i skórka pomarańczowa 5%', 'Cydr z gruszką')}
+      </body></html>
+    `;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return indexHtml;
+        if (url === 'https://cider.ontap.pl/') return pubHtml;
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder: async () => null,
+      lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+    });
+
+    const beers = db.prepare('SELECT brewery, name, style FROM beers ORDER BY id').all();
+    expect(beers).toEqual([
+      { brewery: 'Cydrownia', name: 'Dzik Jabłko', style: 'Cydr Jabłkowy' },
+      {
+        brewery: 'Kauno Alus',
+        name: 'Tradycynis Cydr Flirt malina i skórka pomarańczowa',
+        style: 'Cydr z gruszką',
+      },
+    ]);
+  });
 });
 
 function panel(
