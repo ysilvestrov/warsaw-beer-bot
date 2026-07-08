@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240" width="100%" height="100%">
+    <defs>
+        <linearGradient id="bg-split" x1="0" y1="125" x2="0" y2="125.1" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stop-color="#F8991D" />
+            <stop offset="100%" stop-color="#96CC39" />
+        </linearGradient>
+    </defs>
+
+    <path d="M 100 10 A 80 80 0 0 0 20 90 C 20 150 100 225 100 225 C 100 225 180 150 180 90 A 80 80 0 0 0 100 10 Z"
+          fill="url(#bg-split)" stroke="#000" stroke-width="10" stroke-linejoin="round" />
+
+    <path d="M 100 10 Q 110 30 100 50" fill="none" stroke="#000" stroke-width="8" stroke-linecap="round" />
+
+    <g stroke="#000" stroke-width="8" fill="url(#bg-split)" stroke-linejoin="round" stroke-linecap="round">
+        
+        <path d="M 100 160 Q 120 190 100 220 Q 80 190 100 160 Z" />
+
+        <path d="M 80 125 Q 40 150 60 190 Q 90 170 95 145 L 100 145 L 100 125 Z" />
+        <path d="M 120 125 Q 160 150 140 190 Q 110 170 105 145 L 100 145 L 100 125 Z" />
+        <path d="M 100 130 Q 130 160 100 190 Q 70 160 100 130 Z" />
+
+        <path d="M 75 95 Q 30 120 45 160 Q 80 140 85 115 L 100 115 L 100 95 Z" />
+        <path d="M 125 95 Q 170 120 155 160 Q 120 140 115 115 L 100 115 L 100 95 Z" />
+        <path d="M 100 100 Q 135 130 100 160 Q 65 130 100 100 Z" />
+
+        <path d="M 65 65 Q 20 90 35 130 Q 70 110 75 85 L 100 85 L 100 65 Z" />
+        <path d="M 135 65 Q 180 90 165 130 Q 130 110 125 85 L 100 85 L 100 65 Z" />
+        <path d="M 100 70 Q 140 100 100 130 Q 60 100 100 70 Z" />
+
+        <path d="M 100 50 Q 30 50 35 110 Q 75 105 100 85 Q 110 65 100 50 Z" />
+        <path d="M 100 50 Q 170 50 165 110 Q 125 105 100 85 Q 110 65 100 50 Z" />
+        
+    </g>
+</svg>
