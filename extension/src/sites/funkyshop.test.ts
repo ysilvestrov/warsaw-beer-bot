@@ -125,4 +125,23 @@ describe('funkyshop adapter', () => {
     expect(cards[0]).toMatchObject({ brewery: 'Funky Fluid', name: 'Aloha', abv: 4.5 });
     fetchSpy.mockRestore();
   });
+
+  it('skips cards when a missing brewery cannot be hydrated', async () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/missing-brewery.html">Aloha 500ml</a></p>
+        <div class="product-description-short">Fruited Sour, 4.5%</div>
+      </article>
+    `);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      text: async () => '',
+    } as Response);
+
+    await funkyshop.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha', skip: true });
+    fetchSpy.mockRestore();
+  });
 });

@@ -92,7 +92,11 @@ export const funkyshop: SiteAdapter = {
       const url = detailUrls.get(card.el);
       if (!url) return;
       const brewery = await loadBrewery(url);
-      if (brewery) card.brewery = brewery;
+      if (brewery) {
+        card.brewery = brewery;
+      } else {
+        card.skip = true;
+      }
     }));
   },
 };

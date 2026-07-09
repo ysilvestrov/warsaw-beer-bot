@@ -87,6 +87,21 @@ describe('runOverlay', () => {
     expect(Object.keys(storageSet)).toEqual([`mc2:${normalizeKey('Funky Fluid', 'Aloha')}`]);
   });
 
+  it('does not match cards skipped during detail loading', async () => {
+    const card: Card = { el: cardEl(), brewery: '', name: 'Aloha' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].skip = true;
+      }),
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).not.toHaveBeenCalled();
+  });
+
   it('awaits waitForGrid before parsing when the adapter defines it', async () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };

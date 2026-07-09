@@ -3,6 +3,7 @@ export interface Card {
   brewery: string;
   name: string;
   abv?: number;
+  skip?: boolean;
 }
 
 export interface SiteAdapter {
