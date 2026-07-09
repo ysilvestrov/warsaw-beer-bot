@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { funkyshop } from './funkyshop';
@@ -55,5 +55,118 @@ describe('funkyshop adapter', () => {
 
   it('drops glass and merch products from the non-beer fixture', () => {
     expect(parse(nonBeerHtml)).toEqual([]);
+  });
+
+  it('strips trailing volume plus can format from product names', () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="/en/funky-shop/free-classy.html">Free Classy 500ml (can)</a></p>
+        <a class="manufacturer-product">Funky Fluid</a>
+        <div class="product-description-short">West Coast IPA, 6%</div>
+      </article>
+    `);
+
+    expect(cards).toContainEqual(expect.objectContaining({
+      brewery: 'Funky Fluid',
+      name: 'Free Classy',
+      abv: 6,
+    }));
+  });
+
+  it('strips trailing volume plus product-detail parentheses from names', () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="/en/funky-shop/gelato.html">Gelato XTREME: Jungle Juice Slushy XXL 500ml (6th Anniversary 450 North collab)</a></p>
+        <a class="manufacturer-product">Funky Fluid</a>
+        <div class="product-description-short">Multifruit XTREME Ice Cream Sour, 8%</div>
+      </article>
+    `);
+
+    expect(cards).toContainEqual(expect.objectContaining({
+      brewery: 'Funky Fluid',
+      name: 'Gelato XTREME: Jungle Juice Slushy XXL',
+      abv: 8,
+    }));
+  });
+
+  it('drops can deposit fee rows from mixed product grids', () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="/en/funky-shop/can-deposit.html">Can Deposit</a></p>
+        <div class="product-description-short">Deposit fee</div>
+      </article>
+    `);
+
+    expect(cards).toEqual([]);
+  });
+
+  it('hydrates missing brewery from the product detail page', async () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/aloha.html">Aloha 500ml</a></p>
+        <div class="product-description-short">Fruited Sour, 4.5%</div>
+      </article>
+    `);
+
+    expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => `
+        <html><body>
+          <a class="manufacturer-product">Funky Fluid</a>
+        </body></html>
+      `,
+    } as Response);
+
+    await funkyshop.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledWith('https://funkyshop.pl/en/funky-shop/aloha.html', { credentials: 'include' });
+    expect(cards[0]).toMatchObject({ brewery: 'Funky Fluid', name: 'Aloha', abv: 4.5 });
+    fetchSpy.mockRestore();
+  });
+
+  it('skips cards when a missing brewery cannot be hydrated', async () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/missing-brewery.html">Aloha 500ml</a></p>
+        <div class="product-description-short">Fruited Sour, 4.5%</div>
+      </article>
+    `);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: false,
+      text: async () => '',
+    } as Response);
+
+    await funkyshop.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha', skip: true });
+    fetchSpy.mockRestore();
+  });
+
+  it('shares one detail fetch across cards with the same product URL', async () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/shared.html">Aloha 500ml</a></p>
+        <div class="product-description-short">Fruited Sour, 4.5%</div>
+      </article>
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/shared.html">Free Classy 500ml</a></p>
+        <div class="product-description-short">West Coast IPA, 6%</div>
+      </article>
+    `);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<a class="manufacturer-product">Funky Fluid</a>',
+    } as Response);
+
+    await funkyshop.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(cards.map((card) => card.brewery)).toEqual(['Funky Fluid', 'Funky Fluid']);
+    expect(cards.map((card) => card.skip)).toEqual([undefined, undefined]);
+    fetchSpy.mockRestore();
   });
 });
