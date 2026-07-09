@@ -144,4 +144,29 @@ describe('funkyshop adapter', () => {
     expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha', skip: true });
     fetchSpy.mockRestore();
   });
+
+  it('shares one detail fetch across cards with the same product URL', async () => {
+    const cards = parse(`
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/shared.html">Aloha 500ml</a></p>
+        <div class="product-description-short">Fruited Sour, 4.5%</div>
+      </article>
+      <article class="product-miniature">
+        <p class="h3 product-title"><a href="https://funkyshop.pl/en/funky-shop/shared.html">Free Classy 500ml</a></p>
+        <div class="product-description-short">West Coast IPA, 6%</div>
+      </article>
+    `);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<a class="manufacturer-product">Funky Fluid</a>',
+    } as Response);
+
+    await funkyshop.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(cards.map((card) => card.brewery)).toEqual(['Funky Fluid', 'Funky Fluid']);
+    expect(cards.map((card) => card.skip)).toEqual([undefined, undefined]);
+    fetchSpy.mockRestore();
+  });
 });
