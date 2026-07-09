@@ -35,9 +35,9 @@ export async function runOverlay(
 
     if (adapter.loadCardDetails) await adapter.loadCardDetails(misses.map((m) => m.card));
 
-    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer }[] = misses.map(({ el, key, card }) => ({
+    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer }[] = misses.map(({ el, card }) => ({
       el,
-      key,
+      key: normalizeKey(card.brewery, card.name),
       raw: card.abv !== undefined
         ? { brewery: card.brewery, name: card.name, abv: card.abv }
         : { brewery: card.brewery, name: card.name },

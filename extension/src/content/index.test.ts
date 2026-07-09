@@ -69,6 +69,24 @@ describe('runOverlay', () => {
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0', abv: 7.3 }]);
   });
 
+  it('uses the hydrated brewery identity for matching and cache writes', async () => {
+    vi.mocked(chrome.storage.local.set).mockClear();
+    const card: Card = { el: cardEl(), brewery: '', name: 'Aloha' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].brewery = 'Funky Fluid';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('Funky Fluid', 'Aloha')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'Funky Fluid', name: 'Aloha' }]);
+    const storageSet = vi.mocked(chrome.storage.local.set).mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(Object.keys(storageSet)).toEqual([`mc2:${normalizeKey('Funky Fluid', 'Aloha')}`]);
+  });
+
   it('awaits waitForGrid before parsing when the adapter defines it', async () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };
