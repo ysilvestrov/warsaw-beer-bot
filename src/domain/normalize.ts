@@ -4,6 +4,7 @@ const STYLE_WORDS = new Set([
   'pils', 'pilsner', 'lager', 'stout', 'porter', 'weizen', 'wheat',
   'saison', 'sour', 'gose', 'lambic', 'barleywine', 'bock',
 ]);
+const SPEC_LABEL_WORDS = new Set(['alc', 'abv', 'ibu']);
 export const BREWERY_NOISE = new Set([
   // English / Polish
   'browar', 'browary', 'brewery', 'brewing', 'co', 'company', 'contracts',
@@ -80,7 +81,7 @@ export function stripLegalForm(s: string): string {
 export function normalizeName(s: string): string {
   const tokens = baseNormalize(preserveDecimalIdentifiers(s))
     .split(' ')
-    .filter((t) => t && !STYLE_WORDS.has(t) && !isNumericNoise(t));
+    .filter((t) => t && !STYLE_WORDS.has(t) && !SPEC_LABEL_WORDS.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
 }
 

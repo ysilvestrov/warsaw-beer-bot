@@ -17,6 +17,8 @@ test('normalizes brewery the same way, no style stripping', () => {
 test('strips numeric tokens (ABV / strength / years)', () => {
   // Real ontap-style raw string after baseNormalize splits punctuation.
   expect(normalizeName('Buzdygan Rozkoszy 24°·8,5%')).toBe('buzdygan rozkoszy');
+  expect(normalizeName('NoLo – Hemperor <0,5% alc <0,5%')).toBe('nolo hemperor');
+  expect(normalizeName('Light Lager 4.5% ABV 20 IBU')).toBe('light');
   // Year-only tokens — vintages of the same beer collapse to one key.
   expect(normalizeName('Buzdygan Rozkoszy 2026')).toBe('buzdygan rozkoszy');
   expect(normalizeName('Buzdygan Rozkoszy 2024')).toBe('buzdygan rozkoszy');
