@@ -32,10 +32,12 @@ export async function postMatch(
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<MatchResult[]> {
   let res: Response;
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = `Bearer ${token}`;
   try {
     res = await fetchWithTimeout(`${trimBase(baseUrl)}/match`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ beers }),
     }, timeoutMs);
   } catch {

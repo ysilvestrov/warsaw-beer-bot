@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Fixed Piwne Mosty parsing so out-of-stock placeholders such as "Chwilowy brak:(" and "Wypite" are ignored instead of being sent as brewery or beer names.
+- Extension now shows global Untappd ratings (⭐) on supported shops even without a token; the popup states "Не авторизовано" and links to token setup. Personal ✅/rating badges still require a token.
 
 ## [0.10.0] - 2026-06-30
 

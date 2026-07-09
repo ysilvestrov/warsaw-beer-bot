@@ -79,6 +79,26 @@ describe('api/client', () => {
     ));
     expect(await getHealth('https://api.test', 20)).toBe(false);
   });
+
+  it('omits the Authorization header when the token is empty (anonymous match)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await postMatch('https://api.test', '', [{ brewery: 'B', name: 'N' }]);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('sends the Authorization header when a token is present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ results: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await postMatch('https://api.test', 'tok', [{ brewery: 'B', name: 'N' }]);
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer tok');
+  });
 });
 
 import { postEnrichCandidates, postEnrichResult } from './client';

@@ -9,4 +9,4 @@ export interface ApiDeps {
 }
 
 // Hono generics: variables set on the request context by middleware.
-export type ApiEnv = { Variables: { telegramId: number } };
+export type ApiEnv = { Variables: { telegramId: number | null } };

@@ -13,10 +13,12 @@ beforeEach(() => setSettings({ token: 'tok', baseUrl: 'https://api.test' }));
 afterEach(() => vi.restoreAllMocks());
 
 describe('handleMatch', () => {
-  it('returns no-token error when no token is set', async () => {
+  it('calls postMatch anonymously (empty token) when no token is set', async () => {
     await setSettings({ token: '', baseUrl: 'https://api.test' });
+    const spy = vi.spyOn(client, 'postMatch').mockResolvedValue([mkResult('X')]);
     const reply = await handleMatch({ type: 'match', cards: [{ brewery: 'B', name: 'X' }] });
-    expect(reply).toEqual({ type: 'match:err', code: 'no-token' });
+    expect(reply).toEqual({ type: 'match:ok', results: [mkResult('X')] });
+    expect(spy).toHaveBeenCalledWith('https://api.test', '', [{ brewery: 'B', name: 'X' }]);
   });
 
   it('calls postMatch and returns results on success', async () => {
