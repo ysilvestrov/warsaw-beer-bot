@@ -9,6 +9,11 @@ ratings, by matching page beers against the user's personal history held by the 
 Crawler bot.
 
 ## Permission justifications
+Dashboard reality: `storage` and `activeTab` each get their own field; **all host
+access shares one combined "Host permission justification" field** (content-script shop
+domains + `beer-api` + optional hosts) — paste the consolidated text from
+[`cws-listing.md`](./cws-listing.md) ("Host permission justification").
+
 - **storage** — cache match results and store the user's token/settings locally.
 - **activeTab** — the popup reads the active tab's URL and messages its content script to
   refresh badges on the current page.
