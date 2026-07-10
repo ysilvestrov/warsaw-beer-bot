@@ -102,7 +102,7 @@ shop page with recognizable beers; keep captions short if the dashboard offers t
 ## Privacy & data usage (dashboard "Privacy practices" tab)
 
 All answers are in [`cws-data-usage.md`](./cws-data-usage.md):
-- **Privacy policy URL:** https://ysilvestrov.github.io/warsaw-beer-bot/
+- **Privacy policy URL:** https://ysilvestrov.github.io/warsaw-beer-bot/privacy/
 - Data collected: Authentication information (YES), Website content (YES); everything
   else NO.
 - The 3 required certifications: all TRUE.

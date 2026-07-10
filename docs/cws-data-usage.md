@@ -1,7 +1,7 @@
 # Chrome Web Store — Privacy practices answers (draft for #244/#246)
 
 Reference for filling the CWS dashboard "Privacy practices" tab. Privacy policy URL:
-https://ysilvestrov.github.io/warsaw-beer-bot/
+https://ysilvestrov.github.io/warsaw-beer-bot/privacy/
 
 ## Single purpose
 Show, on supported craft-beer shop pages, which beers the user has already drunk and their

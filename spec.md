@@ -1311,7 +1311,7 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   розмірів; 128px — також іконка листингу CWS.
 
 ### 6.3 Потоки даних розширення (privacy)
-> Канонічний перелік для privacy policy (#244). Політика: https://ysilvestrov.github.io/warsaw-beer-bot/ ; чернетка CWS-дисклоужерів: `docs/cws-data-usage.md`; хостинг — GitHub Pages з `site/` через `.github/workflows/pages.yml`.
+> Канонічний перелік для privacy policy (#244). Політика: https://ysilvestrov.github.io/warsaw-beer-bot/privacy/ (корінь `/` — лендінг-сторінка); чернетка CWS-дисклоужерів: `docs/cws-data-usage.md`; хостинг — GitHub Pages з `site/` через `.github/workflows/pages.yml`.
 
 | Дані | Куди | Коли |
 |---|---|---|

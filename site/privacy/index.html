@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Warsaw Beer Overlay — Privacy Policy</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        max-width: 46rem; margin: 2rem auto; padding: 0 1.1rem;
+        font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        color: #1a1a1a; background: #fff;
+      }
+      h1 { font-size: 1.6rem; margin-bottom: .2rem; }
+      h2 { font-size: 1.2rem; margin-top: 2rem; }
+      .updated { color: #666; margin-top: 0; }
+      table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+      th, td { border: 1px solid #ccc; padding: .5rem .6rem; text-align: left; vertical-align: top; }
+      th { background: #f2f2f2; }
+      code { background: #f2f2f2; padding: .1rem .3rem; border-radius: 3px; }
+      a { color: #1a5fb4; }
+      footer { margin-top: 2.5rem; color: #666; font-size: .9rem; }
+      @media (prefers-color-scheme: dark) {
+        body { color: #e6e6e6; background: #16181c; }
+        th { background: #23262c; } td, th { border-color: #3a3d44; }
+        code { background: #23262c; } a { color: #78aeed; }
+        .updated, footer { color: #9aa0a6; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Warsaw Beer Overlay — Privacy Policy</h1>
+    <p class="updated">Last updated: 8 July 2026</p>
+
+    <p>
+      Warsaw Beer Overlay ("the extension") is a browser extension that shows, on supported
+      craft-beer shop pages, which beers you have already drunk and your ratings, by matching
+      the beers on the page against your personal beer history held by the Warsaw Beer Crawler
+      bot. This policy explains what data the extension processes and where it goes. The
+      extension is a personal, non-commercial project maintained by Yuriy Silvestrov.
+    </p>
+
+    <h2>What the extension processes, and why</h2>
+    <table>
+      <tr><th>Data</th><th>Where it goes</th><th>Why</th></tr>
+      <tr>
+        <td>Your access token (obtained from the bot's <code>/extension</code> command)</td>
+        <td>Stored locally in the browser (<code>chrome.storage.local</code>); sent only to the
+          bot's API at <code>beer-api.ysilvestrov-ai.uk</code> as an authorization header</td>
+        <td>To authenticate your requests to the API</td>
+      </tr>
+      <tr>
+        <td>Beer and brewery names (and, when shown, ABV) read from the shop page you are viewing</td>
+        <td>Sent to <code>beer-api.ysilvestrov-ai.uk</code></td>
+        <td>To match page beers against your history and return which you have drunk and your ratings</td>
+      </tr>
+      <tr>
+        <td>Match results</td>
+        <td>Cached locally in the browser only</td>
+        <td>To avoid re-requesting the same beers and to render badges quickly</td>
+      </tr>
+    </table>
+
+    <h2>Untappd enrichment (optional, off by default)</h2>
+    <p>
+      If you turn on "Find missing beers via Untappd" in the extension's options, then for beers
+      not yet in the catalog the extension performs throttled searches (at most 20 per page)
+      against Untappd's search service (Algolia) using your logged-in Untappd session, and sends
+      the search results to <code>beer-api.ysilvestrov-ai.uk</code> so the beer can be identified.
+      This feature requires a separate permission that you grant explicitly, and it does nothing
+      until you enable it. To turn it off, uncheck the option; the permission can be revoked at any
+      time from the extension's options.
+    </p>
+
+    <h2>Check-in sync (optional, only when you press "Sync")</h2>
+    <p>
+      The popup's "Sync my check-ins" button fetches the HTML of your own Untappd check-in feed
+      using your logged-in Untappd session and sends it to <code>beer-api.ysilvestrov-ai.uk</code>,
+      where the server records which beers you have drunk and your ratings under your account. This
+      runs only when you press the button and grant access to <code>untappd.com</code>. If you never
+      press it, no Untappd data is read.
+    </p>
+
+    <h2>Storage and retention</h2>
+    <p>
+      Your token and the match cache are stored locally in your browser until you remove the token,
+      clear the cache, or uninstall the extension. Data sent to <code>beer-api.ysilvestrov-ai.uk</code>
+      (matched beers and, if you use it, your check-in history) is stored server-side, tied to your
+      bot account, and is governed by the Warsaw Beer Crawler bot; you can ask the maintainer to
+      delete it (see Contact).
+    </p>
+
+    <h2>What the extension does NOT do</h2>
+    <ul>
+      <li>No analytics, telemetry, or tracking of your browsing.</li>
+      <li>No advertising and no advertising identifiers.</li>
+      <li>No selling or sharing of your data with third parties.</li>
+      <li>No network requests other than to <code>beer-api.ysilvestrov-ai.uk</code> and — only if
+        you enable the optional features — Untappd and its search service (Algolia).</li>
+    </ul>
+
+    <h2>Your controls</h2>
+    <ul>
+      <li>Remove your token in the extension's options to stop all API requests.</li>
+      <li>"Clear all cache" in the popup removes locally cached match data.</li>
+      <li>Leave "Find missing beers via Untappd" off (or uncheck it) to disable enrichment.</li>
+      <li>Simply never press "Sync my check-ins" to avoid reading your Untappd feed.</li>
+      <li>Uninstall the extension to remove all locally stored data.</li>
+    </ul>
+
+    <h2>Changes to this policy</h2>
+    <p>
+      If the data the extension handles changes, this page will be updated and the "Last updated"
+      date above changed accordingly.
+    </p>
+
+    <h2>Contact</h2>
+    <p>Questions or data-deletion requests: <a href="mailto:yuriy@silvestrov.com">yuriy@silvestrov.com</a>.</p>
+
+    <footer><a href="../">← Warsaw Beer Overlay home</a> · personal, non-commercial project.</footer>
+  </body>
+</html>
