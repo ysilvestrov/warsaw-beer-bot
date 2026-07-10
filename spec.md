@@ -1252,6 +1252,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   (MAGIC ROAD) — у bespoke-тестах адаптера. Відсутність фікстури/винятку = червоний CI.
 
 ### 6.1 Дистрибуція бета-версій (off-store, через бота)
+> ⚠️ **Legacy на час переходу (#247).** Це початковий off-store канал. Основним став
+> Chrome Web Store — див. §6.4; цей канал працює **паралельно лише під час переходу** і
+> ретайриться на cutover (#267).
 > Приватна роздача ~10 технічним тестерам; **без Chrome Web Store** (рев'ю,
 > публічність, зайве навантаження на Untappd). Дизайн:
 > `docs/superpowers/specs/2026-06-08-extension-beta-distribution-design.md`,
@@ -1323,6 +1326,31 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 
 Немає аналітики/трекінгу/реклами/продажу даних. Інших мережевих призначень, окрім beer-api та
 (за згодою) Untappd+Algolia, немає. Зміна цих потоків у коді МУСИТЬ оновити і політику, і цю таблицю.
+
+### 6.4 Дистрибуція: перехід на Chrome Web Store (#247)
+> Рішення серії `chrome-web-store`. Дизайн: `docs/superpowers/specs/2026-07-10-cws-distribution-migration-design.md`. Cutover-дії → #267; автоматизація аплоаду → #266.
+
+- **Модель — перехідний період, потім повний перехід.** **Chrome Web Store — основний**
+  канал: CWS **сам авто-оновлює** користувачів. Off-store bot-канал (§6.1) стає **legacy** і
+  працює **паралельно лише на час переходу**, поки тестери мігрують; після cutover — ретайр.
+- **Store extension ID:** `fdelmnhijeiojadcaihfdpecfcldbndg` (item подано на рев'ю 2026-07-10;
+  версія 0.11.0). Store-збірка **без `key`**, тож CWS присвоює цей ID сам (див. §6.2).
+- **Наслідок зміни ID.** Store-ID **відрізняється** від `key`-pinned ID unpacked-збірки, а
+  `chrome.storage.local` прив'язаний до ID → у store-версії сховище **порожнє**: тестер має
+  **заново вставити токен** в Options і видалити unpacked-версію.
+- **Реліз під час переходу — обидва канали.** Нова версія = `npm run package:store` → **ручний**
+  аплоад у CWS dashboard (автоматизація відкладена, #266) **та** `npm run release` (off-store dev
+  zip + bot-broadcast, §6.1) для тестерів, що ще на unpacked. Після cutover лишається лише перший.
+- **Dev/maintainer.** Unpacked-збірка з `key` лишається як локальний dev-режим мейнтейнера.
+- **Cutover (#267):** коли store-версія стане LIVE — розіслати міграційне повідомлення (нижче),
+  витримати grace-період, тоді ретайрити off-store канал (`extension_releases` §3.12 + broadcast).
+
+**Міграційне повідомлення тестерам (чернетка, розсилка на cutover, #267):**
+> 📦 «Warsaw Beer Overlay» тепер у Chrome Web Store! Постав офіційну версію звідти:
+> https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg — вона
+> оновлюватиметься автоматично. Після встановлення: відкрий **Options** і **встав токен
+> заново** (у версії зі стору сховище порожнє — новий ID розширення) → перевір **Test
+> connection** → **видали стару unpacked-версію** з `chrome://extensions`. Питання — пиши боту.
 
 ---
 
