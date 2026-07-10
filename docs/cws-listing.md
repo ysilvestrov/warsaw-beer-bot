@@ -45,17 +45,41 @@ yours — see the privacy policy.
 
 ## Permission justifications
 
-Canonical list is in [`cws-data-usage.md`](./cws-data-usage.md) ("Permission
-justifications"). Store build (`CWS_BUILD=1`) requests:
+The CWS "Privacy practices" tab gives **one justification field per API permission**
+plus a **single combined "Host permission justification"** textarea that covers ALL
+host access (content-script shop domains + the API host + optional hosts) — not one
+field per host. Fill them as follows.
 
-| Permission | One-line justification |
-|---|---|
-| `storage` | Cache match results + store the user's token/settings locally for fast page loads. |
-| `activeTab` | The popup's "Refresh this page" / status act only on the tab the user invokes it on. |
-| host `beer-api.ysilvestrov-ai.uk` | The extension's own backend: matches shop beer names against the catalog + the user's Untappd history. |
-| 9 shop content-script hosts | Read product names on each supported store and inject the rating badges. |
-| optional `untappd.com` | Only with opt-in "find missing beers" / check-in sync: queries Untappd from the user's own session. |
-| optional `*.algolia.net` | Untappd's search backend, used only during opt-in "find missing beers". |
+### API permissions (separate fields)
+
+- **storage** — `Caches beer-match results and stores the user's API token and settings locally, so pages show badges quickly without re-querying.`
+- **activeTab** — `The popup's "Refresh this page" button and status readout act only on the tab where the user clicks the extension icon.`
+
+### Host permission justification (one combined field — paste verbatim)
+
+```
+This extension needs host access to three groups of sites, each directly required by its single purpose — showing the user's Untappd check-in status and ratings on craft-beer shop pages.
+
+1) Supported craft-beer shops (content scripts). Match patterns:
+https://beerrepublic.eu/*, https://*.beerrepublic.eu/*,
+https://onemorebeer.pl/*, https://*.onemorebeer.pl/*,
+https://beerfreak.org/*, https://*.beerfreak.org/*,
+https://bierloods22.nl/*, https://*.bierloods22.nl/*,
+https://winetime.com.ua/*, https://*.winetime.com.ua/*,
+https://hoptimaal.com/*, https://*.hoptimaal.com/*,
+https://flasker.com.ua/*, https://*.flasker.com.ua/*,
+https://piwnemosty.pl/*, https://*.piwnemosty.pl/*,
+https://funkyshop.pl/*, https://*.funkyshop.pl/*.
+On these specific stores the content script reads product (beer/brewery) names from the page and injects a small rating badge next to each beer. Every store is listed explicitly; the "*." subdomain wildcard only covers www/regional subdomains of the same store.
+
+2) The extension's own backend — https://beer-api.ysilvestrov-ai.uk/*.
+Badges are computed server-side: the extension sends the page's beer names to this API, which matches them against the beer catalog and the user's own Untappd history and returns the rating / already-drunk status. No third-party host is involved in the core feature.
+
+3) Optional hosts, requested at runtime only if the user enables extra features — https://untappd.com/* and https://*.algolia.net/*.
+Used solely for the opt-in "find missing beers" and "sync my check-ins" features, which query Untappd (and its Algolia search backend) from the user's own logged-in session. They are not requested unless the user turns the feature on.
+```
+
+Reference for the pattern syntax: https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns
 
 ## Screenshots (capture at 1280×800 or 640×400; PNG/JPEG; min 1, aim 3–4)
 
