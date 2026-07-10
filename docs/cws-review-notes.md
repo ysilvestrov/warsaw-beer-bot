@@ -20,10 +20,10 @@ No account, login, or token is required to see the core feature:
    listing/category page.
 3. Wait ~1–2s: ⭐ rating badges appear on beers present in our catalog. Clicking a
    badge opens the beer (or an Untappd search) in a new tab.
-4. Click the toolbar icon: the popup shows **"Не авторизовано — показуються лише
-   глобальні рейтинги (⭐)"** with a **"Як отримати токен"** button. This is the
-   expected unauthenticated state — the extension is fully functional for global
-   ratings; a token only adds personal ✅/rating data.
+4. Click the toolbar icon: the popup shows **"Not connected — showing global ratings
+   only (⭐)"** with a **"Get a token"** button. This is the expected unauthenticated
+   state — the extension is fully functional for global ratings; a token only adds
+   personal ✅/rating data.
 
 ## Authorized mode (optional)
 

@@ -59,9 +59,9 @@ describe('formatSyncStatus', () => {
 });
 
 describe('authNoteText', () => {
-  it('returns the not-authorized note when there is no token', () => {
+  it('returns the not-connected note when there is no token', () => {
     expect(authNoteText(false)).toBe(
-      'Не авторизовано — показуються лише глобальні рейтинги (⭐). Додай токен, щоб бачити «вже пив» ✅ і свою оцінку.',
+      "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.",
     );
   });
   it('returns null when a token is present', () => {
