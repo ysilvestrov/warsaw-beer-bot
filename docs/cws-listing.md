@@ -84,7 +84,7 @@ then load `extension/dist` via chrome://extensions → Load unpacked). Anonymous
    with badges are clearly visible. Full 1280×800.
 2. **Popup.** Click the toolbar icon over a shop page so the popup is open and visible.
    Show either the working sync state (token loaded) or the no-token guidance
-   ("Не авторизовано" note + "Як отримати токен" button) — pick one; the working state
+   ("Not connected" note + "Get a token" button) — pick one; the working state
    reads best for shoppers. Center the popup; pad to 1280×800 if needed.
 3. **Options page.** `chrome://extensions` → Details → Extension options (or the popup's
    button). Show the token field and the "Find missing beers via Untappd" toggle — this

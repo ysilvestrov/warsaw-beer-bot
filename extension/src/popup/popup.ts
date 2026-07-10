@@ -43,7 +43,7 @@ export function canRefresh(url: string): boolean {
 export function authNoteText(hasToken: boolean): string | null {
   return hasToken
     ? null
-    : 'Не авторизовано — показуються лише глобальні рейтинги (⭐). Додай токен, щоб бачити «вже пив» ✅ і свою оцінку.';
+    : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
 }
 
 function el<T extends HTMLElement>(id: string): T | null {
