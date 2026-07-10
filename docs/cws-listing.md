@@ -57,26 +57,17 @@ field per host. Fill them as follows.
 
 ### Host permission justification (one combined field — paste verbatim)
 
+⚠️ The field caps at **1000 characters**, so do NOT list every match pattern (the
+reviewer sees them in the manifest). This condensed version is 872 chars:
+
 ```
-This extension needs host access to three groups of sites, each directly required by its single purpose — showing the user's Untappd check-in status and ratings on craft-beer shop pages.
+Host access maps directly to this extension's single purpose: showing the user's Untappd check-in status and ratings on craft-beer shop pages.
 
-1) Supported craft-beer shops (content scripts). Match patterns:
-https://beerrepublic.eu/*, https://*.beerrepublic.eu/*,
-https://onemorebeer.pl/*, https://*.onemorebeer.pl/*,
-https://beerfreak.org/*, https://*.beerfreak.org/*,
-https://bierloods22.nl/*, https://*.bierloods22.nl/*,
-https://winetime.com.ua/*, https://*.winetime.com.ua/*,
-https://hoptimaal.com/*, https://*.hoptimaal.com/*,
-https://flasker.com.ua/*, https://*.flasker.com.ua/*,
-https://piwnemosty.pl/*, https://*.piwnemosty.pl/*,
-https://funkyshop.pl/*, https://*.funkyshop.pl/*.
-On these specific stores the content script reads product (beer/brewery) names from the page and injects a small rating badge next to each beer. Every store is listed explicitly; the "*." subdomain wildcard only covers www/regional subdomains of the same store.
+Content scripts run only on 9 specific craft-beer stores — BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal, Flasker, Piwne Mosty and Funkyshop (including their www/regional subdomains) — to read product beer/brewery names from the page and inject a small rating badge next to each beer.
 
-2) The extension's own backend — https://beer-api.ysilvestrov-ai.uk/*.
-Badges are computed server-side: the extension sends the page's beer names to this API, which matches them against the beer catalog and the user's own Untappd history and returns the rating / already-drunk status. No third-party host is involved in the core feature.
+beer-api.ysilvestrov-ai.uk is the extension's own backend: it receives the page's beer names and returns the rating / already-drunk status. No third party is involved in the core feature.
 
-3) Optional hosts, requested at runtime only if the user enables extra features — https://untappd.com/* and https://*.algolia.net/*.
-Used solely for the opt-in "find missing beers" and "sync my check-ins" features, which query Untappd (and its Algolia search backend) from the user's own logged-in session. They are not requested unless the user turns the feature on.
+untappd.com and *.algolia.net are optional and requested at runtime only if the user enables "find missing beers" or "sync my check-ins", which query Untappd and its Algolia search backend from the user's own logged-in session.
 ```
 
 Reference for the pattern syntax: https://developer.chrome.com/docs/extensions/develop/concepts/match-patterns
