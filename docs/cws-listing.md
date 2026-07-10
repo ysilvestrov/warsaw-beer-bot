@@ -128,7 +128,8 @@ anonymous ⭐ mode (#245) makes the core feature verifiable with zero setup.
       Check the deadline/consequences shown at registration.
 - [ ] Store listing tab: paste name, summary, detailed description; set category
       **Shopping**, language **English**; upload the 128×128 icon and screenshots.
-- [ ] Permissions tab: paste each justification (table above / `cws-data-usage.md`).
+- [ ] Permissions tab: paste the `storage` and `activeTab` justifications, then the
+      combined **Host permission justification** text (see "Permission justifications").
 - [ ] Privacy practices tab: privacy policy URL, data-collected checkboxes, 3
       certifications (`cws-data-usage.md`).
 - [ ] Account → review notes: paste `cws-review-notes.md`.
