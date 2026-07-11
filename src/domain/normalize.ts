@@ -79,7 +79,7 @@ export function stripLegalForm(s: string): string {
 }
 
 export function normalizeName(s: string): string {
-  const tokens = baseNormalize(preserveDecimalIdentifiers(s))
+  const tokens = baseNormalize(preserveDecimalIdentifiers(stripSearchNoise(s)))
     .split(' ')
     .filter((t) => t && !STYLE_WORDS.has(t) && !SPEC_LABEL_WORDS.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
@@ -128,11 +128,15 @@ function foldToken(tok: string): string {
 export function stripSearchNoise(s: string): string {
   return s
     .replace(/\[[^\]]*\]/g, ' ')                     // [adjunct, lists]
-    .replace(/\([^)]*\)/g, ' ')                      // (collab …), (batch/2023)
+    .replace(/\(([^)]*)\)/g, (_group, content: string) =>
+      /^(?=[\p{L}\p{N}]*\d)[\p{L}\p{N}]+$/u.test(content) ? ` ${content} ` : ' ')
+    // Keep compact identifiers such as (TAP04); drop (collab …), (batch/2023).
     .replace(/[[\](){}]/g, ' ')                      // stray/unbalanced brackets
     .replace(/[<>]?\s*\d+(?:[.,]\d+)?\s*%/g, ' ')    // <0,5%  4.5%  0,5 %
     .replace(/\d+(?:[.,]\d+)?\s*°/g, ' ')            // 24°
     .replace(/\b(?:alc|abv|ibu)\b/gi, ' ')           // spec labels
+    .replace(/["“”„]/g, '')                         // wrapping display/straight quotes
+    .replace(/\s*[.!?,;:]+\s*$/, '')                  // trailing punctuation
     .replace(/\s+/g, ' ')
     .trim();
 }

@@ -371,6 +371,48 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  describe('shared structural-noise normalization (#269)', () => {
+    test.each([
+      { bid: 30278, brewery: 'NEPOMUCEN', input: 'Nonalco Matcha IPA (puszka)', candidate: 'Nonalco Matcha IPA' },
+      { bid: 30277, brewery: 'Browar Stu Mostów', input: 'Free Pan Da (puszka)', candidate: 'Free Pan Da' },
+      { bid: 30276, brewery: 'Browar Stu Mostów', input: 'Ole! (puszka)', candidate: 'Ole!' },
+      { bid: 30294, brewery: 'StarKraft', input: 'Jubilance (Pure Bedlam Collab)', candidate: 'Jubilance' },
+    ])('matched: noisy input resolves to clean candidate $bid', async ({ bid, brewery, input, candidate }) => {
+      const search = fakeSearch(() => [
+        { bid, beer_name: candidate, brewery_name: brewery, style: 'IPA', abv: 5, global_rating: 3.5 },
+      ]);
+
+      const out = await lookupBeer({ brewery, name: input, search });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(bid);
+    });
+
+    test('matched: NoLo Hemperor passes the existing bilingual brewery gate (12082)', async () => {
+      const search = fakeSearch(() => [
+        {
+          bid: 12082,
+          beer_name: 'NoLo – Hemperor',
+          brewery_name: 'Piwne Podziemie / Beer Underground',
+          style: 'Non-Alcoholic Beer',
+          abv: 0.5,
+          global_rating: 3.5,
+        },
+      ]);
+
+      const out = await lookupBeer({
+        brewery: 'Piwne Podziemie Brewery',
+        name: 'NoLo – Hemperor <0,5% alc <0,5%',
+        search,
+      });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(12082);
+    });
+  });
+
   describe('reviewed matcher near-misses (#234)', () => {
     test.each([
       {

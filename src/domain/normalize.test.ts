@@ -33,6 +33,28 @@ test('preserves decimal release identifiers in beer names', () => {
   expect(normalizeName('Ambrosia 9.0 — IPA')).toBe('ambrosia 9.0');
 });
 
+describe('normalizeName structural search noise', () => {
+  test.each([
+    ['Nonalco Matcha IPA (puszka)', 'nonalco matcha'],
+    ['Free Pan Da (puszka)', 'free pan da'],
+    ['Ole! (puszka)', 'ole'],
+    ['Jubilance (Pure Bedlam Collab)', 'jubilance'],
+    ['Wonders [passionfruit, banana]', 'wonders'],
+    ['NoLo – Hemperor <0,5% alc <0,5%', 'nolo hemperor'],
+    ['“Jubilance”.', 'jubilance'],
+  ])('normalizes %s to %s', (raw, expected) => {
+    expect(normalizeName(raw)).toBe(expected);
+  });
+
+  test('normalizes noisy and clean names symmetrically', () => {
+    expect(normalizeName('Jubilance (Pure Bedlam Collab)')).toBe(normalizeName('Jubilance'));
+  });
+
+  test('preserves internal punctuation and decimal release identifiers', () => {
+    expect(normalizeName('Dynaboost: Mosaic 9.0')).toBe('dynaboost mosaic 9.0');
+  });
+});
+
 test('strips every Polish diacritic', () => {
   expect(normalizeBrewery('ąćęłńóśźż')).toBe('acelnoszz');
   expect(normalizeBrewery('ĄĆĘŁŃÓŚŹŻ')).toBe('acelnoszz');
@@ -210,6 +232,14 @@ describe('stripSearchNoise', () => {
     expect(stripSearchNoise('Hemperor <0,5% alc 4.5% abv 24°')).toBe('Hemperor');
   });
   test('leaves an ordinary name untouched', () => {
+    expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
+  });
+  test('removes wrapping quote marks and trailing punctuation', () => {
+    expect(stripSearchNoise('“Jubilance”.')).toBe('Jubilance');
+    expect(stripSearchNoise('"Jubilance"?!')).toBe('Jubilance');
+    expect(stripSearchNoise('„Jubilance”   ;:')).toBe('Jubilance');
+  });
+  test('preserves internal punctuation', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
   });
   test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
