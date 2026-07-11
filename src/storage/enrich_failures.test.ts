@@ -114,16 +114,49 @@ describe('enrich_failures', () => {
     expect(setEnrichFailureReview(db, 99999, 'wontfix', null, '2026-06-11T02:00:00Z')).toBe(false);
   });
 
-  test('a recurring failure clears a prior review', () => {
+  test('same-signal re-fail (0→0) PRESERVES a prior review (no churn)', () => {
     const { db, id } = freshDbWithBeer();
-    recordEnrichFailure(db, row({ beer_id: id }));
-    setEnrichFailureReview(db, id, 'matcher_bug', null, '2026-06-11T02:00:00Z');
-    recordEnrichFailure(db, row({ beer_id: id, at: '2026-06-11T03:00:00Z' })); // fails again
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 0 }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-06-11T02:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 0, at: '2026-06-11T03:00:00Z' }));
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBe('matcher_bug');
+    expect(got.review_note).toBe('note');
+    expect(got.reviewed_at).toBe('2026-06-11T02:00:00Z');
+    expect(got.fail_count).toBe(2);
+    expect(got.last_at).toBe('2026-06-11T03:00:00Z');
+  });
+
+  test('same-signal re-fail (N→N) PRESERVES a prior review', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 2, candidates_summary: 'X — Y' }));
+    setEnrichFailureReview(db, id, 'not_on_untappd', null, '2026-06-11T02:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 5, candidates_summary: 'X — Y', at: '2026-06-11T03:00:00Z' }));
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBe('not_on_untappd');
+    expect(got.candidates_count).toBe(5);
+  });
+
+  test('boundary crossing 0→N re-opens triage (clears review)', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 0 }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-06-11T02:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 3, candidates_summary: 'X — Y', at: '2026-06-11T03:00:00Z' }));
     const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_class).toBeNull();
     expect(got.review_note).toBeNull();
     expect(got.reviewed_at).toBeNull();
     expect(got.fail_count).toBe(2);
+    expect(got.candidates_count).toBe(3);
+  });
+
+  test('boundary crossing N→0 re-opens triage (clears review)', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 2, candidates_summary: 'X — Y' }));
+    setEnrichFailureReview(db, id, 'not_on_untappd', null, '2026-06-11T02:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 0, candidates_summary: '', at: '2026-06-11T03:00:00Z' }));
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBeNull();
   });
 
   test('the review_class CHECK constraint rejects an invalid class', () => {
