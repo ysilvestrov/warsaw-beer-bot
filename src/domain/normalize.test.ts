@@ -33,6 +33,28 @@ test('preserves decimal release identifiers in beer names', () => {
   expect(normalizeName('Ambrosia 9.0 — IPA')).toBe('ambrosia 9.0');
 });
 
+describe('normalizeName structural search noise', () => {
+  test.each([
+    ['Nonalco Matcha IPA (puszka)', 'nonalco matcha'],
+    ['Free Pan Da (puszka)', 'free pan da'],
+    ['Ole! (puszka)', 'ole'],
+    ['Jubilance (Pure Bedlam Collab)', 'jubilance'],
+    ['Wonders [passionfruit, banana]', 'wonders'],
+    ['NoLo – Hemperor <0,5% alc <0,5%', 'nolo hemperor'],
+    ['“Jubilance”.', 'jubilance'],
+  ])('normalizes %s to %s', (raw, expected) => {
+    expect(normalizeName(raw)).toBe(expected);
+  });
+
+  test('normalizes noisy and clean names symmetrically', () => {
+    expect(normalizeName('Jubilance (Pure Bedlam Collab)')).toBe(normalizeName('Jubilance'));
+  });
+
+  test('preserves internal punctuation and decimal release identifiers', () => {
+    expect(normalizeName('Dynaboost: Mosaic 9.0')).toBe('dynaboost mosaic 9.0');
+  });
+});
+
 test('strips every Polish diacritic', () => {
   expect(normalizeBrewery('ąćęłńóśźż')).toBe('acelnoszz');
   expect(normalizeBrewery('ĄĆĘŁŃÓŚŹŻ')).toBe('acelnoszz');
@@ -197,6 +219,9 @@ describe('cleanSearchQuery', () => {
   test('all-noise input never yields an empty query (fallback)', () => {
     expect(cleanSearchQuery('Brewing Co', '[only adjuncts]')).toBe('Brewing Co');
   });
+  test('uses the raw name only as a last resort when all cleaned input is empty', () => {
+    expect(cleanSearchQuery('', '(only)')).toBe('(only)');
+  });
 });
 
 describe('stripSearchNoise', () => {
@@ -211,6 +236,25 @@ describe('stripSearchNoise', () => {
   });
   test('leaves an ordinary name untouched', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
+  });
+  test('removes wrapping quote marks and trailing punctuation', () => {
+    expect(stripSearchNoise('“Jubilance”.')).toBe('Jubilance');
+    expect(stripSearchNoise('"Jubilance"?!')).toBe('Jubilance');
+    expect(stripSearchNoise('„Jubilance”   ;:')).toBe('Jubilance');
+  });
+  test('preserves token boundaries around quote marks', () => {
+    expect(stripSearchNoise('Foo"Bar')).toBe('Foo Bar');
+    expect(normalizeName('Foo"Bar')).toBe('foo bar');
+  });
+  test('preserves internal punctuation', () => {
+    expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
+  });
+  test('preserves digit-bearing compact identifiers but strips letter-only groups', () => {
+    expect(stripSearchNoise('Festweisse (TAP04)')).toBe('Festweisse TAP04');
+    expect(normalizeName('Festweisse (TAP04)')).toBe('festweisse tap04');
+    expect(stripSearchNoise('Imperial Stout (BBA)')).toBe('Imperial Stout');
+    expect(normalizeName('Imperial Stout (BBA)')).toBe('');
+    expect(stripSearchNoise('Nonalco Matcha IPA (puszka)')).toBe('Nonalco Matcha IPA');
   });
   test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
     expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');

@@ -79,7 +79,7 @@ export function stripLegalForm(s: string): string {
 }
 
 export function normalizeName(s: string): string {
-  const tokens = baseNormalize(preserveDecimalIdentifiers(s))
+  const tokens = baseNormalize(preserveDecimalIdentifiers(stripSearchNoise(s)))
     .split(' ')
     .filter((t) => t && !STYLE_WORDS.has(t) && !SPEC_LABEL_WORDS.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
@@ -118,21 +118,25 @@ function foldToken(tok: string): string {
 // (as stripBreweryNoise did), drop BREWERY_NOISE tokens, and dedup repeated tokens (by
 // fold), keeping survivors in their original raw form. Fixes #126: a name that repeats
 // the brewery ("Track Brewing Company Taking Shape" + "Track Brewing Co.") otherwise
-// AND-searches duplicated terms and returns nothing. Falls back to the raw name if the
-// clean pass removes everything (all-noise input), to avoid an empty `?q=` search.
+// AND-searches duplicated terms and returns nothing. The raw name is used only as a
+// last-resort non-empty fallback when cleaning removes everything and no brewery survives.
 // Strip structural search noise from a raw brewery/name string before it becomes an
 // Untappd (Algolia) query. Algolia ANDs every term, so bracketed adjunct lists, collab
 // parentheticals, and ABV/spec strings over-constrain the search to zero hits (#236).
-// These groups never carry the core beer name, so they are dropped wholesale — the raw
-// name (with adjuncts) is still used separately for downstream fuzzy disambiguation.
+// The helper is shared by query and match normalization, so structural noise removed
+// from the search query cannot be reintroduced by downstream name matching.
 export function stripSearchNoise(s: string): string {
   return s
     .replace(/\[[^\]]*\]/g, ' ')                     // [adjunct, lists]
-    .replace(/\([^)]*\)/g, ' ')                      // (collab …), (batch/2023)
+    .replace(/\(([^)]*)\)/g, (_group, content: string) =>
+      /^(?=[\p{L}\p{N}]*\d)[\p{L}\p{N}]+$/u.test(content) ? ` ${content} ` : ' ')
+    // Keep compact digit-bearing identifiers such as (TAP04); drop (BBA), (collab …).
     .replace(/[[\](){}]/g, ' ')                      // stray/unbalanced brackets
     .replace(/[<>]?\s*\d+(?:[.,]\d+)?\s*%/g, ' ')    // <0,5%  4.5%  0,5 %
     .replace(/\d+(?:[.,]\d+)?\s*°/g, ' ')            // 24°
     .replace(/\b(?:alc|abv|ibu)\b/gi, ' ')           // spec labels
+    .replace(/["“”„]/g, ' ')                        // wrapping display/straight quotes
+    .replace(/\s*[.!?,;:]+\s*$/, '')                  // trailing punctuation
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -151,7 +155,7 @@ export function cleanSearchQuery(brewery: string, name: string): string {
     seen.add(f);
     out.push(tok);
   }
-  // Fall back to the CLEANED name/brewery (never the raw name) so brackets/spec are
-  // never re-injected into ?q= when the strip+dedup pass empties the query.
+  // Prefer cleaned name/brewery; use the raw name only as a last resort when structural
+  // cleaning removes everything and no cleaned brewery survives, so the query is non-empty.
   return out.length ? out.join(' ') : (cleanName || cleanBrewery || name.trim());
 }
