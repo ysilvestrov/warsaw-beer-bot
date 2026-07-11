@@ -13,7 +13,10 @@ export interface EnrichFailureRow {
 }
 
 // One row per failing beer. Upsert on beer_id: a repeat failure refreshes the
-// diagnostic fields and bumps fail_count. The row is cleared (clearEnrichFailure)
+// diagnostic fields and bumps fail_count. The prior triage classification
+// (review_class/review_note/reviewed_at) is preserved on re-fail UNLESS
+// candidates_count crosses the 0↔>0 boundary, in which case it is cleared to
+// re-open the row for triage. The row is cleared (clearEnrichFailure)
 // when the beer eventually matches, and CASCADE-deleted if the beer row is removed.
 export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   db.prepare(
@@ -31,9 +34,15 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
        candidates_summary = excluded.candidates_summary,
        fail_count         = enrich_failures.fail_count + 1,
        last_at            = excluded.last_at,
-       review_class       = NULL,
-       review_note        = NULL,
-       reviewed_at        = NULL`,
+       review_class       = CASE
+         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+         THEN NULL ELSE enrich_failures.review_class END,
+       review_note        = CASE
+         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+         THEN NULL ELSE enrich_failures.review_note END,
+       reviewed_at        = CASE
+         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+         THEN NULL ELSE enrich_failures.reviewed_at END`,
   ).run(
     r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
     r.candidates_count, r.candidates_summary, r.at,
@@ -61,7 +70,9 @@ export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'won
 
 // Marks an orphan failure as triaged. Returns false if no row exists for beerId
 // (e.g. the failure already cleared because the beer matched). A later recurring
-// failure resets these fields via recordEnrichFailure's ON CONFLICT clause.
+// failure only resets these fields via recordEnrichFailure's ON CONFLICT clause
+// when candidates_count crosses the 0↔>0 boundary; otherwise the classification
+// is preserved.
 export function setEnrichFailureReview(
   db: DB,
   beerId: number,

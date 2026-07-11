@@ -89,7 +89,18 @@ const MAX_OPEN_ISSUES = 30; // more open triage issues than this is itself a bug
 // token budget.
 const ORPHAN_FIELD_CAPS = { name: 150, url: 300, summary: 400 } as const;
 
-function boundOrphan(o: UntriagedFailure): UntriagedFailure {
+// The q= param of search_url is the actual cleaned query that was run
+// (cleanSearchQuery output). Decode it so the triage model sees the real
+// post-normalisation query rather than URL-encoding or the raw noisy name.
+function decodeSearchQuery(searchUrl: string): string {
+  try {
+    return new URL(searchUrl).searchParams.get('q') ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function boundOrphan(o: UntriagedFailure): UntriagedFailure & { search_query: string } {
   return {
     ...o,
     brewery: o.brewery.slice(0, ORPHAN_FIELD_CAPS.name),
@@ -97,6 +108,7 @@ function boundOrphan(o: UntriagedFailure): UntriagedFailure {
     search_url: o.search_url.slice(0, ORPHAN_FIELD_CAPS.url),
     source_url: o.source_url.slice(0, ORPHAN_FIELD_CAPS.url),
     candidates_summary: o.candidates_summary.slice(0, ORPHAN_FIELD_CAPS.summary),
+    search_query: decodeSearchQuery(o.search_url).slice(0, ORPHAN_FIELD_CAPS.name),
   };
 }
 
@@ -110,6 +122,8 @@ export function buildTriagePrompt(input: TriageInput): string {
     'what the Untappd search returned (empty = the search query itself found nothing);',
     '`source_url` is the shop the beer was scraped from ("" = internal cron);',
     '`fail_count` is how many attempts have failed.',
+    '`search_query` is the ACTUAL query we sent (the normalised `q=` from search_url); the raw',
+    '`name` may still contain noise that is already stripped in `search_query`.',
     '',
     'Key test before you classify: looking at the shop page, are the brewery and',
     'name fields essentially correct?',
@@ -136,6 +150,15 @@ export function buildTriagePrompt(input: TriageInput): string {
     '- not_on_untappd: a real beer that simply is not listed on Untappd. No fix possible.',
     '- wontfix: not worth fixing (one-off collab long gone, non-beer that is not the',
     '  adapter\'s fault, hopeless/garbled data with nothing to rescue).',
+    '',
+    'Pivot on candidates_count before you blame query noise:',
+    '- candidates_count > 0: the search WORKS and returned candidates, so the miss is on the',
+    '  MATCH side (fuzzy threshold, brewery alias, name divergence) — do NOT diagnose query',
+    '  noise; route it to the match-side issue.',
+    '- candidates_count = 0: the search found nothing — a query-noise or brewery-alias problem.',
+    'Already-handled guard: `search_query` IS the query after normalisation. If a noise token',
+    'visible in `name` (brackets, parentheticals, %/°/alc/abv/ibu) is already ABSENT from',
+    '`search_query`, it is already stripped — do NOT propose stripping it again (it is already stripped).',
     '',
     'Cluster actionable orphans (parser_bug / matcher_bug) into patterns:',
     '- If an open issue below already covers the pattern, set issue_number to it.',
