@@ -1,9 +1,11 @@
-import 'dotenv/config';
 import { loadEnv } from '../src/config/env';
 import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import type { RearmTarget } from './rearm-aliased-orphans';
 import { applyRearm } from './rearm-aliased-orphans';
+import { loadOperatorEnv } from './operator-env';
+
+loadOperatorEnv();
 
 export { applyRearm } from './rearm-aliased-orphans';
 

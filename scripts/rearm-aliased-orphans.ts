@@ -1,8 +1,10 @@
-import 'dotenv/config';
 import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import { loadEnv } from '../src/config/env';
 import { hasCuratedAlias } from '../src/domain/matcher';
+import { loadOperatorEnv } from './operator-env';
+
+loadOperatorEnv();
 
 export interface RearmTarget {
   id: number;
