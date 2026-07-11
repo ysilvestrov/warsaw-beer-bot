@@ -1249,14 +1249,19 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   (навігація / SPA ре-маунт / infinite-scroll); кеш дедуплікує повторні матчі.
 - **Auth:** токен з команди `/extension` зберігається в `chrome.storage.local`;
   base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
-  options-сторінка має Test connection (`GET /health` + 1-beer `/match`).
+  options-сторінка має Test connection (`GET /health` + 1-beer `/match`) і завжди
+  показує посилання «Read the setup guide →» на хостований install-гайд
+  (`docs/extension-install-en.md`/`-uk.md`).
 - **Popup керування кешем** (toolbar `action`, дозвіл `activeTab`):
   «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
   видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
   повідомлення `refresh-page` контент-скрипту → `refreshCards` + `clearKeys` +
   `runOverlay`); «Clear all cache» — чистить усі `mc2:`-ключі (`clearAll`). Ключі
   кешу site-незалежні (`normalizeKey(brewery,name)`), тож «per-site» реалізовано як
-  «оновити відкриту сторінку».
+  «оновити відкриту сторінку». Поки токен **не заданий**, popup, **окрім** цього
+  меню (кнопки лишаються), додатково показує «Not connected», кнопку «Get a token»
+  і те саме посилання «Read the setup guide →»; після збереження токена ці три
+  додаткові елементи ховаються.
 - **Read-only гарантія:** лише додає власні бейдж-ноди; будь-яка помилка
   парсингу/рендеру проковтується й не ламає сторінку магазину.
 - **Тести:** контракт адаптера покрито **конформанс-тестом над реєстром**

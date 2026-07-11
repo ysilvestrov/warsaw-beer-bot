@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { getSettings, setSettings, DEFAULT_BASE_URL } from './config';
+import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from './config';
 
 describe('config', () => {
   it('returns empty token + default baseUrl when nothing stored', async () => {
@@ -32,5 +32,11 @@ describe('config', () => {
     await setSettings({ enrichEnabled: true });
     expect((await getSettings()).enrichEnabled).toBe(true);
     vi.unstubAllGlobals();
+  });
+});
+
+describe('SETUP_GUIDE_URL', () => {
+  it('points at the hosted English setup guide', () => {
+    expect(SETUP_GUIDE_URL).toBe('https://ysilvestrov.github.io/warsaw-beer-bot/install/');
   });
 });

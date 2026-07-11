@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { canRefresh, formatSyncStatus, authNoteText } from './popup';
+import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible } from './popup';
+import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
   it('true on a supported shop URL', () => {
@@ -66,5 +67,15 @@ describe('authNoteText', () => {
   });
   it('returns null when a token is present', () => {
     expect(authNoteText(true)).toBeNull();
+  });
+});
+
+describe('guideLinkVisible', () => {
+  it('shows the guide link only when there is no token', () => {
+    expect(guideLinkVisible(false)).toBe(true);
+    expect(guideLinkVisible(true)).toBe(false);
+  });
+  it('links to the hosted setup guide', () => {
+    expect(SETUP_GUIDE_URL).toContain('/install/');
   });
 });
