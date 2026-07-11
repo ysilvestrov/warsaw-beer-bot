@@ -1,6 +1,6 @@
 import { pickAdapter } from '../sites/registry';
 import { clearAll } from '../cache/store';
-import { getSettings } from '../shared/config';
+import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 
 export interface SyncStatusView {
   running: boolean;
@@ -46,6 +46,11 @@ export function authNoteText(hasToken: boolean): string | null {
     : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
 }
 
+/** The setup-guide link is shown in the same no-token state as the auth note. */
+export function guideLinkVisible(hasToken: boolean): boolean {
+  return !hasToken;
+}
+
 function el<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
@@ -63,17 +68,21 @@ async function initPopup(): Promise<void> {
 
   const authNote = el<HTMLElement>('authNote');
   const getTokenBtn = el<HTMLButtonElement>('getToken');
+  const guideLink = el<HTMLAnchorElement>('guideLink');
   const { token } = await getSettings();
   const note = authNoteText(Boolean(token));
-  if (authNote && getTokenBtn) {
+  if (authNote && getTokenBtn && guideLink) {
     if (note) {
       authNote.textContent = note;
       authNote.style.display = '';
       getTokenBtn.style.display = '';
       getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+      guideLink.href = SETUP_GUIDE_URL;
+      guideLink.style.display = guideLinkVisible(Boolean(token)) ? '' : 'none';
     } else {
       authNote.style.display = 'none';
       getTokenBtn.style.display = 'none';
+      guideLink.style.display = 'none';
     }
   }
 
