@@ -123,8 +123,8 @@ function foldToken(tok: string): string {
 // Strip structural search noise from a raw brewery/name string before it becomes an
 // Untappd (Algolia) query. Algolia ANDs every term, so bracketed adjunct lists, collab
 // parentheticals, and ABV/spec strings over-constrain the search to zero hits (#236).
-// These groups never carry the core beer name, so they are dropped wholesale — the raw
-// name (with adjuncts) is still used separately for downstream fuzzy disambiguation.
+// The helper is shared by query and match normalization, so structural noise removed
+// from the search query cannot be reintroduced by downstream name matching.
 export function stripSearchNoise(s: string): string {
   return s
     .replace(/\[[^\]]*\]/g, ' ')                     // [adjunct, lists]
@@ -135,7 +135,7 @@ export function stripSearchNoise(s: string): string {
     .replace(/[<>]?\s*\d+(?:[.,]\d+)?\s*%/g, ' ')    // <0,5%  4.5%  0,5 %
     .replace(/\d+(?:[.,]\d+)?\s*°/g, ' ')            // 24°
     .replace(/\b(?:alc|abv|ibu)\b/gi, ' ')           // spec labels
-    .replace(/["“”„]/g, '')                         // wrapping display/straight quotes
+    .replace(/["“”„]/g, ' ')                        // wrapping display/straight quotes
     .replace(/\s*[.!?,;:]+\s*$/, '')                  // trailing punctuation
     .replace(/\s+/g, ' ')
     .trim();

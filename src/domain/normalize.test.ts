@@ -239,6 +239,10 @@ describe('stripSearchNoise', () => {
     expect(stripSearchNoise('"Jubilance"?!')).toBe('Jubilance');
     expect(stripSearchNoise('„Jubilance”   ;:')).toBe('Jubilance');
   });
+  test('preserves token boundaries around quote marks', () => {
+    expect(stripSearchNoise('Foo"Bar')).toBe('Foo Bar');
+    expect(normalizeName('Foo"Bar')).toBe('foo bar');
+  });
   test('preserves internal punctuation', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
   });
