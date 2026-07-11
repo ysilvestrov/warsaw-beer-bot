@@ -78,6 +78,17 @@ journalctl -u warsaw-beer-bot -f       # no sudo: operator is in systemd-journal
 sudo systemctl restart warsaw-beer-bot # NOPASSWD via /etc/sudoers.d/warsaw-beer-bot
 ```
 
+Database maintenance commands run from the deployed checkout as the service user.
+They automatically load `/etc/warsaw-beer-bot/.env` and remain available after
+`npm prune --omit=dev`:
+
+```bash
+sudo -n -u warsaw-beer-bot bash -lc \
+  'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans'
+sudo -n -u warsaw-beer-bot bash -lc \
+  'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans -- --apply'
+```
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2
