@@ -1,4 +1,4 @@
-import { getSettings, setSettings, DEFAULT_BASE_URL } from '../shared/config';
+import { getSettings, setSettings, DEFAULT_BASE_URL, SETUP_GUIDE_URL } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { getHealth, postMatch, ApiError } from '../api/client';
 export { ENRICH_ORIGINS } from '../shared/enrich-permissions';
@@ -42,6 +42,9 @@ async function initOptionsPage(): Promise<void> {
   const urlInput = el<HTMLInputElement>('baseUrl');
   const status = el<HTMLElement>('status');
   if (!tokenInput || !urlInput || !status) return;
+
+  const guideLink = el<HTMLAnchorElement>('guideLink');
+  if (guideLink) guideLink.href = SETUP_GUIDE_URL;
 
   const s = await getSettings();
   tokenInput.value = s.token;
