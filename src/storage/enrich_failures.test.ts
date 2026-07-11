@@ -159,6 +159,23 @@ describe('enrich_failures', () => {
     expect(got.review_class).toBeNull();
   });
 
+  test('lifecycle: a boundary crossing re-opens, then a same-side re-fail re-sticks', () => {
+    const { db, id } = freshDbWithBeer();
+    // Classified while cand=0.
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 0 }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'n1', '2026-06-11T02:00:00Z');
+    // 0→N crossing re-opens for triage (cleared).
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 4, candidates_summary: 'X — Y', at: '2026-06-11T03:00:00Z' }));
+    let got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBeNull();
+    // Re-classified on the new (N) side, then a same-side N→N re-fail stays sticky.
+    setEnrichFailureReview(db, id, 'not_on_untappd', null, '2026-06-11T04:00:00Z');
+    recordEnrichFailure(db, row({ beer_id: id, candidates_count: 6, candidates_summary: 'X — Y', at: '2026-06-11T05:00:00Z' }));
+    got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_class).toBe('not_on_untappd');
+    expect(got.fail_count).toBe(3);
+  });
+
   test('the review_class CHECK constraint rejects an invalid class', () => {
     const { db, id } = freshDbWithBeer();
     recordEnrichFailure(db, row({ beer_id: id }));
