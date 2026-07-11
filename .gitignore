@@ -18,3 +18,7 @@ extension/warsaw-beer-overlay-*.zip
 
 # Scratch folder for the current task (see CLAUDE.md ./tmp/ policy)
 tmp/
+
+# Generated on GitHub Pages from docs/extension-install-*.md (see scripts/render-docs.ts)
+site/install/
+site/install-uk/
