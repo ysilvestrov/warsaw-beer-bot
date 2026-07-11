@@ -242,6 +242,10 @@ describe('stripSearchNoise', () => {
   test('preserves internal punctuation', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
   });
+  test('preserves compact parenthetical identifiers', () => {
+    expect(stripSearchNoise('Festweisse (TAP04)')).toBe('Festweisse TAP04');
+    expect(normalizeName('Festweisse (TAP04)')).toBe('festweisse tap04');
+  });
   test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
     expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');
   });

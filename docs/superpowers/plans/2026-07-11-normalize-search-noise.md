@@ -55,6 +55,11 @@ describe('normalizeName structural search noise (#269)', () => {
   test('preserves an internal colon and decimal release identifier', () => {
     expect(normalizeName('Dynaboost: Mosaic 9.0')).toBe('dynaboost mosaic 9.0');
   });
+
+  test('preserves a compact parenthetical identifier', () => {
+    expect(stripSearchNoise('Festweisse (TAP04)')).toBe('Festweisse TAP04');
+    expect(normalizeName('Festweisse (TAP04)')).toBe('festweisse tap04');
+  });
 });
 ```
 
@@ -159,6 +164,10 @@ At the end of the existing replacement chain in `stripSearchNoise()`, before whi
 ```
 
 Do not strip apostrophes globally and do not strip internal punctuation.
+Descriptive parenthetical structural groups (packaging, collaboration, and
+batch prose) are removed, but preserve compact parenthetical identifiers with
+no whitespace, such as `(TAP04)`, by unwrapping the parentheses. This keeps the
+existing name-key identity behavior intact.
 
 - [ ] **Step 6: Run focused and matcher regression tests and verify GREEN**
 
@@ -355,10 +364,13 @@ behavioral requirement in Ukrainian, matching the surrounding language:
 ```md
 **Спільне очищення структурного шуму (#269).** `normalizeName()` перед базовою
 нормалізацією застосовує той самий `stripSearchNoise()`, що й
-`cleanSearchQuery()`: прибирає `[...]`, `(...)`, випадкові дужки, ABV/°/alc/abv/ibu,
+`cleanSearchQuery()`: прибирає `[...]`, описові `(...)` з пакувальним,
+collab- або batch-текстом, випадкові дужки, ABV/°/alc/abv/ibu,
 обгорткові лапки та кінцеву пунктуацію. Правило симетрично застосовується до
 вхідної й каталогової назви, тому кандидат, знайдений очищеним Algolia-запитом,
-не відхиляється exact/name-key/fuzzy етапом лише через цей шум.
+не відхиляється exact/name-key/fuzzy етапом лише через цей шум. Компактні
+ідентифікатори без пробілів у дужках, наприклад `(TAP04)`, зберігаються без
+дужок, щоб не регресував наявний identity matching.
 ```
 
 - [ ] **Step 2: Document the operator re-arm command**

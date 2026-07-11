@@ -74,7 +74,8 @@ filtering, and numeric-noise filtering.
 
 The ordering is important:
 
-1. structural groups and strength/spec fragments are removed from the raw text;
+1. descriptive structural groups and strength/spec fragments are removed from
+   the raw text;
 2. legitimate decimal identifiers in the surviving name are protected;
 3. punctuation, case, and diacritics are normalized as today;
 4. existing style, spec-label, and numeric token rules remain unchanged.
@@ -86,7 +87,11 @@ same behavior because it normalizes each side through `normalizeName()`.
 `stripSearchNoise()` remains the single structural-noise helper. Its tests will
 cover balanced and stray brackets, specification strings, wrapping quote marks,
 and trailing punctuation while preserving internal punctuation that is part of
-an ordinary name, such as the colon in `Dynaboost: Mosaic`.
+an ordinary name, such as the colon in `Dynaboost: Mosaic`. Descriptive
+parenthetical groups containing packaging, collaboration, or batch prose are
+stripped, but compact parenthetical identifiers containing no whitespace, such
+as `(TAP04)`, survive structural stripping so existing identity matching does
+not regress.
 
 ### Lookup and matcher behavior
 
