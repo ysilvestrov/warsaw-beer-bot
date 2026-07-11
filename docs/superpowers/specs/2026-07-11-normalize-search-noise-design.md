@@ -89,9 +89,14 @@ cover balanced and stray brackets, specification strings, wrapping quote marks,
 and trailing punctuation while preserving internal punctuation that is part of
 an ordinary name, such as the colon in `Dynaboost: Mosaic`. Descriptive
 parenthetical groups containing packaging, collaboration, or batch prose are
-stripped, but compact parenthetical identifiers containing no whitespace, such
-as `(TAP04)`, survive structural stripping so existing identity matching does
-not regress.
+stripped, but compact parenthetical identifiers containing no whitespace and at
+least one digit, such as `(TAP04)`, survive structural stripping so existing
+identity matching does not regress. Letter-only groups such as `(BBA)` remain
+structural noise and are stripped.
+
+Search-query fallback prefers the cleaned name and then the cleaned brewery. The
+raw name is used only as a last-resort non-empty fallback when structural
+cleaning removes everything and no cleaned brewery survives.
 
 ### Lookup and matcher behavior
 

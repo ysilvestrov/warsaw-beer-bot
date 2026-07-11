@@ -219,6 +219,9 @@ describe('cleanSearchQuery', () => {
   test('all-noise input never yields an empty query (fallback)', () => {
     expect(cleanSearchQuery('Brewing Co', '[only adjuncts]')).toBe('Brewing Co');
   });
+  test('uses the raw name only as a last resort when all cleaned input is empty', () => {
+    expect(cleanSearchQuery('', '(only)')).toBe('(only)');
+  });
 });
 
 describe('stripSearchNoise', () => {
@@ -246,9 +249,12 @@ describe('stripSearchNoise', () => {
   test('preserves internal punctuation', () => {
     expect(stripSearchNoise('Dynaboost: Mosaic')).toBe('Dynaboost: Mosaic');
   });
-  test('preserves compact parenthetical identifiers', () => {
+  test('preserves digit-bearing compact identifiers but strips letter-only groups', () => {
     expect(stripSearchNoise('Festweisse (TAP04)')).toBe('Festweisse TAP04');
     expect(normalizeName('Festweisse (TAP04)')).toBe('festweisse tap04');
+    expect(stripSearchNoise('Imperial Stout (BBA)')).toBe('Imperial Stout');
+    expect(normalizeName('Imperial Stout (BBA)')).toBe('');
+    expect(stripSearchNoise('Nonalco Matcha IPA (puszka)')).toBe('Nonalco Matcha IPA');
   });
   test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
     expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');

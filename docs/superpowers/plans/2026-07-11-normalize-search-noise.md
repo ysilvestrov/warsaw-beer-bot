@@ -56,9 +56,10 @@ describe('normalizeName structural search noise (#269)', () => {
     expect(normalizeName('Dynaboost: Mosaic 9.0')).toBe('dynaboost mosaic 9.0');
   });
 
-  test('preserves a compact parenthetical identifier', () => {
+  test('preserves a digit-bearing compact parenthetical identifier', () => {
     expect(stripSearchNoise('Festweisse (TAP04)')).toBe('Festweisse TAP04');
     expect(normalizeName('Festweisse (TAP04)')).toBe('festweisse tap04');
+    expect(stripSearchNoise('Imperial Stout (BBA)')).toBe('Imperial Stout');
   });
 });
 ```
@@ -166,8 +167,11 @@ At the end of the existing replacement chain in `stripSearchNoise()`, before whi
 Do not strip apostrophes globally and do not strip internal punctuation.
 Descriptive parenthetical structural groups (packaging, collaboration, and
 batch prose) are removed, but preserve compact parenthetical identifiers with
-no whitespace, such as `(TAP04)`, by unwrapping the parentheses. This keeps the
-existing name-key identity behavior intact.
+no whitespace and at least one digit, such as `(TAP04)`, by unwrapping the
+parentheses. Letter-only groups such as `(BBA)` are stripped. This keeps the
+existing name-key identity behavior intact without preserving packaging labels.
+When cleaned name, cleaned brewery, and deduplicated output are all empty, retain
+the raw name solely as a last-resort non-empty search-query fallback.
 
 - [ ] **Step 6: Run focused and matcher regression tests and verify GREEN**
 
@@ -369,8 +373,10 @@ collab- або batch-текстом, випадкові дужки, ABV/°/alc/a
 обгорткові лапки та кінцеву пунктуацію. Правило симетрично застосовується до
 вхідної й каталогової назви, тому кандидат, знайдений очищеним Algolia-запитом,
 не відхиляється exact/name-key/fuzzy етапом лише через цей шум. Компактні
-ідентифікатори без пробілів у дужках, наприклад `(TAP04)`, зберігаються без
-дужок, щоб не регресував наявний identity matching.
+ідентифікатори без пробілів, що містять хоча б одну цифру, наприклад
+`(TAP04)`, зберігаються без дужок; літерні групи на кшталт `(BBA)` видаляються.
+Сира назва використовується лише як останній non-empty fallback, якщо структурна
+очистка спорожнила назву і не лишила очищеної броварні.
 ```
 
 - [ ] **Step 2: Document the operator re-arm command**
