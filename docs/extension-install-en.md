@@ -144,6 +144,10 @@ preserved — the extension ID is fixed.
 
 ## Part 3. Configure the extension
 
+The settings page itself has a **"Read the setup guide →"** link at the top
+that brings you back here — handy if you land on Options without having seen
+this guide first.
+
 1. Open the extension's settings page:
    - right-click the extension icon → **"Options"**, or
    - `chrome://extensions` → on the extension's card → **"Details" → "Extension options"**.
@@ -211,6 +215,11 @@ Clicking the extension's icon on the browser toolbar opens a small menu:
   just ran `/import`).
 - **"Clear all cache"** — clears the **entire** local overlay cache (all sites).
 - **"Sync my check-ins"** — pulls in your check-ins from Untappd (see below).
+
+If **no token** is set yet, the popup also shows — alongside the usual
+buttons above — a "Not connected" note next to a **"Get a token"** button and
+a **"Read the setup guide →"** link. These extra elements disappear once
+you've added a token (Part 3).
 
 ### "Sync my check-ins" — sync check-ins without Supporter
 
