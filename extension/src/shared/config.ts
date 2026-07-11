@@ -6,6 +6,9 @@ export interface Settings {
 
 export const DEFAULT_BASE_URL = 'https://beer-api.ysilvestrov-ai.uk';
 
+/** Hosted English install & setup guide, linked from the options page and no-token popup. */
+export const SETUP_GUIDE_URL = 'https://ysilvestrov.github.io/warsaw-beer-bot/install/';
+
 export async function getSettings(): Promise<Settings> {
   const s = await chrome.storage.local.get(['token', 'baseUrl', 'enrichEnabled']);
   return {
