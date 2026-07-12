@@ -1213,7 +1213,8 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `[data-information-type="brand-name"]`, назва `a.product__title`; `°` у тайтлі це
   Плато, не ABV → `abv` опускається; має `waitForGrid`), `beerfreak` (Horoshop SSR —
   `.catalogCard`, brewery/name з embedded `products` metadata, домен
-  `beerfreak.org`), `bierloods22` (Bierloods22 SSR — `.product-block`,
+  `beerfreak.org`; локально відхиляє tasting sets, mix packs і numbered multi-beer
+  series), `bierloods22` (Bierloods22 SSR — `.product-block`,
   пивоварня з **brand-префіксу** `a.title[title]` (`"{brand} {title}"` → `brand = attr − text`;
   кількість ` - `-сегментів brand'у задає межу пивоварні, тож пивоварні з внутрішнім ` - `
   типу `Kykao - Handcrafted` парсяться правильно; порожній brand → фолбек split по першому

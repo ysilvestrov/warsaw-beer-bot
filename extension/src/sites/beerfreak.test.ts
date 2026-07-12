@@ -145,6 +145,31 @@ describe('beerfreak adapter', () => {
     }));
   });
 
+  it('drops BeerFreak tasting sets and multi-beer packs', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 29993, brand_title: 'FUNKY FLUID (Польща)', title: 'WORLD CUP SERIES - 5 SPECIAL BEER' },
+      { id: 31072, brand_title: 'ГОНІР - HONIR BREWERY (Україна)', title: 'Дегустаціний сет від Honir Brewery' },
+      { id: 31073, brand_title: 'Example Brewery', title: 'Example Brewery Mix Pack' },
+      { id: 31074, brand_title: 'Example Brewery', title: 'Example Brewery Tasting Set' },
+    ]));
+
+    expect(parsed).toEqual([]);
+  });
+
+  it('keeps legitimate BeerFreak beers with incidental set-like substrings', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 31075, brand_title: 'Sunset Brew', title: 'Sunset Brew Sunset Boulevard' },
+      { id: 31076, brand_title: 'Reset Brewing', title: 'Reset Brewing Reset IPA' },
+      { id: 31077, brand_title: 'Series Brewing', title: 'Series Brewing Special Beer' },
+    ]));
+
+    expect(parsed.map(({ brewery, name }) => ({ brewery, name }))).toEqual([
+      { brewery: 'Sunset Brew', name: 'Sunset Boulevard' },
+      { brewery: 'Reset Brewing', name: 'Reset IPA' },
+      { brewery: 'Series Brewing', name: 'Special Beer' },
+    ]);
+  });
+
   it('extracts a brewery prefix from Beerfreak titles when metadata has no brand', () => {
     const parsed = beerfreak.parseCards(docWithProducts([
       { id: 10112, brand_title: null, title: 'Brouwerij De Dolle Brouwers Oerbier' },
