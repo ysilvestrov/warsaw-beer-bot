@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { vi } from 'vitest';
 import { filterIndexBySlugs, refreshOntap } from './refresh-ontap';
 import type { IndexPub } from '../sources/ontap/index';
 import { HttpError, type Http } from '../sources/http';
@@ -9,6 +10,7 @@ import { listLookupCandidates } from '../storage/beers';
 import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
+import { prepareCatalogChunked } from '../domain/catalog-cache';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -438,5 +440,50 @@ describe('refreshOntap multi-city', () => {
     expect(calls.filter((url) => url.startsWith('https://untappd.com/search'))).toHaveLength(0);
     expect(enrichedCount(db)).toBe(0);
     expect(breaker.state).toBe('open');
+  });
+
+  test('prepares the catalog once per run regardless of pub count', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const pubHtml = (n: string) =>
+      `<html><head><meta property="og:title" content="${n} / ontap.pl"></head>
+        <body>${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}</body></html>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/') return pubHtml('A');
+        if (url === 'https://pubb.ontap.pl/') return pubHtml('B');
+        return '';
+      },
+    };
+    const prepareSpy = vi.fn((rows) => prepareCatalogChunked(rows));
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false, prepareCatalog: prepareSpy,
+    });
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('a fresh orphan from one pub is reused by a later pub (no duplicate insert)', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const sharedBody = `<body>${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/' || url === 'https://pubb.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${sharedBody}</html>`;
+        return '';
+      },
+    };
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false,
+    });
+    expect(beerCount(db)).toBe(1); // one orphan, reused across pubs — not duplicated
   });
 });

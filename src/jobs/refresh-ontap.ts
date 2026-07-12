@@ -10,7 +10,8 @@ import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
 import { upsertBeer } from '../storage/beers';
-import { matchPrepared, prepareCatalog } from '../domain/matcher';
+import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
+import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 import { enrichOneOrphan } from './untappd-enrich';
@@ -31,6 +32,7 @@ interface Deps {
   cities?: readonly City[];     // default CITIES
   inlineEnrichBudget?: number;  // default 20 — total inline Untappd enriches per run
   breaker?: CircuitBreaker;     // default noopBreaker
+  prepareCatalog?: (rows: CatalogBeer[]) => Promise<PreparedCatalog>;  // default: prepareCatalogChunked
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
@@ -43,10 +45,13 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     cities = CITIES,
     inlineEnrichBudget = 20,
     breaker = noopBreaker,
+    prepareCatalog = prepareCatalogChunked,
   } = deps;
 
   let enrichBudget = inlineEnrichBudget;
   let inlineEnrichStopped = false;
+
+  const prepared = await prepareCatalog(listBeerCatalog(db));
 
   for (const city of cities) {
     let indexPubs: IndexPub[];
@@ -92,8 +97,6 @@ export async function refreshOntap(deps: Deps): Promise<void> {
         const snapshotId = createSnapshot(db, pubId, new Date().toISOString());
         insertTaps(db, snapshotId, taps);
 
-        const catalog = listBeerCatalog(db);
-        const prepared = prepareCatalog(catalog);
         for (const t of taps) {
           if (isOntapEmptyTapRef(t.beer_ref)) continue;
           const identity = normalizeOntapTapIdentity(t.brewery_ref, t.beer_ref);
@@ -115,6 +118,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
               normalized_name: normalizeName(name),
               normalized_brewery: normalizeBrewery(brewery),
             });
+            prepared.add(prepareBeer({ id: beerId, brewery, name, abv: t.abv }));
             upsertMatch(db, t.beer_ref, beerId, 1.0);
             isFreshOrphan = true;
           }
