@@ -3,6 +3,7 @@
 ## [0.11.0] - 2026-07-10
 
 - Extension now shows global Untappd ratings (⭐) on supported shops even without a token; the popup shows a "Not connected" note and links to token setup. Personal ✅/rating badges still require a token.
+- Fixed BeerFreak filtering so tasting sets, mix packs, and numbered multi-beer series are ignored instead of being matched as individual beers.
 - Fixed Funkyshop parsing on English/home grids: product detail fallback now fills missing breweries, can/deposit rows are ignored, and trailing volume/format text is removed from beer names before matching.
 - Fixed Piwne Mosty parsing so out-of-stock placeholders such as "Chwilowy brak:(" and "Wypite" are ignored instead of being sent as brewery or beer names.
 
