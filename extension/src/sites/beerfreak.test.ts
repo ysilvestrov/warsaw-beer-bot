@@ -158,9 +158,9 @@ describe('beerfreak adapter', () => {
 
   it('keeps legitimate BeerFreak beers with incidental set-like substrings', () => {
     const parsed = beerfreak.parseCards(docWithProducts([
-      { id: 31075, brand_title: 'Sunset Brew', title: 'Sunset Boulevard' },
-      { id: 31076, brand_title: 'Reset Brewing', title: 'Reset IPA' },
-      { id: 31077, brand_title: 'Series Brewing', title: 'Special Beer' },
+      { id: 31075, brand_title: 'Sunset Brew', title: 'Sunset Brew Sunset Boulevard' },
+      { id: 31076, brand_title: 'Reset Brewing', title: 'Reset Brewing Reset IPA' },
+      { id: 31077, brand_title: 'Series Brewing', title: 'Series Brewing Special Beer' },
     ]));
 
     expect(parsed.map(({ brewery, name }) => ({ brewery, name }))).toEqual([
