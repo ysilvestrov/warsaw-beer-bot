@@ -6,6 +6,7 @@ import { isBlockPage, isBlockStatus } from '../sources/untappd/block';
 import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles } from '../storage/user_profiles';
 import { upsertBeer, findBeerByNormalized } from '../storage/beers';
+import { bumpCatalogVersion } from '../storage/catalog-version';
 import { markHad } from '../storage/untappd_had';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
@@ -74,6 +75,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
         let beerId: number;
         if (existing) {
           updateRatingAndAbv.run(it.global_rating, it.abv, existing.id);
+          bumpCatalogVersion();
           beerId = existing.id;
         } else {
           beerId = upsertBeer(db, {

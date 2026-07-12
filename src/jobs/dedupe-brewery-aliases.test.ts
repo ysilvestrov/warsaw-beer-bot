@@ -5,6 +5,7 @@ import { upsertBeer } from '../storage/beers';
 import { upsertMatch } from '../storage/match_links';
 import { mergeCheckin } from '../storage/checkins';
 import { ensureProfile } from '../storage/user_profiles';
+import { catalogVersion } from '../storage/catalog-version';
 import { dedupeBreweryAliases } from './dedupe-brewery-aliases';
 
 function fresh() {
@@ -59,8 +60,10 @@ describe('dedupeBreweryAliases', () => {
       venue: null,
     });
 
+    const v = catalogVersion();
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+    expect(catalogVersion()).toBeGreaterThan(v);
 
     // match_links now points to canonical row.
     const link = db.prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')

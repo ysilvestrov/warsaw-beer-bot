@@ -1,6 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { breweryAliases } from '../domain/matcher';
+import { bumpCatalogVersion } from '../storage/catalog-version';
 
 interface PairCandidate {
   canonical_id: number;
@@ -80,6 +81,7 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
   tx(Array.from(pairsByOrphan.values()));
 
   const merged = pairsByOrphan.size;
+  if (merged > 0) bumpCatalogVersion();
   log.info(
     { pairs: merged },
     'dedupe-brewery-aliases: merged orphan ontap rows into canonical Untappd rows',

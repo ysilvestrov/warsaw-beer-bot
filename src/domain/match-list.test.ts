@@ -1,6 +1,12 @@
 import { vi } from 'vitest';
 import { matchBeerList, type CatalogBeerWithRating } from './match-list';
-import { matchBeer } from './matcher';
+import { matchBeer, prepareCatalog } from './matcher';
+
+// The route now hands matchBeerList an already-prepared catalog + id index; tests
+// build them the same way the cache does.
+function prep(catalog: CatalogBeerWithRating[]) {
+  return { prepared: prepareCatalog(catalog), byId: new Map(catalog.map((c) => [c.id, c])) };
+}
 
 const catalog: CatalogBeerWithRating[] = [
   { id: 105, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85 },
@@ -9,8 +15,10 @@ const catalog: CatalogBeerWithRating[] = [
 
 describe('matchBeerList', () => {
   it('marks a matched, drunk beer with its personal rating', async () => {
+    const { prepared, byId } = prep(catalog);
     const res = await matchBeerList(
-      catalog,
+      prepared,
+      byId,
       new Set([105]),
       new Map([[105, 4.0]]),
       [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }],
@@ -29,8 +37,10 @@ describe('matchBeerList', () => {
   it('a fuzzy match never claims drunk or personal rating', async () => {
     // "Atak Chmiel" (typo) fuzzy-matches catalog 200 "Atak Chmielu". Even though 200 is
     // in the drunk set with a rating, a fuzzy match must not assert drunk/personal.
+    const { prepared, byId } = prep(catalog);
     const res = await matchBeerList(
-      catalog,
+      prepared,
+      byId,
       new Set([200]),
       new Map([[200, 4.5]]),
       [{ brewery: 'PINTA', name: 'Atak Chmiel' }],
@@ -42,19 +52,20 @@ describe('matchBeerList', () => {
   });
 
   it('drunk_uncertain is false for exact, non-drunk-fuzzy, and no-match', async () => {
-    const exactDrunk = await matchBeerList(catalog, new Set([200]), new Map(), [
+    const { prepared, byId } = prep(catalog);
+    const exactDrunk = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
     ]);
     expect(exactDrunk[0].is_drunk).toBe(true);
     expect(exactDrunk[0].drunk_uncertain).toBe(false);
 
-    const fuzzyNotDrunk = await matchBeerList(catalog, new Set<number>(), new Map(), [
+    const fuzzyNotDrunk = await matchBeerList(prepared, byId, new Set<number>(), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmiel' },
     ]);
     expect(fuzzyNotDrunk[0].is_drunk).toBe(false);
     expect(fuzzyNotDrunk[0].drunk_uncertain).toBe(false);
 
-    const noMatch = await matchBeerList(catalog, new Set([200]), new Map(), [
+    const noMatch = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'Nope', name: 'Does Not Exist At All' },
     ]);
     expect(noMatch[0].matched_beer).toBe(null);
@@ -65,7 +76,8 @@ describe('matchBeerList', () => {
     const cat: CatalogBeerWithRating[] = [
       { id: 300, brewery: 'PINTA', name: 'Viva la Wit', abv: 4.8, rating_global: 3.6, untappd_id: 555 },
     ];
-    const res = await matchBeerList(cat, new Set(), new Map(), [
+    const { prepared, byId } = prep(cat);
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
       { brewery: 'PINTA', name: 'Viva la Wit' },
     ]);
     expect(res[0].matched_beer).toEqual({
@@ -74,7 +86,8 @@ describe('matchBeerList', () => {
   });
 
   it('drunk via had-list only → is_drunk true, user_rating null', async () => {
-    const res = await matchBeerList(catalog, new Set([200]), new Map(), [
+    const { prepared, byId } = prep(catalog);
+    const res = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
     ]);
     expect(res[0].is_drunk).toBe(true);
@@ -82,7 +95,8 @@ describe('matchBeerList', () => {
   });
 
   it('no catalog match → matched_beer null, not drunk', async () => {
-    const res = await matchBeerList(catalog, new Set(), new Map(), [
+    const { prepared, byId } = prep(catalog);
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
       { brewery: 'Nowhere', name: 'Unknown Stout' },
     ]);
     expect(res[0]).toEqual({
@@ -95,7 +109,8 @@ describe('matchBeerList', () => {
   });
 
   it('preserves input order', async () => {
-    const res = await matchBeerList(catalog, new Set(), new Map(), [
+    const { prepared, byId } = prep(catalog);
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
       { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
     ]);
@@ -121,7 +136,8 @@ describe('matchBeerList — prepare-once equivalence', () => {
   ];
 
   it('per-batch result equals matching each beer alone', async () => {
-    const batch = await matchBeerList(bigCatalog, new Set(), new Map(), inputs);
+    const { prepared, byId } = prep(bigCatalog);
+    const batch = await matchBeerList(prepared, byId, new Set(), new Map(), inputs);
     inputs.forEach((input, i) => {
       const solo = matchBeer(input, bigCatalog);
       expect(batch[i].matched_beer?.id ?? null).toBe(solo?.id ?? null);
@@ -130,18 +146,16 @@ describe('matchBeerList — prepare-once equivalence', () => {
 });
 
 describe('matchBeerList — cooperative yielding', () => {
-  it('yields between prep chunks and after each beer', async () => {
-    // 2001 rows → ceil(2001/2000) = 2 prep-chunk yields.
-    const big: CatalogBeerWithRating[] = Array.from({ length: 2001 }, (_, i) => ({
-      id: i + 1, brewery: `Brew ${i}`, name: `Beer ${i}`, abv: null, rating_global: null,
-    }));
+  it('yields once after each beer', async () => {
+    const { prepared, byId } = prep([
+      { id: 1, brewery: 'Brew 0', name: 'Beer 0', abv: null, rating_global: null },
+    ]);
     const items = [
       { brewery: 'Brew 0', name: 'Beer 0' },   // exact match
-      { brewery: 'Nowhere', name: 'Unknown' }, // empty-pool fallback
+      { brewery: 'Nowhere', name: 'Unknown' }, // no match
     ];
     const yieldSpy = vi.fn(() => Promise.resolve());
-    await matchBeerList(big, new Set(), new Map(), items, { yield: yieldSpy });
-    // 2 prep-chunk yields + 1 yield per beer.
-    expect(yieldSpy.mock.calls.length).toBe(2 + items.length);
+    await matchBeerList(prepared, byId, new Set(), new Map(), items, { yield: yieldSpy });
+    expect(yieldSpy.mock.calls.length).toBe(items.length);
   });
 });
