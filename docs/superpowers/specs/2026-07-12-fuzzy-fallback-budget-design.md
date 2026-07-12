@@ -130,6 +130,24 @@ measurement pass. Low request volume makes `info` cheap.
   (`FULL_FALLBACK_BUDGET`), items beyond it return `matched_beer: null`.
 - No extension impact → no `docs/extension-install-uk.md` change.
 
+## Planned review (≈ 1 week after deploy, ~2026-07-19)
+
+The `info` stats are instrumentation with a decision attached, not fire-and-forget. About a
+week after this ships, review the aggregated prod logs and decide:
+
+- Pull `match fallback stats` lines from journalctl (UTC) since deploy and aggregate
+  `attempts`, `hits`, `budgetSkipped` across requests.
+- **Hit-rate (`hits / attempts`)** — if the full-catalog fallback is essentially never
+  productive (near-zero), consider lowering `FULL_FALLBACK_BUDGET` further or dropping the
+  fallback entirely. If it is meaningfully productive, keep or raise the budget.
+- **`budgetSkipped`** — how often, and on which requests, the cap is actually hit. If it is
+  effectively never reached, the current limit is comfortably safe. If it is hit often on
+  legitimate (non-garbage) input, that argues for option 2 (token-index prefilter) so those
+  items get a cheap full search instead of being dropped.
+
+Outcome: either close #279 as sufficient, adjust the constant, or open a follow-up for the
+token-prefilter. Track this as a checkbox on the #279 PR / issue so it is not forgotten.
+
 ## Related
 
 #277 (catalog cache — removed prepare/build cost but not this per-item cost), #84
