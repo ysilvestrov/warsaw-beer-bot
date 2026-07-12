@@ -853,6 +853,20 @@ describe('matchPrepared — full-catalog fallback budget (#279)', () => {
     expect(budget.budgetSkipped).toBe(0);
   });
 
+  it('consumes budget but records no hit when the divergence guard rejects the full-catalog candidate', () => {
+    // Fake full-catalog searcher returns a candidate whose name diverges on content tokens,
+    // so nameTokensDiverge rejects it → null, but the attempt/decrement still happened.
+    const divergentBuild = () =>
+      ({ search: () => [{ item: prepareBeer(c({ id: 9, brewery: 'Pinta', name: 'Vanilla Imperial Stout' })), score: 0.9 }] }) as never;
+    const prepared = prepareCatalog(cat, divergentBuild);
+    const budget = createFallbackBudget();
+    const m = matchPrepared({ brewery: 'Nowhere', name: 'Grapefruit IPA' }, prepared, budget);
+    expect(m).toBeNull();
+    expect(budget.attempts).toBe(1);
+    expect(budget.hits).toBe(0);
+    expect(budget.remaining).toBe(19);
+  });
+
   it('omitting the budget leaves the full fallback ungated (matchBeer path)', () => {
     // matchBeer never passes a budget; unknown-brewery fuzzy still works as today.
     const m = matchBeer({ brewery: 'Stu Mostow', name: 'Buty Skejty' }, [

@@ -425,10 +425,11 @@ export function matchPrepared(
   // 30k rows (#279); gate it per request so one bad page can't burn ~18s of CPU. Items past
   // the budget return null (stay ⚪). The brewery-bucket path is small/cheap → ungated.
   const pool = breweryMatches;
+  const usedFullFallback = pool.length === 0;
   // Use the first alias as the search seed — full normalized brewery already appears at
   // index 0 of breweryAliases when no slash is present.
   const seedBrewery = inputAliases[0] ?? '';
-  let searcher: PreparedSearcher; // in-file type declared at matcher.ts:41
+  let searcher: PreparedSearcher; // PreparedSearcher: in-file searcher type
   if (pool.length) {
     searcher = prepared.searcherFor(pool);
   } else {
@@ -445,7 +446,7 @@ export function matchPrepared(
   // Reject a fuzzy candidate that diverges from the input on content tokens — a different
   // flavour variant of the same base beer, which must not inherit drunk/rating data.
   if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
-  if (pool.length === 0 && budget) budget.hits++;
+  if (usedFullFallback && budget) budget.hits++;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
 }
 
