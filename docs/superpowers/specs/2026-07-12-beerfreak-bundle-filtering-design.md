@@ -1,6 +1,6 @@
 # BeerFreak Bundle Filtering Design
 
-**Issue:** #284  
+**Issue:** #284
 **Date:** 2026-07-12
 
 ## Problem
