@@ -161,3 +161,22 @@ and build.
 `spec.md` will document the new API limits and 413 contract. The extension continues
 to receive a normal HTTP error response and no extension source file changes are
 required, so the extension changelog is outside this change.
+
+## One-week Operational Follow-up
+
+One week after this change reaches production, review the accumulated
+`api payload too large` warning events and reassess the fixed limits. The review will
+measure:
+
+- rejection counts by route and rejection layer;
+- declared content-length distribution where available;
+- authenticated, anonymous, and invalid-auth rejection counts;
+- repeated authenticated rejections grouped by `telegramId` to identify abuse or a
+  consistently oversized legitimate client flow;
+- whether any legitimate check-in, enrichment, or matching request was rejected.
+
+If legitimate requests approach or exceed a limit, adjust only the affected route or
+field using the observed payload sizes and retain reasonable safety headroom. If the
+limits produce no false positives, record that they were reviewed and keep them
+unchanged. Repeated abusive traffic should be carried into the separate rate-limiting
+follow-up rather than broadening this issue.
