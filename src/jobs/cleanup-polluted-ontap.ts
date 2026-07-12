@@ -1,7 +1,8 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { extractBeerName } from '../sources/ontap/pub';
-import { matchPrepared, prepareCatalog, type CatalogBeer } from '../domain/matcher';
+import { matchPrepared, type CatalogBeer } from '../domain/matcher';
+import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName } from '../domain/normalize';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 
@@ -22,7 +23,7 @@ interface MergePlan { kind: 'merge'; pollutedId: number; targetId: number }
 interface RewritePlan { kind: 'rewrite'; pollutedId: number; cleaned: string; cleanedNormalized: string }
 type Plan = MergePlan | RewritePlan;
 
-export function cleanupPollutedOntap(db: DB, log: pino.Logger): CleanupResult {
+export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<CleanupResult> {
   const allOntap = db
     .prepare(
       `SELECT id, name, brewery, abv, normalized_name, untappd_id
@@ -49,7 +50,7 @@ export function cleanupPollutedOntap(db: DB, log: pino.Logger): CleanupResult {
     .prepare('SELECT id, name, brewery, abv FROM beers')
     .all() as CatalogBeer[];
   const pool = cleanPool.filter((c) => !pollutedIds.has(c.id));
-  const preparedPool = prepareCatalog(pool);
+  const preparedPool = await prepareCatalogChunked(pool);
 
   const plans: Plan[] = [];
   for (const p of polluted) {
