@@ -7,6 +7,7 @@ import { ensureProfile, setUntappdUsername } from '../storage/user_profiles';
 import { HttpError, type Http } from '../sources/http';
 import { refreshAllUntappd } from './refresh-untappd';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
+import { catalogVersion } from '../storage/catalog-version';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -154,7 +155,9 @@ describe('refreshAllUntappd', () => {
       'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.20'),
     });
 
+    const v = catalogVersion();
     await refreshAllUntappd({ db, log: silentLog, http });
+    expect(catalogVersion()).toBeGreaterThan(v);
 
     const row = findBeerByNormalized(db, 'pinta', 'atak chmielu')!;
     expect(row.id).toBe(seededId);

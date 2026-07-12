@@ -2,6 +2,7 @@ import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
+import { catalogVersion } from '../storage/catalog-version';
 import { cleanupPollutedOntap } from './cleanup-polluted-ontap';
 
 const silentLog = pino({ level: 'silent' });
@@ -37,8 +38,10 @@ describe('cleanupPollutedOntap', () => {
       normalized_brewery: 'wagabunda',
     });
 
+    const v = catalogVersion();
     const result = cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 1, merged: 0 });
+    expect(catalogVersion()).toBeGreaterThan(v);
 
     const row = getRow(db, id)!;
     expect(row.name).toBe('Oxymel');

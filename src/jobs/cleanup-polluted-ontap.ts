@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import { extractBeerName } from '../sources/ontap/pub';
 import { matchPrepared, prepareCatalog, type CatalogBeer } from '../domain/matcher';
 import { normalizeName } from '../domain/normalize';
+import { bumpCatalogVersion } from '../storage/catalog-version';
 
 const POLLUTION_RE = /\d+(?:[.,]\d+)?\s*[°%]| — /;
 const MERGE_THRESHOLD = 0.9;
@@ -92,6 +93,7 @@ export function cleanupPollutedOntap(db: DB, log: pino.Logger): CleanupResult {
     }
   });
   tx(plans);
+  if (rewritten + merged > 0) bumpCatalogVersion();
 
   log.info({ rewritten, merged }, 'cleanup-polluted-ontap: pass complete');
   return { rewritten, merged };
