@@ -25,9 +25,9 @@ export const FULL_FALLBACK_BUDGET = 20;
 
 export interface FallbackBudget {
   remaining: number;      // full-catalog fallbacks still allowed
-  attempts: number;       // items that reached the full-catalog path
-  hits: number;           // of those, produced a non-null match
-  budgetSkipped: number;  // items denied full search because budget was exhausted
+  attempts: number;       // items that entered the full-catalog branch (incl. budget-skipped)
+  hits: number;           // of the searches actually run, how many produced a non-null match
+  budgetSkipped: number;  // items denied the full search because budget was exhausted
 }
 
 export function createFallbackBudget(limit: number = FULL_FALLBACK_BUDGET): FallbackBudget {
