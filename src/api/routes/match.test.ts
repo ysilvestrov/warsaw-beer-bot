@@ -9,7 +9,7 @@ import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
 import type { ApiEnv } from '../types';
 
-function setup() {
+function setup(log = pino({ level: 'silent' })) {
   const db = openDb(':memory:');
   migrate(db);
   ensureProfile(db, 1);
@@ -24,8 +24,6 @@ function setup() {
     checkin_id: 'c1', telegram_id: 1, beer_id: panIpani,
     user_rating: 4.0, checkin_at: '2026-01-01T00:00:00Z', venue: null,
   });
-  const log = pino({ level: 'silent' });
-
   function appAs(telegramId: number) {
     const app = new Hono<ApiEnv>();
     app.use('/match', async (c, next) => { c.set('telegramId', telegramId); await next(); });
@@ -101,5 +99,16 @@ describe('POST /match', () => {
       drunk_uncertain: false,
       user_rating: null,
     });
+  });
+
+  it('logs full-fallback stats at info', async () => {
+    const lines: any[] = [];
+    const log = pino({ level: 'info' }, { write: (s: string) => lines.push(JSON.parse(s)) });
+    const { appAs } = setup(log);
+    await post(appAs(1), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });
+    const stat = lines.find((l) => l.msg === 'match fallback stats');
+    expect(stat).toBeTruthy();
+    expect(stat.items).toBe(1);
+    expect(stat.fullFallback).toEqual({ attempts: 0, hits: 0, budgetSkipped: 0 });
   });
 });

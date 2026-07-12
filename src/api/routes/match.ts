@@ -38,7 +38,18 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const drunkSet = telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId);
     const ratings = telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId);
 
-    const results = await matchBeerList(prepared, byId, drunkSet, ratings, beers);
+    const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers);
+    deps.log.info(
+      {
+        items: beers.length,
+        fullFallback: {
+          attempts: fallback.attempts,
+          hits: fallback.hits,
+          budgetSkipped: fallback.budgetSkipped,
+        },
+      },
+      'match fallback stats',
+    );
     return c.json({ results });
   });
 }

@@ -43,6 +43,11 @@ export interface MatchListOptions {
   yield?: () => Promise<void>;
 }
 
+export interface MatchListOutcome {
+  results: MatchListResult[];
+  fallback: FallbackBudget;
+}
+
 export async function matchBeerList(
   prepared: PreparedCatalog,
   byId: Map<number, CatalogBeerWithRating>,
@@ -50,7 +55,7 @@ export async function matchBeerList(
   ratingByBeerId: Map<number, number>,
   items: MatchInput[],
   opts: MatchListOptions = {},
-): Promise<{ results: MatchListResult[]; fallback: FallbackBudget }> {
+): Promise<MatchListOutcome> {
   const yield_ = opts.yield ?? yieldToEventLoop;
   const budget = createFallbackBudget();
   const out: MatchListResult[] = [];
