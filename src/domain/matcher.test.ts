@@ -875,3 +875,37 @@ describe('matchPrepared — full-catalog fallback budget (#279)', () => {
     expect(m?.id).toBe(2);
   });
 });
+
+describe('makePreparedCatalog — add (#278)', () => {
+  const mk = (id: number, brewery: string, name: string) =>
+    prepareBeer({ id, brewery, name, abv: null });
+
+  it('add() makes a row exact-matchable and present in both indexes', () => {
+    const prepared = prepareCatalog([{ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: null }]);
+    expect(matchPrepared({ brewery: 'Stu Mostów', name: 'Buty Skejta' }, prepared)).toBeNull();
+    prepared.add(mk(2, 'Stu Mostów', 'Buty Skejta'));
+    expect(matchPrepared({ brewery: 'Stu Mostów', name: 'Buty Skejta' }, prepared))
+      .toEqual({ id: 2, confidence: 1, source: 'exact' });
+    expect(prepared.candidatesByFirstToken('stu').map((b) => b.id)).toContain(2);
+    expect(prepared.breweryCandidates(breweryAliases('Stu Mostów')).map((b) => b.id)).toContain(2);
+  });
+
+  it('add() does not rebuild the memoized full searcher', () => {
+    const build = vi.fn((rows) => prepareCatalog(rows).searcherFor(rows));
+    const prepared = prepareCatalog([{ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: null }], build);
+    // First empty-pool fallback builds the full searcher once.
+    matchPrepared({ brewery: 'Nowhere', name: 'Mystery' }, prepared);
+    expect(build).toHaveBeenCalledTimes(1);
+    prepared.add(mk(2, 'Elsewhere', 'Another Thing'));
+    // add() must not build; a further empty-pool fallback reuses the memoized searcher.
+    matchPrepared({ brewery: 'Faraway', name: 'Third Thing' }, prepared);
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it('add() buckets a collab row under each alias first token and dedupes', () => {
+    const prepared = prepareCatalog([]);
+    prepared.add(mk(5, 'Alpha / Beta', 'Shared Brew'));
+    expect(prepared.candidatesByFirstToken('alpha').map((b) => b.id)).toEqual([5]);
+    expect(prepared.candidatesByFirstToken('beta').map((b) => b.id)).toEqual([5]);
+  });
+});
