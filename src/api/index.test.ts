@@ -85,6 +85,37 @@ describe('createApiApp', () => {
   });
 
   it.each([
+    ['/match', MATCH_BODY_LIMIT_BYTES, undefined, 404],
+    ['/enrich/candidates', ENRICH_CANDIDATES_BODY_LIMIT_BYTES, 'Bearer nope', 401],
+    ['/enrich/result', ENRICH_RESULT_BODY_LIMIT_BYTES, 'Bearer nope', 401],
+    ['/checkins/sync', CHECKINS_SYNC_BODY_LIMIT_BYTES, 'Bearer nope', 401],
+  ])('does not apply the POST-specific limit to GET %s', async (
+    path,
+    limit,
+    authorization,
+    expectedStatus,
+  ) => {
+    const { warn, ...apiDeps } = deps();
+    const app = createApiApp(apiDeps);
+    const headers: Record<string, string> = { 'Content-Length': String(limit + 1) };
+    if (authorization) headers.Authorization = authorization;
+    const request = new Request(`http://localhost${path}`, {
+      method: 'POST',
+      headers,
+      body: 'x',
+    });
+    // Fetch forbids constructing GET-with-body requests, but an upstream Node HTTP
+    // request can still carry one. Override the exposed method to exercise that case.
+    Object.defineProperty(request, 'method', { value: 'GET' });
+
+    const res = await app.request(request);
+
+    expect(res.status).toBe(expectedStatus);
+    expect(res.status).not.toBe(413);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it.each([
     ['anonymous', undefined, 'anonymous', undefined],
     ['authenticated', 'Bearer tok', 'authenticated', 555],
   ])('rejects an oversized %s POST /match body at the global limit', async (
