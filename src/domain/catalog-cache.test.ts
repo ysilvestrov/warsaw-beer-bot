@@ -88,6 +88,30 @@ describe('createCatalogCache', () => {
     await cache.idle();
     expect(load).toHaveBeenCalledTimes(2);
   });
+
+  it('routes a background rebuild failure to onError and keeps serving the stale value', async () => {
+    let version = 0;
+    const load = vi.fn(() => rows).mockImplementationOnce(() => rows);
+    load.mockImplementationOnce(() => { throw new Error('load boom'); });
+    const onError = vi.fn();
+    const cache = make({ getVersion: () => version, load, onError });
+    const first = await cache.get();  // cold build at version 0 (1st load succeeds)
+    version = 1;                      // catalog changed
+    const stale = await cache.get();  // returns stale, triggers bg rebuild (2nd load throws)
+    await cache.idle();               // wait for the failed background rebuild
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(stale).toBe(first);        // still served the stale value, no throw
+  });
+
+  it('propagates a cold build failure to the caller without poisoning the cache', async () => {
+    const load = vi.fn<() => CatalogBeerWithRating[]>(() => { throw new Error('cold boom'); });
+    const cache = make({ getVersion: () => 0, load });
+    await expect(cache.get()).rejects.toThrow('cold boom');
+    // rebuilding was cleared → a subsequent get with a now-working load succeeds
+    load.mockImplementation(() => rows);
+    const { prepared } = await cache.get();
+    expect(prepared.beers.length).toBe(2);
+  });
 });
 
 describe('prepareCatalogChunked', () => {

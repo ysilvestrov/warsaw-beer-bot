@@ -27,11 +27,12 @@ export interface CatalogCacheOptions {
   prepare?: (rows: CatalogBeerWithRating[]) => Promise<PreparedCatalog>; // default: chunked
   now?: () => number;                                               // default: Date.now
   ttlMs?: number;                                                   // default: 5 min
+  onError?: (err: unknown) => void;   // called when a BACKGROUND rebuild fails; default: no-op
 }
 
-// Builds PreparedBeer[] in chunks, yielding to the event loop between chunks so the
-// long-poll bot keeps processing updates during the ~1.2 s CPU burst, then assembles
-// the catalog. Moved here from match-list.ts — the cache is now its only caller.
+// Chunked catalog prep. Lives here because the cache is its primary caller; yields to
+// the event loop between 2000-row chunks so the long-poll bot keeps processing updates
+// during the ~1.2 s CPU burst.
 export async function prepareCatalogChunked(
   catalog: CatalogBeerWithRating[],
   yield_: () => Promise<void> = yieldToEventLoop,
@@ -48,14 +49,19 @@ export async function prepareCatalogChunked(
 export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): CatalogCache {
   const getVersion = opts.getVersion ?? catalogVersion;
   const load = opts.load ?? (() => loadCatalog(db));
-  const prepare = opts.prepare ?? ((rows) => prepareCatalogChunked(rows));
+  const prepare = opts.prepare ?? prepareCatalogChunked;
   const now = opts.now ?? Date.now;
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
+  const onError = opts.onError ?? (() => {});
 
   let current: { value: CachedCatalog; version: number; builtAt: number } | null = null;
-  let rebuilding: Promise<void> | null = null;
+  let rebuilding: Promise<CachedCatalog> | null = null;
 
-  function rebuild(): Promise<void> {
+  // `background` routes a failure to onError from INSIDE the promise chain (before the
+  // .finally that nulls `rebuilding`), so idle() — which awaits `rebuilding` — is
+  // guaranteed to observe onError. The chain still rejects afterwards so a cold caller
+  // (background=false) surfaces the error; idle() and the background trigger swallow it.
+  function rebuild(background: boolean): Promise<CachedCatalog> {
     // Single-flight: a rebuild already running is reused, never doubled.
     if (rebuilding) return rebuilding;
     // Capture the version BEFORE load: a write landing mid-rebuild leaves
@@ -65,23 +71,32 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
       const rows = load();
       const prepared = await prepare(rows);
       const byId = new Map(rows.map((r) => [r.id, r]));
-      current = { value: { prepared, byId }, version, builtAt: now() };
-    })().finally(() => { rebuilding = null; });
+      const value: CachedCatalog = { prepared, byId };
+      current = { value, version, builtAt: now() };
+      return value;
+    })()
+      .catch((err) => {
+        if (background) onError(err);
+        throw err;
+      })
+      .finally(() => { rebuilding = null; });
     return rebuilding;
   }
 
   return {
-    async get() {
-      if (current === null) {
-        await rebuild();
-        return current!.value;
-      }
+    get() {
+      // Cold: no cached value yet — await (and surface) the build.
+      if (current === null) return rebuild(false);
       const stale = current.version !== getVersion() || now() - current.builtAt > ttlMs;
-      if (stale && !rebuilding) void rebuild();
-      return current.value;
+      // SWR: kick off the rebuild in the background and serve stale immediately. The
+      // failure is already routed to onError inside rebuild(); the trailing catch keeps
+      // this fire-and-forget promise from becoming an unhandled rejection (→ crash).
+      if (stale && !rebuilding) rebuild(true).catch(() => {});
+      return Promise.resolve(current.value);
     },
     idle() {
-      return rebuilding ?? Promise.resolve();
+      // Never reject: idle() is a barrier, not an error channel (that's onError's job).
+      return rebuilding ? rebuilding.then(() => {}, () => {}) : Promise.resolve();
     },
   };
 }
