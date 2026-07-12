@@ -15,12 +15,18 @@ const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
 const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
+const BEERFREAK_BUNDLE_RE = /(?:^|[^\p{L}\p{N}])(?:mix\s+pack|tasting\s+set|set|сет)(?=$|[^\p{L}\p{N}])/iu;
+const BEERFREAK_NUMBERED_SERIES_RE = /(?:^|[^\p{L}\p{N}])series\s*[-:]?\s*\d+\s+special\s+beers?(?=$|[^\p{L}\p{N}])/iu;
 const MAX_DETAIL_FETCHES_PER_PASS = 20;
 const detailUrls = new WeakMap<HTMLElement, string>();
 const abvByUrl = new Map<string, Promise<number | undefined>>();
 
 function text(el: Element | null): string {
   return el?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+}
+
+function isBeerFreakBundle(rawTitle: string): boolean {
+  return BEERFREAK_BUNDLE_RE.test(rawTitle) || BEERFREAK_NUMBERED_SERIES_RE.test(rawTitle);
 }
 
 function cleanBrewery(raw: string | null): string {
@@ -175,7 +181,7 @@ export const beerfreak: SiteAdapter = {
       const product = Number.isFinite(id) ? meta.get(id) : undefined;
       const rawTitle = product?.title ?? text(el.querySelector('.catalogCard-title a'));
       if (!rawTitle) continue;
-      if (isNonBeerName(rawTitle)) continue;
+      if (isNonBeerName(rawTitle) || isBeerFreakBundle(rawTitle)) continue;
 
       const parsed = product
         ? product.brand_title == null
