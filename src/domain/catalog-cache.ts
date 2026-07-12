@@ -1,7 +1,7 @@
 import type { DB } from '../storage/db';
 import { loadCatalog } from '../storage/beers';
 import { catalogVersion } from '../storage/catalog-version';
-import { prepareBeer, makePreparedCatalog, type PreparedCatalog } from './matcher';
+import { prepareBeer, makePreparedCatalog, type PreparedCatalog, type CatalogBeer } from './matcher';
 import { yieldToEventLoop, type CatalogBeerWithRating } from './match-list';
 
 // ~0.027 ms/row on the prod catalog → 2000 rows ≈ ≤60 ms of normalization per chunk.
@@ -34,7 +34,7 @@ export interface CatalogCacheOptions {
 // the event loop between 2000-row chunks so the long-poll bot keeps processing updates
 // during the ~1.2 s CPU burst.
 export async function prepareCatalogChunked(
-  catalog: CatalogBeerWithRating[],
+  catalog: CatalogBeer[],
   yield_: () => Promise<void> = yieldToEventLoop,
 ): Promise<PreparedCatalog> {
   const beers = [];
