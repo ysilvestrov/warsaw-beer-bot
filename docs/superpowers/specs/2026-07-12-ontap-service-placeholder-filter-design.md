@@ -1,6 +1,6 @@
 # Ontap Service Placeholder Filter Design
 
-**Date:** 2026-07-12  
+**Date:** 2026-07-12
 **Issue:** #285, split from #255
 
 ## Problem
