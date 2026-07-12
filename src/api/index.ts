@@ -9,6 +9,7 @@ import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
 import { optionalAuthMiddleware } from './middleware/optional-auth';
 import { adminMiddleware } from './middleware/admin';
+import { GLOBAL_BODY_LIMIT_BYTES, payloadBodyLimit } from './middleware/payload-limit';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
@@ -20,6 +21,7 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   // Requests originate from arbitrary shop domains; auth is a Bearer header
   // (not cookies), so a wildcard origin is safe.
   app.use('*', cors({ origin: '*' }));
+  app.use('*', payloadBodyLimit(deps, GLOBAL_BODY_LIMIT_BYTES, 'global'));
 
   app.get('/health', (c) => c.json({ ok: true }));
 

@@ -3,14 +3,22 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { ensureProfile } from '../storage/user_profiles';
 import { rotateToken, hashToken } from '../storage/api_tokens';
+import type { ApiDeps } from './types';
 import { createApiApp, createApiServer } from './index';
+import { GLOBAL_BODY_LIMIT_BYTES } from './middleware/payload-limit';
 
 function deps() {
   const db = openDb(':memory:');
   migrate(db);
   ensureProfile(db, 555);
   rotateToken(db, 555, hashToken('tok'), '2026-06-07T00:00:00Z');
-  return { db, env: {} as never, log: pino({ level: 'silent' }) };
+  const warn = vi.fn();
+  const result = {
+    db,
+    env: {} as never,
+    log: { warn, error: vi.fn() } as never,
+  } satisfies ApiDeps;
+  return { ...result, warn };
 }
 
 describe('createApiApp', () => {
@@ -41,6 +49,43 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it.each([
+    ['anonymous', undefined, 'anonymous', undefined],
+    ['authenticated', 'Bearer tok', 'authenticated', 555],
+  ])('rejects an oversized %s POST /match body at the global limit', async (
+    _name,
+    authorization,
+    auth,
+    telegramId,
+  ) => {
+    const { warn, ...apiDeps } = deps();
+    const app = createApiApp(apiDeps);
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authorization) headers.Authorization = authorization;
+    const res = await app.request('/match', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        beers: [{ brewery: 'X', name: 'Y' }],
+        padding: 'x'.repeat(GLOBAL_BODY_LIMIT_BYTES),
+      }),
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      method: 'POST',
+      path: '/match',
+      rejectionLayer: 'global',
+      limit: GLOBAL_BODY_LIMIT_BYTES,
+      limitUnit: 'bytes',
+      auth,
+      ...(telegramId === undefined ? {} : { telegramId }),
+    });
+    expect((warn.mock.calls[0]?.[0] as Record<string, unknown>).telegramId).toBe(telegramId);
   });
 
   it('sets permissive CORS headers', async () => {
