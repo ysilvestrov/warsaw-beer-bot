@@ -6,13 +6,19 @@ import { createCatalogCache } from '../../domain/catalog-cache';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
 import { matchBeerList } from '../../domain/match-list';
+import {
+  BEER_TEXT_LIMIT_CHARS,
+  MATCH_BODY_LIMIT_BYTES,
+  payloadBodyLimit,
+  payloadSizeValidationHook,
+} from '../middleware/payload-limit';
 
 const MatchBody = z.object({
   beers: z
     .array(
       z.object({
-        brewery: z.string(),
-        name: z.string(),
+        brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
+        name: z.string().max(BEER_TEXT_LIMIT_CHARS),
         abv: z.number().optional(),
       }),
     )
@@ -27,7 +33,11 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
   const cache = createCatalogCache(deps.db, {
     onError: (err) => deps.log.error({ err }, 'catalog cache rebuild failed'),
   });
-  app.post('/match', zValidator('json', MatchBody), async (c) => {
+  app.post(
+    '/match',
+    payloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES, 'route'),
+    zValidator('json', MatchBody, payloadSizeValidationHook(deps) as never),
+    async (c) => {
     const telegramId = c.get('telegramId') ?? null;
     const { beers } = c.req.valid('json');
 
@@ -51,5 +61,6 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       'match fallback stats',
     );
     return c.json({ results });
-  });
+    },
+  );
 }

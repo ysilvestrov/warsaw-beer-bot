@@ -9,10 +9,17 @@ import { getSyncState, advanceSyncState } from '../../storage/checkin_sync_state
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
 import { isBlockPage } from '../../sources/untappd/block';
+import {
+  CHECKINS_HTML_LIMIT_CHARS,
+  CHECKINS_SYNC_BODY_LIMIT_BYTES,
+  CURSOR_LIMIT_CHARS,
+  payloadBodyLimit,
+  payloadSizeValidationHook,
+} from '../middleware/payload-limit';
 
 const SyncBody = z.object({
-  html: z.string(),
-  maxId: z.string().nullable().optional(),
+  html: z.string().max(CHECKINS_HTML_LIMIT_CHARS),
+  maxId: z.string().max(CURSOR_LIMIT_CHARS).nullable().optional(),
 });
 
 export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
@@ -30,7 +37,11 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     });
   });
 
-  app.post('/checkins/sync', zValidator('json', SyncBody), (c) => {
+  app.post(
+    '/checkins/sync',
+    payloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES, 'route'),
+    zValidator('json', SyncBody, payloadSizeValidationHook(deps) as never),
+    (c) => {
     const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
     const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
@@ -80,5 +91,6 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       serverCount: countCheckins(deps.db, telegramId),
       complete: page.nextMaxId === null,
     });
-  });
+    },
+  );
 }

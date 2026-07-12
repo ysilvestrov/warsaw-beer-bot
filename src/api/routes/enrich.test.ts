@@ -7,14 +7,22 @@ import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enric
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiEnv } from '../types';
+import {
+  BEER_TEXT_LIMIT_CHARS,
+  ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
+  ENRICH_HTML_LIMIT_CHARS,
+  ENRICH_RESULT_BODY_LIMIT_BYTES,
+  PAGE_URL_LIMIT_CHARS,
+} from '../middleware/payload-limit';
 
 function setup() {
   const db = openDb(':memory:');
   migrate(db);
-  const log = pino({ level: 'silent' });
+  const warn = vi.fn();
+  const log = { ...pino({ level: 'silent' }), warn } as never;
   const app = new Hono<ApiEnv>();
   enrichRoute(app, { db, env: {} as never, log });
-  return { db, app };
+  return { db, app, warn };
 }
 
 function post(app: Hono<ApiEnv>, path: string, body: unknown) {
@@ -26,6 +34,36 @@ function post(app: Hono<ApiEnv>, path: string, body: unknown) {
 }
 
 describe('POST /enrich/candidates', () => {
+  it('rejects a raw body over the route byte limit', async () => {
+    const { app, warn } = setup();
+    const body = `{"padding":"${'x'.repeat(ENRICH_CANDIDATES_BODY_LIMIT_BYTES)}"}`;
+    const res = await app.request('/enrich/candidates', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) },
+      body,
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toEqual({
+      method: 'POST', path: '/enrich/candidates', rejectionLayer: 'route',
+      limit: ENRICH_CANDIDATES_BODY_LIMIT_BYTES, limitUnit: 'bytes',
+      contentLength: body.length, auth: 'anonymous',
+    });
+  });
+
+  it('rejects a brewery over the per-field character limit', async () => {
+    const { app, warn } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'b'.repeat(BEER_TEXT_LIMIT_CHARS + 1), name: 'Beer' }],
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      rejectionLayer: 'schema', limit: BEER_TEXT_LIMIT_CHARS,
+      limitUnit: 'characters', fieldPath: 'beers.0.brewery', auth: 'anonymous',
+    });
+  });
+
   it('registers a new beer as an orphan and marks it eligible', async () => {
     const { db, app } = setup();
     const res = await post(app, '/enrich/candidates', {
@@ -128,6 +166,34 @@ function searchHtml(
 }
 
 describe('POST /enrich/result', () => {
+  it('rejects a raw body over the route byte limit', async () => {
+    const { app, warn } = setup();
+    const body = `{"padding":"${'x'.repeat(ENRICH_RESULT_BODY_LIMIT_BYTES)}"}`;
+    const res = await app.request('/enrich/result', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body,
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      path: '/enrich/result', rejectionLayer: 'route',
+      limit: ENRICH_RESULT_BODY_LIMIT_BYTES, limitUnit: 'bytes', auth: 'anonymous',
+    });
+  });
+
+  it.each([
+    ['html', ENRICH_HTML_LIMIT_CHARS, { brewery: 'B', name: 'N', html: 'x'.repeat(ENRICH_HTML_LIMIT_CHARS + 1) }],
+    ['pageUrl', PAGE_URL_LIMIT_CHARS, { brewery: 'B', name: 'N', algolia: {}, pageUrl: 'x'.repeat(PAGE_URL_LIMIT_CHARS + 1) }],
+  ])('rejects oversized %s at schema validation', async (fieldPath, limit, body) => {
+    const { app, warn } = setup();
+    const res = await post(app, '/enrich/result', body);
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      path: '/enrich/result', rejectionLayer: 'schema', limit,
+      limitUnit: 'characters', fieldPath, auth: 'anonymous',
+    });
+  });
+
   it('enriches the orphan from relayed Algolia JSON', async () => {
     const { db, app } = setup();
     const res = await post(app, '/enrich/result', {

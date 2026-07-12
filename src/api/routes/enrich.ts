@@ -21,23 +21,35 @@ import {
 } from '../../sources/untappd/algolia';
 import { lookupBeer } from '../../domain/untappd-lookup';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
+import {
+  BEER_TEXT_LIMIT_CHARS,
+  ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
+  ENRICH_HTML_LIMIT_CHARS,
+  ENRICH_RESULT_BODY_LIMIT_BYTES,
+  PAGE_URL_LIMIT_CHARS,
+  payloadBodyLimit,
+  payloadSizeValidationHook,
+} from '../middleware/payload-limit';
 
 const CandidatesBody = z.object({
   beers: z
-    .array(z.object({ brewery: z.string(), name: z.string() }))
+    .array(z.object({
+      brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
+      name: z.string().max(BEER_TEXT_LIMIT_CHARS),
+    }))
     .min(1)
     .max(200),
 });
 
 const ResultBody = z.object({
-  brewery: z.string(),
-  name: z.string(),
-  html: z.string().optional(),
+  brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
+  name: z.string().max(BEER_TEXT_LIMIT_CHARS),
+  html: z.string().max(ENRICH_HTML_LIMIT_CHARS).optional(),
   algolia: z.object({
     hits: z.array(z.record(z.string(), z.unknown())).optional(),
     nbHits: z.number().optional(),
   }).optional(),
-  pageUrl: z.string().optional(),
+  pageUrl: z.string().max(PAGE_URL_LIMIT_CHARS).optional(),
 }).refine((v) => typeof v.html === 'string' || v.algolia !== undefined, {
   message: 'html or algolia is required',
 });
@@ -67,7 +79,11 @@ function ensureBeerRow(db: ApiDeps['db'], brewery: string, name: string) {
 }
 
 export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
-  app.post('/enrich/candidates', zValidator('json', CandidatesBody), (c) => {
+  app.post(
+    '/enrich/candidates',
+    payloadBodyLimit(deps, ENRICH_CANDIDATES_BODY_LIMIT_BYTES, 'route'),
+    zValidator('json', CandidatesBody, payloadSizeValidationHook(deps) as never),
+    (c) => {
     const { beers } = c.req.valid('json');
     const now = new Date();
     const candidates = deps.db.transaction(() =>
@@ -87,9 +103,14 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       }),
     )();
     return c.json({ candidates });
-  });
+    },
+  );
 
-  app.post('/enrich/result', zValidator('json', ResultBody), async (c) => {
+  app.post(
+    '/enrich/result',
+    payloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES, 'route'),
+    zValidator('json', ResultBody, payloadSizeValidationHook(deps) as never),
+    async (c) => {
     const { brewery, name, html, algolia, pageUrl } = c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name);
     // Only orphans need enrichment. If the row was already enriched by an earlier
@@ -111,5 +132,6 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       return c.json({ status: 'matched', untappd_id: outcome.result.bid, rating_global: outcome.result.global_rating });
     }
     return c.json({ status: kind });
-  });
+    },
+  );
 }

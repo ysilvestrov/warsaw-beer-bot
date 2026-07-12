@@ -8,8 +8,11 @@ import { mergeCheckin } from '../../storage/checkins';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
 import type { ApiEnv } from '../types';
+import { BEER_TEXT_LIMIT_CHARS, MATCH_BODY_LIMIT_BYTES } from '../middleware/payload-limit';
 
-function setup(log = pino({ level: 'silent' })) {
+function setup(log?: pino.Logger) {
+  const warn = vi.fn();
+  const appLog = log ?? ({ ...pino({ level: 'silent' }), warn } as never);
   const db = openDb(':memory:');
   migrate(db);
   ensureProfile(db, 1);
@@ -27,16 +30,16 @@ function setup(log = pino({ level: 'silent' })) {
   function appAs(telegramId: number) {
     const app = new Hono<ApiEnv>();
     app.use('/match', async (c, next) => { c.set('telegramId', telegramId); await next(); });
-    matchRoute(app, { db, env: {} as never, log });
+    matchRoute(app, { db, env: {} as never, log: appLog });
     return app;
   }
   function appAnon() {
     const app = new Hono<ApiEnv>();
     // No middleware sets telegramId → route must treat it as anonymous.
-    matchRoute(app, { db, env: {} as never, log });
+    matchRoute(app, { db, env: {} as never, log: appLog });
     return app;
   }
-  return { appAs, appAnon, panIpani };
+  return { appAs, appAnon, panIpani, warn };
 }
 
 function post(app: Hono<ApiEnv>, body: unknown) {
@@ -48,6 +51,37 @@ function post(app: Hono<ApiEnv>, body: unknown) {
 }
 
 describe('POST /match', () => {
+  it('rejects an anonymous raw body over the route byte limit', async () => {
+    const { appAnon, warn } = setup();
+    const body = `{"padding":"${'x'.repeat(MATCH_BODY_LIMIT_BYTES)}"}`;
+    const res = await appAnon().request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) },
+      body,
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toEqual({
+      method: 'POST', path: '/match', rejectionLayer: 'route',
+      limit: MATCH_BODY_LIMIT_BYTES, limitUnit: 'bytes',
+      contentLength: body.length, auth: 'anonymous',
+    });
+  });
+
+  it('rejects an oversized name with authenticated identity metadata', async () => {
+    const { appAs, warn } = setup();
+    const res = await post(appAs(1), {
+      beers: [{ brewery: 'B', name: 'n'.repeat(BEER_TEXT_LIMIT_CHARS + 1) }],
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      path: '/match', rejectionLayer: 'schema', limit: BEER_TEXT_LIMIT_CHARS,
+      limitUnit: 'characters', fieldPath: 'beers.0.name',
+      auth: 'authenticated', telegramId: 1,
+    });
+  });
+
   it('returns drunk status + personal rating for the calling user', async () => {
     const { appAs } = setup();
     const res = await post(appAs(1), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });

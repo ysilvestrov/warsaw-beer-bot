@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { Hono, type MiddlewareHandler } from 'hono';
 import { cors } from 'hono/cors';
 import { serve } from '@hono/node-server';
 import type { ServerType } from '@hono/node-server';
@@ -9,10 +9,26 @@ import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
 import { optionalAuthMiddleware } from './middleware/optional-auth';
 import { adminMiddleware } from './middleware/admin';
+import {
+  CHECKINS_SYNC_BODY_LIMIT_BYTES,
+  ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
+  ENRICH_RESULT_BODY_LIMIT_BYTES,
+  GLOBAL_BODY_LIMIT_BYTES,
+  MATCH_BODY_LIMIT_BYTES,
+  payloadBodyLimit,
+} from './middleware/payload-limit';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
+
+function postPayloadBodyLimit(
+  deps: ApiDeps,
+  maxSize: number,
+): MiddlewareHandler<ApiEnv> {
+  const limit = payloadBodyLimit(deps, maxSize, 'route');
+  return (c, next) => c.req.method === 'POST' ? limit(c, next) : next();
+}
 
 export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
@@ -20,16 +36,30 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   // Requests originate from arbitrary shop domains; auth is a Bearer header
   // (not cookies), so a wildcard origin is safe.
   app.use('*', cors({ origin: '*' }));
+  app.use('*', payloadBodyLimit(deps, GLOBAL_BODY_LIMIT_BYTES, 'global'));
 
   app.get('/health', (c) => c.json({ ok: true }));
 
   // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
+  app.use('/match', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));
   app.use('/match', optionalAuthMiddleware(deps.db));
   matchRoute(app, deps);
 
+  app.use(
+    '/enrich/candidates',
+    postPayloadBodyLimit(deps, ENRICH_CANDIDATES_BODY_LIMIT_BYTES),
+  );
+  app.use(
+    '/enrich/result',
+    postPayloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES),
+  );
   app.use('/enrich/*', authMiddleware(deps.db));
   enrichRoute(app, deps);
 
+  app.use(
+    '/checkins/sync',
+    postPayloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES),
+  );
   app.use('/checkins/*', authMiddleware(deps.db));
   checkinsRoute(app, deps);
 

@@ -585,6 +585,40 @@ Persist у `user_profiles.language`.
 (default 3000); доступний зовні через Cloudflare-тунель (§5.9).
 CORS: `origin: '*'` (авторизація — Bearer-заголовок, не cookies).
 
+#### Ліміти розміру запитів
+Усі HTTP-запити мають глобальний transport-ліміт **4 MiB**. Для тіл окремих
+endpoint'ів діють жорсткіші ліміти: `POST /checkins/sync` — **1 MiB**,
+`POST /enrich/result` — **512 KiB**, `POST /match` і
+`POST /enrich/candidates` — по **256 KiB**. Transport-ліміти рахуються в байтах;
+вони застосовуються як до відомого `Content-Length`, так і до фактично прочитаного
+потоку.
+
+Окремо schema-валідація обмежує JavaScript-рядки в символах: `html` чекінів —
+**768 Ki символів**, enrich-`html` — **384 Ki символів**, `brewery` і `name` —
+по **512 символів**, `pageUrl` — **2048 символів**, `maxId` — **512 символів**.
+Будь-яке перевищення transport- або character-ліміту повертає точну відповідь
+`413 {"error":"payload_too_large"}`. Звичайні помилки схеми, не пов'язані з
+розміром, як і раніше повертають `400`. Transport-відмова за оголошеним
+`Content-Length` стається до JSON-парсингу. Після будь-якої size-відмови обробник
+відповідного route, синхронний domain/HTML-парсинг, нормалізація та мутації бази
+даних не запускаються.
+
+Кожен `413` пише warning `api payload too large` з полями `method`, `path`,
+`rejectionLayer` (`global`, `route` або `schema`), `limit`, `limitUnit` (`bytes`
+або `characters`), `contentLength` (валідне оголошене значення або `null`), `auth`
+(`anonymous`, `authenticated` або `invalid`), опційним `telegramId` лише для
+автентифікованого запиту та `fieldPath` для schema-відмови. Логи ніколи не містять
+сирі токени, Authorization-заголовки, тіло запиту, значення полів чи хеші. Для
+глобальної відмови Bearer-токен резолвиться лише для логування: це не змінює
+відповідь `413`, не розкриває стан токена клієнту й не додає lookup до звичайних
+запитів.
+
+Через тиждень після виходу в production слід переглянути warning-події: кількість
+відмов за route, layer і auth-станом; розподіл `contentLength`; повтори за
+`telegramId`; легітимні false positive. Для легітимних запитів коригується лише
+зачеплений ліміт зі збереженням запасу; якщо false positive немає — ліміт
+залишається без змін. Повторний abuse переходить в окремий rate-limit follow-up.
+
 #### `GET /health` — перевірка стану
 Відкритий endpoint без авторизації. Відповідь: `{ ok: true }`.
 

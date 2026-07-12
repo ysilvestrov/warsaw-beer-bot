@@ -9,6 +9,10 @@ import { getSyncState } from '../../storage/checkin_sync_state';
 import { authMiddleware } from '../middleware/auth';
 import { checkinsRoute } from './checkins';
 import type { ApiEnv } from '../types';
+import {
+  CHECKINS_HTML_LIMIT_CHARS,
+  CHECKINS_SYNC_BODY_LIMIT_BYTES,
+} from '../middleware/payload-limit';
 
 // Synthetic feed pages verified against parseCheckinFeedPage's real selectors.
 
@@ -50,12 +54,13 @@ function setup() {
   ensureProfile(db, TELEGRAM_ID_NO_USERNAME);
   rotateToken(db, TELEGRAM_ID_NO_USERNAME, hashToken(RAW_TOKEN_NO_USER), new Date().toISOString());
 
-  const log = pino({ level: 'silent' });
+  const warn = vi.fn();
+  const log = { ...pino({ level: 'silent' }), warn } as never;
   const app = new Hono<ApiEnv>();
   app.use('/checkins/*', authMiddleware(db));
   checkinsRoute(app, { db, env: {} as never, log });
 
-  return { db, app };
+  return { db, app, warn };
 }
 
 function get(app: Hono<ApiEnv>, path: string, token?: string) {
@@ -101,6 +106,58 @@ describe('GET /checkins/sync/state', () => {
 });
 
 describe('POST /checkins/sync', () => {
+  it('rejects an oversized raw body at the route limit without mutating sync data', async () => {
+    const { db, app, warn } = setup();
+    const body = `{"padding":"${'x'.repeat(CHECKINS_SYNC_BODY_LIMIT_BYTES)}"}`;
+    const res = await app.request('/checkins/sync', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': String(body.length),
+        Authorization: `Bearer ${RAW_TOKEN}`,
+      },
+      body,
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn).toHaveBeenCalledWith(
+      {
+        method: 'POST', path: '/checkins/sync', rejectionLayer: 'route',
+        limit: CHECKINS_SYNC_BODY_LIMIT_BYTES, limitUnit: 'bytes',
+        contentLength: body.length, auth: 'authenticated', telegramId: TELEGRAM_ID,
+      },
+      'api payload too large',
+    );
+    expect(countCheckins(db, TELEGRAM_ID)).toBe(0);
+    expect(getSyncState(db, TELEGRAM_ID)).toMatchObject({ deepest_max_id: null, complete: false });
+  });
+
+  it('rejects oversized html at schema validation without mutating sync data', async () => {
+    const { db, app, warn } = setup();
+    const res = await post(
+      app,
+      '/checkins/sync',
+      { html: 'x'.repeat(CHECKINS_HTML_LIMIT_CHARS + 1) },
+      RAW_TOKEN,
+    );
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn.mock.calls[0]?.[0]).toMatchObject({
+      method: 'POST', path: '/checkins/sync', rejectionLayer: 'schema',
+      limit: CHECKINS_HTML_LIMIT_CHARS, limitUnit: 'characters',
+      auth: 'authenticated', telegramId: TELEGRAM_ID, fieldPath: 'html',
+    });
+    expect(countCheckins(db, TELEGRAM_ID)).toBe(0);
+    expect(getSyncState(db, TELEGRAM_ID)).toMatchObject({ deepest_max_id: null, complete: false });
+  });
+
+  it('keeps ordinary malformed payloads as 400 responses', async () => {
+    const { app } = setup();
+    expect((await post(app, '/checkins/sync', {}, RAW_TOKEN)).status).toBe(400);
+  });
+
   it('merges a page of check-ins and returns correct counts', async () => {
     const { db, app } = setup();
     const res = await post(app, '/checkins/sync', { html: PAGE_ONE, maxId: null }, RAW_TOKEN);
