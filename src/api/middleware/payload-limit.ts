@@ -33,10 +33,14 @@ function identityForRejection(c: Context<ApiEnv>, deps: ApiDeps): Identity {
   if (header === undefined) return { auth: 'anonymous' };
   const match = header.match(/^Bearer (.+)$/);
   if (!match) return { auth: 'invalid' };
-  const telegramId = findTelegramIdByHash(deps.db, hashToken(match[1]));
-  return telegramId === null
-    ? { auth: 'invalid' }
-    : { auth: 'authenticated', telegramId };
+  try {
+    const telegramId = findTelegramIdByHash(deps.db, hashToken(match[1]));
+    return telegramId === null
+      ? { auth: 'invalid' }
+      : { auth: 'authenticated', telegramId };
+  } catch {
+    return { auth: 'invalid' };
+  }
 }
 
 function contentLength(c: Context<ApiEnv>): number | null {

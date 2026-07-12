@@ -93,6 +93,25 @@ describe('payloadBodyLimit', () => {
     });
     expect(warn.mock.calls[0]?.[0]).toMatchObject({ auth: 'authenticated', telegramId: 777 });
   });
+
+  it('preserves the 413 response when rejection identity lookup fails', async () => {
+    const { app, deps, warn } = setup();
+    deps.db.close();
+
+    const res = await app.request('/upload', {
+      method: 'POST',
+      headers: { 'Content-Length': '6', Authorization: 'Bearer tok' },
+      body: 'secret',
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({ auth: 'invalid' }),
+      'api payload too large',
+    );
+    expect((warn.mock.calls[0]?.[0] as Record<string, unknown>).telegramId).toBeUndefined();
+  });
 });
 
 describe('payloadSizeValidationHook', () => {

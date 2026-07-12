@@ -5,7 +5,13 @@ import { ensureProfile } from '../storage/user_profiles';
 import { rotateToken, hashToken } from '../storage/api_tokens';
 import type { ApiDeps } from './types';
 import { createApiApp, createApiServer } from './index';
-import { GLOBAL_BODY_LIMIT_BYTES } from './middleware/payload-limit';
+import {
+  CHECKINS_SYNC_BODY_LIMIT_BYTES,
+  ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
+  ENRICH_RESULT_BODY_LIMIT_BYTES,
+  GLOBAL_BODY_LIMIT_BYTES,
+  MATCH_BODY_LIMIT_BYTES,
+} from './middleware/payload-limit';
 
 function deps() {
   const db = openDb(':memory:');
@@ -49,6 +55,33 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it.each([
+    ['/match', MATCH_BODY_LIMIT_BYTES],
+    ['/enrich/candidates', ENRICH_CANDIDATES_BODY_LIMIT_BYTES],
+    ['/enrich/result', ENRICH_RESULT_BODY_LIMIT_BYTES],
+    ['/checkins/sync', CHECKINS_SYNC_BODY_LIMIT_BYTES],
+  ])('rejects an oversized %s body before invalid authorization', async (path, limit) => {
+    const { warn, ...apiDeps } = deps();
+    const app = createApiApp(apiDeps);
+    const res = await app.request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer nope' },
+      body: JSON.stringify({ padding: 'x'.repeat(limit) }),
+    });
+
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+    expect(warn).toHaveBeenCalledOnce();
+    expect(warn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        method: 'POST', path, rejectionLayer: 'route', limit,
+        limitUnit: 'bytes', auth: 'invalid',
+      }),
+      'api payload too large',
+    );
+    expect((warn.mock.calls[0]?.[0] as Record<string, unknown>).telegramId).toBeUndefined();
   });
 
   it.each([

@@ -9,7 +9,14 @@ import type { ApiDeps, ApiEnv } from './types';
 import { authMiddleware } from './middleware/auth';
 import { optionalAuthMiddleware } from './middleware/optional-auth';
 import { adminMiddleware } from './middleware/admin';
-import { GLOBAL_BODY_LIMIT_BYTES, payloadBodyLimit } from './middleware/payload-limit';
+import {
+  CHECKINS_SYNC_BODY_LIMIT_BYTES,
+  ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
+  ENRICH_RESULT_BODY_LIMIT_BYTES,
+  GLOBAL_BODY_LIMIT_BYTES,
+  MATCH_BODY_LIMIT_BYTES,
+  payloadBodyLimit,
+} from './middleware/payload-limit';
 import { matchRoute } from './routes/match';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
@@ -26,12 +33,25 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   app.get('/health', (c) => c.json({ ok: true }));
 
   // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
+  app.use('/match', payloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES, 'route'));
   app.use('/match', optionalAuthMiddleware(deps.db));
   matchRoute(app, deps);
 
+  app.use(
+    '/enrich/candidates',
+    payloadBodyLimit(deps, ENRICH_CANDIDATES_BODY_LIMIT_BYTES, 'route'),
+  );
+  app.use(
+    '/enrich/result',
+    payloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES, 'route'),
+  );
   app.use('/enrich/*', authMiddleware(deps.db));
   enrichRoute(app, deps);
 
+  app.use(
+    '/checkins/sync',
+    payloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES, 'route'),
+  );
   app.use('/checkins/*', authMiddleware(deps.db));
   checkinsRoute(app, deps);
 
