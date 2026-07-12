@@ -525,7 +525,7 @@ Stack: Node.js, TypeScript, Telegraf (Telegram), SQLite, Vitest.
 - Run tests: `npm test` (extension tests: `cd extension && npm test`)
 - Run the bot locally: `npm run dev`
 
-See [`spec.md`](./spec.md) for the canonical behavior specification.
+See [`spec.md`](../../../../spec.md) for the canonical behavior specification.
 
 ---
 

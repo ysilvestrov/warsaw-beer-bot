@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node ≥ 20, TypeScript strict, Telegraf v4, `better-sqlite3`, `cheerio`, `csv-parse`, `fast-fuzzy`, `p-queue`, `zod`, `pino`, `node-cron`, Jest + `ts-jest`.
 
-**Spec:** [`docs/superpowers/specs/2026-04-22-warsaw-beer-bot-design.md`](../specs/2026-04-22-warsaw-beer-bot-design.md)
+**Spec:** [`docs/superpowers/specs/2026-04-22-warsaw-beer-bot-design.md`](../../specs/2026-04/2026-04-22-warsaw-beer-bot-design.md)
 
 ---
 

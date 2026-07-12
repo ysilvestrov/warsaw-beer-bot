@@ -16,7 +16,7 @@
 - ❌ `pl` / `en` translations — Phase 2.
 - ❌ `be` — Phase 3.
 
-Reference spec: [`docs/superpowers/specs/2026-04-27-i18n-design.md`](../specs/2026-04-27-i18n-design.md).
+Reference spec: [`docs/superpowers/specs/2026-04-27-i18n-design.md`](../../specs/2026-04/2026-04-27-i18n-design.md).
 
 ---
 
