@@ -18,11 +18,12 @@ function deps() {
   migrate(db);
   ensureProfile(db, 555);
   rotateToken(db, 555, hashToken('tok'), '2026-06-07T00:00:00Z');
-  const warn = vi.fn();
+  const log = pino({ level: 'silent' });
+  const warn = vi.spyOn(log, 'warn');
   const result = {
     db,
     env: {} as never,
-    log: { warn, error: vi.fn() } as never,
+    log,
   } satisfies ApiDeps;
   return { ...result, warn };
 }
