@@ -73,9 +73,19 @@ Call `bumpCatalogVersion()` at the end of the mutators that change a **matchable
 `recordLookupNotFound`, `recordLookupTransient`, `recordRatingNotFound`,
 `recordRatingTransient`.
 
-Because every catalog write funnels through these functions, the enrich route, checkins route,
-refresh-ontap/refresh-untappd jobs, and import all get covered transitively — no per-call-site
-plumbing.
+Most catalog writes funnel through these functions, so the enrich route, checkins route,
+refresh-ontap, and import get covered transitively. A few cron/maintenance jobs write matchable
+`beers` fields with **raw SQL** that bypasses the mutators — these bump `bumpCatalogVersion()`
+directly at their write site:
+
+- `refresh-untappd.ts` — `updateRatingAndAbv` (rating_global/abv on an existing row).
+- `cleanup-polluted-ontap.ts` — the rewrite/merge transaction (name/normalized_name + DELETE).
+- `dedupe-brewery-aliases.ts` — the merge transaction (DELETE orphan rows).
+
+Deliberately **not** instrumented: `backfill-normalized-brewery.ts` (writes only the
+`normalized_brewery` column, which the prepared catalog recomputes from raw `brewery` — no
+`/match` effect) and the `schema.ts` re-arm migration (lookup counters only). The 5-minute TTL
+backstop (§3) covers any write path still missed.
 
 ### 3. `src/domain/catalog-cache.ts` — the cache
 
