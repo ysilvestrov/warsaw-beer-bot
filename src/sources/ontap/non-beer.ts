@@ -1,7 +1,10 @@
 export interface OntapNonBeerInput {
   style: string | null;
   brewery_ref: string | null;
+  beer_ref?: string | null;
 }
+
+const EXACT_BEER_SENTINELS = new Set(['kran w serwisie']);
 
 const STYLE_TOKENS = [
   'vino',
@@ -84,6 +87,10 @@ function looksLikeScheduleOrNav(brewery: string): boolean {
 }
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
+  if (EXACT_BEER_SENTINELS.has(norm(tap.beer_ref ?? null))) {
+    return true;
+  }
+
   const style = norm(tap.style);
   if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
     return false;
