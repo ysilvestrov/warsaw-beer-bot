@@ -6,11 +6,19 @@ import { HttpError, type Http } from '../sources/http';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { latestSnapshot, tapsForSnapshot } from '../storage/snapshots';
-import { listLookupCandidates } from '../storage/beers';
+import { listLookupCandidates, upsertBeer } from '../storage/beers';
 import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
+
+// Wrap upsertBeer in a spy while keeping the real implementation (and every other
+// export, e.g. listLookupCandidates) intact. Lets the orphan-reuse test assert that a
+// second pub with the same beer takes the in-memory match path — NOT a second insert.
+vi.mock('../storage/beers', async (importActual) => {
+  const actual = await importActual<typeof import('../storage/beers')>();
+  return { ...actual, upsertBeer: vi.fn(actual.upsertBeer) };
+});
 
 const silentLog = pino({ level: 'silent' });
 
@@ -468,6 +476,7 @@ describe('refreshOntap multi-city', () => {
 
   test('a fresh orphan from one pub is reused by a later pub (no duplicate insert)', async () => {
     const db = openDb(':memory:'); migrate(db);
+    vi.mocked(upsertBeer).mockClear();
     const index = `
       <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
       <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
@@ -484,6 +493,12 @@ describe('refreshOntap multi-city', () => {
       db, log: silentLog, http, search: { search: async () => [] }, geocoder,
       cities: oneCity, lookupEnabled: false,
     });
+    // The discriminating assertion: pub A inserts the orphan and prepared.add()s it, so
+    // pub B's identical tap takes the in-memory matchPrepared path (m truthy) → upsertBeer
+    // fires exactly ONCE. Without prepared.add, pub B re-enters the orphan else-branch and
+    // upsertBeer runs a SECOND time (DB UPSERT still dedups to 1 row, so beerCount alone
+    // can't tell the two apart — hence the call-count check).
+    expect(upsertBeer).toHaveBeenCalledTimes(1);
     expect(beerCount(db)).toBe(1); // one orphan, reused across pubs — not duplicated
   });
 });

@@ -118,6 +118,9 @@ export async function refreshOntap(deps: Deps): Promise<void> {
               normalized_name: normalizeName(name),
               normalized_brewery: normalizeBrewery(brewery),
             });
+            // abv frozen at scrape time is fine: a fresh in-run orphan is a single row, and
+            // matcher's ABV disambiguation only changes the pick among MULTIPLE exact rows
+            // (vintages), never for one.
             prepared.add(prepareBeer({ id: beerId, brewery, name, abv: t.abv }));
             upsertMatch(db, t.beer_ref, beerId, 1.0);
             isFreshOrphan = true;
