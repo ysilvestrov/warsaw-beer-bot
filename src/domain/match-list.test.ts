@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { matchBeerList, type CatalogBeerWithRating } from './match-list';
-import { matchBeer, prepareCatalog } from './matcher';
+import { matchBeer, prepareCatalog, FULL_FALLBACK_BUDGET } from './matcher';
 
 // The route now hands matchBeerList an already-prepared catalog + id index; tests
 // build them the same way the cache does.
@@ -23,7 +23,7 @@ describe('matchBeerList', () => {
       new Map([[105, 4.0]]),
       [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }],
     );
-    expect(res).toEqual([
+    expect(res.results).toEqual([
       {
         raw: { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
         matched_beer: { id: 105, name: 'Pan IPAni', brewery: 'Trzech Kumpli', rating_global: 3.85, untappd_id: null },
@@ -45,10 +45,10 @@ describe('matchBeerList', () => {
       new Map([[200, 4.5]]),
       [{ brewery: 'PINTA', name: 'Atak Chmiel' }],
     );
-    expect(res[0].matched_beer?.id).toBe(200);
-    expect(res[0].is_drunk).toBe(false);
-    expect(res[0].user_rating).toBeNull();
-    expect(res[0].drunk_uncertain).toBe(true);
+    expect(res.results[0].matched_beer?.id).toBe(200);
+    expect(res.results[0].is_drunk).toBe(false);
+    expect(res.results[0].user_rating).toBeNull();
+    expect(res.results[0].drunk_uncertain).toBe(true);
   });
 
   it('drunk_uncertain is false for exact, non-drunk-fuzzy, and no-match', async () => {
@@ -56,20 +56,20 @@ describe('matchBeerList', () => {
     const exactDrunk = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
     ]);
-    expect(exactDrunk[0].is_drunk).toBe(true);
-    expect(exactDrunk[0].drunk_uncertain).toBe(false);
+    expect(exactDrunk.results[0].is_drunk).toBe(true);
+    expect(exactDrunk.results[0].drunk_uncertain).toBe(false);
 
     const fuzzyNotDrunk = await matchBeerList(prepared, byId, new Set<number>(), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmiel' },
     ]);
-    expect(fuzzyNotDrunk[0].is_drunk).toBe(false);
-    expect(fuzzyNotDrunk[0].drunk_uncertain).toBe(false);
+    expect(fuzzyNotDrunk.results[0].is_drunk).toBe(false);
+    expect(fuzzyNotDrunk.results[0].drunk_uncertain).toBe(false);
 
     const noMatch = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'Nope', name: 'Does Not Exist At All' },
     ]);
-    expect(noMatch[0].matched_beer).toBe(null);
-    expect(noMatch[0].drunk_uncertain).toBe(false);
+    expect(noMatch.results[0].matched_beer).toBe(null);
+    expect(noMatch.results[0].drunk_uncertain).toBe(false);
   });
 
   it('passes untappd_id through to matched_beer', async () => {
@@ -80,7 +80,7 @@ describe('matchBeerList', () => {
     const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
       { brewery: 'PINTA', name: 'Viva la Wit' },
     ]);
-    expect(res[0].matched_beer).toEqual({
+    expect(res.results[0].matched_beer).toEqual({
       id: 300, name: 'Viva la Wit', brewery: 'PINTA', rating_global: 3.6, untappd_id: 555,
     });
   });
@@ -90,8 +90,8 @@ describe('matchBeerList', () => {
     const res = await matchBeerList(prepared, byId, new Set([200]), new Map(), [
       { brewery: 'PINTA', name: 'Atak Chmielu' },
     ]);
-    expect(res[0].is_drunk).toBe(true);
-    expect(res[0].user_rating).toBeNull();
+    expect(res.results[0].is_drunk).toBe(true);
+    expect(res.results[0].user_rating).toBeNull();
   });
 
   it('no catalog match → matched_beer null, not drunk', async () => {
@@ -99,7 +99,7 @@ describe('matchBeerList', () => {
     const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
       { brewery: 'Nowhere', name: 'Unknown Stout' },
     ]);
-    expect(res[0]).toEqual({
+    expect(res.results[0]).toEqual({
       raw: { brewery: 'Nowhere', name: 'Unknown Stout' },
       matched_beer: null,
       is_drunk: false,
@@ -114,7 +114,22 @@ describe('matchBeerList', () => {
       { brewery: 'PINTA', name: 'Atak Chmielu' },
       { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
     ]);
-    expect(res.map((r) => r.matched_beer?.id)).toEqual([200, 105]);
+    expect(res.results.map((r) => r.matched_beer?.id)).toEqual([200, 105]);
+  });
+
+  it('shares one full-fallback budget across the batch and returns it', async () => {
+    // A catalog of one beer; N+1 unknown-brewery inputs all fall to the full-catalog
+    // path. With a batch larger than the budget, the surplus is skipped.
+    const { prepared, byId } = prep([
+      { id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1, rating_global: 3.7 },
+    ]);
+    const n = FULL_FALLBACK_BUDGET + 3;
+    const items = Array.from({ length: n }, (_, i) => ({ brewery: `Unknown${i}`, name: `Mystery ${i}` }));
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), items);
+    expect(res.results).toHaveLength(n);
+    expect(res.fallback.attempts).toBe(n);
+    expect(res.fallback.budgetSkipped).toBe(3);
+    expect(res.fallback.remaining).toBe(0);
   });
 });
 
@@ -140,7 +155,7 @@ describe('matchBeerList — prepare-once equivalence', () => {
     const batch = await matchBeerList(prepared, byId, new Set(), new Map(), inputs);
     inputs.forEach((input, i) => {
       const solo = matchBeer(input, bigCatalog);
-      expect(batch[i].matched_beer?.id ?? null).toBe(solo?.id ?? null);
+      expect(batch.results[i].matched_beer?.id ?? null).toBe(solo?.id ?? null);
     });
   });
 });
