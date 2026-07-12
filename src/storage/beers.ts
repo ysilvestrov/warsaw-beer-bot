@@ -1,4 +1,5 @@
 import type { DB } from './db';
+import { bumpCatalogVersion } from './catalog-version';
 
 export interface BeerInput {
   untappd_id?: number | null;
@@ -44,6 +45,7 @@ export function upsertBeer(db: DB, b: BeerInput): number {
     ).run(b.untappd_id ?? null, b.name, b.brewery, b.style ?? null,
           b.abv ?? null, b.rating_global ?? null,
           b.normalized_name, b.normalized_brewery, existing.id);
+    bumpCatalogVersion();
     return existing.id;
   }
 
@@ -53,6 +55,7 @@ export function upsertBeer(db: DB, b: BeerInput): number {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(b.untappd_id ?? null, b.name, b.brewery, b.style ?? null, b.abv ?? null,
         b.rating_global ?? null, b.normalized_name, b.normalized_brewery);
+  bumpCatalogVersion();
   return Number(res.lastInsertRowid);
 }
 
@@ -107,6 +110,7 @@ export function recordLookupSuccess(
        untappd_lookup_at = ?
      WHERE id = ?`,
   ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
+  bumpCatalogVersion();
 }
 
 // Merges an orphan beer into a canonical catalog entry by redirecting all
@@ -116,6 +120,7 @@ export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number
   db.prepare('UPDATE match_links SET untappd_beer_id = ? WHERE untappd_beer_id = ?')
     .run(canonicalId, orphanId);
   db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
+  bumpCatalogVersion();
 }
 
 export function recordLookupNotFound(db: DB, beerId: number, at: string): void {
@@ -200,6 +205,7 @@ export function recordRatingSuccess(
   // the beer leaves the candidate pool naturally (rating_global IS NOT NULL).
   db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?')
     .run(rating, beerId);
+  bumpCatalogVersion();
 }
 
 export function recordRatingNotFound(
