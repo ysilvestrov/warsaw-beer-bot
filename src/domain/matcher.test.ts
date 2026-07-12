@@ -1,5 +1,5 @@
 import { vi } from 'vitest';
-import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, hasCuratedAlias, type CatalogBeer } from './matcher';
+import { matchBeer, breweryAliases, breweryAliasesMatch, breweryAliasContained, extractYear, prepareCatalog, matchPrepared, prepareBeer, nameTokensDiverge, nameKeys, intersects, stripBreweryFromName, leadingRun, hasCuratedAlias, createFallbackBudget, FULL_FALLBACK_BUDGET, type CatalogBeer } from './matcher';
 
 const c = (over: Partial<CatalogBeer> & { id: number }): CatalogBeer => ({
   brewery: 'Pinta',
@@ -802,5 +802,62 @@ describe('hasCuratedAlias', () => {
   it('false for plain collabs and unrelated breweries', () => {
     expect(hasCuratedAlias('Stu Mostów / Ophiussa')).toBe(false);
     expect(hasCuratedAlias('Pinta')).toBe(false);
+  });
+});
+
+describe('matchPrepared — full-catalog fallback budget (#279)', () => {
+  const cat: CatalogBeer[] = [c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1 })];
+
+  // A fake searcher (injected via the build seam) makes the full-catalog hit
+  // deterministic without depending on fast-fuzzy's exact scoring. `as never` matches
+  // the repo's test-cast convention (e.g. src/config/env.test.ts).
+  const hitBuild = () =>
+    ({ search: () => [{ item: prepareBeer(c({ id: 1, brewery: 'Pinta', name: 'Atak Chmielu' })), score: 0.9 }] }) as never;
+
+  it('default budget constant is 20', () => {
+    expect(FULL_FALLBACK_BUDGET).toBe(20);
+    expect(createFallbackBudget().remaining).toBe(20);
+  });
+
+  it('counts a full-catalog attempt and hit', () => {
+    const prepared = prepareCatalog(cat, hitBuild);
+    const budget = createFallbackBudget();
+    // Unknown brewery → empty pool → full-catalog fallback.
+    const m = matchPrepared({ brewery: 'Nowhere', name: 'Atak Chmielu' }, prepared, budget);
+    expect(m?.id).toBe(1);
+    expect(budget.attempts).toBe(1);
+    expect(budget.hits).toBe(1);
+    expect(budget.budgetSkipped).toBe(0);
+    expect(budget.remaining).toBe(19);
+  });
+
+  it('returns null and records budgetSkipped once the budget is exhausted', () => {
+    const prepared = prepareCatalog(cat, hitBuild);
+    const budget = createFallbackBudget(1);
+    const first = matchPrepared({ brewery: 'Nowhere', name: 'Atak Chmielu' }, prepared, budget);
+    const second = matchPrepared({ brewery: 'Elsewhere', name: 'Atak Chmielu' }, prepared, budget);
+    expect(first?.id).toBe(1);
+    expect(second).toBeNull();
+    expect(budget.attempts).toBe(2);
+    expect(budget.hits).toBe(1);
+    expect(budget.budgetSkipped).toBe(1);
+    expect(budget.remaining).toBe(0); // not driven negative
+  });
+
+  it('brewery-bucket fuzzy path does not touch the budget', () => {
+    const prepared = prepareCatalog(cat);
+    const budget = createFallbackBudget();
+    // 'Pinta' (typo 'Atak Chmiel') still buckets under first token 'pinta' → non-empty pool.
+    matchPrepared({ brewery: 'Pinta', name: 'Atak Chmiel' }, prepared, budget);
+    expect(budget.attempts).toBe(0);
+    expect(budget.budgetSkipped).toBe(0);
+  });
+
+  it('omitting the budget leaves the full fallback ungated (matchBeer path)', () => {
+    // matchBeer never passes a budget; unknown-brewery fuzzy still works as today.
+    const m = matchBeer({ brewery: 'Stu Mostow', name: 'Buty Skejty' }, [
+      c({ id: 2, brewery: 'Stu Mostów', name: 'Buty Skejta', abv: 5.0 }),
+    ]);
+    expect(m?.id).toBe(2);
   });
 });
