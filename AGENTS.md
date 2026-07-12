@@ -24,6 +24,8 @@ Documented solutions live under `docs/solutions/` with YAML frontmatter (`module
 
 The project specification is maintained in OpenSpec format and is the primary source of truth for expected behavior.
 
+Design documents and implementation plans live under `docs/superpowers/specs/<YYYY-MM>/` and `docs/superpowers/plans/<YYYY-MM>/`, organized into monthly subfolders (e.g. `specs/2026-07/2026-07-12-<topic>-design.md`). Place new documents in the current month's subfolder; the newest document is the latest file in the newest month folder. The top level of `specs/`/`plans/` holds only month folders.
+
 If implementation details and assumptions conflict with "spec.md", follow "spec.md".
 
 Do not introduce behavior that contradicts the specification.
