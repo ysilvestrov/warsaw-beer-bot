@@ -23,6 +23,7 @@ describe('isOntapNonBeerTap', () => {
     ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
+    ['service placeholder beer name', { style: null, brewery_ref: 'Kran czeka na lepsze czasy Brewery', beer_ref: '  KRAN   W SERWISIE  ' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
@@ -42,6 +43,7 @@ describe('isOntapNonBeerTap', () => {
     ['mead Polish sweet descriptor', { style: 'Mead półsłodkie', brewery_ref: 'Berryland' }],
     ['melomel sweet descriptor', { style: 'Melomel słodkie', brewery_ref: 'Berryland' }],
     ['normal beer', { style: 'West Coast IPA', brewery_ref: 'PINTA Brewery' }],
+    ['similar service-themed beer name', { style: 'IPA', brewery_ref: 'PINTA Brewery', beer_ref: 'Kran w serwisie najlepszych piw' }],
     ['normal brewery with dash but no arrow/time', { style: 'IPA', brewery_ref: 'Browar Stu Mostow - Wroclaw' }],
     ['drinkability prose does not match generic drink', {
       style: 'Dark, smooth, and deceptively light on the palate, endlessly drinkable Schwarzbier',
@@ -51,7 +53,7 @@ describe('isOntapNonBeerTap', () => {
     expect(isOntapNonBeerTap(tap)).toBe(false);
   });
 
-  test('does not inspect beer_ref/name', () => {
+  test('does not apply non-beer metadata tokens to beer_ref/name', () => {
     const tapWithName = {
       style: null,
       brewery_ref: 'Beer Brewery',
