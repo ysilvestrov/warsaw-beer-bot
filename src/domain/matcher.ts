@@ -70,6 +70,10 @@ export interface PreparedCatalog {
   candidatesByFirstToken(token: string): PreparedBeer[];
   searcherFor(rows: PreparedBeer[]): PreparedSearcher;
   fullSearcher(): PreparedSearcher;
+  // Append a single already-prepared row: push to `beers` and index it under the first token
+  // of each of its brewery aliases. Does NOT rebuild the memoized fullSearcher — a fresh row
+  // is always reachable via its own brewery bucket, never the full-catalog path (#278).
+  add(row: PreparedBeer): void;
 }
 
 // First whitespace-delimited token of a normalized brewery alias. `breweryAliasesMatch`
@@ -105,14 +109,18 @@ export function makePreparedCatalog(
   // aliases. Aliases of one row are contiguous, so a tail check dedupes a row that has
   // several aliases sharing a first token. One O(catalog) pass, built eagerly.
   const byFirstToken = new Map<string, PreparedBeer[]>();
-  for (const b of beers) {
+  // Index one row under the first token of each of its brewery aliases. A row's aliases are
+  // processed together, so the tail check dedupes a row whose aliases share a first token.
+  // Shared by the initial eager build and add() (#278).
+  const indexRow = (b: PreparedBeer): void => {
     for (const alias of b.aliases) {
       const key = aliasFirstToken(alias);
       let bucket = byFirstToken.get(key);
       if (!bucket) byFirstToken.set(key, (bucket = []));
       if (bucket[bucket.length - 1] !== b) bucket.push(b);
     }
-  }
+  };
+  for (const b of beers) indexRow(b);
 
   return {
     beers,
@@ -134,6 +142,7 @@ export function makePreparedCatalog(
     candidatesByFirstToken: (token) => byFirstToken.get(token) ?? [],
     searcherFor: build,
     fullSearcher: () => (full ??= build(beers)),
+    add: (row) => { beers.push(row); indexRow(row); },
   };
 }
 

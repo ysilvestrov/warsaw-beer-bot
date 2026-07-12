@@ -1,14 +1,26 @@
 import pino from 'pino';
+import { vi } from 'vitest';
 import { filterIndexBySlugs, refreshOntap } from './refresh-ontap';
 import type { IndexPub } from '../sources/ontap/index';
 import { HttpError, type Http } from '../sources/http';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { latestSnapshot, tapsForSnapshot } from '../storage/snapshots';
-import { listLookupCandidates } from '../storage/beers';
+import { listLookupCandidates, upsertBeer } from '../storage/beers';
 import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
+import { prepareCatalogChunked } from '../domain/catalog-cache';
+import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import type { BeerSearch } from '../sources/untappd/search';
+
+// Wrap upsertBeer in a spy while keeping the real implementation (and every other
+// export, e.g. listLookupCandidates) intact. Lets the orphan-reuse test assert that a
+// second pub with the same beer takes the in-memory match path — NOT a second insert.
+vi.mock('../storage/beers', async (importActual) => {
+  const actual = await importActual<typeof import('../storage/beers')>();
+  return { ...actual, upsertBeer: vi.fn(actual.upsertBeer) };
+});
 
 const silentLog = pino({ level: 'silent' });
 
@@ -438,5 +450,98 @@ describe('refreshOntap multi-city', () => {
     expect(calls.filter((url) => url.startsWith('https://untappd.com/search'))).toHaveLength(0);
     expect(enrichedCount(db)).toBe(0);
     expect(breaker.state).toBe('open');
+  });
+
+  test('prepares the catalog once per run regardless of pub count', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const pubHtml = (n: string) =>
+      `<html><head><meta property="og:title" content="${n} / ontap.pl"></head>
+        <body>${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}</body></html>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/') return pubHtml('A');
+        if (url === 'https://pubb.ontap.pl/') return pubHtml('B');
+        return '';
+      },
+    };
+    const prepareSpy = vi.fn((rows) => prepareCatalogChunked(rows));
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false, prepareCatalog: prepareSpy,
+    });
+    expect(prepareSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test('a fresh orphan from one pub is reused by a later pub (no duplicate insert)', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    vi.mocked(upsertBeer).mockClear();
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const sharedBody = `<body>${panel(1, 'Foo Brewery', 'Foo Hazy 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/' || url === 'https://pubb.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${sharedBody}</html>`;
+        return '';
+      },
+    };
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false,
+    });
+    // The discriminating assertion: pub A inserts the orphan and prepared.add()s it, so
+    // pub B's identical tap takes the in-memory matchPrepared path (m truthy) → upsertBeer
+    // fires exactly ONCE. Without prepared.add, pub B re-enters the orphan else-branch and
+    // upsertBeer runs a SECOND time (DB UPSERT still dedups to 1 row, so beerCount alone
+    // can't tell the two apart — hence the call-count check).
+    expect(upsertBeer).toHaveBeenCalledTimes(1);
+    expect(beerCount(db)).toBe(1); // one orphan, reused across pubs — not duplicated
+  });
+
+  test('a fresh orphan merged by inline enrich in one pub does not FK-crash a later pub', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // Canonical beer already owns untappd_id 999.
+    upsertBeer(db, {
+      untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    // Two pubs list the SAME beer. It is NOT name-matchable to the canonical (different name)
+    // so it becomes a fresh orphan, but inline enrich resolves it to bid 999 → UNIQUE
+    // collision → mergeIntoCanonical deletes the orphan mid-run.
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const body = `<body>${panel(1, 'Moon Lark Brewery', 'Deep Sea Diver 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/' || url === 'https://pubb.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${body}</html>`;
+        return '';
+      },
+    };
+    const search: BeerSearch = {
+      search: async () => [
+        { bid: 999, beer_name: 'Deep Sea Diver', brewery_name: 'Moon Lark Brewery', style: null, abv: null, global_rating: null },
+      ],
+    };
+    const lines: any[] = [];
+    const log = pino({ level: 'warn' }, { write: (s: string) => lines.push(JSON.parse(s)) });
+    await refreshOntap({
+      db, log, http, search, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
+    });
+    // The merge fired both times → only the canonical row remains, still owning 999.
+    expect(beerCount(db)).toBe(1);
+    expect((db.prepare('SELECT untappd_id FROM beers').get() as { untappd_id: number }).untappd_id).toBe(999);
+    // Regression guard: the second pub must NOT have FK-crashed.
+    expect(lines.find((l) => l.msg === 'ontap pub refresh failed')).toBeUndefined();
   });
 });

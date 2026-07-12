@@ -58,7 +58,7 @@ async function main(): Promise<void> {
   backfillNormalizedBrewery(db, log);
   backfillCheckinAt(db, log);
   dedupeBreweryAliases(db, log);
-  cleanupPollutedOntap(db, log);
+  await cleanupPollutedOntap(db, log);
   cleanupOldSnapshots(db, log, env.SNAPSHOT_RETENTION_DAYS);
 
   const http = createHttp({ userAgent: env.NOMINATIM_USER_AGENT });

@@ -9,8 +9,9 @@ import { isOntapEmptyTapRef, normalizeOntapTapIdentity, parsePubPage } from '../
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
-import { upsertBeer } from '../storage/beers';
-import { matchPrepared, prepareCatalog } from '../domain/matcher';
+import { upsertBeer, getBeer } from '../storage/beers';
+import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
+import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopProgress, type ProgressFn } from './progress';
 import { enrichOneOrphan } from './untappd-enrich';
@@ -31,6 +32,7 @@ interface Deps {
   cities?: readonly City[];     // default CITIES
   inlineEnrichBudget?: number;  // default 20 — total inline Untappd enriches per run
   breaker?: CircuitBreaker;     // default noopBreaker
+  prepareCatalog?: (rows: CatalogBeer[]) => Promise<PreparedCatalog>;  // default: prepareCatalogChunked
 }
 
 export async function refreshOntap(deps: Deps): Promise<void> {
@@ -43,10 +45,13 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     cities = CITIES,
     inlineEnrichBudget = 20,
     breaker = noopBreaker,
+    prepareCatalog = prepareCatalogChunked,
   } = deps;
 
   let enrichBudget = inlineEnrichBudget;
   let inlineEnrichStopped = false;
+
+  const prepared = await prepareCatalog(listBeerCatalog(db));
 
   for (const city of cities) {
     let indexPubs: IndexPub[];
@@ -92,8 +97,6 @@ export async function refreshOntap(deps: Deps): Promise<void> {
         const snapshotId = createSnapshot(db, pubId, new Date().toISOString());
         insertTaps(db, snapshotId, taps);
 
-        const catalog = listBeerCatalog(db);
-        const prepared = prepareCatalog(catalog);
         for (const t of taps) {
           if (isOntapEmptyTapRef(t.beer_ref)) continue;
           const identity = normalizeOntapTapIdentity(t.brewery_ref, t.beer_ref);
@@ -141,6 +144,18 @@ export async function refreshOntap(deps: Deps): Promise<void> {
                 await new Promise<void>((r) => setTimeout(r, lookupSleepMs));
               }
             }
+          }
+
+          // Add the fresh orphan to the in-memory catalog AFTER inline enrich, and only if it
+          // still exists: inline enrich may merge+delete it into a canonical row (#278). Adding
+          // it pre-enrich would leave a stale (deleted) id in `prepared` that a later pub could
+          // exact-match → upsertMatch would then hit a FK violation on the deleted beers.id.
+          // Skipping the add when merged mirrors the old per-pub DB reload (a later pub
+          // re-orphans + re-merges). Reading the live row also picks up any enrich abv/rating/
+          // untappd_id update.
+          if (isFreshOrphan) {
+            const row = getBeer(db, beerId);
+            if (row) prepared.add(prepareBeer({ id: row.id, brewery: row.brewery, name: row.name, abv: row.abv ?? null }));
           }
         }
         ok++;

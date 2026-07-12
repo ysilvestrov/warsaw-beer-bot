@@ -20,12 +20,12 @@ function getRow(db: ReturnType<typeof openDb>, id: number) {
 }
 
 describe('cleanupPollutedOntap', () => {
-  test('empty DB → no-op', () => {
+  test('empty DB → no-op', async () => {
     const db = fresh();
-    expect(cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 0 });
+    expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 0 });
   });
 
-  test('single polluted row, no canonical → rewrite in place', () => {
+  test('single polluted row, no canonical → rewrite in place', async () => {
     const db = fresh();
     const id = upsertBeer(db, {
       untappd_id: null,
@@ -39,7 +39,7 @@ describe('cleanupPollutedOntap', () => {
     });
 
     const v = catalogVersion();
-    const result = cleanupPollutedOntap(db, silentLog);
+    const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 1, merged: 0 });
     expect(catalogVersion()).toBeGreaterThan(v);
 
@@ -50,7 +50,7 @@ describe('cleanupPollutedOntap', () => {
     expect(row.normalized_brewery).toBe('wagabunda');
   });
 
-  test('polluted + ontap canonical → merge with match_links + checkins repointed', () => {
+  test('polluted + ontap canonical → merge with match_links + checkins repointed', async () => {
     const db = fresh();
     const cleanId = upsertBeer(db, {
       untappd_id: null,
@@ -79,7 +79,7 @@ describe('cleanupPollutedOntap', () => {
       'INSERT INTO checkins (checkin_id, telegram_id, beer_id, checkin_at) VALUES (?, ?, ?, ?)',
     ).run('chk-1', 42, pollutedId, '2026-04-01 12:00:00');
 
-    const result = cleanupPollutedOntap(db, silentLog);
+    const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 0, merged: 1 });
 
     expect(getRow(db, pollutedId)).toBeUndefined();
@@ -94,7 +94,7 @@ describe('cleanupPollutedOntap', () => {
     expect(checkin.beer_id).toBe(cleanId);
   });
 
-  test('polluted ontap-side row merges into untappd-side canonical (cross-source)', () => {
+  test('polluted ontap-side row merges into untappd-side canonical (cross-source)', async () => {
     const db = fresh();
     const untappdId = upsertBeer(db, {
       untappd_id: 12345,
@@ -117,14 +117,14 @@ describe('cleanupPollutedOntap', () => {
       normalized_brewery: 'wagabunda',
     });
 
-    const result = cleanupPollutedOntap(db, silentLog);
+    const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 0, merged: 1 });
     expect(getRow(db, pollutedId)).toBeUndefined();
     expect(getRow(db, untappdId)?.untappd_id).toBe(12345);
     expect(getRow(db, untappdId)?.name).toBe('Oxymel');
   });
 
-  test('two polluted rows resolving to the same clean name, no canonical → both rewrite (become duplicates)', () => {
+  test('two polluted rows resolving to the same clean name, no canonical → both rewrite (become duplicates)', async () => {
     const db = fresh();
     const aId = upsertBeer(db, {
       untappd_id: null,
@@ -147,7 +147,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_brewery: 'wagabunda',
     });
 
-    const result = cleanupPollutedOntap(db, silentLog);
+    const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 2, merged: 0 });
 
     expect(getRow(db, aId)?.name).toBe('Oxymel');
@@ -156,7 +156,7 @@ describe('cleanupPollutedOntap', () => {
     expect(getRow(db, bId)?.normalized_name).toBe('oxymel');
   });
 
-  test('idempotent: second invocation returns {0, 0}', () => {
+  test('idempotent: second invocation returns {0, 0}', async () => {
     const db = fresh();
     upsertBeer(db, {
       untappd_id: null,
@@ -169,14 +169,14 @@ describe('cleanupPollutedOntap', () => {
       normalized_brewery: 'wagabunda',
     });
 
-    const first = cleanupPollutedOntap(db, silentLog);
+    const first = await cleanupPollutedOntap(db, silentLog);
     expect(first).toEqual({ rewritten: 1, merged: 0 });
 
-    const second = cleanupPollutedOntap(db, silentLog);
+    const second = await cleanupPollutedOntap(db, silentLog);
     expect(second).toEqual({ rewritten: 0, merged: 0 });
   });
 
-  test('clean rows preserved — no pollution markers means no touching', () => {
+  test('clean rows preserved — no pollution markers means no touching', async () => {
     const db = fresh();
     const cleanId = upsertBeer(db, {
       untappd_id: null,
@@ -199,7 +199,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_brewery: 'some',
     });
 
-    const result = cleanupPollutedOntap(db, silentLog);
+    const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 0, merged: 0 });
     expect(getRow(db, cleanId)?.name).toBe('Oxymel');
     expect(getRow(db, untappdRowId)?.name).toBe('Some Brewery Stuff 14°·5%');
