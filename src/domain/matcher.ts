@@ -18,6 +18,22 @@ export interface MatchResult {
 }
 
 const FUZZY_THRESHOLD = 0.75;
+
+// Per-request cap on how many items may run the ~89ms/item full-catalog fuzzy
+// fallback (#279). Beyond it, items return null (stay ⚪) instead of burning CPU.
+export const FULL_FALLBACK_BUDGET = 20;
+
+export interface FallbackBudget {
+  remaining: number;      // full-catalog fallbacks still allowed
+  attempts: number;       // items that entered the full-catalog branch (incl. budget-skipped)
+  hits: number;           // of the searches actually run, how many produced a non-null match
+  budgetSkipped: number;  // items denied the full search because budget was exhausted
+}
+
+export function createFallbackBudget(limit: number = FULL_FALLBACK_BUDGET): FallbackBudget {
+  return { remaining: limit, attempts: 0, hits: 0, budgetSkipped: 0 };
+}
+
 export const ABV_TOLERANCE = 0.3;
 const TRANSITIVE_SAFE_ALIAS_HUBS = new Set(['nepo']);
 
@@ -301,6 +317,7 @@ export function nameTokensDiverge(a: string, b: string): boolean {
 export function matchPrepared(
   input: { brewery: string; name: string; abv?: number | null },
   prepared: PreparedCatalog,
+  budget?: FallbackBudget,
 ): MatchResult | null {
   const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
@@ -403,20 +420,33 @@ export function matchPrepared(
     return null;
   }
 
-  // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's,
-  // otherwise the full catalog (shared, lazily-built Searcher).
+  // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's, otherwise the
+  // full catalog (shared, lazily-built Searcher). The full-catalog path is ~89ms/item over
+  // 30k rows (#279); gate it per request so one bad page can't burn ~18s of CPU. Items past
+  // the budget return null (stay ⚪). The brewery-bucket path is small/cheap → ungated.
   const pool = breweryMatches;
-  const searcher = pool.length ? prepared.searcherFor(pool) : prepared.fullSearcher();
-  // Use the first alias as the search seed — full normalized brewery already
-  // appears at index 0 of breweryAliases when no slash is present.
+  const usedFullFallback = pool.length === 0;
+  // Use the first alias as the search seed — full normalized brewery already appears at
+  // index 0 of breweryAliases when no slash is present.
   const seedBrewery = inputAliases[0] ?? '';
+  let searcher: PreparedSearcher; // PreparedSearcher: in-file searcher type
+  if (pool.length) {
+    searcher = prepared.searcherFor(pool);
+  } else {
+    if (budget) {
+      budget.attempts++;
+      if (budget.remaining <= 0) { budget.budgetSkipped++; return null; }
+      budget.remaining--;
+    }
+    searcher = prepared.fullSearcher();
+  }
   const results = searcher.search(`${seedBrewery} ${nn}`);
   if (!results.length) return null;
   const best = results[0];
-  // Reject a fuzzy candidate that diverges from the input on content tokens — a
-  // different flavour variant of the same base beer (e.g. "Double Vanilla Mind Over
-  // Matter" vs "S'mores Mind Over Matter"), which must not inherit drunk/rating data.
+  // Reject a fuzzy candidate that diverges from the input on content tokens — a different
+  // flavour variant of the same base beer, which must not inherit drunk/rating data.
   if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
+  if (usedFullFallback && budget) budget.hits++;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
 }
 

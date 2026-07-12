@@ -1,7 +1,9 @@
 import {
   matchPrepared,
+  createFallbackBudget,
   type CatalogBeer,
   type PreparedCatalog,
+  type FallbackBudget,
 } from './matcher';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
@@ -41,6 +43,11 @@ export interface MatchListOptions {
   yield?: () => Promise<void>;
 }
 
+export interface MatchListOutcome {
+  results: MatchListResult[];
+  fallback: FallbackBudget;
+}
+
 export async function matchBeerList(
   prepared: PreparedCatalog,
   byId: Map<number, CatalogBeerWithRating>,
@@ -48,12 +55,13 @@ export async function matchBeerList(
   ratingByBeerId: Map<number, number>,
   items: MatchInput[],
   opts: MatchListOptions = {},
-): Promise<MatchListResult[]> {
+): Promise<MatchListOutcome> {
   const yield_ = opts.yield ?? yieldToEventLoop;
+  const budget = createFallbackBudget();
   const out: MatchListResult[] = [];
   for (const item of items) {
     const raw = { brewery: item.brewery, name: item.name };
-    const m = matchPrepared(item, prepared);
+    const m = matchPrepared(item, prepared, budget);
     if (!m) {
       out.push({ raw, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null });
     } else {
@@ -74,5 +82,5 @@ export async function matchBeerList(
     }
     await yield_();
   }
-  return out;
+  return { results: out, fallback: budget };
 }
