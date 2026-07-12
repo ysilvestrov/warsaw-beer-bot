@@ -9,7 +9,7 @@ import { isOntapEmptyTapRef, normalizeOntapTapIdentity, parsePubPage } from '../
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
-import { upsertBeer } from '../storage/beers';
+import { upsertBeer, getBeer } from '../storage/beers';
 import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
@@ -118,10 +118,6 @@ export async function refreshOntap(deps: Deps): Promise<void> {
               normalized_name: normalizeName(name),
               normalized_brewery: normalizeBrewery(brewery),
             });
-            // abv frozen at scrape time is fine: a fresh in-run orphan is a single row, and
-            // matcher's ABV disambiguation only changes the pick among MULTIPLE exact rows
-            // (vintages), never for one.
-            prepared.add(prepareBeer({ id: beerId, brewery, name, abv: t.abv }));
             upsertMatch(db, t.beer_ref, beerId, 1.0);
             isFreshOrphan = true;
           }
@@ -148,6 +144,18 @@ export async function refreshOntap(deps: Deps): Promise<void> {
                 await new Promise<void>((r) => setTimeout(r, lookupSleepMs));
               }
             }
+          }
+
+          // Add the fresh orphan to the in-memory catalog AFTER inline enrich, and only if it
+          // still exists: inline enrich may merge+delete it into a canonical row (#278). Adding
+          // it pre-enrich would leave a stale (deleted) id in `prepared` that a later pub could
+          // exact-match → upsertMatch would then hit a FK violation on the deleted beers.id.
+          // Skipping the add when merged mirrors the old per-pub DB reload (a later pub
+          // re-orphans + re-merges). Reading the live row also picks up any enrich abv/rating/
+          // untappd_id update.
+          if (isFreshOrphan) {
+            const row = getBeer(db, beerId);
+            if (row) prepared.add(prepareBeer({ id: row.id, brewery: row.brewery, name: row.name, abv: row.abv ?? null }));
           }
         }
         ok++;

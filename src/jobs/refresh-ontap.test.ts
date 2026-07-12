@@ -11,6 +11,8 @@ import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
+import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import type { BeerSearch } from '../sources/untappd/search';
 
 // Wrap upsertBeer in a spy while keeping the real implementation (and every other
 // export, e.g. listLookupCandidates) intact. Lets the orphan-reuse test assert that a
@@ -500,5 +502,46 @@ describe('refreshOntap multi-city', () => {
     // can't tell the two apart — hence the call-count check).
     expect(upsertBeer).toHaveBeenCalledTimes(1);
     expect(beerCount(db)).toBe(1); // one orphan, reused across pubs — not duplicated
+  });
+
+  test('a fresh orphan merged by inline enrich in one pub does not FK-crash a later pub', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // Canonical beer already owns untappd_id 999.
+    upsertBeer(db, {
+      untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    // Two pubs list the SAME beer. It is NOT name-matchable to the canonical (different name)
+    // so it becomes a fresh orphan, but inline enrich resolves it to bid 999 → UNIQUE
+    // collision → mergeIntoCanonical deletes the orphan mid-run.
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const body = `<body>${panel(1, 'Moon Lark Brewery', 'Deep Sea Diver 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/' || url === 'https://pubb.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${body}</html>`;
+        return '';
+      },
+    };
+    const search: BeerSearch = {
+      search: async () => [
+        { bid: 999, beer_name: 'Deep Sea Diver', brewery_name: 'Moon Lark Brewery', style: null, abv: null, global_rating: null },
+      ],
+    };
+    const lines: any[] = [];
+    const log = pino({ level: 'warn' }, { write: (s: string) => lines.push(JSON.parse(s)) });
+    await refreshOntap({
+      db, log, http, search, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
+    });
+    // The merge fired both times → only the canonical row remains, still owning 999.
+    expect(beerCount(db)).toBe(1);
+    expect((db.prepare('SELECT untappd_id FROM beers').get() as { untappd_id: number }).untappd_id).toBe(999);
+    // Regression guard: the second pub must NOT have FK-crashed.
+    expect(lines.find((l) => l.msg === 'ontap pub refresh failed')).toBeUndefined();
   });
 });
