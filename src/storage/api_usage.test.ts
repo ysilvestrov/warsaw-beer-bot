@@ -32,3 +32,18 @@ test('recordMatchUsage: separate dates are independent rows', () => {
   expect(getUsageForDate(d, '2026-07-14')).toEqual({ anonRequests: 1, authedRequests: 0, beers: 1 });
   expect(getUsageForDate(d, '2026-07-15')).toEqual({ anonRequests: 0, authedRequests: 1, beers: 4 });
 });
+
+test('recordMatchUsage: restores busy_timeout after a successful write', () => {
+  const d = db();
+  const before = d.pragma('busy_timeout', { simple: true });
+  recordMatchUsage(d, { date: '2026-07-14', authed: false, beers: 1 });
+  expect(d.pragma('busy_timeout', { simple: true })).toBe(before);
+});
+
+test('recordMatchUsage: restores busy_timeout even when the write throws', () => {
+  const d = db();
+  d.exec('DROP TABLE api_usage'); // force the INSERT to throw
+  const before = d.pragma('busy_timeout', { simple: true });
+  expect(() => recordMatchUsage(d, { date: '2026-07-14', authed: false, beers: 1 })).toThrow();
+  expect(d.pragma('busy_timeout', { simple: true })).toBe(before);
+});
