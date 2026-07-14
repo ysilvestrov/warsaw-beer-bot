@@ -39,6 +39,7 @@ import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { createTriageLlm } from './infra/triage-llm';
+import { createTriageArchive } from './infra/triage-archive';
 import { createGithubIssuesClient } from './infra/github-issues';
 import { createPersistentCircuitBreaker } from './domain/untappd-circuit';
 import { ALGOLIA_DEFAULTS, createAlgoliaSearch, extractAlgoliaKeys } from './sources/untappd/algolia';
@@ -126,6 +127,7 @@ async function main(): Promise<void> {
   // Orphan-triage clients. Either may be null (missing key) — the job then
   // records a "disabled" result once per day instead of crashing.
   const triageLlm = createTriageLlm(env);
+  const triageArchive = createTriageArchive({ dir: env.TRIAGE_LOG_DIR ?? '' }, log);
   const triageGithub = env.GITHUB_TOKEN
     ? createGithubIssuesClient({ token: env.GITHUB_TOKEN, repo: env.GITHUB_REPO })
     : null;
@@ -244,7 +246,7 @@ async function main(): Promise<void> {
     // window + job_state idempotency inside the job. Same UTC-tick pattern as
     // daily-status.
     cron.schedule('*/15 * * * *', () => {
-      orphanTriage({ db, log, llm: triageLlm, github: triageGithub })
+      orphanTriage({ db, log, llm: triageLlm, github: triageGithub, archive: triageArchive })
         .catch((e) => log.error({ err: e }, 'orphan-triage cron'));
     }),
   ];
@@ -267,7 +269,7 @@ async function main(): Promise<void> {
   // within the triage window, run today's triage now instead of waiting for the
   // next 15-min tick. Idempotent via job_state, so a normal start is a no-op once
   // the day's triage already ran.
-  orphanTriage({ db, log, llm: triageLlm, github: triageGithub })
+  orphanTriage({ db, log, llm: triageLlm, github: triageGithub, archive: triageArchive })
     .catch((e) => log.error({ err: e }, 'orphan-triage startup'));
 
   // Startup catch-up: if the bot was down/redeploying at 09:00 Warsaw but is up

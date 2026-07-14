@@ -50,7 +50,11 @@ const gh = (over = {}) => ({
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   ...over,
 });
-const llm = (analysis: Analysis) => ({ analyze: vi.fn().mockResolvedValue(analysis) });
+const exchange = (analysis: Analysis, stopReason: string | null = 'tool_use') => ({
+  analysis,
+  raw: { prompt: 'p', response: {}, stopReason, provider: 'anthropic' as const },
+});
+const llm = (analysis: Analysis) => ({ analyze: vi.fn().mockResolvedValue(exchange(analysis)) });
 
 test('shouldRunTriage: window and idempotency', () => {
   expect(shouldRunTriage({ now: inWindow(), lastRunDate: null }))
@@ -182,8 +186,8 @@ test('no untriaged orphans: nothing-to-do line, no LLM call', async () => {
 test('reentrancy guard: overlapping tick is skipped while a run is in progress', async () => {
   const d = db();
   seedOrphan(d, 1);
-  let resolveAnalyze!: (v: Analysis) => void;
-  const deferred = new Promise<Analysis>((resolve) => { resolveAnalyze = resolve; });
+  let resolveAnalyze!: (v: ReturnType<typeof exchange>) => void;
+  const deferred = new Promise<ReturnType<typeof exchange>>((resolve) => { resolveAnalyze = resolve; });
   const theLlm = { analyze: vi.fn().mockReturnValue(deferred) };
   const github = gh();
 
@@ -198,7 +202,10 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
   expect(theLlm.analyze).toHaveBeenCalledTimes(1);
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
 
-  resolveAnalyze({ verdicts: [], new_issues: [] });
+  resolveAnalyze(exchange({
+    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  }));
   await first;
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
 });
@@ -216,4 +223,101 @@ test('buildTriageLine formats counts', () => {
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
     skipped: 0, error: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
+});
+
+test('empty verdicts: retries once; still empty → error line, run marked, nothing written', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const emptyEx = exchange({ verdicts: [], new_issues: [] }, 'end_turn');
+  const analyze = vi.fn().mockResolvedValue(emptyEx);
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: { analyze }, github, now: inWindow });
+
+  expect(analyze).toHaveBeenCalledTimes(2);            // one retry
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.commentOnIssue).not.toHaveBeenCalled();
+  const cls = (d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_class: string | null }).review_class;
+  expect(cls).toBeNull();                              // untriaged → re-enters tomorrow
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.line).toContain('помилка');
+  expect(result.line).toContain('0 вердиктів');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+});
+
+test('empty verdicts then non-empty retry: proceeds normally', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  const good = exchange({
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'x', issue_number: 228, new_issue_key: null },
+      { beer_id: 2, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
+    ],
+    new_issues: [],
+  });
+  const analyze = vi.fn()
+    .mockResolvedValueOnce(exchange({ verdicts: [], new_issues: [] }, 'end_turn'))
+    .mockResolvedValueOnce(good);
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: { analyze }, github, now: inWindow });
+
+  expect(analyze).toHaveBeenCalledTimes(2);
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
+  const cls = (id: number) => (d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+    .get(id) as { review_class: string | null }).review_class;
+  expect(cls(1)).toBe('matcher_bug');
+  expect(cls(2)).toBe('wontfix');
+});
+
+test('partial shortfall: fewer verdicts than batch → still processes, run marked', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  // Only beer_id 1 gets a verdict; beer_id 2 is uncovered (shortfall).
+  const analyze = vi.fn().mockResolvedValue(exchange({
+    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  }));
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: { analyze }, github, now: inWindow });
+
+  expect(analyze).toHaveBeenCalledTimes(1);             // non-empty → no retry
+  const cls = (id: number) => (d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+    .get(id) as { review_class: string | null }).review_class;
+  expect(cls(1)).toBe('wontfix');
+  expect(cls(2)).toBeNull();                            // uncovered → re-enters tomorrow
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+});
+
+test('archive: write called once with both exchanges', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analyze = vi.fn()
+    .mockResolvedValueOnce(exchange({ verdicts: [], new_issues: [] }, 'end_turn'))
+    .mockResolvedValueOnce(exchange({
+      verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+      new_issues: [],
+    }));
+  const archive = { write: vi.fn().mockResolvedValue(undefined) };
+  await orphanTriage({ db: d, log, llm: { analyze }, github: gh(), archive, now: inWindow });
+
+  expect(archive.write).toHaveBeenCalledTimes(1);
+  const [dateKey, payload] = archive.write.mock.calls[0];
+  expect(dateKey).toBe('2026-07-05');
+  expect((payload as { exchanges: unknown[] }).exchanges).toHaveLength(2);
+  expect((payload as { batchSize: number }).batchSize).toBe(1);
+});
+
+test('archive: zero-verdict-after-retry run is still archived (both empty exchanges)', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analyze = vi.fn().mockResolvedValue(exchange({ verdicts: [], new_issues: [] }, 'end_turn'));
+  const archive = { write: vi.fn().mockResolvedValue(undefined) };
+  await orphanTriage({ db: d, log, llm: { analyze }, github: gh(), archive, now: inWindow });
+
+  // The zero-verdict path is the whole point of the archive — it must persist
+  // both attempts even though the run ends in an error line.
+  expect(analyze).toHaveBeenCalledTimes(2);
+  expect(archive.write).toHaveBeenCalledTimes(1);
+  expect((archive.write.mock.calls[0][1] as { exchanges: unknown[] }).exchanges).toHaveLength(2);
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('помилка');
 });

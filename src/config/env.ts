@@ -28,6 +28,8 @@ const Schema = z.object({
   OPENAI_API_KEY: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_REPO: z.string().min(1).default('ysilvestrov/warsaw-beer-bot'),
+  // Optional diagnostic archive of raw triage LLM I/O; unset ⇒ archive disabled.
+  TRIAGE_LOG_DIR: z.string().optional(),
 });
 
 export type Env = z.infer<typeof Schema>;

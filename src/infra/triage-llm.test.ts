@@ -7,11 +7,14 @@ const validAnalysis = { verdicts: [], new_issues: [] };
 
 test('openai: sends JSON-mode request, parses and validates content', async () => {
   const fetchImpl = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-    choices: [{ message: { content: JSON.stringify(validAnalysis) } }],
+    choices: [{ message: { content: JSON.stringify(validAnalysis) }, finish_reason: 'stop' }],
   }), { status: 200 }));
   const llm = createOpenAiTriageLlm({ apiKey: 'k', model: 'gpt-4o-mini', fetchImpl });
   const out = await llm.analyze(input);
-  expect(out).toEqual(validAnalysis);
+  expect(out.analysis).toEqual(validAnalysis);
+  expect(out.raw.provider).toBe('openai');
+  expect(out.raw.stopReason).toBe('stop');
+  expect(typeof out.raw.prompt).toBe('string');
   const [url, init] = fetchImpl.mock.calls[0];
   expect(String(url)).toBe('https://api.openai.com/v1/chat/completions');
   const body = JSON.parse(init.body as string);
@@ -60,7 +63,9 @@ test('anthropic: extracts tool_use input and validates', async () => {
     () => ({ messages: { create } }) as never,
   );
   const out = await llm.analyze(input);
-  expect(out).toEqual(validAnalysis);
+  expect(out.analysis).toEqual(validAnalysis);
+  expect(out.raw.provider).toBe('anthropic');
+  expect(out.raw.stopReason).toBe('tool_use');
   const req = create.mock.calls[0][0];
   expect(req.tool_choice).toEqual({ type: 'tool', name: 'submit_triage' });
   expect(req.model).toBe('claude-opus-4-8');

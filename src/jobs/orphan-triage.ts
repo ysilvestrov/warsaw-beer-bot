@@ -4,10 +4,11 @@ import { getJobState, setJobState } from '../storage/job_state';
 import {
   listUntriagedFailures, setEnrichFailureReview, type UntriagedFailure,
 } from '../storage/enrich_failures';
-import type { TriageLlm } from '../infra/triage-llm';
+import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
+import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions } from '../domain/triage-plan';
-import type { Verdict } from '../domain/triage-analysis';
+import type { Analysis, Verdict } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
@@ -73,6 +74,7 @@ export interface OrphanTriageDeps {
   log: pino.Logger;
   llm: TriageLlm | null;
   github: GithubIssuesClient | null;
+  archive?: TriageArchive | null;
   now?: () => Date;
 }
 
@@ -118,14 +120,47 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const nowIso = now.toISOString();
 
     let plan;
+    let analysis: Analysis;
+    const exchanges: TriageExchange[] = [];
     try {
       const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
-      const analysis = await llm.analyze({ orphans, openIssues });
+      const ex1 = await llm.analyze({ orphans, openIssues });
+      exchanges.push(ex1);
+      // An empty verdict set on a non-empty batch is anomalous (the prompt asks
+      // for a verdict per orphan). Retry once against the same open-issues set.
+      // Only a fully-empty array retries; a non-empty array of only foreign
+      // (hallucinated) ids falls through to the covered===0 error below.
+      if (ex1.analysis.verdicts.length === 0) {
+        log.warn({ batch: orphans.length, stopReason: ex1.raw.stopReason },
+          'orphan-triage: empty verdicts, retrying once');
+        const ex2 = await llm.analyze({ orphans, openIssues });
+        exchanges.push(ex2);
+      }
+      analysis = exchanges[exchanges.length - 1].analysis;
       plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
       log.error({ err: e }, 'orphan-triage: analysis failed');
+      await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
       finish({ ...outcome, error: errMessage(e).slice(0, 120) });
       return;
+    }
+
+    // Every run with an LLM call is archived — the zero-verdict path most of all.
+    await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
+
+    // Distinct in-batch beer_ids that actually got a verdict (ignores any
+    // hallucinated foreign ids the model may echo from open-issue bodies).
+    const covered = new Set(
+      analysis.verdicts.map((v) => v.beer_id).filter((id) => byId.has(id)),
+    ).size;
+    if (covered === 0) {
+      log.error({ batch: orphans.length, stopReasons: exchanges.map((e) => e.raw.stopReason) },
+        'orphan-triage: zero verdicts after retry');
+      finish({ ...outcome, error: `LLM повернув 0 вердиктів (${exchanges.length} спроб)` });
+      return;
+    }
+    if (covered < orphans.length) {
+      log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
     }
     outcome.skipped = plan.skipped;
 
