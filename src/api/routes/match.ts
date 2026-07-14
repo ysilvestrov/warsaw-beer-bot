@@ -6,6 +6,8 @@ import { createCatalogCache } from '../../domain/catalog-cache';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
 import { matchBeerList } from '../../domain/match-list';
+import { recordMatchUsage } from '../../storage/api_usage';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
 import {
   BEER_TEXT_LIMIT_CHARS,
   MATCH_BODY_LIMIT_BYTES,
@@ -40,6 +42,17 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     async (c) => {
     const telegramId = c.get('telegramId') ?? null;
     const { beers } = c.req.valid('json');
+
+    // Operational usage metric for the daily digest — never break the response.
+    try {
+      recordMatchUsage(deps.db, {
+        date: warsawDateAndHour(new Date()).date,
+        authed: telegramId !== null,
+        beers: beers.length,
+      });
+    } catch (e) {
+      deps.log.warn({ err: e }, 'api_usage record failed');
+    }
 
     const { prepared, byId } = await cache.get();
     // Anonymous callers get global-only results: empty drunk/ratings sets mean
