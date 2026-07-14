@@ -5,6 +5,8 @@ import { upsertBeer } from './beers';
 import { createSnapshot, insertTaps } from './snapshots';
 import { collectStatus } from './stats';
 import { setJobState } from './job_state';
+import { recordMatchUsage } from './api_usage';
+import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -58,6 +60,9 @@ test('collectStatus computes all metrics', () => {
     enrichMatched24h: 0,
     enrichFailures24h: 0,
     untappdSearchHealthy: true,
+    extMatchRequests: 0,
+    extMatchAnon: 0,
+    extMatchBeers: 0,
   });
 });
 
@@ -84,4 +89,19 @@ it('reports enrich health metrics', () => {
   expect(m.enrichMatched24h).toBe(1);
   expect(m.enrichFailures24h).toBe(1);
   expect(m.untappdSearchHealthy).toBe(true);
+});
+
+test('collectStatus: extension /match metrics come from the previous Warsaw day', () => {
+  const db = openDb(':memory:');
+  migrate(db);
+  const now = new Date('2026-06-05T09:30:00Z');
+  const yesterday = previousDate(warsawDateAndHour(now).date);
+  recordMatchUsage(db, { date: yesterday, authed: false, beers: 3 });
+  recordMatchUsage(db, { date: yesterday, authed: true, beers: 2 });
+  // Same-day (today) row must NOT be counted.
+  recordMatchUsage(db, { date: warsawDateAndHour(now).date, authed: false, beers: 99 });
+  const m = collectStatus(db, now);
+  expect(m.extMatchRequests).toBe(2);
+  expect(m.extMatchAnon).toBe(1);
+  expect(m.extMatchBeers).toBe(5);
 });

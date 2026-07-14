@@ -21,6 +21,7 @@ const base: StatusMetrics = {
   usersTotal: 31, usersLinked: 24,
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
   enrichMatched24h: 5, enrichFailures24h: 3, untappdSearchHealthy: true,
+  extMatchRequests: 1234, extMatchAnon: 312, extMatchBeers: 47210,
 };
 
 test('buildStatusMessage: full message exact string', () => {
@@ -36,6 +37,7 @@ test('buildStatusMessage: full message exact string', () => {
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
+      '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',
       '',
       'На кранах зараз',
       '• 1 118 унікальних пив у 42 пабах',

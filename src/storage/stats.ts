@@ -1,6 +1,8 @@
 import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
+import { getUsageForDate } from './api_usage';
+import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
   lastScrapeHoursAgo: number | null;
@@ -20,6 +22,9 @@ export interface StatusMetrics {
   enrichMatched24h: number;
   enrichFailures24h: number;
   untappdSearchHealthy: boolean;
+  extMatchRequests: number;   // total /match requests, previous Warsaw day
+  extMatchAnon: number;       // anonymous subset
+  extMatchBeers: number;      // sum of beers, previous Warsaw day
 }
 
 export function collectStatus(db: DB, now: Date): StatusMetrics {
@@ -49,6 +54,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     try { dbSizeMb = Math.round(fs.statSync(db.name).size / 1e5) / 10; } catch { dbSizeMb = null; }
   }
 
+  const usage = getUsageForDate(db, previousDate(warsawDateAndHour(now).date));
+
   return {
     lastScrapeHoursAgo,
     pubsScraped24h: count('SELECT COUNT(DISTINCT pub_id) AS c FROM tap_snapshots WHERE snapshot_at >= ?', [cutoff24]),
@@ -75,5 +82,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     enrichMatched24h: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND untappd_lookup_at >= ?', [cutoff24]),
     enrichFailures24h: count('SELECT COUNT(*) AS c FROM enrich_failures WHERE last_at >= ?', [cutoff24]),
     untappdSearchHealthy: canaryOk && !circuitOpen,
+    extMatchRequests: usage.anonRequests + usage.authedRequests,
+    extMatchAnon: usage.anonRequests,
+    extMatchBeers: usage.beers,
   };
 }

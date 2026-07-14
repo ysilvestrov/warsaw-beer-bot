@@ -24,6 +24,7 @@ export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: 
     ...(triageLine ? [`• ${triageLine}`] : []),
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
+    `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,
     '',
     'На кранах зараз',
     `• ${group(m.onTapDistinct)} унікальних пив у ${m.onTapPubs} пабах`,

@@ -12,6 +12,8 @@ import {
   GLOBAL_BODY_LIMIT_BYTES,
   MATCH_BODY_LIMIT_BYTES,
 } from './middleware/payload-limit';
+import { getUsageForDate } from '../storage/api_usage';
+import { warsawDateAndHour } from '../domain/warsaw-time';
 
 function deps() {
   const db = openDb(':memory:');
@@ -56,6 +58,43 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     expect(res.status).toBe(401);
+  });
+
+  it('POST /match records anonymous usage for today', async () => {
+    const d = deps();
+    const app = createApiApp(d);
+    await app.request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }, { brewery: 'A', name: 'B' }] }),
+    });
+    const today = warsawDateAndHour(new Date()).date;
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 1, authedRequests: 0, beers: 2 });
+  });
+
+  it('POST /match records authenticated usage when a valid token is sent', async () => {
+    const d = deps();
+    const app = createApiApp(d);
+    await app.request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tok' },
+      body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
+    });
+    const today = warsawDateAndHour(new Date()).date;
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, beers: 1 });
+  });
+
+  it('POST /match still returns 200 when usage recording fails (best-effort)', async () => {
+    const d = deps();
+    d.db.exec('DROP TABLE api_usage'); // make recordMatchUsage throw inside the handler
+    const app = createApiApp(d);
+    const res = await app.request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
+    });
+    expect(res.status).toBe(200); // the metric write must never break the response
+    expect(d.warn).toHaveBeenCalled(); // failure is logged, not silent
   });
 
   it.each([

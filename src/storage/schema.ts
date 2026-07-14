@@ -227,6 +227,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE checkin_sync_state ADD COLUMN profile_total INTEGER;
     `,
   },
+  {
+    version: 17,
+    sql: `
+      CREATE TABLE api_usage (
+        date            TEXT PRIMARY KEY,
+        anon_requests   INTEGER NOT NULL DEFAULT 0,
+        authed_requests INTEGER NOT NULL DEFAULT 0,
+        beers           INTEGER NOT NULL DEFAULT 0
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
