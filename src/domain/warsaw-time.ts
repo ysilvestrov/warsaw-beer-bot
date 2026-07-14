@@ -11,3 +11,11 @@ export function warsawDateAndHour(d: Date): { date: string; hour: number } {
   if (hour === 24) hour = 0; // some ICU builds render midnight as "24"
   return { date: `${get('year')}-${get('month')}-${get('day')}`, hour };
 }
+
+// 'YYYY-MM-DD' → the previous calendar date, same format. Pure UTC math on the
+// date-only value (no zone attached), so DST never applies.
+export function previousDate(date: string): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
