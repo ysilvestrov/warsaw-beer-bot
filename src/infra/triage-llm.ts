@@ -5,9 +5,22 @@ import {
 } from '../domain/triage-analysis';
 import type { Env } from '../config/env';
 
+export interface TriageRaw {
+  prompt: string;                    // buildTriagePrompt(input) — what was sent
+  response: unknown;                 // raw Anthropic message / OpenAI JSON body
+  stopReason: string | null;
+  provider: 'anthropic' | 'openai';
+}
+
+export interface TriageExchange {
+  analysis: Analysis;
+  raw: TriageRaw;
+}
+
 export interface TriageLlm {
-  /** Throws on transport error, missing/invalid structured output. */
-  analyze(input: TriageInput): Promise<Analysis>;
+  /** Throws on transport error, missing/invalid structured output. Empty
+   * verdicts are NOT an error — they resolve normally; the job decides. */
+  analyze(input: TriageInput): Promise<TriageExchange>;
 }
 
 const TOOL_NAME = 'submit_triage';
@@ -39,6 +52,7 @@ export function createAnthropicTriageLlm(
   const client = factory(cfg.apiKey);
   return {
     async analyze(input) {
+      const prompt = buildTriagePrompt(input);
       const res = await client.messages.create({
         model: cfg.model,
         max_tokens: MAX_TOKENS,
@@ -51,7 +65,7 @@ export function createAnthropicTriageLlm(
           strict: true,
         }],
         tool_choice: { type: 'tool', name: TOOL_NAME },
-        messages: [{ role: 'user', content: buildTriagePrompt(input) }],
+        messages: [{ role: 'user', content: prompt }],
       });
       // A truncated tool_use input is malformed by construction — report the
       // real cause instead of a downstream schema-validation error.
@@ -62,7 +76,10 @@ export function createAnthropicTriageLlm(
       if (!block || block.type !== 'tool_use') {
         throw new Error(`triage LLM: no tool_use block in response (stop_reason=${res.stop_reason})`);
       }
-      return parseAnalysis(block.input);
+      return {
+        analysis: parseAnalysis(block.input),
+        raw: { prompt, response: res, stopReason: res.stop_reason ?? null, provider: 'anthropic' },
+      };
     },
   };
 }
@@ -77,6 +94,7 @@ export function createOpenAiTriageLlm(
   const fetchImpl = cfg.fetchImpl ?? fetch;
   return {
     async analyze(input) {
+      const prompt = buildTriagePrompt(input);
       const res = await fetchImpl(`${endpoint}/chat/completions`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
@@ -85,7 +103,7 @@ export function createOpenAiTriageLlm(
           response_format: { type: 'json_object' },
           messages: [
             { role: 'system', content: 'Respond with a single JSON object matching the requested shape: {"verdicts": [...], "new_issues": [...]}.' },
-            { role: 'user', content: buildTriagePrompt(input) },
+            { role: 'user', content: prompt },
           ],
         }),
       });
@@ -95,7 +113,9 @@ export function createOpenAiTriageLlm(
           `triage LLM: OpenAI HTTP ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`,
         );
       }
-      const data = await res.json() as { choices?: { message?: { content?: string } }[] };
+      const data = await res.json() as {
+        choices?: { message?: { content?: string }; finish_reason?: string }[];
+      };
       const content = data.choices?.[0]?.message?.content;
       // Endpoint is overridable — OpenAI-compatible gateways vary in shape.
       if (typeof content !== 'string') {
@@ -107,7 +127,10 @@ export function createOpenAiTriageLlm(
       } catch {
         throw new Error(`triage LLM: response is not JSON: ${content.slice(0, 80)}`);
       }
-      return parseAnalysis(parsed);
+      return {
+        analysis: parseAnalysis(parsed),
+        raw: { prompt, response: data, stopReason: data.choices?.[0]?.finish_reason ?? null, provider: 'openai' },
+      };
     },
   };
 }
