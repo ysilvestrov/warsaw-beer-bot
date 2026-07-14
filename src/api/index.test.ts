@@ -84,6 +84,19 @@ describe('createApiApp', () => {
     expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, beers: 1 });
   });
 
+  it('POST /match still returns 200 when usage recording fails (best-effort)', async () => {
+    const d = deps();
+    d.db.exec('DROP TABLE api_usage'); // make recordMatchUsage throw inside the handler
+    const app = createApiApp(d);
+    const res = await app.request('/match', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
+    });
+    expect(res.status).toBe(200); // the metric write must never break the response
+    expect(d.warn).toHaveBeenCalled(); // failure is logged, not silent
+  });
+
   it.each([
     ['/match', MATCH_BODY_LIMIT_BYTES],
     ['/enrich/candidates', ENRICH_CANDIDATES_BODY_LIMIT_BYTES],
