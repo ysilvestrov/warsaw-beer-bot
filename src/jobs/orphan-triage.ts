@@ -128,6 +128,8 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       exchanges.push(ex1);
       // An empty verdict set on a non-empty batch is anomalous (the prompt asks
       // for a verdict per orphan). Retry once against the same open-issues set.
+      // Only a fully-empty array retries; a non-empty array of only foreign
+      // (hallucinated) ids falls through to the covered===0 error below.
       if (ex1.analysis.verdicts.length === 0) {
         log.warn({ batch: orphans.length, stopReason: ex1.raw.stopReason },
           'orphan-triage: empty verdicts, retrying once');

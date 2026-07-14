@@ -306,3 +306,18 @@ test('archive: write called once with both exchanges', async () => {
   expect((payload as { exchanges: unknown[] }).exchanges).toHaveLength(2);
   expect((payload as { batchSize: number }).batchSize).toBe(1);
 });
+
+test('archive: zero-verdict-after-retry run is still archived (both empty exchanges)', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analyze = vi.fn().mockResolvedValue(exchange({ verdicts: [], new_issues: [] }, 'end_turn'));
+  const archive = { write: vi.fn().mockResolvedValue(undefined) };
+  await orphanTriage({ db: d, log, llm: { analyze }, github: gh(), archive, now: inWindow });
+
+  // The zero-verdict path is the whole point of the archive — it must persist
+  // both attempts even though the run ends in an error line.
+  expect(analyze).toHaveBeenCalledTimes(2);
+  expect(archive.write).toHaveBeenCalledTimes(1);
+  expect((archive.write.mock.calls[0][1] as { exchanges: unknown[] }).exchanges).toHaveLength(2);
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('помилка');
+});
