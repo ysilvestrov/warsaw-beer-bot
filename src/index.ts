@@ -82,6 +82,7 @@ async function main(): Promise<void> {
         })
       : undefined,
     isBlock: untappdBlock,
+    maxBlockRetries: env.UNTAPPD_BLOCK_RETRIES,
   });
   const algoliaSearch = createAlgoliaSearch({
     appId: env.UNTAPPD_ALGOLIA_APP_ID ?? ALGOLIA_DEFAULTS.appId,
@@ -111,6 +112,7 @@ async function main(): Promise<void> {
             })
           : undefined,
         isBlock: untappdBlock,
+        maxBlockRetries: env.UNTAPPD_BLOCK_RETRIES,
       })
     : null;
   if (!untappdHttp) {
