@@ -472,4 +472,43 @@ describe('lookupBeer', () => {
       expect(out.result.bid).toBe(candidate.bid);
     });
   });
+
+  test('#271 head-retry: zero candidates + comma/#N tail retries with the head and matches', async () => {
+    const search = fakeSearch((q) =>
+      q === 'Pinta Fantazja'
+        ? [{ bid: 7000, beer_name: 'Fantazja', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
+        : [],
+    );
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja #1, Pastry Sour z Guavą, Mango', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(7000);
+  });
+
+  test('#271: no head-retry when the full query already returned candidates (even if unmatched)', async () => {
+    let calls = 0;
+    const search = fakeSearch(() => {
+      calls++;
+      return [{ bid: 9, beer_name: 'Whatever', brewery_name: 'Other Brewery', style: 'IPA', abv: 5, global_rating: 3 }];
+    });
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja #1, Mango', search });
+    expect(out.kind).toBe('not_found');
+    expect(calls).toBe(1); // brewery gate rejected the candidate; retry must NOT fire
+  });
+
+  test('#271: no head-retry for a dash-only tail (excluded delimiter)', async () => {
+    let calls = 0;
+    const search = fakeSearch(() => { calls++; return []; });
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Imperial Stout - Barrel Aged', search });
+    expect(out.kind).toBe('not_found');
+    expect(calls).toBe(1); // no comma/#N delimiter → no head-retry
+  });
+
+  test('#271: single-retry guard — head-retry does not recurse forever', async () => {
+    let calls = 0;
+    const search = fakeSearch(() => { calls++; return []; });
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja, Mango, Guava', search });
+    expect(out.kind).toBe('not_found');
+    expect(calls).toBe(2); // original pass + exactly one head-retry pass
+  });
 });
