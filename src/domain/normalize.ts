@@ -142,20 +142,40 @@ export function stripSearchNoise(s: string): string {
 }
 
 export function cleanSearchQuery(brewery: string, name: string): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
   const cleanBrewery = stripSearchNoise(stripLegalForm(brewery));
   const cleanName = stripSearchNoise(name);
-  // Collapse COLLAB_SEP ("/", " x ", " & ") first so a bare collab connector ("x")
-  // never leaks into the query (as stripBreweryNoise did before tokenizing).
-  const combined = `${cleanBrewery} ${cleanName}`.split(COLLAB_SEP).join(' ');
-  for (const tok of combined.split(/\s+/)) {
+
+  // Brewery brand tokens: split collab separators (defensive — detaches glued junk like
+  // "collab/"), then whitespace; drop BREWERY_NOISE and empty folds; dedup by fold.
+  const brandTokens: string[] = [];
+  const brandFolds = new Set<string>();
+  for (const tok of cleanBrewery.split(COLLAB_SEP).join(' ').split(/\s+/)) {
     const f = foldToken(tok);
-    if (!f || BREWERY_NOISE.has(f) || seen.has(f)) continue;
-    seen.add(f);
-    out.push(tok);
+    if (!f || BREWERY_NOISE.has(f) || brandFolds.has(f)) continue;
+    brandFolds.add(f);
+    brandTokens.push(tok);
   }
-  // Prefer cleaned name/brewery; use the raw name only as a last resort when structural
-  // cleaning removes everything and no cleaned brewery survives, so the query is non-empty.
+
+  // Name tokens: whitespace split, "/" -> space (unambiguous collab slash); drop lone collab
+  // connectors ("x"), empty folds, and BREWERY_NOISE anywhere. The name is NEVER split on " x "
+  // (#270): a name beginning "x <partner>:" is a shop artifact, not a collab-brewery separator.
+  const nameTokens: string[] = [];
+  for (const tok of cleanName.replace(/\//g, ' ').split(/\s+/)) {
+    const f = foldToken(tok);
+    if (!f || f === 'x' || BREWERY_NOISE.has(f)) continue;
+    nameTokens.push(tok);
+  }
+
+  // Strip only the leading and trailing runs of name tokens that duplicate a brewery brand token
+  // (the "name restates the brewery" case: #126 leading, #155 trailing). Mid-name duplicates are
+  // KEPT (#270 "Road"/"Upside") — Algolia collapses a repeated identical term to one, so keeping
+  // them is harmless while dropping them destroyed the beer name.
+  let start = 0;
+  let end = nameTokens.length;
+  while (start < end && brandFolds.has(foldToken(nameTokens[start]))) start++;
+  while (end > start && brandFolds.has(foldToken(nameTokens[end - 1]))) end--;
+
+  const out = [...brandTokens, ...nameTokens.slice(start, end)];
+  // Last resort: never emit an empty query.
   return out.length ? out.join(' ') : (cleanName || cleanBrewery || name.trim());
 }

@@ -222,6 +222,22 @@ describe('cleanSearchQuery', () => {
   test('uses the raw name only as a last resort when all cleaned input is empty', () => {
     expect(cleanSearchQuery('', '(only)')).toBe('(only)');
   });
+  test('#270 31133: mid-name tokens repeating the brewery are kept, lone leading "x" dropped', () => {
+    // Was destroyed to "Magic Road Upside Down: to" — Road/Upside dropped as dup-of-brewery.
+    expect(
+      cleanSearchQuery('Browar Magic Road', 'x Upside Down: Road to Upside'),
+    ).toBe('Magic Road Upside Down: Road to Upside');
+  });
+  test('#270: mid-name token duplicating the brewery is kept (not deduped away)', () => {
+    // OLD global dedup dropped the second "Milk" (part of the beer name) -> "Milk Coffee Stout".
+    // NEW edge-run dedup keeps the mid-name "Milk"; a repeated identical Algolia term is harmless.
+    expect(cleanSearchQuery('Milk Brewery', 'Coffee x Milk Stout')).toBe('Milk Coffee Milk Stout');
+  });
+  test('#270 31135: leading collab "x" dropped, rest of the name intact (regression guard)', () => {
+    expect(cleanSearchQuery('Nepo Brewing', 'x Uncharted: Top-Tier')).toBe(
+      'Nepo Uncharted: Top-Tier',
+    );
+  });
 });
 
 describe('stripSearchNoise', () => {
