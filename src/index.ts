@@ -135,17 +135,29 @@ async function main(): Promise<void> {
   if (!triageGithub) log.warn('orphan-triage GitHub disabled (GITHUB_TOKEN not set)');
 
   const adminAlert = (msg: string) => { notifyAdmin?.(msg)?.catch(() => {}); };
-  // One shared breaker across all Untappd jobs: blockThreshold counts CONSECUTIVE
-  // blocks across the whole Untappd circuit (any job), not per-job — a healthy
-  // success in any job resets the count. With a rotating proxy each block is a
-  // different exit IP, so N consecutive blocks signal a systemic problem.
-  const untappdBreaker = createPersistentCircuitBreaker({
+  // Two independent Untappd breakers. The Algolia search path (enrich /
+  // ontap refresh) and the HTML-scrape path (profile had-list + tap ratings)
+  // fail for different reasons (see #298) and must not gate each other.
+  // blockThreshold counts CONSECUTIVE blocks WITHIN each path; a healthy
+  // success in that path resets its count.
+  // The Algolia breaker keeps the legacy key 'untappd_circuit_open_until' so
+  // stats.untappdSearchHealthy (which reads that key) stays correct and the
+  // live open_until state survives deploys.
+  const algoliaBreaker = createPersistentCircuitBreaker({
     db,
     key: 'untappd_circuit_open_until',
     cooldownMs: 6 * 60 * 60 * 1000,
     blockThreshold: env.UNTAPPD_BLOCK_THRESHOLD,
-    onTrip: () => adminAlert('⚠️ Untappd: можливий бан IP (403/429 або captcha). Енрич призупинено на ~6 год.'),
-    onRecover: () => adminAlert('✅ Untappd: доступ відновлено, енрич продовжено.'),
+    onTrip: () => adminAlert('⚠️ Untappd Algolia: можливий бан IP (403/429 або captcha). Енрич призупинено на ~6 год.'),
+    onRecover: () => adminAlert('✅ Untappd Algolia: доступ відновлено, енрич продовжено.'),
+  });
+  const profileHttpBreaker = createPersistentCircuitBreaker({
+    db,
+    key: 'untappd_profile_http_open_until',
+    cooldownMs: 6 * 60 * 60 * 1000,
+    blockThreshold: env.UNTAPPD_BLOCK_THRESHOLD,
+    onTrip: () => adminAlert('⚠️ Untappd профіль-скрейп: 403/блок — скрейп профілів/рейтингів призупинено на ~6 год.'),
+    onRecover: () => adminAlert('✅ Untappd профіль-скрейп: доступ відновлено.'),
   });
 
   bot.use(
@@ -172,7 +184,7 @@ async function main(): Promise<void> {
           db, log, http, geocoder, onProgress: notify,
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
           pubSlugs: opts?.pubSlugs,
-          breaker: untappdBreaker,
+          breaker: algoliaBreaker,
           search: algoliaSearch,
         });
         // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
@@ -180,7 +192,7 @@ async function main(): Promise<void> {
         if (!opts?.pubSlugs && untappdHttp) {
           await refreshAllUntappd({
             db, log, http: untappdHttp, onProgress: notify, notifyAdmin,
-            breaker: untappdBreaker,
+            breaker: profileHttpBreaker,
           });
         }
       },
@@ -193,7 +205,7 @@ async function main(): Promise<void> {
       refreshOntap({
         db, log, http, geocoder,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
-        breaker: untappdBreaker,
+        breaker: algoliaBreaker,
         search: algoliaSearch,
       }).catch((e) => log.error({ err: e }, 'ontap cron'));
     }),
@@ -206,7 +218,7 @@ async function main(): Promise<void> {
       enrichOrphans({
         db, log, search: algoliaSearch,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
-        breaker: untappdBreaker,
+        breaker: algoliaBreaker,
         notifyAdmin,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
@@ -218,7 +230,7 @@ async function main(): Promise<void> {
       refreshTapRatings({
         db, log, http: untappdSearchHttp,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
-        breaker: untappdBreaker,
+        breaker: profileHttpBreaker,
       }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
     }),
     // cleanup-old-snapshots: daily at 05:00 Warsaw, a quiet slot away from the
@@ -255,7 +267,7 @@ async function main(): Promise<void> {
     cronJobs.push(cron.schedule('0 3 * * *', () => {
       refreshAllUntappd({
         db, log, http: untappdHttp, notifyAdmin,
-        breaker: untappdBreaker,
+        breaker: profileHttpBreaker,
       }).catch((e) => log.error({ err: e }, 'untappd cron'));
     }));
   }
