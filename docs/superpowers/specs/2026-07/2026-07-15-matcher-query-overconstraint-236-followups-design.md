@@ -63,42 +63,65 @@ Evidence:
 - Result: `x Upside Down: Road to Upside` is no longer cut at ` x ` — only the lone leading `x`
   disappears; `Upside Down: Road to Upside` survives into the query.
 
-**A2. Leading-run dedup (replaces global fold-dedup).** This is the core change:
-- Emit brewery tokens first (deduped among themselves by fold, dropping `BREWERY_NOISE`).
-- For the name, strip **only the leading contiguous run** of tokens whose fold matches a brewery
-  token or `BREWERY_NOISE`. Stop at the first name token that is **not** in the brewery set; keep all
-  remaining name tokens verbatim — no further dedup of the name against the brewery.
-- Identical-token AND terms that survive (e.g. `Road` in both brewery and mid-name) are harmless:
-  Algolia treats a repeated identical term as the single term.
+**A2. Edge-run dedup (replaces global fold-dedup).** This is the core change. Define
+`breweryFolds` = the folds of brewery **brand** tokens (brewery tokens that survive `BREWERY_NOISE`
+removal). Build the name token list from A1, then:
+- Drop any name token whose fold is in `BREWERY_NOISE` **anywhere** (pure noise: `collab`, `brewing`,
+  `co`, …) and any token whose fold is empty (bare punctuation like `–`).
+- From the remaining name tokens, strip the **leading** contiguous run and the **trailing**
+  contiguous run whose fold is in `breweryFolds`. Stop each run at the first token not in
+  `breweryFolds`. **Keep every mid-name token**, even if it duplicates a brewery brand token.
+- Emit brewery brand tokens (deduped among themselves by fold), then the surviving name tokens, in
+  original raw form. Identical AND terms that survive (e.g. `Road` in both brewery and mid-name) are
+  harmless — Algolia treats a repeated identical term as the single term.
+
+Why leading **and** trailing (not leading-only): existing #155 test relies on trailing removal —
+`TRZECH KUMPLI Brewery` / `Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli` → the trailing
+`Trzech Kumpli` must drop, yielding `TRZECH KUMPLI Porter Bałtycki Żytnio-Orkiszowy`.
 
 Worked cases:
-- #126 `Track Brewing Co` / `Track Brewing Company Taking Shape`: leading run `Track`(brewery),
-  `Brewing`(noise), `Company`(noise), then `Taking`(not in brewery → stop) → name kept `Taking Shape`
-  → query `Track Taking Shape`. ✓ (preserved)
-- #270 31133 `Browar Magic Road` / `x Upside Down: Road to Upside`: lone `x` dropped; name leading
-  token `Upside` not in brewery → stop immediately → no name tokens dropped → `Road`/`Upside`
-  preserved. ✓ (fixed)
+- #126 `Track Brewing Co` / `Track Brewing Company Taking Shape`: noise drops `Brewing`,`Company`;
+  leading run `Track`(brand) → drop, `Taking`(not brand → stop) → name `Taking Shape` →
+  query `TRACK Taking Shape`. ✓ (preserved)
+- #155 `TRZECH KUMPLI Brewery` / `Porter Bałtycki Żytnio-Orkiszowy Trzech Kumpli`: trailing run
+  `Kumpli`,`Trzech` → drop, `Żytnio-Orkiszowy`(not brand → stop) → `TRZECH KUMPLI Porter Bałtycki
+  Żytnio-Orkiszowy`. ✓ (preserved)
+- #270 31133 `Browar Magic Road` / `x Upside Down: Road to Upside`: lone `x` dropped; brand folds
+  `{magic, road}`; leading `Upside`(not brand → stop), trailing `Upside`(not brand → stop), so no
+  edge trim; mid-name `Road` kept → name `Upside Down: Road to Upside` → `Road`/`Upside` preserved. ✓ (fixed)
 
 **A3. Fallback** (`out.length ? … : (cleanName || cleanBrewery || name.trim())`) unchanged.
 
-### Part B — head-retry in `lookupBeer` (`src/domain/untappd-lookup.ts`) (#271)
+### Part B — head-retry in `lookupBeer` (`src/domain/untappd-lookup.ts`) (#271, NARROWED)
 
-In the per-part loop, after `results = await args.search.search(query)`:
+> **Design-defect correction (2026-07-15).** The original "retry the search but keep matching on the
+> full name" idea does not work: the matcher (`fuzzyTargets`/`nameKeys`/coverage) requires **every**
+> input-name token to be covered by the candidate. When the shop name carries a long flavour tail
+> (`Space Pop I - Blackberry, Lemon, Marshmallow`) and the Untappd beer is the short head
+> (`Space Pop I`), a candidate found via a head-only search is still **rejected** by the full-name
+> gates. So the retry must **match on the head too** — which reintroduces false-match risk. Two of the
+> three issue examples (30780 `Jungle boogie mango ananas`, 30109 `WA Gossip …`) have **no delimiter**
+> and would need a token-cap, which is riskier still. Decision: implement only the **safe delimiter-list
+> slice** now; defer bare-space tails, token-cap, and the ` - ` dash to a follow-up.
 
-- If `results.length === 0` **and** the name has a trimmable tail, run **one** additional search with
-  the head only, and adopt its results if non-empty.
-- **Tail delimiter**: first occurrence of `, ` (comma), ` #\d` (hash-number), or ` - `/` — ` (dash).
-  `head` = the name substring up to (excluding) that delimiter.
-- **Gate**: retry only when `results === 0` and `headQuery !== query` (a tail actually existed and
-  was removed). This makes it a strict fallback — if the full query already returned candidates, no
-  retry happens; if the head query also returns 0, nothing changes.
-- **Safety invariant (documented in code)**: the head query only widens the candidate **search**.
-  All downstream match gates — brewery gate, `nameKeys`, `fuzzyTargets` — continue to use the **full
-  original name**. A candidate surfaced only by the head must still match the full name to be
-  returned, so head-retry cannot introduce a false match.
-- **Cost / traffic**: +1 HTTP search on the subset of orphans that (a) returned 0 and (b) have a
-  tail. It goes through `args.search`, so it inherits the Untappd circuit breaker, Webshare proxy,
-  and backoff automatically. `triedUrls` records the head query URL too (for `enrich_failures`).
+Implemented behaviour — a single, whole-lookup head-retry gated to fire only when the search returned
+**nothing at all**:
+
+- After the per-part loop, if `seenCandidates.length === 0` (every part's search returned zero
+  results — a genuine query-zeroing, not a matcher rejection) **and** the name has a **delimiter-list
+  tail**, recurse `lookupBeer` once with `name = head`.
+- **Tail delimiter (narrowed)**: the first ` #\d` (hash-number) or `,` (comma). `head` = the name
+  substring before it, trimmed. **Excluded**: ` - `/` — ` dash (often a real sub-edition) and any
+  token-cap (would truncate legitimate multiword names). If no such delimiter, no retry.
+- **Matching uses the head**: recursion re-runs the whole pipeline with the head as the name, so the
+  brewery gate + name gates evaluate the head — this is what lets the short Untappd name match.
+- **Guards**: single retry only (private `headRetried` flag threaded through recursion — infinite-loop
+  guard); `head` must be non-empty and `!== name`; brewery gate still applies unchanged in the retry.
+- **Outcome merge**: on retry `not_found`, merge `searchUrls`/`candidates` from both passes for
+  `enrich_failures` debugging; on `matched`/`blocked`/`transient`, return the retry outcome directly.
+- **Cost / traffic**: one extra whole-lookup pass on the subset of orphans that surfaced zero
+  candidates *and* have a delimiter tail. All searches go through `args.search`, inheriting the Untappd
+  circuit breaker, Webshare proxy, and backoff automatically.
 
 ### Part C — Validation
 
@@ -106,9 +129,10 @@ In the per-part loop, after `results = await args.search.search(query)`:
    - `normalize.test.ts` for `cleanSearchQuery`: 31133 (`Road`/`Upside` preserved), 31135 (leading
      `x` dropped, rest intact), #126 regression (`Track Taking Shape`), and a plain non-collab case.
    - New lookup test for head-retry: mock `BeerSearch` returning `[]` for the full query and a
-     candidate for the head; assert the second search fires with the head; assert that a head
-     candidate which does **not** match the full name yields `not_found` (safety invariant); assert
-     no retry when the full query already returns results.
+     matching candidate for the head query (`31170`-style `Owocowa Fantazja #1 - …` → head
+     `Owocowa Fantazja`); assert the retry fires and returns `matched`. Assert **no** retry when the
+     full query already returned candidates (even if unmatched). Assert **no** retry for a
+     dash-only tail (`X - Imperial Edition`). Assert single-retry guard (no infinite loop).
 2. **Prod dry-run replay (`./tmp/`, read-only).** Script reads `matcher_bug` rows from
    `enrich_failures` on the read-only prod DB, runs each through old vs new `cleanSearchQuery`, and
    reports: count now producing a non-empty / changed query, per-row before→after diffs, and any row
@@ -118,15 +142,23 @@ In the per-part loop, after `results = await args.search.search(query)`:
 
 ## Risks
 
-- **A2 heuristic edge**: a beer whose name legitimately *starts* with a brewery token loses that
-  leading token (same as current behaviour — the brewery already contributes it). Acceptable; the
-  dry-run diff surfaces any surprising shortening.
-- **B dash delimiter**: ` - ` can appear in real names (`X - Imperial Edition`). Safe here because
-  retry only fires after the full query returned 0, and matching still gates on the full name.
-- **Traffic**: head-retry adds Untappd calls on a failing subset. Bounded; inherits breaker/proxy.
-  Validate observed call volume against the breaker budget after deploy (per hot-loop discipline).
+- **A2 heuristic edge**: a beer whose name legitimately *starts or ends* with a brewery brand token
+  loses that edge token (same as current behaviour — the brewery already contributes it). Acceptable;
+  the dry-run diff surfaces any surprising shortening.
+- **B false-match risk**: matching on the head is more permissive, so a real product differentiator
+  in the tail could let the head match a different beer of the same brewery. Mitigated by: gating on
+  **zero candidates** (search found literally nothing), keeping the brewery gate, excluding the ` - `
+  dash and token-cap, and restricting to `,`/`#N` flavour-list tails. Residual risk accepted for the
+  narrowed slice; watch the dry-run diff and post-deploy match quality.
+- **Traffic**: head-retry adds one whole-lookup pass on a failing subset. Bounded; inherits
+  breaker/proxy. Validate observed call volume against the breaker budget after deploy (hot-loop
+  discipline).
 
 ## Out of scope / follow-ups
 
+- **#271 remainder (deferred to its own cycle)**: bare space-separated adjunct tails (30780
+  `Jungle boogie mango ananas`, 30109 `WA Gossip …`), the token-cap strategy, and the ` - ` dash
+  delimiter. These need head-matching with stronger false-match guards — a proper design, not a
+  bolt-on here.
 - Collab-partner identification/removal from names (residual #270/#271 over-constraint).
 - Broader query-noise classes tracked in #229 / #254.
