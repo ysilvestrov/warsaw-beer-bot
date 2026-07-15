@@ -69,6 +69,13 @@ describe('env: proxy + block threshold', () => {
       loadEnv({ ...base, UNTAPPD_BLOCK_THRESHOLD: '5' } as never).UNTAPPD_BLOCK_THRESHOLD,
     ).toBe(5);
   });
+
+  test('UNTAPPD_BLOCK_RETRIES defaults to 6 and coerces', () => {
+    expect(loadEnv({ ...base } as never).UNTAPPD_BLOCK_RETRIES).toBe(6);
+    expect(
+      loadEnv({ ...base, UNTAPPD_BLOCK_RETRIES: '8' } as never).UNTAPPD_BLOCK_RETRIES,
+    ).toBe(8);
+  });
 });
 
 describe('env: Algolia keys', () => {
