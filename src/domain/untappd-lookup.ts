@@ -41,6 +41,18 @@ function brewerySearchParts(brewery: string): string[] {
   return parts.length > 1 ? parts : [brewery];
 }
 
+// #271: the head of a name up to the first bare adjunct/flavour-LIST delimiter — a comma or
+// " #<n>". Deliberately EXCLUDES the " - " dash (often a real sub-edition) and any token cap, both
+// of which risk truncating a legitimate name. Returns null when there is no such delimiter or the
+// head is empty / equal to the whole name.
+const TAIL_LIST_DELIMITER = /,|\s#\d/;
+function headBeforeTail(name: string): string | null {
+  const m = TAIL_LIST_DELIMITER.exec(name);
+  if (!m) return null;
+  const head = name.slice(0, m.index).trim();
+  return head && head !== name.trim() ? head : null;
+}
+
 function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   const breweryNorm = normalizeBrewery(brewery);
   const targets = new Map<string, FuzzyTarget>();
@@ -161,7 +173,7 @@ function swappedBrandNameScore(
   return null;
 }
 
-export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
+export async function lookupBeer(args: LookupArgs, headRetried = false): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
   const targetNames = fuzzyTargets(name, brewery);
@@ -313,5 +325,24 @@ export async function lookupBeer(args: LookupArgs): Promise<LookupOutcome> {
     // No name match in this search part — fall through to the next part.
   }
 
+  // #271 fallback: the search returned zero candidates across every brewery part — a genuine
+  // query-zeroing (a matcher rejection would leave seenCandidates non-empty and is NOT retried).
+  // If the name has a comma/#N flavour-list tail, retry the WHOLE lookup once with the head only,
+  // so the tail cannot AND-zero the Algolia search. Matching then evaluates the head (brewery gate
+  // unchanged) — this is what lets a short Untappd name match. Single retry (headRetried guard).
+  if (!headRetried && seenCandidates.length === 0) {
+    const head = headBeforeTail(name);
+    if (head) {
+      const retry = await lookupBeer({ ...args, name: head }, true);
+      if (retry.kind === 'not_found') {
+        return {
+          kind: 'not_found',
+          searchUrls: [...triedUrls, ...retry.searchUrls],
+          candidates: retry.candidates,
+        };
+      }
+      return retry;
+    }
+  }
   return { kind: 'not_found', searchUrls: triedUrls, candidates: seenCandidates };
 }
