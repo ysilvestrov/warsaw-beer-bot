@@ -190,3 +190,26 @@ test('rotations() reflects the rotator counter', async () => {
   await http.get('https://x');
   expect(http.rotations?.()).toBe(7);
 });
+
+test('retries up to maxBlockRetries and returns the body on a later success', async () => {
+  const rotator = fakeRotator();
+  let call = 0;
+  const fetchImpl: typeof fetch = async () => {
+    call++;
+    return call <= 3
+      ? new Response('', { status: 403 })
+      : new Response('ok-body', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock, maxBlockRetries: 6 });
+  expect(await http.get('https://untappd.com/beer/1')).toBe('ok-body');
+  expect(rotator.rotations()).toBe(3);
+  expect(call).toBe(4);
+});
+
+test('exhausts maxBlockRetries then throws a block HttpError (rotates exactly budget times)', async () => {
+  const rotator = fakeRotator();
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 403 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock, maxBlockRetries: 3 });
+  await expect(http.get('https://untappd.com/beer/1')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+  expect(rotator.rotations()).toBe(3);
+});

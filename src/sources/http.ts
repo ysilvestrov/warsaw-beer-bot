@@ -31,6 +31,8 @@ export interface HttpOpts {
   redirect?: RequestRedirect;
   rotator?: RotatingDispatcher;
   isBlock?: (status: number, body: string | null) => boolean;
+  /** Max rotate+retry attempts on a block before surfacing to the breaker. Default 1. */
+  maxBlockRetries?: number;
 }
 
 export function createHttp(opts: HttpOpts): Http {
@@ -83,18 +85,23 @@ export function createHttp(opts: HttpOpts): Http {
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 
         let outcome = await classify(url, await doFetch(url));
-        if (outcome.kind === 'block') {
-          // Rotate to a fresh exit IP and retry exactly once. A second block
-          // (different IP) signals a systemic ban and is surfaced to the breaker.
-          // safe: classify() only returns 'block' when opts.rotator is truthy. Retry uses a fresh IP, so no extra throttle gap is applied.
-          opts.rotator!.rotate(outcome.reason);
-          outcome = await classify(url, await doFetch(url));
-          if (outcome.kind === 'block') {
+        // Rotate to a fresh exit IP and retry, up to maxBlockRetries (default 1).
+        // Untappd HTML pages sit behind a Cloudflare Managed Challenge that ~1/3 of
+        // residential exit IPs pass, so retrying through fresh IPs beats the lottery.
+        // safe: classify() only returns 'block' when opts.rotator is truthy. Retries
+        // use a fresh IP each time, so no extra throttle gap is applied.
+        const budget = opts.maxBlockRetries ?? 1;
+        let retries = 0;
+        while (outcome.kind === 'block') {
+          if (retries >= budget) {
             // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
             // systemic block — including a 200 Cloudflare challenge page — reaches
             // the circuit breaker. outcome.status may be 200 for a block page.
             throw new HttpError(outcome.status === 429 ? 429 : 403, url);
           }
+          opts.rotator!.rotate(outcome.reason);
+          retries++;
+          outcome = await classify(url, await doFetch(url));
         }
         return outcome.body;
       }) as Promise<string>;
