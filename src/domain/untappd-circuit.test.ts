@@ -188,3 +188,43 @@ describe('blockThreshold', () => {
     expect(b.state).toBe('open');
   });
 });
+
+test('two persistent breakers with distinct keys are isolated (profile trip)', () => {
+  const db = freshDb();
+  const algolia = createPersistentCircuitBreaker({
+    db, key: 'untappd_circuit_open_until', cooldownMs: 6 * 3600_000,
+    blockThreshold: 1, onTrip: () => {}, onRecover: () => {},
+  });
+  const profile = createPersistentCircuitBreaker({
+    db, key: 'untappd_profile_http_open_until', cooldownMs: 6 * 3600_000,
+    blockThreshold: 1, onTrip: () => {}, onRecover: () => {},
+  });
+
+  // Trip only the profile-http breaker.
+  expect(profile.canAttempt(at(0))).toBe(true);
+  profile.onResult(true, at(0));
+  expect(profile.canAttempt(at(1))).toBe(false); // open within cooldown
+
+  // Algolia breaker is untouched, and only the profile key exists.
+  expect(algolia.canAttempt(at(1))).toBe(true);
+  expect(getJobState(db, 'untappd_profile_http_open_until')).not.toBeNull();
+  expect(getJobState(db, 'untappd_circuit_open_until')).toBeNull();
+});
+
+test('two persistent breakers with distinct keys are isolated (algolia trip)', () => {
+  const db = freshDb();
+  const algolia = createPersistentCircuitBreaker({
+    db, key: 'untappd_circuit_open_until', cooldownMs: 6 * 3600_000,
+    blockThreshold: 1, onTrip: () => {}, onRecover: () => {},
+  });
+  const profile = createPersistentCircuitBreaker({
+    db, key: 'untappd_profile_http_open_until', cooldownMs: 6 * 3600_000,
+    blockThreshold: 1, onTrip: () => {}, onRecover: () => {},
+  });
+
+  algolia.onResult(true, at(0));
+  expect(algolia.canAttempt(at(1))).toBe(false);
+  expect(profile.canAttempt(at(1))).toBe(true);
+  expect(getJobState(db, 'untappd_circuit_open_until')).not.toBeNull();
+  expect(getJobState(db, 'untappd_profile_http_open_until')).toBeNull();
+});
