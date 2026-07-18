@@ -1,7 +1,9 @@
 # Changelog
 
-## [0.11.0] - 2026-07-10
+## [0.12.0] - 2026-07-18
 
+- Improved Flasker brewery detection: listings where the brewery isn't the first word of the title — or appears only in a product tag or the brand strip — now identify the correct brewery for dozens more breweries, instead of guessing the first word, so more beers match and badge correctly.
+- Fixed BeerFreak beer names that duplicated the brewery (e.g. "Hoppy Hog Family Brewery Hoppy Hog …") when the shop's brand label and product title used different brewery wordings; the brewery is no longer repeated inside the beer name.
 - Extension now shows global Untappd ratings (⭐) on supported shops even without a token; the popup shows a "Not connected" note and links to token setup. Personal ✅/rating badges still require a token.
 - Fixed BeerFreak filtering so tasting sets, mix packs, and numbered multi-beer series are ignored instead of being matched as individual beers.
 - Fixed Funkyshop parsing on English/home grids: product detail fallback now fills missing breweries, can/deposit rows are ignored, and trailing volume/format text is removed from beer names before matching.
