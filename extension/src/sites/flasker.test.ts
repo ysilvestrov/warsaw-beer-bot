@@ -22,7 +22,7 @@ describe('parseTitle', () => {
 
   it('comma decimal abv, Cyrillic name', () => {
     expect(parseTitle('REBREW Труханів Острів SIPA 4,3% 330ml'))
-      .toEqual({ brewery: 'REBREW', name: 'Труханів Острів SIPA', abv: 4.3 });
+      .toEqual({ brewery: 'Rebrew', name: 'Труханів Острів SIPA', abv: 4.3 });
   });
 
   it('brewery = first token; dash + style stay in the name', () => {
@@ -158,6 +158,31 @@ describe('parseTitle', () => {
 
   it('does not parse a gravity (°) reading as ABV', () => {
     expect(parseTitle('Vibrant IS 9° 330ml')).toEqual({ brewery: 'Vibrant', name: 'IS 9°' });
+  });
+
+  it('registry: two-word brewery at the head splits correctly (no tags)', () => {
+    expect(parseTitle('Хмільний кіт №4 APA 5.5% 330ml'))
+      .toEqual({ brewery: 'Хмільний кіт', name: '№4 APA', abv: 5.5 });
+  });
+
+  it('registry: canonicalizes an abbreviation brewery from the title head', () => {
+    expect(parseTitle('KLB Kyiv Lager 4.8% 500ml'))
+      .toEqual({ brewery: 'Kyiv Local Brewery', name: 'Kyiv Lager', abv: 4.8 });
+  });
+
+  it('registry: transliterates a Cyrillic brewery to its catalog form', () => {
+    expect(parseTitle('Правда Framboise 5% 330ml'))
+      .toEqual({ brewery: 'Pravda', name: 'Framboise', abv: 5 });
+  });
+
+  it('registry: resolves via a brewery tag when the head omits it', () => {
+    expect(parseTitle('Some Guest Gose 4% 330ml', { productTags: ['REBREW', 'Gose'] }))
+      .toEqual({ brewery: 'Rebrew', name: 'Some Guest Gose', abv: 4 });
+  });
+
+  it('registry: unknown brewery still falls back to the first-word split', () => {
+    expect(parseTitle('Unknownbrew Mystery Ale 5% 330ml'))
+      .toEqual({ brewery: 'Unknownbrew', name: 'Mystery Ale', abv: 5 });
   });
 });
 

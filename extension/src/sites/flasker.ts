@@ -223,9 +223,25 @@ export function parseTitle(
   const abv = abvMatch ? Number(abvMatch[1].replace(',', '.')) : undefined;
 
   const rule = resolveBreweryRule(evidence);
-  const fallback = splitBreweryName(head);
-  const brewery = rule?.canonical ?? fallback.brewery;
-  const nameBeforeCleanup = rule ? stripTitleAlias(head, rule.titleAliases) : fallback.name;
+  const regTag = rule ? null : breweryFromRegistryTags(evidence.productTags ?? []);
+  const regHead = rule || regTag ? null : breweryFromRegistryHead(head);
+
+  let brewery: string;
+  let nameBeforeCleanup: string;
+  if (rule) {
+    brewery = rule.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, rule.titleAliases);
+  } else if (regTag) {
+    brewery = regTag.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, regTag.match);
+  } else if (regHead) {
+    brewery = regHead.brewery.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, regHead.brewery.match);
+  } else {
+    const fallback = splitBreweryName(head);
+    brewery = fallback.brewery;
+    nameBeforeCleanup = fallback.name;
+  }
   const name = stripMerchandisingPrefix(nameBeforeCleanup);
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
