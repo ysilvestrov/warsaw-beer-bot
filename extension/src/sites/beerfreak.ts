@@ -15,6 +15,13 @@ const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
 const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
+// Words that appear as brewery descriptors in a title's leading brewery form
+// (structural forms + "family" for "<X> Family Brewery"). Lowercased; compared
+// with normalizedToken (which strips ( ) , ).
+const BREWERY_DESCRIPTORS = new Set([
+  'brewery', 'brewing', 'browar', 'brasserie', 'brouwerij', 'brauerei',
+  'pivovar', 'birrificio', 'company', 'co', 'co.', 'family',
+]);
 const BEERFREAK_BUNDLE_RE = /(?:^|[^\p{L}\p{N}])(?:mix\s+pack|tasting\s+set|set|сет)(?=$|[^\p{L}\p{N}])/iu;
 const BEERFREAK_NUMBERED_SERIES_RE = /(?:^|[^\p{L}\p{N}])series\s*[-:]?\s*\d+\s+special\s+beers?(?=$|[^\p{L}\p{N}])/iu;
 const MAX_DETAIL_FETCHES_PER_PASS = 20;
@@ -36,16 +43,43 @@ function cleanBrewery(raw: string | null): string {
     .trim();
 }
 
+// Divergent brand_title: strip the leading brewery *run* from the title. Consume
+// leading tokens that are brand-core tokens (from brand_title, minus descriptors)
+// or brewery-descriptor words; the remainder is the beer name. Returns '' when no
+// brand token was matched (so a name that merely starts with a descriptor is not
+// eaten) or when nothing remains, letting the caller fall back to the full title.
+function stripLeadingBreweryRun(rawTitle: string, brewery: string): string {
+  const brandCore = new Set(
+    brewery.toLowerCase().split(/\s+/).filter((t) => t && !BREWERY_DESCRIPTORS.has(t)),
+  );
+  if (brandCore.size === 0) return '';
+
+  const tokens = rawTitle.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  let i = 0;
+  let matchedBrand = false;
+  while (i < tokens.length) {
+    const t = normalizedToken(tokens[i]);
+    if (brandCore.has(t)) { matchedBrand = true; i += 1; continue; }
+    if (BREWERY_DESCRIPTORS.has(t)) { i += 1; continue; }
+    break;
+  }
+  if (!matchedBrand) return '';
+  return tokens.slice(i).join(' ').trim();
+}
+
 function cleanName(rawTitle: string, brewery: string): string {
   const b = brewery.trim();
   if (!b) return rawTitle.trim();
 
   const prefix = rawTitle.slice(0, b.length);
-  if (prefix.toLowerCase() !== b.toLowerCase()) return rawTitle.trim();
-
-  return stripLeadingCollaborator(rawTitle.slice(b.length))
-    .replace(BREWERY_NOISE_PREFIX_RE, '')
-    .trim() || rawTitle.trim();
+  if (prefix.toLowerCase() === b.toLowerCase()) {
+    // exact-prefix path (also handles leading slash collaborators)
+    return stripLeadingCollaborator(rawTitle.slice(b.length))
+      .replace(BREWERY_NOISE_PREFIX_RE, '')
+      .trim() || rawTitle.trim();
+  }
+  // divergent brand_title → token-run strip of the leading brewery form
+  return stripLeadingBreweryRun(rawTitle, b) || rawTitle.trim();
 }
 
 function normalizedToken(token: string): string {
