@@ -19,14 +19,14 @@
     "gen-flasker-breweries": "tsx scripts/gen-flasker-breweries.ts"
   },
   "devDependencies": {
-    "@crxjs/vite-plugin": "^2.4.0",
+    "@crxjs/vite-plugin": "^2.7.1",
     "@types/chrome": "^0.0.270",
     "@types/node": "^22.19.20",
     "jsdom": "^25.0.1",
     "playwright": "^1.60.0",
     "tsx": "^4.22.4",
     "typescript": "^5.9.3",
-    "vite": "^5.4.21",
-    "vitest": "^2.1.9"
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }
