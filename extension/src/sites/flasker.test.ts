@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker } from './flasker';
+import {
+  parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker,
+  breweryFromRegistryTags, breweryFromRegistryHead,
+} from './flasker';
 
 const load = (name: string) =>
   new DOMParser().parseFromString(readFileSync(resolve(__dirname, `../../tests/fixtures/${name}`), 'utf8'), 'text/html');
@@ -19,7 +22,7 @@ describe('parseTitle', () => {
 
   it('comma decimal abv, Cyrillic name', () => {
     expect(parseTitle('REBREW Труханів Острів SIPA 4,3% 330ml'))
-      .toEqual({ brewery: 'REBREW', name: 'Труханів Острів SIPA', abv: 4.3 });
+      .toEqual({ brewery: 'Rebrew', name: 'Труханів Острів SIPA', abv: 4.3 });
   });
 
   it('brewery = first token; dash + style stay in the name', () => {
@@ -155,6 +158,31 @@ describe('parseTitle', () => {
 
   it('does not parse a gravity (°) reading as ABV', () => {
     expect(parseTitle('Vibrant IS 9° 330ml')).toEqual({ brewery: 'Vibrant', name: 'IS 9°' });
+  });
+
+  it('registry: two-word brewery at the head splits correctly (no tags)', () => {
+    expect(parseTitle('Хмільний кіт №4 APA 5.5% 330ml'))
+      .toEqual({ brewery: 'Хмільний кіт', name: '№4 APA', abv: 5.5 });
+  });
+
+  it('registry: canonicalizes an abbreviation brewery from the title head', () => {
+    expect(parseTitle('KLB Kyiv Lager 4.8% 500ml'))
+      .toEqual({ brewery: 'Kyiv Local Brewery', name: 'Kyiv Lager', abv: 4.8 });
+  });
+
+  it('registry: transliterates a Cyrillic brewery to its catalog form', () => {
+    expect(parseTitle('Правда Framboise 5% 330ml'))
+      .toEqual({ brewery: 'Pravda', name: 'Framboise', abv: 5 });
+  });
+
+  it('registry: resolves via a brewery tag when the head omits it', () => {
+    expect(parseTitle('Some Guest Gose 4% 330ml', { productTags: ['REBREW', 'Gose'] }))
+      .toEqual({ brewery: 'Rebrew', name: 'Some Guest Gose', abv: 4 });
+  });
+
+  it('registry: unknown brewery still falls back to the first-word split', () => {
+    expect(parseTitle('Unknownbrew Mystery Ale 5% 330ml'))
+      .toEqual({ brewery: 'Unknownbrew', name: 'Mystery Ale', abv: 5 });
   });
 });
 
@@ -330,5 +358,33 @@ describe('flasker adapter', () => {
     const brands = flasker.parseCards(load('flasker.block.html')).map((c) => c.brewery);
     expect(brands).not.toContain('Склянка');
     expect(brands).not.toContain('Відкривачка');
+  });
+});
+
+describe('registry lookup helpers', () => {
+  it('breweryFromRegistryTags matches a brewery tag case-insensitively', () => {
+    expect(breweryFromRegistryTags(['330 ml', 'COPPER', 'REBREW', 'Україна'])?.canonical).toBe('Rebrew');
+  });
+
+  it('breweryFromRegistryTags returns null when no tag is a known brewery', () => {
+    expect(breweryFromRegistryTags(['Imperial Stout', 'Україна'])).toBeNull();
+  });
+
+  it('breweryFromRegistryTags returns null when two different breweries tie', () => {
+    expect(breweryFromRegistryTags(['REBREW', 'Burgomistr'])).toBeNull();
+  });
+
+  it('breweryFromRegistryHead matches the longest brewery prefix of the head', () => {
+    const hit = breweryFromRegistryHead('Хмільний кіт №4 APA');
+    expect(hit?.brewery.canonical).toBe('Хмільний кіт');
+    expect(hit?.matched).toBe('Хмільний кіт');
+  });
+
+  it('breweryFromRegistryHead requires a word boundary (no partial-token match)', () => {
+    expect(breweryFromRegistryHead('DUMArine Special')).toBeNull();
+  });
+
+  it('breweryFromRegistryHead returns null when the head starts with an unknown brewery', () => {
+    expect(breweryFromRegistryHead('ШО (IIIO) Totem IPA')).toBeNull();
   });
 });

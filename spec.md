@@ -1305,9 +1305,13 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   title-prefix fallback, ABV із subtitle; Beer Club/Merch/Spirits/Bundles виключаються),
   домен `hoptimaal.com`), `flasker` (Flasker WooCommerce SSR — `li.product`/`h2.woocommerce-loop-product__title`
   (archive), `tr[data-title]` (Barn2 product table), `li.wc-block-grid__product` (block
-  grid); brewery з explicit allowlist Flasker product-tag/product-slug metadata
-  (known product-family slug overrides > tag > brewery slug), fallback — existing title parser (зазвичай перше слово, з відомою
-  обробкою two-word/parenthetical cases); відомий display-prefix brewery
+  grid); brewery: спершу курований набір правил `BREWERY_RULES` (product-family
+  slug overrides > tag > brewery slug; Mad Brew/VibrantPour/Copper Head/Flasker/Hoppy Hog),
+  далі згенерований реєстр броварень сайту (`flasker-breweries.generated.ts` — з
+  бренд-стрічки `mb-brand-tile`, звірений з каталогом Untappd для canonical-форми)
+  за product-tag, потім за title-head (найдовший збіг), fallback — existing title
+  parser (зазвичай перше слово, з відомою обробкою two-word/parenthetical cases);
+  відомий display-prefix brewery
   видаляється з name, leading `ПРЕДРЕЛІЗ`/`ПРЕДРЕДІЗ`/`ПРОБНИК:` labels теж;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
   відкидається; ABV із `%` у title), домен `flasker.com.ua`), `piwnemosty`

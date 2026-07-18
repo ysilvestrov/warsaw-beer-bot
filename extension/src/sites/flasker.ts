@@ -1,6 +1,7 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
 import { isNonBeerName } from './non-beer';
+import { FLASKER_BREWERIES, type FlaskerBrewery } from './flasker-breweries.generated';
 
 // --- volume / abv --------------------------------------------------------
 // Beers always quote a volume; snacks/merch never do. Volume is both the primary
@@ -146,6 +147,34 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   return { brewery, name: name || brewery };
 }
 
+// Registry path: resolve a brewery from the product's own tags. Returns null when
+// no tag is a known registry brewery, or when two *different* breweries tie
+// (ambiguous collab) — the caller then falls through to title-head / fallback.
+export function breweryFromRegistryTags(tags: string[]): FlaskerBrewery | null {
+  const set = new Set(tags.map(normalizeTag));
+  const hits = FLASKER_BREWERIES.filter((b) => b.match.some((m) => set.has(m.toLowerCase())));
+  return hits.length === 1 ? hits[0] : null;
+}
+
+// Registry path: resolve a brewery that appears as the leading prefix of the title
+// head. Longest match wins (so "Хмільний кіт" beats a bare "Хмільний"). Requires a
+// word boundary (exact head or `<brewery> `) so "DUMArine" never matches "DUMA".
+export function breweryFromRegistryHead(
+  head: string,
+): { brewery: FlaskerBrewery; matched: string } | null {
+  const lower = head.toLowerCase();
+  let best: { brewery: FlaskerBrewery; matched: string } | null = null;
+  for (const brewery of FLASKER_BREWERIES) {
+    for (const m of brewery.match) {
+      const lm = m.toLowerCase();
+      if (lower === lm || lower.startsWith(`${lm} `)) {
+        if (!best || m.length > best.matched.length) best = { brewery, matched: m };
+      }
+    }
+  }
+  return best;
+}
+
 const MERCH_PREFIX_RE = /^(?:(?:ПРЕДРЕЛІЗ|ПРЕДРЕДІЗ)(?=$|[\s:–—-])|ПРОБНИК:)[\s:–—-]*/iu;
 
 export function stripMerchandisingPrefix(name: string): string {
@@ -194,9 +223,25 @@ export function parseTitle(
   const abv = abvMatch ? Number(abvMatch[1].replace(',', '.')) : undefined;
 
   const rule = resolveBreweryRule(evidence);
-  const fallback = splitBreweryName(head);
-  const brewery = rule?.canonical ?? fallback.brewery;
-  const nameBeforeCleanup = rule ? stripTitleAlias(head, rule.titleAliases) : fallback.name;
+  const regTag = rule ? null : breweryFromRegistryTags(evidence.productTags ?? []);
+  const regHead = rule || regTag ? null : breweryFromRegistryHead(head);
+
+  let brewery: string;
+  let nameBeforeCleanup: string;
+  if (rule) {
+    brewery = rule.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, rule.titleAliases);
+  } else if (regTag) {
+    brewery = regTag.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, regTag.match);
+  } else if (regHead) {
+    brewery = regHead.brewery.canonical;
+    nameBeforeCleanup = stripTitleAlias(head, regHead.brewery.match);
+  } else {
+    const fallback = splitBreweryName(head);
+    brewery = fallback.brewery;
+    nameBeforeCleanup = fallback.name;
+  }
   const name = stripMerchandisingPrefix(nameBeforeCleanup);
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
