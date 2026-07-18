@@ -225,4 +225,47 @@ describe('beerfreak adapter', () => {
   it('does not define waitForGrid (SSR)', () => {
     expect(beerfreak.waitForGrid).toBeUndefined();
   });
+
+  it('strips the leading brewery run when brand_title diverges from the title form', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 20001, brand_title: 'HOPPY HOG BREWERY (Україна)', title: 'Hoppy Hog Family Brewery Tropical Veil NEIPA' },
+      { id: 20002, brand_title: 'BROKREACJA BREWERY (Польща)', title: 'Browar Brokreacja NAFCIARZ 19' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'HOPPY HOG BREWERY',
+      name: 'Tropical Veil NEIPA',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'BROKREACJA BREWERY',
+      name: 'NAFCIARZ 19',
+    }));
+  });
+
+  it('does not over-strip when the title tokens do not include a brand-core token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 20003, brand_title: 'ZZZ BREWERY (Nowhere)', title: 'Family Reunion Imperial Stout' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'ZZZ BREWERY',
+      name: 'Family Reunion Imperial Stout',
+    }));
+  });
+
+  it('leaves exact-prefix brands and the SHO paren-alias case unchanged (regression)', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 20004, brand_title: 'VOLTA BREWERY (Україна)', title: 'Volta Brewery MODERN PILSNER' },
+      { id: 20005, brand_title: 'SHO BREWERY (Україна)', title: 'SHO Brewery (IIIO) Narcissus' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'VOLTA BREWERY',
+      name: 'MODERN PILSNER',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'SHO BREWERY',
+      name: '(IIIO) Narcissus',
+    }));
+  });
 });
