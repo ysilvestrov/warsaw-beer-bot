@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker } from './flasker';
+import {
+  parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker,
+  breweryFromRegistryTags, breweryFromRegistryHead,
+} from './flasker';
 
 const load = (name: string) =>
   new DOMParser().parseFromString(readFileSync(resolve(__dirname, `../../tests/fixtures/${name}`), 'utf8'), 'text/html');
@@ -330,5 +333,33 @@ describe('flasker adapter', () => {
     const brands = flasker.parseCards(load('flasker.block.html')).map((c) => c.brewery);
     expect(brands).not.toContain('Склянка');
     expect(brands).not.toContain('Відкривачка');
+  });
+});
+
+describe('registry lookup helpers', () => {
+  it('breweryFromRegistryTags matches a brewery tag case-insensitively', () => {
+    expect(breweryFromRegistryTags(['330 ml', 'COPPER', 'REBREW', 'Україна'])?.canonical).toBe('Rebrew');
+  });
+
+  it('breweryFromRegistryTags returns null when no tag is a known brewery', () => {
+    expect(breweryFromRegistryTags(['Imperial Stout', 'Україна'])).toBeNull();
+  });
+
+  it('breweryFromRegistryTags returns null when two different breweries tie', () => {
+    expect(breweryFromRegistryTags(['REBREW', 'Burgomistr'])).toBeNull();
+  });
+
+  it('breweryFromRegistryHead matches the longest brewery prefix of the head', () => {
+    const hit = breweryFromRegistryHead('Хмільний кіт №4 APA');
+    expect(hit?.brewery.canonical).toBe('Хмільний кіт');
+    expect(hit?.matched).toBe('Хмільний кіт');
+  });
+
+  it('breweryFromRegistryHead requires a word boundary (no partial-token match)', () => {
+    expect(breweryFromRegistryHead('DUMArine Special')).toBeNull();
+  });
+
+  it('breweryFromRegistryHead returns null when the head starts with an unknown brewery', () => {
+    expect(breweryFromRegistryHead('ШО (IIIO) Totem IPA')).toBeNull();
   });
 });
