@@ -7,6 +7,7 @@ import {
   clearEnrichFailure,
   setEnrichFailureReview,
   listUntriagedFailures,
+  retireEnrichFailure,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -208,5 +209,34 @@ describe('enrich_failures', () => {
       brewery: 'B', name: 'b', search_url: 'u2', candidates_count: 2,
       candidates_summary: 'x|y', fail_count: 1, last_at: '2026-07-03T00:00:00Z',
     });
+  });
+});
+
+describe('retireEnrichFailure', () => {
+  test('sets retired_at, appends note, preserves review_class', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    setEnrichFailureReview(db, id, 'parser_bug', 'garbled name', '2026-07-01T00:00:00Z');
+    const changed = retireEnrichFailure(db, id, 'retired: current non-beer filter rejects', '2026-07-19T00:00:00Z');
+    expect(changed).toBe(true);
+    const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.retired_at).toBe('2026-07-19T00:00:00Z');
+    expect(got.review_class).toBe('parser_bug');
+    expect(got.review_note).toContain('garbled name');
+    expect(got.review_note).toContain('retired: current non-beer filter rejects');
+  });
+  test('is idempotent — a second call does not change or re-append', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    retireEnrichFailure(db, id, 'retired: x', '2026-07-19T00:00:00Z');
+    const changed = retireEnrichFailure(db, id, 'retired: x', '2026-07-20T00:00:00Z');
+    expect(changed).toBe(false);
+    const got = db.prepare('SELECT retired_at, review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.retired_at).toBe('2026-07-19T00:00:00Z');
+    expect((got.review_note.match(/retired: x/g) ?? []).length).toBe(1);
+  });
+  test('returns false when no row exists', () => {
+    const { db } = freshDbWithBeer();
+    expect(retireEnrichFailure(db, 999, 'retired: x', '2026-07-19T00:00:00Z')).toBe(false);
   });
 });
