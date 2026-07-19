@@ -292,7 +292,11 @@ describe("Series: label strip (#303)", () => {
   test('strips a leading "<label> Series:" prefix, keeping the tail', () => {
     expect(stripSearchNoise('Crazy Lines Series: Redwood')).toBe('Redwood');
     expect(stripSearchNoise('Gold Series: Blast')).toBe('Blast');
-    expect(stripSearchNoise('WORLD CUP SERIES - 5 SPECIAL BEER')).toBe('5 SPECIAL BEER');
+    expect(stripSearchNoise('WORLD CUP SERIES - 5 SPECIAL BEER')).toBe('5 SPECIAL BEER'); // uppercase
+  });
+  test('tolerates casing and whitespace around the separator', () => {
+    expect(stripSearchNoise('gold series : blast')).toBe('blast'); // lowercase + space before colon
+    expect(stripSearchNoise('Gold SERIES:Blast')).toBe('Blast');   // no space after colon
   });
   test('drops the Series label from the built search query', () => {
     expect(cleanSearchQuery('Nepomucen', 'Crazy Lines Series: Redwood')).toBe('Nepomucen Redwood');
