@@ -287,3 +287,18 @@ describe("'family' brewery noise (#309)", () => {
     expect(cleanSearchQuery('Hoppy Hog Family Brewery', 'Pale Ale')).toBe('Hoppy Hog Pale Ale');
   });
 });
+
+describe("Series: label strip (#303)", () => {
+  test('strips a leading "<label> Series:" prefix, keeping the tail', () => {
+    expect(stripSearchNoise('Crazy Lines Series: Redwood')).toBe('Redwood');
+    expect(stripSearchNoise('Gold Series: Blast')).toBe('Blast');
+    expect(stripSearchNoise('WORLD CUP SERIES - 5 SPECIAL BEER')).toBe('5 SPECIAL BEER');
+  });
+  test('drops the Series label from the built search query', () => {
+    expect(cleanSearchQuery('Nepomucen', 'Crazy Lines Series: Redwood')).toBe('Nepomucen Redwood');
+  });
+  test('negative guard: leaves names without a series label untouched', () => {
+    expect(stripSearchNoise('Time Series IPA')).toBe('Time Series IPA');
+    expect(stripSearchNoise('Double Dry Hopped Galaxy')).toBe('Double Dry Hopped Galaxy');
+  });
+});
