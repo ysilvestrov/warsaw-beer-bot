@@ -59,7 +59,18 @@ That is the proof of resolution: the live pipeline would now reject this beer; i
 only survives because its `beers`/`match_links` rows predate the filter (the
 filter blocks new creation but does not retroactively remove existing rows). This
 is the only reusable verification predicate in the codebase, and it demonstrably
-catches real live rows (e.g. `VINO KARPATIA` → brewery contains `vino`).
+catches real live rows: brewery-token rows (`WINO`, `Number wine`) and
+wine/spritz-styled rows (`Conegliano / Vino Bianco`, `Monte Santi / Aperol Spritz`)
+all trip the current filter.
+
+**Known gap (verified against prod):** `isOntapNonBeerTap`'s `BREWERY_TOKENS` list
+contains `wino`/`wine`/`vini` but **not** the Italian `vino`, and it only tests
+`style` when a style is present. So `VINO KARPATIA / Biały bez` (Italian `vino`
+spelling, empty style) does **not** auto-trip — verified: `isOntapNonBeerTap`
+returns `false` for it. Such rows go through the `--ids` escape hatch. Widening
+the shared filter (e.g. adding `vino` to `BREWERY_TOKENS`) is deliberately **out
+of #286 scope** — it changes live ontap ingestion behaviour and belongs with the
+parser-filter issues (#306/#238 family).
 
 Output prints the tripping signal (token / sentinel) per row so the retirement is
 self-justifying.
@@ -137,7 +148,8 @@ Module exports (mirroring the rearm tools) for unit testing:
 
 ## Testing (Vitest)
 
-- `selectAutoRetireTargets`: wine/`vino` row selected; normal IPA not selected;
+- `selectAutoRetireTargets`: wine row with a filter-tripping brewery (`WINO …`)
+  selected; normal IPA not selected;
   matched beer (`untappd_id` set) excluded; already-`retired_at` row excluded.
 - `applyRetire`: sets `retired_at` + appends note; idempotent; only touches
   targets.
@@ -158,6 +170,7 @@ Module exports (mirroring the rearm tools) for unit testing:
 
 Server-side only; ships via `deploy.sh` (migration 18 runs on startup). First real
 use: after this deploys, run the auto path dry-run to see the wine/non-beer
-cluster, then `--apply`; use `--ids` only for clusters whose parser fix has
-already shipped (e.g. brewery=name #238) — not for still-live bugs like the
-Konrad/Krakonoš trailing-°Plato cluster (#306).
+cluster the current filter trips, then `--apply`. Use `--ids` for (a) rows the
+filter misses (e.g. `VINO KARPATIA`, Italian `vino` + empty style) and (b)
+clusters whose parser fix has already shipped (e.g. brewery=name #238) — but not
+for still-live bugs like the Konrad/Krakonoš trailing-°Plato cluster (#306).
