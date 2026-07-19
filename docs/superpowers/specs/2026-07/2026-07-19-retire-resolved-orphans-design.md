@@ -33,10 +33,16 @@ that would nuke live, still-failing orphans. Each retirement needs a per-row
   polluting the enrich pool, triage, ops views, and the daily digest count.
 - **Out:** `beers`/catalog cleanup, off-tap garbage collection, re-ingestion,
   anything touching untriaged (`review_class IS NULL`) rows.
+- **Out:** rows whose underlying parser bug is **still live** — e.g. the Konrad /
+  Krakonoš trailing-°Plato cluster (beer `12289`, tracked in #306). These are
+  not resolved; they must be *fixed*, not retired. Such a row becomes
+  retire-eligible (escape hatch) only after its fix ships and re-ingestion has
+  had a chance to produce a matched replacement.
 
 Non-goal: automatically *detecting* resolution for fix categories that cannot be
 re-derived from stored data (see §Selection). Those go through an explicit
-operator-supplied escape hatch.
+operator-supplied escape hatch, and only for clusters whose fix is already
+deployed.
 
 ## Selection — two verified paths
 
@@ -152,5 +158,6 @@ Module exports (mirroring the rearm tools) for unit testing:
 
 Server-side only; ships via `deploy.sh` (migration 18 runs on startup). First real
 use: after this deploys, run the auto path dry-run to see the wine/non-beer
-cluster, then `--apply`; use `--ids` for the brewery=name / degree-noise clusters
-identified in triage.
+cluster, then `--apply`; use `--ids` only for clusters whose parser fix has
+already shipped (e.g. brewery=name #238) — not for still-live bugs like the
+Konrad/Krakonoš trailing-°Plato cluster (#306).
