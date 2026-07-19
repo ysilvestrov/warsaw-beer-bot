@@ -319,6 +319,23 @@ describe('listLookupCandidates', () => {
     expect(out.map((c) => c.id)).toEqual([live]);
   });
 
+  test('excludes retired orphans (retired_at set)', () => {
+    const db = fresh();
+    const retired = seedBeerOnTap(db, { brewery: 'VINO KARPATIA', name: 'Bialy bez' });
+    const live = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
+    recordEnrichFailure(db, {
+      beer_id: retired, brewery: 'VINO KARPATIA', name: 'Bialy bez',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, retired, 'parser_bug', 'wine', '2026-05-26T11:30:00Z');
+    db.prepare('UPDATE enrich_failures SET retired_at = ? WHERE beer_id = ?')
+      .run('2026-05-26T11:45:00Z', retired);
+    const now = new Date('2026-05-26T12:00:00Z');
+    const out = listLookupCandidates(db, 10, now);
+    expect(out.map((c) => c.id)).toEqual([live]);
+  });
+
   test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug)', () => {
     const db = fresh();
     const matcherBug = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });

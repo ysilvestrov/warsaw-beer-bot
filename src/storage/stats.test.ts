@@ -91,6 +91,24 @@ it('reports enrich health metrics', () => {
   expect(m.untappdSearchHealthy).toBe(true);
 });
 
+it('orphansPending excludes retired orphans', () => {
+  const db = fresh();
+  const { lastInsertRowid: a } = db.prepare(
+    `INSERT INTO beers (untappd_id,name,brewery,normalized_name,normalized_brewery) VALUES (NULL,'Alpha','Brew A','alpha','brew a')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO beers (untappd_id,name,brewery,normalized_name,normalized_brewery) VALUES (NULL,'Beta','Brew B','beta','brew b')`,
+  ).run();
+  db.prepare(
+    `INSERT INTO enrich_failures
+       (beer_id,brewery,name,search_url,outcome,candidates_count,candidates_summary,
+        fail_count,last_at,source_url,review_class,retired_at)
+     VALUES (?,'Brew A','Alpha','u','not_found',0,'',1,'2026-07-01T00:00:00Z','','parser_bug','2026-07-19T00:00:00Z')`,
+  ).run(a);
+  const m = collectStatus(db, new Date('2026-07-19T10:00:00Z'));
+  expect(m.orphansPending).toBe(1);
+});
+
 test('collectStatus: extension /match metrics come from the previous Warsaw day', () => {
   const db = openDb(':memory:');
   migrate(db);

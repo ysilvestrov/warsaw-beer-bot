@@ -90,6 +90,33 @@ export function setEnrichFailureReview(
   return info.changes > 0;
 }
 
+// Terminal state for a classified failure whose underlying problem is resolved
+// (the responsible fix has shipped). Sets retired_at and appends `note` to
+// review_note, preserving the original review_class for audit. When there is no
+// prior note the note stands alone (no leading ` | ` separator). Idempotent:
+// only rows not already retired are touched (WHERE retired_at IS NULL), so
+// re-runs neither re-append the note nor overwrite the timestamp. Returns false
+// when no eligible row exists (missing, or already retired).
+export function retireEnrichFailure(
+  db: DB,
+  beerId: number,
+  note: string,
+  atIso: string,
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE enrich_failures
+         SET retired_at  = ?,
+             review_note = CASE
+               WHEN review_note IS NULL OR review_note = '' THEN ?
+               ELSE review_note || ' | ' || ?
+             END
+       WHERE beer_id = ? AND retired_at IS NULL`,
+    )
+    .run(atIso, note, note, beerId);
+  return info.changes > 0;
+}
+
 export interface UntriagedFailure {
   beer_id: number;
   brewery: string;

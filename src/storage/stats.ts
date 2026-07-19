@@ -61,7 +61,14 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     pubsScraped24h: count('SELECT COUNT(DISTINCT pub_id) AS c FROM tap_snapshots WHERE snapshot_at >= ?', [cutoff24]),
     beersTotal: count('SELECT COUNT(*) AS c FROM beers'),
     beersMatched: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL'),
-    orphansPending: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NULL'),
+    orphansPending: count(
+      `SELECT COUNT(*) AS c FROM beers b
+        WHERE b.untappd_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM enrich_failures ef
+            WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
+          )`,
+    ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),
     taps: count('SELECT COUNT(*) AS c FROM taps'),

@@ -247,4 +247,13 @@ describe('schema migrations', () => {
     const row = db.prepare("SELECT city FROM pubs WHERE slug = 'x'").get() as { city: string };
     expect(row.city).toBe('warszawa');
   });
+
+  test('migration 18 adds nullable retired_at to enrich_failures', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db.prepare(`PRAGMA table_info(enrich_failures)`).all() as { name: string; notnull: number }[];
+    const retired = cols.find((c) => c.name === 'retired_at');
+    expect(retired).toBeDefined();
+    expect(retired!.notnull).toBe(0);
+  });
 });
