@@ -159,7 +159,8 @@ export function listLookupCandidates(
 ): LookupCandidate[] {
   // SQL pre-filter: orphan beers (untappd_id NULL) whose beer_id is on the
   // latest snapshot of at least one pub, excluding ones triaged as `wontfix`
-  // (intentionally never matched — re-querying them just wastes Untappd calls).
+  // (intentionally never matched — re-querying them just wastes Untappd calls)
+  // or retired (provably resolved by a shipped fix — re-querying is dead work).
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
@@ -168,7 +169,8 @@ export function listLookupCandidates(
        WHERE b.untappd_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
-           WHERE ef.beer_id = b.id AND ef.review_class = 'wontfix'
+           WHERE ef.beer_id = b.id
+             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
          )
          AND EXISTS (
            SELECT 1 FROM match_links ml
