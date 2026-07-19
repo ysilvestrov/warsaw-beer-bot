@@ -17,6 +17,8 @@ export const BREWERY_NOISE = new Set([
   // is deliberately NOT noise — it's a separate word or brand fragment in
   // "Nano Cinco"/"Mandrill Nano Brewing", which stripping would corrupt (#228).
   'nanobrowar', 'nanobrowary', 'nanobryggeri',
+  // Descriptor in "<brand> Family Brewery"; never the load-bearing brand token (#309).
+  'family',
 ]);
 
 // Separator for collab/bilingual brewery names. Untappd uses:

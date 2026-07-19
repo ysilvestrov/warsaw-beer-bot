@@ -276,3 +276,14 @@ describe('stripSearchNoise', () => {
     expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');
   });
 });
+
+describe("'family' brewery noise (#309)", () => {
+  test('family is dropped so X Family Brewery == X Brewery', () => {
+    expect(normalizeBrewery('HOPPY HOG FAMILY BREWERY')).toBe('hoppy hog');
+    expect(normalizeBrewery('Hoppy Hog Family Brewery')).toBe('hoppy hog');
+    expect(normalizeBrewery('HOPPY HOG BREWERY')).toBe('hoppy hog');
+  });
+  test('family is dropped from the search query brand tokens', () => {
+    expect(cleanSearchQuery('Hoppy Hog Family Brewery', 'Pale Ale')).toBe('Hoppy Hog Pale Ale');
+  });
+});
