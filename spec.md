@@ -348,6 +348,9 @@ src/
 | `review_class` | TEXT | nullable CHECK IN (`parser_bug`,`matcher_bug`,`not_on_untappd`,`wontfix`) | клас тріажу після ручного розгляду; `NULL` = ще не розмічено; `parser_bug` — НАШ адаптер зіпсував інакше чистий рядок (криво розбита пивоварня/назва, обрізання, HTML-сміття, merch/скло/вино/їжа); зіпсований лістинг самої крамниці (типоси в її даних) — НЕ parser_bug; `matcher_bug` — пиво правдоподібно є на Untappd, але ми промахнулись: alias-геп, розбіжність назв, або шум у запиті, який треба лише нормалізувати перед пошуком; `not_on_untappd` — відсутнє на Untappd; `wontfix` — навмисно без матчингу |
 | `review_note` | TEXT | nullable | довільна нотатка тріажу (агент або адмін) |
 | `reviewed_at` | TEXT | nullable | час розмітки (ISO); виставляється ендпоінтом `POST /admin/enrich-failures/review` |
+| `retired_at` | TEXT | nullable (міграція 18) | термінальний стан для класифікованого провалу, чия причина вже усунена (відповідний фікс задеплоєно). Виставляється ops-тулою `retire-resolved-orphans`. Рядок **зберігає** початковий `review_class` (для аудиту); `review_note` доповнюється причиною |
+
+**Retirement (`retired_at`).** Класифіковані рядки провалів залишаються в БД назавжди (видаляються лише на `matched`), тож уже вирішені кластери (вино/спирт тепер фільтруються, brewery=name #238 тощо) продовжують виглядати «активними» й роздувати лічильник orphan'ів. `retire-resolved-orphans` (npm-скрипт, dry-run за замовчуванням, `--apply`) переводить **доказово вирішені** рядки в `retired_at`. Вибір — лише верифікований, ніколи за віком чи класом: **авто-шлях** бере класифікованих orphan'ів, яких поточний `isOntapNonBeerTap` тепер відкидає (доказ вирішення); **escape-hatch `--ids <csv> --reason "<text>"`** — явно задані оператором `beer_id` (для фіксів, яких предикат не ловить — напр. `VINO KARPATIA` italian-`vino`, або parse-split кластери після шипу фіксу). Retired-рядки виключені з enrich-пулу (`listLookupCandidates`, поряд із `wontfix`) та з лічильника `orphansPending` у щоденному дайджесті.
 
 **Хто що пише:** `applyLookupOutcome` (спільний для серверного крона і client-relay)
 upsert'ить рядок на `not_found`/`blocked` і **видаляє** його на `matched`. Один рядок на
@@ -431,6 +434,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 15 | `job_state(key, value)` — дрібний крос-рестарт стан джоб (`daily_status_last_sent`, `untappd_circuit_open_until`, `untappd_profile_http_open_until`) |
 | 16 | `checkin_sync_state.profile_total` (INTEGER) — лік чекінів профілю Untappd для `/status` |
 | 17 | `api_usage` (денний облік запитів розширення) |
+| 18 | `enrich_failures.retired_at` (термінальний стан вирішених провалів; ops-тула `retire-resolved-orphans`) |
 
 ---
 
