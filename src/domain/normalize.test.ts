@@ -288,6 +288,13 @@ describe("'family' brewery noise (#309)", () => {
   });
 });
 
+describe('minipivovar brewery noise (#318)', () => {
+  test('minipivovar is stripped so it matches the bare brand', () => {
+    expect(normalizeBrewery('Minipivovar Skřečoňský žabák')).toBe('skreconsky zabak');
+    expect(normalizeBrewery('Skřečoňský žabák')).toBe('skreconsky zabak');
+  });
+});
+
 describe("Series: label strip (#303)", () => {
   test('strips a leading "<label> Series:" prefix, keeping the tail', () => {
     expect(stripSearchNoise('Crazy Lines Series: Redwood')).toBe('Redwood');

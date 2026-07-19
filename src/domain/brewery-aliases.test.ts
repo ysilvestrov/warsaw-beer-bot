@@ -53,3 +53,28 @@ test('aliasKeys contains both sides of every curated pair, excludes non-aliases'
   expect(keys.has('уманьпиво')).toBe(true);
   expect(keys.has('pinta')).toBe(false);
 });
+
+describe('#318 gate-miss alias batch', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['aecht schlenkerla', 'schlenkerla'],
+    ['lausitzer', 'privatbrauerei eibau'],
+    ['grybow pilsvar', 'pilsvar'],
+    ['cydr dobronski', 'jnt group'],
+    ['prerov', 'zubr'],
+    ['bakalar', 'tradicni v rakovniku'],
+    ['dzik', 'cydrownia'],
+    ['panipani', 'trzech kumpli'],
+    ['vibrant pour', 'vibrantpour'],
+    ['smoothiemaker', 'mad brew'],
+    ['drofa', 'дрофа'],
+  ];
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+  // The batch must not create a hub (a form shared by >1 partner) — each new
+  // form is a 1:1 equivalence, so every form in the batch has exactly one neighbour.
+  test.each(PAIRS.flat())('form %s has exactly one neighbour (no new hub)', (form) => {
+    expect(aliasNeighbors(form)).toHaveLength(1);
+  });
+});

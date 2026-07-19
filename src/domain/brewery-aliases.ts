@@ -21,6 +21,22 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['wroclove', 'witnica'],
   ['poutnik', 'pelhrimov'],
   ['jezek kwasnicowy', 'jihlava'],
+  // #318 batch (2026-07-19): live on-tap + shop gate-miss aliases, each verified
+  // against the orphan's enrich_failures.candidates_summary (authoritative Untappd
+  // brewery) and normalized via `npm run alias-key`.
+  ['aecht schlenkerla', 'schlenkerla'],
+  ['lausitzer', 'privatbrauerei eibau'],
+  ['grybow pilsvar', 'pilsvar'],
+  ['cydr dobronski', 'jnt group'],
+  ['prerov', 'zubr'],
+  ['bakalar', 'tradicni v rakovniku'],
+  ['dzik', 'cydrownia'],
+  // brand-as-brewery (shop put a beer/brand in the brewery field; confirmed 1:1):
+  ['panipani', 'trzech kumpli'],
+  ['smoothiemaker', 'mad brew'],
+  // shop (extension) sources:
+  ['vibrant pour', 'vibrantpour'],
+  ['drofa', 'дрофа'],
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
