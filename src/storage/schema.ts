@@ -238,6 +238,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 18,
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN retired_at TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
