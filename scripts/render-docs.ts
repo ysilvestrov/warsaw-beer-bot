@@ -62,31 +62,39 @@ export function renderPage(opts: RenderOptions): string {
 `;
 }
 
+const SETUP_TITLE = 'Warsaw Beer Overlay — Setup';
+
+// The pages rendered to site/ for GitHub Pages, relative to the repo root.
+const TARGETS: (Omit<RenderOptions, 'markdown'> & { src: string; out: string })[] = [
+  { src: 'docs/extension-install-en.md', out: 'site/install/index.html',
+    lang: 'en', title: SETUP_TITLE, altLang: 'uk', altHref: '../install-uk/', homeHref: '../' },
+  { src: 'docs/extension-install-uk.md', out: 'site/install-uk/index.html',
+    lang: 'uk', title: SETUP_TITLE, altLang: 'en', altHref: '../install/', homeHref: '../' },
+  { src: 'extension/CHANGELOG.md', out: 'site/changelog/index.html',
+    lang: 'en', title: 'Warsaw Beer Overlay — Changelog', homeHref: '../' },
+];
+
+// Reads each source under `root` and renders it to HTML. Pure w.r.t. the
+// filesystem output (no writes) so it can be exercised in tests against the
+// real repo files — a malformed source throws here rather than at deploy time.
+export function renderDocs(root: string): { src: string; out: string; html: string }[] {
+  return TARGETS.map((t) => {
+    const markdown = readFileSync(join(root, t.src), 'utf8');
+    return { src: t.src, out: t.out, html: renderPage({ ...t, markdown }) };
+  });
+}
+
 // CLI: npx tsx scripts/render-docs.ts
 // Renders the extension install guides (docs/extension-install-*.md) and the
 // changelog (extension/CHANGELOG.md) to static self-contained HTML pages under
 // site/ for GitHub Pages hosting.
 function main(): void {
   const root = join(__dirname, '..');
-  const setupTitle = 'Warsaw Beer Overlay — Setup';
-  const targets: (RenderOptions & { src: string; out: string })[] = [
-    { src: 'docs/extension-install-en.md', out: 'site/install/index.html',
-      lang: 'en', title: setupTitle, altLang: 'uk', altHref: '../install-uk/',
-      homeHref: '../', markdown: '' },
-    { src: 'docs/extension-install-uk.md', out: 'site/install-uk/index.html',
-      lang: 'uk', title: setupTitle, altLang: 'en', altHref: '../install/',
-      homeHref: '../', markdown: '' },
-    { src: 'extension/CHANGELOG.md', out: 'site/changelog/index.html',
-      lang: 'en', title: 'Warsaw Beer Overlay — Changelog', homeHref: '../',
-      markdown: '' },
-  ];
-  for (const t of targets) {
-    const markdown = readFileSync(join(root, t.src), 'utf8');
-    const html = renderPage({ ...t, markdown });
-    const outPath = join(root, t.out);
+  for (const { src, out, html } of renderDocs(root)) {
+    const outPath = join(root, out);
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, html);
-    console.log(`rendered ${t.src} -> ${t.out}`);
+    console.log(`rendered ${src} -> ${out}`);
   }
 }
 
