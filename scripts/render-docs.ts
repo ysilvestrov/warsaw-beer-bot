@@ -5,10 +5,15 @@ import { marked } from 'marked';
 export interface RenderOptions {
   markdown: string;
   lang: 'en' | 'uk';
-  altLang: 'en' | 'uk';
-  altHref: string;
   homeHref: string;
+  /** Document <title>. Defaults to the install-guide title. */
+  title?: string;
+  /** Alternate-language link. Rendered only when both are provided. */
+  altLang?: 'en' | 'uk';
+  altHref?: string;
 }
+
+const DEFAULT_TITLE = 'Warsaw Beer Overlay — Setup';
 
 const ALT_LABEL: Record<'en' | 'uk', string> = {
   en: 'Read in English',
@@ -35,18 +40,21 @@ const STYLE = `
 
 export function renderPage(opts: RenderOptions): string {
   const body = marked.parse(opts.markdown, { async: false }) as string;
+  const navLinks = [`<a href="${opts.homeHref}">${HOME_LABEL[opts.lang]}</a>`];
+  if (opts.altLang && opts.altHref) {
+    navLinks.push(`<a href="${opts.altHref}">${ALT_LABEL[opts.altLang]}</a>`);
+  }
   return `<!doctype html>
 <html lang="${opts.lang}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Warsaw Beer Overlay — Setup</title>
+    <title>${opts.title ?? DEFAULT_TITLE}</title>
     <style>${STYLE}</style>
   </head>
   <body>
     <nav>
-      <a href="${opts.homeHref}">${HOME_LABEL[opts.lang]}</a>
-      <a href="${opts.altHref}">${ALT_LABEL[opts.altLang]}</a>
+      ${navLinks.join('\n      ')}
     </nav>
     ${body}
   </body>
@@ -55,20 +63,26 @@ export function renderPage(opts: RenderOptions): string {
 }
 
 // CLI: npx tsx scripts/render-docs.ts
-// Renders both extension install guides (docs/extension-install-*.md) to
-// static self-contained HTML pages under site/ for GitHub Pages hosting.
+// Renders the extension install guides (docs/extension-install-*.md) and the
+// changelog (extension/CHANGELOG.md) to static self-contained HTML pages under
+// site/ for GitHub Pages hosting.
 function main(): void {
   const root = join(__dirname, '..');
-  const targets = [
+  const setupTitle = 'Warsaw Beer Overlay — Setup';
+  const targets: (RenderOptions & { src: string; out: string })[] = [
     { src: 'docs/extension-install-en.md', out: 'site/install/index.html',
-      lang: 'en' as const, altLang: 'uk' as const, altHref: '../install-uk/' },
+      lang: 'en', title: setupTitle, altLang: 'uk', altHref: '../install-uk/',
+      homeHref: '../', markdown: '' },
     { src: 'docs/extension-install-uk.md', out: 'site/install-uk/index.html',
-      lang: 'uk' as const, altLang: 'en' as const, altHref: '../install/' },
+      lang: 'uk', title: setupTitle, altLang: 'en', altHref: '../install/',
+      homeHref: '../', markdown: '' },
+    { src: 'extension/CHANGELOG.md', out: 'site/changelog/index.html',
+      lang: 'en', title: 'Warsaw Beer Overlay — Changelog', homeHref: '../',
+      markdown: '' },
   ];
   for (const t of targets) {
     const markdown = readFileSync(join(root, t.src), 'utf8');
-    const html = renderPage({ markdown, lang: t.lang, altLang: t.altLang,
-      altHref: t.altHref, homeHref: '../' });
+    const html = renderPage({ ...t, markdown });
     const outPath = join(root, t.out);
     mkdirSync(dirname(outPath), { recursive: true });
     writeFileSync(outPath, html);

@@ -3,7 +3,7 @@ name: Deploy privacy policy to Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', 'docs/extension-install-*.md', 'scripts/render-docs.ts', '.github/workflows/pages.yml']
+    paths: ['site/**', 'docs/extension-install-*.md', 'extension/CHANGELOG.md', 'scripts/render-docs.ts', '.github/workflows/pages.yml']
   workflow_dispatch:
 
 permissions:
