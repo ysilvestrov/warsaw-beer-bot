@@ -72,4 +72,9 @@ describe('#318 gate-miss alias batch', () => {
     expect(aliasNeighbors(shop)).toContain(untappd);
     expect(aliasNeighbors(untappd)).toContain(shop);
   });
+  // The batch must not create a hub (a form shared by >1 partner) — each new
+  // form is a 1:1 equivalence, so every form in the batch has exactly one neighbour.
+  test.each(PAIRS.flat())('form %s has exactly one neighbour (no new hub)', (form) => {
+    expect(aliasNeighbors(form)).toHaveLength(1);
+  });
 });
