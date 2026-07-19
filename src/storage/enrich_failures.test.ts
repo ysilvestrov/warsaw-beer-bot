@@ -239,4 +239,11 @@ describe('retireEnrichFailure', () => {
     const { db } = freshDbWithBeer();
     expect(retireEnrichFailure(db, 999, 'retired: x', '2026-07-19T00:00:00Z')).toBe(false);
   });
+  test('note stands alone (no leading separator) when there was no prior note', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id })); // review_note is NULL here
+    retireEnrichFailure(db, id, 'retired: current non-beer filter rejects', '2026-07-19T00:00:00Z');
+    const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(got.review_note).toBe('retired: current non-beer filter rejects');
+  });
 });
