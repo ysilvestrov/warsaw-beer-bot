@@ -17,6 +17,8 @@ export const BREWERY_NOISE = new Set([
   // is deliberately NOT noise — it's a separate word or brand fragment in
   // "Nano Cinco"/"Mandrill Nano Brewing", which stripping would corrupt (#228).
   'nanobrowar', 'nanobrowary', 'nanobryggeri',
+  // Descriptor in "<brand> Family Brewery"; never the load-bearing brand token (#309).
+  'family',
 ]);
 
 // Separator for collab/bilingual brewery names. Untappd uses:
@@ -127,6 +129,10 @@ function foldToken(tok: string): string {
 // from the search query cannot be reintroduced by downstream name matching.
 export function stripSearchNoise(s: string): string {
   return s
+    // Drop a leading "<label> Series:" collection prefix that otherwise ANDs the
+    // Algolia query to zero hits (#303). Anchored on the word "series" + a
+    // separator, so names without a labelled series ("Time Series IPA") are kept.
+    .replace(/^.*?\bseries\b\s*[:\-–—]\s*/iu, '')
     .replace(/\[[^\]]*\]/g, ' ')                     // [adjunct, lists]
     .replace(/\(([^)]*)\)/g, (_group, content: string) =>
       /^(?=[\p{L}\p{N}]*\d)[\p{L}\p{N}]+$/u.test(content) ? ` ${content} ` : ' ')
