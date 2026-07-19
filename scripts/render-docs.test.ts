@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { renderPage } from './render-docs';
+import { join } from 'node:path';
+import { renderPage, renderDocs } from './render-docs';
 
 describe('renderPage', () => {
   const html = renderPage({
@@ -64,5 +65,30 @@ describe('renderPage — single-language page (e.g. changelog)', () => {
 
   it('renders the markdown body to HTML', () => {
     expect(html).toContain('<h1>Changelog</h1>');
+  });
+});
+
+// Smoke test the real file-reading path against the actual repo sources, so a
+// malformed changelog / install guide fails a PR rather than the Pages deploy.
+describe('renderDocs (real repo files)', () => {
+  const repoRoot = join(__dirname, '..');
+  const rendered = renderDocs(repoRoot);
+
+  it('renders all three targets without throwing', () => {
+    expect(rendered.map((r) => r.out).sort()).toEqual([
+      'site/changelog/index.html',
+      'site/install-uk/index.html',
+      'site/install/index.html',
+    ]);
+  });
+
+  it('renders the real changelog with the changelog title and a version entry', () => {
+    const changelog = rendered.find((r) => r.out === 'site/changelog/index.html');
+    expect(changelog).toBeDefined();
+    expect(changelog!.html).toContain('<title>Warsaw Beer Overlay — Changelog</title>');
+    // The real CHANGELOG uses "## [x.y.z]" headings -> <h2>[x.y.z]</h2>.
+    expect(changelog!.html).toMatch(/<h2[^>]*>\[\d+\.\d+\.\d+\]/);
+    expect(changelog!.html).toContain('href="../"'); // ← Home
+    expect(changelog!.html.toLowerCase()).not.toContain('українською');
   });
 });
