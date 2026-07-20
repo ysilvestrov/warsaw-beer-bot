@@ -78,3 +78,20 @@ describe('#318 gate-miss alias batch', () => {
     expect(aliasNeighbors(form)).toHaveLength(1);
   });
 });
+
+describe('#329 gate-miss alias batch', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['ziemia obiacana', 'ziemia obiecana'],
+    ['bergqell', 'bergquell lobau'],
+    ['bracki zamkowy w cieszynie', 'arcyksiazecy zamkowy cieszyn'],
+    ['tank busters', 'tankbusters'],
+  ];
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+  // Each new form is a 1:1 equivalence — no shared form, so no new alias hub.
+  test.each(PAIRS.flat())('form %s has exactly one neighbour (no new hub)', (form) => {
+    expect(aliasNeighbors(form)).toHaveLength(1);
+  });
+});

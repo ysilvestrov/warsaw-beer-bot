@@ -37,6 +37,14 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // shop (extension) sources:
   ['vibrant pour', 'vibrantpour'],
   ['drofa', 'дрофа'],
+  // #329 batch (2026-07-20): gate-miss aliases, each verified against the orphan's
+  // enrich_failures.candidates_summary (authoritative Untappd brewery) and the real
+  // matcher name stage (only rows whose name already matches post-alias — see the
+  // #329 design doc). Name-divergent misses were routed to #319, not aliased here.
+  ['ziemia obiacana', 'ziemia obiecana'],      // brewery typo OBIACANA->OBIECANA; 4 beers
+  ['bergqell', 'bergquell lobau'],             // Erdbeer (Porter style-stripped)
+  ['bracki zamkowy w cieszynie', 'arcyksiazecy zamkowy cieszyn'], // Cieszyn Pilsner
+  ['tank busters', 'tankbusters'],             // Paranormal Activity
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
