@@ -92,8 +92,10 @@ describe('breweryAliases', () => {
 
   test('x-connector collab (lower case x) returns full + each side', () => {
     const out = breweryAliases('ZIEMIA OBIECANA x Weźże Krafta Brewery');
+    // The 'ziemia obiecana' side also expands one hop to its curated-alias
+    // partner 'ziemia obiacana' (the OBIACANA->OBIECANA typo pair, #329).
     expect(new Set(out)).toEqual(
-      new Set(['ziemia obiecana x wezze krafta', 'ziemia obiecana', 'wezze krafta']),
+      new Set(['ziemia obiecana x wezze krafta', 'ziemia obiecana', 'ziemia obiacana', 'wezze krafta']),
     );
   });
 
@@ -907,5 +909,40 @@ describe('makePreparedCatalog — add (#278)', () => {
     prepared.add(mk(5, 'Alpha / Beta', 'Shared Brew'));
     expect(prepared.candidatesByFirstToken('alpha').map((b) => b.id)).toEqual([5]);
     expect(prepared.candidatesByFirstToken('beta').map((b) => b.id)).toEqual([5]);
+  });
+});
+
+describe('#329 gate-miss alias batch — end to end', () => {
+  const passes = (shop: string, untappd: string) =>
+    breweryAliasesMatch(breweryAliases(shop), breweryAliases(untappd));
+
+  test('new pairs pass the brewery gate', () => {
+    expect(passes('ZIEMIA OBIACANA Brewery', 'Ziemia Obiecana')).toBe(true);
+    expect(passes('BERGQELL Brewery', 'Bergquell Brauerei Löbau')).toBe(true);
+    expect(passes('Bracki Browar Zamkowy w Cieszynie Brewery', 'Arcyksiążęcy Browar Zamkowy Cieszyn')).toBe(true);
+    expect(passes('Tank Busters Brewery', 'TankBusters.Co')).toBe(true);
+  });
+
+  // Catalog carries the authoritative Untappd brewery/name; input is the shop label.
+  const cat: CatalogBeer[] = [
+    c({ id: 101, brewery: 'Ziemia Obiecana', name: 'Bryła' }),
+    c({ id: 102, brewery: 'Ziemia Obiecana', name: 'Beach Hut' }),
+    c({ id: 103, brewery: 'Ziemia Obiecana', name: 'Padel Boys' }),
+    c({ id: 104, brewery: 'Ziemia Obiecana', name: 'Prole Juice' }),
+    c({ id: 105, brewery: 'Bergquell Brauerei Löbau', name: 'Erdbeer Porter' }),
+    c({ id: 106, brewery: 'Arcyksiążęcy Browar Zamkowy Cieszyn', name: 'Cieszyn Pilsner' }),
+    c({ id: 107, brewery: 'TankBusters.Co', name: 'Paranormal Activity' }),
+  ];
+
+  test.each([
+    ['ZIEMIA OBIACANA Brewery', 'BRYŁA', 101],
+    ['ZIEMIA OBIACANA Brewery', 'BEACH HUT', 102],
+    ['ZIEMIA OBIACANA Brewery', 'PADEL BOYS', 103],
+    ['ZIEMIA OBIACANA Brewery', 'Prole Juice', 104],
+    ['BERGQELL Brewery', 'Erdbeer', 105],
+    ['Bracki Browar Zamkowy w Cieszynie Brewery', 'CIESZYN PILSNER', 106],
+    ['Tank Busters Brewery', 'Paranormal Activity', 107],
+  ] as const)('%s / %s matches catalog id %i', (brewery, name, id) => {
+    expect(matchBeer({ brewery, name }, cat)).toEqual({ id, confidence: 1, source: 'exact' });
   });
 });
