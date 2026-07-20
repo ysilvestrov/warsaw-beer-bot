@@ -1,5 +1,18 @@
 # Design: make orphan-ops tools prod-reachable via `dist` (#328)
 
+> **⚠️ PREMISE INVALIDATED (2026-07-20, same day).** This design assumed `tsx`
+> is a devDependency pruned from `/opt` — the reachability problem #328 states.
+> **That is false.** `tsx` is a regular `dependency` (since the bootstrap
+> commit); `npm prune --omit=dev` never removes it; `scripts/` is rsynced into
+> `/opt`. Verified empirically: `sudo -n -u warsaw-beer-bot bash -lc 'cd
+> /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans'` runs the blessed
+> tool in prod today (dry-run listed 42 orphans). So there is **no reachability
+> bug**, and the `src/ops/`→`dist` migration below is unnecessary. Its only real
+> upside would be shedding `tsx`/`esbuild` from prod *if* `tsx` were also
+> demoted to a devDependency — a minor footprint change, not what #328 claims.
+> Kept for the reasoning trail; **not implemented.** See
+> `feedback_ops_tooling_reachability` memory.
+
 **Date:** 2026-07-20
 **Issue:** [#328](https://github.com/…/issues/328) — *ops: make `scripts/*.ts` tools runnable in prod (compile to dist / NOPASSWD wrapper) instead of hand-written SQL*
 **Related memory:** `feedback_ops_tooling_reachability`, `reference_prod_deploy_and_db_ops`
