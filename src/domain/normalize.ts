@@ -13,6 +13,10 @@ export const BREWERY_NOISE = new Set([
   // Scandinavian (+ definite form), Spanish (post-diacritic-strip form)
   'pivovar', 'pivovary', 'brauerei', 'brasserie', 'birrificio',
   'brouwerij', 'bryggeri', 'bryggeriet', 'cerveceria',
+  // "Měšťanský pivovar <place>" = burgher's/civic brewery — a generic Czech
+  // brewery-type descriptor (~15 breweries on Untappd). Stripping the leading
+  // token lets the bare shop "<place>" pass the leading-prefix brewery gate.
+  'mestansky',
   // Compound "nano-brewery" descriptors only (a single glued token). Bare "nano"
   // is deliberately NOT noise — it's a separate word or brand fragment in
   // "Nano Cinco"/"Mandrill Nano Brewing", which stripping would corrupt (#228).

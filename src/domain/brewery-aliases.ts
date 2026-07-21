@@ -45,6 +45,10 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['bergqell', 'bergquell lobau'],             // Erdbeer (Porter style-stripped)
   ['bracki zamkowy w cieszynie', 'arcyksiazecy zamkowy cieszyn'], // Cieszyn Pilsner
   ['tank busters', 'tankbusters'],             // Paranormal Activity
+  // Měšťanský-pivovar batch (2026-07-21): Czech locative declension. After the
+  // `mestansky` noise strip the shop "Polička" normalizes to `policka` and the
+  // Untappd "Měšťanský pivovar v Poličce" to `v policce`. Verified via alias-key.
+  ['policka', 'v policce'],
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
