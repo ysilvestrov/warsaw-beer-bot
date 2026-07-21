@@ -27,6 +27,12 @@ describe('extractGrade', () => {
     expect(extractGrade('Premium pszenica')).toBeNull();
     expect(extractGrade('Hopinka')).toBeNull();
   });
+
+  test('mixed word + concurring numeral / suffix forms resolve (first hit wins)', () => {
+    expect(extractGrade('Desitka 10')).toBe(10);   // spelled word + matching numeral
+    expect(extractGrade('Dvanáctka 12%')).toBe(12); // spelled word + %-suffixed numeral
+    expect(extractGrade('12°')).toBe(12);           // degree-suffixed bare numeral
+  });
 });
 
 describe('isAleStyle', () => {
