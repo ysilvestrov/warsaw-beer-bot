@@ -40,6 +40,11 @@ describe('aliasNeighbors', () => {
     expect(aliasNeighbors('pinta')).toEqual([]);
     expect(aliasNeighbors('')).toEqual([]);
   });
+
+  test('Polička locative declension pairs policka <-> v policce', () => {
+    expect(aliasNeighbors('policka')).toContain('v policce');
+    expect(aliasNeighbors('v policce')).toContain('policka');
+  });
 });
 
 test('aliasKeys contains both sides of every curated pair, excludes non-aliases', () => {
