@@ -14,6 +14,14 @@ test('normalizes brewery the same way, no style stripping', () => {
   expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
 });
 
+test('strips Měšťanský (burgher-brewery descriptor) so only the place remains', () => {
+  expect(normalizeBrewery('Měšťanský pivovar Kutná Hora')).toBe('kutna hora');
+  expect(normalizeBrewery('Měšťanský pivovar Kojetín')).toBe('kojetin');
+  expect(normalizeBrewery('Měšťanský pivovar Havlíčkův Brod')).toBe('havlickuv brod');
+  // A real brand token next to it is untouched.
+  expect(normalizeBrewery('Měšťanský pivovar Polička Brewery')).toBe('policka');
+});
+
 test('strips numeric tokens (ABV / strength / years)', () => {
   // Real ontap-style raw string after baseNormalize splits punctuation.
   expect(normalizeName('Buzdygan Rozkoszy 24°·8,5%')).toBe('buzdygan rozkoszy');
