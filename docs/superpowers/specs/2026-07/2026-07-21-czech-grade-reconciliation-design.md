@@ -27,12 +27,18 @@ is a new selection stage, not a query change.
 
 | beer_id | shop brewery / name | candidate(s) | intended hit |
 |---|---|---|---|
-| 12141 | Kamenice nad Lipou / `Desitka` | `Kamenická 10` (1) | Kamenická 10 |
-| 29429 | Kamenica / `Dvanastka` | `Kamenická 12`, `Spílková Dvanáctka` (2) | either (same brewery, 12°) |
-| 29556 | Kamenica / `Desitka` | `Kamenická 10` + 2 other breweries (4) | Kamenická 10 |
-| 12007 | Nachmelená Opice / `11` | `Ležák 11%`, `Góséčko 11%`, `Session IPA 11%` (5) | Ležák 11% |
-| 31800 | Pivovar Krakonoš / `Trutnov 11` | `Světlý ležák 11°` ×3 (plain / Vánoční / Velikonoční) (3) | plain Světlý ležák 11° |
+| 12141 | Kamenice nad Lipou / `Desitka` | `Kamenická 10` (1) | Kamenická 10 ✅ grade fix |
+| 29429 | Kamenica / `Dvanastka` | `Kamenická 12`, `Spílková Dvanáctka` (2) | 12° — ⚠️ also needs `kamenica`↔`kamenice` alias |
+| 29556 | Kamenica / `Desitka` | `Kamenická 10` + 2 other breweries (4) | Kamenická 10 — ⚠️ also needs alias |
+| 12007 | Nachmelená Opice / `11` | `Ležák 11%`, `Góséčko 11%`, `Session IPA 11%` (5) | Ležák 11% ✅ grade fix |
+| 31800 | Pivovar Krakonoš / `Trutnov 11` | `Světlý ležák 11°` ×3 (plain / Vánoční / Velikonoční) (3) | plain Světlý ležák 11° ✅ grade fix |
 | 31421 | `Premium pszenica` | (0 candidates) | none — misfiled (Polish wheat), left untouched |
+
+**Brewery-gate caveat:** the two `Kamenica` orphans (29429/29556) fail the *strict brewery gate*
+first (`kamenica` ≠ `kamenice`), which the grade stage runs behind. The grade logic is correct for
+them (verified in isolation), but they only clear once a `kamenica`↔`kamenice` curated brewery alias
+is added — that is separate brewery-alias-batch work, out of scope here. This PR rescues 12141 /
+12007 / 31800 outright.
 
 ## Design
 
@@ -113,3 +119,5 @@ enrichment cycle.
 - Parser-side °Plato handling (#306 — Konrad/Krakonoš name residue) — that is the parser half.
 - Bare-number grades where **no** candidate shares the grade (nothing to reconcile against).
 - Flavour-word PL/UK→EN translation (#322) — separate.
+- `kamenica`↔`kamenice` (and any other) curated **brewery aliases** needed to pass the strict gate
+  — brewery-alias-batch work (`npm run alias-key`), tracked with the alias issues, not #321.

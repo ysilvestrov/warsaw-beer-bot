@@ -511,4 +511,71 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
     expect(calls).toBe(2); // original pass + exactly one head-retry pass
   });
+
+  test('#321 grade: single same-grade lager candidate (Desitka → Kamenická 10)', async () => {
+    const search = fakeSearch(() => [
+      { bid: 12141, beer_name: 'Kamenická 10', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Pale Lager', abv: 4.2, global_rating: 3.3 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Kamenice nad Lipou Brewery', name: 'Desitka', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(12141);
+  });
+
+  test('#321 grade: bare number excludes ale styles (11 → Ležák, not Gose/IPA)', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Ležák 11%', brewery_name: 'Nachmelená Opice', style: 'Czech Pale Lager', abv: 4.6, global_rating: 3.5 },
+      { bid: 2, beer_name: 'Góséčko mango+calamansi 11%', brewery_name: 'Nachmelená Opice', style: 'Gose', abv: 4.6, global_rating: 3.5 },
+      { bid: 3, beer_name: 'Session IPA 11%', brewery_name: 'Nachmelená Opice', style: 'IPA - Session', abv: 4.6, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Nachmelená Opice Brewery', name: '11', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1);
+  });
+
+  test('#321 grade: fewest-descriptor lager wins over seasonals (Trutnov 11 → plain)', async () => {
+    const search = fakeSearch(() => [
+      { bid: 30, beer_name: 'Vánoční světlý ležák 11°', brewery_name: 'Krakonoš', style: 'Czech Pale Lager', abv: 4.8, global_rating: 3.5 },
+      { bid: 31, beer_name: 'Světlý ležák 11°', brewery_name: 'Krakonoš', style: 'Czech Pale Lager', abv: 4.8, global_rating: 3.6 },
+      { bid: 32, beer_name: 'Velikonoční světlý ležák 11°', brewery_name: 'Krakonoš', style: 'Czech Pale Lager', abv: 4.8, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Pivovar Krakonoš Brewery', name: 'Trutnov 11', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(31);
+  });
+
+  test('#321 grade: spelled word matches same-grade candidates (Dvanastka → 12°)', async () => {
+    // NB: uses a strict-matching brewery to isolate the grade logic. The real orphans
+    // 29429/29556 ('Kamenica' vs 'Pivovar Kamenice nad Lipou') additionally need a
+    // kamenica↔kamenice curated brewery alias to pass the strict gate — that is a separate
+    // brewery-alias concern, out of scope for #321 (grade reconciliation).
+    const search = fakeSearch(() => [
+      { bid: 40, beer_name: 'Kamenická 12', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Amber Lager', abv: 5, global_rating: 3.5 },
+      { bid: 41, beer_name: 'Spílková Dvanáctka', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Kamenice nad Lipou Brewery', name: 'Dvanastka', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect([40, 41]).toContain(out.result.bid);
+  });
+
+  test('#321 grade: no same-grade non-ale candidate → not_found (does not force a match)', async () => {
+    const search = fakeSearch(() => [
+      { bid: 50, beer_name: 'Hazy IPA 11%', brewery_name: 'Nachmelená Opice', style: 'IPA', abv: 6.5, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Nachmelená Opice Brewery', name: '11', search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('#321 grade: dark candidate excluded for a plain (pale-default) bare-number grade', async () => {
+    // Bare "10" normalizes to empty, so no earlier name stage fires — this routes purely
+    // through the grade stage, where the dark candidate must be excluded (pale is default).
+    const search = fakeSearch(() => [
+      { bid: 60, beer_name: 'Tmavá desítka', brewery_name: 'Nachmelená Opice', style: 'Czech Dark Lager', abv: 4.2, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Nachmelená Opice Brewery', name: '10', search });
+    expect(out.kind).toBe('not_found');
+  });
 });

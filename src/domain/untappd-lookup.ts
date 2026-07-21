@@ -1,6 +1,7 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripBreweryFromName } from './matcher';
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from './normalize';
+import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
   type SearchResult,
@@ -321,6 +322,33 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       intersects(nameKeys(r.beer_name, r.brewery_name), brandKeys),
     );
     if (brandHits.length > 0) return { kind: 'matched', result: pickByAbv(brandHits, abv) };
+
+    // Stage 3 (#321): Czech °Plato grade reconciliation. STRICT pool only, last resort (every
+    // name stage above has missed). A shop name that is a Czech grade (bare 8/10/11/12 or spelled
+    // desítka/dvanáctka/…) denotes a PALE LAGER — never an ale style. Reconcile it to a same-grade
+    // candidate, excluding ale styles (and dark variants unless the input is itself dark), then
+    // prefer the fewest-extra-descriptor candidate (plain lager over a seasonal), ABV-tiebroken.
+    const inputGrade = extractGrade(name);
+    if (strictPool.length > 0 && inputGrade != null) {
+      const inputDark = isDark(name, null);
+      const graded = strictPool.filter(
+        (r) =>
+          extractGrade(r.beer_name) === inputGrade &&
+          !isAleStyle(r.beer_name, r.style) &&
+          (inputDark || !isDark(r.beer_name, r.style)),
+      );
+      if (graded.length > 0) {
+        const ranked = graded
+          .map((r) => ({
+            r,
+            extra: extraDescriptorCount(r.beer_name, normalizeBrewery(r.brewery_name), inputGrade),
+          }))
+          .sort((a, b) => a.extra - b.extra);
+        const bestExtra = ranked[0].extra;
+        const tied = ranked.filter((x) => x.extra === bestExtra).map((x) => x.r);
+        return { kind: 'matched', result: pickByAbv(tied, abv) };
+      }
+    }
 
     // No name match in this search part — fall through to the next part.
   }
