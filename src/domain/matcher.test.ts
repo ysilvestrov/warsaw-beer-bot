@@ -130,6 +130,27 @@ describe('breweryAliases', () => {
   });
 });
 
+describe('breweryAliasesMatch — Měšťanský pivovar', () => {
+  const gateOpens = (shop: string, untappd: string) =>
+    breweryAliasesMatch(breweryAliases(shop), breweryAliases(untappd));
+
+  test('nominative place matches via noise strip', () => {
+    expect(gateOpens('Kutna Hora Brewery', 'Měšťanský pivovar Kutná Hora')).toBe(true);
+    expect(gateOpens('Kojetin Brewery', 'Měšťanský pivovar Kojetín')).toBe(true);
+    expect(gateOpens('Havlickuv Brod Brewery', 'Měšťanský pivovar Havlíčkův Brod')).toBe(true);
+  });
+
+  test('Polička locative matches via curated alias (all shop spellings)', () => {
+    expect(gateOpens('Polička Brewery', 'Měšťanský pivovar v Poličce')).toBe(true);
+    expect(gateOpens('Pivovar Policka Brewery', 'Měšťanský pivovar v Poličce')).toBe(true);
+    expect(gateOpens('Měšťanský Pivovar Polička Brewery', 'Měšťanský pivovar v Poličce')).toBe(true);
+  });
+
+  test('does not over-match a different Měšťanský place', () => {
+    expect(gateOpens('Kutna Hora Brewery', 'Měšťanský pivovar Kojetín')).toBe(false);
+  });
+});
+
 test('exact normalized match is confidence 1', () => {
   const m = matchBeer({ brewery: 'PINTA', name: 'Atak Chmielu IPA' }, catalog);
   expect(m).toEqual({ id: 1, confidence: 1, source: 'exact' });

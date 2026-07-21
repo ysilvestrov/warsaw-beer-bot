@@ -578,4 +578,16 @@ describe('lookupBeer', () => {
     const out = await lookupBeer({ brewery: 'Nachmelená Opice Brewery', name: '10', search });
     expect(out.kind).toBe('not_found');
   });
+
+  test('Měšťanský: nominative gate opens, name resolves (Kutná Hora Zlata 12)', async () => {
+    const search = fakeSearch(() => [
+      { bid: 70, beer_name: 'Kutnohorská Zlatá 12', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
+      { bid: 71, beer_name: 'Kutnohorská Zlatá 12 Chmelená za studena', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
+      { bid: 72, beer_name: 'Zlatá 12 nefiltrovaná', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Kutna Hora Brewery', name: 'Zlata 12', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect([70, 71, 72]).toContain(out.result.bid);
+  });
 });
