@@ -113,7 +113,9 @@ describe('collab-aware stripBreweryNoise (#117 Omnipollo)', () => {
 describe('multilingual brewery descriptors', () => {
   test('normalizeBrewery strips foreign brewery words', () => {
     expect(normalizeBrewery('Pivovar Černá Hora')).toBe('cerna hora');
-    expect(normalizeBrewery('Měšťanský Pivovary Polička')).toBe('mestansky policka');
+    // 'měšťanský' ("burgher's/civic") is now a brewery-type descriptor too, so only
+    // the place survives (2026-07-21).
+    expect(normalizeBrewery('Měšťanský Pivovary Polička')).toBe('policka');
     expect(normalizeBrewery('Brauerei Aying')).toBe('aying');
     expect(normalizeBrewery('Brasserie Dupont')).toBe('dupont');
     expect(normalizeBrewery('Birrificio Italiano')).toBe('italiano');
