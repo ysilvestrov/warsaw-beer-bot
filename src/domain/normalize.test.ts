@@ -375,6 +375,11 @@ describe('AleBrowar brand glue (#327)', () => {
     expect(cleanSearchQuery('Ale Browar Brewery', 'Herr Axolotl Aronia'))
       .toBe('AleBrowar Herr Axolotl Aronia');
   });
+  test('tolerates casing and collapsed/extra whitespace', () => {
+    expect(normalizeBrewery('ALE  BROWAR')).toBe('alebrowar');   // double space (\s+)
+    expect(normalizeBrewery('AlE Browar')).toBe('alebrowar');    // mixed case (i flag)
+    expect(normalizeBrewery('ALE BROWAR ')).toBe('alebrowar');   // trailing space
+  });
   test('negative guard: an unrelated "... ale" brewery is untouched', () => {
     expect(normalizeBrewery('Real Ale Brewing')).toBe('real ale');
     expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
