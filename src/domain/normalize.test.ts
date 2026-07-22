@@ -323,6 +323,9 @@ describe('stripQueryTokenNoise (query-only cleanups)', () => {
     expect(stripQueryTokenNoise('Pinta 555')).toBe('Pinta 555');
     expect(stripQueryTokenNoise('Many Hops 100')).toBe('Many Hops 100');
   });
+  test('handles a period and a year in one string, with no leftover whitespace', () => {
+    expect(stripQueryTokenNoise('Vol. 30 and 2025')).toBe('Vol 30 and');
+  });
 });
 
 describe('degree/ABV mid-dot spec residue (#326)', () => {
