@@ -2,12 +2,12 @@ import { loadEnv } from '../src/config/env';
 import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import type { RearmTarget } from './rearm-aliased-orphans';
-import { applyRearm } from './rearm-aliased-orphans';
+import { applyRearm, selectRearmTargetsByIds } from './rearm-aliased-orphans';
 import { loadOperatorEnv } from './operator-env';
 
 loadOperatorEnv();
 
-export { applyRearm } from './rearm-aliased-orphans';
+export { applyRearm, selectRearmTargetsByIds } from './rearm-aliased-orphans';
 
 export function selectRearmTargets(db: DB): RearmTarget[] {
   return db
@@ -24,11 +24,33 @@ export function selectRearmTargets(db: DB): RearmTarget[] {
     .all() as RearmTarget[];
 }
 
+function parseIds(argv: string[]): number[] | null {
+  const idx = argv.indexOf('--ids');
+  if (idx < 0) return null;
+  return (argv[idx + 1] ?? '')
+    .split(',')
+    .map((s) => parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n));
+}
+
 function main(argv: string[]): void {
   const apply = argv.includes('--apply');
+  const ids = parseIds(argv);
   const db = openDb(loadEnv().DATABASE_PATH);
   try {
-    const targets = selectRearmTargets(db);
+    let targets: RearmTarget[];
+    if (ids !== null) {
+      targets = selectRearmTargetsByIds(db, ids);
+      const found = new Set(targets.map((t) => t.id));
+      for (const id of ids) {
+        if (!found.has(id)) {
+          console.warn(`⚠ ${id}: skipped (missing or already matched)`);
+        }
+      }
+    } else {
+      targets = selectRearmTargets(db);
+    }
+
     for (const target of targets) {
       console.log(
         `${target.brewery} / ${target.name} (count=${target.untappd_lookup_count})`,
