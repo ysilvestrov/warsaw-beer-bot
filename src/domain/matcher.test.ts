@@ -166,6 +166,20 @@ describe('breweryAliasesMatch — AleBrowar spaced/glued (#327)', () => {
   });
 });
 
+describe('St. James’s Gate ↔ Guinness alias (#327 comment)', () => {
+  const catalog: CatalogBeer[] = [
+    { id: 4473, brewery: 'Guinness', name: 'Guinness Draught', abv: null },
+    { id: 800349, brewery: 'Guinness', name: 'West Indies Porter', abv: null },
+  ];
+  test('St. James’s Gate Brewery / Guinness Draught matches the Guinness beer', () => {
+    expect(matchBeer({ brewery: "St. James’s Gate Brewery", name: 'Guinness Draught' }, catalog))
+      .toEqual({ id: 4473, confidence: 1, source: 'exact' });
+  });
+  test('does not open the gate for an unrelated brewery', () => {
+    expect(breweryAliasesMatch(breweryAliases('Pinta'), breweryAliases('Guinness'))).toBe(false);
+  });
+});
+
 test('exact normalized match is confidence 1', () => {
   const m = matchBeer({ brewery: 'PINTA', name: 'Atak Chmielu IPA' }, catalog);
   expect(m).toEqual({ id: 1, confidence: 1, source: 'exact' });
