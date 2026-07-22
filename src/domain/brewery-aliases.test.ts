@@ -45,6 +45,11 @@ describe('aliasNeighbors', () => {
     expect(aliasNeighbors('policka')).toContain('v policce');
     expect(aliasNeighbors('v policce')).toContain('policka');
   });
+
+  test('#325 Kraftwerk <-> Remeslo (same-owner conflation)', () => {
+    expect(aliasNeighbors('kraftwerk')).toEqual(['remeslo']);
+    expect(aliasNeighbors('remeslo')).toEqual(['kraftwerk']);
+  });
 });
 
 test('aliasKeys contains both sides of every curated pair, excludes non-aliases', () => {
