@@ -357,6 +357,35 @@ describe("'family' brewery noise (#309)", () => {
   });
 });
 
+describe('AleBrowar brand glue (#327)', () => {
+  // Untappd registers the brand as the single token "AleBrowar" (-> "alebrowar").
+  // Shops write it spaced ("ALE BROWAR"), so `browar` becomes a droppable
+  // BREWERY_NOISE token and the brand collapses to the bare style word "ale",
+  // derailing both the search query and the brewery gate. Glue it back.
+  test('spaced ALE BROWAR normalizes to the glued Untappd token', () => {
+    expect(normalizeBrewery('ALE BROWAR Brewery')).toBe('alebrowar');
+    expect(normalizeBrewery('Ale Browar Brewery')).toBe('alebrowar');
+    expect(normalizeBrewery('ALE BROWAR')).toBe('alebrowar');
+    // The already-glued form is unchanged.
+    expect(normalizeBrewery('AleBrowar')).toBe('alebrowar');
+    expect(normalizeBrewery('AleBrowar Brewery')).toBe('alebrowar');
+  });
+  test('the search query keeps the glued brand instead of a bare "ale"', () => {
+    expect(cleanSearchQuery('ALE BROWAR Brewery', 'Hooded Pils')).toBe('AleBrowar Hooded Pils');
+    expect(cleanSearchQuery('Ale Browar Brewery', 'Herr Axolotl Aronia'))
+      .toBe('AleBrowar Herr Axolotl Aronia');
+  });
+  test('tolerates casing and collapsed/extra whitespace', () => {
+    expect(normalizeBrewery('ALE  BROWAR')).toBe('alebrowar');   // double space (\s+)
+    expect(normalizeBrewery('AlE Browar')).toBe('alebrowar');    // mixed case (i flag)
+    expect(normalizeBrewery('ALE BROWAR ')).toBe('alebrowar');   // trailing space
+  });
+  test('negative guard: an unrelated "... ale" brewery is untouched', () => {
+    expect(normalizeBrewery('Real Ale Brewing')).toBe('real ale');
+    expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
+  });
+});
+
 describe('minipivovar brewery noise (#318)', () => {
   test('minipivovar is stripped so it matches the bare brand', () => {
     expect(normalizeBrewery('Minipivovar Skřečoňský žabák')).toBe('skreconsky zabak');

@@ -151,6 +151,21 @@ describe('breweryAliasesMatch — Měšťanský pivovar', () => {
   });
 });
 
+describe('breweryAliasesMatch — AleBrowar spaced/glued (#327)', () => {
+  const gateOpens = (shop: string, untappd: string) =>
+    breweryAliasesMatch(breweryAliases(shop), breweryAliases(untappd));
+
+  test('spaced shop spellings gate against Untappd "AleBrowar"', () => {
+    expect(gateOpens('ALE BROWAR Brewery', 'AleBrowar')).toBe(true);
+    expect(gateOpens('Ale Browar Brewery', 'AleBrowar')).toBe(true);
+    expect(gateOpens('AleBrowar Brewery', 'AleBrowar')).toBe(true);
+  });
+
+  test('does not open the gate for an unrelated "... ale" brewery', () => {
+    expect(gateOpens('Real Ale Brewing', 'AleBrowar')).toBe(false);
+  });
+});
+
 test('exact normalized match is confidence 1', () => {
   const m = matchBeer({ brewery: 'PINTA', name: 'Atak Chmielu IPA' }, catalog);
   expect(m).toEqual({ id: 1, confidence: 1, source: 'exact' });
