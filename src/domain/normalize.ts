@@ -142,8 +142,12 @@ export function stripSearchNoise(s: string): string {
       /^(?=[\p{L}\p{N}]*\d)[\p{L}\p{N}]+$/u.test(content) ? ` ${content} ` : ' ')
     // Keep compact digit-bearing identifiers such as (TAP04); drop (BBA), (collab …).
     .replace(/[[\](){}]/g, ' ')                      // stray/unbalanced brackets
+    // Degree/Plato spec, optionally followed by a mid-dot ABV tail: "24°",
+    // "12,5°·4", "24°·8,5%", "7°·<0,5%". The mid-dot (·/•/∙) fragment survived
+    // the bare "°" strip and leaked into the query, zeroing it (#326). Runs
+    // before the standalone "%" strip so the whole block is consumed at once.
+    .replace(/\d+(?:[.,]\d+)?\s*°(?:\s*[·•∙]\s*[<>]?\s*\d+(?:[.,]\d+)?\s*%?)?/gu, ' ')
     .replace(/[<>]?\s*\d+(?:[.,]\d+)?\s*%/g, ' ')    // <0,5%  4.5%  0,5 %
-    .replace(/\d+(?:[.,]\d+)?\s*°/g, ' ')            // 24°
     .replace(/\b(?:alc|abv|ibu)\b/gi, ' ')           // spec labels
     .replace(/["“”„]/g, ' ')                        // wrapping display/straight quotes
     .replace(/\s*[.!?,;:]+\s*$/, '')                  // trailing punctuation

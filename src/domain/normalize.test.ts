@@ -287,6 +287,24 @@ describe('stripSearchNoise', () => {
   });
 });
 
+describe('degree/ABV mid-dot spec residue (#326)', () => {
+  // "<deg>°·<abv>" spec blocks: the "°" part was stripped but the "·<abv>"
+  // tail (mid-dot + ABV fragment) leaked into the search query, zeroing it.
+  test('strips a bare mid-dot ABV number with no % sign', () => {
+    expect(stripSearchNoise('Plum Plum Plum 12,5°·4')).toBe('Plum Plum Plum');
+  });
+  test('strips a mid-dot ABV percentage tail', () => {
+    expect(stripSearchNoise('Buzdygan Rozkoszy 24°·8,5%')).toBe('Buzdygan Rozkoszy');
+  });
+  test('strips a mid-dot <-prefixed ABV percentage tail', () => {
+    expect(stripSearchNoise('Freeky Mango Ale 7°·<0,5%')).toBe('Freeky Mango Ale');
+  });
+  test('cleanSearchQuery drops the residue instead of zeroing the query', () => {
+    expect(cleanSearchQuery('Inne Beczki', 'Plum Plum Plum 12,5°·4'))
+      .toBe('Inne Beczki Plum Plum Plum');
+  });
+});
+
 describe("'family' brewery noise (#309)", () => {
   test('family is dropped so X Family Brewery == X Brewery', () => {
     expect(normalizeBrewery('HOPPY HOG FAMILY BREWERY')).toBe('hoppy hog');
