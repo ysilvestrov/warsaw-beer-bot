@@ -967,3 +967,21 @@ describe('#329 gate-miss alias batch — end to end', () => {
     expect(matchBeer({ brewery, name }, cat)).toEqual({ id, confidence: 1, source: 'exact' });
   });
 });
+
+describe('#295 period-delete stays out of matching normalization', () => {
+  test('a glued Vol.30 catalog record still matches a shop "Vol. 30" name', () => {
+    const catalog = [
+      {
+        id: 1,
+        brewery: 'Upslope Brewing Company',
+        name: 'Lee Hill Series Vol.30  Wild Christmas Ale With Tropical Fruit',
+        abv: 7.5,
+      },
+    ];
+    const hit = matchBeer(
+      { brewery: 'Upslope', name: 'Lee Hill Vol. 30 Wild Christmas Ale With Tropical Fruit', abv: 7.5 },
+      catalog,
+    );
+    expect(hit?.id).toBe(1);
+  });
+});
