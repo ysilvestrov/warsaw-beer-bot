@@ -155,9 +155,26 @@ export function stripSearchNoise(s: string): string {
     .trim();
 }
 
+// Query-only token cleanup. NOT used by normalizeName, so matching normalization is unchanged
+// (keeping it out of stripSearchNoise is deliberate — see the #295 design doc). Two rules:
+//  1. Delete a period unless it sits between two digits: "Vol." -> "Vol", "V.S.O.J." -> "VSOJ",
+//     while "3.0" is preserved. Deleting (not spacing) is required — Algolia zeroes "V S O J"
+//     but matches "VSOJ"; and a glued Untappd record like "Vol.30" only matches once the query
+//     drops the period so the standalone number can align.
+//  2. Strip a standalone calendar-year token (19xx/20xx). Algolia ANDs terms and Untappd stores
+//     vintages parenthetically, so a bare year over-constrains the search to zero. Mirrors
+//     extractYear's year definition; the matcher already treats years as non-identity.
+export function stripQueryTokenNoise(s: string): string {
+  return s
+    .replace(/(?<!\d)\.|\.(?!\d)/g, '')
+    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function cleanSearchQuery(brewery: string, name: string): string {
-  const cleanBrewery = stripSearchNoise(stripLegalForm(brewery));
-  const cleanName = stripSearchNoise(name);
+  const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(brewery)));
+  const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
 
   // Brewery brand tokens: split collab separators (defensive — detaches glued junk like
   // "collab/"), then whitespace; drop BREWERY_NOISE and empty folds; dedup by fold.

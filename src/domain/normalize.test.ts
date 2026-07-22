@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -194,8 +194,27 @@ describe('cleanSearchQuery', () => {
   test('non-duplicated beer is unchanged (no regression)', () => {
     expect(cleanSearchQuery('Pinta', 'Atak Chmielu')).toBe('Pinta Atak Chmielu');
   });
-  test('preserves digits and original casing in surviving tokens', () => {
-    expect(cleanSearchQuery('Pinta', 'Many Hops 2023')).toBe('Pinta Many Hops 2023');
+  test('preserves non-year digits and original casing in surviving tokens', () => {
+    expect(cleanSearchQuery('Pinta', 'Many Hops 100')).toBe('Pinta Many Hops 100');
+  });
+  test('glues a Vol. period so Algolia can match a glued Vol.30 record (#295)', () => {
+    expect(cleanSearchQuery('Upslope', 'Lee Hill Vol. 30 Wild Christmas Ale With Tropical Fruit'))
+      .toBe('Upslope Lee Hill Vol 30 Wild Christmas Ale With Tropical Fruit');
+  });
+  test('glues a dotted abbreviation (#295)', () => {
+    expect(cleanSearchQuery('Revolution', 'Peach Brandy Barrel D.B.V.S.O.J.'))
+      .toBe('Revolution Peach Brandy Barrel DBVSOJ');
+  });
+  test('strips a trailing vintage year from the query (#295)', () => {
+    expect(cleanSearchQuery('Perennial', 'Vanilla Bean Abraxas 2025'))
+      .toBe('Perennial Vanilla Bean Abraxas');
+  });
+  test('strips a parenthetical vintage year from the query (#295)', () => {
+    expect(cleanSearchQuery('Revolution', 'Mineshaft Gap (2026)'))
+      .toBe('Revolution Mineshaft Gap');
+  });
+  test('leaves a clean name unchanged (#295)', () => {
+    expect(cleanSearchQuery('Almanac', 'Sunshine Sherbet')).toBe('Almanac Sunshine Sherbet');
   });
   test('strips a legal-form brewery suffix (Sp. z o.o.) instead of leaking it into the query', () => {
     expect(cleanSearchQuery('Pinta Sp. z o.o.', 'Atak Chmielu')).toBe('Pinta Atak Chmielu');
@@ -284,6 +303,25 @@ describe('stripSearchNoise', () => {
   });
   test('mixed valid name + noise: drops both bracket groups whole, keeps the name', () => {
     expect(stripSearchNoise('Brewery (Special Edition) [adjuncts]')).toBe('Brewery');
+  });
+});
+
+describe('stripQueryTokenNoise (query-only cleanups)', () => {
+  test('deletes a period unless between two digits (glue, do not space)', () => {
+    expect(stripQueryTokenNoise('Vol. 30')).toBe('Vol 30');
+    expect(stripQueryTokenNoise('D.B.V.S.O.J.')).toBe('DBVSOJ');
+    expect(stripQueryTokenNoise('V.S.O.J.')).toBe('VSOJ');
+  });
+  test('preserves a decimal version/strength token', () => {
+    expect(stripQueryTokenNoise('Stópka 3.0')).toBe('Stópka 3.0');
+  });
+  test('strips a standalone calendar year (19xx/20xx)', () => {
+    expect(stripQueryTokenNoise('Vanilla Bean Abraxas 2025')).toBe('Vanilla Bean Abraxas');
+    expect(stripQueryTokenNoise('Mineshaft Gap 2026')).toBe('Mineshaft Gap');
+  });
+  test('keeps a non-year number', () => {
+    expect(stripQueryTokenNoise('Pinta 555')).toBe('Pinta 555');
+    expect(stripQueryTokenNoise('Many Hops 100')).toBe('Many Hops 100');
   });
 });
 
