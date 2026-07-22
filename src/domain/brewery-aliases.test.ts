@@ -21,6 +21,8 @@ describe('aliasNeighbors', () => {
     expect(aliasNeighbors('pelhrimov')).toContain('poutnik');
     expect(aliasNeighbors('jezek kwasnicowy')).toContain('jihlava');
     expect(aliasNeighbors('jihlava')).toContain('jezek kwasnicowy');
+    expect(aliasNeighbors('st james s gate')).toContain('guinness');
+    expect(aliasNeighbors('guinness')).toContain('st james s gate');
   });
 
   test('kasteel vanhonsebrouck pairs with both van honsebrouck and bacchus', () => {

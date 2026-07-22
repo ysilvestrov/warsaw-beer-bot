@@ -55,6 +55,12 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // alias-key. NB: this pair fixes the brewery GATE for that owner's English-named
   // beers; the Wiedeński→Vienna style-word gap is tracked separately (see #325 issue).
   ['kraftwerk', 'remeslo'],
+  // #327 comment (2026-07-22): St. James's Gate IS Guinness's Dublin brewery, so
+  // shops that file the real brewery name ("St. James's Gate Brewery / Guinness
+  // Draught") miss the Untappd brewery `Guinness`. Factual same-brewery pair, safe.
+  // Rescues 219 (Guinness Draught); the bare-"Guinness"-name misses (11851) are a
+  // name-stage issue, not a gate issue. Verified via alias-key.
+  ['st james s gate', 'guinness'],
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
