@@ -25,6 +25,24 @@ export const BREWERY_NOISE = new Set([
   'family',
 ]);
 
+// Brands whose Untappd-registered name glues together a token that BREWERY_NOISE
+// would otherwise strip, collapsing the brand to a generic word. Shops write the
+// brand spaced ("ALE BROWAR"), so `browar` becomes a droppable token and the
+// brewery falls to the bare style word "ale" — derailing both the search query
+// and the brewery gate against Untappd's single token "AleBrowar" (#327). Glue
+// the spaced form to the Untappd token BEFORE tokenization so the load-bearing
+// token survives. `\bale\s+browar\b` is specific to this brand: Polish "browar"
+// (brewery) otherwise leads the name ("Browar Stu Mostów"), never trailing "ale".
+const BRAND_CANONICALIZATIONS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bale\s+browar\b/giu, 'AleBrowar'],
+];
+
+export function canonicalizeBreweryBrand(s: string): string {
+  let out = s;
+  for (const [re, replacement] of BRAND_CANONICALIZATIONS) out = out.replace(re, replacement);
+  return out;
+}
+
 // Separator for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
@@ -92,7 +110,7 @@ export function normalizeName(s: string): string {
 }
 
 export function normalizeBrewery(s: string): string {
-  const tokens = baseNormalize(stripLegalForm(s))
+  const tokens = baseNormalize(stripLegalForm(canonicalizeBreweryBrand(s)))
     .split(' ')
     .filter((t) => t && !BREWERY_NOISE.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
@@ -173,7 +191,7 @@ export function stripQueryTokenNoise(s: string): string {
 }
 
 export function cleanSearchQuery(brewery: string, name: string): string {
-  const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(brewery)));
+  const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery))));
   const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
 
   // Brewery brand tokens: split collab separators (defensive — detaches glued junk like
