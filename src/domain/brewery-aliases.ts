@@ -49,6 +49,12 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // `mestansky` noise strip the shop "Polička" normalizes to `policka` and the
   // Untappd "Měšťanský pivovar v Poličce" to `v policce`. Verified via alias-key.
   ['policka', 'v policce'],
+  // #325 (2026-07-22): Kraftwerk & Remeslo share an owner and are routinely conflated
+  // by shops (the shop filed "Remeslo Wiedeński Lager" under brewery "Kraftwerk"; the
+  // beer is Untappd's `Remeslo Brewery — Vienna Lager`, bid 3843080). Verified via
+  // alias-key. NB: this pair fixes the brewery GATE for that owner's English-named
+  // beers; the Wiedeński→Vienna style-word gap is tracked separately (see #325 issue).
+  ['kraftwerk', 'remeslo'],
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
