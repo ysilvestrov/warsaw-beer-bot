@@ -7,7 +7,7 @@ import { loadOperatorEnv } from './operator-env';
 
 loadOperatorEnv();
 
-export { applyRearm } from './rearm-aliased-orphans';
+export { applyRearm, selectRearmTargetsByIds } from './rearm-aliased-orphans';
 
 export function selectRearmTargets(db: DB): RearmTarget[] {
   return db

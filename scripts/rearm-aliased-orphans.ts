@@ -40,6 +40,22 @@ export function applyRearm(db: DB, targets: RearmTarget[]): number {
   return txn(targets);
 }
 
+// Orphans (no Untappd match) selected by explicit beer id, bypassing the class/candidate
+// filters of the query-based selectors. The only gate is "still an orphan" (untappd_id IS NULL):
+// never reset a matched beer. Empty id list short-circuits to no targets.
+export function selectRearmTargetsByIds(db: DB, ids: number[]): RearmTarget[] {
+  if (ids.length === 0) return [];
+  const placeholders = ids.map(() => '?').join(',');
+  return db
+    .prepare(
+      `SELECT id, brewery, name, untappd_lookup_count
+         FROM beers
+        WHERE untappd_id IS NULL AND id IN (${placeholders})
+        ORDER BY id`,
+    )
+    .all(...ids) as RearmTarget[];
+}
+
 function main(argv: string[]): void {
   const apply = argv.includes('--apply');
   const db = openDb(loadEnv().DATABASE_PATH);

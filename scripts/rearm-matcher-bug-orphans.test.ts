@@ -3,7 +3,7 @@ import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import { migrate } from '../src/storage/schema';
 import { normalizeBrewery, normalizeName } from '../src/domain/normalize';
-import { applyRearm, selectRearmTargets } from './rearm-matcher-bug-orphans';
+import { applyRearm, selectRearmTargets, selectRearmTargetsByIds } from './rearm-matcher-bug-orphans';
 
 interface SeedFailure {
   name: string;
@@ -114,6 +114,43 @@ describe('selectRearmTargets', () => {
           untappd_lookup_count: 4,
         },
       ]);
+    } finally {
+      db.close();
+    }
+  });
+});
+
+describe('selectRearmTargetsByIds', () => {
+  it('returns orphan rows for the given ids in id order, ignoring class/candidate filters', () => {
+    const db = fresh();
+    try {
+      const parserZero = insertFailure(db, {
+        name: 'Parser Zero',
+        brewery: 'Brewery Zero',
+        review_class: 'parser_bug',
+        candidates_count: 0,
+      });
+      const matched = insertFailure(db, {
+        name: 'Already Matched',
+        brewery: 'Brewery Matched',
+        untappd_id: 999,
+      });
+      const plain = insertFailure(db, { name: 'Plain Orphan', brewery: 'Brewery Plain' });
+      const missing = plain + 10_000;
+
+      expect(selectRearmTargetsByIds(db, [plain, parserZero, matched, missing])).toEqual([
+        { id: parserZero, brewery: 'Brewery Zero', name: 'Parser Zero', untappd_lookup_count: 3 },
+        { id: plain, brewery: 'Brewery Plain', name: 'Plain Orphan', untappd_lookup_count: 3 },
+      ]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('returns an empty array for an empty id list', () => {
+    const db = fresh();
+    try {
+      expect(selectRearmTargetsByIds(db, [])).toEqual([]);
     } finally {
       db.close();
     }
