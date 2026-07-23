@@ -26,6 +26,10 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
       const info = db
         .prepare('UPDATE match_links SET untappd_beer_id = ?, reviewed_by_user = 1 WHERE untappd_beer_id = ?')
         .run(canonical.id, beerId);
+      // Redirect the orphan's checkins too: checkins.beer_id → beers(id) has NO ON DELETE
+      // CASCADE, so with foreign_keys=ON a checkin on the orphan would abort the DELETE.
+      // Point them at the canonical row (its real Untappd identity) before removing the orphan.
+      db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonical.id, beerId);
       db.prepare('DELETE FROM beers WHERE id = ?').run(beerId); // enrich_failures CASCADE-drop
       bumpCatalogVersion();
       return { kind: 'merged', canonicalId: canonical.id, redirected: info.changes as number };

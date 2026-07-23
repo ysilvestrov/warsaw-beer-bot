@@ -48,6 +48,29 @@ describe('pinMatch', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM enrich_failures').get()).toEqual({ n: 0 });
   });
 
+  test('merge case: redirects the orphan checkins to the canonical row (no FK abort)', () => {
+    const db = newDb();
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
+      style: null, abv: null, rating_global: 4.1,
+      normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
+    });
+    const orphanId = orphan(db, 'Recraft', 'Urodzinowe');
+    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    // checkins.beer_id → beers(id) has NO CASCADE; a checkin on the orphan would abort
+    // the DELETE with foreign_keys=ON unless pinMatch redirects it first.
+    db.prepare(
+      'INSERT INTO checkins (checkin_id, telegram_id, beer_id, user_rating, checkin_at) VALUES (?, ?, ?, ?, ?)',
+    ).run('c1', 42, orphanId, 4.0, AT);
+
+    const res = pinMatch(db, orphanId, 6614460, AT);
+
+    expect(res.kind).toBe('merged');
+    expect(getBeer(db, orphanId)).toBeNull();
+    expect(db.prepare('SELECT beer_id FROM checkins WHERE checkin_id = ?').get('c1'))
+      .toEqual({ beer_id: canonicalId });
+  });
+
   test('new-bid case: sets untappd_id on the orphan row, pins its link, clears failure', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
