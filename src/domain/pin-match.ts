@@ -39,3 +39,38 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
     return { kind: 'set', beerId };
   })();
 }
+
+export interface PinRow {
+  ontap_ref: string;
+  beer_id: number;
+  brewery: string;
+  name: string;
+  untappd_id: number | null;
+}
+
+// Undo a pin by its ontap_ref (reliable for merged pins whose orphan row is gone).
+export function unpinByRef(db: DB, ontapRef: string): number {
+  return db
+    .prepare('UPDATE match_links SET reviewed_by_user = 0 WHERE ontap_ref = ? AND reviewed_by_user = 1')
+    .run(ontapRef).changes as number;
+}
+
+// Undo a pin by the beer it points at (natural for same-row pins whose orphan survives).
+export function unpinByBeer(db: DB, beerId: number): number {
+  return db
+    .prepare('UPDATE match_links SET reviewed_by_user = 0 WHERE untappd_beer_id = ? AND reviewed_by_user = 1')
+    .run(beerId).changes as number;
+}
+
+export function listPins(db: DB): PinRow[] {
+  return db
+    .prepare(
+      `SELECT ml.ontap_ref AS ontap_ref, ml.untappd_beer_id AS beer_id,
+              b.brewery AS brewery, b.name AS name, b.untappd_id AS untappd_id
+         FROM match_links ml
+         JOIN beers b ON b.id = ml.untappd_beer_id
+        WHERE ml.reviewed_by_user = 1
+        ORDER BY ml.ontap_ref`,
+    )
+    .all() as PinRow[];
+}

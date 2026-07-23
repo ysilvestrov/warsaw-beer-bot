@@ -4,7 +4,7 @@ import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
 import { upsertMatch, getMatch } from '../storage/match_links';
 import { recordEnrichFailure } from '../storage/enrich_failures';
-import { pinMatch } from './pin-match';
+import { pinMatch, unpinByRef, unpinByBeer, listPins } from './pin-match';
 
 function newDb() {
   const db = openDb(':memory:');
@@ -82,5 +82,44 @@ describe('pinMatch', () => {
     const db = newDb();
     const res = pinMatch(db, 99999, 1093012, AT);
     expect(res.kind).toBe('noop');
+  });
+});
+
+describe('unpin & list', () => {
+  test('unpinByRef clears the flag for a merged pin addressed by its ontap_ref', () => {
+    const db = newDb();
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
+    });
+    const orphanId = orphan(db, 'Recraft', 'Urodzinowe');
+    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    pinMatch(db, orphanId, 6614460, AT); // merges → 'Urodzinowe' pinned to canonicalId
+
+    expect(unpinByRef(db, 'Urodzinowe')).toBe(1);
+    expect(getMatch(db, 'Urodzinowe')?.reviewed_by_user).toBe(0);
+    expect(getMatch(db, 'Urodzinowe')?.untappd_beer_id).toBe(canonicalId);
+  });
+
+  test('unpinByBeer clears the flag for a same-row pin', () => {
+    const db = newDb();
+    const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
+    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    pinMatch(db, orphanId, 1093012, AT);
+
+    expect(unpinByBeer(db, orphanId)).toBe(1);
+    expect(getMatch(db, 'Pear taste')?.reviewed_by_user).toBe(0);
+  });
+
+  test('listPins returns all pinned links with their beer + untappd_id', () => {
+    const db = newDb();
+    const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
+    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    pinMatch(db, orphanId, 1093012, AT);
+
+    expect(listPins(db)).toEqual([
+      { ontap_ref: 'Pear taste', beer_id: orphanId, brewery: 'CYDR Fizz', name: 'Pear taste', untappd_id: 1093012 },
+    ]);
   });
 });
