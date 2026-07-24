@@ -188,6 +188,7 @@ src/
 | `untappd_lookup_count` | INTEGER | NOT NULL DEFAULT 0 (v5) | лічильник спроб (backoff) |
 | `rating_refresh_at` | TEXT | nullable (v6) | час останнього оновлення рейтингу |
 | `rating_refresh_count` | INTEGER | NOT NULL DEFAULT 0 (v6) | лічильник оновлень рейтингу |
+| `google_tried_at` | TEXT | nullable (v19) | час останньої спроби Google-фолбеку (#139); per-beer кулдаун 30 днів захищає квоту від дормантних orphan'ів |
 
 Індекс: `idx_beers_norm (normalized_brewery, normalized_name)`.
 **Інваріант:** реальний статус матчингу визначає `untappd_id IS NOT NULL`,
@@ -447,6 +448,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 16 | `checkin_sync_state.profile_total` (INTEGER) — лік чекінів профілю Untappd для `/status` |
 | 17 | `api_usage` (денний облік запитів розширення) |
 | 18 | `enrich_failures.retired_at` (термінальний стан вирішених провалів; ops-тула `retire-resolved-orphans`) |
+| 19 | `beers.google_tried_at` + `google_quota(day, count)` — Google-фолбек на 0 кандидатів (#139): per-beer кулдаун + денний cap за Pacific-датою |
 
 ---
 
@@ -797,6 +799,24 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 токен-підсписок аліаса кандидата (#120, `breweryAliasContained`).  Relaxed-збіг матчиться **лише на
 точну назву** — перетин name-keys АБО точна рівність нормалізованих назв — і **ніколи** на
 наближений fuzzy (≥0.85, але <1.0). Strict-шлях незмінний. (`/match`-каталог поки не зачеплено.)
+
+**Google-фолбек на 0 кандидатів (#139).** Коли Untappd/Algolia повертає **нуль** кандидатів (справжнє
+занулення запиту, а не відхилення реальних кандидатів матчером) — після наявного #271 head-retry —
+сервер може резолвити канонічну сторінку пива через Google Custom Search JSON API (движок обмежений
+`untappd.com`) і перепрогнати цього кандидата через строгий gate. Механізм суто **серверний**
+(`lookupWithFallback` обгортає `lookupBeer` у двох точках: cron `enrichOneOrphan` і client-relay
+`/enrich/result`), тож браузерне розширення **не змінюється**. Увімкнено лише за наявності
+`GOOGLE_CSE_KEY`+`GOOGLE_CSE_CX`; без них — нуль змін поведінки.
+- **Gate (refined B1):** strict-збіг пивоварні **обов'язковий завжди**; далі — АБО проходить звичайний
+  name-gate (одномовні: переставлені/переспецифіковані назви), АБО є перекриття розрізняльних токенів
+  (`hasLongSharedToken`, перевіряється в обох напрямках — fast-fuzzy напрямлений — щоб крос-мовні
+  `cynamon`≈`cinnamon` корробурували) **І** ABV у толерансі. ABV сам по собі **ніколи** не достатній
+  (інакше пиво тієї ж броварні з іншою назвою хибно лінкувалось би — кейс Artezan «Święty Spokój»).
+- **Гідрація ABV:** CSE `pagemap` → фолбек Algolia-by-name.
+- **Захист витрат:** жорсткий денний cap (`GOOGLE_CSE_DAILY_CAP`, дефолт 90) за **Pacific-датою**
+  (таблиця `google_quota(day, count)`, v19; квота Google скидається опівночі PT), плюс per-beer
+  30-денний кулдаун (`beers.google_tried_at`). Рекомендація ops: **не вмикати billing** на CSE-проєкті —
+  тоді 429 на 101-му запиті = безкоштовний хард-стоп, незалежний від cap.
 
 **Brand-as-beer-name (#138B).** Якщо кандидат провалює і strict, і relaxed гейт пивоварні, але вхідна
 пивоварня (бренд на полиці) є суцільним токен-підсписком **назви пива** кандидата (Untappd веде пиво під

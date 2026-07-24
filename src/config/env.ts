@@ -21,6 +21,9 @@ const Schema = z.object({
   ADMIN_API_TOKEN: z.string().optional(),
   UNTAPPD_ALGOLIA_APP_ID: z.string().optional(),
   UNTAPPD_ALGOLIA_SEARCH_KEY: z.string().optional(),
+  GOOGLE_CSE_KEY: z.string().optional(),
+  GOOGLE_CSE_CX: z.string().optional(),
+  GOOGLE_CSE_DAILY_CAP: z.coerce.number().int().positive().default(90),
 
   // Orphan-triage job: keys are optional or defaulted; absence disables the job, never crashes startup.
   TRIAGE_LLM_PROVIDER: z.enum(['anthropic', 'openai']).default('anthropic'),
@@ -46,6 +49,7 @@ export const EXPECTED_PROD_KEYS = [
   { key: 'ADMIN_API_TOKEN', disables: 'admin HTTP endpoints (enrich-failures review)' },
   { key: 'GITHUB_TOKEN', disables: 'orphan-triage job (GitHub issue filing)' },
   { key: 'ANTHROPIC_API_KEY', disables: 'orphan-triage job (LLM analysis; not needed if TRIAGE_LLM_PROVIDER=openai)' },
+  { key: 'GOOGLE_CSE_KEY', disables: 'Google fallback resolver for 0-candidate lookups (#139)' },
 ] as const satisfies ReadonlyArray<{ key: keyof Env; disables: string }>;
 
 // Expected keys that are unset or empty-string in the parsed env.

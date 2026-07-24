@@ -118,6 +118,7 @@ describe('missingExpectedKeys', () => {
         'ADMIN_TELEGRAM_ID',
         'ANTHROPIC_API_KEY',
         'GITHUB_TOKEN',
+        'GOOGLE_CSE_KEY',
         'UNTAPPD_SESSION_COOKIE',
         'WEBSHARE_PROXY',
       ],
@@ -132,6 +133,7 @@ describe('missingExpectedKeys', () => {
       ADMIN_API_TOKEN: 't',
       GITHUB_TOKEN: 'gh',
       ANTHROPIC_API_KEY: 'sk-ant',
+      GOOGLE_CSE_KEY: 'gk',
     });
     expect(missingExpectedKeys(env)).toEqual([]);
   });
@@ -208,5 +210,26 @@ describe('env: orphan-triage job', () => {
       TRIAGE_LLM_PROVIDER: 'openai',
     });
     expect(missingExpectedKeys(env).map((k) => k.key)).toContain('ANTHROPIC_API_KEY');
+  });
+});
+
+describe('GOOGLE_CSE config', () => {
+  const base = {
+    TELEGRAM_BOT_TOKEN: '0123456789',
+    DATABASE_PATH: '/tmp/x.db',
+    OSRM_BASE_URL: 'http://localhost',
+    NOMINATIM_USER_AGENT: 'ua',
+  };
+
+  it('defaults GOOGLE_CSE_DAILY_CAP to 90 and leaves keys optional', () => {
+    const env = loadEnv({ ...base } as never);
+    expect(env.GOOGLE_CSE_KEY).toBeUndefined();
+    expect(env.GOOGLE_CSE_CX).toBeUndefined();
+    expect(env.GOOGLE_CSE_DAILY_CAP).toBe(90);
+  });
+
+  it('coerces GOOGLE_CSE_DAILY_CAP from string', () => {
+    const env = loadEnv({ ...base, GOOGLE_CSE_DAILY_CAP: '50' } as never);
+    expect(env.GOOGLE_CSE_DAILY_CAP).toBe(50);
   });
 });

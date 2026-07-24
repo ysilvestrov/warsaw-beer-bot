@@ -18,6 +18,7 @@ export interface BeerRow extends BeerInput {
   untappd_lookup_count: number;
   rating_refresh_at: string | null;
   rating_refresh_count: number;
+  google_tried_at: string | null;
 }
 
 export function upsertBeer(db: DB, b: BeerInput): number {
@@ -276,4 +277,15 @@ export function listRatingRefreshCandidates(
   );
 
   return eligible.slice(0, limit);
+}
+
+export function readGoogleTriedAt(db: DB, beerId: number): string | null {
+  const row = db
+    .prepare('SELECT google_tried_at FROM beers WHERE id = ?')
+    .get(beerId) as { google_tried_at: string | null } | undefined;
+  return row?.google_tried_at ?? null;
+}
+
+export function stampGoogleTried(db: DB, beerId: number, iso: string): void {
+  db.prepare('UPDATE beers SET google_tried_at = ? WHERE id = ?').run(iso, beerId);
 }

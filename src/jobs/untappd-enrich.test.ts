@@ -172,6 +172,32 @@ describe('enrichOneOrphan', () => {
     expect(searchCalled).toBe(false);
   });
 
+  test('applies the Google fallback when the normal lookup yields 0 candidates', async () => {
+    const db = fresh();
+    const beerId = upsertBeer(db, {
+      name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', brewery: 'Maryensztadt',
+      style: null, abv: 11.5, rating_global: null,
+      normalized_name: 'ice brett porter double ba suszona sliwka i cynamon',
+      normalized_brewery: 'maryensztadt',
+    });
+    const search = fakeSearch([]);
+    const fallback = async () => ({
+      bid: 5158585,
+      beer_name: 'Barrel Aged Project: Ice Imperial Brett Baltic Porter Double Barrel Aged Dry Plum & Cinnamon',
+      brewery_name: 'Maryensztadt',
+      style: null, abv: 11.5, global_rating: null,
+    });
+
+    const outcome = await enrichOneOrphan(
+      { db, log: silentLog, search, googleFallback: fallback },
+      beerId,
+    );
+
+    expect(outcome).toBe('matched');
+    const row = getBeer(db, beerId);
+    expect(row?.untappd_id).toBe(5158585);
+  });
+
   test('blocked: returns "blocked" and records nothing (no backoff mutation)', async () => {
     const db = fresh();
     const id = upsertBeer(db, {

@@ -6,7 +6,7 @@ import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
-import type { ApiEnv } from '../types';
+import type { ApiDeps, ApiEnv } from '../types';
 import {
   BEER_TEXT_LIMIT_CHARS,
   ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
@@ -15,13 +15,13 @@ import {
   PAGE_URL_LIMIT_CHARS,
 } from '../middleware/payload-limit';
 
-function setup() {
+function setup(depsOverride?: Partial<ApiDeps>) {
   const db = openDb(':memory:');
   migrate(db);
   const warn = vi.fn();
   const log = { ...pino({ level: 'silent' }), warn } as never;
   const app = new Hono<ApiEnv>();
-  enrichRoute(app, { db, env: {} as never, log });
+  enrichRoute(app, { db, env: {} as never, log, ...depsOverride });
   return { db, app, warn };
 }
 
@@ -297,6 +297,30 @@ describe('POST /enrich/result', () => {
     )!;
     const fail = db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
     expect(fail.source_url).toBe('https://beerfreak.org/p/abc');
+  });
+
+  it('applies Google fallback on /enrich/result when the relayed search is empty', async () => {
+    const googleFallback = async () => ({
+      bid: 5158585,
+      beer_name: 'Barrel Aged Project: Ice Imperial Brett Baltic Porter Double Barrel Aged Dry Plum & Cinnamon',
+      brewery_name: 'Maryensztadt',
+      style: null, abv: 11.5, global_rating: null,
+    });
+    const { db, app } = setup({ googleFallback });
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Maryensztadt',
+      name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon',
+      algolia: { hits: [] }, // relayed 0 candidates
+      pageUrl: 'https://shop.example/x',
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toMatchObject({ status: 'matched', untappd_id: 5158585 });
+
+    const row = findBeerByNormalized(
+      db, normalizeBrewery('Maryensztadt'), normalizeName('Ice Brett Porter Double BA Suszona Śliwka i Cynamon'),
+    )!;
+    expect(getBeer(db, row.id)!.untappd_id).toBe(5158585);
   });
 
   it('reports blocked without mutating backoff when Untappd serves a block page', async () => {

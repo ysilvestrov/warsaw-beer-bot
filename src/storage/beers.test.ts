@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer, findBeerByNormalized, loadCatalog } from './beers';
+import { upsertBeer, findBeerByNormalized, loadCatalog, readGoogleTriedAt, stampGoogleTried } from './beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 function fresh() {
@@ -592,5 +592,19 @@ describe('loadCatalog', () => {
       id, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85,
       untappd_id: 9001,
     });
+  });
+});
+
+describe('google_tried_at', () => {
+  it('is null until stamped, then reads back the stamp', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const id = upsertBeer(db, {
+      name: 'X', brewery: 'Y', normalized_name: 'x', normalized_brewery: 'y',
+    });
+    expect(readGoogleTriedAt(db, id)).toBeNull();
+    stampGoogleTried(db, id, '2026-07-24T10:00:00.000Z');
+    expect(readGoogleTriedAt(db, id)).toBe('2026-07-24T10:00:00.000Z');
+    db.close();
   });
 });

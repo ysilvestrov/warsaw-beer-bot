@@ -244,6 +244,16 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN retired_at TEXT;
     `,
   },
+  {
+    version: 19,
+    sql: `
+      ALTER TABLE beers ADD COLUMN google_tried_at TEXT;
+      CREATE TABLE google_quota (
+        day   TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 0
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

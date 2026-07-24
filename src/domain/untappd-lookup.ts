@@ -100,7 +100,7 @@ function coverageScore(needles: string[], haystack: string[]): number | null {
   return total / needles.length;
 }
 
-function hasLongSharedToken(a: string[], b: string[]): boolean {
+export function hasLongSharedToken(a: string[], b: string[]): boolean {
   return a.some((left) =>
     left.length >= LONG_TOKEN_LENGTH &&
     b.some((right) => right.length >= LONG_TOKEN_LENGTH && fuzzy(left, right) >= NEAR_TOKEN_SIM),
