@@ -45,13 +45,14 @@ describe('parseCseResponse', () => {
 
 describe('createGoogleResolver', () => {
   it('calls the CSE endpoint with key/cx/q and parses the result', async () => {
-    const fetchImpl = vi.fn(async () =>
+    const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify(MARYENSZTADT_CSE), { status: 200 }),
-    ) as unknown as typeof fetch;
+    );
+    const fetchImpl = fetchMock as unknown as typeof fetch;
     const r = createGoogleResolver({ key: 'K', cx: 'C', fetchImpl });
     const out = await r.resolve('Maryensztadt', 'BA Suszona Śliwka');
     expect(out[0].bid).toBe(5158585);
-    const calledUrl = (fetchImpl as unknown as vi.Mock).mock.calls[0][0] as string;
+    const calledUrl = fetchMock.mock.calls[0][0] as string;
     expect(calledUrl).toContain('key=K');
     expect(calledUrl).toContain('cx=C');
     expect(calledUrl).toContain('q=Maryensztadt');
