@@ -24,6 +24,21 @@ describe('schema migrations', () => {
     expect(() => migrate(db)).not.toThrow();
   });
 
+  it('v19 creates google_quota and adds beers.google_tried_at', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    const cols = (db.prepare(`PRAGMA table_info(beers)`).all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain('google_tried_at');
+
+    const quotaCols = (db.prepare(`PRAGMA table_info(google_quota)`).all() as { name: string }[]).map((c) => c.name);
+    expect(quotaCols).toEqual(['day', 'count']);
+
+    const version = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
+    expect(version).toBeGreaterThanOrEqual(19);
+    db.close();
+  });
+
   it('migration v3 adds user_profiles.language column', () => {
     const db = openDb(':memory:');
     migrate(db);
