@@ -13,6 +13,7 @@ import { createCircuitBreaker } from '../domain/untappd-circuit';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import type { BeerSearch } from '../sources/untappd/search';
+import { getMatch, upsertMatch } from '../storage/match_links';
 
 // Wrap upsertBeer in a spy while keeping the real implementation (and every other
 // export, e.g. listLookupCandidates) intact. Lets the orphan-reuse test assert that a
@@ -121,6 +122,49 @@ describe('refreshOntap non-beer filtering', () => {
       'Chyliczki',
       'Vilniaus Alus Brewery',
     ]);
+  });
+
+  test('leaves a pinned tap link untouched instead of re-matching it', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+
+    // Canonical target beer (already matched) + a curated pin whose ontap_ref does NOT
+    // describe it, so normal matching would re-orphan the tap and clobber the link.
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
+      style: null, abv: null, rating_global: 4.1,
+      normalized_name: normalizeName('Banany Na Rauszu 2026'),
+      normalized_brewery: normalizeBrewery('ReCraft'),
+    });
+    upsertMatch(db, 'Urodzinowe', canonicalId, 1.0);
+    db.prepare("UPDATE match_links SET reviewed_by_user = 1 WHERE ontap_ref = 'Urodzinowe'").run();
+
+    const indexHtml = `
+      <div onclick="location.assign('https://mixed.ontap.pl/')">
+        <div class="panel-body">Mixed Pub 1 taps</div>
+      </div>
+    `;
+    const pubHtml = `
+      <html><head><meta property="og:title" content="Mixed Pub / ontap.pl"></head>
+      <body>${panel(1, 'Recraft', 'Urodzinowe 5%', 'Ale')}</body></html>
+    `;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return indexHtml;
+        if (url === 'https://mixed.ontap.pl/') return pubHtml;
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder: async () => null,
+      lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+    });
+
+    const link = getMatch(db, 'Urodzinowe');
+    expect(link?.untappd_beer_id).toBe(canonicalId);
+    expect(link?.reviewed_by_user).toBe(1);
+    expect(db.prepare("SELECT COUNT(*) AS n FROM beers WHERE name = 'Urodzinowe'").get()).toEqual({ n: 0 });
   });
 
   test('keeps N/A in the snapshot without creating catalog or match rows', async () => {

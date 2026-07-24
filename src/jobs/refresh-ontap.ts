@@ -8,7 +8,7 @@ import { isOntapNonBeerTap } from '../sources/ontap/non-beer';
 import { isOntapEmptyTapRef, normalizeOntapTapIdentity, parsePubPage } from '../sources/ontap/pub';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
-import { upsertMatch } from '../storage/match_links';
+import { upsertMatch, getMatch } from '../storage/match_links';
 import { upsertBeer, getBeer } from '../storage/beers';
 import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
@@ -99,6 +99,11 @@ export async function refreshOntap(deps: Deps): Promise<void> {
 
         for (const t of taps) {
           if (isOntapEmptyTapRef(t.beer_ref)) continue;
+          // Curated pin: a human fixed this tap's Untappd link (reviewed_by_user = 1).
+          // Never recompute it — the tap row is already persisted by insertTaps above,
+          // and the pinned target beer stays in the catalog for other taps to match.
+          const pinned = getMatch(db, t.beer_ref);
+          if (pinned?.reviewed_by_user) continue;
           const identity = normalizeOntapTapIdentity(t.brewery_ref, t.beer_ref);
           if (!identity) continue;
           const { brewery, name } = identity;

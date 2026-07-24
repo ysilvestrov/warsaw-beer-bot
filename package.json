@@ -12,6 +12,7 @@
     "alias-key": "tsx scripts/brewery-alias-key.ts",
     "rearm-aliased-orphans": "tsx scripts/rearm-aliased-orphans.ts",
     "rearm-matcher-bug-orphans": "tsx scripts/rearm-matcher-bug-orphans.ts",
+    "pin-match": "tsx scripts/pin-match.ts",
     "retire-resolved-orphans": "tsx scripts/retire-resolved-orphans.ts",
     "render-docs": "tsx scripts/render-docs.ts"
   },

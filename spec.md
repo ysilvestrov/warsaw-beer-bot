@@ -258,11 +258,23 @@ src/
 | `ontap_ref` | TEXT | NOT NULL UNIQUE | сире посилання з крана |
 | `untappd_beer_id` | INTEGER | → `beers(id)`, nullable | **локальний `beers.id`** (історична назва) |
 | `confidence` | REAL | NOT NULL | 1.0 = exact/parser-choice, <1 = fuzzy score |
-| `reviewed_by_user` | INTEGER | NOT NULL DEFAULT 0 | прапор ручної ревізії |
+| `reviewed_by_user` | INTEGER | NOT NULL DEFAULT 0 | `1` = **курований пін** (ручний матч, який ingest ніколи не переобраховує) |
 
 > ⚠️ **Gotcha:** `untappd_beer_id` — це **локальний `beers.id`**, а не Untappd-id;
 > він заповнений навіть для orphan-рядків. Реальний статус матчингу читати з
 > `beers.untappd_id`, не з наявності match-link.
+
+**Куровані піни (`reviewed_by_user = 1`).** Для пива, чия назва в магазині розходиться
+з Untappd так, що жоден алгоритм не наведе місток (напр. магазинне `Urodzinowe`, яке в
+Untappd — `Banany Na Rauszu 2026`), людина фіксує матч вручну. Ingest (`refresh-ontap`)
+**ніколи не переобраховує** кран із пінованим лінком, а enrich-крон його не чіпає (пінований
+рядок уже не orphan). Піни створюються/знімаються/переглядаються тулою `npm run pin-match`
+(`--beer/--untappd` для піна, `--unpin --ref/--beer`, `--list`). Два випадки на рівні даних:
+якщо цільовий Untappd-bid уже належить канонічному рядку — лінк(и) orphan'а
+**перенаправляються** на канонічний рядок і orphan видаляється (merge); якщо bid новий —
+`untappd_id` виставляється на власному рядку orphan'а. Пін ключується на сирому рядку назви
+крана (`ontap_ref`): якщо магазин згодом перевикористає **той самий** рядок для **іншого**
+пива, пін треба зняти вручну — він не самокоригується.
 
 ### 3.7 `untappd_had` — per-user trailing-25 «вже пив» (v4)
 | Поле | Тип | Обмеження | Опис |
