@@ -16,6 +16,7 @@ export const CITIES: readonly City[] = [
   { slug: 'gdansk', label: 'Gdańsk' },
   { slug: 'lodz', label: 'Łódź' },
   { slug: 'katowice', label: 'Katowice' },
+  { slug: 'lublin', label: 'Lublin' },
 ];
 
 export const DEFAULT_CITY = 'warszawa';
