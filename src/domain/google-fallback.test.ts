@@ -136,3 +136,52 @@ describe('runGoogleFallback', () => {
     db.close();
   });
 });
+
+import { lookupWithFallback } from './google-fallback';
+import type { LookupOutcome } from './untappd-lookup';
+
+describe('lookupWithFallback', () => {
+  const matched: LookupOutcome = {
+    kind: 'matched',
+    result: { bid: 1, beer_name: 'A', brewery_name: 'B', style: null, abv: null, global_rating: null },
+  };
+  const notFoundEmpty: LookupOutcome = { kind: 'not_found', searchUrls: ['u'], candidates: [] };
+  const notFoundWithCands: LookupOutcome = {
+    kind: 'not_found',
+    searchUrls: ['u'],
+    candidates: [{ bid: 9, beer_name: 'X', brewery_name: 'Y', style: null, abv: null, global_rating: null }],
+  };
+
+  it('passes through a matched outcome without invoking the fallback', async () => {
+    const fb = vi.fn();
+    const out = await lookupWithFallback(async () => matched, 1, fb);
+    expect(out).toBe(matched);
+    expect(fb).not.toHaveBeenCalled();
+  });
+
+  it('does NOT invoke the fallback when candidates were non-empty (matcher rejection)', async () => {
+    const fb = vi.fn();
+    const out = await lookupWithFallback(async () => notFoundWithCands, 1, fb);
+    expect(out).toBe(notFoundWithCands);
+    expect(fb).not.toHaveBeenCalled();
+  });
+
+  it('invokes the fallback on not_found + empty candidates and upgrades to matched', async () => {
+    const sr = { bid: 5158585, beer_name: 'A', brewery_name: 'B', style: null, abv: 11.5, global_rating: null };
+    const fb = vi.fn(async () => sr);
+    const out = await lookupWithFallback(async () => notFoundEmpty, 42, fb);
+    expect(out).toEqual({ kind: 'matched', result: sr });
+    expect(fb).toHaveBeenCalledWith(42);
+  });
+
+  it('keeps the original not_found when the fallback yields null', async () => {
+    const fb = vi.fn(async () => null);
+    const out = await lookupWithFallback(async () => notFoundEmpty, 42, fb);
+    expect(out).toBe(notFoundEmpty);
+  });
+
+  it('is a no-op passthrough when fallback is null (feature-flag off)', async () => {
+    const out = await lookupWithFallback(async () => notFoundEmpty, 42, null);
+    expect(out).toBe(notFoundEmpty);
+  });
+});

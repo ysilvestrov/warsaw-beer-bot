@@ -13,6 +13,7 @@ import {
   intersects,
 } from './matcher';
 import { hasLongSharedToken } from './untappd-lookup';
+import type { LookupOutcome } from './untappd-lookup';
 import { fuzzy } from 'fast-fuzzy';
 import type { ResolvedBeer, WebResolver } from '../sources/google/resolver';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
@@ -132,4 +133,20 @@ export async function runGoogleFallback(
     if (abvCorroborates(input.abv, abv)) return toSearchResult({ ...cand, abv });
   }
   return null;
+}
+
+// Runs `doLookup` (the normal matcher), and ONLY when it returns not_found with
+// zero candidates — a genuine query-zeroing, not a matcher rejection of real
+// candidates — invokes the Google fallback. A fallback hit upgrades the outcome
+// to matched; a miss (or fallback === null) leaves the original outcome intact.
+export async function lookupWithFallback(
+  doLookup: () => Promise<LookupOutcome>,
+  beerId: number,
+  fallback: ((beerId: number) => Promise<SearchResult | null>) | null,
+): Promise<LookupOutcome> {
+  const outcome = await doLookup();
+  if (!fallback) return outcome;
+  if (outcome.kind !== 'not_found' || outcome.candidates.length > 0) return outcome;
+  const sr = await fallback(beerId);
+  return sr ? { kind: 'matched', result: sr } : outcome;
 }
