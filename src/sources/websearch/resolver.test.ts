@@ -22,12 +22,34 @@ describe('parseBraveResponse', () => {
     expect(parseBraveResponse(brave).every((r) => r.abv === null)).toBe(true);
   });
 
-  it('dedupes /photos twins by bid, keeping the canonical page', () => {
+  it('drops Untappd sub-pages rather than depending on them ranking below the canonical page', () => {
     const out = parseBraveResponse(brave);
     const gose = out.filter((r) => r.bid === 3809861);
     expect(gose).toHaveLength(1);
-    // The canonical result comes first in Brave's ranking, so its clean brewery
-    // survives instead of the "Trzech Kumpli | Photos" garble of the twin.
+    // The /photos twin is excluded by URL shape (bidFromLink only matches the
+    // canonical `/b/<slug>/<digits>` path), not because it happens to rank
+    // below the canonical page — so its "Trzech Kumpli | Photos" garble never
+    // has a chance to be picked up in the first place.
+    expect(gose[0].brewery_name).toBe('Trzech Kumpli');
+  });
+
+  it('drops the canonical result and its /photos twin the same way regardless of which ranks first', () => {
+    const out = parseBraveResponse({
+      web: {
+        results: [
+          {
+            title: 'Gose | Mango i Marakuja - Trzech Kumpli | Photos - Untappd',
+            url: 'https://untappd.com/b/trzech-kumpli-gose-mango-i-marakuja/3809861/photos',
+          },
+          {
+            title: 'Gose z mango i marakują - Trzech Kumpli - Untappd',
+            url: 'https://untappd.com/b/trzech-kumpli-gose-z-mango-i-marakuja/3809861',
+          },
+        ],
+      },
+    });
+    const gose = out.filter((r) => r.bid === 3809861);
+    expect(gose).toHaveLength(1);
     expect(gose[0].brewery_name).toBe('Trzech Kumpli');
   });
 

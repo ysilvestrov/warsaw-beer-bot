@@ -19,9 +19,12 @@ export interface BraveResponse {
 }
 
 // Untappd beer pages are `/b/<slug>/<digits>` — same shape parsed in search.ts.
+// The bid must END the path segment (only a `?query`, `#fragment`, or end-of-
+// string may follow): this excludes sub-pages like `/b/<slug>/<digits>/photos`,
+// which carry the same bid but a garbled title (see parseBraveResponse below).
 function bidFromLink(link: unknown): number | null {
   if (typeof link !== 'string') return null;
-  const m = link.match(/\/b\/[^/]+\/(\d+)\b/);
+  const m = link.match(/\/b\/[^/]+\/(\d+)(?:[?#]|$)/);
   if (!m) return null;
   const n = parseInt(m[1], 10);
   return Number.isFinite(n) ? n : null;
@@ -44,8 +47,11 @@ function splitTitle(title: unknown): { beer_name: string; brewery_name: string }
 
 // Brave surfaces `/photos` (and similar) sub-pages as separate results carrying
 // the SAME bid as the canonical page, with a garbled brewery segment
-// ("Trzech Kumpli | Photos"). Keep the first occurrence: Brave ranks the
-// canonical page above its sub-pages.
+// ("Trzech Kumpli | Photos") that can never pass the downstream brewery gate
+// (src/domain/web-fallback.ts). bidFromLink already excludes them by URL shape,
+// so they never reach this loop — the `seen` Set below is just a belt-and-braces
+// guard against Brave returning the same canonical URL twice (e.g. with
+// different query strings), not the mechanism that drops sub-pages.
 export function parseBraveResponse(json: BraveResponse): ResolvedBeer[] {
   if (!json || typeof json !== 'object') return [];
   const results = Array.isArray(json.web?.results) ? json.web!.results! : [];
