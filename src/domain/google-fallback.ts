@@ -1,8 +1,8 @@
 // src/domain/google-fallback.ts
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { readGoogleTriedAt, stampGoogleTried } from '../storage/beers';
-import { tryConsumeGoogleQuota } from '../storage/google_quota';
+import { readWebTriedAt, stampWebTried } from '../storage/beers';
+import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
 import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
 import {
@@ -108,21 +108,21 @@ export async function runGoogleFallback(
   const now = (deps.now ?? (() => new Date()))();
 
   // Per-beer cooldown: don't re-spend Google on the same orphan within 30 days.
-  const triedAt = readGoogleTriedAt(deps.db, input.beerId);
+  const triedAt = readWebTriedAt(deps.db, input.beerId);
   if (triedAt) {
     const ageDays = (now.getTime() - new Date(triedAt).getTime()) / 86_400_000;
     if (ageDays < RE_GOOGLE_COOLDOWN_DAYS) return null;
   }
 
   // Daily budget guard (UTC day). Consume BEFORE the network call.
-  if (!tryConsumeGoogleQuota(deps.db, utcDay(now), deps.cap)) return null;
+  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) return null;
 
   let candidates: ResolvedBeer[];
   try {
     candidates = await deps.resolver.resolve(input.brewery, input.name);
   } finally {
     // A spent call marks the beer regardless of outcome (accept or reject).
-    stampGoogleTried(deps.db, input.beerId, now.toISOString());
+    stampWebTried(deps.db, input.beerId, now.toISOString());
   }
 
   for (const cand of candidates) {

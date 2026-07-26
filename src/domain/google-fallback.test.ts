@@ -78,7 +78,7 @@ describe('runGoogleFallback', () => {
   };
   const input = { brewery: 'Maryensztadt', name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', abv: 11.5 };
 
-  it('returns a matched SearchResult, spends quota, and stamps google_tried_at', async () => {
+  it('returns a matched SearchResult, spends quota, and stamps web_tried_at', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
@@ -86,29 +86,29 @@ describe('runGoogleFallback', () => {
 
     const sr = await runGoogleFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
-    expect((db.prepare('SELECT count FROM google_quota').get() as { count: number }).count).toBe(1);
-    expect(db.prepare('SELECT google_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
     db.close();
   });
 
-  it('skips (no quota spent) when google_tried_at is within cooldown', async () => {
+  it('skips (no quota spent) when web_tried_at is within cooldown', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
-    db.prepare('UPDATE beers SET google_tried_at = ? WHERE id = ?').run('2026-07-20T12:00:00.000Z', beerId);
+    db.prepare('UPDATE beers SET web_tried_at = ? WHERE id = ?').run('2026-07-20T12:00:00.000Z', beerId);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
     const now = () => new Date('2026-07-24T12:00:00Z'); // 4 days later < 30d cooldown
 
     const sr = await runGoogleFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr).toBeNull();
     expect(resolver.resolve).not.toHaveBeenCalled();
-    expect(db.prepare('SELECT COUNT(*) AS c FROM google_quota').get()).toMatchObject({ c: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS c FROM web_search_quota').get()).toMatchObject({ c: 0 });
     db.close();
   });
 
   it('returns null without calling the resolver when the day is at cap', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
-    db.prepare('INSERT INTO google_quota(day, count) VALUES (?, ?)').run('2026-07-24', 90);
+    db.prepare('INSERT INTO web_search_quota(day, count) VALUES (?, ?)').run('2026-07-24', 90);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
     const now = () => new Date('2026-07-24T12:00:00Z');
 

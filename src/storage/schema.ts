@@ -254,6 +254,13 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 20,
+    sql: `
+      ALTER TABLE google_quota RENAME TO web_search_quota;
+      ALTER TABLE beers RENAME COLUMN google_tried_at TO web_tried_at;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
