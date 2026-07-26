@@ -46,6 +46,22 @@ describe('loadEnv', () => {
     const env = loadEnv(baseEnv);
     expect(env.ADMIN_API_TOKEN).toBeUndefined();
   });
+
+  it('WEB_SEARCH_DAILY_CAP defaults to 30', () => {
+    const env = loadEnv(baseEnv);
+    expect(env.WEB_SEARCH_DAILY_CAP).toBe(30);
+  });
+
+  it('WEB_SEARCH_DAILY_CAP parses an override', () => {
+    const env = loadEnv({ ...baseEnv, WEB_SEARCH_DAILY_CAP: '10' });
+    expect(env.WEB_SEARCH_DAILY_CAP).toBe(10);
+  });
+
+  it('reports BRAVE_API_KEY as an expected prod key that disables the #139 fallback', () => {
+    expect(EXPECTED_PROD_KEYS.map((k) => k.key)).toContain('BRAVE_API_KEY');
+    expect(EXPECTED_PROD_KEYS.map((k) => k.key)).not.toContain('GOOGLE_CSE_KEY');
+    expect(missingExpectedKeys(loadEnv(baseEnv)).map((k) => k.key)).toContain('BRAVE_API_KEY');
+  });
 });
 
 describe('env: proxy + block threshold', () => {
@@ -117,8 +133,8 @@ describe('missingExpectedKeys', () => {
         'ADMIN_API_TOKEN',
         'ADMIN_TELEGRAM_ID',
         'ANTHROPIC_API_KEY',
+        'BRAVE_API_KEY',
         'GITHUB_TOKEN',
-        'GOOGLE_CSE_KEY',
         'UNTAPPD_SESSION_COOKIE',
         'WEBSHARE_PROXY',
       ],
@@ -133,7 +149,7 @@ describe('missingExpectedKeys', () => {
       ADMIN_API_TOKEN: 't',
       GITHUB_TOKEN: 'gh',
       ANTHROPIC_API_KEY: 'sk-ant',
-      GOOGLE_CSE_KEY: 'gk',
+      BRAVE_API_KEY: 'bk',
     });
     expect(missingExpectedKeys(env)).toEqual([]);
   });
@@ -213,7 +229,7 @@ describe('env: orphan-triage job', () => {
   });
 });
 
-describe('GOOGLE_CSE config', () => {
+describe('BRAVE_API_KEY config', () => {
   const base = {
     TELEGRAM_BOT_TOKEN: '0123456789',
     DATABASE_PATH: '/tmp/x.db',
@@ -221,15 +237,13 @@ describe('GOOGLE_CSE config', () => {
     NOMINATIM_USER_AGENT: 'ua',
   };
 
-  it('defaults GOOGLE_CSE_DAILY_CAP to 90 and leaves keys optional', () => {
+  it('BRAVE_API_KEY is optional and undefined when absent', () => {
     const env = loadEnv({ ...base } as never);
-    expect(env.GOOGLE_CSE_KEY).toBeUndefined();
-    expect(env.GOOGLE_CSE_CX).toBeUndefined();
-    expect(env.GOOGLE_CSE_DAILY_CAP).toBe(90);
+    expect(env.BRAVE_API_KEY).toBeUndefined();
   });
 
-  it('coerces GOOGLE_CSE_DAILY_CAP from string', () => {
-    const env = loadEnv({ ...base, GOOGLE_CSE_DAILY_CAP: '50' } as never);
-    expect(env.GOOGLE_CSE_DAILY_CAP).toBe(50);
+  it('BRAVE_API_KEY passes through when set', () => {
+    const env = loadEnv({ ...base, BRAVE_API_KEY: 'brave-key' } as never);
+    expect(env.BRAVE_API_KEY).toBe('brave-key');
   });
 });
