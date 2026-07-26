@@ -20,7 +20,7 @@ import {
   type AlgoliaResponse,
 } from '../../sources/untappd/algolia';
 import { lookupBeer } from '../../domain/untappd-lookup';
-import { lookupWithFallback } from '../../domain/google-fallback';
+import { lookupWithFallback } from '../../domain/web-fallback';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
 import {
   BEER_TEXT_LIMIT_CHARS,
@@ -128,7 +128,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const outcome = await lookupWithFallback(
       () => lookupBeer({ brewery, name, abv: row.abv, search }),
       row.id,
-      deps.googleFallback ?? null,
+      deps.webFallback ?? null,
     );
     const nowIso = new Date().toISOString();
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.

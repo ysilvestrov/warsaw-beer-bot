@@ -29,9 +29,9 @@ export interface EnrichOrphansDeps {
   sleep?: (ms: number) => Promise<void>;   // for tests
   now?: () => Date;             // for tests
   breaker?: CircuitBreaker;     // default noopBreaker
-  // Optional Google 0-candidate fallback (null/undefined when unconfigured);
+  // Optional web 0-candidate fallback (null/undefined when unconfigured);
   // forwarded straight through to enrichOneOrphan.
-  googleFallback?: ((beerId: number) => Promise<SearchResult | null>) | null;
+  webFallback?: ((beerId: number) => Promise<SearchResult | null>) | null;
 }
 
 const ZERO_RESULT: EnrichOrphansResult = {
@@ -82,7 +82,7 @@ export async function enrichOrphans(
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
     const kind = await enrichOneOrphan(
-      { db: deps.db, log: deps.log, search: deps.search, now, googleFallback: deps.googleFallback },
+      { db: deps.db, log: deps.log, search: deps.search, now, webFallback: deps.webFallback },
       c.id,
     );
     if (kind === 'blocked') {

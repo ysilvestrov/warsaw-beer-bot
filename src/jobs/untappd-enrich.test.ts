@@ -172,7 +172,7 @@ describe('enrichOneOrphan', () => {
     expect(searchCalled).toBe(false);
   });
 
-  test('applies the Google fallback when the normal lookup yields 0 candidates', async () => {
+  test('applies the web fallback when the normal lookup yields 0 candidates', async () => {
     const db = fresh();
     const beerId = upsertBeer(db, {
       name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', brewery: 'Maryensztadt',
@@ -189,7 +189,7 @@ describe('enrichOneOrphan', () => {
     });
 
     const outcome = await enrichOneOrphan(
-      { db, log: silentLog, search, googleFallback: fallback },
+      { db, log: silentLog, search, webFallback: fallback },
       beerId,
     );
 
