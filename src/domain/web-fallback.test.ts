@@ -1,22 +1,22 @@
-// src/domain/google-fallback.test.ts
+// src/domain/web-fallback.test.ts
 import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
-import { gateGoogleCandidate, runGoogleFallback } from './google-fallback';
-import type { ResolvedBeer, WebResolver } from '../sources/google/resolver';
+import { gateWebCandidate, runWebFallback } from './web-fallback';
+import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch } from '../sources/untappd/search';
 import pino from 'pino';
 
 const log = pino({ level: 'silent' });
 const noHydrate: BeerSearch = { search: async () => [] };
 
-describe('gateGoogleCandidate (refined B1)', () => {
+describe('gateWebCandidate (refined B1)', () => {
   const input = { brewery: 'Maryensztadt', name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', abv: 11.5 };
 
   it('accepts same-language name-gate hit regardless of abv', () => {
     const cand: ResolvedBeer = { bid: 1000186, beer_name: 'Pan IPAni', brewery_name: 'Trzech Kumpli', abv: null };
-    expect(gateGoogleCandidate({ brewery: 'Trzech Kumpli', name: 'PanIPAni', abv: null }, cand)).toBe(true);
+    expect(gateWebCandidate({ brewery: 'Trzech Kumpli', name: 'PanIPAni', abv: null }, cand)).toBe(true);
   });
 
   it('accepts cross-language candidate on token overlap + abv corroboration', () => {
@@ -26,17 +26,17 @@ describe('gateGoogleCandidate (refined B1)', () => {
       brewery_name: 'Maryensztadt',
       abv: 11.5,
     };
-    expect(gateGoogleCandidate(input, cand)).toBe(true);
+    expect(gateWebCandidate(input, cand)).toBe(true);
   });
 
   it('rejects same-brewery wrong-name beer (Artezan case) even if abv coincides', () => {
     const cand: ResolvedBeer = { bid: 2552312, beer_name: 'Te Czasy Się Skończyły', brewery_name: 'Browar Artezan', abv: 11.5 };
-    expect(gateGoogleCandidate({ brewery: 'Artezan', name: 'Święty Spokój', abv: 11.5 }, cand)).toBe(false);
+    expect(gateWebCandidate({ brewery: 'Artezan', name: 'Święty Spokój', abv: 11.5 }, cand)).toBe(false);
   });
 
   it('rejects a different brewery outright', () => {
     const cand: ResolvedBeer = { bid: 1, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', abv: 6 };
-    expect(gateGoogleCandidate({ brewery: 'Carlsberg', name: 'Grimbergen blanche', abv: 6 }, cand)).toBe(false);
+    expect(gateWebCandidate({ brewery: 'Carlsberg', name: 'Grimbergen blanche', abv: 6 }, cand)).toBe(false);
   });
 
   it('rejects token-overlap candidate when abv is out of tolerance', () => {
@@ -46,7 +46,7 @@ describe('gateGoogleCandidate (refined B1)', () => {
       brewery_name: 'Maryensztadt',
       abv: 6.0,
     };
-    expect(gateGoogleCandidate({ ...input, abv: 11.5 }, cand)).toBe(false);
+    expect(gateWebCandidate({ ...input, abv: 11.5 }, cand)).toBe(false);
   });
 
   it('rejects token-overlap candidate when input abv is missing', () => {
@@ -56,7 +56,7 @@ describe('gateGoogleCandidate (refined B1)', () => {
       brewery_name: 'Maryensztadt',
       abv: 11.5,
     };
-    expect(gateGoogleCandidate({ ...input, abv: null }, cand)).toBe(false);
+    expect(gateWebCandidate({ ...input, abv: null }, cand)).toBe(false);
   });
 });
 
@@ -69,7 +69,7 @@ function freshDb() {
   return db;
 }
 
-describe('runGoogleFallback', () => {
+describe('runWebFallback', () => {
   const cross: ResolvedBeer = {
     bid: 5158585,
     beer_name: 'Barrel Aged Project: Ice Imperial Brett Baltic Porter Double Barrel Aged Dry Plum & Cinnamon',
@@ -78,47 +78,47 @@ describe('runGoogleFallback', () => {
   };
   const input = { brewery: 'Maryensztadt', name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', abv: 11.5 };
 
-  it('returns a matched SearchResult, spends quota, and stamps google_tried_at', async () => {
+  it('returns a matched SearchResult, spends quota, and stamps web_tried_at', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
     const now = () => new Date('2026-07-24T12:00:00Z');
 
-    const sr = await runGoogleFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
-    expect((db.prepare('SELECT count FROM google_quota').get() as { count: number }).count).toBe(1);
-    expect(db.prepare('SELECT google_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
     db.close();
   });
 
-  it('skips (no quota spent) when google_tried_at is within cooldown', async () => {
+  it('skips (no quota spent) when web_tried_at is within cooldown', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
-    db.prepare('UPDATE beers SET google_tried_at = ? WHERE id = ?').run('2026-07-20T12:00:00.000Z', beerId);
+    db.prepare('UPDATE beers SET web_tried_at = ? WHERE id = ?').run('2026-07-20T12:00:00.000Z', beerId);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
     const now = () => new Date('2026-07-24T12:00:00Z'); // 4 days later < 30d cooldown
 
-    const sr = await runGoogleFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr).toBeNull();
     expect(resolver.resolve).not.toHaveBeenCalled();
-    expect(db.prepare('SELECT COUNT(*) AS c FROM google_quota').get()).toMatchObject({ c: 0 });
+    expect(db.prepare('SELECT COUNT(*) AS c FROM web_search_quota').get()).toMatchObject({ c: 0 });
     db.close();
   });
 
   it('returns null without calling the resolver when the day is at cap', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
-    db.prepare('INSERT INTO google_quota(day, count) VALUES (?, ?)').run('2026-07-24', 90);
+    db.prepare('INSERT INTO web_search_quota(day, count) VALUES (?, ?)').run('2026-07-24', 90);
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
     const now = () => new Date('2026-07-24T12:00:00Z');
 
-    const sr = await runGoogleFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr).toBeNull();
     expect(resolver.resolve).not.toHaveBeenCalled();
     db.close();
   });
 
-  it('hydrates abv from Algolia when the CSE candidate abv is null', async () => {
+  it('hydrates abv from Algolia when the resolver candidate abv is null', async () => {
     const db = freshDb();
     const beerId = seed(db, input.brewery, input.name);
     const noAbv: ResolvedBeer = { ...cross, abv: null };
@@ -130,14 +130,14 @@ describe('runGoogleFallback', () => {
     };
     const now = () => new Date('2026-07-24T12:00:00Z');
 
-    const sr = await runGoogleFallback({ db, resolver, hydrate, cap: 90, log, now }, { beerId, ...input });
+    const sr = await runWebFallback({ db, resolver, hydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
     expect(hydrate.search).toHaveBeenCalled();
     db.close();
   });
 });
 
-import { lookupWithFallback } from './google-fallback';
+import { lookupWithFallback } from './web-fallback';
 import type { LookupOutcome } from './untappd-lookup';
 
 describe('lookupWithFallback', () => {

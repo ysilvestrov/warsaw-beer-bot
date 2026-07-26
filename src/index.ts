@@ -45,8 +45,8 @@ import { createPersistentCircuitBreaker } from './domain/untappd-circuit';
 import { ALGOLIA_DEFAULTS, createAlgoliaSearch, extractAlgoliaKeys } from './sources/untappd/algolia';
 import { buildSearchUrl } from './sources/untappd/search';
 import type { SearchResult } from './sources/untappd/search';
-import { createGoogleResolver } from './sources/google/resolver';
-import { runGoogleFallback } from './domain/google-fallback';
+import { createBraveResolver } from './sources/websearch/resolver';
+import { runWebFallback } from './domain/web-fallback';
 import { getBeer } from './storage/beers';
 import { createShutdown } from './shutdown';
 import { interruptActiveProgress } from './bot/active-progress';
@@ -98,25 +98,22 @@ async function main(): Promise<void> {
       return extractAlgoliaKeys(html);
     },
   });
-  // Google 0-candidate fallback (#139). Enabled only when both CSE keys are set;
-  // otherwise null → lookupWithFallback is a passthrough (zero behaviour change).
-  const googleFallback: ((beerId: number) => Promise<SearchResult | null>) | null =
-    env.GOOGLE_CSE_KEY && env.GOOGLE_CSE_CX
-      ? (beerId: number) => {
-          const beer = getBeer(db, beerId);
-          if (!beer) return Promise.resolve(null);
-          return runGoogleFallback(
-            {
-              db,
-              resolver: createGoogleResolver({ key: env.GOOGLE_CSE_KEY!, cx: env.GOOGLE_CSE_CX! }),
-              hydrate: algoliaSearch,
-              cap: env.GOOGLE_CSE_DAILY_CAP,
-              log,
-            },
-            { beerId, brewery: beer.brewery, name: beer.name, abv: beer.abv ?? null },
-          );
-        }
-      : null;
+  // Web 0-candidate fallback (#139), Brave Search. Enabled only when the API key
+  // is set; otherwise null → lookupWithFallback is a passthrough (zero behaviour
+  // change). The resolver is built ONCE and hoisted out of the per-beer closure:
+  // it owns the 1 req/s serialization gate, which a per-call instance would reset
+  // on every invocation and thus never enforce.
+  const braveResolver = env.BRAVE_API_KEY ? createBraveResolver({ key: env.BRAVE_API_KEY, log }) : null;
+  const webFallback: ((beerId: number) => Promise<SearchResult | null>) | null = braveResolver
+    ? (beerId: number) => {
+        const beer = getBeer(db, beerId);
+        if (!beer) return Promise.resolve(null);
+        return runWebFallback(
+          { db, resolver: braveResolver, hydrate: algoliaSearch, cap: env.WEB_SEARCH_DAILY_CAP, log },
+          { beerId, brewery: beer.brewery, name: beer.name, abv: beer.abv ?? null },
+        );
+      }
+    : null;
 
   const geocoder = createGeocoder({ userAgent: env.NOMINATIM_USER_AGENT });
 
@@ -242,7 +239,7 @@ async function main(): Promise<void> {
     // Bumped from '0 6,18 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
     cron.schedule('30 */3 * * *', () => {
       enrichOrphans({
-        db, log, search: algoliaSearch, googleFallback,
+        db, log, search: algoliaSearch, webFallback,
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
         breaker: algoliaBreaker,
         notifyAdmin,
@@ -317,7 +314,7 @@ async function main(): Promise<void> {
   dailyStatus({ db, log, notifyAdmin })
     .catch((e) => log.error({ err: e }, 'daily-status startup'));
 
-  const apiApp = createApiApp({ db, env, log, googleFallback });
+  const apiApp = createApiApp({ db, env, log, webFallback });
   const apiServer = createApiServer(apiApp, env, log);
 
   // Without an explicit exit, node-cron schedules and the SQLite handle keep

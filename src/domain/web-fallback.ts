@@ -1,9 +1,9 @@
-// src/domain/google-fallback.ts
+// src/domain/web-fallback.ts
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { readGoogleTriedAt, stampGoogleTried } from '../storage/beers';
-import { tryConsumeGoogleQuota } from '../storage/google_quota';
-import { pacificDay } from './pacific-day';
+import { readWebTriedAt, stampWebTried } from '../storage/beers';
+import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
+import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
 import {
   ABV_TOLERANCE,
@@ -15,11 +15,11 @@ import {
 import { hasLongSharedToken } from './untappd-lookup';
 import type { LookupOutcome } from './untappd-lookup';
 import { fuzzy } from 'fast-fuzzy';
-import type { ResolvedBeer, WebResolver } from '../sources/google/resolver';
+import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
-const RE_GOOGLE_COOLDOWN_DAYS = 30;
+const RE_WEB_COOLDOWN_DAYS = 30;
 
 interface GateInput { brewery: string; name: string; abv: number | null }
 
@@ -60,7 +60,7 @@ function abvCorroborates(a: number | null, b: number | null): boolean {
 // (same-language) OR there is distinctive token overlap AND abv corroborates
 // (cross-language). Never accept on abv alone. `cand.abv` must already be
 // hydrated by the caller before the token-overlap branch is trusted.
-export function gateGoogleCandidate(input: GateInput, cand: ResolvedBeer): boolean {
+export function gateWebCandidate(input: GateInput, cand: ResolvedBeer): boolean {
   if (!breweryStrict(input, cand)) return false;
   if (nameGatePass(input, cand)) return true;
   if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return false;
@@ -78,10 +78,10 @@ function toSearchResult(cand: ResolvedBeer): SearchResult {
   };
 }
 
-export interface GoogleFallbackDeps {
+export interface WebFallbackDeps {
   db: DB;
   resolver: WebResolver;
-  hydrate: BeerSearch; // server-side Algolia, for abv hydration only
+  hydrate: BeerSearch; // server-side Algolia — the ONLY source of candidate abv (Brave supplies none)
   cap: number;
   log: pino.Logger;
   now?: () => Date;
@@ -101,28 +101,28 @@ async function hydrateAbv(hydrate: BeerSearch, cand: ResolvedBeer): Promise<numb
   }
 }
 
-export async function runGoogleFallback(
-  deps: GoogleFallbackDeps,
+export async function runWebFallback(
+  deps: WebFallbackDeps,
   input: { beerId: number; brewery: string; name: string; abv: number | null },
 ): Promise<SearchResult | null> {
   const now = (deps.now ?? (() => new Date()))();
 
-  // Per-beer cooldown: don't re-spend Google on the same orphan within 30 days.
-  const triedAt = readGoogleTriedAt(deps.db, input.beerId);
+  // Per-beer cooldown: don't re-spend a web search on the same orphan within 30 days.
+  const triedAt = readWebTriedAt(deps.db, input.beerId);
   if (triedAt) {
     const ageDays = (now.getTime() - new Date(triedAt).getTime()) / 86_400_000;
-    if (ageDays < RE_GOOGLE_COOLDOWN_DAYS) return null;
+    if (ageDays < RE_WEB_COOLDOWN_DAYS) return null;
   }
 
-  // Daily budget guard (Pacific day). Consume BEFORE the network call.
-  if (!tryConsumeGoogleQuota(deps.db, pacificDay(now), deps.cap)) return null;
+  // Daily budget guard (UTC day). Consume BEFORE the network call.
+  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) return null;
 
   let candidates: ResolvedBeer[];
   try {
     candidates = await deps.resolver.resolve(input.brewery, input.name);
   } finally {
     // A spent call marks the beer regardless of outcome (accept or reject).
-    stampGoogleTried(deps.db, input.beerId, now.toISOString());
+    stampWebTried(deps.db, input.beerId, now.toISOString());
   }
 
   for (const cand of candidates) {
@@ -137,7 +137,7 @@ export async function runGoogleFallback(
 
 // Runs `doLookup` (the normal matcher), and ONLY when it returns not_found with
 // zero candidates — a genuine query-zeroing, not a matcher rejection of real
-// candidates — invokes the Google fallback. A fallback hit upgrades the outcome
+// candidates — invokes the web fallback. A fallback hit upgrades the outcome
 // to matched; a miss (or fallback === null) leaves the original outcome intact.
 export async function lookupWithFallback(
   doLookup: () => Promise<LookupOutcome>,

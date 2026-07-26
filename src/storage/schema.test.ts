@@ -24,18 +24,26 @@ describe('schema migrations', () => {
     expect(() => migrate(db)).not.toThrow();
   });
 
-  it('v19 creates google_quota and adds beers.google_tried_at', () => {
+  it('v20 renames the quota table and the per-beer stamp to provider-neutral names', () => {
     const db = openDb(':memory:');
     migrate(db);
 
     const cols = (db.prepare(`PRAGMA table_info(beers)`).all() as { name: string }[]).map((c) => c.name);
-    expect(cols).toContain('google_tried_at');
+    expect(cols).toContain('web_tried_at');
+    expect(cols).not.toContain('google_tried_at');
 
-    const quotaCols = (db.prepare(`PRAGMA table_info(google_quota)`).all() as { name: string }[]).map((c) => c.name);
+    const quotaCols = (db.prepare(`PRAGMA table_info(web_search_quota)`).all() as { name: string }[]).map(
+      (c) => c.name,
+    );
     expect(quotaCols).toEqual(['day', 'count']);
 
+    const tables = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]
+    ).map((t) => t.name);
+    expect(tables).not.toContain('google_quota');
+
     const version = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
-    expect(version).toBeGreaterThanOrEqual(19);
+    expect(version).toBeGreaterThanOrEqual(20);
     db.close();
   });
 
