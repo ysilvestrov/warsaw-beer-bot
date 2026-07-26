@@ -1,4 +1,6 @@
 // src/sources/websearch/resolver.ts
+import type pino from 'pino';
+
 export interface ResolvedBeer {
   bid: number;
   beer_name: string;
@@ -73,6 +75,7 @@ export interface BraveResolverOpts {
   count?: number; // results to request (default 5)
   minIntervalMs?: number; // spacing between outbound calls (default 1100)
   fetchImpl?: typeof fetch;
+  log?: Pick<pino.Logger, 'warn'>; // optional: surfaces failing calls (see resolve)
 }
 
 const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
@@ -118,9 +121,18 @@ export function createBraveResolver(opts: BraveResolverOpts): WebResolver {
             signal: AbortSignal.timeout(8000),
           }),
         );
-        if (!res.ok) return []; // 429 rate-limit / auth failure / anything → "no resolution"
+        // 429 rate-limit / auth failure / anything → "no resolution". Logged
+        // because a systematically broken key looks exactly like "nothing
+        // matched" from the caller's side: the dead Google CSE predecessor
+        // 403'd for a full day, burning quota units and 30-day cooldowns, and
+        // was only caught by a manual probe.
+        if (!res.ok) {
+          opts.log?.warn({ status: res.status }, 'brave search returned non-200');
+          return [];
+        }
         return parseBraveResponse((await res.json()) as BraveResponse);
-      } catch {
+      } catch (err) {
+        opts.log?.warn({ err }, 'brave search failed');
         return [];
       }
     },

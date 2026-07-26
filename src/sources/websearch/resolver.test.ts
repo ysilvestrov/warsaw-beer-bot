@@ -108,6 +108,29 @@ describe('createBraveResolver', () => {
     await expect(resolver.resolve('Brewery', 'Beer')).resolves.toEqual([]);
   });
 
+  it('logs a failing call so a systematically broken key is visible, not silent', async () => {
+    // A dead key looks identical to "nothing matched" from the caller's side —
+    // the Google CSE predecessor 403'd for a day before anyone noticed.
+    const warn = vi.fn();
+    const nonOk = createBraveResolver({
+      key: 'k',
+      log: { warn },
+      fetchImpl: (async () => ({ ok: false, status: 403 })) as unknown as typeof fetch,
+    });
+    await nonOk.resolve('Brewery', 'Beer');
+    expect(warn).toHaveBeenCalledWith({ status: 403 }, expect.stringContaining('non-200'));
+
+    const throws = createBraveResolver({
+      key: 'k',
+      log: { warn },
+      fetchImpl: (async () => {
+        throw new Error('ECONNRESET');
+      }) as unknown as typeof fetch,
+    });
+    await throws.resolve('Brewery', 'Beer');
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
   it('serializes concurrent calls at least minIntervalMs apart', async () => {
     const at: number[] = [];
     const fetchImpl = vi.fn(async () => {

@@ -103,7 +103,7 @@ async function main(): Promise<void> {
   // change). The resolver is built ONCE and hoisted out of the per-beer closure:
   // it owns the 1 req/s serialization gate, which a per-call instance would reset
   // on every invocation and thus never enforce.
-  const braveResolver = env.BRAVE_API_KEY ? createBraveResolver({ key: env.BRAVE_API_KEY }) : null;
+  const braveResolver = env.BRAVE_API_KEY ? createBraveResolver({ key: env.BRAVE_API_KEY, log }) : null;
   const webFallback: ((beerId: number) => Promise<SearchResult | null>) | null = braveResolver
     ? (beerId: number) => {
         const beer = getBeer(db, beerId);
