@@ -60,3 +60,60 @@ export function parseBraveResponse(json: BraveResponse): ResolvedBeer[] {
   }
   return out;
 }
+
+export interface BraveResolverOpts {
+  key: string;
+  count?: number; // results to request (default 5)
+  minIntervalMs?: number; // spacing between outbound calls (default 1100)
+  fetchImpl?: typeof fetch;
+}
+
+const BRAVE_ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
+
+export function createBraveResolver(opts: BraveResolverOpts): WebResolver {
+  const f = opts.fetchImpl ?? fetch;
+  const count = opts.count ?? 5;
+  const minIntervalMs = opts.minIntervalMs ?? 1100;
+
+  // Brave Free allows 1 request/second, and an over-rate 429 still costs us a
+  // quota unit (consumed before the call) — so calls queue on a promise chain
+  // instead of racing. The cron path is already sequential; this protects the
+  // user-driven /enrich/result path, where the added latency (≤ ~1s) only ever
+  // lands on the rare 0-candidate branch.
+  let gate: Promise<void> = Promise.resolve();
+  let last = 0;
+  function schedule<T>(fn: () => Promise<T>): Promise<T> {
+    const run = gate.then(async () => {
+      const wait = last + minIntervalMs - Date.now();
+      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+      last = Date.now();
+      return fn();
+    });
+    gate = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  return {
+    async resolve(brewery: string, name: string): Promise<ResolvedBeer[]> {
+      // Built manually (not via URLSearchParams.set) so spaces land as %20: the
+      // form-encoded `+` that URLSearchParams produces doesn't round-trip through
+      // decodeURIComponent back into a space.
+      const query = `${brewery} ${name}`.trim() + ' site:untappd.com';
+      const url = new URL(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${count}`);
+      try {
+        const res = await schedule(() =>
+          f(url, {
+            headers: { Accept: 'application/json', 'X-Subscription-Token': opts.key },
+          }),
+        );
+        if (!res.ok) return []; // 429 rate-limit / auth failure / anything → "no resolution"
+        return parseBraveResponse((await res.json()) as BraveResponse);
+      } catch {
+        return [];
+      }
+    },
+  };
+}
