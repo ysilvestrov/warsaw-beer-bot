@@ -3,7 +3,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { readGoogleTriedAt, stampGoogleTried } from '../storage/beers';
 import { tryConsumeGoogleQuota } from '../storage/google_quota';
-import { pacificDay } from './pacific-day';
+import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
 import {
   ABV_TOLERANCE,
@@ -114,8 +114,8 @@ export async function runGoogleFallback(
     if (ageDays < RE_GOOGLE_COOLDOWN_DAYS) return null;
   }
 
-  // Daily budget guard (Pacific day). Consume BEFORE the network call.
-  if (!tryConsumeGoogleQuota(deps.db, pacificDay(now), deps.cap)) return null;
+  // Daily budget guard (UTC day). Consume BEFORE the network call.
+  if (!tryConsumeGoogleQuota(deps.db, utcDay(now), deps.cap)) return null;
 
   let candidates: ResolvedBeer[];
   try {
