@@ -35,6 +35,7 @@ describe('parseBraveResponse', () => {
     expect(parseBraveResponse({})).toEqual([]);
     expect(parseBraveResponse({ web: {} })).toEqual([]);
     expect(parseBraveResponse({ web: { results: [{ title: 42, url: null }] } } as never)).toEqual([]);
+    expect(parseBraveResponse(null as never)).toEqual([]);
   });
 
   it('drops results whose title is not the "<Beer> - <Brewery> - Untappd" shape', () => {
@@ -64,8 +65,9 @@ describe('createBraveResolver', () => {
     expect(out[1].bid).toBe(5158585);
     const [url, init] = fetchImpl.mock.calls[0] as unknown as [URL, RequestInit];
     expect(String(url)).toContain('https://api.search.brave.com/res/v1/web/search');
-    expect(decodeURIComponent(String(url))).toContain('Maryensztadt Suszona Śliwka i Cynamon site:untappd.com');
-    expect(decodeURIComponent(String(url))).toContain('count=5');
+    const q = new URL(String(url)).searchParams.get('q');
+    expect(q).toBe('Maryensztadt Suszona Śliwka i Cynamon site:untappd.com');
+    expect(new URL(String(url)).searchParams.get('count')).toBe('5');
     expect((init.headers as Record<string, string>)['X-Subscription-Token']).toBe('k-123');
     expect((init.headers as Record<string, string>)['Accept']).toBe('application/json');
   });
@@ -101,5 +103,34 @@ describe('createBraveResolver', () => {
     expect(at).toHaveLength(3);
     expect(at[1] - at[0]).toBeGreaterThanOrEqual(55);
     expect(at[2] - at[1]).toBeGreaterThanOrEqual(55);
+  });
+
+  it('releases the gate for queued callers after a call rejects', async () => {
+    const at: number[] = [];
+    let call = 0;
+    const fetchImpl = vi.fn(async () => {
+      at.push(Date.now());
+      call += 1;
+      if (call === 1) throw new Error('ECONNRESET');
+      return okResponse(brave);
+    });
+    const resolver = createBraveResolver({
+      key: 'k',
+      minIntervalMs: 60,
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+
+    const [first, second, third] = await Promise.all([
+      resolver.resolve('A', 'x'),
+      resolver.resolve('B', 'y'),
+      resolver.resolve('C', 'z'),
+    ]);
+
+    expect(at).toHaveLength(3);
+    expect(at[1] - at[0]).toBeGreaterThanOrEqual(55);
+    expect(at[2] - at[1]).toBeGreaterThanOrEqual(55);
+    expect(first).toEqual([]);
+    expect(second.length).toBeGreaterThan(0);
+    expect(third.length).toBeGreaterThan(0);
   });
 });

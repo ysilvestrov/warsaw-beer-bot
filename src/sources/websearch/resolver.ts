@@ -47,6 +47,7 @@ function splitTitle(title: unknown): { beer_name: string; brewery_name: string }
 // ("Trzech Kumpli | Photos"). Keep the first occurrence: Brave ranks the
 // canonical page above its sub-pages.
 export function parseBraveResponse(json: BraveResponse): ResolvedBeer[] {
+  if (!json || typeof json !== 'object') return [];
   const results = Array.isArray(json.web?.results) ? json.web!.results! : [];
   const out: ResolvedBeer[] = [];
   const seen = new Set<number>();
@@ -98,15 +99,17 @@ export function createBraveResolver(opts: BraveResolverOpts): WebResolver {
 
   return {
     async resolve(brewery: string, name: string): Promise<ResolvedBeer[]> {
-      // Built manually (not via URLSearchParams.set) so spaces land as %20: the
-      // form-encoded `+` that URLSearchParams produces doesn't round-trip through
-      // decodeURIComponent back into a space.
-      const query = `${brewery} ${name}`.trim() + ' site:untappd.com';
-      const url = new URL(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${count}`);
       try {
+        // Query is percent-encoded into the URL by hand (not URLSearchParams.set).
+        const query = `${brewery} ${name}`.trim() + ' site:untappd.com';
+        const url = new URL(`${BRAVE_ENDPOINT}?q=${encodeURIComponent(query)}&count=${count}`);
         const res = await schedule(() =>
           f(url, {
             headers: { Accept: 'application/json', 'X-Subscription-Token': opts.key },
+            // The serialization gate below means a hung request doesn't just run
+            // slow — it blocks every queued caller behind it, each of whom has
+            // already spent their quota unit. Bound it so a stall self-clears.
+            signal: AbortSignal.timeout(8000),
           }),
         );
         if (!res.ok) return []; // 429 rate-limit / auth failure / anything → "no resolution"
