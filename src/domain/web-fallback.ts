@@ -3,6 +3,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { readWebTriedAt, stampWebTried } from '../storage/beers';
 import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
+import { isWebFallbackBlocked } from '../storage/enrich_failures';
 import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
 import {
@@ -107,15 +108,31 @@ export async function runWebFallback(
 ): Promise<SearchResult | null> {
   const now = (deps.now ?? (() => new Date()))();
 
+  // Triage classes the metered path must never spend on. Checked first and for
+  // free: no quota, and deliberately NO web_tried_at stamp, so a beer unblocked
+  // by a later parser fix is retried on the next cron tick rather than 30 days
+  // later (#351). Covers the relay path too, which never passes through
+  // listLookupCandidates and was previously unfiltered even for `wontfix`.
+  if (isWebFallbackBlocked(deps.db, input.beerId)) {
+    deps.log.debug({ beerId: input.beerId, reason: 'review-class' }, 'web-fallback skipped');
+    return null;
+  }
+
   // Per-beer cooldown: don't re-spend a web search on the same orphan within 30 days.
   const triedAt = readWebTriedAt(deps.db, input.beerId);
   if (triedAt) {
     const ageDays = (now.getTime() - new Date(triedAt).getTime()) / 86_400_000;
-    if (ageDays < RE_WEB_COOLDOWN_DAYS) return null;
+    if (ageDays < RE_WEB_COOLDOWN_DAYS) {
+      deps.log.debug({ beerId: input.beerId, reason: 'cooldown' }, 'web-fallback skipped');
+      return null;
+    }
   }
 
   // Daily budget guard (UTC day). Consume BEFORE the network call.
-  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) return null;
+  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) {
+    deps.log.debug({ beerId: input.beerId, reason: 'quota' }, 'web-fallback skipped');
+    return null;
+  }
 
   let candidates: ResolvedBeer[];
   try {

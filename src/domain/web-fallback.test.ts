@@ -7,6 +7,7 @@ import { gateWebCandidate, runWebFallback } from './web-fallback';
 import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch } from '../sources/untappd/search';
 import pino from 'pino';
+import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 
 const log = pino({ level: 'silent' });
 const noHydrate: BeerSearch = { search: async () => [] };
@@ -133,6 +134,51 @@ describe('runWebFallback', () => {
     const sr = await runWebFallback({ db, resolver, hydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
     expect(hydrate.search).toHaveBeenCalled();
+    db.close();
+  });
+
+  it('skips a parser_bug orphan without spending quota or stamping a cooldown', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: input.brewery, name: input.name,
+      search_url: 'u', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-07-24T00:00:00.000Z',
+    });
+    setEnrichFailureReview(db, beerId, 'parser_bug', 'garbled', '2026-07-24T00:00:00.000Z');
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+
+    expect(sr).toBeNull();
+    expect(resolver.resolve).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT COUNT(*) AS c FROM web_search_quota').get()).toMatchObject({ c: 0 });
+    // The stamp must stay NULL: a free skip must not cost the beer its 30-day
+    // cooldown, or the retry after the parser fix ships waits a month.
+    expect(
+      (db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId) as { web_tried_at: string | null })
+        .web_tried_at,
+    ).toBeNull();
+    db.close();
+  });
+
+  it('still runs for a matcher_bug orphan', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: input.brewery, name: input.name,
+      search_url: 'u', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-07-24T00:00:00.000Z',
+    });
+    setEnrichFailureReview(db, beerId, 'matcher_bug', 'divergent name', '2026-07-24T00:00:00.000Z');
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+
+    expect(sr?.bid).toBe(5158585);
+    expect(resolver.resolve).toHaveBeenCalled();
     db.close();
   });
 });
