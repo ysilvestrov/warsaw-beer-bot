@@ -59,6 +59,14 @@ function abvCorroborates(a: number | null, b: number | null): boolean {
 
 export type GateStage = 'accept' | 'reject:brewery' | 'reject:name-token' | 'needs-abv';
 
+// The stages a rejected candidate can be logged under (accept/needs-abv never
+// reach the log as a stage: accept returns early, needs-abv resolves to either
+// a match or the post-hydration 'reject:abv' below) — and the call-level verdicts
+// runWebFallback reports. Typed narrowly (not `string`) so a typo in either is a
+// compile error; #349 will consume these strings programmatically.
+type RejectStage = Exclude<GateStage, 'accept' | 'needs-abv'> | 'reject:abv';
+type CallVerdict = 'matched' | 'rejected' | 'no-candidates';
+
 // Refined B1, split so the ABV-dependent stage is separable: brewery-strict is
 // ALWAYS required; then either the name gate passes (same-language) or there is
 // distinctive token overlap, which alone is not enough — it must be corroborated
@@ -160,9 +168,9 @@ export async function runWebFallback(
   // exactly how many correct candidates a null ABV costs us.
   const rejected: Array<{
     bid: number; beer_name: string; brewery_name: string;
-    stage: string; inputAbv: number | null; candAbv: number | null;
+    stage: RejectStage; inputAbv: number | null; candAbv: number | null;
   }> = [];
-  const logCall = (verdict: string, matchedBid?: number) =>
+  const logCall = (verdict: CallVerdict, matchedBid?: number) =>
     deps.log.info(
       {
         beerId: input.beerId, brewery: input.brewery, name: input.name,

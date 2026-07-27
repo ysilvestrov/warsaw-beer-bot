@@ -266,6 +266,24 @@ describe('runWebFallback', () => {
 
     expect(info.mock.calls[0][0]).toMatchObject({ verdict: 'no-candidates', results: 0, rejected: [] });
   });
+
+  it('logs reject:brewery for the immediate push-and-continue branch, without hydrating abv', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const mismatch: ResolvedBeer = { bid: 1, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', abv: 6 };
+    const resolver: WebResolver = { resolve: vi.fn(async () => [mismatch]) };
+    const hydrate: BeerSearch = { search: vi.fn(async () => []) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(sr).toBeNull();
+    expect(hydrate.search).not.toHaveBeenCalled();
+    const fields = info.mock.calls[0][0];
+    expect(fields).toMatchObject({ verdict: 'rejected', results: 1 });
+    expect(fields.rejected[0]).toMatchObject({ stage: 'reject:brewery', candAbv: 6 });
+  });
 });
 
 import { lookupWithFallback } from './web-fallback';
