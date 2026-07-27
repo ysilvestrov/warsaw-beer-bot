@@ -133,7 +133,12 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const nowIso = new Date().toISOString();
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
-    if (kind === 'matched' && outcome.kind === 'matched') {
+    // A merge is a success: the bid is real and already owned by a canonical row,
+    // so answer like a match instead of the old not_found. `outcome.result` still
+    // holds the bid — nothing needs plumbing through applyLookupOutcome. The
+    // extension's status union is untouched ('merged' never crosses the boundary),
+    // so old extension versions benefit without an update (#351).
+    if ((kind === 'matched' || kind === 'merged') && outcome.kind === 'matched') {
       return c.json({ status: 'matched', untappd_id: outcome.result.bid, rating_global: outcome.result.global_rating });
     }
     return c.json({ status: kind });
