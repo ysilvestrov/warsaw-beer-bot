@@ -82,6 +82,36 @@ describe('enrichOrphans', () => {
     expect(getBeer(db, b)?.untappd_lookup_count).toBe(1);
   });
 
+  test('merged duplicate bid: reports merged, not matched or not_found', async () => {
+    const db = fresh();
+    // Canonical row already owns bid 555.
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 555, name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'marine', normalized_brewery: 'moon lark',
+    });
+    // On-tap orphan for the same beer under a name-divergent (collab) brewery string,
+    // so it inserts as a distinct row rather than colliding with the canonical on upsert.
+    const orphanId = seedOrphanOnTap(db, 'Moon Lark & AleBrowar Brewery', 'Marine');
+    const search = {
+      async search(q: string): Promise<SearchResult[]> {
+        if (q === CANARY_QUERY) return [GUINNESS_HIT];
+        return [{ bid: 555, beer_name: 'Marine', brewery_name: 'Moon Lark Brewery', style: null, abv: null, global_rating: null }];
+      },
+    };
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search, sleepMs: 0, now: () => new Date('2026-05-26T12:00:00Z'),
+    });
+
+    expect(result.processed).toBe(1);
+    expect(result.merged).toBe(1);
+    expect(result.matched).toBe(0);
+    expect(result.not_found).toBe(0);
+    expect(getBeer(db, orphanId)).toBeNull();
+    expect(getBeer(db, canonicalId)?.untappd_id).toBe(555);
+  });
+
   test('respects limit', async () => {
     const db = fresh();
     for (let i = 0; i < 5; i++) {
