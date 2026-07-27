@@ -12,6 +12,7 @@ export const CANARY_STATE_KEY = 'untappd_search_canary'; // JSON {ok:boolean, at
 export interface EnrichOrphansResult {
   processed: number;
   matched: number;
+  merged: number;
   not_found: number;
   transient: number;
   skipped: number;
@@ -35,7 +36,7 @@ export interface EnrichOrphansDeps {
 }
 
 const ZERO_RESULT: EnrichOrphansResult = {
-  processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0,
+  processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0,
 };
 
 export async function enrichOrphans(

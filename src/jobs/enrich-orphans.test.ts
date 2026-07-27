@@ -118,7 +118,7 @@ describe('enrichOrphans', () => {
       now: () => new Date('2026-05-26T12:00:00Z'),
     });
 
-    expect(result).toEqual({ processed: 0, matched: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0 });
+    expect(result).toEqual({ processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0 });
     expect(calls).toBe(0);
   });
 

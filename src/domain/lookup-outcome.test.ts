@@ -86,3 +86,32 @@ describe('applyLookupOutcome failure logging', () => {
     expect(failRow(db, id).source_url).toBe('');
   });
 });
+
+describe('applyLookupOutcome merge', () => {
+  test("returns 'merged' and redirects match_links when the bid already belongs to another row", () => {
+    const { db, id, log } = fresh();
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 777, name: 'Canonical Beer', brewery: 'Canonical Brewery',
+      style: null, abv: null, rating_global: 4.2,
+      normalized_name: normalizeName('Canonical Beer'),
+      normalized_brewery: normalizeBrewery('Canonical Brewery'),
+    });
+    db.prepare(
+      "INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user) VALUES ('ref-1', ?, 0.9, 0)",
+    ).run(id);
+
+    const kind = applyLookupOutcome(
+      { db, log }, id,
+      { kind: 'matched', result: cand({ bid: 777 }) },
+      '2026-07-27T00:00:00Z', input,
+    );
+
+    expect(kind).toBe('merged');
+    expect(getBeer(db, id)).toBeNull();              // orphan row deleted
+    expect(getBeer(db, canonicalId)!.untappd_id).toBe(777);
+    const link = db.prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?').get('ref-1') as
+      { untappd_beer_id: number };
+    expect(link.untappd_beer_id).toBe(canonicalId);  // match_links redirected to the canonical row
+    db.close();
+  });
+});

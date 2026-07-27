@@ -10,7 +10,7 @@ import { recordEnrichFailure, clearEnrichFailure } from '../storage/enrich_failu
 import type { LookupOutcome } from './untappd-lookup';
 import type { SearchResult } from '../sources/untappd/search';
 
-export type EnrichOutcomeKind = 'matched' | 'not_found' | 'transient' | 'skipped' | 'blocked';
+export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient' | 'skipped' | 'blocked';
 
 // Compact, human-readable summary of what the Untappd search returned — top 3
 // "<brewery> — <name>". Empty string when the search returned nothing (a noisy query).
@@ -42,12 +42,14 @@ export function applyLookupOutcome(
           .get(outcome.result.bid) as { id: number } | undefined;
         if (canonical) {
           // mergeIntoCanonical deletes the orphan row → its enrich_failures row is
-          // CASCADE-removed; this is a success, not a failure.
+          // CASCADE-removed; this is a success, not a failure. Reported as its own
+          // kind so it stops being counted (and answered) as not_found (#351).
           mergeIntoCanonical(deps.db, beerId, canonical.id);
           deps.log.warn(
             { beerId, canonicalId: canonical.id, bid: outcome.result.bid },
             'enrich: merged duplicate orphan into canonical',
           );
+          return 'merged';
         }
         return 'not_found';
       }
