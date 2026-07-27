@@ -57,14 +57,26 @@ function abvCorroborates(a: number | null, b: number | null): boolean {
   return a != null && b != null && Math.abs(a - b) <= ABV_TOLERANCE;
 }
 
-// Refined B1: brewery-strict ALWAYS required; then either the name gate passes
-// (same-language) OR there is distinctive token overlap AND abv corroborates
-// (cross-language). Never accept on abv alone. `cand.abv` must already be
-// hydrated by the caller before the token-overlap branch is trusted.
+export type GateStage = 'accept' | 'reject:brewery' | 'reject:name-token' | 'needs-abv';
+
+// Refined B1, split so the ABV-dependent stage is separable: brewery-strict is
+// ALWAYS required; then either the name gate passes (same-language) or there is
+// distinctive token overlap, which alone is not enough — it must be corroborated
+// by ABV ('needs-abv'). Never accept on abv alone. Hydration-free by construction,
+// so runWebFallback can call it before paying for hydrateAbv.
+export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateStage {
+  if (!breweryStrict(input, cand)) return 'reject:brewery';
+  if (nameGatePass(input, cand)) return 'accept';
+  if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';
+  return 'needs-abv';
+}
+
+// Whole-gate verdict for an ALREADY-hydrated candidate. Thin wrapper over the
+// core so the two can no longer drift.
 export function gateWebCandidate(input: GateInput, cand: ResolvedBeer): boolean {
-  if (!breweryStrict(input, cand)) return false;
-  if (nameGatePass(input, cand)) return true;
-  if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return false;
+  const stage = evaluateCandidate(input, cand);
+  if (stage === 'accept') return true;
+  if (stage !== 'needs-abv') return false;
   return abvCorroborates(input.abv, cand.abv);
 }
 
@@ -143,9 +155,9 @@ export async function runWebFallback(
   }
 
   for (const cand of candidates) {
-    if (!breweryStrict(input, cand)) continue;
-    if (nameGatePass(input, cand)) return toSearchResult(cand);
-    if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) continue;
+    const stage = evaluateCandidate(input, cand);
+    if (stage === 'accept') return toSearchResult(cand);
+    if (stage !== 'needs-abv') continue;
     const abv = await hydrateAbv(deps.hydrate, cand);
     if (abvCorroborates(input.abv, abv)) return toSearchResult({ ...cand, abv });
   }

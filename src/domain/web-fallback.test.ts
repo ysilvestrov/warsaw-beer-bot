@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
-import { gateWebCandidate, runWebFallback } from './web-fallback';
+import { evaluateCandidate, gateWebCandidate, runWebFallback } from './web-fallback';
 import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch } from '../sources/untappd/search';
 import pino from 'pino';
@@ -58,6 +58,35 @@ describe('gateWebCandidate (refined B1)', () => {
       abv: 11.5,
     };
     expect(gateWebCandidate({ ...input, abv: null }, cand)).toBe(false);
+  });
+});
+
+describe('evaluateCandidate (stage-returning gate core)', () => {
+  const input = { brewery: 'Maryensztadt', name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', abv: 11.5 };
+
+  it('returns reject:brewery when the brewery gate fails', () => {
+    const cand: ResolvedBeer = { bid: 1, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', abv: 6 };
+    expect(evaluateCandidate({ brewery: 'Carlsberg', name: 'Grimbergen blanche', abv: 6 }, cand)).toBe('reject:brewery');
+  });
+
+  it('returns accept when the same-language name gate passes', () => {
+    const cand: ResolvedBeer = { bid: 1000186, beer_name: 'Pan IPAni', brewery_name: 'Trzech Kumpli', abv: null };
+    expect(evaluateCandidate({ brewery: 'Trzech Kumpli', name: 'PanIPAni', abv: null }, cand)).toBe('accept');
+  });
+
+  it('returns reject:name-token when brewery matches but nothing in the name does', () => {
+    const cand: ResolvedBeer = { bid: 2552312, beer_name: 'Te Czasy Się Skończyły', brewery_name: 'Browar Artezan', abv: 11.5 };
+    expect(evaluateCandidate({ brewery: 'Artezan', name: 'Święty Spokój', abv: 11.5 }, cand)).toBe('reject:name-token');
+  });
+
+  it('returns needs-abv for the cross-language token-overlap branch', () => {
+    const cand: ResolvedBeer = {
+      bid: 5158585,
+      beer_name: 'Barrel Aged Project: Ice Imperial Brett Baltic Porter Double Barrel Aged Dry Plum & Cinnamon',
+      brewery_name: 'Maryensztadt',
+      abv: null,
+    };
+    expect(evaluateCandidate(input, cand)).toBe('needs-abv');
   });
 });
 
