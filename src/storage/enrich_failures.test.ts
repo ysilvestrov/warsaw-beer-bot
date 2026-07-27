@@ -8,6 +8,7 @@ import {
   setEnrichFailureReview,
   listUntriagedFailures,
   retireEnrichFailure,
+  isWebFallbackBlocked,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -245,5 +246,60 @@ describe('retireEnrichFailure', () => {
     retireEnrichFailure(db, id, 'retired: current non-beer filter rejects', '2026-07-19T00:00:00Z');
     const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_note).toBe('retired: current non-beer filter rejects');
+  });
+});
+
+describe('isWebFallbackBlocked', () => {
+  const row = (beerId: number): EnrichFailureRow => ({
+    beer_id: beerId,
+    brewery: 'Track',
+    name: 'Taking Shape',
+    search_url: 'https://untappd.com/search?q=Track+Taking+Shape&type=beer',
+    source_url: '',
+    outcome: 'not_found',
+    candidates_count: 0,
+    candidates_summary: '',
+    at: '2026-07-27T00:00:00.000Z',
+  });
+
+  it('is false when there is no failure row at all', () => {
+    const { db, id } = freshDbWithBeer();
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  it('is false for an untriaged failure', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row(id));
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  it('is false for matcher_bug — the class the web fallback exists for', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row(id));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-07-27T00:00:00.000Z');
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  it.each(['wontfix', 'parser_bug', 'not_on_untappd'] as const)(
+    'is true for %s',
+    (cls) => {
+      const { db, id } = freshDbWithBeer();
+      recordEnrichFailure(db, row(id));
+      setEnrichFailureReview(db, id, cls, 'note', '2026-07-27T00:00:00.000Z');
+      expect(isWebFallbackBlocked(db, id)).toBe(true);
+      db.close();
+    },
+  );
+
+  it('is true for a retired row regardless of class', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row(id));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-07-27T00:00:00.000Z');
+    retireEnrichFailure(db, id, 'retired: fix shipped', '2026-07-27T00:00:00.000Z');
+    expect(isWebFallbackBlocked(db, id)).toBe(true);
+    db.close();
   });
 });

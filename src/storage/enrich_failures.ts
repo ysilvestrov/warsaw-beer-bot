@@ -65,6 +65,25 @@ export function isWontfix(db: DB, beerId: number): boolean {
   );
 }
 
+// True when the METERED web fallback (#139) must not spend a request on this beer.
+// Superset of isWontfix: `parser_bug` means the query string itself is garbage, so
+// searching the web with the same wrong string cannot help; `not_on_untappd` means
+// triage already established the page does not exist; `retired_at` means a shipped
+// fix already resolved the row. The free Algolia retry keeps running for all of
+// these — only the paid path is tightened (#351).
+export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
+  return (
+    db
+      .prepare(
+        `SELECT 1 FROM enrich_failures
+          WHERE beer_id = ?
+            AND (review_class IN ('wontfix', 'parser_bug', 'not_on_untappd')
+                 OR retired_at IS NOT NULL)`,
+      )
+      .get(beerId) !== undefined
+  );
+}
+
 // Values must stay in sync with the CHECK on enrich_failures.review_class (schema migration 12).
 export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix';
 
