@@ -833,11 +833,12 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
   `listLookupCandidates` і раніше не фільтрувався навіть за `wontfix`.
 - **Спостережуваність (#351):** кожен **витрачений** виклик пише один `info`-рядок
   `web-fallback call` (`beerId`, `brewery`, `name`, `results`, `verdict` =
-  `matched`/`rejected`/`no-candidates`, `matchedBid`, `rejected[]` зі стадією гейта
+  `matched`/`rejected`/`no-candidates`/`error`, `matchedBid`, `rejected[]` зі стадією гейта
   `reject:brewery`/`reject:name-token`/`reject:abv` та парою `inputAbv`/`candAbv`).
   Пропуски (`review-class`, `cooldown`, `quota`) — `debug`-рядок `web-fallback skipped`
   з полем `reason`. Логуються лише **оцінені** кандидати: цикл виходить на першому
-  прийнятому.
+  прийнятому. Виняток резолвера теж лишає рядок (`verdict: error`) і пробрасується далі —
+  інваріант «одна витрачена одиниця = один рядок» тримається без дірок.
 
 **Brand-as-beer-name (#138B).** Якщо кандидат провалює і strict, і relaxed гейт пивоварні, але вхідна
 пивоварня (бренд на полиці) є суцільним токен-підсписком **назви пива** кандидата (Untappd веде пиво під
