@@ -154,13 +154,47 @@ export async function runWebFallback(
     stampWebTried(deps.db, input.beerId, now.toISOString());
   }
 
+  // One line per SPENT call. Without it a miss is indistinguishable from a dead
+  // key or an empty index, and the rejection stages are the input the gate
+  // redesign (#349) is waiting on — reject:abv with inputAbv/candAbv shows
+  // exactly how many correct candidates a null ABV costs us.
+  const rejected: Array<{
+    bid: number; beer_name: string; brewery_name: string;
+    stage: string; inputAbv: number | null; candAbv: number | null;
+  }> = [];
+  const logCall = (verdict: string, matchedBid?: number) =>
+    deps.log.info(
+      {
+        beerId: input.beerId, brewery: input.brewery, name: input.name,
+        results: candidates.length, verdict, matchedBid, rejected,
+      },
+      'web-fallback call',
+    );
+
   for (const cand of candidates) {
     const stage = evaluateCandidate(input, cand);
-    if (stage === 'accept') return toSearchResult(cand);
-    if (stage !== 'needs-abv') continue;
+    if (stage === 'accept') {
+      logCall('matched', cand.bid);
+      return toSearchResult(cand);
+    }
+    if (stage !== 'needs-abv') {
+      rejected.push({
+        bid: cand.bid, beer_name: cand.beer_name, brewery_name: cand.brewery_name,
+        stage, inputAbv: input.abv, candAbv: cand.abv,
+      });
+      continue;
+    }
     const abv = await hydrateAbv(deps.hydrate, cand);
-    if (abvCorroborates(input.abv, abv)) return toSearchResult({ ...cand, abv });
+    if (abvCorroborates(input.abv, abv)) {
+      logCall('matched', cand.bid);
+      return toSearchResult({ ...cand, abv });
+    }
+    rejected.push({
+      bid: cand.bid, beer_name: cand.beer_name, brewery_name: cand.brewery_name,
+      stage: 'reject:abv', inputAbv: input.abv, candAbv: abv,
+    });
   }
+  logCall(candidates.length === 0 ? 'no-candidates' : 'rejected');
   return null;
 }
 

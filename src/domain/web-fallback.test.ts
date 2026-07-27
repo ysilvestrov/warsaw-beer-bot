@@ -210,6 +210,62 @@ describe('runWebFallback', () => {
     expect(resolver.resolve).toHaveBeenCalled();
     db.close();
   });
+
+  // A logger that records what runWebFallback reports, without pino formatting.
+  function spyLog() {
+    const info = vi.fn();
+    const debug = vi.fn();
+    return { logger: { ...pino({ level: 'silent' }), info, debug } as never, info, debug };
+  }
+
+  it('logs one info line with the rejection stage and both abv sides', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const noAbv: ResolvedBeer = { ...cross, abv: null };
+    const resolver: WebResolver = { resolve: vi.fn(async () => [noAbv]) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    // input abv null → the needs-abv branch cannot corroborate → reject:abv
+    const sr = await runWebFallback(
+      { db, resolver, hydrate: noHydrate, cap: 90, log: logger, now },
+      { beerId, brewery: input.brewery, name: input.name, abv: null },
+    );
+
+    expect(sr).toBeNull();
+    expect(info).toHaveBeenCalledTimes(1);
+    const [fields, msg] = info.mock.calls[0];
+    expect(msg).toBe('web-fallback call');
+    expect(fields).toMatchObject({ beerId, results: 1, verdict: 'rejected' });
+    expect(fields.rejected[0]).toMatchObject({
+      bid: 5158585, stage: 'reject:abv', inputAbv: null, candAbv: null,
+    });
+    db.close();
+  });
+
+  it('logs verdict matched with the winning bid', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(info.mock.calls[0][0]).toMatchObject({ verdict: 'matched', matchedBid: 5158585, results: 1 });
+  });
+
+  it('logs verdict no-candidates when the resolver returns nothing', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const resolver: WebResolver = { resolve: vi.fn(async () => []) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(info.mock.calls[0][0]).toMatchObject({ verdict: 'no-candidates', results: 0, rejected: [] });
+  });
 });
 
 import { lookupWithFallback } from './web-fallback';
