@@ -65,7 +65,7 @@ export type GateStage = 'accept' | 'reject:brewery' | 'reject:name-token' | 'nee
 // runWebFallback reports. Typed narrowly (not `string`) so a typo in either is a
 // compile error; #349 will consume these strings programmatically.
 type RejectStage = Exclude<GateStage, 'accept' | 'needs-abv'> | 'reject:abv';
-type CallVerdict = 'matched' | 'rejected' | 'no-candidates';
+type CallVerdict = 'matched' | 'rejected' | 'no-candidates' | 'error';
 
 // Refined B1, split so the ABV-dependent stage is separable: brewery-strict is
 // ALWAYS required; then either the name gate passes (same-language) or there is
@@ -157,8 +157,22 @@ export async function runWebFallback(
   let candidates: ResolvedBeer[];
   try {
     candidates = await deps.resolver.resolve(input.brewery, input.name);
+  } catch (err) {
+    // The quota unit is already spent by the time we get here, so the invariant
+    // "every spent call writes one info line" must hold on this path too — even
+    // though the current Brave resolver never actually throws (it catches
+    // everything and returns []). Log, then rethrow UNCHANGED: this must not
+    // alter the caller's error semantics in any way.
+    deps.log.info(
+      {
+        beerId: input.beerId, brewery: input.brewery, name: input.name,
+        results: 0, verdict: 'error', rejected: [],
+      },
+      'web-fallback call',
+    );
+    throw err;
   } finally {
-    // A spent call marks the beer regardless of outcome (accept or reject).
+    // A spent call marks the beer regardless of outcome (accept, reject, or error).
     stampWebTried(deps.db, input.beerId, now.toISOString());
   }
 

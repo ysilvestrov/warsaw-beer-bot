@@ -176,9 +176,10 @@ describe('runWebFallback', () => {
     });
     setEnrichFailureReview(db, beerId, 'parser_bug', 'garbled', '2026-07-24T00:00:00.000Z');
     const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const { logger, debug } = spyLog();
     const now = () => new Date('2026-07-24T12:00:00Z');
 
-    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
 
     expect(sr).toBeNull();
     expect(resolver.resolve).not.toHaveBeenCalled();
@@ -189,6 +190,7 @@ describe('runWebFallback', () => {
       (db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId) as { web_tried_at: string | null })
         .web_tried_at,
     ).toBeNull();
+    expect(debug).toHaveBeenCalledWith({ beerId, reason: 'review-class' }, 'web-fallback skipped');
     db.close();
   });
 
@@ -283,6 +285,27 @@ describe('runWebFallback', () => {
     const fields = info.mock.calls[0][0];
     expect(fields).toMatchObject({ verdict: 'rejected', results: 1 });
     expect(fields.rejected[0]).toMatchObject({ stage: 'reject:brewery', candAbv: 6 });
+  });
+
+  it('logs the spend and rethrows unchanged when the resolver throws, still stamping web_tried_at', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const boom = new Error('resolver exploded');
+    const resolver: WebResolver = { resolve: vi.fn(async () => { throw boom; }) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await expect(
+      runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input }),
+    ).rejects.toThrow(boom);
+
+    expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect(info).toHaveBeenCalledTimes(1);
+    const [fields, msg] = info.mock.calls[0];
+    expect(msg).toBe('web-fallback call');
+    expect(fields).toMatchObject({ beerId, results: 0, verdict: 'error', rejected: [] });
+    db.close();
   });
 });
 
