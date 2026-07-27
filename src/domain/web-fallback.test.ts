@@ -3,10 +3,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
-import { gateWebCandidate, runWebFallback } from './web-fallback';
+import { evaluateCandidate, gateWebCandidate, runWebFallback } from './web-fallback';
 import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch } from '../sources/untappd/search';
 import pino from 'pino';
+import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 
 const log = pino({ level: 'silent' });
 const noHydrate: BeerSearch = { search: async () => [] };
@@ -57,6 +58,35 @@ describe('gateWebCandidate (refined B1)', () => {
       abv: 11.5,
     };
     expect(gateWebCandidate({ ...input, abv: null }, cand)).toBe(false);
+  });
+});
+
+describe('evaluateCandidate (stage-returning gate core)', () => {
+  const input = { brewery: 'Maryensztadt', name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', abv: 11.5 };
+
+  it('returns reject:brewery when the brewery gate fails', () => {
+    const cand: ResolvedBeer = { bid: 1, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', abv: 6 };
+    expect(evaluateCandidate({ brewery: 'Carlsberg', name: 'Grimbergen blanche', abv: 6 }, cand)).toBe('reject:brewery');
+  });
+
+  it('returns accept when the same-language name gate passes', () => {
+    const cand: ResolvedBeer = { bid: 1000186, beer_name: 'Pan IPAni', brewery_name: 'Trzech Kumpli', abv: null };
+    expect(evaluateCandidate({ brewery: 'Trzech Kumpli', name: 'PanIPAni', abv: null }, cand)).toBe('accept');
+  });
+
+  it('returns reject:name-token when brewery matches but nothing in the name does', () => {
+    const cand: ResolvedBeer = { bid: 2552312, beer_name: 'Te Czasy Się Skończyły', brewery_name: 'Browar Artezan', abv: 11.5 };
+    expect(evaluateCandidate({ brewery: 'Artezan', name: 'Święty Spokój', abv: 11.5 }, cand)).toBe('reject:name-token');
+  });
+
+  it('returns needs-abv for the cross-language token-overlap branch', () => {
+    const cand: ResolvedBeer = {
+      bid: 5158585,
+      beer_name: 'Barrel Aged Project: Ice Imperial Brett Baltic Porter Double Barrel Aged Dry Plum & Cinnamon',
+      brewery_name: 'Maryensztadt',
+      abv: null,
+    };
+    expect(evaluateCandidate(input, cand)).toBe('needs-abv');
   });
 });
 
@@ -133,6 +163,148 @@ describe('runWebFallback', () => {
     const sr = await runWebFallback({ db, resolver, hydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
     expect(hydrate.search).toHaveBeenCalled();
+    db.close();
+  });
+
+  it('skips a parser_bug orphan without spending quota or stamping a cooldown', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: input.brewery, name: input.name,
+      search_url: 'u', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-07-24T00:00:00.000Z',
+    });
+    setEnrichFailureReview(db, beerId, 'parser_bug', 'garbled', '2026-07-24T00:00:00.000Z');
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const { logger, debug } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(sr).toBeNull();
+    expect(resolver.resolve).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT COUNT(*) AS c FROM web_search_quota').get()).toMatchObject({ c: 0 });
+    // The stamp must stay NULL: a free skip must not cost the beer its 30-day
+    // cooldown, or the retry after the parser fix ships waits a month.
+    expect(
+      (db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId) as { web_tried_at: string | null })
+        .web_tried_at,
+    ).toBeNull();
+    expect(debug).toHaveBeenCalledWith({ beerId, reason: 'review-class' }, 'web-fallback skipped');
+    db.close();
+  });
+
+  it('still runs for a matcher_bug orphan', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: input.brewery, name: input.name,
+      search_url: 'u', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-07-24T00:00:00.000Z',
+    });
+    setEnrichFailureReview(db, beerId, 'matcher_bug', 'divergent name', '2026-07-24T00:00:00.000Z');
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
+
+    expect(sr?.bid).toBe(5158585);
+    expect(resolver.resolve).toHaveBeenCalled();
+    db.close();
+  });
+
+  // A logger that records what runWebFallback reports, without pino formatting.
+  function spyLog() {
+    const info = vi.fn();
+    const debug = vi.fn();
+    return { logger: { ...pino({ level: 'silent' }), info, debug } as never, info, debug };
+  }
+
+  it('logs one info line with the rejection stage and both abv sides', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const noAbv: ResolvedBeer = { ...cross, abv: null };
+    const resolver: WebResolver = { resolve: vi.fn(async () => [noAbv]) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    // input abv null → the needs-abv branch cannot corroborate → reject:abv
+    const sr = await runWebFallback(
+      { db, resolver, hydrate: noHydrate, cap: 90, log: logger, now },
+      { beerId, brewery: input.brewery, name: input.name, abv: null },
+    );
+
+    expect(sr).toBeNull();
+    expect(info).toHaveBeenCalledTimes(1);
+    const [fields, msg] = info.mock.calls[0];
+    expect(msg).toBe('web-fallback call');
+    expect(fields).toMatchObject({ beerId, results: 1, verdict: 'rejected' });
+    expect(fields.rejected[0]).toMatchObject({
+      bid: 5158585, stage: 'reject:abv', inputAbv: null, candAbv: null,
+    });
+    db.close();
+  });
+
+  it('logs verdict matched with the winning bid', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const resolver: WebResolver = { resolve: vi.fn(async () => [cross]) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(info.mock.calls[0][0]).toMatchObject({ verdict: 'matched', matchedBid: 5158585, results: 1 });
+  });
+
+  it('logs verdict no-candidates when the resolver returns nothing', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const resolver: WebResolver = { resolve: vi.fn(async () => []) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(info.mock.calls[0][0]).toMatchObject({ verdict: 'no-candidates', results: 0, rejected: [] });
+  });
+
+  it('logs reject:brewery for the immediate push-and-continue branch, without hydrating abv', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const mismatch: ResolvedBeer = { bid: 1, beer_name: 'Grimbergen Blanche', brewery_name: 'Brouwerij Alken-Maes', abv: 6 };
+    const resolver: WebResolver = { resolve: vi.fn(async () => [mismatch]) };
+    const hydrate: BeerSearch = { search: vi.fn(async () => []) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    const sr = await runWebFallback({ db, resolver, hydrate, cap: 90, log: logger, now }, { beerId, ...input });
+
+    expect(sr).toBeNull();
+    expect(hydrate.search).not.toHaveBeenCalled();
+    const fields = info.mock.calls[0][0];
+    expect(fields).toMatchObject({ verdict: 'rejected', results: 1 });
+    expect(fields.rejected[0]).toMatchObject({ stage: 'reject:brewery', candAbv: 6 });
+  });
+
+  it('logs the spend and rethrows unchanged when the resolver throws, still stamping web_tried_at', async () => {
+    const db = freshDb();
+    const beerId = seed(db, input.brewery, input.name);
+    const boom = new Error('resolver exploded');
+    const resolver: WebResolver = { resolve: vi.fn(async () => { throw boom; }) };
+    const { logger, info } = spyLog();
+    const now = () => new Date('2026-07-24T12:00:00Z');
+
+    await expect(
+      runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log: logger, now }, { beerId, ...input }),
+    ).rejects.toThrow(boom);
+
+    expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect(info).toHaveBeenCalledTimes(1);
+    const [fields, msg] = info.mock.calls[0];
+    expect(msg).toBe('web-fallback call');
+    expect(fields).toMatchObject({ beerId, results: 0, verdict: 'error', rejected: [] });
     db.close();
   });
 });

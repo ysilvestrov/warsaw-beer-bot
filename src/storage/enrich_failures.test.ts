@@ -8,6 +8,7 @@ import {
   setEnrichFailureReview,
   listUntriagedFailures,
   retireEnrichFailure,
+  isWebFallbackBlocked,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -245,5 +246,48 @@ describe('retireEnrichFailure', () => {
     retireEnrichFailure(db, id, 'retired: current non-beer filter rejects', '2026-07-19T00:00:00Z');
     const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_note).toBe('retired: current non-beer filter rejects');
+  });
+});
+
+describe('isWebFallbackBlocked', () => {
+  test('is false when there is no failure row at all', () => {
+    const { db, id } = freshDbWithBeer();
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  test('is false for an untriaged failure', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  test('is false for matcher_bug — the class the web fallback exists for', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-07-27T00:00:00.000Z');
+    expect(isWebFallbackBlocked(db, id)).toBe(false);
+    db.close();
+  });
+
+  test.each(['wontfix', 'parser_bug', 'not_on_untappd'] as const)(
+    'is true for %s',
+    (cls) => {
+      const { db, id } = freshDbWithBeer();
+      recordEnrichFailure(db, row({ beer_id: id }));
+      setEnrichFailureReview(db, id, cls, 'note', '2026-07-27T00:00:00.000Z');
+      expect(isWebFallbackBlocked(db, id)).toBe(true);
+      db.close();
+    },
+  );
+
+  test('is true for a retired row regardless of class', () => {
+    const { db, id } = freshDbWithBeer();
+    recordEnrichFailure(db, row({ beer_id: id }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-07-27T00:00:00.000Z');
+    retireEnrichFailure(db, id, 'retired: fix shipped', '2026-07-27T00:00:00.000Z');
+    expect(isWebFallbackBlocked(db, id)).toBe(true);
+    db.close();
   });
 });

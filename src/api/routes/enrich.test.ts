@@ -323,6 +323,43 @@ describe('POST /enrich/result', () => {
     expect(getBeer(db, row.id)!.untappd_id).toBe(5158585);
   });
 
+  it('reports matched with the canonical bid when the relay result merges a duplicate', async () => {
+    const { db, app } = setup();
+    // A different row already owns bid 5469263 → recordLookupSuccess will hit the
+    // UNIQUE constraint and merge the freshly created orphan into it.
+    upsertBeer(db, {
+      untappd_id: 5469263, name: 'Legacy Row', brewery: 'Legacy Brewery',
+      style: null, abv: null, rating_global: 3.5,
+      normalized_name: normalizeName('Legacy Row'),
+      normalized_brewery: normalizeBrewery('Legacy Brewery'),
+    });
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA Barrel Brewing',
+      name: 'After Hours: Rose Wild Ale',
+      algolia: {
+        hits: [{
+          bid: 5469263,
+          beer_name: 'After Hours: Rose Wild Ale',
+          brewery_name: 'PINTA Barrel Brewing',
+          type_name: 'Wild Ale - Other',
+          beer_abv: 5.7,
+          rating_score: 3.89,
+        }],
+        nbHits: 1,
+      },
+    });
+
+    expect(res.status).toBe(200);
+    // Before #351 this answered {status:'not_found'} and the extension showed no
+    // badge for a beer that IS on Untappd.
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 5469263 });
+    // The orphan row is gone; the canonical keeps the bid.
+    expect(findBeerByNormalized(
+      db, normalizeBrewery('PINTA Barrel Brewing'), normalizeName('After Hours: Rose Wild Ale'),
+    )).toBeNull();
+  });
+
   it('reports blocked without mutating backoff when Untappd serves a block page', async () => {
     const { db, app } = setup();
     // Cloudflare "Just a moment..." interstitial — isBlockPage flags this.

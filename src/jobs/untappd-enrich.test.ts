@@ -125,7 +125,7 @@ describe('enrichOneOrphan', () => {
     expect(searchCalled).toBe(false);
   });
 
-  test('duplicate untappd_id: merges orphan into canonical, returns not_found', async () => {
+  test('duplicate untappd_id: merges orphan into canonical, returns merged', async () => {
     const db = fresh();
 
     // Canonical entry already has untappd_id=999.
@@ -152,7 +152,7 @@ describe('enrichOneOrphan', () => {
 
     const out = await enrichOneOrphan({ db, log: silentLog, search }, orphanId);
 
-    expect(out).toBe('not_found');
+    expect(out).toBe('merged');
     // Orphan row deleted.
     expect(getBeer(db, orphanId)).toBeNull();
     // match_link redirected to canonical.

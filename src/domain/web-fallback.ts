@@ -3,6 +3,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { readWebTriedAt, stampWebTried } from '../storage/beers';
 import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
+import { isWebFallbackBlocked } from '../storage/enrich_failures';
 import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
 import {
@@ -56,14 +57,34 @@ function abvCorroborates(a: number | null, b: number | null): boolean {
   return a != null && b != null && Math.abs(a - b) <= ABV_TOLERANCE;
 }
 
-// Refined B1: brewery-strict ALWAYS required; then either the name gate passes
-// (same-language) OR there is distinctive token overlap AND abv corroborates
-// (cross-language). Never accept on abv alone. `cand.abv` must already be
-// hydrated by the caller before the token-overlap branch is trusted.
+export type GateStage = 'accept' | 'reject:brewery' | 'reject:name-token' | 'needs-abv';
+
+// The stages a rejected candidate can be logged under (accept/needs-abv never
+// reach the log as a stage: accept returns early, needs-abv resolves to either
+// a match or the post-hydration 'reject:abv' below) — and the call-level verdicts
+// runWebFallback reports. Typed narrowly (not `string`) so a typo in either is a
+// compile error; #349 will consume these strings programmatically.
+type RejectStage = Exclude<GateStage, 'accept' | 'needs-abv'> | 'reject:abv';
+type CallVerdict = 'matched' | 'rejected' | 'no-candidates' | 'error';
+
+// Refined B1, split so the ABV-dependent stage is separable: brewery-strict is
+// ALWAYS required; then either the name gate passes (same-language) or there is
+// distinctive token overlap, which alone is not enough — it must be corroborated
+// by ABV ('needs-abv'). Never accept on abv alone. Hydration-free by construction,
+// so runWebFallback can call it before paying for hydrateAbv.
+export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateStage {
+  if (!breweryStrict(input, cand)) return 'reject:brewery';
+  if (nameGatePass(input, cand)) return 'accept';
+  if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';
+  return 'needs-abv';
+}
+
+// Whole-gate verdict for an ALREADY-hydrated candidate. Thin wrapper over the
+// core so the two can no longer drift.
 export function gateWebCandidate(input: GateInput, cand: ResolvedBeer): boolean {
-  if (!breweryStrict(input, cand)) return false;
-  if (nameGatePass(input, cand)) return true;
-  if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return false;
+  const stage = evaluateCandidate(input, cand);
+  if (stage === 'accept') return true;
+  if (stage !== 'needs-abv') return false;
   return abvCorroborates(input.abv, cand.abv);
 }
 
@@ -107,31 +128,95 @@ export async function runWebFallback(
 ): Promise<SearchResult | null> {
   const now = (deps.now ?? (() => new Date()))();
 
+  // Triage classes the metered path must never spend on. Checked first and for
+  // free: no quota, and deliberately NO web_tried_at stamp, so a beer unblocked
+  // by a later parser fix is retried on the next cron tick rather than 30 days
+  // later (#351). Covers the relay path too, which never passes through
+  // listLookupCandidates and was previously unfiltered even for `wontfix`.
+  if (isWebFallbackBlocked(deps.db, input.beerId)) {
+    deps.log.debug({ beerId: input.beerId, reason: 'review-class' }, 'web-fallback skipped');
+    return null;
+  }
+
   // Per-beer cooldown: don't re-spend a web search on the same orphan within 30 days.
   const triedAt = readWebTriedAt(deps.db, input.beerId);
   if (triedAt) {
     const ageDays = (now.getTime() - new Date(triedAt).getTime()) / 86_400_000;
-    if (ageDays < RE_WEB_COOLDOWN_DAYS) return null;
+    if (ageDays < RE_WEB_COOLDOWN_DAYS) {
+      deps.log.debug({ beerId: input.beerId, reason: 'cooldown' }, 'web-fallback skipped');
+      return null;
+    }
   }
 
   // Daily budget guard (UTC day). Consume BEFORE the network call.
-  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) return null;
+  if (!tryConsumeWebSearchQuota(deps.db, utcDay(now), deps.cap)) {
+    deps.log.debug({ beerId: input.beerId, reason: 'quota' }, 'web-fallback skipped');
+    return null;
+  }
 
   let candidates: ResolvedBeer[];
   try {
     candidates = await deps.resolver.resolve(input.brewery, input.name);
+  } catch (err) {
+    // The quota unit is already spent by the time we get here, so the invariant
+    // "every spent call writes one info line" must hold on this path too — even
+    // though the current Brave resolver never actually throws (it catches
+    // everything and returns []). Log, then rethrow UNCHANGED: this must not
+    // alter the caller's error semantics in any way.
+    deps.log.info(
+      {
+        beerId: input.beerId, brewery: input.brewery, name: input.name,
+        results: 0, verdict: 'error', rejected: [],
+      },
+      'web-fallback call',
+    );
+    throw err;
   } finally {
-    // A spent call marks the beer regardless of outcome (accept or reject).
+    // A spent call marks the beer regardless of outcome (accept, reject, or error).
     stampWebTried(deps.db, input.beerId, now.toISOString());
   }
 
+  // One line per SPENT call. Without it a miss is indistinguishable from a dead
+  // key or an empty index, and the rejection stages are the input the gate
+  // redesign (#349) is waiting on — reject:abv with inputAbv/candAbv shows
+  // exactly how many correct candidates a null ABV costs us.
+  const rejected: Array<{
+    bid: number; beer_name: string; brewery_name: string;
+    stage: RejectStage; inputAbv: number | null; candAbv: number | null;
+  }> = [];
+  const logCall = (verdict: CallVerdict, matchedBid?: number) =>
+    deps.log.info(
+      {
+        beerId: input.beerId, brewery: input.brewery, name: input.name,
+        results: candidates.length, verdict, matchedBid, rejected,
+      },
+      'web-fallback call',
+    );
+
   for (const cand of candidates) {
-    if (!breweryStrict(input, cand)) continue;
-    if (nameGatePass(input, cand)) return toSearchResult(cand);
-    if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) continue;
+    const stage = evaluateCandidate(input, cand);
+    if (stage === 'accept') {
+      logCall('matched', cand.bid);
+      return toSearchResult(cand);
+    }
+    if (stage !== 'needs-abv') {
+      rejected.push({
+        bid: cand.bid, beer_name: cand.beer_name, brewery_name: cand.brewery_name,
+        stage, inputAbv: input.abv, candAbv: cand.abv,
+      });
+      continue;
+    }
     const abv = await hydrateAbv(deps.hydrate, cand);
-    if (abvCorroborates(input.abv, abv)) return toSearchResult({ ...cand, abv });
+    if (abvCorroborates(input.abv, abv)) {
+      logCall('matched', cand.bid);
+      return toSearchResult({ ...cand, abv });
+    }
+    rejected.push({
+      bid: cand.bid, beer_name: cand.beer_name, brewery_name: cand.brewery_name,
+      stage: 'reject:abv', inputAbv: input.abv, candAbv: abv,
+    });
   }
+  logCall(candidates.length === 0 ? 'no-candidates' : 'rejected');
   return null;
 }
 
