@@ -440,3 +440,23 @@ test('buildTriageLine reports the unverified count', () => {
     error: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
+
+test('logs one evidence summary per run (input for the quality review)', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const lines: Record<string, unknown>[] = [];
+  const spyLog = { ...log, info: (o: unknown) => { lines.push(o as Record<string, unknown>); },
+    warn: () => {}, error: () => {}, debug: () => {} } as unknown as typeof log;
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'alias',
+      issue_number: 228, new_issue_key: null, proposed_query: 'q', expected_target: 'A — B' }],
+    new_issues: [],
+  };
+  await orphanTriage({
+    db: d, log: spyLog, llm: llm(analysis), github: gh(),
+    search: { search: vi.fn().mockRejectedValue(new Error('breaker open')) }, now: inWindow,
+  });
+
+  const summary = lines.find((l) => typeof l === 'object' && l !== null && 'rowsWithEvidence' in l);
+  expect(summary).toMatchObject({ probeFailures: 2, causesChecked: 1, unverified: 1, verifyFailures: 1 });
+});

@@ -135,6 +135,9 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     let plan;
     let analysis: Analysis;
     let unverified = 0;
+    let probeFailures = 0;
+    let verifyFailures = 0;
+    let causesChecked = 0;
     const exchanges: TriageExchange[] = [];
     const probeLimit = deps.probeLimit ?? TRIAGE_PROBE_LIMIT_DEFAULT;
     try {
@@ -145,7 +148,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       const probes = deps.search
         ? await collectTriageProbes({
             orphans, search: deps.search, limit: probeLimit,
-            onError: (query, err) => log.warn({ err, query }, 'orphan-triage: probe failed'),
+            onError: (query, err) => {
+              probeFailures += 1;
+              log.warn({ err, query }, 'orphan-triage: probe failed');
+            },
           })
         : new Map();
       const ex1 = await llm.analyze({ orphans, openIssues, probes });
@@ -167,8 +173,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (deps.search) {
         const verified = await verifyCauses({
           verdicts: analysis.verdicts, search: deps.search, limit: probeLimit,
-          onError: (query, err) => log.warn({ err, query }, 'orphan-triage: verification failed'),
+          onError: (query, err) => {
+            verifyFailures += 1;
+            log.warn({ err, query }, 'orphan-triage: verification failed');
+          },
         });
+        causesChecked = verified.size;
         analysis = {
           ...analysis,
           verdicts: analysis.verdicts.map((v) => {
@@ -182,6 +192,15 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
             };
           }),
         };
+      }
+      // One line per run summarising how much evidence actually reached the model.
+      // The 2026-08-04 quality review compares these against the pre-change baseline,
+      // and a run where every probe failed (breaker open) must be visible as such —
+      // its verdicts were made blind, even though the verification gate still blocks
+      // unproven causes from reaching GitHub.
+      if (deps.search) {
+        log.info({ rowsWithEvidence: probes.size, probeFailures, causesChecked, unverified, verifyFailures },
+          'orphan-triage: evidence summary');
       }
       plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
