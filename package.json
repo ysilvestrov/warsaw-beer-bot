@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit",
+    "ai-review-replay": "tsx scripts/ai-review/replay.ts",
     "alias-key": "tsx scripts/brewery-alias-key.ts",
     "rearm-aliased-orphans": "tsx scripts/rearm-aliased-orphans.ts",
     "rearm-matcher-bug-orphans": "tsx scripts/rearm-matcher-bug-orphans.ts",
