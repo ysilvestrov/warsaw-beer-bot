@@ -7,8 +7,26 @@ const orphan: UntriagedFailure = {
   beer_id: 7, brewery: 'Nepomucen', name: 'Hazy Disco', search_url: 'https://s',
   source_url: 'https://shop.example', candidates_count: 3,
   candidates_summary: 'Nepo Brewing Hazy Disco|Other Beer', fail_count: 4,
-  last_at: '2026-07-04T10:00:00Z',
+  last_at: '2026-07-04T10:00:00Z', abv: null, style: null,
 };
+
+test('VerdictSchema accepts a causal verdict with a proposed query', () => {
+  const v = VerdictSchema.parse({
+    beer_id: 1, review_class: 'matcher_bug', review_note: 'alias gap',
+    issue_number: 347, new_issue_key: null,
+    proposed_query: 'Petrus Kriek', expected_target: 'Brouwerij De Brabandere — Petrus Kriek',
+  });
+  expect(v.proposed_query).toBe('Petrus Kriek');
+  expect(v.expected_target).toBe('Brouwerij De Brabandere — Petrus Kriek');
+});
+
+test('ANALYSIS_TOOL_SCHEMA requires the two verification fields (nullable)', () => {
+  const props = ANALYSIS_TOOL_SCHEMA.properties.verdicts.items.properties as Record<string, unknown>;
+  expect(props.proposed_query).toEqual({ type: ['string', 'null'] });
+  expect(props.expected_target).toEqual({ type: ['string', 'null'] });
+  expect(ANALYSIS_TOOL_SCHEMA.properties.verdicts.items.required)
+    .toEqual(expect.arrayContaining(['proposed_query', 'expected_target']));
+});
 
 test('AnalysisSchema: accepts a valid payload', () => {
   const a = AnalysisSchema.parse({

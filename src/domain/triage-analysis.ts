@@ -11,6 +11,12 @@ export const VerdictSchema = z.object({
   // an existing open issue OR a new_issues entry; not_on_untappd/wontfix use neither.
   issue_number: z.number().int().nullable(),
   new_issue_key: z.string().nullable(),
+  // Falsifiable evidence for a causal verdict: the query the model believes finds
+  // the beer, and the "<brewery> — <name>" it expects back. The job re-runs the
+  // query before publishing anything to GitHub (see verifyCauses). Defaulted so a
+  // model that omits them parses as "unproven" rather than failing the whole batch.
+  proposed_query: z.string().nullable().default(null),
+  expected_target: z.string().nullable().default(null),
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
 
@@ -57,8 +63,11 @@ export const ANALYSIS_TOOL_SCHEMA = {
           review_note: { type: 'string' },
           issue_number: { type: ['integer', 'null'] },
           new_issue_key: { type: ['string', 'null'] },
+          proposed_query: { type: ['string', 'null'] },
+          expected_target: { type: ['string', 'null'] },
         },
-        required: ['beer_id', 'review_class', 'review_note', 'issue_number', 'new_issue_key'],
+        required: ['beer_id', 'review_class', 'review_note', 'issue_number', 'new_issue_key',
+          'proposed_query', 'expected_target'],
         additionalProperties: false,
       },
     },
