@@ -18,6 +18,14 @@ export function normalizeWs(s: string): string {
  * Matching is whitespace-normalised so a re-indented or re-wrapped quote still
  * matches: line numbers are the field models get wrong most often, so we locate
  * the text and derive the position rather than trusting what was reported.
+ *
+ * Known limitation: a multi-line quote must begin at the start of a line —
+ * one that starts mid-line is not located. That is deliberate: anchoring the
+ * multi-line search at the window start is what prevents a substring
+ * false-positive (matching a later line's quote against an earlier line's
+ * accumulated window). The failure mode this trades for is failing closed —
+ * applyGate drops the finding as `quote_not_found` instead of possibly
+ * mis-locating it.
  */
 export function locateQuote(content: string, quote: string): number | null {
   const needle = normalizeWs(quote);

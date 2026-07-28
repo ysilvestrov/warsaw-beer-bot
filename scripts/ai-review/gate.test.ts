@@ -55,6 +55,15 @@ describe('locateQuote', () => {
   it('returns null for an empty quote', () => {
     expect(locateQuote(CONTENT, '   ')).toBeNull();
   });
+
+  // Known, deliberate limitation: a multi-line quote must begin at the start of
+  // a line. Anchoring Phase 2 at the window start is what prevents the
+  // substring false-positive that reports a line-3 quote as line 1. The cost is
+  // that a mid-line multi-line quote is not located, so applyGate drops the
+  // finding as `quote_not_found` — failing closed, which is the safe direction.
+  it('does not locate a multi-line quote that starts mid-line', () => {
+    expect(locateQuote(CONTENT, "(clash) {\n  return 'not_found';")).toBeNull();
+  });
 });
 
 describe('changedLineRanges', () => {
