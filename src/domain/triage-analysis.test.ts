@@ -119,6 +119,15 @@ test('buildTriagePrompt: instructs the candidates_count pivot and already-handle
   expect(p).toContain('already stripped');
 });
 
+test('buildTriagePrompt: instructs the translation guard for foreign-language names', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+  expect(p).toContain('Translation guard');
+  // Untappd keeps most PL/CZ descriptors verbatim, so a foreign name + 0 candidates
+  // is not evidence of a translation gap (#340 re-review 2026-07-28).
+  expect(p).toContain('keeps the original spelling');
+  expect(p).toContain('an English-named candidate from the SAME brewery');
+});
+
 test('ANALYSIS_TOOL_SCHEMA: strict-compatible (no open objects)', () => {
   const check = (node: unknown): void => {
     if (typeof node !== 'object' || node === null) return;
