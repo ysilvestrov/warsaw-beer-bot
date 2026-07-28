@@ -55,43 +55,25 @@ describe('readConfig', () => {
     expect(cfg.repo).toBe('ysilvestrov/warsaw-beer-bot');
   });
 
+  it('defaults both pass models and lets env override them independently', () => {
+    const cfg = readConfig(full);
+    expect(cfg.findModel).toBeTruthy();
+    expect(cfg.verifyModel).toBeTruthy();
+
+    const overridden = readConfig({
+      ...full,
+      AI_REVIEW_MODEL: 'find-x',
+      AI_REVIEW_VERIFY_MODEL: 'verify-y',
+    } as NodeJS.ProcessEnv);
+    expect(overridden.findModel).toBe('find-x');
+    expect(overridden.verifyModel).toBe('verify-y');
+  });
+
   it('throws loudly when OPENAI_API_KEY is missing', () => {
     const { OPENAI_API_KEY, ...rest } = full;
     expect(() => readConfig(rest as NodeJS.ProcessEnv)).toThrow(/OPENAI_API_KEY/);
   });
 });
-
-import { truncateDiff, buildMessages } from './ai-pr-review';
-
-describe('truncateDiff', () => {
-  it('returns the diff unchanged when within budget', () => {
-    expect(truncateDiff('abc', 10)).toEqual({ text: 'abc', truncated: false });
-  });
-  it('cuts to the budget and flags truncation when over', () => {
-    expect(truncateDiff('abcdef', 3)).toEqual({ text: 'abc', truncated: true });
-  });
-});
-
-describe('buildMessages', () => {
-  it('puts instructions in system and PR context + diff in user, noting truncation', () => {
-    const msgs = buildMessages({
-      instructions: 'REVIEW RULES',
-      prTitle: 'My PR',
-      prBody: 'desc',
-      baseRef: 'main',
-      headRef: 'feat',
-      diff: 'diff-body',
-      truncated: true,
-    });
-    expect(msgs[0]).toEqual({ role: 'system', content: 'REVIEW RULES' });
-    expect(msgs[1].role).toBe('user');
-    expect(msgs[1].content).toContain('Title: My PR');
-    expect(msgs[1].content).toContain('diff-body');
-    expect(msgs[1].content).toContain('truncated');
-  });
-});
-
-import { callOpenAI } from './ai-pr-review';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -101,43 +83,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     text: async () => JSON.stringify(body),
   } as unknown as Response;
 }
-
-const completion = { choices: [{ message: { content: 'LGTM' } }] };
-const deps = (fetchFn: typeof fetch) => ({
-  endpoint: 'https://api.openai.com/v1',
-  apiKey: 'sk',
-  fetchFn,
-  sleep: async () => {},
-});
-
-describe('callOpenAI', () => {
-  it('returns the completion content on success', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse(completion)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries on 5xx then succeeds', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({}, 500))
-      .mockResolvedValueOnce(jsonResponse(completion)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-  });
-
-  it('fails loudly after exhausting retries on persistent 429', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse({}, 429)) as unknown as typeof fetch;
-    await expect(callOpenAI({ ...deps(fetchFn), attempts: 3 }, [])).rejects.toThrow(/429|attempts/);
-    expect(fetchFn).toHaveBeenCalledTimes(3);
-  });
-
-  it('does not retry a 401 auth error', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse({ error: 'bad key' }, 401)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).rejects.toThrow(/401/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-});
 
 import { upsertReview, wrapBody, MARKER } from './ai-pr-review';
 
