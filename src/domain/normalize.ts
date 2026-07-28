@@ -190,6 +190,13 @@ export function stripQueryTokenNoise(s: string): string {
     .trim();
 }
 
+// #350: Algolia does not match a one-character token — `Elch Brau n Helles` returns 0 hits while
+// `Elch Brau Pork Helles` and `Elch Brau Roll Helles` both return the target `Pork'N'Roll Helles`.
+// Sending such a token therefore ANDs the whole query to nothing. The name stage already ignores
+// them (`nameTokens` in untappd-lookup.ts keeps length >= 2), so dropping them here removes a
+// query ↔ name-normalisation asymmetry and can only widen the candidate pool, never narrow it.
+const MIN_QUERY_TOKEN_LENGTH = 2;
+
 export function cleanSearchQuery(brewery: string, name: string): string {
   const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery))));
   const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
@@ -200,18 +207,19 @@ export function cleanSearchQuery(brewery: string, name: string): string {
   const brandFolds = new Set<string>();
   for (const tok of cleanBrewery.split(COLLAB_SEP).join(' ').split(/\s+/)) {
     const f = foldToken(tok);
-    if (!f || BREWERY_NOISE.has(f) || brandFolds.has(f)) continue;
+    if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f) || brandFolds.has(f)) continue;
     brandFolds.add(f);
     brandTokens.push(tok);
   }
 
-  // Name tokens: whitespace split, "/" -> space (unambiguous collab slash); drop lone collab
-  // connectors ("x"), empty folds, and BREWERY_NOISE anywhere. The name is NEVER split on " x "
-  // (#270): a name beginning "x <partner>:" is a shop artifact, not a collab-brewery separator.
+  // Name tokens: whitespace split, "/" -> space (unambiguous collab slash); drop one-character
+  // folds (incl. the lone collab connector "x"), empty folds, and BREWERY_NOISE anywhere. The name
+  // is NEVER split on " x " (#270): a name beginning "x <partner>:" is a shop artifact, not a
+  // collab-brewery separator.
   const nameTokens: string[] = [];
   for (const tok of cleanName.replace(/\//g, ' ').split(/\s+/)) {
     const f = foldToken(tok);
-    if (!f || f === 'x' || BREWERY_NOISE.has(f)) continue;
+    if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f)) continue;
     nameTokens.push(tok);
   }
 
