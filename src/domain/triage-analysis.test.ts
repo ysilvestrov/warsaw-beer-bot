@@ -7,8 +7,26 @@ const orphan: UntriagedFailure = {
   beer_id: 7, brewery: 'Nepomucen', name: 'Hazy Disco', search_url: 'https://s',
   source_url: 'https://shop.example', candidates_count: 3,
   candidates_summary: 'Nepo Brewing Hazy Disco|Other Beer', fail_count: 4,
-  last_at: '2026-07-04T10:00:00Z',
+  last_at: '2026-07-04T10:00:00Z', abv: null, style: null,
 };
+
+test('VerdictSchema accepts a causal verdict with a proposed query', () => {
+  const v = VerdictSchema.parse({
+    beer_id: 1, review_class: 'matcher_bug', review_note: 'alias gap',
+    issue_number: 347, new_issue_key: null,
+    proposed_query: 'Petrus Kriek', expected_target: 'Brouwerij De Brabandere — Petrus Kriek',
+  });
+  expect(v.proposed_query).toBe('Petrus Kriek');
+  expect(v.expected_target).toBe('Brouwerij De Brabandere — Petrus Kriek');
+});
+
+test('ANALYSIS_TOOL_SCHEMA requires the two verification fields (nullable)', () => {
+  const props = ANALYSIS_TOOL_SCHEMA.properties.verdicts.items.properties as Record<string, unknown>;
+  expect(props.proposed_query).toEqual({ type: ['string', 'null'] });
+  expect(props.expected_target).toEqual({ type: ['string', 'null'] });
+  expect(ANALYSIS_TOOL_SCHEMA.properties.verdicts.items.required)
+    .toEqual(expect.arrayContaining(['proposed_query', 'expected_target']));
+});
 
 test('AnalysisSchema: accepts a valid payload', () => {
   const a = AnalysisSchema.parse({
@@ -126,6 +144,40 @@ test('buildTriagePrompt: instructs the translation guard for foreign-language na
   // is not evidence of a translation gap (#340 re-review 2026-07-28).
   expect(p).toContain('keeps the original spelling');
   expect(p).toContain('an English-named candidate from the SAME brewery');
+});
+
+test('buildTriagePrompt renders probe evidence and the shop abv/style', () => {
+  const o: UntriagedFailure = { ...orphan, candidates_count: 0, candidates_summary: '', abv: 4.6, style: 'Lager' };
+  const p = buildTriagePrompt({
+    orphans: [o], openIssues: [],
+    probes: new Map([[o.beer_id, {
+      brewery: 'Browar Artezan — Jasne (bid 6666784, 5.0%, Lager - Pale)',
+      name: '',
+    }]]),
+  });
+  expect(p).toContain('"probe_brewery": "Browar Artezan — Jasne (bid 6666784, 5.0%, Lager - Pale)"');
+  expect(p).toContain('"probe_name": "(no results)"');
+  expect(p).toContain('"abv": 4.6');
+  expect(p).toContain('"style": "Lager"');
+});
+
+test('buildTriagePrompt distinguishes a probe that found nothing from one never run', () => {
+  const ran: UntriagedFailure = { ...orphan, beer_id: 1, candidates_count: 0, candidates_summary: '' };
+  const skipped: UntriagedFailure = { ...orphan, beer_id: 2, candidates_count: 0, candidates_summary: '' };
+  const p = buildTriagePrompt({
+    orphans: [ran, skipped], openIssues: [],
+    probes: new Map([[1, { brewery: '', name: '' }]]),   // ran, both empty
+  });
+  const [first, second] = p.slice(p.indexOf('## Orphans')).split('"beer_id": 2');
+  expect(first).toContain('"probe_brewery": "(no results)"');
+  expect(second).toContain('"probe_brewery": "(not run)"');
+});
+
+test('buildTriagePrompt instructs the falsifiable-cause contract', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+  expect(p).toContain('proposed_query');
+  expect(p).toContain('will be re-run');
+  expect(p).toContain('probe_brewery');
 });
 
 test('ANALYSIS_TOOL_SCHEMA: strict-compatible (no open objects)', () => {

@@ -213,15 +213,15 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, wontfix: 0, skipped: 1, error: null, disabledReason: null,
+    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, error: 'invalid json', disabledReason: null,
+    skipped: 0, unverified: 0, error: 'invalid json', disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, error: null, disabledReason: 'нема GITHUB_TOKEN',
+    skipped: 0, unverified: 0, error: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
 
@@ -320,4 +320,143 @@ test('archive: zero-verdict-after-retry run is still archived (both empty exchan
   expect(archive.write).toHaveBeenCalledTimes(1);
   expect((archive.write.mock.calls[0][1] as { exchanges: unknown[] }).exchanges).toHaveLength(2);
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('помилка');
+});
+
+// --- evidence pipeline (2026-07-28): probes + cause verification ---
+
+const searchStub = (results: unknown[] = []) => ({ search: vi.fn().mockResolvedValue(results) });
+
+const petrusHit = {
+  bid: 6682946, beer_name: 'Petrus Kriek', brewery_name: 'Brouwerij De Brabandere',
+  style: null, abv: 4, global_rating: null,
+};
+
+test('an unverified cause is downgraded: no GitHub write, note prefixed', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 1, review_class: 'matcher_bug', review_note: 'brewery alias gap',
+      issue_number: 228, new_issue_key: null,
+      proposed_query: 'ReCraft Hazy American Pale Ale',
+      expected_target: 'Browar Cornelius — Cornelius Hazy APA',
+    }],
+    new_issues: [],
+  };
+  const github = gh();
+  // probes return nothing; the verification query returns nothing either
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, search: searchStub(), now: inWindow });
+
+  expect(github.commentOnIssue).not.toHaveBeenCalled();
+  const row = d.prepare('SELECT review_class, review_note FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_class: string; review_note: string };
+  expect(row.review_class).toBe('matcher_bug');
+  expect(row.review_note).toMatch(/^unverified: /);
+  expect(row.review_note).not.toContain('#228');
+});
+
+test('a verified cause is published as before', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 1, review_class: 'matcher_bug', review_note: 'brand of De Brabandere',
+      issue_number: 228, new_issue_key: null,
+      proposed_query: 'Petrus Kriek',
+      expected_target: 'Brouwerij De Brabandere — Petrus Kriek',
+    }],
+    new_issues: [],
+  };
+  const github = gh();
+  await orphanTriage({
+    db: d, log, llm: llm(analysis), github, search: searchStub([petrusHit]), now: inWindow,
+  });
+
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
+  const row = d.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_note: string };
+  expect(row.review_note).toContain('#228');
+  expect(row.review_note).not.toMatch(/^unverified: /);
+});
+
+test('probes run for zero-candidate orphans and reach the prompt input', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'not_on_untappd', review_note: 'absent',
+      issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  };
+  const theLlm = llm(analysis);
+  const search = searchStub([petrusHit]);
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), search, now: inWindow });
+
+  // brewery-only + name-only for the single zero-candidate row
+  expect(search.search).toHaveBeenCalledTimes(2);
+  expect(theLlm.analyze.mock.calls[0][0].probes.get(1).brewery).toContain('Petrus Kriek');
+});
+
+test('a search dep that throws never fails the run', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'alias',
+      issue_number: 228, new_issue_key: null,
+      proposed_query: 'q', expected_target: 'A — B' }],
+    new_issues: [],
+  };
+  const github = gh();
+  const search = { search: vi.fn().mockRejectedValue(new Error('breaker open')) };
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, search, now: inWindow });
+
+  const row = d.prepare('SELECT review_class, review_note FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_class: string; review_note: string };
+  expect(row.review_class).toBe('matcher_bug');
+  expect(row.review_note).toMatch(/^unverified: /);
+  expect(github.commentOnIssue).not.toHaveBeenCalled();
+});
+
+test('without a search dep the job behaves exactly as before', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'alias',
+      issue_number: 228, new_issue_key: null }],
+    new_issues: [],
+  };
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
+  const row = d.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_note: string };
+  expect(row.review_note).toContain('#228');
+});
+
+test('buildTriageLine reports the unverified count', () => {
+  expect(buildTriageLine({
+    total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
+    notOnUntappd: 1, wontfix: 0, skipped: 0, unverified: 2,
+    error: null, disabledReason: null,
+  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
+});
+
+test('logs one evidence summary per run (input for the quality review)', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const lines: Record<string, unknown>[] = [];
+  const spyLog = { ...log, info: (o: unknown) => { lines.push(o as Record<string, unknown>); },
+    warn: () => {}, error: () => {}, debug: () => {} } as unknown as typeof log;
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'alias',
+      issue_number: 228, new_issue_key: null, proposed_query: 'q', expected_target: 'A — B' }],
+    new_issues: [],
+  };
+  await orphanTriage({
+    db: d, log: spyLog, llm: llm(analysis), github: gh(),
+    search: { search: vi.fn().mockRejectedValue(new Error('breaker open')) }, now: inWindow,
+  });
+
+  const summary = lines.find((l) => typeof l === 'object' && l !== null && 'rowsWithEvidence' in l);
+  expect(summary).toMatchObject({ probeFailures: 2, causesChecked: 1, unverified: 1, verifyFailures: 1 });
 });

@@ -33,6 +33,9 @@ const Schema = z.object({
   GITHUB_REPO: z.string().min(1).default('ysilvestrov/warsaw-beer-bot'),
   // Optional diagnostic archive of raw triage LLM I/O; unset ⇒ archive disabled.
   TRIAGE_LOG_DIR: z.string().optional(),
+  // Untappd searches the triage job may spend per run on evidence probes and on
+  // verifying proposed causes; 0 disables both (job behaves as before).
+  TRIAGE_PROBE_LIMIT: z.coerce.number().int().min(0).default(120),
 });
 
 export type Env = z.infer<typeof Schema>;

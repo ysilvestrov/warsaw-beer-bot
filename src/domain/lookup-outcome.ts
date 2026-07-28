@@ -8,15 +8,9 @@ import {
 } from '../storage/beers';
 import { recordEnrichFailure, clearEnrichFailure } from '../storage/enrich_failures';
 import type { LookupOutcome } from './untappd-lookup';
-import type { SearchResult } from '../sources/untappd/search';
+import { summarizeCandidates } from './candidate-format';
 
 export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient' | 'skipped' | 'blocked';
-
-// Compact, human-readable summary of what the Untappd search returned — top 3
-// "<brewery> — <name>". Empty string when the search returned nothing (a noisy query).
-function summarizeCandidates(candidates: SearchResult[]): string {
-  return candidates.slice(0, 3).map((r) => `${r.brewery_name} — ${r.beer_name}`).join('; ');
-}
 
 // Applies a lookupBeer outcome to a beer row's enrichment/backoff state. Shared by the
 // server enrich cron (enrichOneOrphan) and the client-relay /enrich/result endpoint so

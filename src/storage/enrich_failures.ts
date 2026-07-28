@@ -146,6 +146,10 @@ export interface UntriagedFailure {
   candidates_summary: string;
   fail_count: number;
   last_at: string;
+  // From the beer row, not the failure row: the triage prompt needs the shop's own
+  // ABV/style to check a candidate against instead of guessing.
+  abv: number | null;
+  style: string | null;
 }
 
 // Newest untriaged not_found failures for the daily triage job. `blocked` rows
@@ -154,11 +158,13 @@ export interface UntriagedFailure {
 export function listUntriagedFailures(db: DB, limit: number): UntriagedFailure[] {
   return db
     .prepare(
-      `SELECT beer_id, brewery, name, search_url, source_url,
-              candidates_count, candidates_summary, fail_count, last_at
-         FROM enrich_failures
-        WHERE review_class IS NULL AND outcome = 'not_found'
-        ORDER BY last_at DESC, beer_id DESC
+      `SELECT ef.beer_id, ef.brewery, ef.name, ef.search_url, ef.source_url,
+              ef.candidates_count, ef.candidates_summary, ef.fail_count, ef.last_at,
+              b.abv AS abv, b.style AS style
+         FROM enrich_failures ef
+         JOIN beers b ON b.id = ef.beer_id
+        WHERE ef.review_class IS NULL AND ef.outcome = 'not_found'
+        ORDER BY ef.last_at DESC, ef.beer_id DESC
         LIMIT ?`,
     )
     .all(limit) as UntriagedFailure[];

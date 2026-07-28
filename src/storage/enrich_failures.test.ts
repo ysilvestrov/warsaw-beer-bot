@@ -211,6 +211,23 @@ describe('enrich_failures', () => {
       candidates_summary: 'x|y', fail_count: 1, last_at: '2026-07-03T00:00:00Z',
     });
   });
+
+  // The triage prompt compares the shop's ABV against a candidate's before calling
+  // them the same beer, so the batch must carry it (2026-07-28 evidence pipeline).
+  test('listUntriagedFailures exposes the beer abv and style', () => {
+    const db = testDb();
+    const id = upsertBeer(db, {
+      untappd_id: null, name: 'Hazy American Pale Ale', brewery: 'ReCraft Brewery',
+      style: 'Hazy APA', abv: 4.2, rating_global: null,
+      normalized_name: normalizeName('Hazy American Pale Ale'),
+      normalized_brewery: normalizeBrewery('ReCraft Brewery'),
+    });
+    recordEnrichFailure(db, row({ beer_id: id, brewery: 'ReCraft Brewery', name: 'Hazy American Pale Ale' }));
+
+    const [got] = listUntriagedFailures(db, 10);
+    expect(got.abv).toBe(4.2);
+    expect(got.style).toBe('Hazy APA');
+  });
 });
 
 describe('retireEnrichFailure', () => {

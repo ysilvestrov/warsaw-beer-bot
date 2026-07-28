@@ -38,19 +38,18 @@ test('forces labels from verdict classes, ignoring model labels', () => {
     .toEqual(['matcher-bug', 'orphan-triage', 'parser-bug']);
 });
 
-test('skips invalid verdicts: unknown issue, unknown key, both refs, actionable without ref', () => {
+test('skips invalid verdicts: unknown issue, unknown key, both refs', () => {
   const a: Analysis = {
     verdicts: [
       v({ beer_id: 1, issue_number: 999 }),                       // not open
       v({ beer_id: 2, new_issue_key: 'ghost' }),                  // no such entry
       v({ beer_id: 3, issue_number: 228, new_issue_key: 'k1' }),  // both refs
-      v({ beer_id: 4 }),                                          // actionable, no ref
       v({ beer_id: 5, review_class: 'not_on_untappd', issue_number: 228 }), // quiet class ignores refs
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [228], [1, 2, 3, 4, 5]);
-  expect(plan.skipped).toBe(4);
+  const plan = planTriageActions(a, [228], [1, 2, 3, 5]);
+  expect(plan.skipped).toBe(3);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([5]);
   expect(plan.newIssues).toHaveLength(0); // k1 unused → not created
   expect(plan.comments).toHaveLength(0);
@@ -137,4 +136,21 @@ test('dedupes duplicate beer_id verdicts: first wins, later ones skipped', () =>
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([2]);
   expect(plan.skipped).toBe(1);
+});
+
+// An actionable class with no reference is how a classified-but-unproven row is
+// expressed (the job strips the attachment when a cause fails verification, and
+// the prompt allows the model to decline one). It must be RECORDED, not skipped:
+// skipping keeps review_class NULL, so the same unprovable hypothesis would be
+// regenerated - and re-probed - every single day.
+test('an actionable verdict without a reference is recorded quietly, not skipped', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, review_note: 'unverified: alias gap' })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [228], [1]);
+  expect(plan.skipped).toBe(0);
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
+  expect(plan.comments).toHaveLength(0);
+  expect(plan.newIssues).toHaveLength(0);
 });

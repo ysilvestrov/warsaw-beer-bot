@@ -81,7 +81,12 @@ export function planTriageActions(
     }
     const hasIssue = verdict.issue_number !== null;
     const hasKey = verdict.new_issue_key !== null;
-    if (hasIssue === hasKey) { skipped++; continue; } // both or neither
+    if (hasIssue && hasKey) { skipped++; continue; } // contradictory routing
+    // Actionable class with no target: either the model deliberately declined to
+    // name a cause, or the job stripped an unverified one. Record the class so the
+    // row leaves the untriaged pool instead of regenerating the same unprovable
+    // hypothesis every day; it stays findable via the issues' `Scope:` queries.
+    if (!hasIssue && !hasKey) { quiet.push(verdict); continue; }
     if (hasIssue) {
       if (!open.has(verdict.issue_number!)) { skipped++; continue; }
       pushInto(byIssue, verdict.issue_number!, verdict);
