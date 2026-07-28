@@ -332,16 +332,35 @@ export function locateQuote(content: string, quote: string): number | null {
   if (needle === '') return null;
 
   const lines = content.split('\n');
+  const normalized = lines.map(normalizeWs);
+
+  // Phase 1: quote fully contained within a single normalised line.
+  for (let i = 0; i < normalized.length; i++) {
+    if (normalized[i].includes(needle)) return i + 1;
+  }
+
+  // Phase 2: multi-line quote, anchored at the start of line i.
+  // Known limitation: a multi-line quote beginning mid-line is not located, so
+  // applyGate drops it as `quote_not_found` — failing closed on purpose.
   for (let i = 0; i < lines.length; i++) {
-    let acc = '';
-    for (let n = 0; n < MAX_QUOTE_SPAN && i + n < lines.length; n++) {
-      const piece = normalizeWs(lines[i + n]);
-      acc = acc === '' ? piece : `${acc} ${piece}`;
-      if (acc.includes(needle)) return i + 1;
+    let acc = normalized[i];
+    for (let n = 1; n < MAX_QUOTE_SPAN && i + n < lines.length; n++) {
+      acc = `${acc} ${normalized[i + n]}`;
+      if (acc.startsWith(needle)) return i + 1;
     }
   }
   return null;
 }
+```
+
+> **Correction (found during execution):** the first draft of this function used a
+> single growing window with `acc.includes(needle)`. That is wrong — as soon as the
+> needle appeared anywhere in the accumulated string, the function returned the
+> *window start*, so a quote on line 3 was reported as line 1. The
+> "corrects the model-reported line number" test above catches it. The two-phase
+> version is the corrected one.
+
+```typescript
 
 /**
  * Post-image line ranges touched by the diff, per file.
@@ -435,7 +454,7 @@ export function applyGate(params: {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npx vitest run scripts/ai-review/gate.test.ts`
-Expected: PASS — 13 tests.
+Expected: PASS — 15 tests (14 from the block above, plus the mid-line-limitation test added during execution).
 
 - [ ] **Step 5: Commit**
 
