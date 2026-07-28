@@ -281,8 +281,10 @@ async function main(): Promise<void> {
     // window + job_state idempotency inside the job. Same UTC-tick pattern as
     // daily-status.
     cron.schedule('*/15 * * * *', () => {
-      orphanTriage({ db, log, llm: triageLlm, github: triageGithub, archive: triageArchive })
-        .catch((e) => log.error({ err: e }, 'orphan-triage cron'));
+      orphanTriage({
+        db, log, llm: triageLlm, github: triageGithub, archive: triageArchive,
+        search: algoliaSearch, probeLimit: env.TRIAGE_PROBE_LIMIT,
+      }).catch((e) => log.error({ err: e }, 'orphan-triage cron'));
     }),
   ];
 
@@ -304,8 +306,10 @@ async function main(): Promise<void> {
   // within the triage window, run today's triage now instead of waiting for the
   // next 15-min tick. Idempotent via job_state, so a normal start is a no-op once
   // the day's triage already ran.
-  orphanTriage({ db, log, llm: triageLlm, github: triageGithub, archive: triageArchive })
-    .catch((e) => log.error({ err: e }, 'orphan-triage startup'));
+  orphanTriage({
+    db, log, llm: triageLlm, github: triageGithub, archive: triageArchive,
+    search: algoliaSearch, probeLimit: env.TRIAGE_PROBE_LIMIT,
+  }).catch((e) => log.error({ err: e }, 'orphan-triage startup'));
 
   // Startup catch-up: if the bot was down/redeploying at 09:00 Warsaw but is up
   // within the morning window, emit today's digest now instead of waiting for the

@@ -182,6 +182,13 @@ describe('env: orphan-triage job', () => {
     expect(env.GITHUB_REPO).toBe('ysilvestrov/warsaw-beer-bot');
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.GITHUB_TOKEN).toBeUndefined();
+    expect(env.TRIAGE_PROBE_LIMIT).toBe(120);
+  });
+
+  test('TRIAGE_PROBE_LIMIT coerces and accepts 0 (probes + verification off)', () => {
+    expect(loadEnv({ ...validBase, TRIAGE_PROBE_LIMIT: '40' } as never).TRIAGE_PROBE_LIMIT).toBe(40);
+    expect(loadEnv({ ...validBase, TRIAGE_PROBE_LIMIT: '0' } as never).TRIAGE_PROBE_LIMIT).toBe(0);
+    expect(() => loadEnv({ ...validBase, TRIAGE_PROBE_LIMIT: '-1' } as never)).toThrow();
   });
 
   test('triage env: rejects unknown provider', () => {
