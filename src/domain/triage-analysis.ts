@@ -114,6 +114,11 @@ function decodeSearchQuery(searchUrl: string): string {
   }
 }
 
+function renderProbe(value: string | undefined): string {
+  if (value === undefined) return '(not run)';
+  return value === '' ? '(no results)' : value.slice(0, ORPHAN_FIELD_CAPS.summary);
+}
+
 function boundOrphan(o: UntriagedFailure, probe?: TriageProbe) {
   return {
     ...o,
@@ -123,9 +128,12 @@ function boundOrphan(o: UntriagedFailure, probe?: TriageProbe) {
     source_url: o.source_url.slice(0, ORPHAN_FIELD_CAPS.url),
     candidates_summary: o.candidates_summary.slice(0, ORPHAN_FIELD_CAPS.summary),
     search_query: decodeSearchQuery(o.search_url).slice(0, ORPHAN_FIELD_CAPS.name),
-    // Untappd-derived text, so capped like the scraped fields above.
-    probe_brewery: (probe?.brewery ?? '').slice(0, ORPHAN_FIELD_CAPS.summary),
-    probe_name: (probe?.name ?? '').slice(0, ORPHAN_FIELD_CAPS.summary),
+    // Untappd-derived text, so capped like the scraped fields above. "(no results)"
+    // and "(not run)" are deliberately distinct: a probe that ran and found nothing is
+    // strong evidence (the beer/brewery is absent), while a probe that never ran is no
+    // evidence at all. Collapsing both to "" would invite the guessing this exists to stop.
+    probe_brewery: renderProbe(probe?.brewery),
+    probe_name: renderProbe(probe?.name),
   };
 }
 
@@ -177,7 +185,8 @@ export function buildTriagePrompt(input: TriageInput): string {
     'visible in `name` (brackets, parentheticals, %/°/alc/abv/ibu) is already ABSENT from',
     '`search_query`, it is already stripped — do NOT propose stripping it again (it is already stripped).',
     'Evidence fields for zero-candidate rows: `probe_brewery` is what Untappd returns for the BREWERY',
-    'alone, `probe_name` for the NAME alone (empty string = that probe returned nothing or was not run).',
+    'alone, `probe_name` for the NAME alone. "(no results)" means the probe RAN and Untappd holds',
+    'nothing for it — strong evidence of absence; "(not run)" means no probe was made — no evidence.',
     'Use them instead of guessing: a brewery whose catalogue comes back but holds no such beer is',
     'not_on_untappd, not an alias gap; a beer found under a DIFFERENT brewery is a brewery-label',
     'problem; both empty means the beer is likely absent entirely.',

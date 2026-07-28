@@ -156,9 +156,21 @@ test('buildTriagePrompt renders probe evidence and the shop abv/style', () => {
     }]]),
   });
   expect(p).toContain('"probe_brewery": "Browar Artezan — Jasne (bid 6666784, 5.0%, Lager - Pale)"');
-  expect(p).toContain('"probe_name": ""');
+  expect(p).toContain('"probe_name": "(no results)"');
   expect(p).toContain('"abv": 4.6');
   expect(p).toContain('"style": "Lager"');
+});
+
+test('buildTriagePrompt distinguishes a probe that found nothing from one never run', () => {
+  const ran: UntriagedFailure = { ...orphan, beer_id: 1, candidates_count: 0, candidates_summary: '' };
+  const skipped: UntriagedFailure = { ...orphan, beer_id: 2, candidates_count: 0, candidates_summary: '' };
+  const p = buildTriagePrompt({
+    orphans: [ran, skipped], openIssues: [],
+    probes: new Map([[1, { brewery: '', name: '' }]]),   // ran, both empty
+  });
+  const [first, second] = p.slice(p.indexOf('## Orphans')).split('"beer_id": 2');
+  expect(first).toContain('"probe_brewery": "(no results)"');
+  expect(second).toContain('"probe_brewery": "(not run)"');
 });
 
 test('buildTriagePrompt instructs the falsifiable-cause contract', () => {
