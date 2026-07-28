@@ -196,3 +196,136 @@ call per PR plus one verify call per gated finding, all sequential.
 Config B is ~3.1× slower per PR at ~1.2× the call count, i.e. the cost is per-call latency on the
 larger model rather than call volume. At ~2.5 minutes per PR it is still well inside what a CI
 review step can absorb. Roughly 40% of config B's calls are verify calls that rejected nothing.
+
+## Recall set (defects that escaped review and were fixed later)
+
+Same method as the precision set: each PR replayed against its own head commit, no posting. These
+four PRs each shipped a defect that both the old AI reviewer and a human review missed at the time,
+and that had to be fixed in a later commit. Every fix commit was read first (`git show`) so the
+target defect was known before the replay output was looked at.
+
+`#274`'s head object was not present locally (`git cat-file` failed) and was fetched with
+`git fetch origin pull/274/head` before replaying. All four PRs replayed without error; no 401s.
+
+| config | PR | escaped defect | fixed in | verdict | evidence |
+|---|---|---|---|---|---|
+| A | 233 | a non-empty orphan batch that comes back with **zero LLM verdicts** closes the Warsaw day via `finish()` with `error: null` — no retry, no warning, digest reads "Тріаж: 50 нових" while nothing was triaged | `98c05da` (#296) | missed | published 1 finding, on `orphan-triage.ts:111` — the *other* `finish()` caller: "The job exits after marking success when there are no untriaged orphans". Nearest miss of the whole set: it names the right mechanism (`finish` writes `TRIAGE_LAST_RUN_KEY`, so the day is closed) but the wrong branch, and the branch it names is deliberate (nothing to triage → nothing to do). A maintainer would have replied "intended" and stopped |
+| A | 237 | the sharpened prompt lists "name divergence (translation, …)" as a matcher_bug hint with no guard, so the triage model reads "Polish name + 0 candidates" as a PL→EN translation gap | `7a9e262` (#354, issue #340) | missed | raised 1, published **0**. The single raised finding was about the `Scope:` line and was refuted by the verifier |
+| A | 274 | `rearm-matcher-bug-orphans` can only select by the `review_class='matcher_bug' AND candidates_count > 0` predicate — no way to re-arm a known list of beer ids after a fix | `243b75f` (#336) | missed | did land on the file, but with a **false** claim about the same SELECT: "can include beers that already have a later non-`matcher_bug` failure row … does not choose the latest failure state". `enrich_failures.beer_id` is `INTEGER NOT NULL PRIMARY KEY` (schema v10) and `recordEnrichFailure` upserts `ON CONFLICT(beer_id)` — there is exactly one row per beer, so no later row can exist. Nothing about targeting |
+| A | 312 | `## [0.11.0]` was renamed to `## [0.12.0]`, folding already-CWS-shipped 0.11 bullets into the 0.12 notes, so 0.11 users get their own features re-announced | `7b2d10b` (#313) | missed | **structurally impossible**: `no reviewable files`. The PR touches only `extension/CHANGELOG.md`, `extension/package.json`, `extension/package-lock.json`; `INCLUDE_PATTERNS` is `.ts`/`.yml` only and `IGNORE_PATTERNS` has `*.md` |
+| B | 233 | as above | `98c05da` (#296) | missed | published 5 findings — PR-vs-issue confusion in `listOpenIssues`, `per_page=100` with no pagination, the new-issue cap spent before verdict routing, `OPENAI_API_KEY` absent from `EXPECTED_PROD_KEYS`, Markdown-table injection in `exampleTable`. None touches the analysis path or the empty-verdict case. The two gate-dropped claims (non-atomic day guard; duplicate `beer_id` marked seen before validation) are also not it |
+| B | 237 | as above | `7a9e262` (#354) | missed | published 2, both about prompt *mechanics* rather than prompt *content*: the `Scope:` example wraps across two array elements so it renders on two lines (verified true), and the "merch/glassware/wine/food ⇒ parser_bug" test conflicts with the `wontfix` definition (also true). Neither questions a classification rule against how Untappd actually behaves |
+| B | 274 | as above | `243b75f` (#336) | missed | same file, same shape of **false** claim as A: "can return the same beer more than once … no `DISTINCT`". Refuted by the `beer_id` primary key. Nothing about targeting |
+| B | 312 | as above | `7b2d10b` (#313) | missed | `no reviewable files` — identical structural exclusion |
+
+### Totals
+
+| config | caught | partial | missed |
+|---|---|---|---|
+| A | 0 | 0 | 4 |
+| B | 0 | 0 | 4 |
+
+### Recall-set funnel
+
+| config | PR | raised | gated | verified | wall time |
+|---|---|---|---|---|---|
+| A | 233 | 3 | 2 | 1 | 23 s |
+| A | 237 | 1 | 1 | 0 | 34 s |
+| A | 274 | 3 | 3 | 2 | 43 s |
+| A | 312 | — | — | — | 1 s (no reviewable files) |
+| A | **total** | **7** | **6** | **3** | **101 s** |
+| B | 233 | 8 | 6 | 5 | 143 s |
+| B | 237 | 3 | 3 | 2 | 90 s |
+| B | 274 | 3 | 2 | 2 | 81 s |
+| B | 312 | — | — | — | 1 s (no reviewable files) |
+| B | **total** | **14** | **11** | **9** | **315 s** |
+
+## Recall observations
+
+**Recall against known-escaped defects is zero. Both configs, all four PRs, no partial credit.** That
+is the headline and it should not be softened. The rebuilt pipeline published 3 findings (config A)
+and 9 findings (config B) across these PRs and not one of them would have led a maintainer to the
+bug that later had to be fixed. Set against the precision result — config B at 22 published, 0
+fabricated — the honest reading is: **this change makes the reviewer trustworthy, not perceptive.**
+It stopped lying. It has not started catching the things that get past us. Those are different
+properties and only one of them has improved.
+
+**The four misses are four different failure modes, and only two are fixable by prompting.**
+
+1. *#312 is out of scope by construction.* `INCLUDE_PATTERNS` covers `src|tests|scripts|extension/**/*.ts`
+   plus workflow YAML; `IGNORE_PATTERNS` contains `*.md`. A release PR that changes only a CHANGELOG
+   and a version bump has literally nothing for the reviewer to read, and the replay prints `no
+   reviewable files` in one second. No model choice can fix this. This is a real, non-trivial class
+   for this repo — extension release PRs are routine, `CLAUDE.md` makes changelog/doc correctness a
+   merge requirement, and the reviewer is blind to all of it.
+2. *#274 is a missing feature, not a defect.* Nothing in the diff is wrong; what is wrong is what is
+   absent (an `--ids` mode). "Notice the ops tool has no escape hatch you will want in three weeks"
+   is not a review task any find-prompt phrasing reaches. It is a weak recall target and I would not
+   weight it heavily.
+3. *#237 needs domain knowledge the reviewer does not have and cannot get from the diff.* The defect
+   is that a prompt line ("name divergence (translation, …)") is *empirically wrong about Untappd* —
+   Untappd keeps the original Polish spelling, so translating the query zeroes it too. That was only
+   established by a live Algolia replay months later. Nothing in the repository says it. Config B did
+   critique the prompt twice, correctly, but both critiques were internal-consistency checks
+   (a wrapped example line, a conflict between two of its own rules) — the class of prompt bug you
+   can find by reading the prompt. The escaped one required knowing the world outside it.
+4. *#233 is the miss that matters, and it was reachable.* The empty-verdict no-op is ordinary
+   defensive-programming territory: an external call returns an anomalous-but-well-formed response
+   and the code proceeds as if it succeeded, marking the day complete. Config A came within ten
+   lines and stopped at the wrong `finish()` caller. Config B raised eight findings on this PR,
+   ranged over four files, found several true things — and never asked what happens when
+   `analysis.verdicts` is empty. This one is a genuine prompt gap, not a scope or knowledge gap.
+
+**The greedy pass is not greedy enough — and it is markedly less greedy on this set.** Config B
+raised 5.2 findings per PR on the precision set and **4.7 per PR** here (14 across three replayable
+PRs); config A dropped from 3.8 to **2.3** (7 across three). The lowest counts land exactly where the
+escaped defects are: 3 raised on #237, 3 on #274. A pass told to be greedy should be producing double
+digits per PR and letting the gate and verifier cut them down; instead the funnel starts narrow and
+only gets narrower (B: 14 → 11 → 9). Both configs are self-censoring before the machinery designed to
+censor them ever runs. The verify pass again rejected almost nothing for B (2 of 11) and, as on the
+precision set, config A's verifier is the one doing real work (3 of 6 rejected) because it is
+checking a weaker model.
+
+**Config B's zero-false-positive record does not survive contact with this set.** Both configs made
+the same false claim on #274 — that the `enrich_failures` join can yield duplicate or stale rows —
+and `beer_id` is the table's `PRIMARY KEY`. This is exactly the baseline's signature failure
+(asserting the absence of a constraint that exists), and it happened because `src/storage/schema.ts`
+was not in the diff and so never entered the context. The context builder only sends changed files.
+That is a concrete, mechanical cause with a concrete fix: a finding that reasons about row
+multiplicity or uniqueness needs the table definition, and the gate cannot catch it because the
+quote it anchors on — the `JOIN` — is really there. Precision measured on five PRs was 0 false in 22;
+on nine more published findings it is 1 in 9. The true rate is somewhere between and the sample is
+too small to say where.
+
+**What was published that is worth keeping.** Recall against known bugs is a floor, and the ceiling
+here is better than the floor suggests. Three config-B findings are real and were news:
+
+- `listOpenIssues` maps every item the GitHub Issues API returns, with no `pull_request` filter —
+  verified against `5b2be6ef`. A pull request carrying the `orphan-triage` label becomes a triage
+  target the LLM can route verdicts to and the job will comment on. Nobody has ever noticed this.
+- `normalizeName` = `baseNormalize(preserveDecimalIdentifiers(stripSearchNoise(s)))` — `stripSearchNoise`
+  runs *first*, and its parenthetical rule keeps only `[\p{L}\p{N}]+` with a digit, so `(9.0)` fails
+  on the dot and is erased before `preserveDecimalIdentifiers` can protect it. Distinct releases
+  collapse to the same normalized name. That is a live regression **introduced by #274 itself**,
+  found on the PR that introduced it, and it is precisely the "second pair of eyes" outcome the
+  rebuild is for. It is also the strongest single argument in this document for config B over A.
+- `exampleTable` interpolates scraped brewery/beer strings and LLM notes straight into a Markdown
+  table with no escaping of `|` or newlines. Beer names in this corpus contain pipes.
+
+Config A's one comparable finding (`cleanSearchQuery` falls back to the raw name when cleaning
+empties it, reintroducing the structural noise the PR exists to remove) is also true — and is the
+same claim the gate silently dropped as `quote_not_found` on config B/#356 in the precision run,
+which strengthens the earlier suspicion that those drops are lost signal rather than caught noise.
+
+**Verdict.** On this evidence the pipeline finds true things and misses the things that hurt. It is
+still clearly better than what it replaces — the baseline's 13-of-18 fabrication rate was actively
+harmful, and a reviewer whose claims survive `git show` is worth having. But "zero fabrications" was
+bought at least partly by a find pass that is not looking hard enough, and the recall number says so
+plainly. Before this is called an improvement rather than a de-risking, three things follow directly
+from the data above, none of which is a model choice:
+(a) the find prompt must be pushed to actually be greedy, and specifically to ask what happens when
+an external dependency returns a well-formed empty/degenerate response — the #233 class;
+(b) the context builder must include the schema (and other unchanged files a finding depends on) or
+accept a recurring false-positive class about uniqueness and multiplicity — the #274 class;
+(c) the scope globs exclude `*.md` and non-TS release metadata entirely, which makes a whole
+category of this repo's PRs unreviewable — the #312 class.
