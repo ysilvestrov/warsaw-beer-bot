@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
+import type { TriageProbe } from './triage-probes';
 
 export const REVIEW_CLASSES = ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix'] as const;
 
@@ -44,6 +45,9 @@ export interface OpenIssue {
 export interface TriageInput {
   orphans: UntriagedFailure[];
   openIssues: OpenIssue[];
+  // Deterministic search evidence for zero-candidate rows (see triage-probes.ts).
+  // Absent when the job runs without a search dep or the probe budget ran out.
+  probes?: Map<number, TriageProbe>;
 }
 
 // JSON Schema mirror of AnalysisSchema for Anthropic strict tool use.
@@ -109,7 +113,7 @@ function decodeSearchQuery(searchUrl: string): string {
   }
 }
 
-function boundOrphan(o: UntriagedFailure): UntriagedFailure & { search_query: string } {
+function boundOrphan(o: UntriagedFailure, probe?: TriageProbe) {
   return {
     ...o,
     brewery: o.brewery.slice(0, ORPHAN_FIELD_CAPS.name),
@@ -118,6 +122,9 @@ function boundOrphan(o: UntriagedFailure): UntriagedFailure & { search_query: st
     source_url: o.source_url.slice(0, ORPHAN_FIELD_CAPS.url),
     candidates_summary: o.candidates_summary.slice(0, ORPHAN_FIELD_CAPS.summary),
     search_query: decodeSearchQuery(o.search_url).slice(0, ORPHAN_FIELD_CAPS.name),
+    // Untappd-derived text, so capped like the scraped fields above.
+    probe_brewery: (probe?.brewery ?? '').slice(0, ORPHAN_FIELD_CAPS.summary),
+    probe_name: (probe?.name ?? '').slice(0, ORPHAN_FIELD_CAPS.summary),
   };
 }
 
@@ -168,6 +175,21 @@ export function buildTriagePrompt(input: TriageInput): string {
     'Already-handled guard: `search_query` IS the query after normalisation. If a noise token',
     'visible in `name` (brackets, parentheticals, %/°/alc/abv/ibu) is already ABSENT from',
     '`search_query`, it is already stripped — do NOT propose stripping it again (it is already stripped).',
+    'Evidence fields for zero-candidate rows: `probe_brewery` is what Untappd returns for the BREWERY',
+    'alone, `probe_name` for the NAME alone (empty string = that probe returned nothing or was not run).',
+    'Use them instead of guessing: a brewery whose catalogue comes back but holds no such beer is',
+    'not_on_untappd, not an alias gap; a beer found under a DIFFERENT brewery is a brewery-label',
+    'problem; both empty means the beer is likely absent entirely.',
+    'Candidate lines carry `(bid, abv%, style)` — compare the ABV with the row\'s own `abv` before',
+    'claiming a candidate is the same beer. A contradicting ABV (e.g. 0.5% vs 6.0%) means it is NOT',
+    'the same beer, however similar the name.',
+    '',
+    'Falsifiable causes: whenever you attach a verdict to an issue (issue_number or new_issue_key),',
+    'you MUST also give `proposed_query` — the exact query you believe finds the beer — and',
+    '`expected_target` as "<brewery> — <name>" you expect it to return. The query will be re-run and',
+    'checked; if the target does not come back, the cause is discarded and only the classification is',
+    'kept. Do not attach an issue when you cannot name a query that would find the beer; use',
+    'not_on_untappd/wontfix, or matcher_bug with issue_number: null.',
     'Translation guard: a Polish/Czech/Ukrainian name with candidates_count=0 is NOT by itself a',
     'translation gap. Untappd usually keeps the original spelling (`Jasne`, `Niepasteryzowane`,',
     '`Kasztelan Niepasteryzowane`, `BezalkØ Pan IPAni`), so "translate it to English" would zero the',
@@ -197,6 +219,10 @@ export function buildTriagePrompt(input: TriageInput): string {
     issues,
     '',
     '## Orphans',
-    JSON.stringify(input.orphans.map(boundOrphan), null, 1),
+    JSON.stringify(
+      input.orphans.map((o) => boundOrphan(o, input.probes?.get(o.beer_id))),
+      null,
+      1,
+    ),
   ].join('\n');
 }

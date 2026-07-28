@@ -146,6 +146,28 @@ test('buildTriagePrompt: instructs the translation guard for foreign-language na
   expect(p).toContain('an English-named candidate from the SAME brewery');
 });
 
+test('buildTriagePrompt renders probe evidence and the shop abv/style', () => {
+  const o: UntriagedFailure = { ...orphan, candidates_count: 0, candidates_summary: '', abv: 4.6, style: 'Lager' };
+  const p = buildTriagePrompt({
+    orphans: [o], openIssues: [],
+    probes: new Map([[o.beer_id, {
+      brewery: 'Browar Artezan — Jasne (bid 6666784, 5.0%, Lager - Pale)',
+      name: '',
+    }]]),
+  });
+  expect(p).toContain('"probe_brewery": "Browar Artezan — Jasne (bid 6666784, 5.0%, Lager - Pale)"');
+  expect(p).toContain('"probe_name": ""');
+  expect(p).toContain('"abv": 4.6');
+  expect(p).toContain('"style": "Lager"');
+});
+
+test('buildTriagePrompt instructs the falsifiable-cause contract', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+  expect(p).toContain('proposed_query');
+  expect(p).toContain('will be re-run');
+  expect(p).toContain('probe_brewery');
+});
+
 test('ANALYSIS_TOOL_SCHEMA: strict-compatible (no open objects)', () => {
   const check = (node: unknown): void => {
     if (typeof node !== 'object' || node === null) return;
