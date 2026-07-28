@@ -329,3 +329,173 @@ an external dependency returns a well-formed empty/degenerate response — the #
 accept a recurring false-positive class about uniqueness and multiplicity — the #274 class;
 (c) the scope globs exclude `*.md` and non-TS release metadata entirely, which makes a whole
 category of this repo's PRs unreviewable — the #312 class.
+
+## Config C — asymmetric verifier (gpt-5.5 → gpt-5.4)
+
+**Question.** Config B showed the verify pass rejecting 0 of 22 with the same model on both sides.
+The proposed explanation was "a model does not refute its own reasoning". Config C tests it directly:
+keep `gpt-5.5` as the finder (it has the better precision) and give pass 2 a *different, weaker*
+model. Two failure modes were distinguished in advance — (1) verify still rubber-stamps, so
+asymmetry is not the fix; (2) verify rejects, but rejects the **good** findings, because a weaker
+model cannot adjudicate a stronger one's reasoning. Only outcome 2 would be expensive to ship
+unnoticed, so rejections were to be judged on their merits rather than counted.
+
+**API viability.** `gpt-5.4` was probed with the exact request shape (`max_completion_tokens` +
+`response_format: json_schema, strict: true`) before the run: HTTP 200, schema-conforming output.
+No 400s, no 401s; the trial key held for all five replays. The experiment is answered by the data,
+not by the API.
+
+### Per-PR funnel
+
+| config | PR | raised | gated | verified | verify rejections | published labels |
+|---|---|---|---|---|---|---|
+| C | 344 | 7 | 7 | 7 | 0 | 4 real, 3 unfalsifiable |
+| C | 348 | 4 | 4 | 4 | 0 | 2 real, 2 unfalsifiable |
+| C | 352 | 2 | 2 | 2 | 0 | 2 unfalsifiable |
+| C | 356 | 1 | 0 | 0 | — | (nothing published) |
+| C | 358 | 4 | 3 | 3 | 0 | 2 real, 1 unfalsifiable |
+| C | **total** | **18** | **16** | **16** | **0 of 16** | 8 real, 0 false, 8 unfalsifiable |
+
+Gate drops: `quote_not_found` ×1 (#356), `outside_changed_lines` ×1 (#358) — 2 of 18 raised (11%).
+
+### Published findings, labelled
+
+| PR | finding (short) | label | evidence |
+|---|---|---|---|
+| 344 | `--beer` is not validated before `parseInt` (pin path) | real | `pinMatch(db, parseInt(beer, 10), bid, …)` at `scripts/pin-match.ts`; `--beer 12abc` pins beer 12. Same as A and B |
+| 344 | `--beer` unchecked `parseInt` (unpin path) | real | `unpinByBeer(db, parseInt(beer, 10))`, and the log still echoes the original string. Same as B |
+| 344 | `parseBid` accepts any string ending in digits | real | `/(\d+)\/?$/` is unanchored and checks no host/path. Same as A and B |
+| 344 | the set branch overwrites an existing different `untappd_id` | real | `SELECT id, untappd_id FROM beers WHERE id = ?` reads `untappd_id` and **never uses it**; when no row owns the target bid the code runs `UPDATE beers SET untappd_id = ?, untappd_lookup_at = ?` unconditionally, silently re-identifying an already-matched beer (and, combined with the `parseInt` finding above, `--beer 12abc` does it to the wrong row) |
+| 344 | merge branch deletes the source even when `redirected = 0` | unfalsifiable | identical to B's; same reasoning — documented intent, `redirected: 0` is printed back |
+| 344 | merge marks **every** link pointing at that beer as reviewed | unfalsifiable | accurate, but redirecting all links is *forced*: the beer row is deleted immediately after, so any link left behind would dangle. The `reviewed_by_user = 1` half is the documented design ("redirect + pin the orphan's links to the canonical row") |
+| 344 | `loadOperatorEnv()` runs as a top-level import side effect | unfalsifiable | identical to B's; idempotent, no failure path |
+| 348 | `bidFromLink` rejects a canonical URL with a trailing slash | real | `(\d+)(?:[?#]|$)` cannot match `…/b/slug/12345/` at any offset, so a paid-for result is dropped. Same as B |
+| 348 | `hydrateAbv` falls back to `hits[0]` when the bid is absent | real | `return (byId ?? hits[0])?.abv ?? null` — an unrelated beer's ABV can satisfy the only corroborator the token-overlap branch has. Same as B |
+| 348 | a throwing resolver bubbles out instead of failing soft | unfalsifiable | mechanically exact — `try { … } finally { … }` with no `catch`, and neither `lookupWithFallback`, `enrichOneOrphan` nor `enrichOrphans`' loop catches, so a throw would abort the whole nightly batch. But `createBraveResolver.resolve` wraps its entire body in `try/catch → return []` and never throws, so no input reaches the path. Decisively: **PR #352 later added a `catch` at exactly this line and deliberately rethrows unchanged** ("this must not alter the caller's error semantics in any way") — the project looked at this and chose the propagating semantics |
+| 348 | same-language accepts return before ABV hydration | unfalsifiable | accurate (`if (nameGatePass) return toSearchResult(cand)` with `cand.abv` always `null` from Brave), but `recordLookupSuccess` writes `abv = COALESCE(?, abv)`, so a null never overwrites anything — the cost is a missed enrichment, not a wrong value, and hydrating every accept would add an Algolia call per match |
+| 352 | `retired_at` is treated as a permanent web-fallback block even after the row re-fails | unfalsifiable | the mechanism is right (`recordEnrichFailure`'s `ON CONFLICT` never clears `retired_at`; only `clearEnrichFailure` removes the row). But `listLookupCandidates` **already** excludes `retired_at IS NOT NULL` from the enrich pool entirely — a broader, pre-existing exclusion this diff did not introduce — so the cron path never reaches the new guard, and on the relay path skipping a retired row is the stated intent. Contrast with B's `parser_bug` finding below, which is `real` precisely because those rows *do* stay in the pool |
+| 352 | the `merged` response returns the relayed rating, not the stored one | unfalsifiable | identical to B's |
+| 358 | `TRIAGE_PROBE_LIMIT=0` does not disable verification — it strips every cause | real | identical to B's; `0 ?? default` keeps 0, `verifyCauses` then trips `spent >= limit` on the first verdict |
+| 358 | the evidence cap is not shared between probes and verification | real | identical to B's; the same undecremented `probeLimit` goes to both calls |
+| 358 | verification spends budget on verdicts the planner will discard | unfalsifiable | identical to B's; needs the 120-search budget to bind |
+
+### Totals
+
+| config | published | real | false | unfalsifiable | precision |
+|---|---|---|---|---|---|
+| B | 22 | 11 | 0 | 11 | 50% |
+| C | 16 | 8 | 0 | 8 | 50% |
+
+Under the stricter reading used above (excluding input-validation hardening on an operator-only
+CLI), config C is **5/16 (31%)** — the set-branch overwrite, the trailing-slash URL drop,
+`hydrateAbv`'s `hits[0]`, `TRIAGE_PROBE_LIMIT=0` and the shared cap — against config B's 7/22 (32%).
+The two configurations are indistinguishable on precision. That is expected: they share a finder.
+
+### Every verify rejection, judged
+
+**There were none.** `gpt-5.4` adjudicated 16 findings raised by `gpt-5.5` and returned `confirmed`
+on all 16. Zero `refuted`, zero `out_of_scope`, zero `error`. There is nothing to judge as correct
+or wrong, and failure mode 2 (a weak verifier killing good findings) did not occur because the
+verifier did not kill anything at all.
+
+### Answering the two failure modes
+
+**Failure mode 1 — verify still rubber-stamps: confirmed, decisively.** 0 of 16, against config B's
+0 of 22. Model asymmetry is not the fix. The self-verification hypothesis ("a model does not refute
+its own reasoning") is now **refuted as the explanation**: a different model, from a weaker
+generation, adjudicating with the same adversarial prompt, confirmed at exactly the same rate.
+
+**Failure mode 2 — a weak verifier killing good findings: did not occur, and could not be
+observed.** This is worth stating carefully rather than as a clean bill of health. The experiment
+cannot show that `gpt-5.4` *would* adjudicate a stronger model's reasoning correctly; it only shows
+that it never tried. A verifier that confirms everything is safe in the trivial sense that it
+destroys nothing, and useless in the same breath.
+
+**What actually drives the rejection rate is the quality of the findings, not the relationship
+between the two models.** Config A's verifier rejected 41% because it was handed findings that were
+*wrong about the code* — `gpt-5.4-mini` asserted a missing `AbortSignal`, a fabricated
+`isWebFallbackBlocked` regression, a `required` list that harms nothing. Those are refutable by
+reading the file, which is exactly what `VERIFY.md` asks. Under a strong finder that class of
+finding stops being produced: across configs B and C, 38 published findings, **zero** are refuted by
+the code. Every one is accurate about what the code does. So the verifier is asked "does the file
+show this?", answers "yes", and confirms — correctly, on its own terms, every time.
+
+The residual noise under a strong finder is a different class entirely: 8 of C's 16 (and 11 of B's
+22) are accurate statements that argue against deliberate, usually inline-documented design. That is
+not a truth question and `VERIFY.md`'s truth-shaped rubric cannot reach it. The prompt does carry an
+`out_of_scope` verdict nominally covering "style preference, a wish for extra tests" — and in 38
+adjudications across B and C it was used **zero** times. The one verdict that could discriminate a
+design-intent finding from a defect is dead text.
+
+**Verdict: pass 2 does not earn its cost under a strong finder — not with this verifier, and more
+importantly not with this rubric.** In config C it consumed 16 of 21 API calls (76%) and changed the
+published review by nothing at all. Two directions follow, and they are mutually exclusive:
+
+- *Give it a question it can answer.* Not "is this claim true of the file" (a strong finder already
+  clears that bar) but "would acting on this improve the code" — concretely: *when the code carries
+  a comment justifying the behaviour being flagged, the finding must refute that comment or be
+  dropped*. That single rule targets the entire `unfalsifiable` half of both B and C. It is untested
+  and would need its own replay before anyone believes it.
+- *Delete it and spend the budget on a second find pass.* The variance data below argues this is
+  worth more.
+
+### Run-to-run variance: the same finder found a substantially different set
+
+B and C used the **same finder model and the same prompt** on the **same five PRs**. B raised 26 and
+published 22; C raised 18 and published 16. Only ~11 findings are common to both. The difference is
+not the verifier — it never rejected anything in either config — it is pure sampling noise in the
+find pass, and it is large.
+
+Findings B published and C never raised, that are `real`:
+
+- **#344 `pinMatch` never checks whether the source row is already matched** → the merge branch
+  `DELETE FROM beers` destroys a real, identified row. C found the *other half of the same root
+  cause* — the unread `beer.untappd_id` — but only its set-branch consequence (a recoverable
+  overwrite), missing the destructive branch.
+- **#352 sticky `review_class` suppresses the paid path permanently.** C landed on the neighbouring
+  `retired_at` clause in the same function and drew the weaker conclusion.
+- **#356 one-character name tokens: `Plan B` → `Plan`.** C raised exactly one finding on #356 and
+  the gate dropped it.
+- **#358 `expected_target` copied with `(bid N, X%, style)` fails verification.**
+
+Findings C produced that B did not:
+
+- **#344 the set branch overwrites an existing `untappd_id`** (`real`, published).
+- **#358 the digest counts unverified `matcher_bug`/`parser_bug` rows as `wontfix`** — raised, and
+  **killed by the gate as `outside_changed_lines`**. It is true and it is the best finding of the
+  run: `planTriageActions` now routes actionable-class verdicts with no target into `plan.quiet`
+  (new in this PR), and `orphan-triage.ts`'s pre-existing quiet loop is `if (review_class ===
+  'not_on_untappd') notOnUntappd++; else wontfix++`. Unverified matcher/parser rows therefore land
+  in the `else` and are reported as `wontfix` in the daily digest — the very metric the 2026-08-04
+  quality checkpoint (#357) is meant to read. The gate is *technically* right that the quoted line is
+  unchanged; the defect is nonetheless introduced by this diff, elsewhere. This is the clearest
+  single case in the whole measurement of `outside_changed_lines` destroying real signal.
+
+Two runs of the same configuration, and the union of their `real` findings is materially larger than
+either alone (B contributes 4 the other missed, C contributes 2). Nothing in this document suggests
+a verify pass buys that much. A second *find* pass, deduplicated by the existing gate, plausibly
+would — and would cost less than the 16 confirming calls C just spent.
+
+Also worth recording: the #356 `quote_not_found` drop is now the **third** time the same claim (the
+`cleanSearchQuery` empty-output fallback `return out.length ? … : (cleanName || cleanBrewery ||
+name.trim())`, which bypasses the one-character filter the PR exists to add) has been suppressed —
+gate-dropped in B/#356, gate-dropped again in C/#356, and published by A only on the recall set. The
+code is there and the claim is true. That drop reason needs the diagnostic output the earlier
+section already asked for.
+
+### Cost
+
+| config | PR | wall time | API calls |
+|---|---|---|---|
+| C | 344 | 88 s | 1 + 7 |
+| C | 348 | 68 s | 1 + 4 |
+| C | 352 | 85 s | 1 + 2 |
+| C | 356 | 77 s | 1 + 0 |
+| C | 358 | 72 s | 1 + 3 |
+| C | **total** | **390 s** (mean 78 s) | **21** (5 find + 16 verify) |
+
+Config C is ~1.8× faster than B (390 s vs 710 s) at 21 calls vs 27, entirely because `gpt-5.4`
+verifies faster than `gpt-5.5`. No failed calls, no retries — the `empty completion` failure that
+hit B/#348 did not recur. So the cheapest framing of the result is: config C paid 16 API calls and
+roughly a third of its wall clock to confirm a set of findings that would have been published
+unchanged had pass 2 not run.
