@@ -248,6 +248,23 @@ describe('cleanSearchQuery', () => {
   test('all-noise input never yields an empty query (fallback)', () => {
     expect(cleanSearchQuery('Brewing Co', '[only adjuncts]')).toBe('Brewing Co');
   });
+  // #350: Algolia cannot match a one-character token, so sending it ANDs the query to zero even
+  // though every other word is indexed (`Elch Brau n Helles` -> 0 hits, `Elch Brau Pork Roll
+  // Helles` -> the target). The name stage already ignores these tokens (nameTokens keeps
+  // length >= 2), so dropping them here only removes an asymmetry.
+  test('#350 33791: drops a one-character name token that zeroes the query', () => {
+    expect(cleanSearchQuery('Elch Brau Brewery', 'Pork ‚n’ Roll Helles'))
+      .toBe('Elch Brau Pork Roll Helles');
+  });
+  test('#350 31450: drops a one-character brewery token (numeral spelled as a word upstream)', () => {
+    expect(cleanSearchQuery('4 ściany Brewery', 'Trzebnica')).toBe('ściany Trzebnica');
+  });
+  test('#350: multi-character tokens around a dropped one are preserved', () => {
+    expect(cleanSearchQuery('Pinta', 'Rock n Roll')).toBe('Pinta Rock Roll');
+  });
+  test('#350: a name of only one-character tokens still yields a non-empty query', () => {
+    expect(cleanSearchQuery('Pinta Brewery', 'n')).toBe('Pinta');
+  });
   test('uses the raw name only as a last resort when all cleaned input is empty', () => {
     expect(cleanSearchQuery('', '(only)')).toBe('(only)');
   });
