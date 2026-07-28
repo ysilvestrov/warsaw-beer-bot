@@ -8,6 +8,9 @@ import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions } from '../domain/triage-plan';
+import { collectTriageProbes } from '../domain/triage-probes';
+import { verifyCauses, isCausal } from '../domain/triage-verify';
+import type { BeerSearch } from '../sources/untappd/search';
 import type { Analysis, Verdict } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 
@@ -15,6 +18,10 @@ export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
 export const TRIAGE_BATCH_LIMIT = 50;
+// Shared budget for evidence probes and cause verification, in Untappd searches
+// per run. ~50 zero-candidate rows x 2 probes + up to 50 verifications fits; 0
+// disables both paths and the job behaves as it did before the evidence pipeline.
+export const TRIAGE_PROBE_LIMIT_DEFAULT = 120;
 
 // Non-Error throws (strings, objects) must not escape our catch blocks — the
 // run-marked-for-the-day guarantee depends on finish() always being reached.
@@ -44,6 +51,7 @@ export interface TriageOutcome {
   notOnUntappd: number;
   wontfix: number;
   skipped: number;
+  unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
   disabledReason: string | null;
 }
@@ -57,6 +65,7 @@ export function buildTriageLine(o: TriageOutcome): string {
   ];
   if (o.notOnUntappd > 0) parts.push(`${o.notOnUntappd} not_on_untappd`);
   if (o.wontfix > 0) parts.push(`${o.wontfix} wontfix`);
+  if (o.unverified > 0) parts.push(`${o.unverified} неперевірених`);
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }
@@ -75,6 +84,10 @@ export interface OrphanTriageDeps {
   llm: TriageLlm | null;
   github: GithubIssuesClient | null;
   archive?: TriageArchive | null;
+  // Evidence probes + cause verification. Optional: without it the job runs exactly
+  // as it did before the evidence pipeline (no probes, no verification gate).
+  search?: BeerSearch | null;
+  probeLimit?: number;
   now?: () => Date;
 }
 
@@ -102,7 +115,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-      skipped: 0, error: null, disabledReason: null,
+      skipped: 0, unverified: 0, error: null, disabledReason: null,
     };
 
     if (!llm || !github) {
@@ -121,10 +134,21 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     let plan;
     let analysis: Analysis;
+    let unverified = 0;
     const exchanges: TriageExchange[] = [];
+    const probeLimit = deps.probeLimit ?? TRIAGE_PROBE_LIMIT_DEFAULT;
     try {
       const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
-      const ex1 = await llm.analyze({ orphans, openIssues });
+      // Deterministic evidence first: without it the model is asked to explain a
+      // zero-candidate search with nothing but the query string, which is where its
+      // wrong hypotheses come from (2026-07-28 review).
+      const probes = deps.search
+        ? await collectTriageProbes({
+            orphans, search: deps.search, limit: probeLimit,
+            onError: (query, err) => log.warn({ err, query }, 'orphan-triage: probe failed'),
+          })
+        : new Map();
+      const ex1 = await llm.analyze({ orphans, openIssues, probes });
       exchanges.push(ex1);
       // An empty verdict set on a non-empty batch is anomalous (the prompt asks
       // for a verdict per orphan). Retry once against the same open-issues set.
@@ -133,10 +157,32 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (ex1.analysis.verdicts.length === 0) {
         log.warn({ batch: orphans.length, stopReason: ex1.raw.stopReason },
           'orphan-triage: empty verdicts, retrying once');
-        const ex2 = await llm.analyze({ orphans, openIssues });
+        const ex2 = await llm.analyze({ orphans, openIssues, probes });
         exchanges.push(ex2);
       }
       analysis = exchanges[exchanges.length - 1].analysis;
+      // A cause the model cannot prove must not reach GitHub: re-run its proposed
+      // query and, if the expected target does not come back, strip the issue
+      // attachment and keep only the classification.
+      if (deps.search) {
+        const verified = await verifyCauses({
+          verdicts: analysis.verdicts, search: deps.search, limit: probeLimit,
+          onError: (query, err) => log.warn({ err, query }, 'orphan-triage: verification failed'),
+        });
+        analysis = {
+          ...analysis,
+          verdicts: analysis.verdicts.map((v) => {
+            if (!isCausal(v) || verified.get(v.beer_id)) return v;
+            unverified += 1;
+            log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target },
+              'orphan-triage: cause unverified, attachment dropped');
+            return {
+              ...v, issue_number: null, new_issue_key: null,
+              review_note: `unverified: ${v.review_note}`,
+            };
+          }),
+        };
+      }
       plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
       log.error({ err: e }, 'orphan-triage: analysis failed');
@@ -163,6 +209,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
     }
     outcome.skipped = plan.skipped;
+    outcome.unverified = unverified;
 
     const review = (v: Verdict, issueNumber: number | null): void => {
       const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;

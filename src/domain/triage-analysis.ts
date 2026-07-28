@@ -14,10 +14,11 @@ export const VerdictSchema = z.object({
   new_issue_key: z.string().nullable(),
   // Falsifiable evidence for a causal verdict: the query the model believes finds
   // the beer, and the "<brewery> — <name>" it expects back. The job re-runs the
-  // query before publishing anything to GitHub (see verifyCauses). Defaulted so a
-  // model that omits them parses as "unproven" rather than failing the whole batch.
-  proposed_query: z.string().nullable().default(null),
-  expected_target: z.string().nullable().default(null),
+  // query before publishing anything to GitHub (see verifyCauses). Optional on the
+  // zod side so a model that omits them parses as "unproven" instead of failing the
+  // whole batch; ANALYSIS_TOOL_SCHEMA still demands them at generation time.
+  proposed_query: z.string().nullable().optional(),
+  expected_target: z.string().nullable().optional(),
 });
 export type Verdict = z.infer<typeof VerdictSchema>;
 
