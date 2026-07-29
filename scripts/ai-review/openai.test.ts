@@ -96,3 +96,48 @@ describe('callStructured', () => {
     ).rejects.toBeInstanceOf(NonRetryableError);
   });
 });
+
+describe('callStructured — 429 handling', () => {
+  const SCHEMA429 = { type: 'object', properties: {}, additionalProperties: false };
+
+  it('does not retry an exhausted quota and names it plainly', async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 429,
+        text: async () =>
+          '{"error":{"code":"insufficient_quota","message":"You exceeded your current quota"}}',
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await expect(
+      callStructured(deps(fetchFn), [{ role: 'user', content: 'hi' }], {
+        name: 'review',
+        schema: SCHEMA429,
+      }),
+    ).rejects.toThrow(/quota exhausted/);
+    expect(calls).toBe(1);
+  });
+
+  it('still retries a genuine rate limit and surfaces the body', async () => {
+    let calls = 0;
+    const fetchFn = (async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 429,
+        text: async () => '{"error":{"code":"rate_limit_exceeded"}}',
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await expect(
+      callStructured(deps(fetchFn), [{ role: 'user', content: 'hi' }], {
+        name: 'review',
+        schema: SCHEMA429,
+      }),
+    ).rejects.toThrow(/rate_limit_exceeded/);
+    expect(calls).toBe(3);
+  });
+});

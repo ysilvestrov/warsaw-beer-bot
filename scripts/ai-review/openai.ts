@@ -61,7 +61,17 @@ export async function callStructured(
       });
 
       if (res.status === 429 || res.status >= 500) {
-        throw new Error(`OpenAI HTTP ${res.status}`);
+        // Carry the body into the error. OpenAI returns an exhausted balance as
+        // 429 `insufficient_quota`, which is NOT a throttle — retrying it three
+        // times and reporting "failed after 3 attempts" hides the real cause
+        // from whoever debugs the red check.
+        const text = await res.text().catch(() => '');
+        if (text.includes('insufficient_quota')) {
+          throw new NonRetryableError(
+            `OpenAI HTTP ${res.status}: quota exhausted for this API key — ${text.slice(0, 200)}`,
+          );
+        }
+        throw new Error(`OpenAI HTTP ${res.status}: ${text.slice(0, 200)}`);
       }
       if (!res.ok) {
         const text = await res.text();
