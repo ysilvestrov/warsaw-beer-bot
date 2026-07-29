@@ -499,3 +499,157 @@ verifies faster than `gpt-5.5`. No failed calls, no retries — the `empty compl
 hit B/#348 did not recur. So the cheapest framing of the result is: config C paid 16 API calls and
 roughly a third of its wall clock to confirm a set of findings that would have been published
 unchanged had pass 2 not run.
+
+## Verify rubric v2 — re-measurement
+
+**Intent.** `VERIFY.md` was re-aimed from "is this claim true of the file?" to "would a maintainer
+who acted on this finding end up with better code?", with one concrete discriminator: if the file
+carries a comment, docstring or test name justifying the behaviour being flagged, the verdict is
+`out_of_scope` unless the finding explains why that justification is wrong. `refuted` keeps its old
+meaning (the code contradicts the claim) and `out_of_scope` is promoted from a footnote to a
+first-class outcome with worked examples — documented deliberate behaviour, a documented tradeoff
+restated as a defect, observability wishes, style, and test asks with no failing input.
+
+Same command as config B, same five PRs, same head commits, same models (`gpt-5.5` → `gpt-5.5`).
+Only `.github/ai-review/VERIFY.md` changed. No 401s; every replay completed on its first attempt
+(no `empty completion` failure this time).
+
+### Funnel, against config B's previous run
+
+| PR | raised | gated | verified | verify rejections | (B before: raised → gated → verified) |
+|---|---|---|---|---|---|
+| 344 | 5 | 5 | 5 | 0 | 10 → 9 → 9 |
+| 348 | 4 | 4 | 2 | 2 | 4 → 4 → 4 |
+| 352 | 1 | 1 | 0 | 1 | 2 → 2 → 2 |
+| 356 | 1 | 0 | 0 | — | 3 → 2 → 2 |
+| 358 | 5 | 3 | 2 | 1 | 7 → 5 → 5 |
+| **total** | **16** | **13** | **9** | **4 of 13 (31%)** | **26 → 22 → 22 (0 of 22)** |
+
+Verdicts used: 1 `refuted`, 3 `out_of_scope`, 0 `error`. `out_of_scope` went from **0 uses in 38
+adjudications** across configs B and C to **3 uses in 13**. The dead verdict is alive.
+
+Gate drops: `quote_not_found` ×2 (#356 `cleanSearchQuery` fallback — the same claim suppressed for
+the *fourth* time; #358 `verifyCauses` keyed only by `beer_id`), `outside_changed_lines` ×1 (#358
+digest counts unverified matcher/parser rows as `wontfix` — the same true finding the gate killed in
+config C). Unchanged by this edit and still the pipeline's clearest source of lost signal.
+
+**Confound, stated up front.** The find pass raised 16 here against 26 in the previous config-B run
+with an identical model and an identical `AGENTS.md`. Most of the difference between the two
+published sets is that variance, not the rubric: 10 of B's 22 published findings were simply never
+raised this time. Only the four rejections below are attributable to the rubric change, and the
+funnel row above should not be read as "the rubric cut 26 to 16".
+
+### Every rejection, judged
+
+| PR | verdict | finding | judgement |
+|---|---|---|---|
+| 348 | `refuted` | "The new resolver test reads a fixture file that is not included in the shown PR, so the test suite will fail with ENOENT before any tests run" | **correct rejection** — `git ls-tree d9ca8cc` shows `src/sources/websearch/__fixtures__/brave-maryensztadt.json` present at head. This is the #274 context-blindness class: the fixture is `.json`, excluded by `INCLUDE_PATTERNS`, so the finder inferred absence from its own truncated context. A fabrication, caught |
+| 348 | `out_of_scope` | "The Brave URL parser drops otherwise valid canonical Untappd beer URLs if the URL has a trailing slash after the bid" | **WRONG rejection** — see below |
+| 352 | `out_of_scope` | "The web-fallback block check keys only on `beer_id`, so stale triage/retirement state can suppress paid lookup for a corrected current query" | **WRONG rejection** — see below |
+| 358 | `out_of_scope` | "`expectedKey` splits on the first spaced dash anywhere in `expected_target`, so brewery names containing a spaced hyphen are parsed as the separator instead of the requested brewery/name boundary" | **correct rejection** — the line above reads `// Split on the FIRST such separator only: beer names legitimately contain dashes.` The finding restates the documented tradeoff and does not argue the tradeoff was chosen wrongly. Config A published this same claim on the previous run and it was labelled `unfalsifiable`; suppressing it is an improvement |
+
+**Wrong rejection 1 — #348 `bidFromLink` trailing slash.** Full text: *claim* "The Brave URL parser
+drops otherwise valid canonical Untappd beer URLs if the URL has a trailing slash after the bid",
+against `const m = link.match(/\/b\/[^/]+\/(\d+)(?:[?#]|$)/);` in `src/sources/websearch/resolver.ts`.
+`…/b/slug/12345/` matches at no offset, so a well-formed result is discarded — on the one code path
+in this repo where each result has already cost a metered Brave request. The previous config-B run
+published this and it was labelled **`real`**; rejecting it is a **loss**. The rubric misfired on a
+real comment: the lines above do document deliberate strictness ("The bid must END the path segment
+(only a `?query`, `#fragment`, or end-of-string may follow)"), but that comment justifies excluding
+`/photos` **sub-pages**, and a trailing slash is a delimiter rather than a sub-page — the
+implementation is stricter than its own stated rationale requires. The finding is not contradicting
+the comment; it is pointing at ground the comment does not cover, and a maintainer acting on it
+would add `\/?` and be better off. This is exactly the over-application the comment rule invites.
+
+**Wrong rejection 2 — #352 sticky triage state blocks the paid path.** Full text: *claim* "The
+web-fallback block check keys only on `beer_id`, so stale triage/retirement state can suppress paid
+lookup for a corrected current query", against `isWebFallbackBlocked` in
+`src/storage/enrich_failures.ts`. The previous config-B run published a sharper phrasing of the same
+defect ("sticky `review_class` can suppress the paid path permanently") and it was labelled
+**`real`**; rejecting it is a **loss**. The comment above the function is the trap: it justifies the
+`parser_bug` block with "the query string itself is garbage, so searching the web with the same
+wrong string cannot help" — a claim about the *current* state. The finding's whole point is that the
+state goes stale: `recordEnrichFailure` only clears `review_class` across the 0↔>0 candidate
+boundary and `scripts/rearm-matcher-bug-orphans.ts` only re-arms `matcher_bug`, so after a parser fix
+ships, the query is no longer garbage and nothing clears the flag. That *is* an argument that the
+justification no longer holds, and the verifier treated it as a restatement of the justification.
+Mitigating note: this run's phrasing is weaker than B's — it asserts staleness without demonstrating
+that nothing clears the class — so the verifier had less to work with than B's version would have
+given it. It is still a real defect and it is still gone.
+
+### Newly published set, labelled
+
+| PR | finding (short) | label | evidence |
+|---|---|---|---|
+| 344 | `pinMatch` can overwrite the `untappd_id` of an existing non-orphan beer (set branch) | real | `SELECT id, untappd_id` reads the column and never uses it; `UPDATE beers SET untappd_id = ?` runs unconditionally, and the function's own docstring scopes it to "a name-divergent **orphan**". Same defect config C found |
+| 344 | `pinMatch` merge branch deletes a beer that already carries a different `untappd_id` | real | `DELETE FROM beers WHERE id = ?` guarded only by `canonical.id !== beerId`; destroys a real identified row. Same as B's |
+| 344 | `parseBid` extracts any trailing digits rather than the bid path segment | real | `/(\d+)\/?$/` is unanchored; `…?foo=1` yields bid 1. Same as A, B and C. (The verifier's `evidence` sentence for this one is visibly garbled — it stutters over the regex three times — which is worth noting as a rendering-quality risk, not a correctness one) |
+| 344 | the CLI reports success even when `pinMatch` returns a `noop` | unfalsifiable | accurate — `main` prints `JSON.stringify(res)` and never sets `process.exitCode` outside argument errors — but the operator sees the `noop` reason on stdout and no automation in this repo consumes the exit code. A concrete consumer is hypothesised, not shown |
+| 344 | the ingest guard keys the pin on `beer_ref`, so one pin suppresses matching for any tap with the same scraped name | unfalsifiable | `match_links.ontap_ref` is `TEXT NOT NULL UNIQUE` (schema line 63) — the table is global by ref for pinned and unpinned rows alike. A structural property this diff did not introduce, and the "suppressed" taps resolve to the same pinned beer. Same conclusion B reached on its variant |
+| 348 | `hydrateAbv` falls back to `hits[0]` when the resolved bid is absent | real | `return (byId ?? hits[0])?.abv ?? null` — an unrelated beer's ABV can satisfy `abvCorroborates`, the only guard on the cross-language branch. Same as B and C |
+| 348 | same-language accepts return before ABV hydration | unfalsifiable | accurate (`if (nameGatePass) return toSearchResult(cand)` with `cand.abv` always null), but `recordLookupSuccess` writes `abv = COALESCE(?, abv)` so nothing is overwritten — a missed enrichment, not a wrong value. Identical to C's, labelled the same way |
+| 358 | `TRIAGE_PROBE_LIMIT=0` does not disable verification — it strips every cause | real | `deps.probeLimit ?? DEFAULT` preserves 0; `verifyCauses` trips `spent >= limit` on the first verdict. Same as B and C |
+| 358 | the probe limit is applied independently to probes and verification | real | the same undecremented `probeLimit` goes to `collectTriageProbes` and `verifyCauses` against a docstring that calls it a shared per-run budget. Same as B and C |
+
+### Precision
+
+| run | published | real | false | unfalsifiable | precision |
+|---|---|---|---|---|---|
+| B (rubric v1) | 22 | 11 | 0 | 11 | 50% |
+| B (rubric v2) | 9 | 6 | 0 | 3 | **67%** |
+| (old reviewer) | 18 | 1 | 13 | 4 | 6% |
+
+Under the stricter reading used earlier (excluding input-validation hardening on an operator-only
+CLI, i.e. dropping `parseBid`), rubric v2 is **5/9 (56%)** against B's 7/22 (32%). The `unfalsifiable`
+share fell from 11/22 (50%) to 3/9 (33%), which is the intended direction. Zero `false` findings
+again — now with one of them actively caught by the verifier rather than never raised.
+
+### Does pass 2 now earn its cost?
+
+**Marginally, and not on the strength of the new rule.** The arithmetic is small enough to state in
+full. Thirteen findings reached pass 2. Published without it, the review would have been 13 findings:
+8 real, 4 unfalsifiable, 1 false — 62% precision. Pass 2 removed four and published nine: 6 real,
+3 unfalsifiable, 0 false — 67% precision. So the whole pass bought **+5 percentage points of
+precision and −2 real findings**, for 13 API calls (72% of the run's 18).
+
+Broken down by which rule did the work:
+
+- The *old* truth-shaped rubric earned its keep once, and it was the best single moment of the run:
+  the `refuted` fixture-ENOENT claim is a genuine fabrication of the #274 context-blindness class,
+  and it is the first fabrication any strong-finder configuration has produced across 47 published
+  findings. That rejection is worth having and the v2 edit did not weaken it.
+- The *new* comment rule fired three times: once correctly (`expectedKey`, a documented tradeoff
+  restated) and **twice destructively**, on the two findings the previous run labelled `real`. Both
+  losses share a shape: the file carried a comment near the flagged line, the comment justified a
+  *neighbouring* decision rather than the one being flagged, and the verifier accepted proximity as
+  justification. Fifty percent of its firings ate real signal.
+
+That is a worse trade than the headline precision number suggests, and it is the opposite of the
+failure mode that was feared going in. The risk anticipated was that a stricter rubric would reject
+*more of the same* — accurate design-intent noise. What it actually rejected was a mix, and the
+mistakes it made were on the two most valuable findings in the rejected set, both in the metered
+Brave/web-fallback path where a suppressed finding costs real money.
+
+**Three honest readings, and I do not think the data separates them.** (1) The rule is right and the
+wording is too permissive — "carries a comment justifying the behaviour" should be narrowed to
+"justifies *this* behaviour on *this* line", since both losses turned on proximity. (2) The rule is
+right and the *finder* is at fault — B's phrasing of the sticky-`review_class` finding cited the
+mechanism and would plausibly have survived; the rule punishes weakly-argued true findings, which is
+defensible policy but changes what `AGENTS.md` must ask for. (3) The rule is not worth its blast
+radius at all, and the `unfalsifiable` half of the review is better handled by rendering (a "design
+note" section below the defects) than by suppression. Distinguishing these needs a rerun in which
+the rejected findings' `evidence` strings are visible — which the replay tool does not print for
+rejections, and should.
+
+**On the standing question of whether to keep pass 2 at all:** v2 does change the published review,
+so the config-C verdict ("decorative") no longer holds. But it changes it by roughly ±2 findings in
+each direction, and one run of 13 adjudications cannot tell a +5pp precision gain from noise. The
+one durable result is narrower and does not depend on the sample: **`refuted` catches context-blind
+fabrications and should stay; `out_of_scope` as currently worded is not safe to run unattended.**
+
+### Cost
+
+5 find calls + 13 verify calls = **18** (config B rubric v1: 27; config C: 21). Wall time was not
+captured per PR on this run — the five replays were executed in a single loop — so the per-PR timing
+table is not extended. Verify calls are 72% of the total, down from 81% in B only because fewer
+findings were raised.
