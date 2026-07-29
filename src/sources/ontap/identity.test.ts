@@ -1,4 +1,4 @@
-import { extractBeerName, sanitizeBrewery, stripTrailingSpec } from './identity';
+import { extractBeerName, resolveTapIdentity, sanitizeBrewery, stripTrailingSpec } from './identity';
 
 describe('stripTrailingSpec', () => {
   test.each([
@@ -107,5 +107,28 @@ describe('extractBeerName', () => {
 
   test('returns the full text when there is no brewery and no spec', () => {
     expect(extractBeerName('Aperitivo Spritz', null)).toBe('Aperitivo Spritz');
+  });
+});
+
+describe('resolveTapIdentity', () => {
+  test.each([
+    ['Guinness Brewery', 'Guinness', 'Guinness Brewery', 'Guinness'],
+    ['Pilsner Urquell Brewery', 'Pilsner Urquell', 'Pilsner Urquell Brewery', 'Pilsner Urquell'],
+    ['Holba Brewery', 'Holba', 'Holba Brewery', 'Holba'],
+    ['Cydr Dobroński', 'Cydr Dobroński', 'Cydr Dobroński', 'Cydr Dobroński'],
+    ['Frankies Brewery', 'Frankies', 'Frankies Brewery', 'Frankies'],
+    ['Konrad Brewery', 'Konrad 12° · 5,2%', 'Konrad Brewery', 'Konrad 12°'],
+  ])('keeps %s | %s', (breweryRef, beerRef, brewery, name) => {
+    expect(resolveTapIdentity(breweryRef, beerRef)).toEqual({ kind: 'keep', brewery, name });
+  });
+
+  test('keeps the beer when the brewery field is polluted', () => {
+    expect(resolveTapIdentity('W Brzesku Brewery', 'Žatecký Nealko'))
+      .toEqual({ kind: 'keep', brewery: '', name: 'Žatecký Nealko' });
+  });
+
+  test('drops only an empty name', () => {
+    expect(resolveTapIdentity('Some Brewery', '')).toEqual({ kind: 'drop', reason: 'empty-name' });
+    expect(resolveTapIdentity('Some Brewery', '   ')).toEqual({ kind: 'drop', reason: 'empty-name' });
   });
 });

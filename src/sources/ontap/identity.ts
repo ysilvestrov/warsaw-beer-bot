@@ -118,7 +118,10 @@ export function dedupeBreweryPrefix(name: string, breweryRef: string | null): st
   for (const prefix of prefixes) {
     if (name.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) {
       const remainder = name.slice(prefix.length + 1).trim();
-      if (remainder) return remainder;
+      // A remainder with no letters at all (e.g. a bare "12°" left over once the brand
+      // is chopped off "Konrad 12°") isn't a duplicated brewery prefix — it's the brand
+      // name coinciding with the beer name plus its grade. Keep the original in that case.
+      if (remainder && /\p{L}/u.test(remainder)) return remainder;
     }
   }
   return name;
@@ -127,4 +130,19 @@ export function dedupeBreweryPrefix(name: string, breweryRef: string | null): st
 // Turn an <h4> tap title into a beer name: "Harpagan Brewery Buzdygan 24°·8,5%" → "Buzdygan 24°".
 export function extractBeerName(h4Text: string, breweryRef: string | null): string {
   return dedupeBreweryPrefix(stripTrailingSpec(compact(h4Text)), breweryRef);
+}
+
+export type TapIdentity =
+  | { kind: 'keep'; brewery: string; name: string }
+  | { kind: 'drop'; reason: 'empty-name' };
+
+// #306: the ONLY reason this layer may discard a tap is an empty name. Anything else —
+// a name equal to the brand, an unknown brewery, junk — flows through and becomes a
+// visible orphan. A dropped tap produces no catalog row, no match link and no orphan,
+// i.e. it is unobservable; an orphan is triaged daily and can be pinned (#343/#361).
+export function resolveTapIdentity(breweryRef: string | null, beerRef: string): TapIdentity {
+  const sanitized = sanitizeBrewery(breweryRef, beerRef);
+  const name = dedupeBreweryPrefix(stripTrailingSpec(sanitized.name), sanitized.brewery);
+  if (!name) return { kind: 'drop', reason: 'empty-name' };
+  return { kind: 'keep', brewery: sanitized.brewery, name };
 }
