@@ -27,3 +27,80 @@ export function stripTrailingSpec(raw: string): string {
   const cleaned = `${s.slice(0, match.index)}${grade ? ` ${grade[1]}°` : ''}`.trim();
   return cleaned || s;
 }
+
+function escapeRegExp(raw: string): string {
+  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function compact(raw: string): string {
+  return raw.replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function normalized(raw: string): string {
+  return compact(raw).toLowerCase();
+}
+
+// Brewery label without its trailing legal/kind word, e.g. "Pinta Brewery" → "Pinta".
+export function breweryCore(raw: string): string {
+  return compact(raw)
+    .replace(/\s+(?:brewery|browar|brasserie|brouwerij|brauerei|pivovar|birrificio)$/iu, '')
+    .trim();
+}
+
+function stripLeadingCider(raw: string): string {
+  return compact(raw).replace(/^(?:cydr|cider)(?:\s+|$)/iu, '').trim();
+}
+
+// Brewery values that are not breweries: a shop location, an ingredient list, or pure
+// punctuation. #306: these clear the brewery FIELD; the beer itself is kept, because the
+// matcher supports an empty input brewery (relaxed pool, exact-name-only — #149).
+const POLLUTED_BREWERIES = new Set([
+  'w brzesku brewery',
+  'w brzesku',
+  'vaisiu sultys',
+]);
+
+function isPunctuationOnly(raw: string): boolean {
+  const core = breweryCore(raw);
+  return core !== '' && !/[\p{L}\p{N}]/u.test(core);
+}
+
+export interface TapFields {
+  brewery: string;
+  name: string;
+}
+
+// Normalize the brewery field and any brewery-derived noise inside the name.
+export function sanitizeBrewery(breweryRef: string | null, beerRef: string): TapFields {
+  const brewery = compact(breweryRef ?? '');
+  const name = compact(beerRef);
+  const breweryNorm = normalized(brewery);
+
+  if (POLLUTED_BREWERIES.has(breweryNorm) || isPunctuationOnly(brewery)) {
+    return { brewery: '', name };
+  }
+
+  if (breweryNorm === 'cydr dzik' || breweryNorm === 'cydr dzik brewery') {
+    if (normalized(name) === 'polski cydr') return { brewery: 'Cydrownia', name: 'Dzik' };
+    const ciderName = stripLeadingCider(name);
+    if (!ciderName) return { brewery, name };
+    return { brewery: 'Cydrownia', name: `Dzik ${ciderName}` };
+  }
+
+  if (breweryNorm === 'cydr flirt tradycynis') {
+    const ciderName = stripLeadingCider(name);
+    return {
+      brewery: 'Kauno Alus',
+      name: ciderName ? `Tradycynis Cydr Flirt ${ciderName}` : 'Tradycynis Cydr Flirt',
+    };
+  }
+
+  const core = breweryCore(brewery);
+  if (core) {
+    const ciderPrefix = new RegExp(`^(?:cydr|cider)\\s+${escapeRegExp(core)}\\s*[-–—:]\\s*`, 'iu');
+    const stripped = name.replace(ciderPrefix, '').trim();
+    if (stripped) return { brewery, name: stripped };
+  }
+
+  return { brewery, name };
+}

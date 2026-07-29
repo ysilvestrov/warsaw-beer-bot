@@ -1,4 +1,4 @@
-import { stripTrailingSpec } from './identity';
+import { sanitizeBrewery, stripTrailingSpec } from './identity';
 
 describe('stripTrailingSpec', () => {
   test.each([
@@ -30,5 +30,50 @@ describe('stripTrailingSpec', () => {
     ['Aperitivo Spritz', 'Aperitivo Spritz'],                               // no spec at all
   ])('%s → %s', (input, expected) => {
     expect(stripTrailingSpec(input)).toBe(expected);
+  });
+});
+
+describe('sanitizeBrewery', () => {
+  test('clears a known polluted brewery instead of discarding the beer', () => {
+    expect(sanitizeBrewery('W Brzesku Brewery', 'Žatecký Nealko'))
+      .toEqual({ brewery: '', name: 'Žatecký Nealko' });
+    expect(sanitizeBrewery('vaisiu sultys', 'Obuolių'))
+      .toEqual({ brewery: '', name: 'Obuolių' });
+  });
+
+  test('clears a punctuation-only brewery', () => {
+    expect(sanitizeBrewery('- Brewery', 'Pilsner Urquell'))
+      .toEqual({ brewery: '', name: 'Pilsner Urquell' });
+  });
+
+  test('maps the generic Cydr Dzik listing to the real cidery', () => {
+    expect(sanitizeBrewery('CYDR DZIK', 'polski cydr'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik' });
+    expect(sanitizeBrewery('CYDR DZIK Brewery', 'Cydr Jabłko'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
+    expect(sanitizeBrewery('CYDR DZIK Brewery', 'Jabłko'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
+  });
+
+  test('does not invent a Cydr Dzik product name from a bare cider label', () => {
+    expect(sanitizeBrewery('CYDR DZIK Brewery', 'Cydr'))
+      .toEqual({ brewery: 'CYDR DZIK Brewery', name: 'Cydr' });
+  });
+
+  test('maps Cydr Flirt Tradycynis rows to Kauno Alus product names', () => {
+    expect(sanitizeBrewery('Cydr Flirt Tradycynis', 'Cydr malina i skórka pomarańczowa'))
+      .toEqual({ brewery: 'Kauno Alus', name: 'Tradycynis Cydr Flirt malina i skórka pomarańczowa' });
+    expect(sanitizeBrewery('Cydr Flirt Tradycynis', ''))
+      .toEqual({ brewery: 'Kauno Alus', name: 'Tradycynis Cydr Flirt' });
+  });
+
+  test('strips a duplicated cider prefix that repeats the brewery', () => {
+    expect(sanitizeBrewery('Chyliczki', 'Cydr Chyliczki - Japoński Sad'))
+      .toEqual({ brewery: 'Chyliczki', name: 'Japoński Sad' });
+  });
+
+  test('passes an ordinary brewery through untouched', () => {
+    expect(sanitizeBrewery('Pinta Brewery', 'Atak Chmielu'))
+      .toEqual({ brewery: 'Pinta Brewery', name: 'Atak Chmielu' });
   });
 });
