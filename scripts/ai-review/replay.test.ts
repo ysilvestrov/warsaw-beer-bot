@@ -1,4 +1,4 @@
-import { replayModels } from './replay';
+import { ensureHeadCommit, replayModels } from './replay';
 import { readConfig } from '../ai-pr-review';
 
 describe('replayModels', () => {
@@ -27,5 +27,68 @@ describe('replayModels', () => {
         AI_REVIEW_VERIFY_MODEL: 'verify-y',
       } as NodeJS.ProcessEnv),
     ).toEqual({ findModel: 'find-x', verifyModel: 'verify-y' });
+  });
+});
+
+describe('ensureHeadCommit', () => {
+  const spy = () => {
+    const calls: string[] = [];
+    return { calls, fn: (m: string) => calls.push(m) };
+  };
+
+  it('does nothing when the head commit is already local', () => {
+    const fetched = spy();
+    const log = spy();
+    ensureHeadCommit({
+      pr: '352',
+      head: 'abc123',
+      hasCommit: () => true,
+      fetchHead: () => fetched.fn('fetch'),
+      log: log.fn,
+    });
+    expect(fetched.calls).toEqual([]);
+    expect(log.calls).toEqual([]);
+  });
+
+  it('fetches the PR head when the object is missing and says so', () => {
+    const log = spy();
+    let fetches = 0;
+    ensureHeadCommit({
+      pr: '352',
+      head: 'abc123',
+      hasCommit: () => fetches > 0,
+      fetchHead: () => {
+        fetches += 1;
+      },
+      log: log.fn,
+    });
+    expect(fetches).toBe(1);
+    expect(log.calls.join('\n')).toContain('pull/352/head');
+  });
+
+  it('fails loudly when the fetch does not produce the head commit', () => {
+    expect(() =>
+      ensureHeadCommit({
+        pr: '352',
+        head: 'abc123',
+        hasCommit: () => false,
+        fetchHead: () => undefined,
+        log: () => undefined,
+      }),
+    ).toThrow(/abc123/);
+  });
+
+  it('reports the failing fetch instead of a bare git error', () => {
+    expect(() =>
+      ensureHeadCommit({
+        pr: '352',
+        head: 'abc123',
+        hasCommit: () => false,
+        fetchHead: () => {
+          throw new Error('fatal: could not read from remote');
+        },
+        log: () => undefined,
+      }),
+    ).toThrow(/pull\/352\/head/);
   });
 });

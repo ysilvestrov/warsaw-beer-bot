@@ -42,6 +42,39 @@ export function replayModels(env: NodeJS.ProcessEnv): {
   };
 }
 
+/**
+ * Make sure the PR's head commit is in this clone before anything reads it.
+ *
+ * A fresh checkout has never fetched `refs/pull/<n>/head`, so `git show
+ * <head>:<path>` and `git merge-base` fail on an object that was simply never
+ * downloaded — which reads like a broken replay rather than a missing fetch.
+ */
+export function ensureHeadCommit(params: {
+  pr: string;
+  head: string;
+  hasCommit: (sha: string) => boolean;
+  fetchHead: () => void;
+  log: (message: string) => void;
+}): void {
+  const { pr, head, hasCommit, fetchHead, log } = params;
+  const ref = `pull/${pr}/head`;
+  if (hasCommit(head)) return;
+
+  log(`head ${head} is not in this clone; fetching origin ${ref} (may take a moment)…`);
+  try {
+    fetchHead();
+  } catch (err) {
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new Error(`git fetch origin ${ref} failed: ${detail}`);
+  }
+
+  if (!hasCommit(head)) {
+    throw new Error(
+      `git fetch origin ${ref} did not produce commit ${head}; fetch it manually and retry`,
+    );
+  }
+}
+
 async function main(): Promise<void> {
   const pr = process.argv[2];
   if (!pr) throw new Error('usage: npm run ai-review-replay -- <pr-number>');
@@ -57,6 +90,23 @@ async function main(): Promise<void> {
   ) as { title: string; body: string; headRefOid: string; baseRefName: string };
 
   const head = meta.headRefOid;
+  ensureHeadCommit({
+    pr,
+    head,
+    hasCommit: (sha) => {
+      try {
+        sh(['cat-file', '-e', `${sha}^{commit}`]);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    fetchHead: () => {
+      sh(['fetch', 'origin', `pull/${pr}/head`]);
+    },
+    log: (message) => console.error(message),
+  });
+
   const mergeBase = sh(['merge-base', `origin/${meta.baseRefName}`, head]).trim();
 
   const changed = sh(['diff', '--name-only', `${mergeBase}..${head}`])
