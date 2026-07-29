@@ -105,24 +105,20 @@ export function sanitizeBrewery(breweryRef: string | null, beerRef: string): Tap
   return { brewery, name };
 }
 
-// Drop a leading brewery prefix from a tap title. Both the full label ("PINTA Brewery ")
-// and its core ("PINTA ") are tried, longest first. #306: when the title IS the brand
-// ("Guinness Brewery" / "Guinness"), the name is kept as-is — emptying it here is what
-// used to make single-brand taps disappear at ingest.
+// Drop a leading brewery prefix from a tap title. Only the FULL label ("PINTA Brewery ")
+// is tried — NOT its core ("PINTA ") — because `taps.beer_ref` already went through the
+// old parser: stripping the bare core against 3 days of production rows renamed ~40 live
+// identities that work fine today (`Holba | Holba 11 Premium` → `11 Premium`, `Kozel |
+// Kozel Ležák` → `Ležák`, …), each abandoning its existing (often matched) catalog row for
+// a fresh orphan. #306: when the title IS the brand ("Guinness Brewery" / "Guinness"), the
+// name is kept as-is — emptying it here is what used to make single-brand taps disappear
+// at ingest.
 export function dedupeBreweryPrefix(name: string, breweryRef: string | null): string {
   const brewery = compact(breweryRef ?? '');
   if (!brewery) return name;
-  const prefixes = [brewery, breweryCore(brewery)]
-    .filter((p) => p !== '')
-    .sort((a, b) => b.length - a.length);
-  for (const prefix of prefixes) {
-    if (name.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) {
-      const remainder = name.slice(prefix.length + 1).trim();
-      // A remainder with no letters at all (e.g. a bare "12°" left over once the brand
-      // is chopped off "Konrad 12°") isn't a duplicated brewery prefix — it's the brand
-      // name coinciding with the beer name plus its grade. Keep the original in that case.
-      if (remainder && /\p{L}/u.test(remainder)) return remainder;
-    }
+  if (name.toLowerCase().startsWith(`${brewery.toLowerCase()} `)) {
+    const remainder = name.slice(brewery.length + 1).trim();
+    if (remainder) return remainder;
   }
   return name;
 }

@@ -86,8 +86,8 @@ describe('extractBeerName', () => {
       .toBe('WRCLW Salamander');
   });
 
-  test('strips the brewery core when the title omits the kind word', () => {
-    expect(extractBeerName('PINTA Atak Chmielu 6%', 'PINTA Brewery')).toBe('Atak Chmielu');
+  test('keeps the brand inside the title when only the core matches (no catalog churn)', () => {
+    expect(extractBeerName('PINTA Atak Chmielu 6%', 'PINTA Brewery')).toBe('PINTA Atak Chmielu');
   });
 
   test('is case-insensitive on the brewery prefix', () => {
