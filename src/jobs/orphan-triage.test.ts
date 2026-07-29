@@ -8,7 +8,7 @@ import { getJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
   orphanTriage, shouldRunTriage, buildTriageLine,
-  TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY,
+  TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
 
@@ -213,15 +213,15 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, disabledReason: null,
+    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, unverified: 0, error: 'invalid json', disabledReason: null,
+    skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, unverified: 0, error: null, disabledReason: 'нема GITHUB_TOKEN',
+    skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
 
@@ -437,7 +437,7 @@ test('buildTriageLine reports the unverified count', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
     notOnUntappd: 1, wontfix: 0, skipped: 0, unverified: 2,
-    error: null, disabledReason: null,
+    error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
 
@@ -459,4 +459,22 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
   const summary = lines.find((l) => typeof l === 'object' && l !== null && 'rowsWithEvidence' in l);
   expect(summary).toMatchObject({ probeFailures: 2, causesChecked: 1, unverified: 1, verifyFailures: 1 });
+});
+
+test('buildTriageLine: transient attempts vs final failure', () => {
+  const base = {
+    total: 5, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+    skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
+    attempt: null as number | null,
+  };
+  expect(buildTriageLine({ ...base, error: '500 Internal server error', attempt: 1 }))
+    .toBe('Тріаж: тимчасова помилка (500 Internal server error), спроба 1/3');
+  expect(buildTriageLine({ ...base, error: '500 Internal server error', attempt: TRIAGE_MAX_ATTEMPTS }))
+    .toBe('Тріаж: помилка (500 Internal server error, 3 спроби)');
+  // Permanent errors keep the pre-#316 wording.
+  expect(buildTriageLine({ ...base, error: 'invalid json', attempt: null }))
+    .toBe('Тріаж: помилка (invalid json)');
+  expect(buildTriageLine({ ...base, disabledReason: 'нема ключа LLM', attempt: null }))
+    .toBe('Тріаж: вимкнено (нема ключа LLM)');
+  expect(buildTriageLine({ ...base, attempt: null })).toContain('5 нових');
 });

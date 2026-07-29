@@ -17,6 +17,12 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
+export const TRIAGE_ATTEMPTS_KEY = 'orphan_triage_attempts';
+// Transient upstream failures (5xx/429/network) do not consume the Warsaw day —
+// the next 15-min tick inside [06:00,09:00) retries. Bounded at 3 because each
+// attempt costs a full probe budget (up to 120 Untappd searches) plus a
+// 50-orphan LLM call; the window itself would allow ~12 (#316).
+export const TRIAGE_MAX_ATTEMPTS = 3;
 export const TRIAGE_BATCH_LIMIT = 50;
 // Shared budget for evidence probes and cause verification, in Untappd searches
 // per run. ~50 zero-candidate rows x 2 probes + up to 50 verifications fits; 0
@@ -53,12 +59,20 @@ export interface TriageOutcome {
   skipped: number;
   unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
+  // Attempt number for a retriable failure (1-based); null for success,
+  // disabled runs and permanent errors.
+  attempt: number | null;
   disabledReason: string | null;
 }
 
 export function buildTriageLine(o: TriageOutcome): string {
   if (o.disabledReason) return `Тріаж: вимкнено (${o.disabledReason})`;
-  if (o.error) return `Тріаж: помилка (${o.error})`;
+  if (o.error) {
+    if (o.attempt === null) return `Тріаж: помилка (${o.error})`;
+    return o.attempt < TRIAGE_MAX_ATTEMPTS
+      ? `Тріаж: тимчасова помилка (${o.error}), спроба ${o.attempt}/${TRIAGE_MAX_ATTEMPTS}`
+      : `Тріаж: помилка (${o.error}, ${o.attempt} спроби)`;
+  }
   const parts: string[] = [
     ...o.commented.map((c) => `${c.count} до #${c.issueNumber}`),
     ...o.created.map((c) => `${c.count} нова #${c.issueNumber}`),
@@ -115,7 +129,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-      skipped: 0, unverified: 0, error: null, disabledReason: null,
+      skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
     };
 
     if (!llm || !github) {
