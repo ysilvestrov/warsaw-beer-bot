@@ -4,6 +4,7 @@ import {
   type Analysis, type TriageInput,
 } from '../domain/triage-analysis';
 import type { Env } from '../config/env';
+import { RetriableError } from '../domain/transient-error';
 
 export interface TriageRaw {
   prompt: string;                    // buildTriagePrompt(input) — what was sent
@@ -109,8 +110,9 @@ export function createOpenAiTriageLlm(
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new Error(
+        throw new RetriableError(
           `triage LLM: OpenAI HTTP ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`,
+          res.status,
         );
       }
       const data = await res.json() as {

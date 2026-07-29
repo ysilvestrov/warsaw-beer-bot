@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import { createOpenAiTriageLlm, createAnthropicTriageLlm, createTriageLlm } from './triage-llm';
 import { ANALYSIS_TOOL_SCHEMA, type TriageInput } from '../domain/triage-analysis';
+import { isTransient } from '../domain/transient-error';
 
 const input: TriageInput = { orphans: [], openIssues: [] };
 const validAnalysis = { verdicts: [], new_issues: [] };
@@ -51,6 +52,17 @@ test('openai: non-2xx throws with status and response body', async () => {
   const fetchImpl = vi.fn().mockResolvedValue(new Response('rate limited', { status: 429 }));
   const llm = createOpenAiTriageLlm({ apiKey: 'k', model: 'gpt-4o-mini', fetchImpl });
   await expect(llm.analyze(input)).rejects.toThrow(/429.*rate limited/);
+});
+
+test('openai: 5xx/429 are transient, 400 is not', async () => {
+  const llmWith = (status: number, body = 'x') => createOpenAiTriageLlm({
+    apiKey: 'k',
+    model: 'gpt-4o-mini',
+    fetchImpl: vi.fn().mockResolvedValue(new Response(body, { status })),
+  });
+  await expect(llmWith(500).analyze(input)).rejects.toSatisfy(isTransient);
+  await expect(llmWith(429).analyze(input)).rejects.toSatisfy(isTransient);
+  await expect(llmWith(400).analyze(input)).rejects.toSatisfy((e: unknown) => !isTransient(e));
 });
 
 test('anthropic: extracts tool_use input and validates', async () => {

@@ -31,7 +31,11 @@ export class RetriableError extends Error {
 }
 
 export function isTransient(e: unknown): boolean {
-  if (e instanceof RetriableError) return true;
+  // Status is optional (e.g. a network-level failure with no HTTP response);
+  // absent status still counts as transient. When present, defer to the same
+  // status table as everything else so a RetriableError(msg, 403) is not
+  // misclassified as retriable just because of its constructor.
+  if (e instanceof RetriableError) return e.status === undefined || isRetriableStatus(e.status);
   if (typeof e !== 'object' || e === null) return false;
   // Duck-typed `status` covers the Anthropic SDK's APIError without importing it.
   const { status, name, cause } = e as { status?: unknown; name?: unknown; cause?: unknown };
