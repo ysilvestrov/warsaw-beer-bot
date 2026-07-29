@@ -21,6 +21,9 @@ describe('stripTrailingSpec', () => {
      'ZGRYFUS | Pastry Sour Ale Blackcurrant & Cherry'],
     ['Buzdygan Rozkoszy 24°·8,5%', 'Buzdygan Rozkoszy 24°'],
     ['Salamander 6%', 'Salamander'],
+    // a style tail appended after the spec block is part of the spec, not of the name
+    ['Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale', 'Wagabunda Brewery Oxymel 14°'],
+    ['Oxymel 12°·4,2% — Sour', 'Oxymel 12°'],
     // must NOT be touched
     ['La 150° Bionda 8,5%', 'La 150° Bionda'],                              // interior degree
     ['Litovel Pomelo 0% 12°·<0,5%', 'Litovel Pomelo 0% 12°'],               // interior 0% kept

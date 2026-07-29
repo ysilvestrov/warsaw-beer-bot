@@ -6,9 +6,14 @@ const SPEC_TRUNCATED = String.raw`[<>]?\s*\d+(?:[.,;]\d+)?`;
 // Atoms are joined by a mid-dot ONLY. Space-joined atoms are NOT chained, so an
 // interior spec that is part of the name ("Litovel Pomelo 0% 12°·<0,5%") survives.
 const SPEC_SEPARATOR = String.raw`\s*[·•∙]\s*`;
+// Some shops append the style AFTER the spec block ("Oxymel 14°·4,5% — Sour Ale"). That tail
+// is part of the spec, not of the name — the old pub.ts parser cut it too, and catalog rows
+// carrying it are exactly what `cleanupPollutedOntap` exists to repair (its POLLUTION_RE
+// matches " — "). Only recognized AFTER a spec atom, so "NoLo - Hoptimista <0.5%" is safe.
+const SPEC_STYLE_TAIL = String.raw`(?:\s*[—–-]\s*.*)?`;
 // Anchored to the end of the string: an interior degree ("La 150° Bionda") is never touched.
 const TRAILING_SPEC = new RegExp(
-  String.raw`\s+(${SPEC_ATOM})(?:${SPEC_SEPARATOR}(?:${SPEC_ATOM}|${SPEC_TRUNCATED}))*\s*$`,
+  String.raw`\s+(${SPEC_ATOM})(?:${SPEC_SEPARATOR}(?:${SPEC_ATOM}|${SPEC_TRUNCATED}))*${SPEC_STYLE_TAIL}\s*$`,
   'iu',
 );
 // A °Plato grade: numeric, no "<"/">" bound, and its LAST unit character is a degree sign.

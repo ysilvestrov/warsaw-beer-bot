@@ -1,6 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { extractBeerName } from '../sources/ontap/pub';
+import { extractBeerName } from '../sources/ontap/identity';
 import { matchPrepared, type CatalogBeer } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName } from '../domain/normalize';
