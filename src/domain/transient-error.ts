@@ -18,26 +18,23 @@ const NETWORK_ERROR_NAMES = new Set([
   'TimeoutError',
 ]);
 
-/** HTTP failure raised by our own fetch-based clients, carrying the status so
- * isTransient() does not have to parse the message text. */
-export class RetriableError extends Error {
-  readonly status?: number;
+/** Non-2xx response from one of our fetch-based clients, carrying the status so
+ * isTransient() does not have to parse the message text. Being an HttpError says
+ * nothing about retriability — the status decides. */
+export class HttpError extends Error {
+  readonly status: number;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status: number) {
     super(message);
-    this.name = 'RetriableError';
+    this.name = 'HttpError';
     this.status = status;
   }
 }
 
 export function isTransient(e: unknown): boolean {
-  // Status is optional (e.g. a network-level failure with no HTTP response);
-  // absent status still counts as transient. When present, defer to the same
-  // status table as everything else so a RetriableError(msg, 403) is not
-  // misclassified as retriable just because of its constructor.
-  if (e instanceof RetriableError) return e.status === undefined || isRetriableStatus(e.status);
   if (typeof e !== 'object' || e === null) return false;
-  // Duck-typed `status` covers the Anthropic SDK's APIError without importing it.
+  // Duck-typed `status` covers both our own HttpError and the Anthropic SDK's
+  // APIError, without importing the SDK.
   const { status, name, cause } = e as { status?: unknown; name?: unknown; cause?: unknown };
   if (typeof status === 'number' && isRetriableStatus(status)) return true;
   if (typeof name === 'string' && NETWORK_ERROR_NAMES.has(name)) return true;

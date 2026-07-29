@@ -1,12 +1,13 @@
 import { expect, test } from 'vitest';
-import { RetriableError, isTransient } from './transient-error';
+import { HttpError, isTransient } from './transient-error';
 
-test('RetriableError carries the status and is transient', () => {
-  const e = new RetriableError('GitHub GET …: 502 bad gateway', 502);
+test('HttpError carries the status; retriability comes from the status, not the class', () => {
+  const e = new HttpError('GitHub GET …: 502 bad gateway', 502);
   expect(e).toBeInstanceOf(Error);
   expect(e.status).toBe(502);
   expect(e.message).toContain('502');
   expect(isTransient(e)).toBe(true);
+  expect(isTransient(new HttpError('GitHub GET …: 403 forbidden', 403))).toBe(false);
 });
 
 test('duck-typed status: 5xx / 429 / 408 are transient, other 4xx are not', () => {
