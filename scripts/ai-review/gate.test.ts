@@ -159,9 +159,9 @@ describe('applyGate', () => {
     expect(result.dropped[0].reason).toBe('out_of_scope');
   });
 
-  it('keeps the first of two findings quoting the same code', () => {
+  it('keeps the first of two findings restating the same claim about the same code', () => {
     const result = applyGate({
-      findings: [base, { ...base, claim: 'restated' }],
+      findings: [base, { ...base, claim: '  Wrong\n  outcome  ' }],
       reviewable: ['src/a.ts'],
       changed: new Map([['src/a.ts', [[1, 6]] as Array<[number, number]>]]),
       fileContent: () => CONTENT,
@@ -169,6 +169,20 @@ describe('applyGate', () => {
     expect(result.kept).toHaveLength(1);
     expect(result.kept[0].claim).toBe('wrong outcome');
     expect(result.dropped[0].reason).toBe('duplicate');
+  });
+
+  it('keeps two distinct claims about the same quoted line', () => {
+    const result = applyGate({
+      findings: [base, { ...base, claim: 'also leaks the connection' }],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 6]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept.map((f) => f.claim)).toEqual([
+      'wrong outcome',
+      'also leaks the connection',
+    ]);
   });
 
   it('keeps a finding whose quote also occurs earlier outside the changed lines', () => {

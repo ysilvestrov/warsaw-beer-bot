@@ -161,7 +161,13 @@ export function applyGate(params: {
       continue;
     }
 
-    const key = `${finding.file}::${normalizeWs(finding.quote)}`;
+    // The claim is part of the identity: two different bugs can live on the
+    // same line, and keying on the quote alone would publish only one of them.
+    const key = [
+      finding.file,
+      normalizeWs(finding.quote),
+      normalizeWs(finding.claim).toLowerCase(),
+    ].join('::');
     if (seen.has(key)) {
       dropped.push({ finding, reason: 'duplicate' });
       continue;
