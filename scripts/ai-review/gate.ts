@@ -12,12 +12,25 @@ export function normalizeWs(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
 }
 
+/** 1-based inclusive line span of one match of a quote. */
+export interface QuoteMatch {
+  start: number;
+  end: number;
+}
+
 /**
- * 1-based line where `quote` starts in `content`, or null.
+ * Every place `quote` occurs in `content`, in file order.
  *
  * Matching is whitespace-normalised so a re-indented or re-wrapped quote still
  * matches: line numbers are the field models get wrong most often, so we locate
  * the text and derive the position rather than trusting what was reported.
+ *
+ * All occurrences matter, not just the first: a snippet that also appears
+ * earlier in the file outside the diff would otherwise make applyGate test the
+ * wrong line against the changed ranges and drop a real finding.
+ *
+ * `end` is the last line the match actually consumes, so the caller never has
+ * to infer the span from how the model happened to format the quote.
  *
  * Known limitation: a multi-line quote must begin at the start of a line —
  * one that starts mid-line is not located. That is deliberate: anchoring the
@@ -27,9 +40,9 @@ export function normalizeWs(s: string): string {
  * applyGate drops the finding as `quote_not_found` instead of possibly
  * mis-locating it.
  */
-export function locateQuote(content: string, quote: string): number | null {
+export function locateQuoteAll(content: string, quote: string): QuoteMatch[] {
   const needle = normalizeWs(quote);
-  if (needle === '') return null;
+  if (needle === '') return [];
 
   const lines = content.split('\n');
   const normalized = lines.map(normalizeWs);
@@ -38,19 +51,35 @@ export function locateQuote(content: string, quote: string): number | null {
   // each line in isolation (rather than an ever-growing multi-line window)
   // avoids false positives where the needle happens to appear as a substring
   // only once unrelated preceding lines have been concatenated onto it.
+  const single: QuoteMatch[] = [];
   for (let i = 0; i < normalized.length; i++) {
-    if (normalized[i].includes(needle)) return i + 1;
+    if (normalized[i].includes(needle)) single.push({ start: i + 1, end: i + 1 });
   }
+  // Phase 2 only runs when the quote fits on no single line: a needle that is a
+  // prefix of some line would otherwise also match there as a bogus multi-line
+  // window, reporting a span wider than the code it quotes.
+  if (single.length > 0) return single;
 
   // Phase 2: a quote spanning multiple lines, anchored at the start of line i.
+  // The smallest window that matches is the true span, so stop at the first n.
+  const multi: QuoteMatch[] = [];
   for (let i = 0; i < lines.length; i++) {
     let acc = normalized[i];
     for (let n = 1; n < MAX_QUOTE_SPAN && i + n < lines.length; n++) {
       acc = `${acc} ${normalized[i + n]}`;
-      if (acc.startsWith(needle)) return i + 1;
+      if (acc.startsWith(needle)) {
+        multi.push({ start: i + 1, end: i + n + 1 });
+        break;
+      }
     }
   }
-  return null;
+  return multi;
+}
+
+/** 1-based line where `quote` first starts in `content`, or null. */
+export function locateQuote(content: string, quote: string): number | null {
+  const matches = locateQuoteAll(content, quote);
+  return matches.length > 0 ? matches[0].start : null;
 }
 
 /**
@@ -114,16 +143,20 @@ export function applyGate(params: {
       continue;
     }
 
-    const matchedLine = locateQuote(content, finding.quote);
-    if (matchedLine === null) {
+    const matches = locateQuoteAll(content, finding.quote);
+    if (matches.length === 0) {
       dropped.push({ finding, reason: 'quote_not_found' });
       continue;
     }
 
-    const quotedLines = finding.quote.trim().split('\n').length;
-    const matchedEndLine = matchedLine + quotedLines - 1;
+    // A quote can occur several times; the finding is about this PR as long as
+    // any occurrence is on a changed line. Fall back to the first occurrence
+    // only for reporting the drop.
+    const spans = changed.get(finding.file) ?? [];
+    const hit = matches.find((m) => intersects(spans, m.start, m.end)) ?? matches[0];
+    const { start: matchedLine, end: matchedEndLine } = hit;
 
-    if (!intersects(changed.get(finding.file) ?? [], matchedLine, matchedEndLine)) {
+    if (!intersects(spans, matchedLine, matchedEndLine)) {
       dropped.push({ finding, reason: 'outside_changed_lines' });
       continue;
     }

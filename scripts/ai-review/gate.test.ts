@@ -1,4 +1,10 @@
-import { applyGate, changedLineRanges, locateQuote, normalizeWs } from './gate';
+import {
+  applyGate,
+  changedLineRanges,
+  locateQuote,
+  locateQuoteAll,
+  normalizeWs,
+} from './gate';
 import type { RawFinding } from './types';
 
 const base: RawFinding = {
@@ -63,6 +69,33 @@ describe('locateQuote', () => {
   // finding as `quote_not_found` — failing closed, which is the safe direction.
   it('does not locate a multi-line quote that starts mid-line', () => {
     expect(locateQuote(CONTENT, "(clash) {\n  return 'not_found';")).toBeNull();
+  });
+});
+
+describe('locateQuoteAll', () => {
+  const REPEATED = [
+    "  return 'not_found';", // 1 — decoy, before the hunk
+    'const x = 1;',
+    'function g() {',
+    "  return 'not_found';", // 4 — the real one
+    '}',
+  ].join('\n');
+
+  it('reports every occurrence of a repeated single-line quote', () => {
+    expect(locateQuoteAll(REPEATED, "return 'not_found';")).toEqual([
+      { start: 1, end: 1 },
+      { start: 4, end: 4 },
+    ]);
+  });
+
+  it('reports the true end line of a multi-line match', () => {
+    expect(locateQuoteAll(CONTENT, "if (clash) { return 'not_found'; }")).toEqual([
+      { start: 2, end: 4 },
+    ]);
+  });
+
+  it('returns an empty list when the quote is absent', () => {
+    expect(locateQuoteAll(CONTENT, "return 'merged';")).toEqual([]);
   });
 });
 
@@ -136,5 +169,36 @@ describe('applyGate', () => {
     expect(result.kept).toHaveLength(1);
     expect(result.kept[0].claim).toBe('wrong outcome');
     expect(result.dropped[0].reason).toBe('duplicate');
+  });
+
+  it('keeps a finding whose quote also occurs earlier outside the changed lines', () => {
+    const repeated = [
+      "  return 'not_found';", // 1 — untouched by this PR
+      'const x = 1;',
+      'function g() {',
+      "  return 'not_found';", // 4 — added by this PR
+      '}',
+    ].join('\n');
+    const result = applyGate({
+      findings: [base],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[3, 5]] as Array<[number, number]>]]),
+      fileContent: () => repeated,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(4);
+    expect(result.kept[0].matchedEndLine).toBe(4);
+  });
+
+  it('spans the real lines when the model collapsed a multi-line construct', () => {
+    const result = applyGate({
+      findings: [{ ...base, quote: "if (clash) { return 'not_found'; }" }],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[4, 4]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(2);
+    expect(result.kept[0].matchedEndLine).toBe(4);
   });
 });
