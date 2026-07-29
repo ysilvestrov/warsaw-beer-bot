@@ -619,3 +619,30 @@ test('transient GitHub failure on listOpenIssues is retried too', async () => {
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
   expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
 });
+
+test('corrupted attempt counter is ignored instead of widening the budget', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  // A hand-edited/garbled value must not read as a negative or fractional count:
+  // `-100` would otherwise mean attempt -99 < TRIAGE_MAX_ATTEMPTS forever.
+  setJobState(d, TRIAGE_ATTEMPTS_KEY, '2026-07-05:-100');
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+test('a throwing archive cannot cost the day: state is written before the archive', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  // TriageArchive is documented never-throws, but the day accounting must not
+  // depend on another module honouring that.
+  const archive = { write: vi.fn().mockRejectedValue(new Error('disk full')) };
+  await expect(
+    orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), archive, now: inWindow }),
+  ).rejects.toThrow('disk full');
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});

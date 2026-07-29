@@ -149,7 +149,9 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (!raw) return 0;
       const [date, n] = raw.split(':');
       const parsed = Number(n);
-      return date === dateKey && Number.isFinite(parsed) ? parsed : 0;
+      // Non-negative integers only: a hand-edited or corrupted value must not be
+      // able to widen the retry budget (`:-100` would read as attempt -99 < 3).
+      return date === dateKey && Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
@@ -245,14 +247,17 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       const attempt = attemptsToday() + 1;
       const transient = isTransient(e);
       log.error({ err: e, attempt, transient }, 'orphan-triage: analysis failed');
-      await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
       const error = errMessage(e).slice(0, 120);
+      // State first, archive second: the archive is documented best-effort
+      // (never throws), but the day-accounting guarantee must not depend on
+      // another module keeping that promise.
       if (transient && attempt < TRIAGE_MAX_ATTEMPTS) {
         setJobState(db, TRIAGE_ATTEMPTS_KEY, `${dateKey}:${attempt}`);
         publish({ ...outcome, error, attempt });
-        return;
+      } else {
+        finish({ ...outcome, error, attempt: transient ? attempt : null });
       }
-      finish({ ...outcome, error, attempt: transient ? attempt : null });
+      await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
       return;
     }
 

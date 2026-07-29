@@ -5,9 +5,10 @@
 // attempt — see TRIAGE_MAX_ATTEMPTS for the exact accounting).
 
 // HTTP statuses worth another attempt: 408 request timeout, 429 rate limit,
-// and every 5xx.
+// and every 5xx. Bounded at 599 so a non-HTTP number that happens to sit on a
+// `status` property cannot buy itself retries.
 function isRetriableStatus(status: number): boolean {
-  return status === 408 || status === 429 || status >= 500;
+  return status === 408 || status === 429 || (status >= 500 && status <= 599);
 }
 
 // Network-level failure names: the Anthropic SDK's connection errors (matched

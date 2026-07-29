@@ -19,6 +19,8 @@ test('duck-typed status: 5xx / 429 / 408 are transient, other 4xx are not', () =
   expect(isTransient({ status: 503 })).toBe(true);
   expect(isTransient({ status: 429 })).toBe(true);
   expect(isTransient({ status: 408 })).toBe(true);
+  expect(isTransient({ status: 599 })).toBe(true);
+  expect(isTransient({ status: 700 })).toBe(false);   // not an HTTP status at all
   expect(isTransient({ status: 400 })).toBe(false);
   expect(isTransient({ status: 401 })).toBe(false);
   expect(isTransient({ status: 404 })).toBe(false);
