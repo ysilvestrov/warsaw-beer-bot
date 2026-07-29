@@ -44,17 +44,24 @@ orphans повертаються в завтрашній батч), але де�
 ### 1. Класифікація — новий `src/domain/transient-error.ts`
 
 ```ts
-export class RetriableError extends Error {
-  readonly status?: number;
+export class HttpError extends Error {
+  readonly status: number;
+  constructor(message: string, status: number);
 }
 export function isTransient(e: unknown): boolean;
 ```
 
+`status` — обов'язковий аргумент конструктора, не опційне поле: `HttpError` огортає
+**кожну** не-2xx відповідь наших fetch-клієнтів, включно з permanent-класами
+(403, 400 тощо), тож клас із назвою, що обіцяє ретрайність, був би неправильним —
+рішення «ретраїти чи ні» ухвалює лише статус, а не факт, що це `HttpError`.
+
 `isTransient` повертає `true` для:
 
-- екземплярів `RetriableError`;
-- будь-якого об'єкта з числовим `status` ∈ {408, 429} або `status >= 500` — це без
-  імпорту SDK покриває Anthropic-івський `APIError`;
+- будь-якого об'єкта з числовим `status` ∈ {408, 429} або `status >= 500` — це
+  duck-typed перевірка, тож без імпорту SDK покриває і власний `HttpError`, і
+  Anthropic-івський `APIError`; окремої `instanceof`-гілки для `HttpError` не
+  потрібно;
 - мережевих збоїв: `name` ∈ {`APIConnectionError`, `APIConnectionTimeoutError`,
   `AbortError`, `TimeoutError`}, а також `TypeError` з непорожнім `cause` (форма
   `fetch failed` у Node).
@@ -67,9 +74,9 @@ permanent.
 
 Інфраструктура починає кидати типізоване замість голого `Error`:
 
-- `src/infra/triage-llm.ts`, OpenAI-шлях: не-ok відповідь ⇒ `RetriableError` зі
+- `src/infra/triage-llm.ts`, OpenAI-шлях: не-ok відповідь ⇒ `HttpError` зі
   `status = res.status`;
-- `src/infra/github-issues.ts`, `call()`: не-ok відповідь ⇒ `RetriableError` зі
+- `src/infra/github-issues.ts`, `call()`: не-ok відповідь ⇒ `HttpError` зі
   `status = res.status`.
 
 Тексти повідомлень не змінюються — вони йдуть у дайджест (`slice(0, 120)`).
@@ -161,7 +168,7 @@ n/3»; `attempt !== null && attempt >= TRIAGE_MAX_ATTEMPTS` ⇒ «помилка
 `src/domain/transient-error.test.ts`:
 
 - таблиця класифікації: `{status: 500}`, `{status: 429}`, `{status: 408}`,
-  `{status: 400}`, `{status: 404}`, `RetriableError`, `TypeError('fetch failed')` з
+  `{status: 400}`, `{status: 404}`, `HttpError`, `TypeError('fetch failed')` з
   `cause`, іменований `APIConnectionError`, звичайний `Error`, рядок замість `Error`.
 
 `src/jobs/orphan-triage.test.ts` (нові кейси):
@@ -175,7 +182,7 @@ n/3»; `attempt !== null && attempt >= TRIAGE_MAX_ATTEMPTS` ⇒ «помилка
   виставлено;
 - лічильник з учорашньою датою ігнорується (перша сьогоднішня transient-помилка =
   спроба 1);
-- `github.listOpenIssues` кидає `RetriableError(502)` ⇒ поведінка як у transient;
+- `github.listOpenIssues` кидає `HttpError(502)` ⇒ поведінка як у transient;
 - `covered === 0` ⇒ як і раніше permanent (день закрито).
 
 ### 6. `spec.md` §5.11

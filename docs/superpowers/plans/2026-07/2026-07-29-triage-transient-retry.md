@@ -4,7 +4,7 @@
 
 **Goal:** Транзієнтна помилка (5xx/429/408/мережа) під час денного тріажу більше не закриває варшавський день — джоба ретраїть наступним 15-хвилинним тіком у вікні `[06:00, 09:00)`, максимум 3 спроби на день; permanent-помилка закриває день одразу, як і зараз.
 
-**Architecture:** Нова доменна функція `isTransient(e)` + клас `RetriableError` класифікують помилку без розбору тексту повідомлення. Інфраструктура (`triage-llm.ts` OpenAI-шлях, `github-issues.ts`) кидає `RetriableError` зі `status`. У `orphan-triage.ts` одна функція `finish()` розчеплюється на `publish()` (пише лише рядок для дайджесту) і `finish()` (`publish` + `orphan_triage_last_run`); лічильник спроб живе в `job_state` під ключем `orphan_triage_attempts` зі значенням `<дата>:<n>`, яке само себе інвалідує зі зміною дати.
+**Architecture:** Нова доменна функція `isTransient(e)` + клас `HttpError` класифікують помилку без розбору тексту повідомлення. Інфраструктура (`triage-llm.ts` OpenAI-шлях, `github-issues.ts`) кидає `HttpError` зі `status`. У `orphan-triage.ts` одна функція `finish()` розчеплюється на `publish()` (пише лише рядок для дайджесту) і `finish()` (`publish` + `orphan_triage_last_run`); лічильник спроб живе в `job_state` під ключем `orphan_triage_attempts` зі значенням `<дата>:<n>`, яке само себе інвалідує зі зміною дати.
 
 **Tech Stack:** Node.js, TypeScript, Vitest, better-sqlite3 (`job_state`), Anthropic SDK.
 
@@ -21,10 +21,10 @@
 
 | Файл | Відповідальність | Дія |
 |---|---|---|
-| `src/domain/transient-error.ts` | `RetriableError` + `isTransient(e)` — єдине місце, де вирішується «варто ретраїти?» | створити |
+| `src/domain/transient-error.ts` | `HttpError` + `isTransient(e)` — єдине місце, де вирішується «варто ретраїти?» | створити |
 | `src/domain/transient-error.test.ts` | таблиця класифікації | створити |
-| `src/infra/triage-llm.ts` | OpenAI-шлях кидає `RetriableError` зі `status` | змінити |
-| `src/infra/github-issues.ts` | `call()` кидає `RetriableError` зі `status` | змінити |
+| `src/infra/triage-llm.ts` | OpenAI-шлях кидає `HttpError` зі `status` | змінити |
+| `src/infra/github-issues.ts` | `call()` кидає `HttpError` зі `status` | змінити |
 | `src/jobs/orphan-triage.ts` | `publish`/`finish`, лічильник спроб, гілка transient у `catch` | змінити |
 | `src/jobs/orphan-triage.test.ts` | нові кейси ретраю | змінити |
 | `spec.md` §5.11 | контракт транзієнтних помилок | змінити |
@@ -43,10 +43,10 @@
 
 ```ts
 import { expect, test } from 'vitest';
-import { RetriableError, isTransient } from './transient-error';
+import { HttpError, isTransient } from './transient-error';
 
-test('RetriableError carries the status and is transient', () => {
-  const e = new RetriableError('GitHub GET …: 502 bad gateway', 502);
+test('HttpError carries the status and is transient', () => {
+  const e = new HttpError('GitHub GET …: 502 bad gateway', 502);
   expect(e).toBeInstanceOf(Error);
   expect(e.status).toBe(502);
   expect(e.message).toContain('502');
@@ -122,22 +122,23 @@ const NETWORK_ERROR_NAMES = new Set([
   'TimeoutError',
 ]);
 
-/** HTTP failure raised by our own fetch-based clients, carrying the status so
- * isTransient() does not have to parse the message text. */
-export class RetriableError extends Error {
-  readonly status?: number;
+/** Non-2xx response from one of our fetch-based clients, carrying the status so
+ * isTransient() does not have to parse the message text. Being an HttpError says
+ * nothing about retriability — the status decides. */
+export class HttpError extends Error {
+  readonly status: number;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status: number) {
     super(message);
-    this.name = 'RetriableError';
+    this.name = 'HttpError';
     this.status = status;
   }
 }
 
 export function isTransient(e: unknown): boolean {
-  if (e instanceof RetriableError) return true;
   if (typeof e !== 'object' || e === null) return false;
-  // Duck-typed `status` covers the Anthropic SDK's APIError without importing it.
+  // Duck-typed `status` covers both our own HttpError and the Anthropic SDK's
+  // APIError, without importing the SDK.
   const { status, name, cause } = e as { status?: unknown; name?: unknown; cause?: unknown };
   if (typeof status === 'number' && isRetriableStatus(status)) return true;
   if (typeof name === 'string' && NETWORK_ERROR_NAMES.has(name)) return true;
@@ -158,9 +159,17 @@ git add src/domain/transient-error.ts src/domain/transient-error.test.ts
 git commit -m "feat(#316): transient-vs-permanent error classification"
 ```
 
+**Correction during execution:** shipped code renames the class above to
+`HttpError`, and `status` is a **required** constructor argument (no
+`instanceof HttpError` branch in `isTransient` — the duck-typed `status` check
+already covers it). Reason: the class wraps **every** non-2xx response our
+fetch-based clients see, including permanent ones (403, 400, …), so a name that
+promises retriability was misleading — only the status decides, never the class
+itself.
+
 ---
 
-### Task 2: Інфраструктура кидає `RetriableError` зі статусом
+### Task 2: Інфраструктура кидає `HttpError` зі статусом
 
 **Files:**
 - Modify: `src/infra/github-issues.ts` (функція `call`, ~L28-38)
@@ -211,7 +220,7 @@ Expected: FAIL — обидва нові тести падають на 5xx/429 
 У `src/infra/github-issues.ts` — імпорт і заміна кидка в `call()`:
 
 ```ts
-import { RetriableError } from '../domain/transient-error';
+import { HttpError } from '../domain/transient-error';
 ```
 
 ```ts
@@ -220,7 +229,7 @@ import { RetriableError } from '../domain/transient-error';
       // Typed so the caller (orphan-triage) can tell a retriable 5xx from a
       // permanent 4xx without parsing this message. Text is unchanged: it goes
       // into the daily digest.
-      throw new RetriableError(
+      throw new HttpError(
         `GitHub ${init?.method ?? 'GET'} ${url}: ${res.status}${text ? ` ${text.slice(0, 300)}` : ''}`,
         res.status,
       );
@@ -230,13 +239,13 @@ import { RetriableError } from '../domain/transient-error';
 У `src/infra/triage-llm.ts` — імпорт і заміна кидка в OpenAI-шляху:
 
 ```ts
-import { RetriableError } from '../domain/transient-error';
+import { HttpError } from '../domain/transient-error';
 ```
 
 ```ts
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new RetriableError(
+        throw new HttpError(
           `triage LLM: OpenAI HTTP ${res.status}${text ? `: ${text.slice(0, 300)}` : ''}`,
           res.status,
         );
@@ -377,7 +386,7 @@ git commit -m "feat(#316): attempt-aware triage digest line"
 
 ```ts
 import { setJobState } from '../storage/job_state';
-import { RetriableError } from '../domain/transient-error';
+import { HttpError } from '../domain/transient-error';
 ```
 
 (рядок `import { getJobState } from '../storage/job_state';` замінити на
@@ -388,7 +397,7 @@ import { RetriableError } from '../domain/transient-error';
 ```ts
 // #316: a transient upstream failure must not consume the Warsaw day.
 const transientLlm = () => ({
-  analyze: vi.fn().mockRejectedValue(new RetriableError('triage LLM: OpenAI HTTP 500: oops', 500)),
+  analyze: vi.fn().mockRejectedValue(new HttpError('triage LLM: OpenAI HTTP 500: oops', 500)),
 });
 
 test('transient LLM failure: day stays open, attempt counter and soft line written', async () => {
@@ -465,7 +474,7 @@ test('transient GitHub failure on listOpenIssues is retried too', async () => {
   const d = db();
   seedOrphan(d, 1);
   const github = gh({
-    listOpenIssues: vi.fn().mockRejectedValue(new RetriableError('GitHub GET …: 502 bad gateway', 502)),
+    listOpenIssues: vi.fn().mockRejectedValue(new HttpError('GitHub GET …: 502 bad gateway', 502)),
   });
   await orphanTriage({ db: d, log, llm: llm({ verdicts: [], new_issues: [] }), github, now: inWindow });
 
