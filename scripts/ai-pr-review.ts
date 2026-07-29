@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 
 import { buildReviewContext } from './ai-review/context';
 import { runFind } from './ai-review/find';
@@ -171,6 +171,25 @@ function getDiff(baseRef: string, files: string[]): string {
   });
 }
 
+/**
+ * Reads a changed file for review context, or null if it cannot be reviewed.
+ *
+ * Uses `lstat` and refuses anything that is not a regular file, so a symlink is
+ * reported as unreadable instead of being followed. `filterReviewableFiles`
+ * matches on pathname only, so without this a PR could add an in-scope `.ts`
+ * symlink pointing at `/etc/passwd` or `.git/config` and have the target's
+ * contents shipped to the model as "the changed file". We want the blob the PR
+ * actually adds, never what it points at.
+ */
+export function readReviewableFile(path: string): string | null {
+  try {
+    if (!lstatSync(path).isFile()) return null;
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 const FIND_INSTRUCTIONS_PATH = '.github/ai-review/AGENTS.md';
 const VERIFY_INSTRUCTIONS_PATH = '.github/ai-review/VERIFY.md';
 
@@ -192,8 +211,7 @@ async function main(): Promise<void> {
   const verifyInstructions = readInstructions(VERIFY_INSTRUCTIONS_PATH);
 
   const diff = getDiff(cfg.baseRef, reviewable);
-  const readFile = (path: string): string | null =>
-    existsSync(path) ? readFileSync(path, 'utf8') : null;
+  const readFile = readReviewableFile;
 
   const { text: context, diffOnly } = buildReviewContext({ diff, reviewable, readFile });
   if (diffOnly.length > 0) {

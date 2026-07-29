@@ -142,3 +142,34 @@ describe('upsertReview', () => {
     );
   });
 });
+
+import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { readReviewableFile } from './ai-pr-review';
+
+describe('readReviewableFile', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-symlink-'));
+
+  it('reads a regular file', () => {
+    const p = join(dir, 'real.ts');
+    writeFileSync(p, 'export const a = 1;\n');
+    expect(readReviewableFile(p)).toBe('export const a = 1;\n');
+  });
+
+  it('refuses to follow a symlink instead of shipping the target to the model', () => {
+    const secret = join(dir, 'secret.txt');
+    writeFileSync(secret, 'SUPER_SECRET_TOKEN\n');
+    const link = join(dir, 'leak.ts');
+    symlinkSync(secret, link);
+    expect(readReviewableFile(link)).toBeNull();
+  });
+
+  it('returns null for a directory and for a missing path', () => {
+    const sub = join(dir, 'subdir');
+    mkdirSync(sub);
+    expect(readReviewableFile(sub)).toBeNull();
+    expect(readReviewableFile(join(dir, 'nope.ts'))).toBeNull();
+  });
+});
