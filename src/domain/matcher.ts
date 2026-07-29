@@ -429,6 +429,13 @@ export function matchPrepared(
     return null;
   }
 
+  // #306 bare-brand guard: when the beer name carries nothing beyond the brewery brand
+  // ("Holba Brewery / Holba"), a fuzzy hit would attach an arbitrary product of that
+  // brewery ("Holba Šerák") and inherit its rating and drunk state. Exact stages have
+  // already run and missed, so the honest outcome is an orphan. Mirrors the relaxed-pool
+  // rule in untappd-lookup.ts ("exact only, never approximate fuzzy").
+  if (nn !== '' && nn === normalizeBrewery(input.brewery)) return null;
+
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's, otherwise the
   // full catalog (shared, lazily-built Searcher). The full-catalog path is ~89ms/item over
   // 30k rows (#279); gate it per request so one bad page can't burn ~18s of CPU. Items past

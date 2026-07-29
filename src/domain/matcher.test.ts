@@ -1014,3 +1014,25 @@ describe('#295 period-delete stays out of matching normalization', () => {
     expect(hit?.id).toBe(1);
   });
 });
+
+describe('#306 bare-brand guard', () => {
+  const cat: CatalogBeer[] = [
+    { id: 1, brewery: 'Holba', name: 'Holba Šerák', abv: 4.7 },
+    { id: 2, brewery: 'Litovel', name: 'Litovel Dark', abv: 4.5 },
+    { id: 3, brewery: 'Umorušany Janíček Brewery', name: 'Umorušany Janíček', abv: 4.5 },
+  ];
+
+  test('a name that is only the brand never fuzzy-matches a specific product', () => {
+    const prepared = prepareCatalog(cat);
+    expect(matchPrepared({ brewery: 'Holba Brewery', name: 'Holba', abv: null }, prepared)).toBeNull();
+    expect(matchPrepared({ brewery: 'Litovel Brewery', name: 'Litovel', abv: null }, prepared)).toBeNull();
+  });
+
+  test('an exact match on the same input still wins', () => {
+    const m = matchPrepared(
+      { brewery: 'Umorušany Janíček Brewery', name: 'Umorušany Janíček', abv: null },
+      prepareCatalog(cat),
+    );
+    expect(m).toMatchObject({ id: 3, source: 'exact' });
+  });
+});
