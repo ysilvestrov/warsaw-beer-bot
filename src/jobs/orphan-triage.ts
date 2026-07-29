@@ -10,6 +10,7 @@ import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions } from '../domain/triage-plan';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
+import { isTransient } from '../domain/transient-error';
 import type { BeerSearch } from '../sources/untappd/search';
 import type { Analysis, Verdict } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
@@ -121,11 +122,26 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const { run, dateKey } = shouldRunTriage({ now, lastRunDate: getJobState(db, TRIAGE_LAST_RUN_KEY) });
     if (!run) return;
 
-    const finish = (outcome: TriageOutcome): void => {
-      setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+    // Two separate facts, deliberately split (#316): what the digest shows, and
+    // whether the Warsaw day is done. A transient failure publishes without
+    // closing the day, so the next in-window tick retries.
+    const publish = (outcome: TriageOutcome): void => {
       setJobState(db, TRIAGE_LAST_RESULT_KEY,
         JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
+    };
+    const finish = (outcome: TriageOutcome): void => {
+      setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+      publish(outcome);
       log.info({ outcome, dateKey }, 'orphan-triage finished');
+    };
+    // `<date>:<n>`; a value from any other date reads as 0, so the counter needs
+    // no cleanup job.
+    const attemptsToday = (): number => {
+      const raw = getJobState(db, TRIAGE_ATTEMPTS_KEY);
+      if (!raw) return 0;
+      const [date, n] = raw.split(':');
+      const parsed = Number(n);
+      return date === dateKey && Number.isFinite(parsed) ? parsed : 0;
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
@@ -218,9 +234,17 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       }
       plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
-      log.error({ err: e }, 'orphan-triage: analysis failed');
+      const attempt = attemptsToday() + 1;
+      const transient = isTransient(e);
+      log.error({ err: e, attempt, transient }, 'orphan-triage: analysis failed');
       await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
-      finish({ ...outcome, error: errMessage(e).slice(0, 120) });
+      const error = errMessage(e).slice(0, 120);
+      if (transient && attempt < TRIAGE_MAX_ATTEMPTS) {
+        setJobState(db, TRIAGE_ATTEMPTS_KEY, `${dateKey}:${attempt}`);
+        publish({ ...outcome, error, attempt });
+        return;
+      }
+      finish({ ...outcome, error, attempt: transient ? attempt : null });
       return;
     }
 

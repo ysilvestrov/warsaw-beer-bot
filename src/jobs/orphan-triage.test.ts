@@ -4,13 +4,14 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
-import { getJobState } from '../storage/job_state';
+import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
   orphanTriage, shouldRunTriage, buildTriageLine,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
+import { HttpError } from '../domain/transient-error';
 
 const log = pino({ level: 'silent' });
 // Warsaw 07:30 on 2026-07-05 (CEST = UTC+2) → 05:30Z
@@ -477,4 +478,91 @@ test('buildTriageLine: transient attempts vs final failure', () => {
   expect(buildTriageLine({ ...base, disabledReason: 'нема ключа LLM', attempt: null }))
     .toBe('Тріаж: вимкнено (нема ключа LLM)');
   expect(buildTriageLine({ ...base, attempt: null })).toContain('5 нових');
+});
+
+// #316: a transient upstream failure must not consume the Warsaw day.
+const transientLlm = () => ({
+  analyze: vi.fn().mockRejectedValue(new HttpError('triage LLM: OpenAI HTTP 500: oops', 500)),
+});
+
+test('transient LLM failure: day stays open, attempt counter and soft line written', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();      // day NOT consumed
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.date).toBe('2026-07-05');                       // visible in today's digest
+  expect(result.line).toContain('тимчасова помилка');
+  expect(result.line).toContain('спроба 1/3');
+});
+
+test('transient failures: the third attempt closes the day', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const theLlm = transientLlm();
+  for (let i = 0; i < TRIAGE_MAX_ATTEMPTS; i += 1) {
+    await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  }
+  expect(theLlm.analyze).toHaveBeenCalledTimes(TRIAGE_MAX_ATTEMPTS);
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('3 спроби');
+
+  // A fourth tick in the same window is skipped by the idempotency check.
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  expect(theLlm.analyze).toHaveBeenCalledTimes(TRIAGE_MAX_ATTEMPTS);
+});
+
+test('transient then success: normal result line, day closed', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  };
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+  await orphanTriage({ db: d, log, llm: llm(analysis), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  const line = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(line).toContain('1 нових');
+  expect(line).not.toContain('помилка');
+});
+
+test('permanent LLM failure: day is consumed on the first attempt', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  await orphanTriage({
+    db: d, log, github: gh(), now: inWindow,
+    llm: { analyze: vi.fn().mockRejectedValue(new Error('triage LLM: invalid response shape')) },
+  });
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBeNull();
+  const line = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(line).toContain('помилка');
+  expect(line).not.toContain('спроба');
+});
+
+test('attempt counter from an earlier date does not count against today', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setJobState(d, TRIAGE_ATTEMPTS_KEY, '2026-07-04:2');
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+test('transient GitHub failure on listOpenIssues is retried too', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn().mockRejectedValue(new HttpError('GitHub GET …: 502 bad gateway', 502)),
+  });
+  await orphanTriage({ db: d, log, llm: llm({ verdicts: [], new_issues: [] }), github, now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
 });
