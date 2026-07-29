@@ -1,3 +1,5 @@
+import { breweryCore } from './identity';
+
 export interface OntapNonBeerInput {
   style: string | null;
   brewery_ref: string | null;
@@ -22,6 +24,7 @@ const STYLE_TOKENS = [
   'wytrawne',
   'półwytrawne',
   'słodkie',
+  'soft drink',
 ];
 
 const ELIGIBLE_STYLE_TOKENS = [
@@ -64,6 +67,7 @@ const BREWERY_TOKENS = [
   'vini',
   'dolium vini',
   'stacja winiarska',
+  'kofola',
 ];
 
 const EXACT_BREWERY_SENTINELS = new Set([
@@ -97,6 +101,7 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   if (
     brewery &&
     (EXACT_BREWERY_SENTINELS.has(brewery) ||
+      EXACT_BREWERY_SENTINELS.has(norm(breweryCore(brewery))) ||
       BREWERY_TOKENS.some((token) => brewery.includes(token)) ||
       looksLikeScheduleOrNav(brewery))
   ) {

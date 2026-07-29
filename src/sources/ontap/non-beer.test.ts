@@ -86,4 +86,17 @@ describe('ontapTapExclusion', () => {
     expect(ontapTapExclusion({ style: 'Lager', brewery_ref: 'Browar Kormoran', beer_ref: 'Kormoran Miodne' }))
       .toBeNull();
   });
+
+  test.each([
+    ['kofola with suffix', { style: 'Soft Drink', brewery_ref: 'Kofola Brewery', beer_ref: 'Kofola' }],
+    ['kofola long brewery', { style: 'napój bezalkoholowy', brewery_ref: 'Kofola Československo Brewery', beer_ref: 'Kofola' }],
+    ['mojito sentinel with suffix', { style: 'Bezalkoholowe', brewery_ref: 'Mojito Brewery', beer_ref: 'Mojito' }],
+  ])('classifies %s as non-beer', (_label, tap) => {
+    expect(ontapTapExclusion(tap)).toBe('non-beer');
+  });
+
+  test('non-alcoholic BEER is not excluded', () => {
+    expect(ontapTapExclusion({ style: 'Bezalkoholowe', brewery_ref: 'TRZECH KUMPLI Brewery', beer_ref: 'PAN IPANI BEZALKOHOLOWE 8°' })).toBeNull();
+    expect(ontapTapExclusion({ style: 'Non-alcoholic lager', brewery_ref: 'Funky Fluid Brewery', beer_ref: 'Free' })).toBeNull();
+  });
 });
