@@ -45,6 +45,13 @@ describe('sanitizeBrewery', () => {
       .toEqual({ brewery: '', name: 'Obuolių' });
   });
 
+  test('recognises a polluted brewery regardless of a trailing kind word', () => {
+    expect(sanitizeBrewery('vaisiu sultys Brewery', 'Obuolių'))
+      .toEqual({ brewery: '', name: 'Obuolių' });
+    expect(sanitizeBrewery('W Brzesku', 'Žatecký Světlý Ležák'))
+      .toEqual({ brewery: '', name: 'Žatecký Světlý Ležák' });
+  });
+
   test('clears a punctuation-only brewery', () => {
     expect(sanitizeBrewery('- Brewery', 'Pilsner Urquell'))
       .toEqual({ brewery: '', name: 'Pilsner Urquell' });

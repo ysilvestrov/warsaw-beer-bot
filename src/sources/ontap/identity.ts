@@ -62,11 +62,19 @@ function stripLeadingCider(raw: string): string {
 // Brewery values that are not breweries: a shop location, an ingredient list, or pure
 // punctuation. #306: these clear the brewery FIELD; the beer itself is kept, because the
 // matcher supports an empty input brewery (relaxed pool, exact-name-only — #149).
+// Keys are kind-word-free (see isPolluted): the shop emits both "W Brzesku" and
+// "W Brzesku Brewery" for the same pollution.
 const POLLUTED_BREWERIES = new Set([
-  'w brzesku brewery',
   'w brzesku',
   'vaisiu sultys',
 ]);
+
+function isPolluted(brewery: string): boolean {
+  return (
+    POLLUTED_BREWERIES.has(normalized(brewery)) ||
+    POLLUTED_BREWERIES.has(normalized(breweryCore(brewery)))
+  );
+}
 
 function isPunctuationOnly(raw: string): boolean {
   const core = breweryCore(raw);
@@ -84,7 +92,7 @@ export function sanitizeBrewery(breweryRef: string | null, beerRef: string): Tap
   const name = compact(beerRef);
   const breweryNorm = normalized(brewery);
 
-  if (POLLUTED_BREWERIES.has(breweryNorm) || isPunctuationOnly(brewery)) {
+  if (isPolluted(brewery) || isPunctuationOnly(brewery)) {
     return { brewery: '', name };
   }
 
