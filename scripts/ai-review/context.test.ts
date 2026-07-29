@@ -1,4 +1,4 @@
-import { buildReviewContext, fileChurn } from './context';
+import { buildReviewContext, DIFF_BUDGET_SHARE, fileChurn } from './context';
 
 const DIFF = [
   '--- a/src/small.ts',
@@ -55,6 +55,46 @@ describe('buildReviewContext', () => {
     expect(text).not.toContain('SMALL BODY');
     expect(diffOnly).toEqual(['src/small.ts']);
     expect(text).toContain('you see only the diff');
+  });
+
+  it('truncates a diff that does not fit the budget and says so', () => {
+    const huge = [
+      '--- a/src/big.ts',
+      '+++ b/src/big.ts',
+      '@@ -1,1 +1,400 @@',
+      ...Array.from({ length: 400 }, (_, i) => `+line ${i}`),
+      '+LAST LINE OF THE DIFF',
+    ].join('\n');
+    const { text } = buildReviewContext({
+      diff: huge,
+      reviewable: ['src/big.ts'],
+      readFile,
+      budget: 1_000,
+    });
+    expect(huge.length).toBeGreaterThan(1_000);
+    expect(text).not.toContain('LAST LINE OF THE DIFF');
+    expect(text).toContain('TRUNCATED');
+    // The diff itself is held to its share of the budget; the surrounding
+    // section headers are small and deliberately not charged against it.
+    const diffBlock = text.split('```diff\n')[1].split('\n```')[0];
+    expect(diffBlock.length).toBeLessThanOrEqual(1_000 * DIFF_BUDGET_SHARE);
+  });
+
+  it('leaves room for file bodies even when the diff overflows', () => {
+    const huge = [
+      '--- a/src/big.ts',
+      '+++ b/src/big.ts',
+      '@@ -1,1 +1,400 @@',
+      ...Array.from({ length: 400 }, (_, i) => `+line ${i}`),
+    ].join('\n');
+    const { text, diffOnly } = buildReviewContext({
+      diff: huge,
+      reviewable: ['src/big.ts'],
+      readFile,
+      budget: 1_000,
+    });
+    expect(text).toContain('BIG BODY');
+    expect(diffOnly).toEqual([]);
   });
 
   it('lists a deleted file as diff-only instead of throwing', () => {

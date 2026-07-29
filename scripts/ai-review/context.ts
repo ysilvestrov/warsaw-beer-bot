@@ -1,6 +1,34 @@
 /** Total context budget in characters. Roughly 60k tokens. */
 export const CONTEXT_BUDGET = 240_000;
 
+/**
+ * Share of the budget the diff itself may occupy. The diff is the primary
+ * signal, but it must not crowd out the file bodies entirely — and a diff
+ * larger than the whole budget has to degrade rather than blow the request up.
+ */
+export const DIFF_BUDGET_SHARE = 0.75;
+
+/**
+ * Cut `diff` to `limit` characters on a line boundary.
+ *
+ * The caller must announce the cut: a model reasoning about a diff it cannot
+ * see is worse than one told plainly that part of it is missing.
+ */
+function truncateDiff(diff: string, limit: number): { text: string; truncated: boolean } {
+  if (diff.length <= limit) return { text: diff, truncated: false };
+
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of diff.split('\n')) {
+    const next = used + line.length + (kept.length > 0 ? 1 : 0);
+    if (next > limit) break;
+    kept.push(line);
+    used = next;
+  }
+  // A single line longer than the whole allowance still has to be cut.
+  return { text: kept.length > 0 ? kept.join('\n') : diff.slice(0, limit), truncated: true };
+}
+
 /** Added + removed lines per post-image file path. */
 export function fileChurn(diff: string): Map<string, number> {
   const churn = new Map<string, number>();
@@ -36,8 +64,25 @@ export function buildReviewContext(params: {
     (a, b) => (churn.get(b) ?? 0) - (churn.get(a) ?? 0) || a.localeCompare(b),
   );
 
-  const sections: string[] = ['# Diff', '```diff', diff, '```'];
-  let used = diff.length;
+  const { text: diffText, truncated } = truncateDiff(
+    diff,
+    Math.max(0, Math.floor(budget * DIFF_BUDGET_SHARE)),
+  );
+
+  const sections: string[] = ['# Diff', '```diff', diffText, '```'];
+  let used = diffText.length;
+
+  if (truncated) {
+    const notice = [
+      '',
+      `**The diff above is TRUNCATED**: only the first ${diffText.length} of ${diff.length}`,
+      'characters fit in this review. Later hunks — possibly whole files — are not',
+      'shown. Do not make any claim about a change you were not shown.',
+    ];
+    sections.push(...notice);
+    used += notice.join('\n').length;
+  }
+
   const bodies: string[] = [];
   const diffOnly: string[] = [];
 
