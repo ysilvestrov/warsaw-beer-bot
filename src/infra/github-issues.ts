@@ -1,4 +1,5 @@
 import type { OpenIssue } from '../domain/triage-analysis';
+import { HttpStatusError } from '../domain/transient-error';
 
 export interface GithubIssuesClient {
   listOpenIssues(label: string): Promise<OpenIssue[]>;
@@ -30,8 +31,12 @@ export function createGithubIssuesClient(cfg: {
     const res = await fetchImpl(url, { ...init, headers });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      throw new Error(
+      // Typed so the caller (orphan-triage) can tell a retriable 5xx from a
+      // permanent 4xx without parsing this message. Text is unchanged: it goes
+      // into the daily digest.
+      throw new HttpStatusError(
         `GitHub ${init?.method ?? 'GET'} ${url}: ${res.status}${text ? ` ${text.slice(0, 300)}` : ''}`,
+        res.status,
       );
     }
     return res.json() as Promise<T>;

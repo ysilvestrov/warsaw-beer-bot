@@ -4,13 +4,14 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
-import { getJobState } from '../storage/job_state';
+import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
   orphanTriage, shouldRunTriage, buildTriageLine,
-  TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY,
+  TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
+import { HttpStatusError } from '../domain/transient-error';
 
 const log = pino({ level: 'silent' });
 // Warsaw 07:30 on 2026-07-05 (CEST = UTC+2) → 05:30Z
@@ -213,15 +214,15 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, disabledReason: null,
+    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, unverified: 0, error: 'invalid json', disabledReason: null,
+    skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
     total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-    skipped: 0, unverified: 0, error: null, disabledReason: 'нема GITHUB_TOKEN',
+    skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
 
@@ -437,7 +438,7 @@ test('buildTriageLine reports the unverified count', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
     notOnUntappd: 1, wontfix: 0, skipped: 0, unverified: 2,
-    error: null, disabledReason: null,
+    error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
 
@@ -459,4 +460,189 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
   const summary = lines.find((l) => typeof l === 'object' && l !== null && 'rowsWithEvidence' in l);
   expect(summary).toMatchObject({ probeFailures: 2, causesChecked: 1, unverified: 1, verifyFailures: 1 });
+});
+
+test('buildTriageLine: transient attempts vs final failure', () => {
+  const base = {
+    total: 5, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+    skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
+    attempt: null as number | null,
+  };
+  expect(buildTriageLine({ ...base, error: '500 Internal server error', attempt: 1 }))
+    .toBe('Тріаж: тимчасова помилка (500 Internal server error), спроба 1/3');
+  expect(buildTriageLine({ ...base, error: '500 Internal server error', attempt: TRIAGE_MAX_ATTEMPTS }))
+    .toBe('Тріаж: помилка (500 Internal server error, 3 спроби)');
+  // Permanent errors keep the pre-#316 wording.
+  expect(buildTriageLine({ ...base, error: 'invalid json', attempt: null }))
+    .toBe('Тріаж: помилка (invalid json)');
+  expect(buildTriageLine({ ...base, disabledReason: 'нема ключа LLM', attempt: null }))
+    .toBe('Тріаж: вимкнено (нема ключа LLM)');
+  expect(buildTriageLine({ ...base, attempt: null })).toContain('5 нових');
+});
+
+// #316: a transient upstream failure must not consume the Warsaw day.
+const transientLlm = () => ({
+  analyze: vi.fn().mockRejectedValue(new HttpStatusError('triage LLM: OpenAI HTTP 500: oops', 500)),
+});
+
+test('transient LLM failure: day stays open, attempt counter and soft line written', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();      // day NOT consumed
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.date).toBe('2026-07-05');                       // visible in today's digest
+  expect(result.line).toContain('тимчасова помилка');
+  expect(result.line).toContain('спроба 1/3');
+});
+
+test('transient failures: the third attempt closes the day', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const theLlm = transientLlm();
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  // Intermediate value: still open after the second (of three) attempts.
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:2');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+
+  expect(theLlm.analyze).toHaveBeenCalledTimes(TRIAGE_MAX_ATTEMPTS);
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('3 спроби');
+
+  // A fourth tick in the same window is skipped by the idempotency check.
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  expect(theLlm.analyze).toHaveBeenCalledTimes(TRIAGE_MAX_ATTEMPTS);
+});
+
+test('no duplicate GitHub side effects across a transient retry', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
+      { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
+    ],
+    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+  };
+  // One github stub shared across both ticks, so call counts accumulate.
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: transientLlm(), github, now: inWindow });
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  expect(github.createIssue).toHaveBeenCalledTimes(1);
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
+});
+
+test('a permanent failure after a transient one closes the day with pre-#316 wording', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+
+  await orphanTriage({
+    db: d, log, github: gh(), now: inWindow,
+    llm: { analyze: vi.fn().mockRejectedValue(new Error('triage LLM: invalid response shape')) },
+  });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  const line = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(line).toContain('помилка');
+  expect(line).not.toContain('спроба');
+});
+
+test('transient then success: normal result line, day closed', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  };
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+  await orphanTriage({ db: d, log, llm: llm(analysis), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  const line = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(line).toContain('1 нових');
+  expect(line).not.toContain('помилка');
+});
+
+test('closing the day clears the attempt counter', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  };
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  await orphanTriage({ db: d, log, llm: llm(analysis), github: gh(), now: inWindow });
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBeNull();
+});
+
+test('permanent LLM failure: day is consumed on the first attempt', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  await orphanTriage({
+    db: d, log, github: gh(), now: inWindow,
+    llm: { analyze: vi.fn().mockRejectedValue(new Error('triage LLM: invalid response shape')) },
+  });
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBeNull();
+  const line = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(line).toContain('помилка');
+  expect(line).not.toContain('спроба');
+});
+
+test('attempt counter from an earlier date does not count against today', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setJobState(d, TRIAGE_ATTEMPTS_KEY, '2026-07-04:2');
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+test('transient GitHub failure on listOpenIssues is retried too', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn().mockRejectedValue(new HttpStatusError('GitHub GET …: 502 bad gateway', 502)),
+  });
+  await orphanTriage({ db: d, log, llm: llm({ verdicts: [], new_issues: [] }), github, now: inWindow });
+
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+});
+
+test('corrupted attempt counter is ignored instead of widening the budget', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  // A hand-edited/garbled value must not read as a negative or fractional count:
+  // `-100` would otherwise mean attempt -99 < TRIAGE_MAX_ATTEMPTS forever.
+  setJobState(d, TRIAGE_ATTEMPTS_KEY, '2026-07-05:-100');
+  await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+test('a throwing archive cannot cost the day: state is written before the archive', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  // TriageArchive is documented never-throws, but the day accounting must not
+  // depend on another module honouring that.
+  const archive = { write: vi.fn().mockRejectedValue(new Error('disk full')) };
+  await expect(
+    orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), archive, now: inWindow }),
+  ).rejects.toThrow('disk full');
+
+  expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
+  expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
 });

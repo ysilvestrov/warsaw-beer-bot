@@ -1,5 +1,6 @@
 import { expect, test, vi } from 'vitest';
 import { createGithubIssuesClient } from './github-issues';
+import { isTransient } from '../domain/transient-error';
 
 function stubFetch(status: number, body: unknown) {
   return vi.fn().mockResolvedValue(
@@ -49,6 +50,13 @@ test('commentOnIssue: POSTs to comments endpoint', async () => {
 test('non-2xx throws with status and response body text', async () => {
   const fn = stubFetch(403, { message: 'forbidden' });
   await expect(client(fn).listOpenIssues('orphan-triage')).rejects.toThrow(/403.*forbidden/s);
+});
+
+test('5xx is classified transient, 4xx is not', async () => {
+  await expect(client(stubFetch(502, { message: 'bad gateway' })).listOpenIssues('orphan-triage'))
+    .rejects.toSatisfy(isTransient);
+  await expect(client(stubFetch(403, { message: 'forbidden' })).listOpenIssues('orphan-triage'))
+    .rejects.toSatisfy((e: unknown) => !isTransient(e));
 });
 
 test('defaults to global fetch when fetchImpl is omitted', async () => {

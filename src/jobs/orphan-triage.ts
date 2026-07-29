@@ -1,6 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { getJobState, setJobState } from '../storage/job_state';
+import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
   listUntriagedFailures, setEnrichFailureReview, type UntriagedFailure,
 } from '../storage/enrich_failures';
@@ -10,6 +10,7 @@ import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions } from '../domain/triage-plan';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
+import { isTransient } from '../domain/transient-error';
 import type { BeerSearch } from '../sources/untappd/search';
 import type { Analysis, Verdict } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
@@ -17,6 +18,16 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
+export const TRIAGE_ATTEMPTS_KEY = 'orphan_triage_attempts';
+// Transient upstream failures (5xx/429/network) do not consume the Warsaw day —
+// the next 15-min tick inside [06:00,09:00) retries. Bounded at 3 because each
+// attempt can cost up to 2 x TRIAGE_PROBE_LIMIT Untappd searches (probes and
+// verification each keep their own counter against the same limit) plus up to
+// 2 LLM calls (the empty-verdict retry lives inside this same attempt); the
+// window itself would allow ~12 (#316). This bound only covers failures that
+// reach the catch below — a crash or SIGTERM mid-run (e.g. a deploy) leaves
+// the day open for the remaining ticks, same as before #316.
+export const TRIAGE_MAX_ATTEMPTS = 3;
 export const TRIAGE_BATCH_LIMIT = 50;
 // Shared budget for evidence probes and cause verification, in Untappd searches
 // per run. ~50 zero-candidate rows x 2 probes + up to 50 verifications fits; 0
@@ -53,12 +64,20 @@ export interface TriageOutcome {
   skipped: number;
   unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
+  // Attempt number for a retriable failure (1-based); null for success,
+  // disabled runs and permanent errors.
+  attempt: number | null;
   disabledReason: string | null;
 }
 
 export function buildTriageLine(o: TriageOutcome): string {
   if (o.disabledReason) return `Тріаж: вимкнено (${o.disabledReason})`;
-  if (o.error) return `Тріаж: помилка (${o.error})`;
+  if (o.error) {
+    if (o.attempt === null) return `Тріаж: помилка (${o.error})`;
+    return o.attempt < TRIAGE_MAX_ATTEMPTS
+      ? `Тріаж: тимчасова помилка (${o.error}), спроба ${o.attempt}/${TRIAGE_MAX_ATTEMPTS}`
+      : `Тріаж: помилка (${o.error}, ${o.attempt} спроби)`;
+  }
   const parts: string[] = [
     ...o.commented.map((c) => `${c.count} до #${c.issueNumber}`),
     ...o.created.map((c) => `${c.count} нова #${c.issueNumber}`),
@@ -107,15 +126,36 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const { run, dateKey } = shouldRunTriage({ now, lastRunDate: getJobState(db, TRIAGE_LAST_RUN_KEY) });
     if (!run) return;
 
-    const finish = (outcome: TriageOutcome): void => {
-      setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+    // Two separate facts, deliberately split (#316): what the digest shows, and
+    // whether the Warsaw day is done. A transient failure publishes without
+    // closing the day, so the next in-window tick retries.
+    const publish = (outcome: TriageOutcome): void => {
       setJobState(db, TRIAGE_LAST_RESULT_KEY,
         JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
+    };
+    const finish = (outcome: TriageOutcome): void => {
+      setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+      // The day is closed — any retry budget spent getting here is moot. Clearing
+      // it means an operator who re-opens the day (deleting TRIAGE_LAST_RUN_KEY)
+      // does not silently inherit a reduced attempt budget from today's run.
+      deleteJobState(db, TRIAGE_ATTEMPTS_KEY);
+      publish(outcome);
       log.info({ outcome, dateKey }, 'orphan-triage finished');
+    };
+    // `<date>:<n>`; a value from any other date reads as 0, so the counter needs
+    // no cleanup job.
+    const attemptsToday = (): number => {
+      const raw = getJobState(db, TRIAGE_ATTEMPTS_KEY);
+      if (!raw) return 0;
+      const [date, n] = raw.split(':');
+      const parsed = Number(n);
+      // Non-negative integers only: a hand-edited or corrupted value must not be
+      // able to widen the retry budget (`:-100` would read as attempt -99 < 3).
+      return date === dateKey && Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
-      skipped: 0, unverified: 0, error: null, disabledReason: null,
+      skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
     };
 
     if (!llm || !github) {
@@ -204,9 +244,20 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       }
       plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
     } catch (e) {
-      log.error({ err: e }, 'orphan-triage: analysis failed');
+      const attempt = attemptsToday() + 1;
+      const transient = isTransient(e);
+      log.error({ err: e, attempt, transient }, 'orphan-triage: analysis failed');
+      const error = errMessage(e).slice(0, 120);
+      // State first, archive second: the archive is documented best-effort
+      // (never throws), but the day-accounting guarantee must not depend on
+      // another module keeping that promise.
+      if (transient && attempt < TRIAGE_MAX_ATTEMPTS) {
+        setJobState(db, TRIAGE_ATTEMPTS_KEY, `${dateKey}:${attempt}`);
+        publish({ ...outcome, error, attempt });
+      } else {
+        finish({ ...outcome, error, attempt: transient ? attempt : null });
+      }
       await deps.archive?.write(dateKey, { dateKey, ranAt: nowIso, batchSize: orphans.length, exchanges });
-      finish({ ...outcome, error: errMessage(e).slice(0, 120) });
       return;
     }
 
@@ -244,6 +295,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         issue.verdicts.forEach((v) => review(v, number));
         outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
       } catch (e) {
+        // Deliberately not retried by the #316 path even if isTransient(e): by
+        // this point the run may already have GitHub side effects (an earlier
+        // issue created, a comment posted), and re-running it could duplicate
+        // them. These orphans simply stay untriaged and re-enter tomorrow's batch.
         log.error({ err: e, key: issue.key }, 'orphan-triage: createIssue failed');
         outcome.skipped += issue.verdicts.length;
       }
