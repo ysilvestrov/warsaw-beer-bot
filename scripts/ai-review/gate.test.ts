@@ -204,6 +204,55 @@ describe('applyGate', () => {
     expect(result.kept[0].matchedEndLine).toBe(4);
   });
 
+  // Two copies of the same line, both inside the diff. The quote alone cannot
+  // say which one the model meant, so the reported line — untrusted as a
+  // primary locator — is used as a tiebreaker.
+  const TWICE_CHANGED = [
+    'function f() {',
+    "  return 'not_found';", // 2
+    '}',
+    'function g() {',
+    '  if (x) {',
+    "    return 'not_found';", // 6
+    '  }',
+    '}',
+  ].join('\n');
+
+  const gateTwice = (finding: RawFinding) =>
+    applyGate({
+      findings: [finding],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 8]] as Array<[number, number]>]]),
+      fileContent: () => TWICE_CHANGED,
+    });
+
+  it('picks the changed occurrence nearest the reported line', () => {
+    const result = gateTwice({ ...base, start_line: 6, end_line: 6 });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(6);
+  });
+
+  it('still picks the first occurrence when the reported line points there', () => {
+    const result = gateTwice({ ...base, start_line: 2, end_line: 2 });
+    expect(result.kept[0].matchedLine).toBe(2);
+  });
+
+  it('falls back to the first changed occurrence without a usable reported line', () => {
+    const result = gateTwice({ ...base, start_line: 0, end_line: 0 });
+    expect(result.kept[0].matchedLine).toBe(2);
+  });
+
+  it('ignores the reported line when it points outside the changed lines', () => {
+    const result = applyGate({
+      findings: [{ ...base, start_line: 1, end_line: 1 }],
+      reviewable: ['src/a.ts'],
+      // Only the second copy is part of this PR.
+      changed: new Map([['src/a.ts', [[5, 7]] as Array<[number, number]>]]),
+      fileContent: () => TWICE_CHANGED,
+    });
+    expect(result.kept[0].matchedLine).toBe(6);
+  });
+
   it('spans the real lines when the model collapsed a multi-line construct', () => {
     const result = applyGate({
       findings: [{ ...base, quote: "if (clash) { return 'not_found'; }" }],

@@ -119,6 +119,41 @@ function intersects(
   return spans.some(([from, to]) => start <= to && end >= from);
 }
 
+/** Distance from `line` to the closed interval [start, end]; 0 when inside. */
+function distanceTo(match: QuoteMatch, line: number): number {
+  if (line < match.start) return match.start - line;
+  if (line > match.end) return line - match.end;
+  return 0;
+}
+
+/**
+ * Which of several equally valid occurrences the finding is about.
+ *
+ * The quote alone cannot tell two identical changed locations apart, and
+ * attributing the finding to whichever comes first in the file sends the
+ * maintainer to the wrong copy. The model's reported line is not trustworthy
+ * enough to *locate* a finding — that is why we search by text — but it is a
+ * fine tiebreaker between candidates the text already vouched for. Without a
+ * usable report (missing, zero, negative, non-finite) the first occurrence
+ * stands, which is the previous behaviour.
+ */
+function pickMatch(matches: QuoteMatch[], reportedLine: number): QuoteMatch {
+  if (matches.length === 1) return matches[0];
+  if (!Number.isFinite(reportedLine) || reportedLine < 1) return matches[0];
+
+  let best = matches[0];
+  let bestDistance = distanceTo(best, reportedLine);
+  for (const match of matches.slice(1)) {
+    const distance = distanceTo(match, reportedLine);
+    // Strictly closer only: a tie keeps the earlier occurrence.
+    if (distance < bestDistance) {
+      best = match;
+      bestDistance = distance;
+    }
+  }
+  return best;
+}
+
 export function applyGate(params: {
   findings: RawFinding[];
   reviewable: string[];
@@ -150,16 +185,18 @@ export function applyGate(params: {
     }
 
     // A quote can occur several times; the finding is about this PR as long as
-    // any occurrence is on a changed line. Fall back to the first occurrence
-    // only for reporting the drop.
+    // any occurrence is on a changed line.
     const spans = changed.get(finding.file) ?? [];
-    const hit = matches.find((m) => intersects(spans, m.start, m.end)) ?? matches[0];
-    const { start: matchedLine, end: matchedEndLine } = hit;
-
-    if (!intersects(spans, matchedLine, matchedEndLine)) {
+    const onChangedLines = matches.filter((m) => intersects(spans, m.start, m.end));
+    if (onChangedLines.length === 0) {
       dropped.push({ finding, reason: 'outside_changed_lines' });
       continue;
     }
+
+    const { start: matchedLine, end: matchedEndLine } = pickMatch(
+      onChangedLines,
+      finding.start_line,
+    );
 
     // The claim is part of the identity: two different bugs can live on the
     // same line, and keying on the quote alone would publish only one of them.
