@@ -1,7 +1,8 @@
 // Retry classification for jobs whose idempotency key must NOT be consumed by a
 // blip (#316). Transient = the upstream might succeed on the next tick; anything
 // we do not recognise is treated as permanent, because retrying is not free
-// (orphan-triage re-runs up to 120 Untappd probes plus a 50-orphan LLM call).
+// (orphan-triage re-runs its whole probe budget and up to two LLM calls per
+// attempt — see TRIAGE_MAX_ATTEMPTS for the exact accounting).
 
 // HTTP statuses worth another attempt: 408 request timeout, 429 rate limit,
 // and every 5xx.
