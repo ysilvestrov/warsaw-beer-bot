@@ -1035,4 +1035,20 @@ describe('#306 bare-brand guard', () => {
     );
     expect(m).toMatchObject({ id: 3, source: 'exact' });
   });
+
+  test('a style or numeral beyond the brand keeps the fuzzy stage available', () => {
+    const cat: CatalogBeer[] = [
+      { id: 1, brewery: "Murphy's Brewery", name: "Murphy's Irish Stout", abv: 4.0 },
+    ];
+    const m = matchPrepared({ brewery: "Murphy's Brewery", name: "Murphy's Stout", abv: null }, prepareCatalog(cat));
+    expect(m).toMatchObject({ id: 1 });
+  });
+
+  test('a bare brand is blocked even when the catalog has one obvious product', () => {
+    const cat: CatalogBeer[] = [
+      { id: 1, brewery: 'Brouwerij Hoegaarden', name: 'Hoegaarden Witbier', abv: 4.9 },
+    ];
+    expect(matchPrepared({ brewery: 'Brouwerij Hoegaarden Brewery', name: 'Hoegaarden', abv: null }, prepareCatalog(cat)))
+      .toBeNull();
+  });
 });

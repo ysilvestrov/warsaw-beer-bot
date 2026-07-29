@@ -1,5 +1,5 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { normalizeName, normalizeBrewery, COLLAB_SEP, BREWERY_NOISE } from './normalize';
+import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 
 export { COLLAB_SEP } from './normalize';
@@ -201,6 +201,19 @@ export function breweryAliases(brewery: string): string[] {
   }
 
   return Array.from(aliases);
+}
+
+// #306: "bare brand" means the name carries NOTHING beyond the brewery brand
+// ("Holba Brewery / Holba"). Deliberately built on baseNormalize, not normalizeName:
+// normalizeName drops style words and numerals, which would also classify real beers
+// ("Litovel Weizen", "Murphy's Stout", "Holba 12") as bare and deny them the fuzzy stage.
+function isBareBrandName(name: string, brewery: string): boolean {
+  const brandTokens = new Set(
+    breweryAliases(brewery).flatMap((alias) => alias.split(' ')).filter(Boolean),
+  );
+  if (brandTokens.size === 0) return false;
+  const nameTokens = baseNormalize(name).split(' ').filter(Boolean);
+  return nameTokens.length > 0 && nameTokens.every((token) => brandTokens.has(token));
 }
 
 // Token-boundary prefix: true if `a`'s tokens are a leading prefix of `b`'s,
@@ -433,8 +446,9 @@ export function matchPrepared(
   // ("Holba Brewery / Holba"), a fuzzy hit would attach an arbitrary product of that
   // brewery ("Holba Šerák") and inherit its rating and drunk state. Exact stages have
   // already run and missed, so the honest outcome is an orphan. Mirrors the relaxed-pool
-  // rule in untappd-lookup.ts ("exact only, never approximate fuzzy").
-  if (nn !== '' && nn === normalizeBrewery(input.brewery)) return null;
+  // rule in untappd-lookup.ts ("exact only, never approximate fuzzy"). See isBareBrandName
+  // for what counts as "nothing beyond the brand".
+  if (isBareBrandName(input.name, input.brewery)) return null;
 
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's, otherwise the
   // full catalog (shared, lazily-built Searcher). The full-catalog path is ~89ms/item over
