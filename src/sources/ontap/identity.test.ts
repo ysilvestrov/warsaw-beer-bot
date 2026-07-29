@@ -16,6 +16,7 @@ describe('stripTrailingSpec', () => {
     ['Pilsiwko 0%', 'Pilsiwko'],
     ['Plum Plum Plum 12,5°·4', 'Plum Plum Plum 12,5°'],                     // truncated tail
     ['This ls light 8°·3;5%', 'This ls light 8°'],                          // ";" decimal typo
+    ['Beer 8;5°·3;5%', 'Beer 8,5°'],                                        // ";" decimal in the grade
     ['PAN IPANI BEZALKOHOLOWE 8°·<0.5%', 'PAN IPANI BEZALKOHOLOWE 8°'],
     ['ZGRYFUS | Pastry Sour Ale Blackcurrant & Cherry 5%%',
      'ZGRYFUS | Pastry Sour Ale Blackcurrant & Cherry'],
@@ -115,6 +116,11 @@ describe('extractBeerName', () => {
 
   test('returns the full text when there is no brewery and no spec', () => {
     expect(extractBeerName('Aperitivo Spritz', null)).toBe('Aperitivo Spritz');
+  });
+
+  test('does not reduce a brand-plus-grade title to the bare grade', () => {
+    expect(extractBeerName('Konrad Brewery 12°·5%', 'Konrad Brewery')).toBe('Konrad Brewery 12°');
+    expect(extractBeerName('Bernard Brewery 11°·5%', 'Bernard Brewery')).toBe('Bernard Brewery 11°');
   });
 });
 

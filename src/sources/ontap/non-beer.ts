@@ -118,14 +118,20 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
 // orphan (#306).
 const PLACEHOLDER_PHRASES = [
   'chwilowy brak',
-  'wypite',
   'kran w serwisie',
   'czeka na lepsze czasy',
 ];
 
+// Single common words are risky as a substring match (e.g. "wypite" inside a longer beer
+// name) — unlike the multi-word phrases above, these must equal the WHOLE normalized value.
+const PLACEHOLDER_EXACT = new Set([
+  'wypite',
+]);
+
 function isPlaceholder(value: string): boolean {
   const v = norm(value);
-  return v !== '' && PLACEHOLDER_PHRASES.some((phrase) => v.includes(phrase));
+  if (v === '') return false;
+  return PLACEHOLDER_EXACT.has(v) || PLACEHOLDER_PHRASES.some((phrase) => v.includes(phrase));
 }
 
 export type TapExclusion = 'non-beer' | 'placeholder';

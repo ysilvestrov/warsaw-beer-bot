@@ -18,7 +18,9 @@ const TRAILING_SPEC = new RegExp(
 );
 // A °Plato grade: numeric, no "<"/">" bound, and its LAST unit character is a degree sign.
 // This accepts the mangled shop forms "12°°" and "11,8%°" and normalizes both to "12°"/"11,8°".
-const GRADE_ATOM = /^(\d+(?:[.,]\d+)?)\s*[°%]*°$/u;
+// Also accepts ";" as a decimal separator like SPEC_ATOM does ("8;5°"): it's unambiguously a
+// mistyped comma, so it's normalized to "," rather than propagated into the stored name.
+const GRADE_ATOM = /^(\d+(?:[.,;]\d+)?)\s*[°%]*°$/u;
 
 // Remove a trailing strength/spec block from a tap name, preserving a °Plato grade.
 // #306: the grade is part of the identity ("Konrad 10°" ≠ "Konrad 12°"), so it stays in
@@ -29,7 +31,8 @@ export function stripTrailingSpec(raw: string): string {
   const match = s.match(TRAILING_SPEC);
   if (!match) return s;
   const grade = match[1].trim().match(GRADE_ATOM);
-  const cleaned = `${s.slice(0, match.index)}${grade ? ` ${grade[1]}°` : ''}`.trim();
+  const gradeValue = grade ? grade[1].replace(';', ',') : '';
+  const cleaned = `${s.slice(0, match.index)}${grade ? ` ${gradeValue}°` : ''}`.trim();
   return cleaned || s;
 }
 
@@ -126,7 +129,10 @@ export function dedupeBreweryPrefix(name: string, breweryRef: string | null): st
   if (!brewery) return name;
   if (name.toLowerCase().startsWith(`${brewery.toLowerCase()} `)) {
     const remainder = name.slice(brewery.length + 1).trim();
-    if (remainder) return remainder;
+    // A remainder with no letters (e.g. a bare "12°" grade) isn't a duplicated-prefix
+    // beer name — it means the title was the whole brand followed by a grade, and a
+    // bare grade is not a beer name. Keep the title unchanged in that case.
+    if (remainder && /\p{L}/u.test(remainder)) return remainder;
   }
   return name;
 }

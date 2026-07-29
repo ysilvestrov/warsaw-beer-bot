@@ -99,4 +99,11 @@ describe('ontapTapExclusion', () => {
     expect(ontapTapExclusion({ style: 'Bezalkoholowe', brewery_ref: 'TRZECH KUMPLI Brewery', beer_ref: 'PAN IPANI BEZALKOHOLOWE 8°' })).toBeNull();
     expect(ontapTapExclusion({ style: 'Non-alcoholic lager', brewery_ref: 'Funky Fluid Brewery', beer_ref: 'Free' })).toBeNull();
   });
+
+  test('a single-word placeholder only matches the whole value', () => {
+    expect(ontapTapExclusion({ style: null, brewery_ref: 'Chwilowy Brak:( Brewery', beer_ref: 'Wypite' }))
+      .toBe('placeholder');
+    expect(ontapTapExclusion({ style: 'Sour Ale', brewery_ref: 'Piwne Podziemie Brewery', beer_ref: 'Wypite Marzenia' }))
+      .toBeNull();
+  });
 });
