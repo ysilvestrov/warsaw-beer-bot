@@ -4,8 +4,6 @@ export interface OntapNonBeerInput {
   beer_ref?: string | null;
 }
 
-const EXACT_BEER_SENTINELS = new Set(['kran w serwisie']);
-
 const STYLE_TOKENS = [
   'vino',
   'wino',
@@ -87,10 +85,6 @@ function looksLikeScheduleOrNav(brewery: string): boolean {
 }
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
-  if (EXACT_BEER_SENTINELS.has(norm(tap.beer_ref ?? null))) {
-    return true;
-  }
-
   const style = norm(tap.style);
   if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
     return false;
@@ -110,4 +104,31 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   }
 
   return false;
+}
+
+// Shop-UI placeholders scraped as a tap: "temporarily out", "drunk up", "tap out of service".
+// Substring match on BOTH fields — "Guinness Chwilowy brak:(" means the Guinness ran out, it
+// is not a beer with that name. Curated phrases only, never a regex heuristic: this is a finite
+// set of shop strings, and a false drop is invisible while a missed placeholder stays a visible
+// orphan (#306).
+const PLACEHOLDER_PHRASES = [
+  'chwilowy brak',
+  'wypite',
+  'kran w serwisie',
+  'czeka na lepsze czasy',
+];
+
+function isPlaceholder(value: string): boolean {
+  const v = norm(value);
+  return v !== '' && PLACEHOLDER_PHRASES.some((phrase) => v.includes(phrase));
+}
+
+export type TapExclusion = 'non-beer' | 'placeholder';
+
+// Why a tap must not become a snapshot row, or null when it is a normal beer.
+export function ontapTapExclusion(tap: OntapNonBeerInput): TapExclusion | null {
+  if (isPlaceholder(tap.beer_ref ?? '') || isPlaceholder(tap.brewery_ref ?? '')) {
+    return 'placeholder';
+  }
+  return isOntapNonBeerTap(tap) ? 'non-beer' : null;
 }
