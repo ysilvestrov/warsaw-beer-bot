@@ -104,3 +104,27 @@ export function sanitizeBrewery(breweryRef: string | null, beerRef: string): Tap
 
   return { brewery, name };
 }
+
+// Drop a leading brewery prefix from a tap title. Both the full label ("PINTA Brewery ")
+// and its core ("PINTA ") are tried, longest first. #306: when the title IS the brand
+// ("Guinness Brewery" / "Guinness"), the name is kept as-is — emptying it here is what
+// used to make single-brand taps disappear at ingest.
+export function dedupeBreweryPrefix(name: string, breweryRef: string | null): string {
+  const brewery = compact(breweryRef ?? '');
+  if (!brewery) return name;
+  const prefixes = [brewery, breweryCore(brewery)]
+    .filter((p) => p !== '')
+    .sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
+    if (name.toLowerCase().startsWith(`${prefix.toLowerCase()} `)) {
+      const remainder = name.slice(prefix.length + 1).trim();
+      if (remainder) return remainder;
+    }
+  }
+  return name;
+}
+
+// Turn an <h4> tap title into a beer name: "Harpagan Brewery Buzdygan 24°·8,5%" → "Buzdygan 24°".
+export function extractBeerName(h4Text: string, breweryRef: string | null): string {
+  return dedupeBreweryPrefix(stripTrailingSpec(compact(h4Text)), breweryRef);
+}

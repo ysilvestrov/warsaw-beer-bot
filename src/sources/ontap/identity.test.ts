@@ -1,4 +1,4 @@
-import { sanitizeBrewery, stripTrailingSpec } from './identity';
+import { extractBeerName, sanitizeBrewery, stripTrailingSpec } from './identity';
 
 describe('stripTrailingSpec', () => {
   test.each([
@@ -75,5 +75,37 @@ describe('sanitizeBrewery', () => {
   test('passes an ordinary brewery through untouched', () => {
     expect(sanitizeBrewery('Pinta Brewery', 'Atak Chmielu'))
       .toEqual({ brewery: 'Pinta Brewery', name: 'Atak Chmielu' });
+  });
+});
+
+describe('extractBeerName', () => {
+  test('strips the brewery prefix and the trailing spec', () => {
+    expect(extractBeerName('Harpagan Brewery Buzdygan Rozkoszy 24°·8,5%', 'Harpagan Brewery'))
+      .toBe('Buzdygan Rozkoszy 24°');
+    expect(extractBeerName('Stu Mostów WRCLW Salamander 6%', 'Stu Mostów'))
+      .toBe('WRCLW Salamander');
+  });
+
+  test('strips the brewery core when the title omits the kind word', () => {
+    expect(extractBeerName('PINTA Atak Chmielu 6%', 'PINTA Brewery')).toBe('Atak Chmielu');
+  });
+
+  test('is case-insensitive on the brewery prefix', () => {
+    expect(extractBeerName('PINTA Atak Chmielu 6%', 'Pinta')).toBe('Atak Chmielu');
+  });
+
+  test('keeps the name when it is exactly the brand (#306: never empty it)', () => {
+    expect(extractBeerName('Guinness Brewery Guinness', 'Guinness Brewery')).toBe('Guinness');
+    expect(extractBeerName('Pinta', 'Pinta')).toBe('Pinta');
+    expect(extractBeerName('Cydr Dzik', 'Cydr Dzik')).toBe('Cydr Dzik');
+  });
+
+  test('keeps an interior degree mark that is part of the name', () => {
+    expect(extractBeerName('Birra Menabrea Brewery La 150° Bionda 4,8%', 'Birra Menabrea Brewery'))
+      .toBe('La 150° Bionda');
+  });
+
+  test('returns the full text when there is no brewery and no spec', () => {
+    expect(extractBeerName('Aperitivo Spritz', null)).toBe('Aperitivo Spritz');
   });
 });
