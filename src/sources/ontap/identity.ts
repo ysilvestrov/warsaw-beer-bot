@@ -84,6 +84,9 @@ export function sanitizeBrewery(breweryRef: string | null, beerRef: string): Tap
     if (normalized(name) === 'polski cydr') return { brewery: 'Cydrownia', name: 'Dzik' };
     const ciderName = stripLeadingCider(name);
     if (!ciderName) return { brewery, name };
+    // "Cydr Dzik" beer_ref reduces to the bare product token "Dzik" — don't double it into
+    // "Dzik Dzik". A real flavour ("Cydr Jabłko" → "Jabłko") still gets the prefix.
+    if (/^dzik(?:\s|$)/iu.test(ciderName)) return { brewery: 'Cydrownia', name: ciderName };
     return { brewery: 'Cydrownia', name: `Dzik ${ciderName}` };
   }
 

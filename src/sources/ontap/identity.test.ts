@@ -60,6 +60,11 @@ describe('sanitizeBrewery', () => {
       .toEqual({ brewery: 'CYDR DZIK Brewery', name: 'Cydr' });
   });
 
+  test('does not double the Dzik product token when beer_ref is already "Cydr Dzik"', () => {
+    expect(sanitizeBrewery('Cydr Dzik', 'Cydr Dzik'))
+      .toEqual({ brewery: 'Cydrownia', name: 'Dzik' });
+  });
+
   test('maps Cydr Flirt Tradycynis rows to Kauno Alus product names', () => {
     expect(sanitizeBrewery('Cydr Flirt Tradycynis', 'Cydr malina i skórka pomarańczowa'))
       .toEqual({ brewery: 'Kauno Alus', name: 'Tradycynis Cydr Flirt malina i skórka pomarańczowa' });
