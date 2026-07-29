@@ -1,0 +1,267 @@
+import {
+  applyGate,
+  changedLineRanges,
+  locateQuote,
+  locateQuoteAll,
+  normalizeWs,
+} from './gate';
+import type { RawFinding } from './types';
+
+const base: RawFinding = {
+  file: 'src/a.ts',
+  start_line: 1,
+  end_line: 1,
+  quote: "return 'not_found';",
+  claim: 'wrong outcome',
+  why_it_breaks: 'merge is reported as a failure',
+  severity: 'P1',
+  confidence: 'medium',
+};
+
+const CONTENT = [
+  'export function f() {',
+  '  if (clash) {',
+  "    return 'not_found';",
+  '  }',
+  '  return ok;',
+  '}',
+].join('\n');
+
+const DIFF = [
+  'diff --git a/src/a.ts b/src/a.ts',
+  '--- a/src/a.ts',
+  '+++ b/src/a.ts',
+  '@@ -1,3 +2,4 @@',
+  ' context',
+  '+added',
+  'diff --git a/src/gone.ts b/src/gone.ts',
+  '--- a/src/gone.ts',
+  '+++ /dev/null',
+].join('\n');
+
+describe('normalizeWs', () => {
+  it('collapses runs of whitespace and trims', () => {
+    expect(normalizeWs('  a\n\t b  ')).toBe('a b');
+  });
+});
+
+describe('locateQuote', () => {
+  it('finds a single-line quote regardless of indentation', () => {
+    expect(locateQuote(CONTENT, "return 'not_found';")).toBe(3);
+  });
+
+  it('finds a quote spanning several lines', () => {
+    expect(locateQuote(CONTENT, "if (clash) {\n  return 'not_found';\n}")).toBe(2);
+  });
+
+  it('returns null when the quote is absent', () => {
+    expect(locateQuote(CONTENT, "return 'merged';")).toBeNull();
+  });
+
+  it('returns null for an empty quote', () => {
+    expect(locateQuote(CONTENT, '   ')).toBeNull();
+  });
+
+  // Known, deliberate limitation: a multi-line quote must begin at the start of
+  // a line. Anchoring Phase 2 at the window start is what prevents the
+  // substring false-positive that reports a line-3 quote as line 1. The cost is
+  // that a mid-line multi-line quote is not located, so applyGate drops the
+  // finding as `quote_not_found` — failing closed, which is the safe direction.
+  it('does not locate a multi-line quote that starts mid-line', () => {
+    expect(locateQuote(CONTENT, "(clash) {\n  return 'not_found';")).toBeNull();
+  });
+});
+
+describe('locateQuoteAll', () => {
+  const REPEATED = [
+    "  return 'not_found';", // 1 — decoy, before the hunk
+    'const x = 1;',
+    'function g() {',
+    "  return 'not_found';", // 4 — the real one
+    '}',
+  ].join('\n');
+
+  it('reports every occurrence of a repeated single-line quote', () => {
+    expect(locateQuoteAll(REPEATED, "return 'not_found';")).toEqual([
+      { start: 1, end: 1 },
+      { start: 4, end: 4 },
+    ]);
+  });
+
+  it('reports the true end line of a multi-line match', () => {
+    expect(locateQuoteAll(CONTENT, "if (clash) { return 'not_found'; }")).toEqual([
+      { start: 2, end: 4 },
+    ]);
+  });
+
+  it('returns an empty list when the quote is absent', () => {
+    expect(locateQuoteAll(CONTENT, "return 'merged';")).toEqual([]);
+  });
+});
+
+describe('changedLineRanges', () => {
+  it('parses post-image hunk ranges per file and skips deletions', () => {
+    const ranges = changedLineRanges(DIFF);
+    expect(ranges.get('src/a.ts')).toEqual([[2, 5]]);
+    expect(ranges.has('src/gone.ts')).toBe(false);
+  });
+
+  it('treats a hunk without an explicit count as one line', () => {
+    const ranges = changedLineRanges('+++ b/src/b.ts\n@@ -1 +7 @@');
+    expect(ranges.get('src/b.ts')).toEqual([[7, 7]]);
+  });
+});
+
+describe('applyGate', () => {
+  const gate = (finding: RawFinding, content: string | null = CONTENT) =>
+    applyGate({
+      findings: [finding],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 6]] as Array<[number, number]>]]),
+      fileContent: () => content,
+    });
+
+  it('keeps a finding whose quote exists inside the changed range', () => {
+    const result = gate(base);
+    expect(result.dropped).toEqual([]);
+    expect(result.kept).toHaveLength(1);
+  });
+
+  it('corrects the model-reported line number to the real match', () => {
+    const result = gate({ ...base, start_line: 99, end_line: 99 });
+    expect(result.kept[0].matchedLine).toBe(3);
+    expect(result.kept[0].matchedEndLine).toBe(3);
+  });
+
+  it('drops a hallucinated quote', () => {
+    const result = gate({ ...base, quote: "return 'merged';" });
+    expect(result.kept).toEqual([]);
+    expect(result.dropped[0].reason).toBe('quote_not_found');
+  });
+
+  it('drops a real quote that lies outside the changed lines', () => {
+    const result = applyGate({
+      findings: [base],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[5, 6]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.dropped[0].reason).toBe('outside_changed_lines');
+  });
+
+  it('drops a finding about a file outside the reviewed scope', () => {
+    const result = gate({ ...base, file: 'docs/guide.md' });
+    expect(result.dropped[0].reason).toBe('out_of_scope');
+  });
+
+  it('drops a finding whose file has no readable content', () => {
+    const result = gate(base, null);
+    expect(result.dropped[0].reason).toBe('out_of_scope');
+  });
+
+  it('keeps the first of two findings restating the same claim about the same code', () => {
+    const result = applyGate({
+      findings: [base, { ...base, claim: '  Wrong\n  outcome  ' }],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 6]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.kept).toHaveLength(1);
+    expect(result.kept[0].claim).toBe('wrong outcome');
+    expect(result.dropped[0].reason).toBe('duplicate');
+  });
+
+  it('keeps two distinct claims about the same quoted line', () => {
+    const result = applyGate({
+      findings: [base, { ...base, claim: 'also leaks the connection' }],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 6]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept.map((f) => f.claim)).toEqual([
+      'wrong outcome',
+      'also leaks the connection',
+    ]);
+  });
+
+  it('keeps a finding whose quote also occurs earlier outside the changed lines', () => {
+    const repeated = [
+      "  return 'not_found';", // 1 — untouched by this PR
+      'const x = 1;',
+      'function g() {',
+      "  return 'not_found';", // 4 — added by this PR
+      '}',
+    ].join('\n');
+    const result = applyGate({
+      findings: [base],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[3, 5]] as Array<[number, number]>]]),
+      fileContent: () => repeated,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(4);
+    expect(result.kept[0].matchedEndLine).toBe(4);
+  });
+
+  // Two copies of the same line, both inside the diff. The quote alone cannot
+  // say which one the model meant, so the reported line — untrusted as a
+  // primary locator — is used as a tiebreaker.
+  const TWICE_CHANGED = [
+    'function f() {',
+    "  return 'not_found';", // 2
+    '}',
+    'function g() {',
+    '  if (x) {',
+    "    return 'not_found';", // 6
+    '  }',
+    '}',
+  ].join('\n');
+
+  const gateTwice = (finding: RawFinding) =>
+    applyGate({
+      findings: [finding],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 8]] as Array<[number, number]>]]),
+      fileContent: () => TWICE_CHANGED,
+    });
+
+  it('picks the changed occurrence nearest the reported line', () => {
+    const result = gateTwice({ ...base, start_line: 6, end_line: 6 });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(6);
+  });
+
+  it('still picks the first occurrence when the reported line points there', () => {
+    const result = gateTwice({ ...base, start_line: 2, end_line: 2 });
+    expect(result.kept[0].matchedLine).toBe(2);
+  });
+
+  it('falls back to the first changed occurrence without a usable reported line', () => {
+    const result = gateTwice({ ...base, start_line: 0, end_line: 0 });
+    expect(result.kept[0].matchedLine).toBe(2);
+  });
+
+  it('ignores the reported line when it points outside the changed lines', () => {
+    const result = applyGate({
+      findings: [{ ...base, start_line: 1, end_line: 1 }],
+      reviewable: ['src/a.ts'],
+      // Only the second copy is part of this PR.
+      changed: new Map([['src/a.ts', [[5, 7]] as Array<[number, number]>]]),
+      fileContent: () => TWICE_CHANGED,
+    });
+    expect(result.kept[0].matchedLine).toBe(6);
+  });
+
+  it('spans the real lines when the model collapsed a multi-line construct', () => {
+    const result = applyGate({
+      findings: [{ ...base, quote: "if (clash) { return 'not_found'; }" }],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[4, 4]] as Array<[number, number]>]]),
+      fileContent: () => CONTENT,
+    });
+    expect(result.dropped).toEqual([]);
+    expect(result.kept[0].matchedLine).toBe(2);
+    expect(result.kept[0].matchedEndLine).toBe(4);
+  });
+});

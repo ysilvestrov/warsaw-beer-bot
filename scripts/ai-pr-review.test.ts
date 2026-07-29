@@ -34,7 +34,7 @@ describe('filterReviewableFiles', () => {
   });
 });
 
-import { readConfig } from './ai-pr-review';
+import { DEFAULT_FIND_MODEL, DEFAULT_VERIFY_MODEL, readConfig } from './ai-pr-review';
 
 describe('readConfig', () => {
   const full = {
@@ -55,43 +55,27 @@ describe('readConfig', () => {
     expect(cfg.repo).toBe('ysilvestrov/warsaw-beer-bot');
   });
 
+  it('defaults both pass models and lets env override them independently', () => {
+    const cfg = readConfig(full);
+    // Pinned to the exported constants so the replay tool, which imports the
+    // same two, cannot end up measuring a configuration CI does not run.
+    expect(cfg.findModel).toBe(DEFAULT_FIND_MODEL);
+    expect(cfg.verifyModel).toBe(DEFAULT_VERIFY_MODEL);
+
+    const overridden = readConfig({
+      ...full,
+      AI_REVIEW_MODEL: 'find-x',
+      AI_REVIEW_VERIFY_MODEL: 'verify-y',
+    } as NodeJS.ProcessEnv);
+    expect(overridden.findModel).toBe('find-x');
+    expect(overridden.verifyModel).toBe('verify-y');
+  });
+
   it('throws loudly when OPENAI_API_KEY is missing', () => {
     const { OPENAI_API_KEY, ...rest } = full;
     expect(() => readConfig(rest as NodeJS.ProcessEnv)).toThrow(/OPENAI_API_KEY/);
   });
 });
-
-import { truncateDiff, buildMessages } from './ai-pr-review';
-
-describe('truncateDiff', () => {
-  it('returns the diff unchanged when within budget', () => {
-    expect(truncateDiff('abc', 10)).toEqual({ text: 'abc', truncated: false });
-  });
-  it('cuts to the budget and flags truncation when over', () => {
-    expect(truncateDiff('abcdef', 3)).toEqual({ text: 'abc', truncated: true });
-  });
-});
-
-describe('buildMessages', () => {
-  it('puts instructions in system and PR context + diff in user, noting truncation', () => {
-    const msgs = buildMessages({
-      instructions: 'REVIEW RULES',
-      prTitle: 'My PR',
-      prBody: 'desc',
-      baseRef: 'main',
-      headRef: 'feat',
-      diff: 'diff-body',
-      truncated: true,
-    });
-    expect(msgs[0]).toEqual({ role: 'system', content: 'REVIEW RULES' });
-    expect(msgs[1].role).toBe('user');
-    expect(msgs[1].content).toContain('Title: My PR');
-    expect(msgs[1].content).toContain('diff-body');
-    expect(msgs[1].content).toContain('truncated');
-  });
-});
-
-import { callOpenAI } from './ai-pr-review';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -101,43 +85,6 @@ function jsonResponse(body: unknown, status = 200): Response {
     text: async () => JSON.stringify(body),
   } as unknown as Response;
 }
-
-const completion = { choices: [{ message: { content: 'LGTM' } }] };
-const deps = (fetchFn: typeof fetch) => ({
-  endpoint: 'https://api.openai.com/v1',
-  apiKey: 'sk',
-  fetchFn,
-  sleep: async () => {},
-});
-
-describe('callOpenAI', () => {
-  it('returns the completion content on success', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse(completion)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-
-  it('retries on 5xx then succeeds', async () => {
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValueOnce(jsonResponse({}, 500))
-      .mockResolvedValueOnce(jsonResponse(completion)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).resolves.toBe('LGTM');
-    expect(fetchFn).toHaveBeenCalledTimes(2);
-  });
-
-  it('fails loudly after exhausting retries on persistent 429', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse({}, 429)) as unknown as typeof fetch;
-    await expect(callOpenAI({ ...deps(fetchFn), attempts: 3 }, [])).rejects.toThrow(/429|attempts/);
-    expect(fetchFn).toHaveBeenCalledTimes(3);
-  });
-
-  it('does not retry a 401 auth error', async () => {
-    const fetchFn = vi.fn(async () => jsonResponse({ error: 'bad key' }, 401)) as unknown as typeof fetch;
-    await expect(callOpenAI(deps(fetchFn), [])).rejects.toThrow(/401/);
-    expect(fetchFn).toHaveBeenCalledTimes(1);
-  });
-});
 
 import { upsertReview, wrapBody, MARKER } from './ai-pr-review';
 
@@ -195,5 +142,36 @@ describe('upsertReview', () => {
     await expect(upsertReview(ghDeps(fetchFn), wrapBody('x'))).rejects.toThrow(
       /create review HTTP 403.*Forbidden/,
     );
+  });
+});
+
+import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { readReviewableFile } from './ai-pr-review';
+
+describe('readReviewableFile', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ai-review-symlink-'));
+
+  it('reads a regular file', () => {
+    const p = join(dir, 'real.ts');
+    writeFileSync(p, 'export const a = 1;\n');
+    expect(readReviewableFile(p)).toBe('export const a = 1;\n');
+  });
+
+  it('refuses to follow a symlink instead of shipping the target to the model', () => {
+    const secret = join(dir, 'secret.txt');
+    writeFileSync(secret, 'SUPER_SECRET_TOKEN\n');
+    const link = join(dir, 'leak.ts');
+    symlinkSync(secret, link);
+    expect(readReviewableFile(link)).toBeNull();
+  });
+
+  it('returns null for a directory and for a missing path', () => {
+    const sub = join(dir, 'subdir');
+    mkdirSync(sub);
+    expect(readReviewableFile(sub)).toBeNull();
+    expect(readReviewableFile(join(dir, 'nope.ts'))).toBeNull();
   });
 });

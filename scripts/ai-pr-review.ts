@@ -1,5 +1,11 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+
+import { buildReviewContext } from './ai-review/context';
+import { runFind } from './ai-review/find';
+import { applyGate, changedLineRanges } from './ai-review/gate';
+import { renderBody } from './ai-review/render';
+import { verifyAll } from './ai-review/verify';
 
 export const INCLUDE_PATTERNS = [
   'src/**/*.ts',
@@ -45,6 +51,8 @@ export function filterReviewableFiles(files: string[]): string[] {
 export interface Config {
   openaiApiKey: string;
   openaiEndpoint: string;
+  findModel: string;
+  verifyModel: string;
   githubToken: string;
   repo: string;
   prNumber: number;
@@ -53,6 +61,19 @@ export interface Config {
   prTitle: string;
   prBody: string;
 }
+
+/**
+ * Chosen by replay measurement on 2026-07-28, not by preference — see
+ * docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md.
+ * gpt-5.5 as finder published 0 fabrications across the precision set;
+ * gpt-5.4-mini published 5 of 10. The verifier is the same model because no
+ * asymmetric pairing measured better.
+ *
+ * Exported so the replay tool measures the configuration CI runs instead of a
+ * second copy of these strings that can drift away from it.
+ */
+export const DEFAULT_FIND_MODEL = 'gpt-5.5';
+export const DEFAULT_VERIFY_MODEL = 'gpt-5.5';
 
 export function readConfig(env: NodeJS.ProcessEnv): Config {
   const required = (name: string): string => {
@@ -63,6 +84,8 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
   return {
     openaiApiKey: required('OPENAI_API_KEY'),
     openaiEndpoint: env.OPENAI_API_ENDPOINT?.trim() || 'https://api.openai.com/v1',
+    findModel: env.AI_REVIEW_MODEL?.trim() || DEFAULT_FIND_MODEL,
+    verifyModel: env.AI_REVIEW_VERIFY_MODEL?.trim() || DEFAULT_VERIFY_MODEL,
     githubToken: required('GITHUB_TOKEN'),
     repo: required('REPO'),
     prNumber: Number(required('PR_NUMBER')),
@@ -71,99 +94,6 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
     prTitle: env.PR_TITLE ?? '',
     prBody: env.PR_BODY ?? '',
   };
-}
-
-export const DIFF_BUDGET = 100_000;
-
-export function truncateDiff(diff: string, budget: number): { text: string; truncated: boolean } {
-  if (diff.length <= budget) return { text: diff, truncated: false };
-  return { text: diff.slice(0, budget), truncated: true };
-}
-
-export interface ChatMessage {
-  role: 'system' | 'user';
-  content: string;
-}
-
-export function buildMessages(p: {
-  instructions: string;
-  prTitle: string;
-  prBody: string;
-  baseRef: string;
-  headRef: string;
-  diff: string;
-  truncated: boolean;
-}): ChatMessage[] {
-  const user = [
-    '# Pull request',
-    `Title: ${p.prTitle}`,
-    `Base: ${p.baseRef}`,
-    `Head: ${p.headRef}`,
-    '',
-    '## Body',
-    p.prBody || '(no description)',
-    '',
-    `## Diff${p.truncated ? ' (truncated — only the first part is shown)' : ''}`,
-    '```diff',
-    p.diff,
-    '```',
-  ].join('\n');
-  return [
-    { role: 'system', content: p.instructions },
-    { role: 'user', content: user },
-  ];
-}
-
-class NonRetryableError extends Error {}
-
-export interface OpenAiDeps {
-  endpoint: string;
-  apiKey: string;
-  fetchFn?: typeof fetch;
-  sleep?: (ms: number) => Promise<void>;
-  attempts?: number;
-}
-
-export async function callOpenAI(deps: OpenAiDeps, messages: ChatMessage[]): Promise<string> {
-  const fetchFn = deps.fetchFn ?? fetch;
-  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
-  const attempts = deps.attempts ?? 3;
-  const url = `${deps.endpoint.replace(/\/$/, '')}/chat/completions`;
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= attempts; attempt++) {
-    try {
-      const res = await fetchFn(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${deps.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: 'gpt-4o-mini',
-          temperature: 0,
-          top_p: 1,
-          max_tokens: 10000,
-          messages,
-        }),
-      });
-      if (res.status === 429 || res.status >= 500) {
-        throw new Error(`OpenAI HTTP ${res.status}`);
-      }
-      if (!res.ok) {
-        const text = await res.text();
-        throw new NonRetryableError(`OpenAI HTTP ${res.status}: ${text.slice(0, 300)}`);
-      }
-      const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-      const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new NonRetryableError('OpenAI returned an empty completion');
-      return content;
-    } catch (err) {
-      if (err instanceof NonRetryableError) throw err;
-      lastErr = err;
-      if (attempt < attempts) await sleep(2 ** attempt * 100);
-    }
-  }
-  throw new Error(`OpenAI request failed after ${attempts} attempts: ${String(lastErr)}`);
 }
 
 export const MARKER = '<!-- ai-pr-review -->';
@@ -249,7 +179,32 @@ function getDiff(baseRef: string, files: string[]): string {
   });
 }
 
-const INSTRUCTIONS_PATH = '.github/ai-review/AGENTS.md';
+/**
+ * Reads a changed file for review context, or null if it cannot be reviewed.
+ *
+ * Uses `lstat` and refuses anything that is not a regular file, so a symlink is
+ * reported as unreadable instead of being followed. `filterReviewableFiles`
+ * matches on pathname only, so without this a PR could add an in-scope `.ts`
+ * symlink pointing at `/etc/passwd` or `.git/config` and have the target's
+ * contents shipped to the model as "the changed file". We want the blob the PR
+ * actually adds, never what it points at.
+ */
+export function readReviewableFile(path: string): string | null {
+  try {
+    if (!lstatSync(path).isFile()) return null;
+    return readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+const FIND_INSTRUCTIONS_PATH = '.github/ai-review/AGENTS.md';
+const VERIFY_INSTRUCTIONS_PATH = '.github/ai-review/VERIFY.md';
+
+function readInstructions(path: string): string {
+  if (!existsSync(path)) throw new Error(`${path} is missing`);
+  return readFileSync(path, 'utf8');
+}
 
 async function main(): Promise<void> {
   const cfg = readConfig(process.env);
@@ -260,34 +215,55 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!existsSync(INSTRUCTIONS_PATH)) {
-    throw new Error(`${INSTRUCTIONS_PATH} is missing`);
+  const findInstructions = readInstructions(FIND_INSTRUCTIONS_PATH);
+  const verifyInstructions = readInstructions(VERIFY_INSTRUCTIONS_PATH);
+
+  const diff = getDiff(cfg.baseRef, reviewable);
+  const readFile = readReviewableFile;
+
+  const { text: context, diffOnly } = buildReviewContext({ diff, reviewable, readFile });
+  if (diffOnly.length > 0) {
+    console.log(`::notice::Context budget: ${diffOnly.length} file(s) sent as diff only.`);
   }
-  const instructions = readFileSync(INSTRUCTIONS_PATH, 'utf8');
 
-  const { text: diff, truncated } = truncateDiff(getDiff(cfg.baseRef, reviewable), DIFF_BUDGET);
-
-  const messages = buildMessages({
-    instructions,
-    prTitle: cfg.prTitle,
-    prBody: cfg.prBody,
-    baseRef: cfg.baseRef,
-    headRef: cfg.headRef,
-    diff,
-    truncated,
-  });
-
-  const summary = await callOpenAI(
-    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey },
-    messages,
+  const raised = await runFind(
+    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.findModel },
+    { instructions: findInstructions, context, prTitle: cfg.prTitle, prBody: cfg.prBody },
   );
+
+  const { kept, dropped } = applyGate({
+    findings: raised,
+    reviewable,
+    changed: changedLineRanges(diff),
+    fileContent: readFile,
+  });
+  for (const d of dropped) {
+    console.log(`::notice::gate dropped [${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
+  }
+
+  const { confirmed, rejected } = await verifyAll(
+    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.verifyModel },
+    { instructions: verifyInstructions, findings: kept, fileContent: readFile },
+  );
+  for (const r of rejected) {
+    console.log(`::notice::verify withheld [${r.verdict}] ${r.finding.file}: ${r.evidence}`);
+  }
+
+  const body = renderBody({
+    confirmed,
+    counts: { raised: raised.length, gated: kept.length, verified: confirmed.length },
+  });
 
   const how = await upsertReview(
     { repo: cfg.repo, prNumber: cfg.prNumber, token: cfg.githubToken },
-    wrapBody(summary),
+    wrapBody(body),
   );
 
-  console.log(`AI review ${how} on PR #${cfg.prNumber} (${reviewable.length} file(s) in scope).`);
+  console.log(
+    `AI review ${how} on PR #${cfg.prNumber}: ` +
+      `${raised.length} raised → ${kept.length} gated → ${confirmed.length} verified ` +
+      `(${reviewable.length} file(s) in scope).`,
+  );
 }
 
 if (require.main === module) {
