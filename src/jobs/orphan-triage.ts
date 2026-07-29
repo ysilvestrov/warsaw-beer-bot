@@ -1,6 +1,6 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
-import { getJobState, setJobState } from '../storage/job_state';
+import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
   listUntriagedFailures, setEnrichFailureReview, type UntriagedFailure,
 } from '../storage/enrich_failures';
@@ -21,8 +21,12 @@ export const TRIAGE_LABEL = 'orphan-triage';
 export const TRIAGE_ATTEMPTS_KEY = 'orphan_triage_attempts';
 // Transient upstream failures (5xx/429/network) do not consume the Warsaw day —
 // the next 15-min tick inside [06:00,09:00) retries. Bounded at 3 because each
-// attempt costs a full probe budget (up to 120 Untappd searches) plus a
-// 50-orphan LLM call; the window itself would allow ~12 (#316).
+// attempt can cost up to 2 x TRIAGE_PROBE_LIMIT Untappd searches (probes and
+// verification each keep their own counter against the same limit) plus up to
+// 2 LLM calls (the empty-verdict retry lives inside this same attempt); the
+// window itself would allow ~12 (#316). This bound only covers failures that
+// reach the catch below — a crash or SIGTERM mid-run (e.g. a deploy) leaves
+// the day open for the remaining ticks, same as before #316.
 export const TRIAGE_MAX_ATTEMPTS = 3;
 export const TRIAGE_BATCH_LIMIT = 50;
 // Shared budget for evidence probes and cause verification, in Untappd searches
@@ -131,6 +135,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     };
     const finish = (outcome: TriageOutcome): void => {
       setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
+      // The day is closed — any retry budget spent getting here is moot. Clearing
+      // it means an operator who re-opens the day (deleting TRIAGE_LAST_RUN_KEY)
+      // does not silently inherit a reduced attempt budget from today's run.
+      deleteJobState(db, TRIAGE_ATTEMPTS_KEY);
       publish(outcome);
       log.info({ outcome, dateKey }, 'orphan-triage finished');
     };
@@ -282,6 +290,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         issue.verdicts.forEach((v) => review(v, number));
         outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
       } catch (e) {
+        // Deliberately not retried by the #316 path even if isTransient(e): by
+        // this point the run may already have GitHub side effects (an earlier
+        // issue created, a comment posted), and re-running it could duplicate
+        // them. These orphans simply stay untriaged and re-enter tomorrow's batch.
         log.error({ err: e, key: issue.key }, 'orphan-triage: createIssue failed');
         outcome.skipped += issue.verdicts.length;
       }

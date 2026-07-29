@@ -1,13 +1,16 @@
 import { expect, test } from 'vitest';
-import { HttpError, isTransient } from './transient-error';
+import {
+  APIConnectionError, APIConnectionTimeoutError, InternalServerError, RateLimitError, BadRequestError,
+} from '@anthropic-ai/sdk';
+import { HttpStatusError, isTransient } from './transient-error';
 
-test('HttpError carries the status; retriability comes from the status, not the class', () => {
-  const e = new HttpError('GitHub GET …: 502 bad gateway', 502);
+test('HttpStatusError carries the status; retriability comes from the status, not the class', () => {
+  const e = new HttpStatusError('GitHub GET …: 502 bad gateway', 502);
   expect(e).toBeInstanceOf(Error);
   expect(e.status).toBe(502);
   expect(e.message).toContain('502');
   expect(isTransient(e)).toBe(true);
-  expect(isTransient(new HttpError('GitHub GET …: 403 forbidden', 403))).toBe(false);
+  expect(isTransient(new HttpStatusError('GitHub GET …: 403 forbidden', 403))).toBe(false);
 });
 
 test('duck-typed status: 5xx / 429 / 408 are transient, other 4xx are not', () => {
@@ -20,6 +23,19 @@ test('duck-typed status: 5xx / 429 / 408 are transient, other 4xx are not', () =
   expect(isTransient({ status: 401 })).toBe(false);
   expect(isTransient({ status: 404 })).toBe(false);
   expect(isTransient({ status: '500' })).toBe(false);
+});
+
+test('real Anthropic SDK errors: 5xx/429/connection/timeout transient, 4xx not', () => {
+  // The SDK leaves `name` as 'Error' on every error it throws (verified against
+  // the installed @anthropic-ai/sdk) — only `constructor.name` identifies the
+  // class. This is the real #316 bug: connection/timeout errors were previously
+  // classified permanent.
+  const headers = new Headers();
+  expect(isTransient(new InternalServerError(500, { type: 'error' }, 'Internal server error', headers))).toBe(true);
+  expect(isTransient(new RateLimitError(429, {}, 'slow down', headers))).toBe(true);
+  expect(isTransient(new APIConnectionError({ message: 'Connection error.' }))).toBe(true);
+  expect(isTransient(new APIConnectionTimeoutError({ message: 'Request timed out.' }))).toBe(true);
+  expect(isTransient(new BadRequestError(400, {}, 'bad request', headers))).toBe(false);
 });
 
 test('network-level failures are transient', () => {
