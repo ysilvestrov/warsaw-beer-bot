@@ -45,16 +45,23 @@ describe('buildReviewContext', () => {
   });
 
   it('degrades to diff-only for files that do not fit the budget', () => {
+    // Bodies large enough that what fits is decided by their size: the budget
+    // now also has to cover the headings, the fences and the ~250-character
+    // diff-only notice, which would otherwise dominate at this scale.
+    const padded = (p: string) =>
+      p === 'src/big.ts' ? `BIG BODY\n${'x'.repeat(400)}` : `SMALL BODY\n${'y'.repeat(400)}`;
+    const budget = 1_000;
     const { text, diffOnly } = buildReviewContext({
       diff: DIFF,
       reviewable: ['src/big.ts', 'src/small.ts'],
-      readFile,
-      budget: DIFF.length + 60,
+      readFile: padded,
+      budget,
     });
     expect(text).toContain('BIG BODY');
     expect(text).not.toContain('SMALL BODY');
     expect(diffOnly).toEqual(['src/small.ts']);
     expect(text).toContain('you see only the diff');
+    expect(text.length).toBeLessThanOrEqual(budget);
   });
 
   it('truncates a diff that does not fit the budget and says so', () => {
@@ -95,6 +102,30 @@ describe('buildReviewContext', () => {
     });
     expect(text).toContain('BIG BODY');
     expect(diffOnly).toEqual([]);
+  });
+
+  it('keeps the whole assembled message inside the budget', () => {
+    const huge = [
+      '--- a/src/big.ts',
+      '+++ b/src/big.ts',
+      '@@ -1,1 +1,400 @@',
+      ...Array.from({ length: 400 }, (_, i) => `+line ${i}`),
+    ].join('\n');
+    const fat = (p: string) => `## ${p}\n${'body '.repeat(200)}`;
+    // Budgets spanning "every body degrades to diff-only" up to "everything
+    // fits": the assembled message is what gets sent, so all of them hold.
+    // The floor is the two notices themselves, a few hundred characters —
+    // they are never dropped, because a model told nothing about what is
+    // missing is worse than a slightly oversized prompt.
+    for (const budget of [600, 800, 1_500, 3_000, 20_000]) {
+      const { text } = buildReviewContext({
+        diff: huge,
+        reviewable: ['src/big.ts', 'src/small.ts', 'src/third.ts'],
+        readFile: fat,
+        budget,
+      });
+      expect(text.length).toBeLessThanOrEqual(budget);
+    }
   });
 
   it('lists a deleted file as diff-only instead of throwing', () => {
