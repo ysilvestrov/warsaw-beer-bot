@@ -4,8 +4,9 @@ import type { Http } from '../sources/http';
 import type { Geocoder } from '../sources/geocoder';
 import { parseOntapCityIndex, type IndexPub } from '../sources/ontap/index';
 import { CITIES, type City } from '../domain/cities';
-import { isOntapNonBeerTap } from '../sources/ontap/non-beer';
-import { isOntapEmptyTapRef, normalizeOntapTapIdentity, parsePubPage } from '../sources/ontap/pub';
+import { ontapTapExclusion } from '../sources/ontap/non-beer';
+import { isOntapEmptyTapRef, parsePubPage } from '../sources/ontap/pub';
+import { resolveTapIdentity } from '../sources/ontap/identity';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch, getMatch } from '../storage/match_links';
@@ -73,11 +74,16 @@ export async function refreshOntap(deps: Deps): Promise<void> {
       try {
         const html = await http.get(`https://${ip.slug}.ontap.pl/`);
         const { pub, taps: parsedTaps } = parsePubPage(html);
-        const taps = parsedTaps.filter((t) => !isOntapNonBeerTap(t));
-        const droppedNonBeer = parsedTaps.length - taps.length;
-        if (droppedNonBeer > 0) {
-          log.info({ slug: ip.slug, droppedNonBeer }, 'ontap non-beer taps filtered');
-        }
+        // #306: a discarded tap is invisible downstream (no snapshot row, no catalog row,
+        // no orphan, nothing to triage), so every discard is counted by cause and logged
+        // once per pub.
+        const discarded = { 'non-beer': 0, placeholder: 0, 'empty-name': 0 };
+        const taps = parsedTaps.filter((t) => {
+          const exclusion = ontapTapExclusion(t);
+          if (!exclusion) return true;
+          discarded[exclusion]++;
+          return false;
+        });
 
         let lat = pub.lat;
         let lon = pub.lon;
@@ -104,8 +110,11 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           // and the pinned target beer stays in the catalog for other taps to match.
           const pinned = getMatch(db, t.beer_ref);
           if (pinned?.reviewed_by_user) continue;
-          const identity = normalizeOntapTapIdentity(t.brewery_ref, t.beer_ref);
-          if (!identity) continue;
+          const identity = resolveTapIdentity(t.brewery_ref, t.beer_ref);
+          if (identity.kind === 'drop') {
+            discarded[identity.reason]++;
+            continue;
+          }
           const { brewery, name } = identity;
           const m = matchPrepared({ brewery, name, abv: t.abv }, prepared);
           let beerId: number;
@@ -162,6 +171,9 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             const row = getBeer(db, beerId);
             if (row) prepared.add(prepareBeer({ id: row.id, brewery: row.brewery, name: row.name, abv: row.abv ?? null }));
           }
+        }
+        if (discarded['non-beer'] + discarded.placeholder + discarded['empty-name'] > 0) {
+          log.info({ slug: ip.slug, ...discarded }, 'ontap taps discarded');
         }
         ok++;
       } catch (e) {

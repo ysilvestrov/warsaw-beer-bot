@@ -44,7 +44,10 @@ describe('cleanupPollutedOntap', () => {
     expect(catalogVersion()).toBeGreaterThan(v);
 
     const row = getRow(db, id)!;
-    expect(row.name).toBe('Oxymel');
+    // #306: the trailing °Plato grade is part of the identity and stays in the stored
+    // name; only the ABV tail and the appended style are stripped. `normalized_name`
+    // drops the grade on its own, so matching is unaffected.
+    expect(row.name).toBe('Oxymel 14°');
     expect(row.normalized_name).toBe('oxymel');
     expect(row.brewery).toBe('Wagabunda Brewery');
     expect(row.normalized_brewery).toBe('wagabunda');
@@ -124,7 +127,7 @@ describe('cleanupPollutedOntap', () => {
     expect(getRow(db, untappdId)?.name).toBe('Oxymel');
   });
 
-  test('two polluted rows resolving to the same clean name, no canonical → both rewrite (become duplicates)', async () => {
+  test('two polluted rows resolving to the same normalized name, no canonical → both rewrite (become duplicates)', async () => {
     const db = fresh();
     const aId = upsertBeer(db, {
       untappd_id: null,
@@ -150,9 +153,11 @@ describe('cleanupPollutedOntap', () => {
     const result = await cleanupPollutedOntap(db, silentLog);
     expect(result).toEqual({ rewritten: 2, merged: 0 });
 
-    expect(getRow(db, aId)?.name).toBe('Oxymel');
+    // #306: the two rows keep their distinct °Plato grades ("Konrad 10°" ≠ "Konrad 12°"),
+    // but both normalize to the same key, so they are still duplicates for the matcher.
+    expect(getRow(db, aId)?.name).toBe('Oxymel 14°');
     expect(getRow(db, aId)?.normalized_name).toBe('oxymel');
-    expect(getRow(db, bId)?.name).toBe('Oxymel');
+    expect(getRow(db, bId)?.name).toBe('Oxymel 12°');
     expect(getRow(db, bId)?.normalized_name).toBe('oxymel');
   });
 

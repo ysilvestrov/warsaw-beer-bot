@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { parsePubPage, extractBeerName, isOntapEmptyTapRef, normalizeOntapTapIdentity } from './pub';
+import { parsePubPage, isOntapEmptyTapRef } from './pub';
 
 const html = fs.readFileSync(
   path.join(__dirname, '../../../tests/fixtures/ontap/beer-bones.html'),
@@ -23,11 +23,16 @@ test('parses taps with beer_ref and abv', () => {
   for (const t of taps) expect(t.beer_ref.length).toBeGreaterThan(0);
 });
 
-test('beer_ref is clean — no ABV / strength tokens', () => {
+test('beer_ref is clean — no ABV tail, no spec join (the °Plato grade stays)', () => {
   const { taps } = parsePubPage(html);
   for (const t of taps) {
-    expect(t.beer_ref).not.toMatch(/\d+\s*[°%]/);
+    // #306: a trailing "12°" is the °Plato grade and part of the identity
+    // ("Konrad 10°" ≠ "Konrad 12°"), so it is deliberately preserved. What must never
+    // survive is a trailing ABV "%" or the mid-dot that joins spec atoms.
+    expect(t.beer_ref).not.toMatch(/%\s*$/u);
+    expect(t.beer_ref).not.toMatch(/[·•∙]/u);
   }
+  expect(taps.some((t) => /\d\s*°\s*$/u.test(t.beer_ref))).toBe(true);
 });
 
 test('style is populated when subtitle exists', () => {
@@ -64,86 +69,5 @@ describe('tap_number parsing', () => {
   test('non-numeric labels still yield null tap_number', () => {
     const { taps } = parsePubPage(panel('Pompa', 'Some Brewery Some Beer 5%'));
     expect(taps[0].tap_number).toBeNull();
-  });
-});
-
-describe('extractBeerName', () => {
-  test('truncates at first ABV-like token', () => {
-    expect(extractBeerName('Buzdygan Rozkoszy 24°·8,5%', null)).toBe('Buzdygan Rozkoszy');
-    expect(extractBeerName('Pan IPAni 16,5°·6%', null)).toBe('Pan IPAni');
-    expect(extractBeerName('Salamander 6%', null)).toBe('Salamander');
-  });
-
-  test('keeps anniversary degree marks that are part of the beer name', () => {
-    expect(extractBeerName('Birra Menabrea Brewery La 150° Bionda 4,8%', 'Birra Menabrea Brewery'))
-      .toBe('La 150° Bionda');
-  });
-
-  test('strips brewery prefix when present', () => {
-    expect(extractBeerName('Harpagan Brewery Buzdygan Rozkoszy 24°·8,5%', 'Harpagan Brewery'))
-      .toBe('Buzdygan Rozkoszy');
-    expect(extractBeerName('Stu Mostów WRCLW Salamander 6%', 'Stu Mostów'))
-      .toBe('WRCLW Salamander');
-  });
-
-  test('case-insensitive brewery match', () => {
-    expect(extractBeerName('PINTA Atak Chmielu 6%', 'Pinta'))
-      .toBe('Atak Chmielu');
-  });
-
-  test('returns full text when no ABV pattern is found', () => {
-    expect(extractBeerName('Aperitivo Spritz', null)).toBe('Aperitivo Spritz');
-  });
-
-  test('returns empty string when only brewery is present', () => {
-    expect(extractBeerName('Pinta', 'Pinta')).toBe('');
-  });
-});
-
-describe('normalizeOntapTapIdentity', () => {
-  test('drops blank tap names before catalog writes', () => {
-    expect(normalizeOntapTapIdentity('Some Brewery', '')).toBeNull();
-    expect(normalizeOntapTapIdentity('Some Brewery', '   ')).toBeNull();
-  });
-
-  test('strips cider category and duplicate brewery prefix from Chyliczki names', () => {
-    expect(normalizeOntapTapIdentity('Chyliczki', 'Cydr Chyliczki - Japoński Sad'))
-      .toEqual({ brewery: 'Chyliczki', name: 'Japoński Sad' });
-  });
-
-  test('maps Cydr Dzik generic rows to the real cidery and product name', () => {
-    expect(normalizeOntapTapIdentity('CYDR DZIK', 'polski cydr'))
-      .toEqual({ brewery: 'Cydrownia', name: 'Dzik' });
-  });
-
-  test('maps Cydr Dzik fruit rows to the real cidery and product name', () => {
-    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Cydr Jabłko'))
-      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
-    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Jabłko'))
-      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Jabłko' });
-    expect(normalizeOntapTapIdentity('CYDR DZIK', 'Cydr Gruszka'))
-      .toEqual({ brewery: 'Cydrownia', name: 'Dzik Gruszka' });
-  });
-
-  test('does not invent a Cydr Dzik product name from a bare cider label', () => {
-    expect(normalizeOntapTapIdentity('CYDR DZIK Brewery', 'Cydr'))
-      .toEqual({ brewery: 'CYDR DZIK Brewery', name: 'Cydr' });
-  });
-
-  test('maps Cydr Flirt Tradycynis rows to Kauno Alus product names', () => {
-    expect(normalizeOntapTapIdentity('Cydr Flirt Tradycynis', 'Cydr malina i skórka pomarańczowa'))
-      .toEqual({ brewery: 'Kauno Alus', name: 'Tradycynis Cydr Flirt malina i skórka pomarańczowa' });
-  });
-
-  test('drops brewery-only rows and known location/category brewery pollution', () => {
-    expect(normalizeOntapTapIdentity('Przetwórnia Chmielu Brewery', 'Przetwórnia Chmielu')).toBeNull();
-    expect(normalizeOntapTapIdentity('Frankies Brewery', 'Frankies')).toBeNull();
-    expect(normalizeOntapTapIdentity('W Brzesku Brewery', 'Žatecký Nealko')).toBeNull();
-    expect(normalizeOntapTapIdentity('vaisiu sultys', 'Cydr Gruszkowy')).toBeNull();
-  });
-
-  test('keeps unknown brewery/name shapes unchanged', () => {
-    expect(normalizeOntapTapIdentity('Unknown Brewery', 'Some New Beer'))
-      .toEqual({ brewery: 'Unknown Brewery', name: 'Some New Beer' });
   });
 });

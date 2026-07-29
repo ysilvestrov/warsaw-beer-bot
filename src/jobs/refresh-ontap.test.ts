@@ -205,13 +205,13 @@ describe('refreshOntap non-beer filtering', () => {
       .toEqual({ n: 0 });
   });
 
-  test('drops ontap parser-polluted brewery-only and location rows before catalog writes', async () => {
+  test('#306: keeps brand-name and polluted-brewery rows, drops only placeholders', async () => {
     const db = openDb(':memory:');
     migrate(db);
 
     const indexHtml = `
       <div onclick="location.assign('https://polluted.ontap.pl/')">
-        <div class="panel-body">Polluted Pub 4 taps</div>
+        <div class="panel-body">Polluted Pub 6 taps</div>
       </div>
     `;
     const pubHtml = `
@@ -221,6 +221,8 @@ describe('refreshOntap non-beer filtering', () => {
         ${panel(2, 'Frankies Brewery', 'Frankies Brewery 4,5%', 'Svetlý Ležák')}
         ${panel(3, 'W Brzesku Brewery', 'Žatecký Nealko 0%', 'Pilzner bezalkoholowy')}
         ${panel(4, 'PINTA Brewery', 'PINTA Atak Chmielu 6%', 'West Coast IPA')}
+        ${panel(5, '- Brewery', 'Guinness Chwilowy brak:(', 'Stout')}
+        ${panel(6, 'Konrad Brewery', 'Konrad 12°·5,2%', 'Světlý ležák')}
       </body></html>
     `;
     const http: Http = {
@@ -238,8 +240,68 @@ describe('refreshOntap non-beer filtering', () => {
 
     const beers = db.prepare('SELECT brewery, name FROM beers ORDER BY id').all();
     expect(beers).toEqual([
-      expect.objectContaining({ brewery: 'PINTA Brewery', name: 'PINTA Atak Chmielu' }),
+      // brewery-only row: kept, because "name == brand" is not evidence of garbage.
+      // Only the FULL brewery label is stripped as a prefix and here the title IS that
+      // label, so the name is preserved verbatim rather than emptied (#306).
+      { brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwórnia Chmielu Brewery' },
+      { brewery: 'Frankies Brewery', name: 'Frankies Brewery' },
+      // polluted brewery cleared, the beer survives
+      { brewery: '', name: 'Žatecký Nealko' },
+      // the brewery CORE ("PINTA") is deliberately NOT stripped — doing so would rename
+      // ~40 live catalog identities and orphan their existing rows.
+      { brewery: 'PINTA Brewery', name: 'PINTA Atak Chmielu' },
+      // the °Plato grade stays in the name, only the ABV tail is stripped
+      { brewery: 'Konrad Brewery', name: 'Konrad 12°' },
     ]);
+    // the placeholder tap is excluded before the snapshot is written
+    const taps = tapsForSnapshot(db, latestSnapshot(db, listPubs(db)[0].id)!.id);
+    expect(taps.map((t) => t.beer_ref)).not.toContain('Guinness Chwilowy brak:(');
+  });
+
+  test('#306: counts discarded taps by cause', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const records: Array<Record<string, unknown>> = [];
+    const log = pino(
+      { level: 'info' },
+      { write: (s: string) => { records.push(JSON.parse(s)); } },
+    );
+
+    const indexHtml = `
+      <div onclick="location.assign('https://counted.ontap.pl/')">
+        <div class="panel-body">Counted Pub 3 taps</div>
+      </div>
+    `;
+    const pubHtml = `
+      <html><head><meta property="og:title" content="Counted Pub / ontap.pl"></head>
+      <body>
+        ${panel(1, 'PINTA Brewery', 'PINTA Atak Chmielu 6%', 'West Coast IPA')}
+        ${panel(2, '- Brewery', 'Chwilowy Brak:(', 'Stout')}
+        ${panel(3, 'Cantine Vitevis', 'Cantine Vitevis Prosecco', 'PROSECCO')}
+      </body></html>
+    `;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return indexHtml;
+        if (url === 'https://counted.ontap.pl/') return pubHtml;
+        throw new Error(`Unexpected URL ${url}`);
+      },
+    };
+
+    await refreshOntap({
+      db, log, http, search: { search: async () => [] }, geocoder: async () => null,
+      lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+    });
+
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        msg: 'ontap taps discarded',
+        slug: 'counted',
+        placeholder: 1,
+        'non-beer': 1,
+        'empty-name': 0,
+      }),
+    );
   });
 
   test('writes normalized cider producer identities instead of ontap product-line breweries', async () => {

@@ -1,4 +1,5 @@
 import { isOntapNonBeerTap } from './non-beer';
+import { ontapTapExclusion } from './non-beer';
 
 describe('isOntapNonBeerTap', () => {
   test.each([
@@ -23,7 +24,6 @@ describe('isOntapNonBeerTap', () => {
     ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
-    ['service placeholder beer name', { style: null, brewery_ref: 'Kran czeka na lepsze czasy Brewery', beer_ref: '  KRAN   W SERWISIE  ' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
   });
@@ -60,5 +60,50 @@ describe('isOntapNonBeerTap', () => {
       beer_ref: 'Vino Merlot Spritz Prosecco',
     };
     expect(isOntapNonBeerTap(tapWithName)).toBe(false);
+  });
+});
+
+describe('ontapTapExclusion', () => {
+  test.each([
+    ['out-of-stock beer_ref', { style: null, brewery_ref: '- Brewery', beer_ref: 'Guinness Chwilowy brak:(' }],
+    ['bare out-of-stock', { style: null, brewery_ref: '- Brewery', beer_ref: 'Chwilowy Brak:(' }],
+    ['drunk-up placeholder', { style: null, brewery_ref: 'Chwilowy Brak:( Brewery', beer_ref: 'Wypite' }],
+    ['tap out of service', { style: null, brewery_ref: 'Kran czeka na lepsze czasy Brewery', beer_ref: 'KRAN W SERWISIE' }],
+  ])('classifies %s as a placeholder', (_label, tap) => {
+    expect(ontapTapExclusion(tap)).toBe('placeholder');
+  });
+
+  test('classifies wine as non-beer', () => {
+    expect(ontapTapExclusion({ style: 'PROSECCO', brewery_ref: 'Cantine Vitevis' })).toBe('non-beer');
+  });
+
+  test('returns null for a real beer', () => {
+    expect(ontapTapExclusion({ style: 'IPA', brewery_ref: 'Pinta Brewery', beer_ref: 'Atak Chmielu' }))
+      .toBeNull();
+  });
+
+  test('keeps a real beer whose name merely contains a brand called Wypite-like word', () => {
+    expect(ontapTapExclusion({ style: 'Lager', brewery_ref: 'Browar Kormoran', beer_ref: 'Kormoran Miodne' }))
+      .toBeNull();
+  });
+
+  test.each([
+    ['kofola with suffix', { style: 'Soft Drink', brewery_ref: 'Kofola Brewery', beer_ref: 'Kofola' }],
+    ['kofola long brewery', { style: 'napój bezalkoholowy', brewery_ref: 'Kofola Československo Brewery', beer_ref: 'Kofola' }],
+    ['mojito sentinel with suffix', { style: 'Bezalkoholowe', brewery_ref: 'Mojito Brewery', beer_ref: 'Mojito' }],
+  ])('classifies %s as non-beer', (_label, tap) => {
+    expect(ontapTapExclusion(tap)).toBe('non-beer');
+  });
+
+  test('non-alcoholic BEER is not excluded', () => {
+    expect(ontapTapExclusion({ style: 'Bezalkoholowe', brewery_ref: 'TRZECH KUMPLI Brewery', beer_ref: 'PAN IPANI BEZALKOHOLOWE 8°' })).toBeNull();
+    expect(ontapTapExclusion({ style: 'Non-alcoholic lager', brewery_ref: 'Funky Fluid Brewery', beer_ref: 'Free' })).toBeNull();
+  });
+
+  test('a single-word placeholder only matches the whole value', () => {
+    expect(ontapTapExclusion({ style: null, brewery_ref: 'Chwilowy Brak:( Brewery', beer_ref: 'Wypite' }))
+      .toBe('placeholder');
+    expect(ontapTapExclusion({ style: 'Sour Ale', brewery_ref: 'Piwne Podziemie Brewery', beer_ref: 'Wypite Marzenia' }))
+      .toBeNull();
   });
 });

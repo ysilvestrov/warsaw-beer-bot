@@ -1,10 +1,10 @@
+import { breweryCore } from './identity';
+
 export interface OntapNonBeerInput {
   style: string | null;
   brewery_ref: string | null;
   beer_ref?: string | null;
 }
-
-const EXACT_BEER_SENTINELS = new Set(['kran w serwisie']);
 
 const STYLE_TOKENS = [
   'vino',
@@ -24,6 +24,7 @@ const STYLE_TOKENS = [
   'wytrawne',
   'półwytrawne',
   'słodkie',
+  'soft drink',
 ];
 
 const ELIGIBLE_STYLE_TOKENS = [
@@ -66,6 +67,7 @@ const BREWERY_TOKENS = [
   'vini',
   'dolium vini',
   'stacja winiarska',
+  'kofola',
 ];
 
 const EXACT_BREWERY_SENTINELS = new Set([
@@ -87,10 +89,6 @@ function looksLikeScheduleOrNav(brewery: string): boolean {
 }
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
-  if (EXACT_BEER_SENTINELS.has(norm(tap.beer_ref ?? null))) {
-    return true;
-  }
-
   const style = norm(tap.style);
   if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
     return false;
@@ -103,6 +101,7 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   if (
     brewery &&
     (EXACT_BREWERY_SENTINELS.has(brewery) ||
+      EXACT_BREWERY_SENTINELS.has(norm(breweryCore(brewery))) ||
       BREWERY_TOKENS.some((token) => brewery.includes(token)) ||
       looksLikeScheduleOrNav(brewery))
   ) {
@@ -110,4 +109,37 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   }
 
   return false;
+}
+
+// Shop-UI placeholders scraped as a tap: "temporarily out", "drunk up", "tap out of service".
+// Substring match on BOTH fields — "Guinness Chwilowy brak:(" means the Guinness ran out, it
+// is not a beer with that name. Curated phrases only, never a regex heuristic: this is a finite
+// set of shop strings, and a false drop is invisible while a missed placeholder stays a visible
+// orphan (#306).
+const PLACEHOLDER_PHRASES = [
+  'chwilowy brak',
+  'kran w serwisie',
+  'czeka na lepsze czasy',
+];
+
+// Single common words are risky as a substring match (e.g. "wypite" inside a longer beer
+// name) — unlike the multi-word phrases above, these must equal the WHOLE normalized value.
+const PLACEHOLDER_EXACT = new Set([
+  'wypite',
+]);
+
+function isPlaceholder(value: string): boolean {
+  const v = norm(value);
+  if (v === '') return false;
+  return PLACEHOLDER_EXACT.has(v) || PLACEHOLDER_PHRASES.some((phrase) => v.includes(phrase));
+}
+
+export type TapExclusion = 'non-beer' | 'placeholder';
+
+// Why a tap must not become a snapshot row, or null when it is a normal beer.
+export function ontapTapExclusion(tap: OntapNonBeerInput): TapExclusion | null {
+  if (isPlaceholder(tap.beer_ref ?? '') || isPlaceholder(tap.brewery_ref ?? '')) {
+    return 'placeholder';
+  }
+  return isOntapNonBeerTap(tap) ? 'non-beer' : null;
 }

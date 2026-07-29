@@ -85,7 +85,9 @@ src/
 │   ├── geocoder.ts         # адреса → координати (Nominatim fallback)
 │   ├── ontap/
 │   │   ├── index.ts        # парсер індексу /warszawa (список пабів)
-│   │   └── pub.ts          # парсер сторінки паба + extractBeerName
+│   │   ├── identity.ts     # очистка tap-ідентичності (spec/градус/броварня) — #306
+│   │   ├── non-beer.ts     # gate: не-пиво + плейсхолдери «нема в наливі»
+│   │   └── pub.ts          # парсер сторінки паба (лише DOM)
 │   └── untappd/
 │       ├── export.ts       # streaming-парсер експорту (CSV/JSON/ZIP)
 │       ├── scraper.ts      # свіжі чекіни з /user/<u>/beers
@@ -1031,7 +1033,7 @@ Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збережено�
 ### Фонові джоби (node-cron, у процесі)
 | Джоба | Розклад | Призначення |
 |-------|---------|-------------|
-| `refreshOntap` | `0 */12 * * *` | обхід ontap.pl → non-beer gate → snapshots → match |
+| `refreshOntap` | `0 */12 * * *` | обхід ontap.pl → tap-exclusion gate → snapshots → match |
 | `refreshAllUntappd` | `0 3 * * *` | скрейп профілів → checkins/untappd_had (лише якщо є cookie) |
 | `enrichOrphans` | `30 */3 * * *` | lookup orphan-beers у Untappd (LIMIT 20/запуск) |
 | `refreshTapRatings` | `30 1,4,7,10,13,16,19,22 * * *` | дотягування рейтингів кранів (offset 1 год від enrich) |
@@ -1106,15 +1108,32 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 - **Реальний статус матчингу** = `beers.untappd_id IS NOT NULL`,
   **не** наявність `match_links`. `match_links.untappd_beer_id` — локальний
   `beers.id`, заповнений і для orphan'ів.
-- **Ontap non-beer gate.** `refreshOntap` ПОВИНЕН відкидати очевидні не-пивні
-  крани (wine/prosecco/frizzante/spritz/cocktails/nalewka/szprycer/kombucha, а також
-  brewery_ref-сміття парсера — schedule/nav рядки на кшталт `-> … od 18.00`) **до**
-  створення snapshot/tap рядків, matcher/upsert orphan і enrich. Загальні сигнали gate —
-  `taps.style` і `taps.brewery_ref`; `beer_ref`/назва використовується лише для
-  нормалізованого точного sentinel `kran w serwisie` (case- і whitespace-insensitive),
-  без substring/fuzzy-фільтрації, щоб не провокувати широкі Untappd-запити на кшталт
-  `wino`/`merlot`. Cider, kvass/`Kwas chlebowy`
-  /`квас` і mead/melomel лишаються eligible і не blacklist-яться цим правилом.
+- **Ontap tap-exclusion gate.** `refreshOntap` ПОВИНЕН відкидати **до** створення
+  snapshot/tap рядків: (а) очевидні не-пивні крани
+  (wine/prosecco/frizzante/spritz/cocktails/nalewka/szprycer/kombucha, brewery_ref-сміття
+  парсера — schedule/nav рядки на кшталт `-> … od 18.00`) і (б) крамничні плейсхолдери
+  «нема в наливі» (`chwilowy brak`, `wypite`, `kran w serwisie`, `czeka na lepsze czasy`).
+  Сигнали (а) — `taps.style` і `taps.brewery_ref`; сигнал (б) — **підрядок** у `beer_ref`
+  АБО `brewery_ref` із курованого списку фраз (`Guinness Chwilowy brak:(` — це «Guinness
+  закінчився», а не пиво). Курований список фраз — єдиний дозволений substring-фільтр;
+  регексп-евристик і fuzzy тут немає, щоб не провокувати широкі Untappd-запити на кшталт
+  `wino`/`merlot`. Cider, kvass/`Kwas chlebowy`/`квас` і mead/melomel лишаються eligible.
+- **Ontap identity policy (#306).** Шар ontap-ідентичності (`sources/ontap/identity.ts`)
+  НЕ МАЄ права викидати кран за формою рядка: єдина причина дропу — **порожня назва**
+  після очистки. Назва, що дорівнює бренду броварні (`Guinness / Guinness`), проходить
+  далі; сміттєве значення `brewery_ref` (локація, список інгредієнтів, лише пунктуація)
+  **обнуляє поле броварні**, а не викидає пиво. Причина: дроп невидимий (нема ані рядка
+  каталогу, ані orphan-а), orphan — видимий і пінований (#343/#361). Кожен відкинутий кран
+  ПОВИНЕН потрапляти в лічильник за причиною (`ontap taps discarded`).
+- **°Plato-градус — частина назви.** Трейлінг `12°` у CZ/PL-лістингах зберігається у
+  `beers.name` (`Konrad 10°` ≠ `Konrad 12°`); ріжеться ABV-хвіст, а разом з ним — стильова
+  мітка одразу після spec-блоку, якщо вона є (`Oxymel 14°·4,5% — Sour Ale` → `Oxymel 14°`,
+  так само, як робив старий парсер). Пошук працює в обидві сторони:
+  `cleanSearchQuery`/`normalizeName` градус прибирають, а стадія czech-grade (#321) читає
+  його з сирої назви через `extractGrade`.
+- **Голий бренд — тільки exact.** Якщо `normalizeName(name)` дорівнює нормалізованому
+  бренду броварні, `matchPrepared` НЕ МАЄ права падати у fuzzy-fallback: краще orphan,
+  ніж довільний продукт цієї броварні з чужим рейтингом і статусом «випите».
 - `/newbeers` без beer-фільтрів може показувати orphan-и, але завжди відкидає
   порожні `N/A`; з активним style/rating/ABV-фільтром показує лише пива з
   реальним `untappd_id`. Маршрут завжди відкидає orphan-и.

@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { extractBeerName } from './identity';
 
 export interface ParsedPub {
   name: string;
@@ -24,103 +25,6 @@ export interface ParsedPubPage {
 
 export function isOntapEmptyTapRef(beerRef: string): boolean {
   return beerRef.trim().toUpperCase() === 'N/A';
-}
-
-function escapeRegExp(raw: string): string {
-  return raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-function compact(raw: string): string {
-  return raw.replace(/ /g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function normalized(raw: string): string {
-  return compact(raw).toLowerCase();
-}
-
-function breweryCore(raw: string): string {
-  return compact(raw)
-    .replace(/\s+(?:brewery|browar|brasserie|brouwerij|brauerei|pivovar|birrificio)$/iu, '')
-    .trim();
-}
-
-function stripLeadingCider(raw: string): string {
-  return compact(raw).replace(/^(?:cydr|cider)(?:\s+|$)/iu, '').trim();
-}
-
-function breweryPrefixes(breweryRef: string | null): string[] {
-  const brewery = compact(breweryRef ?? '');
-  return brewery ? [brewery] : [];
-}
-
-// Strip ABV/strength suffix and brewery prefix from h4 text.
-// h4Text typically looks like "Brewery Name BeerName 24°·8,5%" — we want
-// just "BeerName" so the matcher sees a canonical key.
-export function extractBeerName(h4Text: string, brewery_ref: string | null): string {
-  let s = compact(h4Text);
-  // Remove trailing strength only. Some beer names contain degree marks
-  // ("La 150° Bionda"), so truncating at the first ° corrupts the name.
-  s = s
-    .replace(/\s+(?:\d{1,2}(?:[.,]\d+)?\s*°\s*[·•]\s*)?\d+(?:[.,]\d+)?\s*%(?:\s*[—-].*)?$/u, '')
-    .replace(/\s+\d{1,2}(?:[.,]\d+)?\s*°$/u, '')
-    .trim();
-  // Drop a leading brewery prefix when present.
-  for (const prefix of breweryPrefixes(brewery_ref)) {
-    const brl = prefix.toLowerCase();
-    if (s.toLowerCase().startsWith(`${brl} `)) {
-      s = s.slice(prefix.length + 1);
-      break;
-    } else if (s.toLowerCase() === brl) {
-      s = '';
-      break;
-    }
-  }
-  return s.trim();
-}
-
-const POLLUTED_BREWERIES = new Set([
-  // Exact parser-polluted production sentinels from #235. Keep this narrow:
-  // returning null here means refreshOntap will skip catalog/enrich writes.
-  'w brzesku brewery',
-  'vaisiu sultys',
-]);
-
-export function normalizeOntapTapIdentity(
-  breweryRef: string | null,
-  beerRef: string,
-): { brewery: string; name: string } | null {
-  const brewery = compact(breweryRef ?? '');
-  let name = compact(beerRef);
-  if (!name) return null;
-
-  const breweryNorm = normalized(brewery);
-  if (POLLUTED_BREWERIES.has(breweryNorm)) return null;
-
-  const core = breweryCore(brewery);
-  if (core && normalized(name) === normalized(core)) return null;
-
-  if (breweryNorm === 'cydr dzik' || breweryNorm === 'cydr dzik brewery') {
-    if (normalized(name) === 'polski cydr') return { brewery: 'Cydrownia', name: 'Dzik' };
-    const ciderName = stripLeadingCider(name);
-    if (!ciderName) return { brewery, name };
-    return { brewery: 'Cydrownia', name: `Dzik ${ciderName}` };
-  }
-
-  if (breweryNorm === 'cydr flirt tradycynis') {
-    const ciderName = stripLeadingCider(name);
-    return {
-      brewery: 'Kauno Alus',
-      name: ciderName ? `Tradycynis Cydr Flirt ${ciderName}` : 'Tradycynis Cydr Flirt',
-    };
-  }
-
-  if (core) {
-    const ciderPrefix = new RegExp(`^(?:cydr|cider)\\s+${escapeRegExp(core)}\\s*[-–—:]\\s*`, 'iu');
-    const stripped = name.replace(ciderPrefix, '').trim();
-    if (stripped) name = stripped;
-  }
-
-  return { brewery, name };
 }
 
 export function parsePubPage(html: string): ParsedPubPage {
