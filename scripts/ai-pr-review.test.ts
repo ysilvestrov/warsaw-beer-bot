@@ -34,7 +34,7 @@ describe('filterReviewableFiles', () => {
   });
 });
 
-import { readConfig } from './ai-pr-review';
+import { DEFAULT_FIND_MODEL, DEFAULT_VERIFY_MODEL, readConfig } from './ai-pr-review';
 
 describe('readConfig', () => {
   const full = {
@@ -57,8 +57,10 @@ describe('readConfig', () => {
 
   it('defaults both pass models and lets env override them independently', () => {
     const cfg = readConfig(full);
-    expect(cfg.findModel).toBeTruthy();
-    expect(cfg.verifyModel).toBeTruthy();
+    // Pinned to the exported constants so the replay tool, which imports the
+    // same two, cannot end up measuring a configuration CI does not run.
+    expect(cfg.findModel).toBe(DEFAULT_FIND_MODEL);
+    expect(cfg.verifyModel).toBe(DEFAULT_VERIFY_MODEL);
 
     const overridden = readConfig({
       ...full,

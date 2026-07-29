@@ -62,6 +62,19 @@ export interface Config {
   prBody: string;
 }
 
+/**
+ * Chosen by replay measurement on 2026-07-28, not by preference — see
+ * docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md.
+ * gpt-5.5 as finder published 0 fabrications across the precision set;
+ * gpt-5.4-mini published 5 of 10. The verifier is the same model because no
+ * asymmetric pairing measured better.
+ *
+ * Exported so the replay tool measures the configuration CI runs instead of a
+ * second copy of these strings that can drift away from it.
+ */
+export const DEFAULT_FIND_MODEL = 'gpt-5.5';
+export const DEFAULT_VERIFY_MODEL = 'gpt-5.5';
+
 export function readConfig(env: NodeJS.ProcessEnv): Config {
   const required = (name: string): string => {
     const v = env[name];
@@ -71,13 +84,8 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
   return {
     openaiApiKey: required('OPENAI_API_KEY'),
     openaiEndpoint: env.OPENAI_API_ENDPOINT?.trim() || 'https://api.openai.com/v1',
-    // Chosen by replay measurement on 2026-07-28, not by preference — see
-    // docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md.
-    // gpt-5.5 as finder published 0 fabrications across the precision set;
-    // gpt-5.4-mini published 5 of 10. The verifier is the same model because
-    // no asymmetric pairing measured better.
-    findModel: env.AI_REVIEW_MODEL?.trim() || 'gpt-5.5',
-    verifyModel: env.AI_REVIEW_VERIFY_MODEL?.trim() || 'gpt-5.5',
+    findModel: env.AI_REVIEW_MODEL?.trim() || DEFAULT_FIND_MODEL,
+    verifyModel: env.AI_REVIEW_VERIFY_MODEL?.trim() || DEFAULT_VERIFY_MODEL,
     githubToken: required('GITHUB_TOKEN'),
     repo: required('REPO'),
     prNumber: Number(required('PR_NUMBER')),

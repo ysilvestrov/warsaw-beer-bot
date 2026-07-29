@@ -13,7 +13,11 @@ import { buildReviewContext } from './context';
 import { runFind } from './find';
 import { applyGate, changedLineRanges } from './gate';
 import { verifyAll } from './verify';
-import { filterReviewableFiles } from '../ai-pr-review';
+import {
+  DEFAULT_FIND_MODEL,
+  DEFAULT_VERIFY_MODEL,
+  filterReviewableFiles,
+} from '../ai-pr-review';
 
 function sh(args: string[]): string {
   return execFileSync('git', args, { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
@@ -21,6 +25,21 @@ function sh(args: string[]): string {
 
 function gh(args: string[]): string {
   return execFileSync('gh', args, { encoding: 'utf8', maxBuffer: 50 * 1024 * 1024 });
+}
+
+/**
+ * The models replay runs with. Deliberately the same defaults and the same env
+ * overrides as the production reviewer: a replay of a different configuration
+ * measures nothing about what CI will do.
+ */
+export function replayModels(env: NodeJS.ProcessEnv): {
+  findModel: string;
+  verifyModel: string;
+} {
+  return {
+    findModel: env.AI_REVIEW_MODEL?.trim() || DEFAULT_FIND_MODEL,
+    verifyModel: env.AI_REVIEW_VERIFY_MODEL?.trim() || DEFAULT_VERIFY_MODEL,
+  };
 }
 
 async function main(): Promise<void> {
@@ -61,8 +80,7 @@ async function main(): Promise<void> {
 
   const { text: context } = buildReviewContext({ diff, reviewable, readFile });
 
-  const findModel = process.env.AI_REVIEW_MODEL || 'gpt-5.4-mini';
-  const verifyModel = process.env.AI_REVIEW_VERIFY_MODEL || 'gpt-5.5';
+  const { findModel, verifyModel } = replayModels(process.env);
   const endpoint = process.env.OPENAI_API_ENDPOINT || 'https://api.openai.com/v1';
 
   const raised = await runFind(
@@ -102,7 +120,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? err.message : String(err));
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  });
+}
