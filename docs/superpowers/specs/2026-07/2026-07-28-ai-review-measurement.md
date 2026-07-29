@@ -653,3 +653,68 @@ fabrications and should stay; `out_of_scope` as currently worded is not safe to 
 captured per PR on this run — the five replays were executed in a single loop — so the per-PR timing
 table is not extended. Verify calls are 72% of the total, down from 81% in B only because fewer
 findings were raised.
+
+## Chosen configuration
+
+**`AI_REVIEW_MODEL=gpt-5.5`, `AI_REVIEW_VERIFY_MODEL=gpt-5.5`** (set as the defaults in
+`scripts/ai-pr-review.ts`).
+
+The finder decides the outcome. `gpt-5.5` published **0 fabrications** across the precision set;
+`gpt-5.4-mini` published 5 of 10, reproducing the baseline's signature failure. No asymmetric
+verifier pairing measured better, so the verifier is the same model.
+
+### What was measured, honestly
+
+| metric | old reviewer | shipped config |
+|---|---|---|
+| fabricated findings | 13 of 18 (72%) | ~1 of 47 (2%) |
+| precision | 6% | 50–67% |
+| recall on 4 known escaped defects | 0 of 4 | **0 of 4** |
+
+The headline claim of this change is therefore **narrow and defensible: it stopped lying.** It is
+not yet demonstrated to catch what escapes us.
+
+### Recall caveat — a flaw in the measurement, not only in the pipeline
+
+Three of the four recall targets were unfair by construction: #312 is structurally unreachable
+(the scope globs exclude `.md`/`package.json`, so the whole class of release PRs is invisible to
+the reviewer); #237's defect was established months later by a live Algolia replay and is not
+derivable from the diff; #274's "defect" is a missing feature. Only #233 was a fair test, and it
+was genuinely missed. A better recall set is owed before anyone claims recall is fine or damning.
+
+Against that, the pipeline did catch defects nobody had flagged before — including a live
+regression **introduced by #274 itself** (`normalizeName` running `stripSearchNoise` before
+`preserveDecimalIdentifiers`, collapsing distinct releases). Recall against a fixed target list is
+a floor, not a ceiling.
+
+### Pass 2 does not currently earn its cost
+
+Across configs B and C, the verify pass rejected **0 of 38** published findings. Re-aiming the
+rubric at actionability made it fire (4 of 13) but **two of those four rejections killed genuine
+defects**, both in the metered web-fallback path, because a comment justifying a *neighbouring*
+decision was accepted as justification for the flagged line. Narrowing the wording did not fix it,
+so comment-based suppression is deliberately **not shipped**.
+
+What remains of pass 2 is the `refuted` verdict, which caught the single context-blind fabrication
+a strong finder produced in 47 findings. That is a real but thin return for ~40–70% of the API
+calls. **It is a candidate for removal**, and the decision should be made on production data from
+the `raised → gated → verified` counters rather than on this sample.
+
+### The mechanical gate is the weakest component, not the strongest
+
+The design predicted the gate would be the cheap, reliable filter. Measured: it dropped 6 of 45
+raised, of which only 2 were genuine catches (`outside_changed_lines`, `duplicate`). The other 4
+were `quote_not_found` — the gate failing to *locate* a quote, discarding findings that were about
+real code. One of them was arguably the best finding of its run (a `#358` digest miscount that
+would corrupt the very metric the 2026-08-04 checkpoint reads), dropped because the quoted line was
+unchanged even though the diff introduced the defect elsewhere.
+
+The gate's durable contribution is the corrected `matchedLine`. Its `quote_not_found` path needs
+work before it can be called a filter, and the replay tool should print the quote and the rejection
+`evidence` so those drops are diagnosable at all.
+
+### Run-to-run variance dominates small comparisons
+
+Identical model, prompt and PR produced 26 raised in one run and 16 in another; two runs of #352
+shared no published findings at all. `temperature` is not available on these models. Any future
+comparison of two configurations on fewer than ~20 PRs is measuring noise.

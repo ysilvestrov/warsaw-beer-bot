@@ -71,7 +71,12 @@ export function readConfig(env: NodeJS.ProcessEnv): Config {
   return {
     openaiApiKey: required('OPENAI_API_KEY'),
     openaiEndpoint: env.OPENAI_API_ENDPOINT?.trim() || 'https://api.openai.com/v1',
-    findModel: env.AI_REVIEW_MODEL?.trim() || 'gpt-5.4-mini',
+    // Chosen by replay measurement on 2026-07-28, not by preference — see
+    // docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md.
+    // gpt-5.5 as finder published 0 fabrications across the precision set;
+    // gpt-5.4-mini published 5 of 10. The verifier is the same model because
+    // no asymmetric pairing measured better.
+    findModel: env.AI_REVIEW_MODEL?.trim() || 'gpt-5.5',
     verifyModel: env.AI_REVIEW_VERIFY_MODEL?.trim() || 'gpt-5.5',
     githubToken: required('GITHUB_TOKEN'),
     repo: required('REPO'),

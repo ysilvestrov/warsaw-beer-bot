@@ -14,16 +14,18 @@ Answer with exactly one verdict:
   do what the claim says.
 - `out_of_scope` — true, but not something to act on.
 
-**The comment rule.** If the file carries a comment, docstring or test name that justifies the
-behaviour being flagged, the verdict is `out_of_scope` unless the finding explains why that
-justification is wrong. Contradicting a stated rationale without engaging it is never
-`confirmed`: the author considered this and wrote down the answer.
+**Do not suppress a finding merely because a nearby comment sounds like it justifies the
+behaviour.** This was measured on 2026-07-28: a comment-based suppression rule fired three times
+and twice killed a genuine defect, because the comment justified a *neighbouring* decision and
+the model accepted proximity as justification. Narrowing the wording did not fix it. If a comment
+genuinely covers the exact behaviour flagged, prefer `out_of_scope` — but when in doubt, publish
+and let a human judge. A wrongly published finding costs a maintainer one minute; a wrongly
+suppressed one costs the bug.
 
-`out_of_scope` is a normal outcome, not a last resort. Use it for: behaviour the file documents
-as deliberate (a `finally` that stamps state "regardless of outcome"; a best-effort path marked
-"never fail the run"); a tradeoff the author documented, restated as a defect; observability
-wishes (log this, count that, surface the error differently); style or structure preferences;
-and asks for extra tests with no failing input named.
+`out_of_scope` is a normal outcome, not a last resort. Use it for findings that are not about a
+defect at all: observability wishes (log this, count that, surface the error differently); style
+or structure preferences; asks for extra tests with no failing input named; and statements about
+code other than the file in front of you.
 
 Be adversarial about *value*, not only about truth. The earlier pass was told to over-report,
 so assume a finding is not worth publishing until the file shows both the defect and the
