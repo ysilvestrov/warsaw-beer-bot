@@ -26,3 +26,13 @@ test('listUnreviewedBelow returns low-confidence, not yet reviewed', () => {
   upsertMatch(db, 'b', beerId, 0.95);
   expect(listUnreviewedBelow(db, 0.85).map((r) => r.ontap_ref)).toEqual(['a']);
 });
+
+test('upsertMatch clears a merge stamp — a matcher write is never merge-derived', () => {
+  const { db, beerId } = setup();
+  upsertMatch(db, 'PINTA|atak', beerId, 1.0);
+  db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'PINTA|atak'").run();
+
+  upsertMatch(db, 'PINTA|atak', beerId, 0.8);
+
+  expect(getMatch(db, 'PINTA|atak')?.merged_at).toBeNull();
+});
