@@ -9,7 +9,7 @@ import { isOntapEmptyTapRef, parsePubPage } from '../sources/ontap/pub';
 import { resolveTapIdentity } from '../sources/ontap/identity';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
-import { upsertMatch, getMatch } from '../storage/match_links';
+import { upsertMatch, getMatch, type MatchRow } from '../storage/match_links';
 import { upsertBeer, getBeer } from '../storage/beers';
 import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
@@ -51,6 +51,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
 
   let enrichBudget = inlineEnrichBudget;
   let inlineEnrichStopped = false;
+  let reusedMergedLinks = 0;
 
   const prepared = await prepareCatalog(listBeerCatalog(db));
 
@@ -108,8 +109,8 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           // Curated pin: a human fixed this tap's Untappd link (reviewed_by_user = 1).
           // Never recompute it — the tap row is already persisted by insertTaps above,
           // and the pinned target beer stays in the catalog for other taps to match.
-          const pinned = getMatch(db, t.beer_ref);
-          if (pinned?.reviewed_by_user) continue;
+          const link = getMatch(db, t.beer_ref);
+          if (link?.reviewed_by_user) continue;
           const identity = resolveTapIdentity(t.brewery_ref, t.beer_ref);
           if (identity.kind === 'drop') {
             discarded[identity.reason]++;
@@ -122,6 +123,13 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           if (m) {
             upsertMatch(db, t.beer_ref, m.id, m.confidence);
             beerId = m.id;
+          } else if (isRememberedMerge(db, link)) {
+            // #366: a previous enrich already resolved this tap and merged it into the canonical
+            // row the link points at. Re-creating the orphan would only get it merged again, at
+            // the cost of an Untappd (or metered web-fallback) lookup. The link already points at
+            // the right row, so there is nothing to write.
+            reusedMergedLinks++;
+            continue;
           } else {
             beerId = upsertBeer(db, {
               name,
@@ -183,6 +191,10 @@ export async function refreshOntap(deps: Deps): Promise<void> {
     }
     await onProgress(`🍻 ontap ${city.slug}: ✓ ${ok}/${indexPubs.length} пабів`, { force: true });
   }
+
+  if (reusedMergedLinks > 0) {
+    log.info({ reused: reusedMergedLinks }, 'ontap merged links reused');
+  }
 }
 
 export function filterIndexBySlugs(
@@ -191,6 +203,14 @@ export function filterIndexBySlugs(
 ): IndexPub[] {
   if (!slugs) return pubs;
   return pubs.filter((p) => slugs.has(p.slug));
+}
+
+// #366: a link stamped by mergeIntoCanonical remembers which canonical row this tap is. Honour it
+// only while the target still exists and is really canonical (has an untappd_id) — a stale stamp
+// must fall through to the normal orphan path rather than silently pinning the tap to nothing.
+function isRememberedMerge(db: DB, link: MatchRow | null): boolean {
+  if (!link?.merged_at || link.untappd_beer_id == null) return false;
+  return getBeer(db, link.untappd_beer_id)?.untappd_id != null;
 }
 
 function listBeerCatalog(db: DB): { id: number; brewery: string; name: string; abv: number | null }[] {
