@@ -163,7 +163,7 @@ function distanceTo(match: QuoteMatch, line: number): number {
  * usable report (missing, zero, negative, non-finite) the first occurrence
  * stands, which is the previous behaviour.
  */
-function pickMatch(matches: QuoteMatch[], reportedLine: number): QuoteMatch {
+export function pickMatch(matches: QuoteMatch[], reportedLine: number): QuoteMatch {
   if (matches.length === 1) return matches[0];
   if (!Number.isFinite(reportedLine) || reportedLine < 1) return matches[0];
 
