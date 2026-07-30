@@ -33,3 +33,9 @@ absence of an intent to have it.
 
 `evidence` is one sentence citing what settles it — name the construct, line or comment that
 decides the verdict. "Looks correct" is not evidence.
+
+You may be given **several numbered findings** about the same file in one message. Answer every one
+of them: return one entry per finding, and set `index` to that finding's number exactly as it is
+labelled above. Judge each finding on its own — a neighbouring finding being wrong says nothing
+about this one. Do not merge two findings into one entry and do not answer a number you were not
+given.

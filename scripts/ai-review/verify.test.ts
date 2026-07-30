@@ -1,25 +1,25 @@
-import { verifyAll } from './verify';
-import type { GatedFinding } from './types';
+import { verifyAll, type VerifyRequest } from './verify';
 
-const finding: GatedFinding = {
+const req = (over: Partial<VerifyRequest> = {}): VerifyRequest => ({
+  id: 'f0',
   file: 'src/a.ts',
-  start_line: 3,
-  end_line: 3,
   matchedLine: 3,
   matchedEndLine: 3,
   quote: "return 'not_found';",
   claim: 'merge reported as failure',
   why_it_breaks: 'cron stats count a success as a miss',
-  severity: 'P1',
-  confidence: 'medium',
-};
+  ...over,
+});
 
 const respond = (content: string) =>
   (async () =>
     ({
       ok: true,
       status: 200,
-      json: async () => ({ choices: [{ message: { content } }] }),
+      json: async () => ({
+        choices: [{ message: { content } }],
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      }),
     }) as unknown as Response) as unknown as typeof fetch;
 
 const deps = (fetchFn: typeof fetch) => ({
@@ -31,46 +31,136 @@ const deps = (fetchFn: typeof fetch) => ({
 });
 
 describe('verifyAll', () => {
-  it('publishes a confirmed finding', async () => {
-    const out = await verifyAll(deps(respond('{"verdict":"confirmed","evidence":"line 3 returns not_found"}')), {
+  it('returns the verdict for a single finding', async () => {
+    const out = await verifyAll(deps(respond('{"verdicts":[{"index":1,"verdict":"confirmed","evidence":"line 3"}]}')), {
       instructions: 'verify',
-      findings: [finding],
+      requests: [req()],
       fileContent: () => 'file body',
     });
-    expect(out.confirmed).toHaveLength(1);
-    expect(out.rejected).toEqual([]);
+    expect(out.results).toEqual([{ id: 'f0', verdict: 'confirmed', evidence: 'line 3' }]);
+    expect(out.usage.calls).toBe(1);
   });
 
-  it('withholds a refuted finding', async () => {
-    const out = await verifyAll(deps(respond('{"verdict":"refuted","evidence":"the PR already returns merged"}')), {
+  it('sends ONE call for several findings in the same file and maps verdicts back by index', async () => {
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                verdicts: [
+                  { index: 2, verdict: 'refuted', evidence: 'second is wrong' },
+                  { index: 1, verdict: 'confirmed', evidence: 'first holds' },
+                ],
+              }),
+            },
+          },
+        ],
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      }),
+    })) as unknown as typeof fetch;
+
+    const out = await verifyAll(deps(fetchFn), {
       instructions: 'verify',
-      findings: [finding],
+      requests: [req({ id: 'f0' }), req({ id: 'f1', claim: 'other bug' })],
       fileContent: () => 'file body',
     });
-    expect(out.confirmed).toEqual([]);
-    expect(out.rejected[0].verdict).toBe('refuted');
+
+    expect(fetchFn).toHaveBeenCalledTimes(1);
+    expect(out.results).toEqual([
+      { id: 'f0', verdict: 'confirmed', evidence: 'first holds' },
+      { id: 'f1', verdict: 'refuted', evidence: 'second is wrong' },
+    ]);
+    expect(out.usage.calls).toBe(1);
   });
 
-  it('withholds a finding whose verification call fails, without throwing', async () => {
+  it('sends one call per file when findings span several files', async () => {
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { content: '{"verdicts":[{"index":1,"verdict":"confirmed","evidence":"e"}]}' } }],
+        usage: { prompt_tokens: 100, completion_tokens: 10 },
+      }),
+    })) as unknown as typeof fetch;
+
+    const out = await verifyAll(deps(fetchFn), {
+      instructions: 'verify',
+      requests: [req({ id: 'f0', file: 'src/a.ts' }), req({ id: 'f1', file: 'src/b.ts' })],
+      fileContent: () => 'file body',
+    });
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+    expect(out.results.map((r) => r.id).sort()).toEqual(['f0', 'f1']);
+    expect(out.usage.calls).toBe(2);
+  });
+
+  it('errors only the finding whose index the model failed to answer', async () => {
+    const out = await verifyAll(
+      deps(respond('{"verdicts":[{"index":1,"verdict":"confirmed","evidence":"first holds"}]}')),
+      {
+        instructions: 'verify',
+        requests: [req({ id: 'f0' }), req({ id: 'f1', claim: 'other bug' })],
+        fileContent: () => 'file body',
+      },
+    );
+    expect(out.results[0]).toEqual({ id: 'f0', verdict: 'confirmed', evidence: 'first holds' });
+    expect(out.results[1].verdict).toBe('error');
+    expect(out.results[1].evidence).toMatch(/no verdict/i);
+  });
+
+  it('ignores an out-of-range index instead of crashing', async () => {
+    const out = await verifyAll(
+      deps(respond('{"verdicts":[{"index":7,"verdict":"confirmed","evidence":"nonsense"}]}')),
+      { instructions: 'verify', requests: [req()], fileContent: () => 'file body' },
+    );
+    expect(out.results[0].verdict).toBe('error');
+  });
+
+  it('errors every finding in a file whose call fails, without throwing', async () => {
     const fetchFn = (async () =>
       ({ ok: false, status: 400, text: async () => 'nope' }) as unknown as Response) as unknown as typeof fetch;
 
     const out = await verifyAll(deps(fetchFn), {
       instructions: 'verify',
-      findings: [finding],
+      requests: [req({ id: 'f0' }), req({ id: 'f1', claim: 'other' })],
       fileContent: () => 'file body',
     });
-    expect(out.confirmed).toEqual([]);
-    expect(out.rejected[0].verdict).toBe('error');
+    expect(out.results.map((r) => r.verdict)).toEqual(['error', 'error']);
   });
 
-  it('withholds a finding whose file body vanished', async () => {
-    const out = await verifyAll(deps(respond('{"verdict":"confirmed","evidence":"x"}')), {
+  it('errors every finding in a file whose body vanished, and spends nothing on it', async () => {
+    const fetchFn = vi.fn() as unknown as typeof fetch;
+    const out = await verifyAll(deps(fetchFn), {
       instructions: 'verify',
-      findings: [finding],
+      requests: [req()],
       fileContent: () => null,
     });
-    expect(out.confirmed).toEqual([]);
-    expect(out.rejected[0].verdict).toBe('error');
+    expect(out.results[0].verdict).toBe('error');
+    expect(out.usage.calls).toBe(0);
+    expect(fetchFn).not.toHaveBeenCalled();
+  });
+
+  it('sends the file body exactly once no matter how many findings it carries', async () => {
+    let sent = '';
+    const fetchFn = (async (_url: string, init?: RequestInit) => {
+      sent = init!.body as string;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{"verdicts":[{"index":1,"verdict":"confirmed","evidence":"e"},{"index":2,"verdict":"confirmed","evidence":"e"}]}' } }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await verifyAll(deps(fetchFn), {
+      instructions: 'verify',
+      requests: [req({ id: 'f0' }), req({ id: 'f1', claim: 'other' })],
+      fileContent: () => 'UNIQUE_BODY_MARKER',
+    });
+    expect(sent.split('UNIQUE_BODY_MARKER')).toHaveLength(2); // present exactly once
   });
 });

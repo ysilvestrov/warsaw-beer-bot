@@ -241,10 +241,29 @@ async function main(): Promise<void> {
     console.log(`::notice::gate dropped [${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
   }
 
-  const { confirmed, rejected } = await verifyAll(
+  const { results } = await verifyAll(
     { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.verifyModel },
-    { instructions: verifyInstructions, findings: kept, fileContent: readFile },
+    {
+      instructions: verifyInstructions,
+      requests: kept.map((f, i) => ({
+        id: `f${i}`,
+        file: f.file,
+        matchedLine: f.matchedLine,
+        matchedEndLine: f.matchedEndLine,
+        quote: f.quote,
+        claim: f.claim,
+        why_it_breaks: f.why_it_breaks,
+      })),
+      fileContent: readFile,
+    },
   );
+  const verifyById = new Map(kept.map((f, i) => [`f${i}`, f]));
+  const confirmed = results
+    .filter((r) => r.verdict === 'confirmed')
+    .map((r) => ({ finding: verifyById.get(r.id)!, verdict: r.verdict, evidence: r.evidence }));
+  const rejected = results
+    .filter((r) => r.verdict !== 'confirmed')
+    .map((r) => ({ finding: verifyById.get(r.id)!, verdict: r.verdict, evidence: r.evidence }));
   for (const r of rejected) {
     console.log(`::notice::verify withheld [${r.verdict}] ${r.finding.file}: ${r.evidence}`);
   }

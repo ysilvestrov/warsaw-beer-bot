@@ -150,14 +150,29 @@ async function main(): Promise<void> {
     fileContent: readFile,
   });
 
-  const { confirmed, rejected } = await verifyAll(
+  const { results } = await verifyAll(
     { endpoint, apiKey, model: verifyModel },
     {
       instructions: readFileSync('.github/ai-review/VERIFY.md', 'utf8'),
-      findings: kept,
+      requests: kept.map((f, i) => ({
+        id: `f${i}`,
+        file: f.file,
+        matchedLine: f.matchedLine,
+        matchedEndLine: f.matchedEndLine,
+        quote: f.quote,
+        claim: f.claim,
+        why_it_breaks: f.why_it_breaks,
+      })),
       fileContent: readFile,
     },
   );
+  const byId = new Map(kept.map((f, i) => [`f${i}`, f]));
+  const confirmed = results
+    .filter((r) => r.verdict === 'confirmed')
+    .map((r) => ({ finding: byId.get(r.id)!, evidence: r.evidence }));
+  const rejected = results
+    .filter((r) => r.verdict !== 'confirmed')
+    .map((r) => ({ finding: byId.get(r.id)!, verdict: r.verdict, evidence: r.evidence }));
 
   console.log(`\n=== PR #${pr} (${findModel} → ${verifyModel}) ===`);
   console.log(`raised ${raised.length} → gated ${kept.length} → verified ${confirmed.length}\n`);
