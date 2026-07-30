@@ -42,7 +42,7 @@ export async function verifyFinding(
     '```',
   ].join('\n');
 
-  const raw = await callStructured(
+  const { content: raw } = await callStructured(
     deps,
     [
       { role: 'system', content: p.instructions },

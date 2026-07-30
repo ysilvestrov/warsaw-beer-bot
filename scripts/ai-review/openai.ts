@@ -1,3 +1,5 @@
+import { parseUsage, type Usage } from './usage';
+
 export class NonRetryableError extends Error {}
 
 export interface ChatMessage {
@@ -22,7 +24,7 @@ export interface OpenAiDeps {
 export const DEFAULT_MAX_COMPLETION_TOKENS = 8000;
 
 /**
- * One structured chat completion.
+ * One structured chat completion, with the tokens it cost.
  *
  * Deliberately sends neither `temperature` nor `max_tokens`: the 2026-07-28 API
  * probe showed `max_tokens` is rejected with HTTP 400 on every gpt-5.x model,
@@ -34,7 +36,7 @@ export async function callStructured(
   messages: ChatMessage[],
   format: JsonSchemaFormat,
   maxCompletionTokens: number = DEFAULT_MAX_COMPLETION_TOKENS,
-): Promise<string> {
+): Promise<{ content: string; usage: Usage }> {
   const fetchFn = deps.fetchFn ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
   const attempts = deps.attempts ?? 3;
@@ -80,10 +82,13 @@ export async function callStructured(
 
       const data = (await res.json()) as {
         choices?: Array<{ message?: { content?: string } }>;
+        usage?: unknown;
       };
       const content = data.choices?.[0]?.message?.content;
       if (!content) throw new NonRetryableError('OpenAI returned an empty completion');
-      return content;
+      // Usage is read from the same response as the content, so a call can never
+      // be published without being billed for in the footer.
+      return { content, usage: parseUsage(data.usage) };
     } catch (err) {
       if (err instanceof NonRetryableError) throw err;
       lastErr = err;

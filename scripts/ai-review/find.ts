@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { callStructured, type OpenAiDeps } from './openai';
 import type { RawFinding } from './types';
+import type { Usage } from './usage';
 
 export const FINDINGS_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -59,7 +60,7 @@ const payloadSchema = z.object({ findings: z.array(findingSchema) });
 export async function runFind(
   deps: OpenAiDeps,
   p: { instructions: string; context: string; prTitle: string; prBody: string },
-): Promise<RawFinding[]> {
+): Promise<{ findings: RawFinding[]; usage: Usage }> {
   const user = [
     '# Pull request',
     `Title: ${p.prTitle}`,
@@ -70,7 +71,7 @@ export async function runFind(
     p.context,
   ].join('\n');
 
-  const raw = await callStructured(
+  const { content: raw, usage } = await callStructured(
     deps,
     [
       { role: 'system', content: p.instructions },
@@ -90,5 +91,5 @@ export async function runFind(
   if (!result.success) {
     throw new Error(`Pass-1 output did not match the schema: ${result.error.message.slice(0, 300)}`);
   }
-  return result.data.findings;
+  return { findings: result.data.findings, usage };
 }

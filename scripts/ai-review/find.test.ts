@@ -33,7 +33,7 @@ const payload = {
 
 describe('runFind', () => {
   it('parses findings out of the structured response', async () => {
-    const findings = await runFind(deps(respond(JSON.stringify(payload))), {
+    const { findings } = await runFind(deps(respond(JSON.stringify(payload))), {
       instructions: 'find things',
       context: '# Diff',
       prTitle: 'T',
@@ -44,7 +44,7 @@ describe('runFind', () => {
   });
 
   it('returns an empty list when the model reports nothing', async () => {
-    const findings = await runFind(deps(respond('{"findings":[]}')), {
+    const { findings } = await runFind(deps(respond('{"findings":[]}')), {
       instructions: 'find things',
       context: '# Diff',
       prTitle: 'T',
@@ -73,5 +73,29 @@ describe('runFind', () => {
         prBody: 'B',
       }),
     ).rejects.toThrow(/schema/i);
+  });
+});
+
+import { runFind as runFindUsage } from './find';
+
+describe('runFind usage', () => {
+  it('reports the tokens its call consumed', async () => {
+    const fetchFn = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ findings: [] }) } }],
+          usage: { prompt_tokens: 1234, completion_tokens: 56 },
+        }),
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const out = await runFindUsage(
+      { endpoint: 'https://api.openai.com/v1', apiKey: 'sk', model: 'gpt-5.5', fetchFn, sleep: async () => {} },
+      { instructions: 'i', context: 'c', prTitle: 't', prBody: 'b' },
+    );
+    expect(out.findings).toEqual([]);
+    expect(out.usage.promptTokens).toBe(1234);
+    expect(out.usage.calls).toBe(1);
   });
 });

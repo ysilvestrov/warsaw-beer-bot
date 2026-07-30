@@ -46,7 +46,7 @@ describe('callStructured', () => {
       name: 'review',
       schema: SCHEMA,
     });
-    expect(out).toBe('{"a":1}');
+    expect(out.content).toBe('{"a":1}');
   });
 
   it('retries a 500 then succeeds', async () => {
@@ -139,5 +139,59 @@ describe('callStructured — 429 handling', () => {
       }),
     ).rejects.toThrow(/rate_limit_exceeded/);
     expect(calls).toBe(3);
+  });
+});
+
+import { callStructured as callWithUsage } from './openai';
+
+describe('callStructured usage', () => {
+  const schema = { type: 'object', additionalProperties: false, required: [], properties: {} };
+
+  it('returns the usage block alongside the content', async () => {
+    const fetchFn = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{}' } }],
+          usage: {
+            prompt_tokens: 900,
+            completion_tokens: 40,
+            prompt_tokens_details: { cached_tokens: 128 },
+            completion_tokens_details: { reasoning_tokens: 32 },
+          },
+        }),
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const out = await callWithUsage(
+      { endpoint: 'https://api.openai.com/v1', apiKey: 'sk', model: 'gpt-5.5', fetchFn, sleep: async () => {} },
+      [{ role: 'user', content: 'hi' }],
+      { name: 'x', schema },
+    );
+    expect(out.content).toBe('{}');
+    expect(out.usage).toEqual({
+      calls: 1,
+      promptTokens: 900,
+      cachedTokens: 128,
+      completionTokens: 40,
+      reasoningTokens: 32,
+    });
+  });
+
+  it('still returns a counted call when the response omits usage', async () => {
+    const fetchFn = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ choices: [{ message: { content: '{}' } }] }),
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const out = await callWithUsage(
+      { endpoint: 'https://api.openai.com/v1', apiKey: 'sk', model: 'gpt-5.5', fetchFn, sleep: async () => {} },
+      [{ role: 'user', content: 'hi' }],
+      { name: 'x', schema },
+    );
+    expect(out.usage.calls).toBe(1);
+    expect(out.usage.promptTokens).toBe(0);
   });
 });

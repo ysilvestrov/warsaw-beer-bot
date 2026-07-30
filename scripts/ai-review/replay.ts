@@ -133,7 +133,7 @@ async function main(): Promise<void> {
   const { findModel, verifyModel } = replayModels(process.env);
   const endpoint = process.env.OPENAI_API_ENDPOINT || 'https://api.openai.com/v1';
 
-  const raised = await runFind(
+  const { findings: raised } = await runFind(
     { endpoint, apiKey, model: findModel },
     {
       instructions: readFileSync('.github/ai-review/AGENTS.md', 'utf8'),
