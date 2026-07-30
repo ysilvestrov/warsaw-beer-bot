@@ -1,6 +1,7 @@
 import {
   applyGate,
   changedLineRanges,
+  findingKey,
   locateQuote,
   locateQuoteAll,
   normalizeWs,
@@ -263,5 +264,66 @@ describe('applyGate', () => {
     expect(result.dropped).toEqual([]);
     expect(result.kept[0].matchedLine).toBe(2);
     expect(result.kept[0].matchedEndLine).toBe(4);
+  });
+});
+
+describe('findingKey', () => {
+  it('is stable across whitespace, claim casing and a truncated quote', () => {
+    const long = 'const x = 1;\n'.repeat(60); // > 400 chars
+    const a = findingKey('src/a.ts', long, 'Merge reported as failure');
+    const b = findingKey('src/a.ts', long.slice(0, 400), 'merge  reported as   failure');
+    expect(a).toBe(b);
+  });
+
+  it('still agrees when the 400-char cut lands inside a run of whitespace', () => {
+    // Normalising before slicing would collapse the run away in the stored copy
+    // only, shortening it past the compared prefix and splitting the key.
+    const full = `if (a) {\n${' '.repeat(500)}\n  doSomething();\n}`;
+    expect(findingKey('src/a.ts', full, 'c')).toBe(
+      findingKey('src/a.ts', full.slice(0, 400), 'c'),
+    );
+  });
+
+  it('separates two different claims about the same line', () => {
+    expect(findingKey('src/a.ts', 'x', 'claim one')).not.toBe(
+      findingKey('src/a.ts', 'x', 'claim two'),
+    );
+  });
+});
+
+describe('applyGate seeded with already-known findings', () => {
+  const raw = (over: Partial<RawFinding> = {}): RawFinding => ({
+    file: 'src/a.ts',
+    start_line: 1,
+    end_line: 1,
+    quote: 'const a = 1;',
+    claim: 'a is wrong',
+    why_it_breaks: 'boom',
+    severity: 'P1',
+    confidence: 'high',
+    ...over,
+  });
+
+  it('drops a re-derived finding that a previous run already published', () => {
+    const out = applyGate({
+      findings: [raw()],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 1]] as Array<[number, number]>]]),
+      fileContent: () => 'const a = 1;',
+      knownKeys: [findingKey('src/a.ts', 'const a = 1;', 'a is wrong')],
+    });
+    expect(out.kept).toEqual([]);
+    expect(out.dropped[0].reason).toBe('duplicate');
+  });
+
+  it('keeps a genuinely new finding in the same file', () => {
+    const out = applyGate({
+      findings: [raw({ claim: 'something else entirely' })],
+      reviewable: ['src/a.ts'],
+      changed: new Map([['src/a.ts', [[1, 1]] as Array<[number, number]>]]),
+      fileContent: () => 'const a = 1;',
+      knownKeys: [findingKey('src/a.ts', 'const a = 1;', 'a is wrong')],
+    });
+    expect(out.kept).toHaveLength(1);
   });
 });
