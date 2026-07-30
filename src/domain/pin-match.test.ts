@@ -135,6 +135,21 @@ describe('unpin & list', () => {
     expect(getMatch(db, 'Pear taste')?.reviewed_by_user).toBe(0);
   });
 
+  test('#366: unpinning also clears a merge stamp, so the tap is really recomputed', () => {
+    const db = newDb();
+    const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
+    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    // The link was first established automatically by a merge, then pinned by a human.
+    db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Pear taste'").run();
+    pinMatch(db, orphanId, 1093012, AT);
+
+    unpinByBeer(db, orphanId);
+
+    // Unpinning means "this link is wrong, work it out again". A surviving stamp would make
+    // ingest reuse the same rejected target forever.
+    expect(getMatch(db, 'Pear taste')?.merged_at).toBeNull();
+  });
+
   test('listPins returns all pinned links with their beer + untappd_id', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
