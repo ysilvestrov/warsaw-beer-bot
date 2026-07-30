@@ -114,6 +114,7 @@ import {
   recordLookupSuccess,
   recordLookupNotFound,
   recordLookupTransient,
+  mergeIntoCanonical,
 } from './beers';
 
 describe('getBeer', () => {
@@ -607,4 +608,64 @@ describe('web_tried_at', () => {
     expect(readWebTriedAt(db, id)).toBe('2026-07-24T10:00:00.000Z');
     db.close();
   });
+});
+
+function mergeFixture() {
+  const db = fresh();
+  const canonicalId = upsertBeer(db, {
+    untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
+    style: null, abv: null, rating_global: null,
+    normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+  });
+  const orphanId = upsertBeer(db, {
+    name: 'Deep Sea Diver', brewery: 'Moon Lark Brewery',
+    style: null, abv: null, rating_global: null,
+    normalized_name: normalizeName('Deep Sea Diver'),
+    normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+  });
+  db.prepare(
+    "INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user) VALUES ('Deep Sea Diver', ?, 1.0, 0)",
+  ).run(orphanId);
+  return { db, canonicalId, orphanId };
+}
+
+test('mergeIntoCanonical redirects the link and stamps it as merge-established', () => {
+  const { db, canonicalId, orphanId } = mergeFixture();
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-07-30T10:00:00Z');
+
+  const link = db.prepare('SELECT untappd_beer_id, merged_at FROM match_links WHERE ontap_ref = ?')
+    .get('Deep Sea Diver') as { untappd_beer_id: number; merged_at: string | null };
+  expect(link.untappd_beer_id).toBe(canonicalId);
+  expect(link.merged_at).toBe('2026-07-30T10:00:00Z');
+  expect(getBeer(db, orphanId)).toBeNull();
+});
+
+test('mergeIntoCanonical redirects a fuzzy satellite link without making it durable', () => {
+  const { db, canonicalId, orphanId } = mergeFixture();
+  // A second tap text the matcher merely guessed onto the orphan (confidence < 1). The lookup
+  // that produced the merge never saw this text, so it must keep re-orphaning on its own.
+  db.prepare(
+    "INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user) VALUES ('Deep Sea Diver Nitro', ?, 0.87, 0)",
+  ).run(orphanId);
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-07-30T10:00:00Z');
+
+  const fuzzy = db.prepare('SELECT untappd_beer_id, merged_at FROM match_links WHERE ontap_ref = ?')
+    .get('Deep Sea Diver Nitro') as { untappd_beer_id: number; merged_at: string | null };
+  expect(fuzzy.untappd_beer_id).toBe(canonicalId);   // still redirected, as before
+  expect(fuzzy.merged_at).toBeNull();                // but not remembered
+});
+
+test('mergeIntoCanonical redirects check-ins instead of FK-crashing on the delete', () => {
+  const { db, canonicalId, orphanId } = mergeFixture();
+  db.prepare(
+    "INSERT INTO checkins (checkin_id, telegram_id, beer_id, checkin_at) VALUES ('c1', 42, ?, '2026-07-30T09:00:00Z')",
+  ).run(orphanId);
+
+  expect(() => mergeIntoCanonical(db, orphanId, canonicalId, '2026-07-30T10:00:00Z')).not.toThrow();
+
+  const checkin = db.prepare('SELECT beer_id FROM checkins WHERE checkin_id = ?').get('c1') as { beer_id: number };
+  expect(checkin.beer_id).toBe(canonicalId);
+  expect(getBeer(db, orphanId)).toBeNull();
 });

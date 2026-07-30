@@ -53,16 +53,22 @@ export interface PinRow {
 }
 
 // Undo a pin by its ontap_ref (reliable for merged pins whose orphan row is gone).
+// #366: also clears merged_at — unpinning means "recompute this tap", and a surviving merge
+// stamp would make ingest reuse the very target the human just rejected.
 export function unpinByRef(db: DB, ontapRef: string): number {
   return db
-    .prepare('UPDATE match_links SET reviewed_by_user = 0 WHERE ontap_ref = ? AND reviewed_by_user = 1')
+    .prepare(
+      'UPDATE match_links SET reviewed_by_user = 0, merged_at = NULL WHERE ontap_ref = ? AND reviewed_by_user = 1',
+    )
     .run(ontapRef).changes as number;
 }
 
 // Undo a pin by the beer it points at (natural for same-row pins whose orphan survives).
 export function unpinByBeer(db: DB, beerId: number): number {
   return db
-    .prepare('UPDATE match_links SET reviewed_by_user = 0 WHERE untappd_beer_id = ? AND reviewed_by_user = 1')
+    .prepare(
+      'UPDATE match_links SET reviewed_by_user = 0, merged_at = NULL WHERE untappd_beer_id = ? AND reviewed_by_user = 1',
+    )
     .run(beerId).changes as number;
 }
 

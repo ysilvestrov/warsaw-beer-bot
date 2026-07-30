@@ -279,4 +279,11 @@ describe('schema migrations', () => {
     expect(retired).toBeDefined();
     expect(retired!.notnull).toBe(0);
   });
+
+  it('v21 adds the merge stamp to match_links', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = (db.prepare('PRAGMA table_info(match_links)').all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain('merged_at');
+  });
 });

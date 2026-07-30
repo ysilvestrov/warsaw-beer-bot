@@ -650,4 +650,116 @@ describe('refreshOntap multi-city', () => {
     // Regression guard: the second pub must NOT have FK-crashed.
     expect(lines.find((l) => l.msg === 'ontap pub refresh failed')).toBeUndefined();
   });
+
+  test('#366: reuses a merge-stamped link instead of re-creating the orphan', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // The canonical row the tap really is. Its name does NOT match the tap text, so the matcher
+    // cannot get there — exactly the situation a merge resolves.
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    upsertMatch(db, 'Deep Sea Diver', canonicalId, 1.0);
+    db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
+
+    const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
+    const body = `<body>${panel(1, 'Moon Lark Brewery', 'Deep Sea Diver 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${body}</html>`;
+        return '';
+      },
+    };
+    let searches = 0;
+    const search: BeerSearch = { search: async () => { searches++; return []; } };
+    // The reuse counter is the rollout signal for #366 ("did the work move, or vanish?"),
+    // so it is asserted rather than trusted.
+    const lines: any[] = [];
+    const log = pino({ level: 'info' }, { write: (s: string) => lines.push(JSON.parse(s)) });
+
+    await refreshOntap({
+      db, log, http, search, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
+    });
+
+    expect(beerCount(db)).toBe(1);        // no fresh orphan
+    expect(searches).toBe(0);             // and therefore no Untappd lookup
+    expect(lines.find((l) => l.msg === 'ontap merged links reused')).toMatchObject({ reused: 1 });
+    const link = getMatch(db, 'Deep Sea Diver');
+    expect(link?.untappd_beer_id).toBe(canonicalId);
+    expect(link?.merged_at).toBe('2026-07-30T00:00:00Z');
+  });
+
+  test('#366: a stamped link whose target is not canonical is not trusted', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // Stamped link pointing at a row with NO untappd_id (e.g. a target that lost its match).
+    const staleId = upsertBeer(db, {
+      name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    upsertMatch(db, 'Deep Sea Diver', staleId, 1.0);
+    db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
+
+    const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
+    const body = `<body>${panel(1, 'Moon Lark Brewery', 'Deep Sea Diver 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${body}</html>`;
+        return '';
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false,
+    });
+
+    // Fell through to the normal orphan path: the tap now has its own catalog row.
+    expect(db.prepare("SELECT COUNT(*) AS n FROM beers WHERE name = 'Deep Sea Diver'").get()).toEqual({ n: 1 });
+  });
+
+  test('#366: a matcher hit retargets the link and clears the stamp', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // Stamped link points at one canonical row…
+    const rememberedId = upsertBeer(db, {
+      untappd_id: 888, name: 'Marine', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    // …while the catalog now also holds a row the matcher can reach by name.
+    const exactId = upsertBeer(db, {
+      untappd_id: 999, name: 'Deep Sea Diver', brewery: 'Moon Lark Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Deep Sea Diver'),
+      normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
+    });
+    upsertMatch(db, 'Deep Sea Diver', rememberedId, 1.0);
+    db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
+
+    const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
+    const body = `<body>${panel(1, 'Moon Lark Brewery', 'Deep Sea Diver 6%', 'IPA')}</body>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/')
+          return `<html><head><meta property="og:title" content="P / ontap.pl"></head>${body}</html>`;
+        return '';
+      },
+    };
+
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder,
+      cities: oneCity, lookupEnabled: false,
+    });
+
+    const link = getMatch(db, 'Deep Sea Diver');
+    expect(link?.untappd_beer_id).toBe(exactId);   // matcher overrules the memory
+    expect(link?.merged_at).toBeNull();
+  });
 });
