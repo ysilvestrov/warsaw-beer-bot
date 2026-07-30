@@ -123,8 +123,15 @@ export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number
     // The stamp keeps that knowledge past the next ingest; without it refreshOntap recomputes,
     // misses again (that is why the row needed a merge) and re-creates the orphan — ~65 wasted
     // Untappd lookups a day, plus repeat metered web-fallback calls.
-    db.prepare('UPDATE match_links SET untappd_beer_id = ?, merged_at = ? WHERE untappd_beer_id = ?')
-      .run(canonicalId, at, orphanId);
+    // Only an exact/parser-choice link (confidence 1.0) carries evidence: its own tap text is
+    // what the lookup resolved. A fuzzy satellite (<1) was a matcher guess about the orphan, so
+    // it is redirected like before but NOT made durable — it keeps re-orphaning and gets looked
+    // up on its own text, which is the more accurate answer.
+    db.prepare(
+      'UPDATE match_links SET untappd_beer_id = ?, merged_at = ? WHERE untappd_beer_id = ? AND confidence >= 1.0',
+    ).run(canonicalId, at, orphanId);
+    db.prepare('UPDATE match_links SET untappd_beer_id = ? WHERE untappd_beer_id = ?')
+      .run(canonicalId, orphanId);
     // checkins.beer_id → beers(id) has NO ON DELETE CASCADE and foreign_keys=ON, so a check-in
     // on the orphan would abort the DELETE. Point it at the canonical row first (as pinMatch does).
     db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);

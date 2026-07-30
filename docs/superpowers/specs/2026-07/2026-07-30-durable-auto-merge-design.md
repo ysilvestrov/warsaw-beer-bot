@@ -113,7 +113,11 @@ so the invariant "any link written by the matcher is not merge-derived" cannot b
 
 One transaction, three effects:
 
-1. redirect `match_links.untappd_beer_id` to the canonical row **and stamp `merged_at`**;
+1. redirect `match_links.untappd_beer_id` to the canonical row, stamping `merged_at` **only on links
+   with `confidence >= 1.0`** (exact / parser-choice — the tap text the lookup actually resolved).
+   A fuzzy satellite (`<1.0`) is a matcher guess *about the orphan*, not evidence about its own text;
+   it is redirected as before but stays non-durable, so it keeps re-orphaning and gets looked up on
+   its own text. Added after review; the first draft stamped every link pointing at the orphan;
 2. redirect `checkins.beer_id` to the canonical row (mirroring `pinMatch`) — closes the FK-abort path
    described above;
 3. delete the orphan row (`enrich_failures` CASCADEs).

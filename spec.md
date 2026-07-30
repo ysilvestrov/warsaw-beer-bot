@@ -292,6 +292,10 @@ Untappd — `Banany Na Rauszu 2026`), людина фіксує матч вру�
    `ontap merged links reused`);
 4. інакше — нова сирота + посилання + inline-enrich.
 
+Штампуються **лише посилання з `confidence >= 1.0`** (exact/parser-choice): саме їхній текст крана
+енрич і шукав. Fuzzy-сателіти (`<1.0`) merge переспрямовує, як і раніше, але **не** робить
+довговічними — вони й далі стають сиротами і шукаються за власним текстом.
+
 Без п.3 кожен інжест створював сироту заново, знову її збагачував і знову зливав: ~65 зайвих
 запитів до Untappd на добу і повторні платні виклики web-fallback на той самий кран (#366).
 Скасувати хибну пам'ять = `UPDATE match_links SET merged_at = NULL WHERE ontap_ref = …`;
@@ -470,6 +474,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 18 | `enrich_failures.retired_at` (термінальний стан вирішених провалів; ops-тула `retire-resolved-orphans`) |
 | 19 | `beers.google_tried_at` + `google_quota(day, count)` — фолбек на 0 кандидатів (#139): per-beer кулдаун + денний cap |
 | 20 | перейменування під нейтрального провайдера: `google_quota` → `web_search_quota`, `beers.google_tried_at` → `beers.web_tried_at` (свап Google CSE → Brave Search) |
+| 21 | `match_links.merged_at` — штамп посилання, встановленого merge-ом; ingest перевикористовує його замість створення сироти (#366) |
 
 ---
 

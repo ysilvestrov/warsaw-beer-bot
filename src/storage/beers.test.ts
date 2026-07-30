@@ -641,6 +641,22 @@ test('mergeIntoCanonical redirects the link and stamps it as merge-established',
   expect(getBeer(db, orphanId)).toBeNull();
 });
 
+test('mergeIntoCanonical redirects a fuzzy satellite link without making it durable', () => {
+  const { db, canonicalId, orphanId } = mergeFixture();
+  // A second tap text the matcher merely guessed onto the orphan (confidence < 1). The lookup
+  // that produced the merge never saw this text, so it must keep re-orphaning on its own.
+  db.prepare(
+    "INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user) VALUES ('Deep Sea Diver Nitro', ?, 0.87, 0)",
+  ).run(orphanId);
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-07-30T10:00:00Z');
+
+  const fuzzy = db.prepare('SELECT untappd_beer_id, merged_at FROM match_links WHERE ontap_ref = ?')
+    .get('Deep Sea Diver Nitro') as { untappd_beer_id: number; merged_at: string | null };
+  expect(fuzzy.untappd_beer_id).toBe(canonicalId);   // still redirected, as before
+  expect(fuzzy.merged_at).toBeNull();                // but not remembered
+});
+
 test('mergeIntoCanonical redirects check-ins instead of FK-crashing on the delete', () => {
   const { db, canonicalId, orphanId } = mergeFixture();
   db.prepare(

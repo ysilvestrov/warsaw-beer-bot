@@ -675,14 +675,19 @@ describe('refreshOntap multi-city', () => {
     };
     let searches = 0;
     const search: BeerSearch = { search: async () => { searches++; return []; } };
+    // The reuse counter is the rollout signal for #366 ("did the work move, or vanish?"),
+    // so it is asserted rather than trusted.
+    const lines: any[] = [];
+    const log = pino({ level: 'info' }, { write: (s: string) => lines.push(JSON.parse(s)) });
 
     await refreshOntap({
-      db, log: silentLog, http, search, geocoder, cities: oneCity,
+      db, log, http, search, geocoder, cities: oneCity,
       lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
     });
 
     expect(beerCount(db)).toBe(1);        // no fresh orphan
     expect(searches).toBe(0);             // and therefore no Untappd lookup
+    expect(lines.find((l) => l.msg === 'ontap merged links reused')).toMatchObject({ reused: 1 });
     const link = getMatch(db, 'Deep Sea Diver');
     expect(link?.untappd_beer_id).toBe(canonicalId);
     expect(link?.merged_at).toBe('2026-07-30T00:00:00Z');
