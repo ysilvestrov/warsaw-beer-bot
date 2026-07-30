@@ -8,7 +8,7 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "ai-review-replay": "tsx scripts/ai-review/replay.ts",
     "alias-key": "tsx scripts/brewery-alias-key.ts",
     "rearm-aliased-orphans": "tsx scripts/rearm-aliased-orphans.ts",

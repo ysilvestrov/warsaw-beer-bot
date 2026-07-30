@@ -226,7 +226,7 @@ async function main(): Promise<void> {
     console.log(`::notice::Context budget: ${diffOnly.length} file(s) sent as diff only.`);
   }
 
-  const raised = await runFind(
+  const { findings: raised } = await runFind(
     { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.findModel },
     { instructions: findInstructions, context, prTitle: cfg.prTitle, prBody: cfg.prBody },
   );
