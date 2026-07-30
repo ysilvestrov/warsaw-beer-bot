@@ -97,6 +97,12 @@ export function costUsd(model: string, u: Usage): number | null {
   // stays unpriced on an unknown model, because its cost is unknown, not zero.
   const billableTokens = u.promptTokens + u.cachedTokens + u.completionTokens;
   if (u.calls === 0 && billableTokens === 0) return 0;
+
+  // A call happened but reported no tokens: the API sent no usage block. Every
+  // completion consumes tokens, so this is unknown cost, not zero — admitted the
+  // same way an unpriced model is, rather than printed as a confident $0.00.
+  if (billableTokens === 0) return null;
+
   const price = PRICES[model];
   if (!price) return null;
   const uncachedInput = Math.max(0, u.promptTokens - u.cachedTokens);

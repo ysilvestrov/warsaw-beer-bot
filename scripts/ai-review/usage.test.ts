@@ -171,3 +171,12 @@ describe('costUsd — the zero-cost shortcut means "nothing happened at all"', (
     expect(costUsd('some-unpriced-model', parseUsage(undefined))).toBeNull();
   });
 });
+
+describe('costUsd — a call whose usage block never arrived', () => {
+  it('is unknown cost, not zero, even at a priced model', () => {
+    // A completion always consumed tokens; if the API did not tell us how many,
+    // printing $0.00 claims a precision we do not have. Unknown is admitted the
+    // same way an unpriced model is: no dollars, and the PR total marked `+`.
+    expect(costUsd('gpt-5.5', parseUsage(undefined))).toBeNull();
+  });
+});
