@@ -89,13 +89,14 @@ export const PRICES_CHECKED_ON = '2026-07-30';
 
 /** Dollars for `u` at `model`'s rates, or null when we have no verified price. */
 export function costUsd(model: string, u: Usage): number | null {
-  // A stage that consumed no tokens spent nothing, whatever its rates would
-  // have been. Without this, an unpriced model that was never called (an
-  // incremental run that skips the find pass) would mark the whole run unpriced
-  // and drop the other stage's real, priced spend from the PR total. The test is
-  // on the token fields rather than on `calls`, because that is where the money
-  // is: usage carrying tokens must be priced even if its call count is missing.
-  if (u.promptTokens === 0 && u.completionTokens === 0) return 0;
+  // Free only when nothing happened at all: no call AND no billable token. That
+  // is the skipped stage this exists for — an incremental run that never runs
+  // find must not mark the whole run unpriced and drop the other stage's real
+  // spend. Both halves are load-bearing: usage carrying tokens is priced even if
+  // its call count is missing, and a call that came back without a usage block
+  // stays unpriced on an unknown model, because its cost is unknown, not zero.
+  const billableTokens = u.promptTokens + u.cachedTokens + u.completionTokens;
+  if (u.calls === 0 && billableTokens === 0) return 0;
   const price = PRICES[model];
   if (!price) return null;
   const uncachedInput = Math.max(0, u.promptTokens - u.cachedTokens);
