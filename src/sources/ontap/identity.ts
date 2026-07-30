@@ -32,7 +32,15 @@ export function stripTrailingSpec(raw: string): string {
   if (!match) return s;
   const grade = match[1].trim().match(GRADE_ATOM);
   const gradeValue = grade ? grade[1].replace(';', ',') : '';
-  const cleaned = `${s.slice(0, match.index)}${grade ? ` ${gradeValue}°` : ''}`.trim();
+  const head = s.slice(0, match.index);
+  // Shops routinely write the grade twice — once inside the name and once in the spec block
+  // ("Platan svetly ležák 11 11°·4,7%", "Holba 12 12°", "Litovel Premium 12° 12°"). Appending
+  // the preserved grade to a head that already ends with the SAME number would keep both, so
+  // the trailing duplicate is replaced instead. A different number is left alone ("Batch 1000 12°").
+  const deduped = grade
+    ? head.replace(new RegExp(`\\s+${escapeRegExp(gradeValue)}\\s*[°%]*\\s*$`, 'u'), '')
+    : head;
+  const cleaned = `${deduped}${grade ? ` ${gradeValue}°` : ''}`.trim();
   return cleaned || s;
 }
 
@@ -137,10 +145,16 @@ export function dedupeBreweryPrefix(name: string, breweryRef: string | null): st
   if (!brewery) return name;
   if (name.toLowerCase().startsWith(`${brewery.toLowerCase()} `)) {
     const remainder = name.slice(brewery.length + 1).trim();
-    // A remainder with no letters (e.g. a bare "12°" grade) isn't a duplicated-prefix
-    // beer name — it means the title was the whole brand followed by a grade, and a
-    // bare grade is not a beer name. Keep the title unchanged in that case.
-    if (remainder && /\p{L}/u.test(remainder)) return remainder;
+    if (!remainder) return name;
+    // A remainder with no letters (e.g. a bare "10°" grade) isn't a duplicated-prefix beer
+    // name — the title was the whole brand followed by a grade, and a bare grade is not a
+    // beer name. Keep the brand, but as its core: the kind word ("Brewery") is never part
+    // of a beer name, so `Konicek Brewery 10°` becomes `Konicek 10°`.
+    if (!/\p{L}/u.test(remainder)) {
+      const core = breweryCore(brewery);
+      return core ? `${core} ${remainder}` : name;
+    }
+    return remainder;
   }
   return name;
 }
