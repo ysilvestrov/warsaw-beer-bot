@@ -5,6 +5,7 @@ import { buildReviewContext } from './ai-review/context';
 import { runFind } from './ai-review/find';
 import { applyGate, changedLineRanges } from './ai-review/gate';
 import { renderBody } from './ai-review/render';
+import { toStored } from './ai-review/state';
 import { verifyAll } from './ai-review/verify';
 
 export const INCLUDE_PATTERNS = [
@@ -268,9 +269,23 @@ async function main(): Promise<void> {
     console.log(`::notice::verify withheld [${r.verdict}] ${r.finding.file}: ${r.evidence}`);
   }
 
+  // Mechanical shape adaptation only: this whole call site is rewritten by
+  // #364 Task 9 (incremental orchestration, real cost line, injected git deps).
+  // Until then, every run behaves as a full review with nothing carried over.
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const body = renderBody({
-    confirmed,
-    counts: { raised: raised.length, gated: kept.length, verified: confirmed.length },
+    open: confirmed.map((v) => ({ finding: toStored(v.finding, v.evidence) })),
+    closed: [],
+    counts: {
+      raised: raised.length,
+      gated: kept.length,
+      verified: confirmed.length,
+      carried: 0,
+      closed: 0,
+    },
+    costLine: null,
+    head: headSha,
+    spend: { usd: 0, runs: 1, unpriced: 1 },
   });
 
   const how = await upsertReview(
