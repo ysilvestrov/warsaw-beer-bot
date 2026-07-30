@@ -195,3 +195,17 @@ describe('#306 follow-up: decimal separator variants in a duplicated grade', () 
     expect(stripTrailingSpec(input)).toBe(expected);
   });
 });
+
+describe('#306 follow-up: a name built from the brewery label carries no kind word', () => {
+  test.each([
+    ['Pivovar Zichovec Brewery 12°·5%', 'Pivovar Zichovec Brewery', 'Zichovec 12°'],
+    ['Konicek Brewery 10 10°·4%', 'Konicek Brewery', 'Konicek 10°'],
+    ['Browar Zamkowy 11°·4,5%', 'Browar Zamkowy', 'Zamkowy 11°'],
+  ])('%s + %s → %s', (h4, brewery, expected) => {
+    expect(extractBeerName(h4, brewery)).toBe(expected);
+  });
+
+  test('a label that is only a kind word leaves the name untouched', () => {
+    expect(extractBeerName('Pivovar 12°·5%', 'Pivovar')).toBe('Pivovar 12°');
+  });
+});

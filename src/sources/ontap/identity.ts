@@ -67,6 +67,15 @@ export function breweryCore(raw: string): string {
     .trim();
 }
 
+// The brand alone: the kind word is dropped from BOTH ends, since shops write it either way
+// ("Pivovar Zichovec Brewery"). Used when a beer name has to be built out of the brewery label,
+// where a kind word is never content. Returns '' when the label is nothing but a kind word.
+export function breweryBrand(raw: string): string {
+  return breweryCore(raw)
+    .replace(/^(?:brewery|browar|brasserie|brouwerij|brauerei|pivovar|birrificio)\s+/iu, '')
+    .trim();
+}
+
 function stripLeadingCider(raw: string): string {
   return compact(raw).replace(/^(?:cydr|cider)(?:\s+|$)/iu, '').trim();
 }
@@ -155,8 +164,8 @@ export function dedupeBreweryPrefix(name: string, breweryRef: string | null): st
     // beer name. Keep the brand, but as its core: the kind word ("Brewery") is never part
     // of a beer name, so `Konicek Brewery 10°` becomes `Konicek 10°`.
     if (!/\p{L}/u.test(remainder)) {
-      const core = breweryCore(brewery);
-      return core ? `${core} ${remainder}` : name;
+      const brand = breweryBrand(brewery);
+      return brand ? `${brand} ${remainder}` : name;
     }
     return remainder;
   }
