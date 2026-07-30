@@ -936,6 +936,15 @@ describe('findingKey', () => {
     expect(a).toBe(b);
   });
 
+  it('still agrees when the 400-char cut lands inside a run of whitespace', () => {
+    // Normalising before slicing would collapse the run away in the stored copy
+    // only, shortening it past the compared prefix and splitting the key.
+    const full = `if (a) {\n${' '.repeat(500)}\n  doSomething();\n}`;
+    expect(findingKey('src/a.ts', full, 'c')).toBe(
+      findingKey('src/a.ts', full.slice(0, 400), 'c'),
+    );
+  });
+
   it('separates two different claims about the same line', () => {
     expect(findingKey('src/a.ts', 'x', 'claim one')).not.toBe(
       findingKey('src/a.ts', 'x', 'claim two'),
@@ -992,28 +1001,35 @@ In `scripts/ai-review/gate.ts`, add after `normalizeWs`:
 
 ```ts
 /**
- * How many normalised characters of a quote take part in a finding's identity.
- *
- * Shorter than state.ts's MAX_QUOTE_CHARS on purpose: a stored quote is
- * truncated raw, a freshly raised one is not, and the two normalise to slightly
- * different lengths at the cut. Comparing a prefix well inside both keeps a
- * carried finding and its re-derived twin on the same key.
- */
-const KEY_QUOTE_CHARS = 300;
-
-/**
  * A finding's identity: file + quoted code + what is claimed about it.
  *
  * The claim is load-bearing — two different bugs can live on the same line, and
  * keying on the quote alone would publish only one of them.
+ *
+ * The quote is cut **before** it is normalised, at exactly the length
+ * `toStored` cuts at. That order is the whole trick: a carried finding holds a
+ * raw 400-character prefix, a freshly raised one holds the full quote, and both
+ * therefore pass through the identical `normalizeWs(slice(0, 400))` here. Doing
+ * it the other way round — normalise, then slice — desynchronises the two
+ * whenever the cut lands inside a run of whitespace, because collapsing a run
+ * the truncated copy no longer contains shortens it below the compared prefix.
+ * The consequence would be mild but real: a still-open finding re-derived by
+ * the incremental pass would miss its own carried twin and be republished as
+ * new.
  */
 export function findingKey(file: string, quote: string, claim: string): string {
   return [
     file,
-    normalizeWs(quote).slice(0, KEY_QUOTE_CHARS),
+    normalizeWs(quote.slice(0, MAX_QUOTE_CHARS)),
     normalizeWs(claim).toLowerCase(),
   ].join('::');
 }
+```
+
+Add the import at the top of `gate.ts` (no cycle: `gate` → `state` → `types`):
+
+```ts
+import { MAX_QUOTE_CHARS } from './state';
 ```
 
 Change `applyGate`'s parameter type and its `seen` initialiser:
