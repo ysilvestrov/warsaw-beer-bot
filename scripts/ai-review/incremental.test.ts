@@ -70,3 +70,73 @@ describe('decideMode', () => {
     expect(d.diffSpec).toBe(`${OLD}..HEAD`);
   });
 });
+
+import { reconcileFindings } from './incremental';
+import type { StoredFinding } from './state';
+
+const stored = (over: Partial<StoredFinding> = {}): StoredFinding => ({
+  file: 'src/a.ts',
+  quote: "return 'not_found';",
+  matchedLine: 3,
+  matchedEndLine: 3,
+  claim: 'merge reported as failure',
+  why_it_breaks: 'cron stats count a success as a miss',
+  severity: 'P1',
+  evidence: 'line 3 returns not_found',
+  ...over,
+});
+
+describe('reconcileFindings', () => {
+  it('carries a finding whose quote is still there, refreshing its line numbers', () => {
+    const content = ['// a new line on top', 'function f() {', "  return 'not_found';", '}'].join('\n');
+    const out = reconcileFindings({ stored: [stored()], fileContent: () => content });
+    expect(out.carried).toHaveLength(1);
+    expect(out.carried[0].matchedLine).toBe(3);
+    expect(out.carried[0].matchedEndLine).toBe(3);
+    expect(out.recheck).toEqual([]);
+    expect(out.closed).toEqual([]);
+  });
+
+  it('closes a finding whose file was deleted or became unreadable', () => {
+    const out = reconcileFindings({ stored: [stored()], fileContent: () => null });
+    expect(out.closed).toEqual([{ finding: stored(), reason: 'obsolete' }]);
+    expect(out.carried).toEqual([]);
+    expect(out.recheck).toEqual([]);
+  });
+
+  it('queues a re-check when the quoted code was edited away', () => {
+    const out = reconcileFindings({
+      stored: [stored()],
+      fileContent: () => "function f() {\n  return 'merged';\n}",
+    });
+    expect(out.recheck).toHaveLength(1);
+    expect(out.carried).toEqual([]);
+  });
+
+  it('re-anchors to the occurrence nearest the stored line when the quote repeats', () => {
+    const content = [
+      "  return 'not_found';", // line 1
+      'const filler = 0;',
+      "  return 'not_found';", // line 3
+    ].join('\n');
+    const out = reconcileFindings({ stored: [stored({ matchedLine: 3 })], fileContent: () => content });
+    expect(out.carried[0].matchedLine).toBe(3);
+  });
+
+  it('handles a mixed batch across several files', () => {
+    const a = stored({ file: 'src/a.ts', quote: 'const a = 1;' });
+    const b = stored({ file: 'src/b.ts', quote: 'const b = 2;' });
+    const c = stored({ file: 'src/c.ts', quote: 'const c = 3;' });
+    const out = reconcileFindings({
+      stored: [a, b, c],
+      fileContent: (path) => {
+        if (path === 'src/a.ts') return 'const a = 1;';
+        if (path === 'src/b.ts') return 'const b = 99;';
+        return null;
+      },
+    });
+    expect(out.carried.map((f) => f.file)).toEqual(['src/a.ts']);
+    expect(out.recheck.map((f) => f.file)).toEqual(['src/b.ts']);
+    expect(out.closed.map((c) => c.finding.file)).toEqual(['src/c.ts']);
+  });
+});
