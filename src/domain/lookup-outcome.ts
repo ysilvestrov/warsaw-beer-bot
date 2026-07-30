@@ -38,7 +38,7 @@ export function applyLookupOutcome(
           // mergeIntoCanonical deletes the orphan row → its enrich_failures row is
           // CASCADE-removed; this is a success, not a failure. Reported as its own
           // kind so it stops being counted (and answered) as not_found (#351).
-          mergeIntoCanonical(deps.db, beerId, canonical.id);
+          mergeIntoCanonical(deps.db, beerId, canonical.id, nowIso);
           deps.log.warn(
             { beerId, canonicalId: canonical.id, bid: outcome.result.bid },
             'enrich: merged duplicate orphan into canonical',

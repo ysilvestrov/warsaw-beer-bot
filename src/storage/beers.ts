@@ -114,13 +114,22 @@ export function recordLookupSuccess(
   bumpCatalogVersion();
 }
 
-// Merges an orphan beer into a canonical catalog entry by redirecting all
-// match_links and deleting the orphan. Called when recordLookupSuccess hits a
-// UNIQUE constraint (the found untappd_id already belongs to another row).
-export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number): void {
-  db.prepare('UPDATE match_links SET untappd_beer_id = ? WHERE untappd_beer_id = ?')
-    .run(canonicalId, orphanId);
-  db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
+// Merges an orphan beer into a canonical catalog entry by redirecting all match_links and
+// deleting the orphan. Called when recordLookupSuccess hits a UNIQUE constraint (the found
+// untappd_id already belongs to another row).
+export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number, at: string): void {
+  db.transaction(() => {
+    // #366: the merge is the only moment we learn "this ontap_ref is that canonical beer".
+    // The stamp keeps that knowledge past the next ingest; without it refreshOntap recomputes,
+    // misses again (that is why the row needed a merge) and re-creates the orphan — ~65 wasted
+    // Untappd lookups a day, plus repeat metered web-fallback calls.
+    db.prepare('UPDATE match_links SET untappd_beer_id = ?, merged_at = ? WHERE untappd_beer_id = ?')
+      .run(canonicalId, at, orphanId);
+    // checkins.beer_id → beers(id) has NO ON DELETE CASCADE and foreign_keys=ON, so a check-in
+    // on the orphan would abort the DELETE. Point it at the canonical row first (as pinMatch does).
+    db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
+    db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
+  })();
   bumpCatalogVersion();
 }
 
