@@ -126,8 +126,26 @@ describe('extractBeerName', () => {
   });
 
   test('does not reduce a brand-plus-grade title to the bare grade', () => {
-    expect(extractBeerName('Konrad Brewery 12°·5%', 'Konrad Brewery')).toBe('Konrad Brewery 12°');
-    expect(extractBeerName('Bernard Brewery 11°·5%', 'Bernard Brewery')).toBe('Bernard Brewery 11°');
+    expect(extractBeerName('Konrad Brewery 12°·5%', 'Konrad Brewery')).toBe('Konrad 12°');
+    expect(extractBeerName('Bernard Brewery 11°·5%', 'Bernard Brewery')).toBe('Bernard 11°');
+  });
+
+  // Live rows from the first production run after #306 shipped (2026-07-30).
+  test('collapses a grade the shop wrote both in the name and in the spec', () => {
+    expect(extractBeerName('Konicek Brewery 10 10°·4%', 'Konicek Brewery')).toBe('Konicek 10°');
+    expect(extractBeerName('Platan Brewery svetly leżak 11 11°·4,7%', 'Platan Brewery'))
+      .toBe('svetly leżak 11°');
+    expect(extractBeerName('Pivovar Zichovec Brewery Bridge Please! 12 12°·5%', 'Pivovar Zichovec Brewery'))
+      .toBe('Bridge Please! 12°');
+    expect(extractBeerName('Litovel Brewery Litovel Premium 12° 12°·5%', 'Litovel Brewery'))
+      .toBe('Litovel Premium 12°');
+  });
+
+  test('keeps a trailing number that is not the grade', () => {
+    expect(extractBeerName('Funky Fluid Brewery Batch 1000 12°·6%', 'Funky Fluid Brewery'))
+      .toBe('Batch 1000 12°');
+    expect(extractBeerName('Holba Brewery Holba 11 Premium 12,5°·5.2%', 'Holba Brewery'))
+      .toBe('Holba 11 Premium 12,5°');
   });
 });
 
@@ -151,5 +169,43 @@ describe('resolveTapIdentity', () => {
   test('drops only an empty name', () => {
     expect(resolveTapIdentity('Some Brewery', '')).toEqual({ kind: 'drop', reason: 'empty-name' });
     expect(resolveTapIdentity('Some Brewery', '   ')).toEqual({ kind: 'drop', reason: 'empty-name' });
+  });
+});
+
+describe('#306 follow-up: same-number spec written twice', () => {
+  test('collapses a "%"-spelled duplicate of the grade', () => {
+    expect(extractBeerName('Primator Brewery 11% 11°·4,7%', 'Primator Brewery')).toBe('Primator 11°');
+  });
+
+  test('keeps an interior percentage that is a different number', () => {
+    expect(extractBeerName('Litovel Brewery Litovel Pomelo 0% 12°·<0,5%', 'Litovel Brewery'))
+      .toBe('Litovel Pomelo 0% 12°');
+  });
+});
+
+describe('#306 follow-up: decimal separator variants in a duplicated grade', () => {
+  test.each([
+    ['Beer 8;5 8;5°·3;5%', 'Beer 8,5°'],                       // ";" on both sides
+    ['Pilsner 12.5 12,5°·4,7%', 'Pilsner 12,5°'],              // "." in the name, "," in the spec
+    // The spec block's own separator is what survives — only ";" is treated as a typo and
+    // normalized to a comma; a "." is a legitimate decimal style and is left as the shop wrote it.
+    ['Pilsner 12,5 12.5°·4,7%', 'Pilsner 12.5°'],
+    ['Czarna Dziura 11,5° 11,5°·5%', 'Czarna Dziura 11,5°'],   // live row
+  ])('%s → %s', (input, expected) => {
+    expect(stripTrailingSpec(input)).toBe(expected);
+  });
+});
+
+describe('#306 follow-up: a name built from the brewery label carries no kind word', () => {
+  test.each([
+    ['Pivovar Zichovec Brewery 12°·5%', 'Pivovar Zichovec Brewery', 'Zichovec 12°'],
+    ['Konicek Brewery 10 10°·4%', 'Konicek Brewery', 'Konicek 10°'],
+    ['Browar Zamkowy 11°·4,5%', 'Browar Zamkowy', 'Zamkowy 11°'],
+  ])('%s + %s → %s', (h4, brewery, expected) => {
+    expect(extractBeerName(h4, brewery)).toBe(expected);
+  });
+
+  test('a label that is only a kind word leaves the name untouched', () => {
+    expect(extractBeerName('Pivovar 12°·5%', 'Pivovar')).toBe('Pivovar 12°');
   });
 });
