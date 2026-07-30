@@ -75,9 +75,27 @@ export function ensureHeadCommit(params: {
   }
 }
 
+/**
+ * Which commit the replay diffs against.
+ *
+ * Without an explicit base a replay always measures a *first* review, which is
+ * no longer what CI usually runs. Passing the previously reviewed head lets a
+ * real incremental run be measured offline — including its much smaller find
+ * prompt — before betting money on a config change.
+ */
+export function resolveReplayBase(p: {
+  explicit: string | undefined;
+  baseRefName: string;
+  head: string;
+  mergeBase: (a: string, b: string) => string;
+}): string {
+  return p.explicit ?? p.mergeBase(`origin/${p.baseRefName}`, p.head);
+}
+
 async function main(): Promise<void> {
   const pr = process.argv[2];
-  if (!pr) throw new Error('usage: npm run ai-review-replay -- <pr-number>');
+  if (!pr) throw new Error('usage: npm run ai-review-replay -- <pr-number> [base-sha]');
+  const explicitBase = process.argv[3];
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
@@ -107,7 +125,13 @@ async function main(): Promise<void> {
     log: (message) => console.error(message),
   });
 
-  const mergeBase = sh(['merge-base', `origin/${meta.baseRefName}`, head]).trim();
+  const mergeBase = resolveReplayBase({
+    explicit: explicitBase,
+    baseRefName: meta.baseRefName,
+    head,
+    mergeBase: (a, b) => sh(['merge-base', a, b]).trim(),
+  });
+  console.error(`replaying ${mergeBase}..${head}`);
 
   const changed = sh(['diff', '--name-only', `${mergeBase}..${head}`])
     .split('\n')
