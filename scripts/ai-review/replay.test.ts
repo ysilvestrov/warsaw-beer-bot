@@ -92,3 +92,27 @@ describe('ensureHeadCommit', () => {
     ).toThrow(/pull\/352\/head/);
   });
 });
+
+import { resolveReplayBase } from './replay';
+
+describe('resolveReplayBase', () => {
+  it('uses the merge-base with the PR base branch by default', () => {
+    const base = resolveReplayBase({
+      explicit: undefined,
+      baseRefName: 'main',
+      head: 'head-sha',
+      mergeBase: (a, b) => `merge-base(${a},${b})`,
+    });
+    expect(base).toBe('merge-base(origin/main,head-sha)');
+  });
+
+  it('uses an explicit base verbatim so an incremental push can be replayed', () => {
+    const base = resolveReplayBase({
+      explicit: 'abc123',
+      baseRefName: 'main',
+      head: 'head-sha',
+      mergeBase: () => 'should-not-be-called',
+    });
+    expect(base).toBe('abc123');
+  });
+});

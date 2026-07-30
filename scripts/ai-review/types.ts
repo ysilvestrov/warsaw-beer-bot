@@ -44,3 +44,28 @@ export interface VerifiedFinding {
   verdict: Verdict;
   evidence: string;
 }
+
+/**
+ * One adjudication question, flattened.
+ *
+ * The verify layer deliberately does not know whether this came from a fresh
+ * gated finding or from re-checking one a previous run published: the question
+ * ("does this claim hold against this file?") is identical, only what the caller
+ * does with the answer differs. `id` is the caller's own handle, echoed back on
+ * the result so it can map to whichever object it came from.
+ */
+export interface VerifyRequest {
+  id: string;
+  file: string;
+  matchedLine: number;
+  matchedEndLine: number;
+  quote: string;
+  claim: string;
+  why_it_breaks: string;
+}
+
+export interface VerifyResult {
+  id: string;
+  verdict: Verdict;
+  evidence: string;
+}

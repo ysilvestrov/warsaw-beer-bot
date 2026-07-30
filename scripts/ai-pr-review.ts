@@ -3,9 +3,13 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 
 import { buildReviewContext } from './ai-review/context';
 import { runFind } from './ai-review/find';
-import { applyGate, changedLineRanges } from './ai-review/gate';
-import { renderBody } from './ai-review/render';
+import { applyGate, changedLineRanges, findingKey } from './ai-review/gate';
+import { decideMode, reconcileFindings, type ClosedFinding } from './ai-review/incremental';
+import { renderBody, type OpenFinding } from './ai-review/render';
+import { parseState, toStored, type StoredFinding } from './ai-review/state';
+import { EMPTY_USAGE, addUsage, costUsd, formatCostLine } from './ai-review/usage';
 import { verifyAll } from './ai-review/verify';
+import type { GatedFinding, VerifyRequest } from './ai-review/types';
 
 export const INCLUDE_PATTERNS = [
   'src/**/*.ts',
@@ -122,29 +126,54 @@ async function githubError(action: string, res: Response): Promise<Error> {
   return new Error(`GitHub ${action} HTTP ${res.status}: ${text.slice(0, 300)}`);
 }
 
-export async function upsertReview(deps: GithubDeps, body: string): Promise<'created' | 'updated'> {
-  const fetchFn = deps.fetchFn ?? fetch;
-  const base = `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}/reviews`;
-  const headers = {
-    Authorization: `Bearer ${deps.token}`,
+export interface ExistingReview {
+  id: number;
+  body: string;
+}
+
+function githubHeaders(token: string): Record<string, string> {
+  return {
+    Authorization: `Bearer ${token}`,
     Accept: 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28',
     'User-Agent': 'warsaw-beer-bot-ai-review',
     'Content-Type': 'application/json',
   };
+}
 
-  // The bot's marker review is created on the first run, so it is among the
-  // earliest reviews and stays on the first page; per_page=100 is enough to find
-  // it without pagination on this repo's PRs.
-  const listRes = await fetchFn(`${base}?per_page=100`, { headers });
-  if (!listRes.ok) throw await githubError('list reviews', listRes);
-  const reviews = (await listRes.json()) as ReviewRow[];
-  const existing = reviews.find(
-    (r) => r.user?.type === 'Bot' && (r.body ?? '').includes(MARKER),
-  );
+/**
+ * The bot's own marker review, if it has one.
+ *
+ * Read before the review runs, not only when posting: its body carries the
+ * state block that decides whether this run is full, incremental or a free
+ * republish. The result is handed to `upsertReview` so the list call is paid
+ * for once.
+ *
+ * The marker review is created on the first run, so it is among the earliest
+ * reviews and stays on the first page; per_page=100 finds it without paging.
+ */
+export async function findExistingReview(deps: GithubDeps): Promise<ExistingReview | null> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const base = `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}/reviews`;
+  const res = await fetchFn(`${base}?per_page=100`, { headers: githubHeaders(deps.token) });
+  if (!res.ok) throw await githubError('list reviews', res);
+  const reviews = (await res.json()) as ReviewRow[];
+  const existing = reviews.find((r) => r.user?.type === 'Bot' && (r.body ?? '').includes(MARKER));
+  return existing ? { id: existing.id, body: existing.body ?? '' } : null;
+}
 
-  if (existing) {
-    const res = await fetchFn(`${base}/${existing.id}`, {
+export async function upsertReview(
+  deps: GithubDeps,
+  body: string,
+  existing?: ExistingReview | null,
+): Promise<'created' | 'updated'> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const base = `https://api.github.com/repos/${deps.repo}/pulls/${deps.prNumber}/reviews`;
+  const headers = githubHeaders(deps.token);
+  const target = existing === undefined ? await findExistingReview(deps) : existing;
+
+  if (target) {
+    const res = await fetchFn(`${base}/${target.id}`, {
       method: 'PUT',
       headers,
       body: JSON.stringify({ body }),
@@ -160,23 +189,6 @@ export async function upsertReview(deps: GithubDeps, body: string): Promise<'cre
   });
   if (!res.ok) throw await githubError('create review', res);
   return 'created';
-}
-
-function listChangedFiles(baseRef: string): string[] {
-  const out = execFileSync('git', ['diff', '--name-only', `origin/${baseRef}...HEAD`], {
-    encoding: 'utf8',
-  });
-  return out
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
-function getDiff(baseRef: string, files: string[]): string {
-  return execFileSync('git', ['diff', `origin/${baseRef}...HEAD`, '--', ...files], {
-    encoding: 'utf8',
-    maxBuffer: 50 * 1024 * 1024,
-  });
 }
 
 /**
@@ -206,64 +218,259 @@ function readInstructions(path: string): string {
   return readFileSync(path, 'utf8');
 }
 
-async function main(): Promise<void> {
-  const cfg = readConfig(process.env);
+/**
+ * Everything `runReview` touches outside itself. Injected so the whole
+ * orchestration — including the incremental path, which otherwise needs a git
+ * fixture with real ancestry — is testable without a network or a repository.
+ */
+export interface ReviewDeps {
+  headSha: string;
+  hasCommit: (sha: string) => boolean;
+  isAncestor: (ancestor: string, descendant: string) => boolean;
+  listChangedFiles: (diffSpec: string) => string[];
+  getDiff: (diffSpec: string, files: string[]) => string;
+  readFile: (path: string) => string | null;
+  readInstructions: (path: string) => string;
+  log: (message: string) => void;
+  openaiFetch?: typeof fetch;
+  githubFetch?: typeof fetch;
+}
 
-  const reviewable = filterReviewableFiles(listChangedFiles(cfg.baseRef));
-  if (reviewable.length === 0) {
-    console.log('::notice::AI review skipped: no changed files are in the reviewer scope.');
+function toVerifyRequest(id: string, f: GatedFinding | StoredFinding): VerifyRequest {
+  return {
+    id,
+    file: f.file,
+    matchedLine: f.matchedLine,
+    matchedEndLine: f.matchedEndLine,
+    quote: f.quote,
+    claim: f.claim,
+    why_it_breaks: f.why_it_breaks,
+  };
+}
+
+export async function runReview(cfg: Config, deps: ReviewDeps): Promise<void> {
+  const gh: GithubDeps = {
+    repo: cfg.repo,
+    prNumber: cfg.prNumber,
+    token: cfg.githubToken,
+    fetchFn: deps.githubFetch,
+  };
+
+  const existing = await findExistingReview(gh);
+  const state = parseState(existing?.body);
+
+  const decision = decideMode({
+    state,
+    headSha: deps.headSha,
+    baseRef: cfg.baseRef,
+    hasCommit: deps.hasCommit,
+    isAncestor: deps.isAncestor,
+  });
+  deps.log(`::notice::AI review mode: ${decision.mode} — ${decision.reason}`);
+
+  // Nothing new to say and nothing new to charge for: put back exactly what is
+  // already there, so the review (and its state) survives a workflow re-run.
+  if (decision.mode === 'republish' && existing) {
+    await upsertReview(gh, existing.body, existing);
+    deps.log(`AI review republished unchanged on PR #${cfg.prNumber} (0 API calls).`);
     return;
   }
 
-  const findInstructions = readInstructions(FIND_INSTRUCTIONS_PATH);
-  const verifyInstructions = readInstructions(VERIFY_INSTRUCTIONS_PATH);
+  const reviewable = filterReviewableFiles(deps.listChangedFiles(decision.diffSpec));
 
-  const diff = getDiff(cfg.baseRef, reviewable);
-  const readFile = readReviewableFile;
-
-  const { text: context, diffOnly } = buildReviewContext({ diff, reviewable, readFile });
-  if (diffOnly.length > 0) {
-    console.log(`::notice::Context budget: ${diffOnly.length} file(s) sent as diff only.`);
+  // A first review with nothing in scope has nothing to publish. An incremental
+  // one still does — the previous run's findings are open until proven closed.
+  if (reviewable.length === 0 && !state) {
+    deps.log('::notice::AI review skipped: no changed files are in the reviewer scope.');
+    return;
   }
 
-  const raised = await runFind(
-    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.findModel },
-    { instructions: findInstructions, context, prTitle: cfg.prTitle, prBody: cfg.prBody },
-  );
+  const openaiDeps = {
+    endpoint: cfg.openaiEndpoint,
+    apiKey: cfg.openaiApiKey,
+    fetchFn: deps.openaiFetch,
+  };
 
-  const { kept, dropped } = applyGate({
-    findings: raised,
-    reviewable,
-    changed: changedLineRanges(diff),
-    fileContent: readFile,
+  // Deliberately runs in `full` mode too, not only incremental: the mode decides
+  // what this run re-reads, never what it forgets. A published finding is retired
+  // by evidence — its file gone, or a re-check refuting it — and after a
+  // force-push the quote it was published against no longer anchors, so it lands
+  // in `recheck` and is adjudicated rather than carried. Dropping the state on a
+  // force-push would instead delete open findings the maintainer is mid-fix on.
+  const { carried, recheck, closed: obsolete } = reconcileFindings({
+    stored: state?.findings ?? [],
+    fileContent: deps.readFile,
   });
-  for (const d of dropped) {
-    console.log(`::notice::gate dropped [${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
+
+  let findUsage = EMPTY_USAGE;
+  let raisedCount = 0;
+  let fresh: GatedFinding[] = [];
+
+  if (reviewable.length > 0) {
+    const diff = deps.getDiff(decision.diffSpec, reviewable);
+    const { text: context, diffOnly } = buildReviewContext({
+      diff,
+      reviewable,
+      readFile: deps.readFile,
+    });
+    if (diffOnly.length > 0) {
+      deps.log(`::notice::Context budget: ${diffOnly.length} file(s) sent as diff only.`);
+    }
+
+    const found = await runFind(
+      { ...openaiDeps, model: cfg.findModel },
+      {
+        instructions: deps.readInstructions(FIND_INSTRUCTIONS_PATH),
+        context,
+        prTitle: cfg.prTitle,
+        prBody: cfg.prBody,
+      },
+    );
+    findUsage = found.usage;
+    raisedCount = found.findings.length;
+
+    const gateResult = applyGate({
+      findings: found.findings,
+      reviewable,
+      changed: changedLineRanges(diff),
+      fileContent: deps.readFile,
+      // Carried findings are already published; without this seed an
+      // incremental pass over the same file would print each of them twice.
+      knownKeys: carried.map((f) => findingKey(f.file, f.quote, f.claim)),
+    });
+    fresh = gateResult.kept;
+    for (const d of gateResult.dropped) {
+      deps.log(`::notice::gate dropped [${d.reason}] ${d.finding.file}: ${d.finding.claim}`);
+    }
+  } else {
+    deps.log('::notice::AI review: this push changed no reviewable file; find pass skipped.');
   }
 
-  const { confirmed, rejected } = await verifyAll(
-    { endpoint: cfg.openaiEndpoint, apiKey: cfg.openaiApiKey, model: cfg.verifyModel },
-    { instructions: verifyInstructions, findings: kept, fileContent: readFile },
-  );
-  for (const r of rejected) {
-    console.log(`::notice::verify withheld [${r.verdict}] ${r.finding.file}: ${r.evidence}`);
+  const freshById = new Map(fresh.map((f, i) => [`f${i}`, f]));
+  const recheckById = new Map(recheck.map((f, i) => [`r${i}`, f]));
+  const requests = [
+    ...fresh.map((f, i) => toVerifyRequest(`f${i}`, f)),
+    ...recheck.map((f, i) => toVerifyRequest(`r${i}`, f)),
+  ];
+
+  const verified =
+    requests.length === 0
+      ? { results: [], usage: EMPTY_USAGE }
+      : await verifyAll(
+          { ...openaiDeps, model: cfg.verifyModel },
+          {
+            instructions: deps.readInstructions(VERIFY_INSTRUCTIONS_PATH),
+            requests,
+            fileContent: deps.readFile,
+          },
+        );
+
+  const open: OpenFinding[] = carried.map((finding) => ({
+    finding,
+    note: 'carried from an earlier push',
+  }));
+  const closed: ClosedFinding[] = [...obsolete];
+  let confirmedCount = 0;
+
+  for (const r of verified.results) {
+    const freshFinding = freshById.get(r.id);
+    if (freshFinding) {
+      // Fresh finding: fail closed. Never publish a claim nobody checked.
+      if (r.verdict === 'confirmed') {
+        open.push({ finding: toStored(freshFinding, r.evidence) });
+        confirmedCount += 1;
+      } else {
+        deps.log(`::notice::verify withheld [${r.verdict}] ${freshFinding.file}: ${r.evidence}`);
+      }
+      continue;
+    }
+
+    // Re-check of an already published finding: fail OPEN, deliberately. It was
+    // published on evidence, and dropping it on a transient API error would
+    // lose information the maintainer is acting on.
+    const old = recheckById.get(r.id)!;
+    if (r.verdict === 'confirmed') {
+      open.push({ finding: { ...old, evidence: r.evidence }, note: 'the fix did not close this' });
+    } else if (r.verdict === 'error') {
+      open.push({ finding: old, note: `unverified this run (${r.evidence})` });
+    } else {
+      closed.push({ finding: old, reason: 'fixed' });
+    }
   }
+
+  const runUsage = addUsage(findUsage, verified.usage);
+  const findUsd = costUsd(cfg.findModel, findUsage);
+  const verifyUsd = costUsd(cfg.verifyModel, verified.usage);
+  const runUsd = findUsd === null || verifyUsd === null ? null : findUsd + verifyUsd;
+  const previousSpend = state?.spend ?? { usd: 0, runs: 0, unpriced: 0 };
+  const spend = {
+    usd: previousSpend.usd + (runUsd ?? 0),
+    runs: previousSpend.runs + 1,
+    unpriced: previousSpend.unpriced + (runUsd === null ? 1 : 0),
+  };
+  const costLine = formatCostLine({
+    find: findUsage,
+    verify: verified.usage,
+    runUsd,
+    totalUsd: spend.usd,
+    unpriced: spend.unpriced,
+  });
+  deps.log(`::notice::AI review cost: ${costLine}`);
 
   const body = renderBody({
-    confirmed,
-    counts: { raised: raised.length, gated: kept.length, verified: confirmed.length },
+    open,
+    closed,
+    counts: {
+      raised: raisedCount,
+      gated: fresh.length,
+      verified: confirmedCount,
+      carried: carried.length,
+      closed: closed.length,
+    },
+    costLine,
+    head: deps.headSha,
+    spend,
   });
 
-  const how = await upsertReview(
-    { repo: cfg.repo, prNumber: cfg.prNumber, token: cfg.githubToken },
-    wrapBody(body),
-  );
+  const how = await upsertReview(gh, wrapBody(body), existing);
 
-  console.log(
-    `AI review ${how} on PR #${cfg.prNumber}: ` +
-      `${raised.length} raised → ${kept.length} gated → ${confirmed.length} verified ` +
-      `(${reviewable.length} file(s) in scope).`,
+  deps.log(
+    `AI review ${how} on PR #${cfg.prNumber} [${decision.mode}]: ` +
+      `${raisedCount} raised → ${fresh.length} gated → ${confirmedCount} confirmed, ` +
+      `${carried.length} carried, ${closed.length} closed ` +
+      `(${reviewable.length} file(s) in scope, ${runUsage.calls} API call(s)).`,
   );
+}
+
+function gitOk(args: string[]): boolean {
+  try {
+    execFileSync('git', args, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function main(): Promise<void> {
+  const cfg = readConfig(process.env);
+  await runReview(cfg, {
+    headSha: execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim(),
+    hasCommit: (sha) => gitOk(['cat-file', '-e', `${sha}^{commit}`]),
+    isAncestor: (a, b) => gitOk(['merge-base', '--is-ancestor', a, b]),
+    listChangedFiles: (diffSpec) =>
+      execFileSync('git', ['diff', '--name-only', diffSpec], { encoding: 'utf8' })
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    getDiff: (diffSpec, files) =>
+      execFileSync('git', ['diff', diffSpec, '--', ...files], {
+        encoding: 'utf8',
+        maxBuffer: 50 * 1024 * 1024,
+      }),
+    readFile: readReviewableFile,
+    readInstructions,
+    log: (message) => console.log(message),
+  });
 }
 
 if (require.main === module) {

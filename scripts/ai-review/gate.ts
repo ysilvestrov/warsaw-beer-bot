@@ -4,12 +4,38 @@ import type {
   GatedFinding,
   RawFinding,
 } from './types';
+import { MAX_QUOTE_CHARS } from './state';
 
 /** Longest multi-line quote we will try to match, in lines. */
 const MAX_QUOTE_SPAN = 40;
 
 export function normalizeWs(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * A finding's identity: file + quoted code + what is claimed about it.
+ *
+ * The claim is load-bearing — two different bugs can live on the same line, and
+ * keying on the quote alone would publish only one of them.
+ *
+ * The quote is cut **before** it is normalised, at exactly the length
+ * `toStored` cuts at. That order is the whole trick: a carried finding holds a
+ * raw 400-character prefix, a freshly raised one holds the full quote, and both
+ * therefore pass through the identical `normalizeWs(slice(0, 400))` here. Doing
+ * it the other way round — normalise, then slice — desynchronises the two
+ * whenever the cut lands inside a run of whitespace, because collapsing a run
+ * the truncated copy no longer contains shortens it below the compared prefix.
+ * The consequence would be mild but real: a still-open finding re-derived by
+ * the incremental pass would miss its own carried twin and be republished as
+ * new.
+ */
+export function findingKey(file: string, quote: string, claim: string): string {
+  return [
+    file,
+    normalizeWs(quote.slice(0, MAX_QUOTE_CHARS)),
+    normalizeWs(claim).toLowerCase(),
+  ].join('::');
 }
 
 /** 1-based inclusive line span of one match of a quote. */
@@ -137,7 +163,7 @@ function distanceTo(match: QuoteMatch, line: number): number {
  * usable report (missing, zero, negative, non-finite) the first occurrence
  * stands, which is the previous behaviour.
  */
-function pickMatch(matches: QuoteMatch[], reportedLine: number): QuoteMatch {
+export function pickMatch(matches: QuoteMatch[], reportedLine: number): QuoteMatch {
   if (matches.length === 1) return matches[0];
   if (!Number.isFinite(reportedLine) || reportedLine < 1) return matches[0];
 
@@ -159,10 +185,16 @@ export function applyGate(params: {
   reviewable: string[];
   changed: Map<string, Array<[number, number]>>;
   fileContent: (path: string) => string | null;
+  /**
+   * Identities already published by an earlier run. An incremental pass
+   * re-reads files it reviewed before, so without this seed a still-open
+   * finding would be raised again and printed twice.
+   */
+  knownKeys?: Iterable<string>;
 }): GateResult {
   const { findings, reviewable, changed, fileContent } = params;
   const inScope = new Set(reviewable);
-  const seen = new Set<string>();
+  const seen = new Set<string>(params.knownKeys ?? []);
   const kept: GatedFinding[] = [];
   const dropped: DroppedFinding[] = [];
 
@@ -198,13 +230,7 @@ export function applyGate(params: {
       finding.start_line,
     );
 
-    // The claim is part of the identity: two different bugs can live on the
-    // same line, and keying on the quote alone would publish only one of them.
-    const key = [
-      finding.file,
-      normalizeWs(finding.quote),
-      normalizeWs(finding.claim).toLowerCase(),
-    ].join('::');
+    const key = findingKey(finding.file, finding.quote, finding.claim);
     if (seen.has(key)) {
       dropped.push({ finding, reason: 'duplicate' });
       continue;

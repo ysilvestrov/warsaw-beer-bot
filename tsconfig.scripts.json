@@ -1,0 +1,15 @@
+{
+  // `tsconfig.json` includes only `src/**/*`, so nothing under `scripts/` had
+  // ever been typechecked — a pipeline that runs on every PR was covered by
+  // tests alone. This config closes that hole for the AI reviewer.
+  //
+  // Scoped to the reviewer rather than all of `scripts/` deliberately:
+  // `bench-match.ts` carries four pre-existing type errors that are not this
+  // change's to fix, and a check that is red on arrival is a check nobody runs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": ["scripts/ai-review/**/*", "scripts/ai-pr-review.ts", "scripts/ai-pr-review.test.ts"]
+}
