@@ -182,3 +182,16 @@ describe('#306 follow-up: same-number spec written twice', () => {
       .toBe('Litovel Pomelo 0% 12°');
   });
 });
+
+describe('#306 follow-up: decimal separator variants in a duplicated grade', () => {
+  test.each([
+    ['Beer 8;5 8;5°·3;5%', 'Beer 8,5°'],                       // ";" on both sides
+    ['Pilsner 12.5 12,5°·4,7%', 'Pilsner 12,5°'],              // "." in the name, "," in the spec
+    // The spec block's own separator is what survives — only ";" is treated as a typo and
+    // normalized to a comma; a "." is a legitimate decimal style and is left as the shop wrote it.
+    ['Pilsner 12,5 12.5°·4,7%', 'Pilsner 12.5°'],
+    ['Czarna Dziura 11,5° 11,5°·5%', 'Czarna Dziura 11,5°'],   // live row
+  ])('%s → %s', (input, expected) => {
+    expect(stripTrailingSpec(input)).toBe(expected);
+  });
+});

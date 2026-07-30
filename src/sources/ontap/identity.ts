@@ -37,8 +37,12 @@ export function stripTrailingSpec(raw: string): string {
   // ("Platan svetly ležák 11 11°·4,7%", "Holba 12 12°", "Litovel Premium 12° 12°"). Appending
   // the preserved grade to a head that already ends with the SAME number would keep both, so
   // the trailing duplicate is replaced instead. A different number is left alone ("Batch 1000 12°").
+  // The decimal separator is matched as a class, not literally: the grade value is normalized
+  // to a comma while the head keeps whatever the shop typed, so "Pilsner 12.5 12,5°" and
+  // "Beer 8;5 8;5°" must still collapse.
+  const gradePattern = gradeValue.split(/[.,;]/).map(escapeRegExp).join('[.,;]');
   const deduped = grade
-    ? head.replace(new RegExp(`\\s+${escapeRegExp(gradeValue)}\\s*[°%]*\\s*$`, 'u'), '')
+    ? head.replace(new RegExp(`\\s+${gradePattern}\\s*[°%]*\\s*$`, 'u'), '')
     : head;
   const cleaned = `${deduped}${grade ? ` ${gradeValue}°` : ''}`.trim();
   return cleaned || s;
