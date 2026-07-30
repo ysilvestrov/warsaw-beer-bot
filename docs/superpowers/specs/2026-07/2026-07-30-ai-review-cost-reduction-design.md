@@ -47,11 +47,24 @@ Three facts drive the design:
    "`createIssue`'s catch says *Deliberately not retried*"). Verify is a design-noise filter.
    Removing it republishes those 7.
 
-3. **Output dominates the bill, not input.** ~390k input tokens across the 11 runs cannot account
-   for $2.52 at any plausible input price; the remainder is completion plus gpt-5.5's hidden
-   reasoning tokens. This inverts the obvious optimisation: trimming context (e.g. dropping test
-   file bodies — `matcher.test.ts` alone is 45k chars on #362) saves less than it looks, while call
-   count and per-call reasoning depth are the real levers.
+3. ~~**Output dominates the bill, not input.**~~ ~390k input tokens across the 11 runs cannot
+   account for $2.52 at any plausible input price; the remainder is completion plus gpt-5.5's
+   hidden reasoning tokens. This inverts the obvious optimisation: trimming context (e.g. dropping
+   test file bodies — `matcher.test.ts` alone is 45k chars on #362) saves less than it looks, while
+   call count and per-call reasoning depth are the real levers.
+
+   > **Corrected 2026-07-30, before implementation.** This premise was reasoned from an unchecked
+   > price. gpt-5.5 is **$5.00 / 1M input, $0.50 / 1M cached input, $30.00 / 1M output**
+   > (<https://developers.openai.com/api/docs/models/gpt-5.5>, read 2026-07-30). The ~390k input
+   > tokens are therefore ≈ **$1.95 of the $2.52** — *input* dominates, and the remaining ~$0.57 is
+   > ~19k output tokens over 40 calls (~475/call), which is unremarkable for this model.
+   >
+   > Nothing in this design changes: incremental re-review is exactly the input-cutting lever, and
+   > it is now the **largest** available one rather than a modest one. But two conclusions above are
+   > void — trimming context is not a weak optimisation, and per-call reasoning depth is not the
+   > main knob. The non-goals stay non-goals (they are still quality bets), and §5's instrumentation
+   > is what settles this from data instead of arithmetic-by-assumption next time. The lesson is the
+   > one already in the repo's memory: *validate the external fact before designing on top of it.*
 
 The trap: the only way to validate a quality-affecting change is a replay, and a replay costs $5 —
 two months of reviewing at the current rate. So this design takes only the savings that do not bet
@@ -170,10 +183,11 @@ find 12.3k→3.1k (1.9k reasoning) · verify 2 calls · this run $0.07 · PR tot
 The PR total accumulates in the state block. This is the point of the whole exercise: the next time
 we ask "what does this cost", the answer is in the review, not in an hour of dashboard archaeology.
 
-**Price table honesty:** the gpt-5.5 numbers are filled in at implementation time from the current
-pricing page and then validated against the dashboard delta of the first real run. If they disagree,
-the table is wrong and gets corrected — the run's token counts are ground truth, the dollars are
-derived.
+**Price table honesty:** the gpt-5.5 numbers were read from the vendor's model page on 2026-07-30 —
+**$5.00 / 1M input, $0.50 / 1M cached input, $30.00 / 1M output** — and the table carries that date.
+They are validated against the dashboard delta of the first real run; if they disagree, the table is
+wrong and gets corrected — the run's token counts are ground truth, the dollars are derived. A model
+with no verified entry prints tokens and no dollars, and the PR total is marked as a lower bound.
 
 ### 6. Cumulative review body
 
