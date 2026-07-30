@@ -163,4 +163,17 @@ describe('verifyAll', () => {
     });
     expect(sent.split('UNIQUE_BODY_MARKER')).toHaveLength(2); // present exactly once
   });
+  it('never throws even when the caller\'s fileContent callback itself throws', async () => {
+    const out = await verifyAll(deps((async () => {
+      throw new Error('should not be reached');
+    }) as unknown as typeof fetch), {
+      instructions: 'verify',
+      requests: [req()],
+      fileContent: () => {
+        throw new Error('disk exploded');
+      },
+    });
+    expect(out.results[0].verdict).toBe('error');
+    expect(out.results[0].evidence).toContain('disk exploded');
+  });
 });

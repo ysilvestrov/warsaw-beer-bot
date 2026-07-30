@@ -139,15 +139,18 @@ export async function verifyAll(
   let usage = EMPTY_USAGE;
 
   for (const [file, requests] of byFile) {
-    const content = p.fileContent(file);
-    if (content === null) {
-      for (const r of requests) {
-        byId.set(r.id, { id: r.id, verdict: 'error', evidence: 'file content unavailable' });
-      }
-      continue;
-    }
-
     try {
+      // Reading the file is inside the try as well: `fileContent` is a callback
+      // we do not own, and "never throws" has to be a property of this function
+      // rather than a promise we extract from every caller.
+      const content = p.fileContent(file);
+      if (content === null) {
+        for (const r of requests) {
+          byId.set(r.id, { id: r.id, verdict: 'error', evidence: 'file content unavailable' });
+        }
+        continue;
+      }
+
       const out = await verifyFile(deps, {
         instructions: p.instructions,
         file,
