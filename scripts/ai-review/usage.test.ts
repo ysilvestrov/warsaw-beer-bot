@@ -88,7 +88,13 @@ describe('costUsd', () => {
   });
 
   it('returns null for a model with no verified price rather than a wrong number', () => {
-    expect(costUsd('gpt-9-imaginary', EMPTY_USAGE)).toBeNull();
+    // Real usage, not EMPTY_USAGE: a stage that never called anything costs 0
+    // at any model, so an empty one would pass this test without testing it.
+    expect(
+      costUsd('gpt-9-imaginary', {
+        calls: 1, promptTokens: 1000, cachedTokens: 0, completionTokens: 100, reasoningTokens: 0,
+      }),
+    ).toBeNull();
   });
 
   it('carries the date its prices were last checked', () => {
@@ -125,5 +131,18 @@ describe('formatCostLine', () => {
     const line = formatCostLine({ find, verify, runUsd: null, totalUsd: 0.21, unpriced: 2 });
     expect(line).toContain('this run — (unpriced model)');
     expect(line).toContain('PR total $0.21+');
+  });
+});
+
+describe('costUsd — a stage that made no calls', () => {
+  it('costs nothing even at a model with no verified price', () => {
+    // Zero tokens cost zero dollars whatever the rates are; returning null here
+    // would mark a whole run unpriced because a skipped stage had no price.
+    expect(costUsd('some-unpriced-model', EMPTY_USAGE)).toBe(0);
+    expect(costUsd('gpt-5.5', EMPTY_USAGE)).toBe(0);
+  });
+
+  it('still refuses to price real usage at an unknown model', () => {
+    expect(costUsd('some-unpriced-model', { ...EMPTY_USAGE, calls: 1, promptTokens: 10 })).toBeNull();
   });
 });

@@ -177,3 +177,29 @@ describe('verifyAll', () => {
     expect(out.results[0].evidence).toContain('disk exploded');
   });
 });
+
+describe('verifyAll — billing of a completed but malformed call', () => {
+  it('counts the usage of a 200 response whose content is not usable', async () => {
+    const out = await verifyAll(deps(respond('not json at all')), {
+      instructions: 'verify',
+      requests: [req(), req({ id: 'f1', claim: 'other bug' })],
+      fileContent: () => 'file body',
+    });
+
+    // The call happened and is billed; dropping its usage would make the
+    // footer under-report money we actually spent.
+    expect(out.usage.calls).toBe(1);
+    expect(out.usage.promptTokens).toBe(100);
+    expect(out.results.map((r) => r.verdict)).toEqual(['error', 'error']);
+  });
+
+  it('counts the usage of a 200 response that misses the verdict schema', async () => {
+    const out = await verifyAll(deps(respond('{"verdicts":[{"index":1,"verdict":"maybe"}]}')), {
+      instructions: 'verify',
+      requests: [req()],
+      fileContent: () => 'file body',
+    });
+    expect(out.usage.calls).toBe(1);
+    expect(out.results[0].verdict).toBe('error');
+  });
+});

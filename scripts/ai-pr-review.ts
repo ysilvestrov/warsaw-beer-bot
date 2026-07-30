@@ -291,6 +291,12 @@ export async function runReview(cfg: Config, deps: ReviewDeps): Promise<void> {
     fetchFn: deps.openaiFetch,
   };
 
+  // Deliberately runs in `full` mode too, not only incremental: the mode decides
+  // what this run re-reads, never what it forgets. A published finding is retired
+  // by evidence — its file gone, or a re-check refuting it — and after a
+  // force-push the quote it was published against no longer anchors, so it lands
+  // in `recheck` and is adjudicated rather than carried. Dropping the state on a
+  // force-push would instead delete open findings the maintainer is mid-fix on.
   const { carried, recheck, closed: obsolete } = reconcileFindings({
     stored: state?.findings ?? [],
     fileContent: deps.readFile,

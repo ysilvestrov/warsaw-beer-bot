@@ -71,7 +71,12 @@ function renderFinding(r: VerifyRequest, index: number): string {
 export async function verifyFile(
   deps: OpenAiDeps,
   p: { instructions: string; file: string; fileContent: string; requests: VerifyRequest[] },
-): Promise<{ verdicts: Map<number, { verdict: 'confirmed' | 'refuted' | 'out_of_scope'; evidence: string }>; usage: Usage }> {
+): Promise<{
+  verdicts: Map<number, { verdict: 'confirmed' | 'refuted' | 'out_of_scope'; evidence: string }>;
+  usage: Usage;
+  /** Set when the call completed but its content could not be used. */
+  error?: string;
+}> {
   const user = [
     `# ${p.requests.length} finding(s) to adjudicate in ${p.file}`,
     '',
@@ -95,9 +100,22 @@ export async function verifyFile(
     Math.max(MIN_VERIFY_TOKENS, p.requests.length * TOKENS_PER_VERDICT),
   );
 
-  const parsed = verdictsSchema.safeParse(JSON.parse(content));
+  // Unusable content is reported, not thrown: the call completed and is billed,
+  // so its usage has to come back with the failure or the footer under-reports
+  // money we actually spent. Only the findings in this file are affected.
+  let parsed;
+  try {
+    parsed = verdictsSchema.safeParse(JSON.parse(content));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { verdicts: new Map(), usage, error: `Pass-2 output was not JSON: ${message.slice(0, 200)}` };
+  }
   if (!parsed.success) {
-    throw new Error(`Pass-2 output did not match the schema: ${parsed.error.message.slice(0, 200)}`);
+    return {
+      verdicts: new Map(),
+      usage,
+      error: `Pass-2 output did not match the schema: ${parsed.error.message.slice(0, 200)}`,
+    };
   }
 
   const verdicts = new Map<number, { verdict: 'confirmed' | 'refuted' | 'out_of_scope'; evidence: string }>();
@@ -164,7 +182,11 @@ export async function verifyAll(
           r.id,
           v
             ? { id: r.id, verdict: v.verdict, evidence: v.evidence }
-            : { id: r.id, verdict: 'error', evidence: 'the verifier returned no verdict for this finding' },
+            : {
+                id: r.id,
+                verdict: 'error',
+                evidence: out.error ?? 'the verifier returned no verdict for this finding',
+              },
         );
       });
     } catch (err) {
