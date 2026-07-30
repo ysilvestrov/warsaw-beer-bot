@@ -146,3 +146,14 @@ describe('costUsd — a stage that made no calls', () => {
     expect(costUsd('some-unpriced-model', { ...EMPTY_USAGE, calls: 1, promptTokens: 10 })).toBeNull();
   });
 });
+
+describe('costUsd — the zero-cost shortcut keys on tokens, not on the call count', () => {
+  it('still prices tokens that arrived without a call count', () => {
+    // The guard exists for a stage that never ran; money lives in the token
+    // fields, so an inconsistent usage must be priced, never silently zeroed.
+    const usd = costUsd('gpt-5.5', {
+      calls: 0, promptTokens: 1000, cachedTokens: 0, completionTokens: 100, reasoningTokens: 0,
+    });
+    expect(usd).toBeGreaterThan(0);
+  });
+});
