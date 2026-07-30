@@ -1,7 +1,7 @@
 # AI PR review — cost reduction (incremental re-review + batched verify + self-billing) — design
 
 **Date:** 2026-07-30
-**Issues:** follow-up to #175 (two-stage reviewer shipped 2026-07-29, PR #359)
+**Issues:** #364 (follow-up to #175 — two-stage reviewer shipped 2026-07-29, PR #359)
 **Status:** approved
 
 ## Problem
