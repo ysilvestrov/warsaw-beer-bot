@@ -185,25 +185,25 @@ Prod state of the affected population (2026-07-31): 797 orphans with
 re-arming is cheap. No blind mass re-arm: re-arming a row that still has no ABV
 merely re-spends the blind lookup that already failed.
 
-## Catalog invalidation and its cost
+## Catalog invalidation
 
 `loadCatalog` selects `abv`, so `beers.abv` feeds the `/match` catalog cache. A
 fill must `bumpCatalogVersion()` or `/match` serves the stale value until the
 5-minute TTL expires.
 
-The hazard is that `/enrich/candidates` handles up to 200 beers on a hot path
-and a rebuild is ~1.2 s of CPU over the 30 k-row catalog. Therefore:
+A first draft of this spec required "bump at most once per request, never once
+per row", fearing that a 200-beer `/enrich/candidates` call would trigger 200
+rebuilds of the 30 k-row catalog at ~1.2 s CPU each. **That was wrong.**
+`bumpCatalogVersion()` is a plain in-memory `version++`
+(`src/storage/catalog-version.ts`); the cache only rebuilds when `get()` observes
+a moved version, so any number of bumps between two reads collapses into a single
+rebuild. `upsertBeer` already bumps once per inserted row and has always done so.
 
-> **Bump at most once per request, and only if at least one row actually gained
-> a fact — never once per row.**
-
-The bump rate then tracks new-beer discovery, the same rate `recordLookupSuccess`
-already bumps at today. The cache is stale-while-revalidate, so the rebuild is a
-background job, not a blocking one. Second and later visits to the same page fill
-nothing and bump nothing.
+So the rule is simply: **bump when a fill actually wrote something.** Per-row is
+fine. No request-level accounting.
 
 The fills stay inside the existing `deps.db.transaction(...)` wrapper in
-`/enrich/candidates`; the bump is issued after the transaction commits.
+`/enrich/candidates`.
 
 ## Error handling
 
@@ -279,8 +279,8 @@ Beyond the guard:
 - Adapter: assert 4.5 / 5.5 / 5.5 and the styles for the DZIKI products; assert
   the PINTA products yield **no** ABV (Plato must not leak in).
 - Server: matched row untouched; old-shape bodies (no `abv`/`style`) still return
-  200; exactly one catalog bump per request and none when nothing changed; a
-  200-beer payload with both fields stays under 256 KiB.
+  200; a fill bumps the catalog version and a no-op fill does not; a 200-beer
+  payload with both fields stays under 256 KiB.
 
 ## Compatibility and rollout
 
