@@ -95,18 +95,20 @@ interface ItemError {
 // uploadState + itemError[]. Only "SUCCESS" counts.
 export async function uploadPackage(
   itemId: string,
-  zip: Buffer,
+  // Typed as the DOM-flavored `Uint8Array<ArrayBuffer>` (not `Buffer`) so `body: zip` below
+  // typechecks with no cast: this project sets no explicit `"lib"`, so the ES2022 target's
+  // default lib pulls in DOM's `BodyInit`, whose ArrayBufferView arm is pinned to
+  // `Uint8Array<ArrayBuffer>` — and `Buffer<ArrayBufferLike>` doesn't structurally match it.
+  // Both real call-site shapes (`Buffer.from(...)`, `readFileSync(path)`) already satisfy
+  // this type, since Node's `Buffer` extends `Uint8Array`.
+  zip: Uint8Array<ArrayBuffer>,
   token: string,
   fetchImpl: typeof fetch = fetch,
 ): Promise<void> {
   const res = await fetchImpl(`${UPLOAD_BASE}/${itemId}`, {
     method: 'PUT',
     headers: authHeaders(token),
-    // `Buffer` really does satisfy the runtime BodyInit contract (Node's global fetch is
-    // undici, which accepts a Buffer body directly) — this cast only works around a type
-    // mismatch where `vitest/globals` pulls in lib.dom's `BodyInit`, whose ArrayBufferView
-    // arm is pinned to `Uint8Array<ArrayBuffer>` and rejects Node's `Buffer<ArrayBufferLike>`.
-    body: zip as unknown as BodyInit,
+    body: zip,
   });
   const body = (await res.json().catch(() => ({}))) as {
     uploadState?: unknown;
