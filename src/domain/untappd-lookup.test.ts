@@ -591,3 +591,30 @@ describe('lookupBeer', () => {
     expect([70, 71, 72]).toContain(out.result.bid);
   });
 });
+
+// #369/#322: the shop publishes "Moc 0.0%" for AleBrowar KWAS CHLEBOWY JASNY.
+// Bright (0.0%) and Light (0.5%) share brewery, style and name — the ABV is the
+// only thing that separates them. A truthiness check anywhere on the relay path
+// would discard the 0 and re-create the ambiguity this test exists to prevent.
+describe('#369/#322 — a relayed 0.0% ABV disambiguates same-brewery twins', () => {
+  const twins: SearchResult[] = [
+    { bid: 5489374, beer_name: 'Kwas Chlebowy Bright', brewery_name: 'AleBrowar', style: 'Kwas Chlebowy', abv: 0, global_rating: 3.4 },
+    { bid: 5489375, beer_name: 'Kwas Chlebowy Light', brewery_name: 'AleBrowar', style: 'Kwas Chlebowy', abv: 0.5, global_rating: 3.3 },
+  ];
+
+  test('picks Bright when abv is 0', async () => {
+    const out = await lookupBeer({
+      brewery: 'AleBrowar', name: 'Kwas Chlebowy', abv: 0, search: fakeSearch(() => twins),
+    });
+    expect(out.kind).toBe('matched');
+    expect(out.kind === 'matched' && out.result.bid).toBe(5489374);
+  });
+
+  test('picks Light when abv is 0.5', async () => {
+    const out = await lookupBeer({
+      brewery: 'AleBrowar', name: 'Kwas Chlebowy', abv: 0.5, search: fakeSearch(() => twins),
+    });
+    expect(out.kind).toBe('matched');
+    expect(out.kind === 'matched' && out.result.bid).toBe(5489375);
+  });
+});
