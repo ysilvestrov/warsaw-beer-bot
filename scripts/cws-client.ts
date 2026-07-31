@@ -1,0 +1,160 @@
+// Thin Chrome Web Store API client (#266). Three endpoints, no dependency: the API has
+// been stable for years and the whole risk here is INTERPRETING its replies — both
+// upload and publish report failure inside an HTTP 200 body, so a generic wrapper would
+// call a failed release a success.
+//
+// Every function takes `fetchImpl` (same seam as src/sources/websearch/resolver.ts) so
+// the tests never touch the network.
+
+export interface CwsCreds {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}
+
+const TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+interface TokenResponse {
+  access_token?: unknown;
+  error?: unknown;
+  error_description?: unknown;
+}
+
+export async function getAccessToken(
+  creds: CwsCreds,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string> {
+  const res = await fetchImpl(TOKEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: creds.clientId,
+      client_secret: creds.clientSecret,
+      refresh_token: creds.refreshToken,
+      grant_type: 'refresh_token',
+    }).toString(),
+  });
+  const body = (await res.json().catch(() => ({}))) as TokenResponse;
+
+  if (body.error === 'invalid_grant') {
+    throw new Error(
+      'CWS auth failed: invalid_grant — the refresh token is dead. Either access was ' +
+        'revoked, or the OAuth consent screen is still in "Testing" mode, where Google ' +
+        'expires refresh tokens after 7 days (move it to "In production"). Re-run: ' +
+        'npm run cws:auth (scripts/cws-auth-bootstrap.ts).',
+    );
+  }
+  if (!res.ok || typeof body.access_token !== 'string') {
+    const detail = [body.error, body.error_description].filter(Boolean).join(': ');
+    throw new Error(`CWS auth failed: HTTP ${res.status}${detail ? ` — ${detail}` : ''}`);
+  }
+  return body.access_token;
+}
+
+const API_BASE = 'https://www.googleapis.com/chromewebstore/v1.1/items';
+
+function authHeaders(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, 'x-goog-api-version': '2' };
+}
+
+export interface CwsItem {
+  id: string;
+  crxVersion: string | null;
+  uploadState: string | null;
+}
+
+// Read-only. Used both as the credential probe (`cws:auth --verify`) and as the release
+// preflight: `crxVersion` is the version currently sitting in the item's draft.
+export async function getItem(
+  itemId: string,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CwsItem> {
+  const res = await fetchImpl(`${API_BASE}/${itemId}?projection=DRAFT`, {
+    headers: authHeaders(token),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(`CWS getItem failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  return {
+    id: typeof body.id === 'string' ? body.id : itemId,
+    crxVersion: typeof body.crxVersion === 'string' ? body.crxVersion : null,
+    uploadState: typeof body.uploadState === 'string' ? body.uploadState : null,
+  };
+}
+
+const UPLOAD_BASE = 'https://www.googleapis.com/upload/chromewebstore/v1.1/items';
+
+interface ItemError {
+  error_code?: unknown;
+  error_detail?: unknown;
+}
+
+// HTTP 200 does NOT mean the upload worked: CWS reports failure in the body via
+// uploadState + itemError[]. Only "SUCCESS" counts.
+export async function uploadPackage(
+  itemId: string,
+  // Typed as the DOM-flavored `Uint8Array<ArrayBuffer>` (not `Buffer`) so `body: zip` below
+  // typechecks with no cast: this project sets no explicit `"lib"`, so the ES2022 target's
+  // default lib pulls in DOM's `BodyInit`, whose ArrayBufferView arm is pinned to
+  // `Uint8Array<ArrayBuffer>` — and `Buffer<ArrayBufferLike>` doesn't structurally match it.
+  // Both real call-site shapes (`Buffer.from(...)`, `readFileSync(path)`) already satisfy
+  // this type, since Node's `Buffer` extends `Uint8Array`.
+  zip: Uint8Array<ArrayBuffer>,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const res = await fetchImpl(`${UPLOAD_BASE}/${itemId}`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: zip,
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    uploadState?: unknown;
+    itemError?: unknown;
+  };
+  if (!res.ok) {
+    throw new Error(`CWS upload failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  if (body.uploadState !== 'SUCCESS') {
+    const errors = Array.isArray(body.itemError) ? (body.itemError as ItemError[]) : [];
+    const detail = errors
+      .map((e) => `${String(e.error_code ?? '?')}: ${String(e.error_detail ?? '?')}`)
+      .join('; ');
+    throw new Error(
+      `CWS upload failed (uploadState=${String(body.uploadState)})` +
+        (detail ? ` — ${detail}` : ''),
+    );
+  }
+}
+
+// publishTarget=default → the public listing (the alternative, trustedTesters, is not
+// used by this project). Like upload, failure arrives inside an HTTP 200 body.
+export async function publishItem(
+  itemId: string,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[]> {
+  const res = await fetchImpl(`${API_BASE}/${itemId}/publish?publishTarget=default`, {
+    method: 'POST',
+    headers: { ...authHeaders(token), 'content-length': '0' },
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    status?: unknown;
+    statusDetail?: unknown;
+  };
+  if (!res.ok) {
+    throw new Error(`CWS publish failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  const status = Array.isArray(body.status) ? body.status.map(String) : [];
+  if (!status.includes('OK')) {
+    const detail = Array.isArray(body.statusDetail)
+      ? body.statusDetail.map(String).join('; ')
+      : '';
+    throw new Error(
+      `CWS publish failed (${status.join(', ') || 'no status'})` + (detail ? ` — ${detail}` : ''),
+    );
+  }
+  return status;
+}
