@@ -1,4 +1,4 @@
-import { getAccessToken, getItem, uploadPackage } from './cws-client';
+import { getAccessToken, getItem, uploadPackage, publishItem } from './cws-client';
 
 function fakeFetch(body: unknown, status = 200) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
@@ -122,5 +122,34 @@ describe('uploadPackage', () => {
     await expect(uploadPackage('itemid', Buffer.from('x'), 'tok', impl)).rejects.toThrow(
       /500/,
     );
+  });
+});
+
+describe('publishItem', () => {
+  it('POSTs to the default publish target and returns the status list', async () => {
+    const { impl, calls } = fakeFetch({ status: ['OK'], statusDetail: ['ok'] });
+    expect(await publishItem('itemid', 'tok', impl)).toEqual(['OK']);
+
+    expect(calls[0].url).toBe(
+      'https://www.googleapis.com/chromewebstore/v1.1/items/itemid/publish?publishTarget=default',
+    );
+    expect(calls[0].init!.method).toBe('POST');
+    const headers = calls[0].init!.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer tok');
+  });
+
+  it('fails on ITEM_NOT_UPDATABLE and quotes the statusDetail', async () => {
+    const { impl } = fakeFetch({
+      status: ['ITEM_NOT_UPDATABLE'],
+      statusDetail: ['Item is currently in the review queue.'],
+    });
+    const p = publishItem('itemid', 'tok', impl);
+    await expect(p).rejects.toThrow(/ITEM_NOT_UPDATABLE/);
+    await expect(publishItem('itemid', 'tok', impl)).rejects.toThrow(/review queue/);
+  });
+
+  it('fails when the response carries no status at all', async () => {
+    const { impl } = fakeFetch({});
+    await expect(publishItem('itemid', 'tok', impl)).rejects.toThrow(/no status/);
   });
 });

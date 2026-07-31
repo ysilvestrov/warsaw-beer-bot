@@ -128,3 +128,33 @@ export async function uploadPackage(
     );
   }
 }
+
+// publishTarget=default → the public listing (the alternative, trustedTesters, is not
+// used by this project). Like upload, failure arrives inside an HTTP 200 body.
+export async function publishItem(
+  itemId: string,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<string[]> {
+  const res = await fetchImpl(`${API_BASE}/${itemId}/publish?publishTarget=default`, {
+    method: 'POST',
+    headers: { ...authHeaders(token), 'content-length': '0' },
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    status?: unknown;
+    statusDetail?: unknown;
+  };
+  if (!res.ok) {
+    throw new Error(`CWS publish failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  const status = Array.isArray(body.status) ? body.status.map(String) : [];
+  if (!status.includes('OK')) {
+    const detail = Array.isArray(body.statusDetail)
+      ? body.statusDetail.map(String).join('; ')
+      : '';
+    throw new Error(
+      `CWS publish failed (${status.join(', ') || 'no status'})` + (detail ? ` — ${detail}` : ''),
+    );
+  }
+  return status;
+}
