@@ -244,8 +244,35 @@ The 0.0% guard is pinned at **each** boundary, not only end to end:
    candidates, `Bright` at 0.0% and `Light` at 0.5%; `lookupBeer` with `abv: 0`
    picks `Bright` (bid 5489374). Permanent regression test.
 
-The fixture has no 0.0% product, so this case needs a small synthetic tile rather
-than a fixture edit.
+Boundaries 1 and 2 run against a real captured fixture (below); 3 and 4 are
+server-side and need no fixture.
+
+### The 0.0% fixture
+
+The existing `onemorebeer.html` fixture has no 0.0% product, so the guard needs
+its own capture. Use a **real page**, not a synthetic tile: the motivating beer
+is live on the shop and a real capture also pins the surrounding DOM structure
+the adapter depends on.
+
+Target page: `https://onemorebeer.pl/bezalkoholowe/inne` — the `source_url`
+recorded for orphan **29552 `AleBrowar / KWAS CHLEBOWY JASNY`** (`abv` NULL,
+`untappd_id` NULL on prod as of 2026-07-31). Being the non-alcoholic category it
+should be dense with 0.0% products rather than containing a single one.
+
+The catalog is client-rendered (Nuxt): `curl` returns an SSR shell with **zero**
+product tiles, so the capture must come from a hydrated browser DOM. Helper:
+`tmp/capture-onemorebeer.js` (paste into DevTools console; it reports tile /
+panel / 0.0% counts and downloads `onemorebeer.abv.html`). The
+`Dane techniczne` panels must **not** be expanded before capturing — they are
+already in the DOM and hidden, which is precisely the state under test.
+
+Save as `extension/tests/fixtures/onemorebeer.abv.html`. This follows the
+existing multi-fixture convention (`flasker.table.html`, `flasker.block.html`);
+`conformance.test.ts` keys strictly on `<id>.html`, so an extra fixture is picked
+up only by the adapter's own tests and cannot disturb the contract suite.
+
+Fallback, only if the captured page yields no 0.0% product: a small synthetic
+tile. Prefer the real capture.
 
 Beyond the guard:
 
