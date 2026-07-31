@@ -8,6 +8,10 @@ const TITLE_SELECTOR = 'a.product__title';
 // .one-product-list-view appears once per tile; .one-catalog-view-list is the single top-level
 // catalog component container (count: 1) that wraps all tiles — use that for the re-render observer.
 const CONTAINER_SELECTOR = '.one-catalog-view-list';
+// #369: the "Dane techniczne" panel is a hidden SIBLING of the tile, not a child —
+// both live under this per-product wrapper.
+const WRAPPER_SELECTOR = '.one-product-list-view';
+const TECH_PANEL_SELECTOR = '.one-product-technical-data';
 
 // onemorebeer-local merch tokens (Polish): glassware, mugs, apparel, books on the accessories page.
 // Stems handle inflection (szklanka/szklanki, koszulka/koszulkę). Deliberately excludes "puszka"
@@ -32,6 +36,38 @@ function cleanName(rawTitle: string, brewery: string): string {
   return name.trim();
 }
 
+// "4.5%", " 0.0%", "4,8 %" → number. Anything else ("n/d", "-", "") → undefined.
+// 0 is a legitimate result and must never be conflated with "missing": AleBrowar's
+// Kwas Chlebowy Bright (0.0%) is told apart from Light (0.5%) by nothing else (#322).
+function parseAbv(value: string): number | undefined {
+  const m = value.replace(',', '.').match(/^\s*(\d+(?:\.\d+)?)\s*%?\s*$/);
+  if (!m) return undefined;
+  const abv = Number(m[1]);
+  return Number.isFinite(abv) ? abv : undefined;
+}
+
+// #369: the shop publishes ABV and style in a "Dane techniczne" accordion that is
+// already in the DOM but collapsed (aria-expanded="false", display:none), so neither
+// a detail fetch nor a synthetic click is needed. Deliberately no fallback selector:
+// if this structure changes the adapter tests should fail loudly, not degrade quietly.
+function technicalFacts(tile: HTMLElement): { abv?: number; style?: string } {
+  const panel = tile.closest(WRAPPER_SELECTOR)?.querySelector(TECH_PANEL_SELECTOR);
+  if (!panel) return {};
+  const facts: { abv?: number; style?: string } = {};
+  for (const row of Array.from(panel.children)) {
+    const spans = row.querySelectorAll('span');
+    const label = text(spans[0]);
+    const value = text(spans[1]);
+    if (label.startsWith('Moc')) {
+      const abv = parseAbv(value);
+      if (abv !== undefined) facts.abv = abv;
+    } else if (label === 'Styl' && value) {
+      facts.style = value;
+    }
+  }
+  return facts;
+}
+
 export const onemorebeer: SiteAdapter = {
   id: 'onemorebeer',
   hostMatch: (url) => url.hostname === 'onemorebeer.pl' || url.hostname.endsWith('.onemorebeer.pl'),
@@ -50,7 +86,7 @@ export const onemorebeer: SiteAdapter = {
       if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) continue;
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
-      cards.push({ el, brewery, name });
+      cards.push({ el, brewery, name, ...technicalFacts(el) });
     }
     return cards;
   },

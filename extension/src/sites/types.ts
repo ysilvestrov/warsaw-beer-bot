@@ -3,6 +3,8 @@ export interface Card {
   brewery: string;
   name: string;
   abv?: number;
+  /** Shop-published style, relayed to /enrich/* for orphan rows (#369). Not sent to /match. */
+  style?: string;
   skip?: boolean;
 }
 
