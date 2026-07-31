@@ -1,6 +1,14 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  openSync,
+  writeSync,
+  closeSync,
+  fchmodSync,
+} from 'node:fs';
 import { resolve } from 'node:path';
 import { getAccessToken, getItem } from './cws-client';
 
@@ -100,19 +108,26 @@ function waitForCode(port: number): Promise<string> {
 // upload and publish to the live store item, so it must never land world-readable.
 //
 // The invariant is "the token only ever exists in a file this process created at 0600",
-// and both calls are needed to get it:
-//   - `rmSync` first, because `writeFileSync`'s `mode` applies only on CREATION: writing
-//     over a leftover 0644 file from an earlier run would put the secret on disk under
-//     the old mode, and tightening it afterwards leaves a readable window.
-//   - `flag: 'wx'` (O_CREAT|O_EXCL), so the write can only succeed by creating the path —
-//     it can never follow a symlink or land in a file someone else placed there after the
-//     unlink; it throws EEXIST instead.
-// There is deliberately no chmod afterwards: the file is born at 0600, a umask can only
-// clear permission bits and never add them, and a path-based chmod would re-resolve the
-// name and could be pointed at another target.
+// and each of the three steps carries part of it:
+//   - `rmSync` first, because a create-mode applies only when the file is CREATED:
+//     writing over a leftover 0644 file from an earlier run would put the secret on disk
+//     under the old mode, and tightening it afterwards leaves a readable window.
+//   - `openSync(path, 'wx')` (O_CREAT|O_EXCL): the open succeeds only by creating the
+//     path, so it can never follow a symlink or land in a file someone else placed there
+//     after the unlink — it throws EEXIST instead.
+//   - `fchmodSync` on the open DESCRIPTOR, not on the path. Permissions are fixed at
+//     exactly 0600 whatever the caller's umask cleared (a mode of 000 would leave the
+//     releaser unable to read their own token), and because it acts on the fd it cannot
+//     be redirected at another file the way a path-based `chmodSync` could.
 export function writeSecretFile(path: string, contents: string): void {
   rmSync(path, { force: true });
-  writeFileSync(path, contents, { mode: 0o600, flag: 'wx' });
+  const fd = openSync(path, 'wx', 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    writeSync(fd, contents);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 function requireEnv(name: string): string {

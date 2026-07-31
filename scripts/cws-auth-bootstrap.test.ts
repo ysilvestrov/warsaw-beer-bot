@@ -170,6 +170,22 @@ describe('writeSecretFile', () => {
     expect(readFileSync(twin, 'utf8')).toBe('stale\n');
   });
 
+  it('lands at exactly 0600 even under a umask that would strip the owner bits', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const path = join(dir, 'cws-env.txt');
+    const previous = process.umask(0o777);
+    try {
+      writeSecretFile(path, 'CWS_REFRESH_TOKEN=abc\n');
+    } finally {
+      process.umask(previous);
+    }
+
+    // A mode-only create would yield 000 here and the releaser could not read their own
+    // token; the fd-based fchmod pins it regardless of umask.
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=abc\n');
+  });
+
   it('never writes the token through a symlink planted at the path', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
     const path = join(dir, 'cws-env.txt');
