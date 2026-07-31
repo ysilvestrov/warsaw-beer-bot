@@ -16,7 +16,8 @@
     "pin-match": "tsx scripts/pin-match.ts",
     "retire-resolved-orphans": "tsx scripts/retire-resolved-orphans.ts",
     "render-docs": "tsx scripts/render-docs.ts",
-    "cws:auth": "tsx scripts/cws-auth-bootstrap.ts"
+    "cws:auth": "tsx scripts/cws-auth-bootstrap.ts",
+    "release:store": "npm --prefix extension run package:store && tsx scripts/publish-store-release.ts"
   },
   "keywords": [],
   "author": "",
