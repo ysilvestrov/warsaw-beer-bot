@@ -7,7 +7,16 @@ import { renderBadge, markSeen } from './badge';
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
 
 export type EnrichOrphans = (
-  orphans: { key: string; el: HTMLElement; brewery: string; name: string }[],
+  orphans: {
+    key: string;
+    el: HTMLElement;
+    brewery: string;
+    name: string;
+    // #369: shop-published facts, relayed to /enrich/* so the matcher stops
+    // running blind. Omitted when the adapter did not publish them.
+    abv?: number;
+    style?: string;
+  }[],
 ) => void;
 
 export async function runOverlay(
@@ -35,7 +44,9 @@ export async function runOverlay(
 
     if (adapter.loadCardDetails) await adapter.loadCardDetails(misses.map((m) => m.card));
 
-    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer }[] = misses
+    // `card` is kept alongside `raw` because /match carries only abv, while the
+    // enrich payload also needs the shop style (#369).
+    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer; card: Card }[] = misses
       .filter(({ card }) => !card.skip)
       .map(({ el, card }) => ({
         el,
@@ -43,6 +54,7 @@ export async function runOverlay(
         raw: card.abv !== undefined
           ? { brewery: card.brewery, name: card.name, abv: card.abv }
           : { brewery: card.brewery, name: card.name },
+        card,
       }));
     if (rawMisses.length === 0) return;
 
@@ -71,7 +83,16 @@ export async function runOverlay(
             !x.result.drunk_uncertain &&
             (x.result.matched_beer == null || x.result.matched_beer.untappd_id == null),
         )
-        .map((x) => ({ key: x.miss!.key, el: x.miss!.el, brewery: x.miss!.raw.brewery, name: x.miss!.raw.name }));
+        .map((x) => ({
+          key: x.miss!.key,
+          el: x.miss!.el,
+          brewery: x.miss!.raw.brewery,
+          name: x.miss!.raw.name,
+          // `!== undefined`, never truthiness: 0.0% is a real ABV and the only thing
+          // separating some same-brewery twins (#322).
+          ...(x.miss!.card.abv !== undefined ? { abv: x.miss!.card.abv } : {}),
+          ...(x.miss!.card.style !== undefined ? { style: x.miss!.card.style } : {}),
+        }));
       if (orphans.length) enrich(orphans);
     }
   } catch {

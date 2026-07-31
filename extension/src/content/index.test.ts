@@ -181,3 +181,46 @@ describe('runOverlay', () => {
     expect(enriched[0]).toMatchObject({ name: 'Regular Orphan' });
   });
 });
+
+// #369: relayed shop facts must survive the hop from Card to the enrich payload.
+describe('runOverlay orphan facts (#369)', () => {
+  const orphanResult = (brewery: string, name: string): MatchResult => ({
+    raw: { brewery, name },
+    matched_beer: { id: 1, name, brewery, rating_global: null, untappd_id: null },
+    is_drunk: false, drunk_uncertain: false, user_rating: null,
+  });
+
+  it('relays abv and style, keeping 0 as a value rather than dropping it', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const adapter = adapterFor([
+      { el: a, brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny', abv: 0, style: 'Kwas Chlebowy' },
+      { el: b, brewery: 'PINTA', name: 'Mystery' },
+    ]);
+    const sendMatch = async () => [
+      orphanResult('AleBrowar', 'Kwas Chlebowy Jasny'),
+      orphanResult('PINTA', 'Mystery'),
+    ];
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, sendMatch, enrich);
+
+    const orphans = enrich.mock.calls[0][0] as Array<{ abv?: number; style?: string }>;
+    expect(orphans[0].abv).toBe(0); // present, not dropped as falsy
+    expect(orphans[0].style).toBe('Kwas Chlebowy');
+    expect(orphans[1].abv).toBeUndefined();
+    expect(orphans[1].style).toBeUndefined();
+  });
+
+  it('still sends abv to /match and never sends style there', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([
+      { el: a, brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny', abv: 0, style: 'Kwas Chlebowy' },
+    ]);
+    const sendMatch = vi.fn(async (_b: RawBeer[]) => [orphanResult('AleBrowar', 'Kwas Chlebowy Jasny')]);
+    await runOverlay(document, adapter, sendMatch, vi.fn());
+
+    expect(sendMatch.mock.calls[0][0][0]).toEqual({
+      brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny', abv: 0,
+    });
+  });
+});

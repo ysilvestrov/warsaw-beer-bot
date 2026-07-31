@@ -34,15 +34,25 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
     const { enrichEnabled } = await getSettings();
     if (!enrichEnabled) return;
     const elByKey = new Map(orphans.map((o) => [o.key, o.el]));
-    const beers: OrphanBeer[] = orphans.map((o) => ({ key: o.key, brewery: o.brewery, name: o.name }));
+    const beers: OrphanBeer[] = orphans.map((o) => ({
+      key: o.key,
+      brewery: o.brewery,
+      name: o.name,
+      ...(o.abv !== undefined ? { abv: o.abv } : {}),
+      ...(o.style !== undefined ? { style: o.style } : {}),
+    }));
     await runEnrichment(beers, {
       getCandidates: async (bs) =>
         (await sendBg<{ candidates: EnrichCandidate[] }>({ type: 'enrich:candidates', beers: bs }))?.candidates ?? [],
       fetchSearch: async (algolia) =>
         (await sendBg<{ algolia: AlgoliaResponse | null }>({ type: 'enrich:fetch', algolia }))?.algolia ?? null,
-      submitResult: async (brewery, name, algolia) =>
-        (await sendBg<{ result: EnrichResult | null }>({ type: 'enrich:result', brewery, name, algolia, pageUrl: window.location.href }))?.result ??
-        { status: 'transient' },
+      submitResult: async (brewery, name, algolia, facts) =>
+        (await sendBg<{ result: EnrichResult | null }>({
+          type: 'enrich:result', brewery, name, algolia,
+          ...(facts?.abv !== undefined ? { abv: facts.abv } : {}),
+          ...(facts?.style !== undefined ? { style: facts.style } : {}),
+          pageUrl: window.location.href,
+        }))?.result ?? { status: 'transient' },
       setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },
       setEnriched: (key, id, r) => { const el = elByKey.get(key); if (el) setEnriched(el, id, r); },
       setOrphan: (key, brewery, name) => { const el = elByKey.get(key); if (el) setOrphan(el, brewery, name); },

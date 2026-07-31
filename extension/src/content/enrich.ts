@@ -7,14 +7,29 @@ export interface OrphanBeer {
   key: string;
   brewery: string;
   name: string;
+  /** Shop-published ABV. 0 is a real value — never test it for truthiness (#369/#322). */
+  abv?: number;
+  /** Shop-published style, persisted server-side for orphan rows (#369). */
+  style?: string;
+}
+
+/** The shop-published facts that travel with a beer to /enrich/* (#369). */
+export interface OrphanFacts {
+  abv?: number;
+  style?: string;
 }
 
 export interface EnrichDeps {
   getCandidates: (
-    beers: { brewery: string; name: string }[],
+    beers: ({ brewery: string; name: string } & OrphanFacts)[],
   ) => Promise<{ brewery: string; name: string; eligible: boolean; algolia: AlgoliaQuery }[]>;
   fetchSearch: (algolia: AlgoliaQuery) => Promise<AlgoliaResponse | null>;
-  submitResult: (brewery: string, name: string, algolia: AlgoliaResponse) => Promise<EnrichResult>;
+  submitResult: (
+    brewery: string,
+    name: string,
+    algolia: AlgoliaResponse,
+    facts?: OrphanFacts,
+  ) => Promise<EnrichResult>;
   setSearching: (key: string) => void;
   setEnriched: (key: string, untappdId: number, ratingGlobal: number | null) => void;
   setOrphan: (key: string, brewery: string, name: string) => void;
@@ -24,6 +39,13 @@ export interface EnrichDeps {
 
 const pairKey = (brewery: string, name: string) => `${brewery} ${name}`;
 
+// Omits absent facts rather than sending nulls. `!== undefined` is load-bearing:
+// an abv of 0 is real and must not be dropped as falsy (#369/#322).
+const orphanFacts = (o: OrphanFacts): OrphanFacts => ({
+  ...(o.abv !== undefined ? { abv: o.abv } : {}),
+  ...(o.style !== undefined ? { style: o.style } : {}),
+});
+
 // Registers every page orphan, then searches Untappd one at a time, throttled — but at
 // most MAX_SEARCHES_PER_PAGE per page so a big shop page doesn't drain the user's session.
 // The rest stay ⚪ for a later load / the server cron (same orphan pool + backoff).
@@ -31,7 +53,7 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
   if (orphans.length === 0) return;
 
   const candidates = await deps.getCandidates(
-    orphans.map((o) => ({ brewery: o.brewery, name: o.name })),
+    orphans.map((o) => ({ brewery: o.brewery, name: o.name, ...orphanFacts(o) })),
   );
   const byPair = new Map(orphans.map((o) => [pairKey(o.brewery, o.name), o]));
   const eligible = candidates.filter((c) => c.eligible).slice(0, MAX_SEARCHES_PER_PAGE);
@@ -47,7 +69,9 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
     deps.setSearching(beer.key);
     try {
       const algolia = await deps.fetchSearch(cand.algolia);
-      const res = algolia ? await deps.submitResult(cand.brewery, cand.name, algolia) : null;
+      const res = algolia
+        ? await deps.submitResult(cand.brewery, cand.name, algolia, orphanFacts(beer))
+        : null;
       if (res && res.status === 'matched' && res.untappd_id != null) {
         deps.setEnriched(beer.key, res.untappd_id, res.rating_global ?? null);
       } else {
