@@ -103,9 +103,14 @@ function waitForCode(port: number): Promise<string> {
 // otherwise put the secret on disk under the old mode, and tightening it afterwards
 // leaves a window in which another local user can read it. `chmodSync` stays as a
 // belt-and-braces guard for an unusual umask (a umask can only clear bits, never add).
+//
+// `flag: 'wx'` (O_CREAT|O_EXCL) is what makes the unlink safe: the write only succeeds by
+// CREATING the path, so it can never follow a symlink or land in a file someone else put
+// there in between — it throws EEXIST instead. (This repo lives under a 0750 home, so no
+// other local user can reach the directory anyway; the flag removes the question.)
 export function writeSecretFile(path: string, contents: string): void {
   rmSync(path, { force: true });
-  writeFileSync(path, contents, { mode: 0o600 });
+  writeFileSync(path, contents, { mode: 0o600, flag: 'wx' });
   chmodSync(path, 0o600);
 }
 

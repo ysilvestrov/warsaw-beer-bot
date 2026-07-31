@@ -5,6 +5,8 @@ import {
   writeFileSync,
   chmodSync,
   linkSync,
+  symlinkSync,
+  lstatSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -163,5 +165,23 @@ describe('writeSecretFile', () => {
     expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=fresh\n');
     expect(statSync(path).mode & 0o777).toBe(0o600);
     expect(readFileSync(twin, 'utf8')).toBe('stale\n');
+  });
+
+  it('never writes the token through a symlink planted at the path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const path = join(dir, 'cws-env.txt');
+    const victim = join(dir, 'victim.txt');
+    writeFileSync(victim, 'untouched\n');
+    symlinkSync(victim, path);
+
+    writeSecretFile(path, 'CWS_REFRESH_TOKEN=fresh\n');
+
+    // The secret went into a newly created regular file, not into whatever the symlink
+    // pointed at (O_EXCL also means a path someone else recreated mid-write throws
+    // rather than silently receiving the credential).
+    expect(readFileSync(victim, 'utf8')).toBe('untouched\n');
+    expect(lstatSync(path).isSymbolicLink()).toBe(false);
+    expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=fresh\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });
