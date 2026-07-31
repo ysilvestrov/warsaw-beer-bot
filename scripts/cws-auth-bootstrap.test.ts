@@ -142,6 +142,9 @@ describe('writeSecretFile', () => {
 
     expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=abc\n');
     expect(statSync(path).mode & 0o777).toBe(0o600);
+    // The invariant that actually matters, independent of the caller's umask:
+    // nothing outside the owner may read the token.
+    expect(statSync(path).mode & 0o077).toBe(0);
   });
 
   it('tightens permissions on a pre-existing file left world-readable by a prior run', () => {

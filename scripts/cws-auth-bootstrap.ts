@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAccessToken, getItem } from './cws-client';
 
@@ -98,20 +98,21 @@ function waitForCode(port: number): Promise<string> {
 
 // Writes a credential file readable only by its owner. The refresh token this holds can
 // upload and publish to the live store item, so it must never land world-readable.
-// `writeFileSync`'s `mode` option only applies when the file is newly CREATED, so the
-// path is removed FIRST: writing over a leftover 0644 file from an earlier run would
-// otherwise put the secret on disk under the old mode, and tightening it afterwards
-// leaves a window in which another local user can read it. `chmodSync` stays as a
-// belt-and-braces guard for an unusual umask (a umask can only clear bits, never add).
 //
-// `flag: 'wx'` (O_CREAT|O_EXCL) is what makes the unlink safe: the write only succeeds by
-// CREATING the path, so it can never follow a symlink or land in a file someone else put
-// there in between — it throws EEXIST instead. (This repo lives under a 0750 home, so no
-// other local user can reach the directory anyway; the flag removes the question.)
+// The invariant is "the token only ever exists in a file this process created at 0600",
+// and both calls are needed to get it:
+//   - `rmSync` first, because `writeFileSync`'s `mode` applies only on CREATION: writing
+//     over a leftover 0644 file from an earlier run would put the secret on disk under
+//     the old mode, and tightening it afterwards leaves a readable window.
+//   - `flag: 'wx'` (O_CREAT|O_EXCL), so the write can only succeed by creating the path —
+//     it can never follow a symlink or land in a file someone else placed there after the
+//     unlink; it throws EEXIST instead.
+// There is deliberately no chmod afterwards: the file is born at 0600, a umask can only
+// clear permission bits and never add them, and a path-based chmod would re-resolve the
+// name and could be pointed at another target.
 export function writeSecretFile(path: string, contents: string): void {
   rmSync(path, { force: true });
   writeFileSync(path, contents, { mode: 0o600, flag: 'wx' });
-  chmodSync(path, 0o600);
 }
 
 function requireEnv(name: string): string {
