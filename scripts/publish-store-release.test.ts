@@ -109,6 +109,23 @@ describe('runRelease', () => {
     ).rejects.toThrow(/Store package not found at \/z\.zip/);
   });
 
+  it('propagates a non-ENOENT read failure instead of the "not found" hint', async () => {
+    const eacces = Object.assign(new Error("EACCES: permission denied, open '/z.zip'"), {
+      code: 'EACCES',
+    });
+    const { deps: d } = deps({
+      readZip: () => {
+        throw eacces;
+      },
+    });
+    await expect(
+      runRelease({ version: '0.13.0', zipPath: '/z.zip', env: readStoreEnv(ENV), deps: d }),
+    ).rejects.toThrow(/EACCES: permission denied/);
+    await expect(
+      runRelease({ version: '0.13.0', zipPath: '/z.zip', env: readStoreEnv(ENV), deps: d }),
+    ).rejects.not.toThrow(/Store package not found/);
+  });
+
   it('dry-run stops after the preflight', async () => {
     const { calls, deps: d } = deps();
     const out = await runRelease({

@@ -1,4 +1,14 @@
-import { buildAuthUrl, exchangeCode, codeFromArgv, resolvePort, DEFAULT_PORT } from './cws-auth-bootstrap';
+import { mkdtempSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  buildAuthUrl,
+  exchangeCode,
+  codeFromArgv,
+  resolvePort,
+  DEFAULT_PORT,
+  writeSecretFile,
+} from './cws-auth-bootstrap';
 
 describe('buildAuthUrl', () => {
   it('requests the chromewebstore scope with an offline, forced-consent flow', () => {
@@ -86,11 +96,55 @@ describe('resolvePort', () => {
 
   it('parses a numeric CWS_AUTH_PORT', () => {
     expect(resolvePort({ CWS_AUTH_PORT: '9001' })).toBe(9001);
+    expect(resolvePort({ CWS_AUTH_PORT: '8080' })).toBe(8080);
   });
 
   it('throws a clear error on a non-numeric CWS_AUTH_PORT', () => {
     expect(() => resolvePort({ CWS_AUTH_PORT: 'not-a-port' })).toThrow(
-      /CWS_AUTH_PORT must be a number/,
+      /CWS_AUTH_PORT must be an integer between 1 and 65535/,
     );
+  });
+
+  it('throws on an empty CWS_AUTH_PORT instead of silently becoming port 0', () => {
+    expect(() => resolvePort({ CWS_AUTH_PORT: '' })).toThrow(
+      /CWS_AUTH_PORT must be an integer between 1 and 65535/,
+    );
+  });
+
+  it('throws on CWS_AUTH_PORT=0 (server.listen(0) would bind a different, unadvertised port)', () => {
+    expect(() => resolvePort({ CWS_AUTH_PORT: '0' })).toThrow(
+      /CWS_AUTH_PORT must be an integer between 1 and 65535/,
+    );
+  });
+
+  it('throws on a CWS_AUTH_PORT above the valid TCP port range', () => {
+    expect(() => resolvePort({ CWS_AUTH_PORT: '70000' })).toThrow(
+      /CWS_AUTH_PORT must be an integer between 1 and 65535/,
+    );
+  });
+});
+
+describe('writeSecretFile', () => {
+  it('creates a new file readable only by the owner', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const path = join(dir, 'cws-env.txt');
+
+    writeSecretFile(path, 'CWS_REFRESH_TOKEN=abc\n');
+
+    expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=abc\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
+  });
+
+  it('tightens permissions on a pre-existing file left world-readable by a prior run', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const path = join(dir, 'cws-env.txt');
+    writeFileSync(path, 'stale\n');
+    chmodSync(path, 0o644);
+    expect(statSync(path).mode & 0o777).toBe(0o644);
+
+    writeSecretFile(path, 'CWS_REFRESH_TOKEN=fresh\n');
+
+    expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=fresh\n');
+    expect(statSync(path).mode & 0o777).toBe(0o600);
   });
 });

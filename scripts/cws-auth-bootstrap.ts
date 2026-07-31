@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAccessToken, getItem } from './cws-client';
 
@@ -65,6 +65,15 @@ function waitForCode(port: number): Promise<string> {
       const url = new URL(req.url ?? '/', `http://127.0.0.1:${port}`);
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
+      // Only a request carrying `code` (success) or `error` (explicit OAuth failure) is
+      // terminal. Anything else — a favicon fetch, a manual visit to this port, a
+      // prefetch — must NOT close the server, or it kills the listener before Google's
+      // real redirect arrives.
+      if (!code && !error) {
+        reply.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' });
+        reply.end('Not found');
+        return;
+      }
       reply.writeHead(200, { 'content-type': 'text/plain; charset=utf-8' });
       reply.end(code ? 'OK — you can close this tab.' : `Failed: ${error ?? 'no code'}`);
       server.close();
@@ -85,6 +94,17 @@ function waitForCode(port: number): Promise<string> {
     });
     server.listen(port, '127.0.0.1');
   });
+}
+
+// Writes a credential file readable only by its owner. The refresh token this holds can
+// upload and publish to the live store item, so it must never land world-readable.
+// `writeFileSync`'s `mode` option only applies when the file is newly CREATED — if a
+// previous run left this path behind with looser permissions (e.g. the default umask's
+// 0644), passing `mode` alone would silently keep them. The `chmodSync` afterwards fixes
+// the mode unconditionally, whether or not the file pre-existed.
+export function writeSecretFile(path: string, contents: string): void {
+  writeFileSync(path, contents, { mode: 0o600 });
+  chmodSync(path, 0o600);
 }
 
 function requireEnv(name: string): string {
@@ -110,14 +130,20 @@ export function codeFromArgv(argv: string[]): string | null {
 }
 
 // Resolves the loopback listener port from CWS_AUTH_PORT, defaulting to DEFAULT_PORT.
-// A non-numeric override becomes NaN and would otherwise surface as an opaque
-// `server.listen(NaN)` failure, so it's validated eagerly here instead.
+// Must be a real TCP port (1..65535): `CWS_AUTH_PORT=` (empty) or `CWS_AUTH_PORT=0` both
+// coerce to 0 under `Number(...)`, which would make the auth URL advertise
+// `http://127.0.0.1:0` while `server.listen(0)` binds a real ephemeral port — the
+// redirect could then never arrive. A non-numeric override becomes NaN and would
+// otherwise surface as an opaque `server.listen(NaN)` failure. Both are validated
+// eagerly here instead.
 export function resolvePort(env: Record<string, string | undefined>): number {
   const raw = env.CWS_AUTH_PORT;
   if (raw === undefined) return DEFAULT_PORT;
   const port = Number(raw);
-  if (!Number.isFinite(port)) {
-    throw new Error('CWS_AUTH_PORT must be a number');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(
+      `CWS_AUTH_PORT must be an integer between 1 and 65535, got ${JSON.stringify(raw)}`,
+    );
   }
   return port;
 }
@@ -157,7 +183,7 @@ async function bootstrap(): Promise<void> {
 
   const refreshToken = await exchangeCode({ clientId, clientSecret, code, redirectUri });
   const envFile = resolve(tmpDir, 'cws-env.txt');
-  writeFileSync(envFile, `CWS_REFRESH_TOKEN=${refreshToken}\n`);
+  writeSecretFile(envFile, `CWS_REFRESH_TOKEN=${refreshToken}\n`);
   console.log(`Refresh token written to ${envFile} — add that line to .env, then run:`);
   console.log('  npm run cws:auth -- --verify');
 }

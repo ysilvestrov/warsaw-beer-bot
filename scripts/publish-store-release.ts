@@ -83,11 +83,26 @@ export async function runRelease(opts: {
   let zip: Uint8Array<ArrayBuffer>;
   try {
     zip = deps.readZip(opts.zipPath);
-  } catch {
-    throw new Error(
-      `Store package not found at ${opts.zipPath} — build it with ` +
-        '`npm --prefix extension run package:store` (or just use `npm run release:store`).',
-    );
+  } catch (err) {
+    // Only a genuinely missing file gets the friendly "go build it" hint. EACCES,
+    // EISDIR and anything else are real problems the hint would send down the wrong
+    // path, so they surface as-is (with context that it happened reading the store
+    // package). Real `fs` failures are `NodeJS.ErrnoException`s with `.code ===
+    // 'ENOENT'`; we also check the message prefix because the message text itself
+    // ("ENOENT: no such file or directory, ...") is what real Node fs errors carry,
+    // covering callers (incl. tests) that construct a plain Error with that text but no
+    // `.code`.
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    const message = err instanceof Error ? err.message : String(err);
+    if (code === 'ENOENT' || message.startsWith('ENOENT')) {
+      throw new Error(
+        `Store package not found at ${opts.zipPath} — build it with ` +
+          '`npm --prefix extension run package:store` (or just use `npm run release:store`).',
+      );
+    }
+    throw new Error(`Failed to read store package at ${opts.zipPath}: ${message}`, {
+      cause: err,
+    });
   }
   await deps.uploadPackage(opts.env.itemId, zip, token);
   console.log(`uploaded ${opts.zipPath} (${zip.length} bytes)`);
