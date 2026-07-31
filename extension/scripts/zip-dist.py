@@ -8,6 +8,10 @@ load via chrome://extensions -> Load unpacked.
 The archive is DETERMINISTIC: entries are sorted and written with a fixed timestamp and
 mode, so identical dist/ contents always produce a byte-identical zip (stable sha256).
 Override the source dir / output path via ZIP_DIST_SRC / ZIP_DIST_OUT (used by tests).
+
+When CWS_BUILD=1 (the Chrome Web Store build, invoked via `npm run package:store`),
+the output gets a `-store` suffix so it cannot collide with / overwrite the dev build's
+zip (whose sha256 is recorded in the bot's extension_releases table).
 """
 import json
 import os
@@ -21,8 +25,12 @@ with open(os.path.join(EXT_ROOT, "package.json"), encoding="utf-8") as f:
     VERSION = json.load(f)["version"]
 
 DIST = os.environ.get("ZIP_DIST_SRC", os.path.join(EXT_ROOT, "dist"))
+# The store build (CWS_BUILD=1) is a DIFFERENT artefact from the dev build (no `key`,
+# no broad optional host permission), so it gets its own filename — otherwise it would
+# silently overwrite the dev zip whose sha256 is already in `extension_releases`.
+SUFFIX = "-store" if os.environ.get("CWS_BUILD") == "1" else ""
 OUT = os.environ.get(
-    "ZIP_DIST_OUT", os.path.join(EXT_ROOT, f"warsaw-beer-overlay-{VERSION}.zip")
+    "ZIP_DIST_OUT", os.path.join(EXT_ROOT, f"warsaw-beer-overlay-{VERSION}{SUFFIX}.zip")
 )
 
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)  # zip epoch floor — stable across runs
