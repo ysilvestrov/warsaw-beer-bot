@@ -182,3 +182,29 @@ describe('onemorebeer technical panel (#369)', () => {
     expect(parsed[0].style).toBeUndefined();
   });
 });
+
+// #369 review follow-up: an impossible shop value must not become a Card.abv at all.
+describe('onemorebeer ABV bounds (#369)', () => {
+  it.each([['9999%', '9999%'], ['negative', '-5%']])(
+    'drops an out-of-range Moc value (%s)',
+    (_label, value) => {
+      const doc = new DOMParser().parseFromString(
+        `<div class="one-catalog-view-list">${wrappedTile('Pinta', 'PINTA MYSTERY BUT. 0,5 L', [
+          ['Moc (%)', value],
+        ])}</div>`,
+        'text/html',
+      );
+      expect(onemorebeer.parseCards(doc)[0].abv).toBeUndefined();
+    },
+  );
+
+  it('still keeps a legitimate 0.0%', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('AleBrowar', 'ALEBROWAR KWAS CHLEBOWY JASNY BUT. 0,5 L', [
+        ['Moc (%)', '0.0%'],
+      ])}</div>`,
+      'text/html',
+    );
+    expect(onemorebeer.parseCards(doc)[0].abv).toBe(0);
+  });
+});

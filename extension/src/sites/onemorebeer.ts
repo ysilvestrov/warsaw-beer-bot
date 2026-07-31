@@ -1,6 +1,7 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
 import { isNonBeerName } from './non-beer';
+import { usableAbv } from '../shared/abv';
 
 const CARD_SELECTOR = '.one-product-list-view__tile';
 const BREWERY_SELECTOR = '[data-information-type="brand-name"] .one-product-tile-information__row__value';
@@ -36,14 +37,15 @@ function cleanName(rawTitle: string, brewery: string): string {
   return name.trim();
 }
 
-// "4.5%", " 0.0%", "4,8 %" → number. Anything else ("n/d", "-", "") → undefined.
+// "4.5%", " 0.0%", "4,8 %" → number. Anything else ("n/d", "-", "", "9999%") → undefined.
 // 0 is a legitimate result and must never be conflated with "missing": AleBrowar's
 // Kwas Chlebowy Bright (0.0%) is told apart from Light (0.5%) by nothing else (#322).
+// Bounds come from usableAbv so a Card never carries an impossible ABV in the first
+// place; usableAbv is applied again at the payload boundary for the other adapters.
 function parseAbv(value: string): number | undefined {
   const m = value.replace(',', '.').match(/^\s*(\d+(?:\.\d+)?)\s*%?\s*$/);
   if (!m) return undefined;
-  const abv = Number(m[1]);
-  return Number.isFinite(abv) ? abv : undefined;
+  return usableAbv(Number(m[1]));
 }
 
 // #369: the shop publishes ABV and style in a "Dane techniczne" accordion that is

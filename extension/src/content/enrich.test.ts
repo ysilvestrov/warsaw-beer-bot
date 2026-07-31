@@ -94,3 +94,23 @@ describe('runEnrichment relays orphan facts (#369)', () => {
     expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
   });
 });
+
+// #369 review follow-up: runEnrichment is exported, so it sanitizes rather than
+// trusting its caller — a stray NaN would serialize as null and be unmappable.
+describe('runEnrichment sanitizes orphan abv (#369)', () => {
+  it.each([['NaN', NaN], ['out of range', 9999], ['negative', -1]])(
+    'drops an %s abv from both endpoints',
+    async (_label, bad) => {
+      const d = deps();
+      await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', abv: bad }], d);
+      expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
+      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+    },
+  );
+
+  it('keeps a legitimate 0', async () => {
+    const d = deps();
+    await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', abv: 0 }], d);
+    expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0', abv: 0 }]);
+  });
+});

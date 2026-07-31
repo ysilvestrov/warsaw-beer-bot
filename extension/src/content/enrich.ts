@@ -1,4 +1,5 @@
 import type { AlgoliaQuery, AlgoliaResponse, EnrichResult } from '../api/types';
+import { usableAbv } from '../shared/abv';
 
 export const MAX_SEARCHES_PER_PAGE = 20;
 export const DEFAULT_DELAY_MS = 4000;
@@ -41,10 +42,16 @@ const pairKey = (brewery: string, name: string) => `${brewery} ${name}`;
 
 // Omits absent facts rather than sending nulls. `!== undefined` is load-bearing:
 // an abv of 0 is real and must not be dropped as falsy (#369/#322).
-const orphanFacts = (o: OrphanFacts): OrphanFacts => ({
-  ...(o.abv !== undefined ? { abv: o.abv } : {}),
-  ...(o.style !== undefined ? { style: o.style } : {}),
-});
+// runEnrichment is exported, so it re-applies usableAbv rather than trusting its
+// caller to have sanitized: JSON.stringify would turn a stray NaN into a null, and
+// null is not a number the enrich schema can map to "no ABV".
+const orphanFacts = (o: OrphanFacts): OrphanFacts => {
+  const abv = usableAbv(o.abv);
+  return {
+    ...(abv !== undefined ? { abv } : {}),
+    ...(o.style !== undefined ? { style: o.style } : {}),
+  };
+};
 
 // Registers every page orphan, then searches Untappd one at a time, throttled — but at
 // most MAX_SEARCHES_PER_PAGE per page so a big shop page doesn't drain the user's session.
