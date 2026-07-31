@@ -1,4 +1,4 @@
-import { buildAuthUrl, exchangeCode } from './cws-auth-bootstrap';
+import { buildAuthUrl, exchangeCode, codeFromArgv, resolvePort, DEFAULT_PORT } from './cws-auth-bootstrap';
 
 describe('buildAuthUrl', () => {
   it('requests the chromewebstore scope with an offline, forced-consent flow', () => {
@@ -54,5 +54,43 @@ describe('exchangeCode', () => {
         impl,
       ),
     ).rejects.toThrow(/refresh_token/);
+  });
+});
+
+describe('codeFromArgv', () => {
+  it('returns null when --code is absent', () => {
+    expect(codeFromArgv(['node', 'script.js', '--verify'])).toBeNull();
+  });
+
+  it('returns the value that follows --code', () => {
+    expect(codeFromArgv(['node', 'script.js', '--code', '4/0AX...'])).toBe('4/0AX...');
+  });
+
+  it('throws when --code is the last token (no value)', () => {
+    expect(() => codeFromArgv(['node', 'script.js', '--code'])).toThrow(
+      /--code requires a value/,
+    );
+  });
+
+  it('throws when the token after --code looks like another flag', () => {
+    expect(() => codeFromArgv(['node', 'script.js', '--code', '--verify'])).toThrow(
+      /--code requires a value/,
+    );
+  });
+});
+
+describe('resolvePort', () => {
+  it('defaults to DEFAULT_PORT when CWS_AUTH_PORT is unset', () => {
+    expect(resolvePort({})).toBe(DEFAULT_PORT);
+  });
+
+  it('parses a numeric CWS_AUTH_PORT', () => {
+    expect(resolvePort({ CWS_AUTH_PORT: '9001' })).toBe(9001);
+  });
+
+  it('throws a clear error on a non-numeric CWS_AUTH_PORT', () => {
+    expect(() => resolvePort({ CWS_AUTH_PORT: 'not-a-port' })).toThrow(
+      /CWS_AUTH_PORT must be a number/,
+    );
   });
 });

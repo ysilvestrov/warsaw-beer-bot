@@ -71,7 +71,18 @@ function waitForCode(port: number): Promise<string> {
       if (code) res(code);
       else rej(new Error(`Authorisation failed: ${error ?? 'no code in redirect'}`));
     });
-    server.on('error', rej);
+    server.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EADDRINUSE') {
+        rej(
+          new Error(
+            `${err.message} — port ${port} is already in use. Set CWS_AUTH_PORT to a free ` +
+              'port and re-run.',
+          ),
+        );
+        return;
+      }
+      rej(err);
+    });
     server.listen(port, '127.0.0.1');
   });
 }
@@ -80,6 +91,35 @@ function requireEnv(name: string): string {
   const v = process.env[name];
   if (!v) throw new Error(`${name} is not set in .env`);
   return v;
+}
+
+// Pulls the `--code <value>` manual fallback out of argv. Returns null when the flag is
+// absent (meaning: wait for the loopback redirect instead). Throws when the flag is
+// present but its value is missing or looks like another flag — without this guard,
+// `process.argv[flagIndex + 1]` silently becomes `undefined`, which URLSearchParams
+// serializes as the literal string "code=undefined" and sends to Google as a real
+// request, turning a local mistake into a confusing remote 400.
+export function codeFromArgv(argv: string[]): string | null {
+  const flagIndex = argv.indexOf('--code');
+  if (flagIndex < 0) return null;
+  const value = argv[flagIndex + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error('--code requires a value (the `code=` parameter from the redirect URL)');
+  }
+  return value;
+}
+
+// Resolves the loopback listener port from CWS_AUTH_PORT, defaulting to DEFAULT_PORT.
+// A non-numeric override becomes NaN and would otherwise surface as an opaque
+// `server.listen(NaN)` failure, so it's validated eagerly here instead.
+export function resolvePort(env: Record<string, string | undefined>): number {
+  const raw = env.CWS_AUTH_PORT;
+  if (raw === undefined) return DEFAULT_PORT;
+  const port = Number(raw);
+  if (!Number.isFinite(port)) {
+    throw new Error('CWS_AUTH_PORT must be a number');
+  }
+  return port;
 }
 
 // Read-only credential probe: proves the refresh token works, the Chrome Web Store API
@@ -100,7 +140,7 @@ async function verify(): Promise<void> {
 async function bootstrap(): Promise<void> {
   const clientId = requireEnv('CWS_CLIENT_ID');
   const clientSecret = requireEnv('CWS_CLIENT_SECRET');
-  const port = Number(process.env.CWS_AUTH_PORT ?? DEFAULT_PORT);
+  const port = resolvePort(process.env);
   const redirectUri = `http://127.0.0.1:${port}`;
   const url = buildAuthUrl(clientId, redirectUri);
 
@@ -112,8 +152,8 @@ async function bootstrap(): Promise<void> {
 
   // Manual fallback for a browser that cannot reach this host's loopback: paste the
   // `code=` value from the failed redirect as `--code <value>`.
-  const flagIndex = process.argv.indexOf('--code');
-  const code = flagIndex >= 0 ? process.argv[flagIndex + 1] : await waitForCode(port);
+  const manualCode = codeFromArgv(process.argv);
+  const code = manualCode !== null ? manualCode : await waitForCode(port);
 
   const refreshToken = await exchangeCode({ clientId, clientSecret, code, redirectUri });
   const envFile = resolve(tmpDir, 'cws-env.txt');
