@@ -50,3 +50,36 @@ export async function getAccessToken(
   }
   return body.access_token;
 }
+
+const API_BASE = 'https://www.googleapis.com/chromewebstore/v1.1/items';
+
+function authHeaders(token: string): Record<string, string> {
+  return { Authorization: `Bearer ${token}`, 'x-goog-api-version': '2' };
+}
+
+export interface CwsItem {
+  id: string;
+  crxVersion: string | null;
+  uploadState: string | null;
+}
+
+// Read-only. Used both as the credential probe (`cws:auth --verify`) and as the release
+// preflight: `crxVersion` is the version currently sitting in the item's draft.
+export async function getItem(
+  itemId: string,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<CwsItem> {
+  const res = await fetchImpl(`${API_BASE}/${itemId}?projection=DRAFT`, {
+    headers: authHeaders(token),
+  });
+  const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(`CWS getItem failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  return {
+    id: typeof body.id === 'string' ? body.id : itemId,
+    crxVersion: typeof body.crxVersion === 'string' ? body.crxVersion : null,
+    uploadState: typeof body.uploadState === 'string' ? body.uploadState : null,
+  };
+}
