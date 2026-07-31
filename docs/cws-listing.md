@@ -124,8 +124,10 @@ anonymous ⭐ mode (#245) makes the core feature verifiable with zero setup.
 - [ ] Privacy practices tab: privacy policy URL, data-collected checkboxes, 3
       certifications (`cws-data-usage.md`).
 - [ ] Account → review notes: paste `cws-review-notes.md`.
-- [ ] Upload the store package (`cd extension && npm run package:store`) and submit for
-      review.
+- [ ] Upload + submit: `npm run release:store` from the repo root (builds the store
+      package, uploads it and submits for review; see `docs/extension-release.md` for
+      the one-time OAuth setup). Manual dashboard upload of
+      `extension/warsaw-beer-overlay-<version>-store.zip` remains a fallback.
 
 Part of the `chrome-web-store` series. Depends on #242 (icons), #244 (privacy), #245
 (no-token UX + review notes). Distribution migration is tracked separately in #247.

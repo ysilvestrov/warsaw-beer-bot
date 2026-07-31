@@ -1218,6 +1218,11 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   мовчки вимкнув daily-status). Прод-`.env` редагувати тільки **additively** через
   `scripts/set-env.sh KEY VALUE FILE` (бекап + upsert одного ключа, інші рядки
   зберігаються) — ніколи не переписувати файл вручну. `.env.example` — перелік ключів.
+- `CWS_CLIENT_ID` / `CWS_CLIENT_SECRET` / `CWS_REFRESH_TOKEN` — OAuth-креденшели Chrome
+  Web Store API (#266), тільки для `npm run release:store`; видаються Desktop-клієнтом у
+  Google Cloud, consent screen МУСИТЬ бути **In production** (у *Testing* refresh-токен
+  живе 7 днів). Отримання: `npm run cws:auth`.
+- `CWS_ITEM_ID` — id store-item (за замовчуванням `fdelmnhijeiojadcaihfdpecfcldbndg`).
 - Секрети **ніколи** не хардкодяться і не потрапляють у логи. На проді `.env`
   у `/etc/warsaw-beer-bot/.env` (`chmod 600`). `.env.example` тримати в синку.
 
@@ -1747,14 +1752,17 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - **Модель — перехідний період, потім повний перехід.** **Chrome Web Store — основний**
   канал: CWS **сам авто-оновлює** користувачів. Off-store bot-канал (§6.1) стає **legacy** і
   працює **паралельно лише на час переходу**, поки тестери мігрують; після cutover — ретайр.
-- **Store extension ID:** `fdelmnhijeiojadcaihfdpecfcldbndg` (item подано на рев'ю 2026-07-10;
-  версія 0.11.0). Store-збірка **без `key`**, тож CWS присвоює цей ID сам (див. §6.2).
+- **Store extension ID:** `fdelmnhijeiojadcaihfdpecfcldbndg` (версія 0.12.0 опублікована й
+  live). Store-збірка **без `key`**, тож CWS присвоює цей ID сам (див. §6.2).
 - **Наслідок зміни ID.** Store-ID **відрізняється** від `key`-pinned ID unpacked-збірки, а
   `chrome.storage.local` прив'язаний до ID → у store-версії сховище **порожнє**: тестер має
   **заново вставити токен** в Options і видалити unpacked-версію.
-- **Реліз під час переходу — обидва канали.** Нова версія = `npm run package:store` → **ручний**
-  аплоад у CWS dashboard (автоматизація відкладена, #266) **та** `npm run release` (off-store dev
-  zip + bot-broadcast, §6.1) для тестерів, що ще на unpacked. Після cutover лишається лише перший.
+- **Реліз під час переходу — обидва канали.** Нова версія = `npm run release:store` (#266:
+  `package:store` → upload у CWS → submit for review, локально, креденшели з `.env`) **та**
+  `npm run release` (off-store dev zip + bot-broadcast, §6.1) для тестерів, що ще на unpacked.
+  Після cutover лишається лише перший. Store-збірка пишеться в окремий файл
+  `warsaw-beer-overlay-<version>-store.zip`, щоб не затирати dev-zip, чий sha256 уже в
+  `extension_releases` (§3.12). Ручний аплоад через dashboard лишається як фолбек.
 - **Dev/maintainer.** Unpacked-збірка з `key` лишається як локальний dev-режим мейнтейнера.
 - **Cutover (#267):** коли store-версія стане LIVE — розіслати міграційне повідомлення (нижче),
   витримати grace-період, тоді ретайрити off-store канал (`extension_releases` §3.12 + broadcast).
