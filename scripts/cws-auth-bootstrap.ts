@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { createServer } from 'node:http';
-import { mkdirSync, writeFileSync, chmodSync } from 'node:fs';
+import { mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAccessToken, getItem } from './cws-client';
 
@@ -98,11 +98,13 @@ function waitForCode(port: number): Promise<string> {
 
 // Writes a credential file readable only by its owner. The refresh token this holds can
 // upload and publish to the live store item, so it must never land world-readable.
-// `writeFileSync`'s `mode` option only applies when the file is newly CREATED — if a
-// previous run left this path behind with looser permissions (e.g. the default umask's
-// 0644), passing `mode` alone would silently keep them. The `chmodSync` afterwards fixes
-// the mode unconditionally, whether or not the file pre-existed.
+// `writeFileSync`'s `mode` option only applies when the file is newly CREATED, so the
+// path is removed FIRST: writing over a leftover 0644 file from an earlier run would
+// otherwise put the secret on disk under the old mode, and tightening it afterwards
+// leaves a window in which another local user can read it. `chmodSync` stays as a
+// belt-and-braces guard for an unusual umask (a umask can only clear bits, never add).
 export function writeSecretFile(path: string, contents: string): void {
+  rmSync(path, { force: true });
   writeFileSync(path, contents, { mode: 0o600 });
   chmodSync(path, 0o600);
 }

@@ -1,4 +1,11 @@
-import { mkdtempSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import {
+  mkdtempSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+  chmodSync,
+  linkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -142,9 +149,19 @@ describe('writeSecretFile', () => {
     chmodSync(path, 0o644);
     expect(statSync(path).mode & 0o777).toBe(0o644);
 
+    // A hard link to the stale file pins its inode. If the secret were written into the
+    // pre-existing 0644 file and only chmod'ed afterwards, it would land in THAT inode —
+    // readable through this link, and readable by any local user during the window
+    // before the chmod. The twin keeping its old contents proves the file was replaced,
+    // so the token only ever existed in a freshly created 0600 file. (Inode numbers
+    // themselves prove nothing here: ext4 hands the same one straight back after unlink.)
+    const twin = join(dir, 'twin.txt');
+    linkSync(path, twin);
+
     writeSecretFile(path, 'CWS_REFRESH_TOKEN=fresh\n');
 
     expect(readFileSync(path, 'utf8')).toBe('CWS_REFRESH_TOKEN=fresh\n');
     expect(statSync(path).mode & 0o777).toBe(0o600);
+    expect(readFileSync(twin, 'utf8')).toBe('stale\n');
   });
 });
