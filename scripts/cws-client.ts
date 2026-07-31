@@ -41,7 +41,7 @@ export async function getAccessToken(
       'CWS auth failed: invalid_grant — the refresh token is dead. Either access was ' +
         'revoked, or the OAuth consent screen is still in "Testing" mode, where Google ' +
         'expires refresh tokens after 7 days (move it to "In production"). Re-run: ' +
-        'npx tsx scripts/cws-auth-bootstrap.ts',
+        'npm run cws:auth (scripts/cws-auth-bootstrap.ts).',
     );
   }
   if (!res.ok || typeof body.access_token !== 'string') {
