@@ -11,5 +11,13 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["scripts/ai-review/**/*", "scripts/ai-pr-review.ts", "scripts/ai-pr-review.test.ts"]
+  "include": [
+    "scripts/ai-review/**/*",
+    "scripts/ai-pr-review.ts",
+    "scripts/ai-pr-review.test.ts",
+    "scripts/cws-client.ts",
+    "scripts/cws-client.test.ts",
+    "scripts/cws-auth-bootstrap.ts",
+    "scripts/cws-auth-bootstrap.test.ts"
+  ]
 }
