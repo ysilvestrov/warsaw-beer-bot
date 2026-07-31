@@ -87,13 +87,124 @@ describe('onemorebeer adapter', () => {
     }
   });
 
-  it('never sets abv (the degree token is Plato/extract, not ABV)', () => {
-    for (const c of cards) {
+  // #369: abv now comes from the technical panel's "Moc (%)" row. The degree token
+  // in titles is Plato/extract and must still never be used as ABV — the four PINTA
+  // products in the fixture carry a ° token and no Moc row, so they stay undefined.
+  it('never derives abv from the degree token (Plato/extract, not ABV)', () => {
+    const plato = cards.filter((c) => /^PINTA/i.test(c.brewery) || c.brewery === 'PINTA');
+    expect(plato.length).toBeGreaterThan(0);
+    for (const c of plato) {
       expect(c.abv).toBeUndefined();
     }
   });
 
   it('defines waitForGrid (SPA grid paints client-side)', () => {
     expect(typeof onemorebeer.waitForGrid).toBe('function');
+  });
+});
+
+// #369: the shop publishes ABV and style in a "Dane techniczne" accordion that is
+// already in the DOM but collapsed. The panel is NOT inside the tile — it is a hidden
+// sibling under the shared .one-product-list-view wrapper.
+function wrappedTile(brewery: string, title: string, rows: [string, string][]): string {
+  const cells = rows
+    .map(([k, v]) => `<div><span>${k}</span><span class="ml-1 font-weight-bold text-right"> ${v}</span></div>`)
+    .join('');
+  return `
+    <div class="my-2 col-12 one-product-list-view">
+      <div class="one-product-list-view__tile">
+        <div data-information-type="brand-name">
+          <span class="one-product-tile-information__row__value">${brewery}</span>
+        </div>
+        <a class="product__title">${title}</a>
+      </div>
+      <div class="border-top bg-white collapse" style="display:none;">
+        <div class="row one-product-technical-data w-100 m-0 py-1 text">${cells}</div>
+      </div>
+    </div>`;
+}
+
+describe('onemorebeer technical panel (#369)', () => {
+  it('reads Moc (%) and Styl from the hidden sibling panel of the fixture', () => {
+    const dziki = cards.find((c) => c.name.includes('UKRYKA'))!;
+    expect(dziki.abv).toBe(4.5);
+    expect(dziki.style).toBe('Wheat beer');
+  });
+
+  it('reads style even when the product publishes no Moc row', () => {
+    const pinta = cards.find((c) => c.name.includes('WEST COAST IPA'))!;
+    expect(pinta.abv).toBeUndefined();
+    expect(pinta.style).toBe('West Coast IPA');
+  });
+
+  it('parses a 0.0% product as 0, not undefined', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('AleBrowar', 'ALEBROWAR KWAS CHLEBOWY JASNY BUT. 0,5 L', [
+        ['Pojemność', '0,5l'], ['Moc (%)', '0.0%'], ['Styl', 'Kwas Chlebowy'],
+      ])}</div>`,
+      'text/html',
+    );
+    const parsed = onemorebeer.parseCards(doc);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].abv).toBe(0); // MUST be 0 — a falsy check here breaks #322
+    expect(parsed[0].style).toBe('Kwas Chlebowy');
+  });
+
+  it('accepts a comma decimal separator', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('Pinta', 'PINTA MYSTERY BUT. 0,5 L', [
+        ['Moc (%)', '4,8 %'],
+      ])}</div>`,
+      'text/html',
+    );
+    expect(onemorebeer.parseCards(doc)[0].abv).toBe(4.8);
+  });
+
+  it('ignores an unparseable Moc value without throwing', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('Pinta', 'PINTA MYSTERY BUT. 0,5 L', [
+        ['Moc (%)', 'n/d'],
+      ])}</div>`,
+      'text/html',
+    );
+    const parsed = onemorebeer.parseCards(doc);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].abv).toBeUndefined();
+  });
+
+  it('leaves both fields undefined when there is no panel at all', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${tile('Pinta', 'PINTA MYSTERY BUT. 0,5 L')}</div>`,
+      'text/html',
+    );
+    const parsed = onemorebeer.parseCards(doc);
+    expect(parsed[0].abv).toBeUndefined();
+    expect(parsed[0].style).toBeUndefined();
+  });
+});
+
+// #369 review follow-up: an impossible shop value must not become a Card.abv at all.
+describe('onemorebeer ABV bounds (#369)', () => {
+  it.each([['9999%', '9999%'], ['negative', '-5%']])(
+    'drops an out-of-range Moc value (%s)',
+    (_label, value) => {
+      const doc = new DOMParser().parseFromString(
+        `<div class="one-catalog-view-list">${wrappedTile('Pinta', 'PINTA MYSTERY BUT. 0,5 L', [
+          ['Moc (%)', value],
+        ])}</div>`,
+        'text/html',
+      );
+      expect(onemorebeer.parseCards(doc)[0].abv).toBeUndefined();
+    },
+  );
+
+  it('still keeps a legitimate 0.0%', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('AleBrowar', 'ALEBROWAR KWAS CHLEBOWY JASNY BUT. 0,5 L', [
+        ['Moc (%)', '0.0%'],
+      ])}</div>`,
+      'text/html',
+    );
+    expect(onemorebeer.parseCards(doc)[0].abv).toBe(0);
   });
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.13.0] - 2026-07-31
+
+- Missing beers are now matched using the alcohol strength the shop publishes, instead of ignoring it. This tells apart releases that share a brewery, a style and a name and differ only in strength — for example AleBrowar's alcohol-free Kwas Chlebowy versus its 0.5% version — so more ⚪ beers become ⭐ instead of staying unmatched.
+- Added OneMoreBeer alcohol strength and style parsing: the shop's "Dane techniczne" panel is now read for every product, so its beers get the same strength-aware matching as the other supported shops.
+
 ## [0.12.0] - 2026-07-19
 
 - Improved Flasker brewery detection: listings where the brewery isn't the first word of the title — or appears only in a product tag or the brand strip — now identify the correct brewery for dozens more breweries, instead of guessing the first word, so more beers match and badge correctly.

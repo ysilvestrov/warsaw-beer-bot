@@ -38,8 +38,10 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
 }
 
 export interface EnrichFetchMessage { type: 'enrich:fetch'; algolia: AlgoliaQuery }
-export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; pageUrl?: string }
+// #369: abv/style are optional shop-published facts. Absent fields are omitted,
+// never sent as null, and an abv of 0 is a real value.
+export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string; abv?: number; style?: string }[] }
+export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; pageUrl?: string }
 
 async function enrichAllowed(): Promise<boolean> {
   const { enrichEnabled } = await getSettings();
@@ -87,7 +89,12 @@ export async function handleEnrichResult(
   const { token, baseUrl, enrichEnabled } = await getSettings();
   if (!enrichEnabled || !token) return { type: 'enrich:result:ok', result: null };
   try {
-    const result = await postEnrichResult(baseUrl, token, { brewery: msg.brewery, name: msg.name, algolia: msg.algolia, pageUrl: msg.pageUrl });
+    const result = await postEnrichResult(baseUrl, token, {
+      brewery: msg.brewery, name: msg.name, algolia: msg.algolia,
+      ...(msg.abv !== undefined ? { abv: msg.abv } : {}),
+      ...(msg.style !== undefined ? { style: msg.style } : {}),
+      pageUrl: msg.pageUrl,
+    });
     return { type: 'enrich:result:ok', result };
   } catch {
     return { type: 'enrich:result:ok', result: null };

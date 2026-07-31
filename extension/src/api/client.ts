@@ -52,7 +52,7 @@ export async function postMatch(
 export async function postEnrichCandidates(
   baseUrl: string,
   token: string,
-  beers: { brewery: string; name: string }[],
+  beers: { brewery: string; name: string; abv?: number; style?: string }[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<EnrichCandidate[]> {
   let res: Response;
@@ -73,7 +73,14 @@ export async function postEnrichCandidates(
 export async function postEnrichResult(
   baseUrl: string,
   token: string,
-  payload: { brewery: string; name: string; algolia: AlgoliaResponse; pageUrl?: string },
+  payload: {
+    brewery: string;
+    name: string;
+    algolia: AlgoliaResponse;
+    abv?: number;
+    style?: string;
+    pageUrl?: string;
+  },
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<EnrichResult> {
   let res: Response;

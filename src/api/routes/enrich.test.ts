@@ -143,6 +143,90 @@ describe('POST /enrich/candidates', () => {
     const res = await post(app, '/enrich/candidates', { beers: [] });
     expect(res.status).toBe(400);
   });
+
+  // --- #369: relayed shop facts ---------------------------------------------
+
+  it('persists a relayed abv and style on a newly created orphan', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'AleBrowar', name: 'KWAS CHLEBOWY JASNY', abv: 0, style: 'Kwas Chlebowy' }],
+    });
+    expect(res.status).toBe(200);
+    const row = findBeerByNormalized(db, normalizeBrewery('AleBrowar'), normalizeName('KWAS CHLEBOWY JASNY'))!;
+    expect(row.abv).toBe(0); // 0.0% must survive — it is the #322 disambiguator
+    expect(row.style).toBe('Kwas Chlebowy');
+  });
+
+  it('backfills an existing orphan that had no abv, and re-arms its backoff', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/candidates', { beers: [{ brewery: 'AleBrowar', name: 'KWAS CHLEBOWY JASNY' }] });
+    const before = findBeerByNormalized(db, normalizeBrewery('AleBrowar'), normalizeName('KWAS CHLEBOWY JASNY'))!;
+    db.prepare('UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 3 WHERE id = ?')
+      .run(new Date().toISOString(), before.id);
+
+    await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'AleBrowar', name: 'KWAS CHLEBOWY JASNY', abv: 0 }],
+    });
+
+    const after = getBeer(db, before.id)!;
+    expect(after.abv).toBe(0);
+    expect(after.untappd_lookup_count).toBe(0);
+    expect(after.untappd_lookup_at).toBeNull();
+  });
+
+  it('does not re-arm on a style-only gain', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/candidates', { beers: [{ brewery: 'PINTA', name: 'Atak Chmielu', abv: 6.1 }] });
+    const before = findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Atak Chmielu'))!;
+    db.prepare('UPDATE beers SET untappd_lookup_count = 2 WHERE id = ?').run(before.id);
+
+    await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Atak Chmielu', abv: 6.1, style: 'IPA' }],
+    });
+
+    const after = getBeer(db, before.id)!;
+    expect(after.style).toBe('IPA');
+    expect(after.untappd_lookup_count).toBe(2);
+  });
+
+  it('drops an out-of-range abv instead of rejecting the whole batch', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [
+        { brewery: 'PINTA', name: 'Bad Abv', abv: 9999 },
+        { brewery: 'PINTA', name: 'Good Abv', abv: 5.2 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Bad Abv'))!.abv).toBeNull();
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Good Abv'))!.abv).toBe(5.2);
+  });
+
+  it('still accepts an old-shape body with no abv or style', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'PINTA', name: 'Atak Chmielu' }] });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Atak Chmielu'))!.abv).toBeNull();
+  });
+
+  it('rejects a style over the per-field character limit', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Atak Chmielu', style: 's'.repeat(BEER_TEXT_LIMIT_CHARS + 1) }],
+    });
+    expect(res.status).toBe(413);
+  });
+
+  it('keeps a 200-beer payload with abv and style inside the route byte limit', () => {
+    const beers = Array.from({ length: 200 }, (_, i) => ({
+      brewery: 'Browar Stu Mostow Wroclaw',
+      name: `Salamander Imperial Baltic Porter Batch ${i}`,
+      abv: 12.5,
+      style: 'Baltic Porter - Imperial',
+    }));
+    const bytes = Buffer.byteLength(JSON.stringify({ beers }), 'utf8');
+    expect(bytes).toBeLessThan(ENRICH_CANDIDATES_BODY_LIMIT_BYTES);
+  });
 });
 
 // Minimal Untappd search markup parseSearchPage understands (mirrors untappd-lookup.test).
@@ -378,5 +462,64 @@ describe('POST /enrich/result', () => {
     // A block must NOT mutate backoff state.
     expect(after.untappd_lookup_at).toBeNull();
     expect(after.untappd_lookup_count).toBe(0);
+  });
+
+  // --- #369: relayed shop facts ---------------------------------------------
+
+  it('passes a relayed abv of 0 into the lookup rather than NULL', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'AleBrowar',
+      name: 'KWAS CHLEBOWY JASNY',
+      abv: 0,
+      style: 'Kwas Chlebowy',
+      algolia: { hits: [], nbHits: 0 },
+    });
+    expect(res.status).toBe(200);
+    const row = findBeerByNormalized(db, normalizeBrewery('AleBrowar'), normalizeName('KWAS CHLEBOWY JASNY'))!;
+    expect(row.abv).toBe(0);
+    expect(row.style).toBe('Kwas Chlebowy');
+  });
+
+  it('still accepts an old-shape result body with no abv or style', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA', name: 'Atak Chmielu', algolia: { hits: [], nbHits: 0 },
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+// #369 review follow-up: one malformed card must never 400 a 200-beer batch. JSON
+// serializes NaN/Infinity as null, so null has to be tolerated and dropped, not rejected.
+describe('enrich payload tolerance', () => {
+  it('accepts a null abv on /enrich/candidates and drops it instead of rejecting the batch', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [
+        { brewery: 'PINTA', name: 'Null Abv', abv: null },
+        { brewery: 'PINTA', name: 'Good Abv', abv: 5.2 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Null Abv'))!.abv).toBeNull();
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Good Abv'))!.abv).toBe(5.2);
+  });
+
+  it('accepts a null style without rejecting the batch', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Null Style', style: null }],
+    });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Null Style'))!.style).toBeNull();
+  });
+
+  it('accepts a null abv on /enrich/result', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA', name: 'Null Abv', abv: null, style: null, algolia: { hits: [], nbHits: 0 },
+    });
+    expect(res.status).toBe(200);
   });
 });

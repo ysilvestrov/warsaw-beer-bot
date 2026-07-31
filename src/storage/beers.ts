@@ -60,6 +60,61 @@ export function upsertBeer(db: DB, b: BeerInput): number {
   return Number(res.lastInsertRowid);
 }
 
+// #369: one place decides whether a relayed ABV is usable. Kept permissive on
+// purpose — 0 is a real value (a 0.0% beer, the #322 disambiguator), and the upper
+// bound is a garbage filter, not a domain limit (freeze-distilled beers reach ~67%).
+export function sanitizeAbv(abv: number | undefined): number | undefined {
+  if (abv === undefined) return undefined;
+  if (!Number.isFinite(abv)) return undefined;
+  if (abv < 0 || abv > 100) return undefined;
+  return abv;
+}
+
+export interface OrphanFacts {
+  abv?: number;
+  style?: string;
+}
+
+export interface FillResult {
+  /** An orphan row gained an ABV it did not have — the caller should re-arm its backoff. */
+  abvGained: boolean;
+  /** Any column was written. */
+  changed: boolean;
+}
+
+// #369: shop-published facts for a beer that arrived over the extension relay.
+// Fills ONLY columns that are currently NULL, and ONLY on orphan rows: a matched
+// row's abv/style belong to Untappd, matching is already done, and a shop value
+// could only introduce drift. Never overwrites.
+export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): FillResult {
+  const none: FillResult = { abvGained: false, changed: false };
+  const abv = sanitizeAbv(facts.abv);
+  const style = facts.style;
+  if (abv === undefined && style === undefined) return none;
+
+  const row = db
+    .prepare('SELECT untappd_id, abv, style FROM beers WHERE id = ?')
+    .get(beerId) as { untappd_id: number | null; abv: number | null; style: string | null } | undefined;
+  if (!row || row.untappd_id != null) return none;
+
+  const abvGained = row.abv == null && abv !== undefined;
+  const styleGained = row.style == null && style !== undefined;
+  if (!abvGained && !styleGained) return none;
+
+  db.prepare('UPDATE beers SET abv = COALESCE(abv, ?), style = COALESCE(style, ?) WHERE id = ?')
+    .run(abvGained ? abv : null, styleGained ? style : null, beerId);
+  bumpCatalogVersion();
+  return { abvGained, changed: true };
+}
+
+// #369: a row that just gained an ABV deserves an immediate retry — the previous
+// lookup ran blind, which is the whole bug. Resets the backoff so isEligible()
+// returns true at once. isWontfix still gates eligibility separately.
+export function rearmLookup(db: DB, beerId: number): void {
+  db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
+    .run(beerId);
+}
+
 export interface CatalogRow {
   id: number;
   brewery: string;
