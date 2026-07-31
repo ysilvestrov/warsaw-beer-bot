@@ -156,9 +156,13 @@ describe('onemorebeer technical panel (#369)', () => {
     for (const card of zero) {
       expect(card.abv).toBe(0);
       expect(card.abv).not.toBeUndefined();
-      expect(card.style).toBeTruthy(); // style parses alongside abv from the same panel
       expect(card.brewery.length).toBeGreaterThan(0);
     }
+
+    // Style parses alongside abv from the same panel. Only "at least one" — that is what
+    // the capture guard promises, and a 0.0% product legitimately need not publish a Styl
+    // row (the main onemorebeer fixture contains such a product).
+    expect(zero.some((c) => c.style)).toBe(true);
 
     // No card may come back with a non-zero ABV it did not publish.
     for (const card of parsed) {

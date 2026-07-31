@@ -48,7 +48,12 @@ async function main() {
             const value = (spans[1]?.textContent ?? '').trim();
             if (label.startsWith('Moc')) {
               withMoc++;
-              if (parseFloat(value.replace(',', '.')) === 0) isZero = true;
+              // Same strict pattern as the adapter's parseAbv, so the guard classifies a
+              // value exactly as the parser will. parseFloat alone is too loose: it reads
+              // a published range like "0,0–0,5%" as 0 and would green-light a fixture
+              // that contains no definite 0.0% product at all.
+              const m = value.replace(',', '.').match(/^\s*(\d+(?:\.\d+)?)\s*%?\s*$/);
+              if (m && Number(m[1]) === 0) isZero = true;
             } else if (label === 'Styl' && value) {
               hasStyle = true;
             }
