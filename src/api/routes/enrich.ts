@@ -6,6 +6,10 @@ import {
   findBeerByNormalized,
   getBeer,
   upsertBeer,
+  fillOrphanFacts,
+  rearmLookup,
+  sanitizeAbv,
+  type OrphanFacts,
 } from '../../storage/beers';
 import { isWontfix } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
@@ -37,6 +41,10 @@ const CandidatesBody = z.object({
     .array(z.object({
       brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
       name: z.string().max(BEER_TEXT_LIMIT_CHARS),
+      // #369: deliberately unbounded here — sanitizeAbv applies the sanity range.
+      // A strict .min/.max would reject the entire 200-beer batch over one rogue card.
+      abv: z.number().optional(),
+      style: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
     }))
     .min(1)
     .max(200),
@@ -45,6 +53,8 @@ const CandidatesBody = z.object({
 const ResultBody = z.object({
   brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
   name: z.string().max(BEER_TEXT_LIMIT_CHARS),
+  abv: z.number().optional(),
+  style: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
   html: z.string().max(ENRICH_HTML_LIMIT_CHARS).optional(),
   algolia: z.object({
     hits: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -67,14 +77,22 @@ function algoliaQuery(deps: ApiDeps, query: string): AlgoliaQuery {
 
 // Ensures a beer row exists for (brewery, name) and returns it.
 // May return a pre-existing matched row, not only a freshly created orphan.
-function ensureBeerRow(db: ApiDeps['db'], brewery: string, name: string) {
+// #369: `facts` are shop-published abv/style relayed by the extension. On insert
+// they seed the row; on an existing orphan they fill NULL columns only. A newly
+// gained ABV re-arms the lookup backoff, because the previous attempt ran blind.
+function ensureBeerRow(db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {}) {
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
   const existing = findBeerByNormalized(db, normalized_brewery, normalized_name);
-  if (existing) return existing;
+  if (existing) {
+    const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
+    if (abvGained) rearmLookup(db, existing.id);
+    return abvGained || changed ? getBeer(db, existing.id)! : existing;
+  }
   const id = upsertBeer(db, {
-    untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
-    normalized_name, normalized_brewery,
+    untappd_id: null, name, brewery,
+    style: facts.style ?? null, abv: sanitizeAbv(facts.abv) ?? null,
+    rating_global: null, normalized_name, normalized_brewery,
   });
   return getBeer(db, id)!;
 }
@@ -89,7 +107,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const now = new Date();
     const candidates = deps.db.transaction(() =>
       beers.map((b) => {
-        const row = ensureBeerRow(deps.db, b.brewery, b.name);
+        const row = ensureBeerRow(deps.db, b.brewery, b.name, { abv: b.abv, style: b.style });
         const eligible =
           row.untappd_id == null &&
           !isWontfix(deps.db, row.id) &&
@@ -112,8 +130,8 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     payloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES, 'route'),
     zValidator('json', ResultBody, payloadSizeValidationHook(deps) as never),
     async (c) => {
-    const { brewery, name, html, algolia, pageUrl } = c.req.valid('json');
-    const row = ensureBeerRow(deps.db, brewery, name);
+    const { brewery, name, abv, style, html, algolia, pageUrl } = c.req.valid('json');
+    const row = ensureBeerRow(deps.db, brewery, name, { abv, style });
     // Only orphans need enrichment. If the row was already enriched by an earlier
     // relay/cron, report the existing canonical match so the extension can update
     // the page without reprocessing or overwriting it.
