@@ -669,3 +669,113 @@ test('mergeIntoCanonical redirects check-ins instead of FK-crashing on the delet
   expect(checkin.beer_id).toBe(canonicalId);
   expect(getBeer(db, orphanId)).toBeNull();
 });
+
+// --- #369: relayed shop facts (abv/style) -----------------------------------
+import { sanitizeAbv, fillOrphanFacts, rearmLookup, getBeer as getBeerRow } from './beers';
+import { catalogVersion } from './catalog-version';
+
+describe('sanitizeAbv', () => {
+  test('keeps 0 — 0.0% is a real, load-bearing ABV (#322 Kwas Chlebowy Bright)', () => {
+    expect(sanitizeAbv(0)).toBe(0);
+  });
+
+  test('keeps ordinary and high-but-real values', () => {
+    expect(sanitizeAbv(4.8)).toBe(4.8);
+    expect(sanitizeAbv(67.5)).toBe(67.5); // freeze-distilled beers exist
+  });
+
+  test('drops undefined, non-finite and out-of-range values', () => {
+    expect(sanitizeAbv(undefined)).toBeUndefined();
+    expect(sanitizeAbv(NaN)).toBeUndefined();
+    expect(sanitizeAbv(Infinity)).toBeUndefined();
+    expect(sanitizeAbv(-1)).toBeUndefined();
+    expect(sanitizeAbv(101)).toBeUndefined();
+  });
+});
+
+function orphanRow(db: ReturnType<typeof openDb>, over: { abv?: number | null; style?: string | null } = {}) {
+  return upsertBeer(db, {
+    untappd_id: null, name: 'Kwas Chlebowy Jasny', brewery: 'AleBrowar',
+    style: over.style ?? null, abv: over.abv ?? null, rating_global: null,
+    normalized_name: 'kwas chlebowy jasny', normalized_brewery: 'alebrowar',
+  });
+}
+
+describe('fillOrphanFacts', () => {
+  test('fills NULL abv and style on an orphan and reports the ABV gain', () => {
+    const db = fresh();
+    const id = orphanRow(db);
+    expect(fillOrphanFacts(db, id, { abv: 0, style: 'Kwas Chlebowy' }))
+      .toEqual({ abvGained: true, changed: true });
+    const row = getBeerRow(db, id)!;
+    expect(row.abv).toBe(0); // 0, not null — the #322 case
+    expect(row.style).toBe('Kwas Chlebowy');
+  });
+
+  test('never overwrites a value that is already set', () => {
+    const db = fresh();
+    const id = orphanRow(db, { abv: 5.5, style: 'IPA' });
+    expect(fillOrphanFacts(db, id, { abv: 0, style: 'Kwas Chlebowy' }))
+      .toEqual({ abvGained: false, changed: false });
+    const row = getBeerRow(db, id)!;
+    expect(row.abv).toBe(5.5);
+    expect(row.style).toBe('IPA');
+  });
+
+  test('leaves matched rows untouched', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 5489374, name: 'Kwas Chlebowy Bright', brewery: 'AleBrowar',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'kwas chlebowy bright', normalized_brewery: 'alebrowar',
+    });
+    expect(fillOrphanFacts(db, id, { abv: 0, style: 'Kwas Chlebowy' }))
+      .toEqual({ abvGained: false, changed: false });
+    const row = getBeerRow(db, id)!;
+    expect(row.abv).toBeNull();
+    expect(row.style).toBeNull();
+  });
+
+  test('reports a style-only fill as changed but NOT an ABV gain', () => {
+    const db = fresh();
+    const id = orphanRow(db, { abv: 4.8 });
+    expect(fillOrphanFacts(db, id, { style: 'IPA' })).toEqual({ abvGained: false, changed: true });
+    expect(getBeerRow(db, id)!.style).toBe('IPA');
+  });
+
+  test('drops an out-of-range abv rather than writing it', () => {
+    const db = fresh();
+    const id = orphanRow(db);
+    expect(fillOrphanFacts(db, id, { abv: 9999 })).toEqual({ abvGained: false, changed: false });
+    expect(getBeerRow(db, id)!.abv).toBeNull();
+  });
+
+  test('bumps the catalog version when it writes and not when it does not', () => {
+    const db = fresh();
+    const id = orphanRow(db);
+    const before = catalogVersion();
+    fillOrphanFacts(db, id, { abv: 4.8 });
+    const afterWrite = catalogVersion();
+    expect(afterWrite).toBeGreaterThan(before);
+    fillOrphanFacts(db, id, { abv: 4.8 }); // already set → no-op
+    expect(catalogVersion()).toBe(afterWrite);
+  });
+
+  test('does nothing when there are no facts to apply', () => {
+    const db = fresh();
+    expect(fillOrphanFacts(db, orphanRow(db), {})).toEqual({ abvGained: false, changed: false });
+  });
+});
+
+describe('rearmLookup', () => {
+  test('clears the backoff so an orphan is retried at once', () => {
+    const db = fresh();
+    const id = orphanRow(db);
+    db.prepare('UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 4 WHERE id = ?')
+      .run('2026-07-31T10:00:00Z', id);
+    rearmLookup(db, id);
+    const row = getBeerRow(db, id)!;
+    expect(row.untappd_lookup_at).toBeNull();
+    expect(row.untappd_lookup_count).toBe(0);
+  });
+});
