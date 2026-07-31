@@ -83,3 +83,46 @@ export async function getItem(
     uploadState: typeof body.uploadState === 'string' ? body.uploadState : null,
   };
 }
+
+const UPLOAD_BASE = 'https://www.googleapis.com/upload/chromewebstore/v1.1/items';
+
+interface ItemError {
+  error_code?: unknown;
+  error_detail?: unknown;
+}
+
+// HTTP 200 does NOT mean the upload worked: CWS reports failure in the body via
+// uploadState + itemError[]. Only "SUCCESS" counts.
+export async function uploadPackage(
+  itemId: string,
+  zip: Buffer,
+  token: string,
+  fetchImpl: typeof fetch = fetch,
+): Promise<void> {
+  const res = await fetchImpl(`${UPLOAD_BASE}/${itemId}`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    // `Buffer` really does satisfy the runtime BodyInit contract (Node's global fetch is
+    // undici, which accepts a Buffer body directly) — this cast only works around a type
+    // mismatch where `vitest/globals` pulls in lib.dom's `BodyInit`, whose ArrayBufferView
+    // arm is pinned to `Uint8Array<ArrayBuffer>` and rejects Node's `Buffer<ArrayBufferLike>`.
+    body: zip as unknown as BodyInit,
+  });
+  const body = (await res.json().catch(() => ({}))) as {
+    uploadState?: unknown;
+    itemError?: unknown;
+  };
+  if (!res.ok) {
+    throw new Error(`CWS upload failed: HTTP ${res.status} — ${JSON.stringify(body)}`);
+  }
+  if (body.uploadState !== 'SUCCESS') {
+    const errors = Array.isArray(body.itemError) ? (body.itemError as ItemError[]) : [];
+    const detail = errors
+      .map((e) => `${String(e.error_code ?? '?')}: ${String(e.error_detail ?? '?')}`)
+      .join('; ');
+    throw new Error(
+      `CWS upload failed (uploadState=${String(body.uploadState)})` +
+        (detail ? ` — ${detail}` : ''),
+    );
+  }
+}

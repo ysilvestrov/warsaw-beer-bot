@@ -1,4 +1,4 @@
-import { getAccessToken, getItem } from './cws-client';
+import { getAccessToken, getItem, uploadPackage } from './cws-client';
 
 function fakeFetch(body: unknown, status = 200) {
   const calls: { url: string; init: RequestInit | undefined }[] = [];
@@ -73,5 +73,54 @@ describe('getItem', () => {
   it('throws on a non-2xx response', async () => {
     const { impl } = fakeFetch({ error: { message: 'no access' } }, 403);
     await expect(getItem('abc', 'tok', impl)).rejects.toThrow(/403/);
+  });
+});
+
+describe('uploadPackage', () => {
+  it('PUTs the zip bytes to the upload endpoint', async () => {
+    const { impl, calls } = fakeFetch({ uploadState: 'SUCCESS' });
+    const zip = Buffer.from('PKfake');
+    await uploadPackage('itemid', zip, 'tok', impl);
+
+    expect(calls[0].url).toBe(
+      'https://www.googleapis.com/upload/chromewebstore/v1.1/items/itemid',
+    );
+    expect(calls[0].init!.method).toBe('PUT');
+    const headers = calls[0].init!.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer tok');
+    expect(headers['x-goog-api-version']).toBe('2');
+    expect(calls[0].init!.body).toBe(zip);
+  });
+
+  // The reason this client exists: CWS reports upload failures with HTTP 200.
+  it('treats uploadState FAILURE as an error and surfaces every itemError detail', async () => {
+    const { impl } = fakeFetch({
+      uploadState: 'FAILURE',
+      itemError: [
+        {
+          error_code: 'PKG_INVALID_VERSION_NUMBER',
+          error_detail: 'Version number is invalid or too small.',
+        },
+      ],
+    });
+    const p = uploadPackage('itemid', Buffer.from('x'), 'tok', impl);
+    await expect(p).rejects.toThrow(/PKG_INVALID_VERSION_NUMBER/);
+    await expect(uploadPackage('itemid', Buffer.from('x'), 'tok', impl)).rejects.toThrow(
+      /Version number is invalid or too small\./,
+    );
+  });
+
+  it('treats IN_PROGRESS as not-success rather than silently passing', async () => {
+    const { impl } = fakeFetch({ uploadState: 'IN_PROGRESS' });
+    await expect(uploadPackage('itemid', Buffer.from('x'), 'tok', impl)).rejects.toThrow(
+      /IN_PROGRESS/,
+    );
+  });
+
+  it('throws on a transport-level error too', async () => {
+    const { impl } = fakeFetch({ error: { message: 'nope' } }, 500);
+    await expect(uploadPackage('itemid', Buffer.from('x'), 'tok', impl)).rejects.toThrow(
+      /500/,
+    );
   });
 });
