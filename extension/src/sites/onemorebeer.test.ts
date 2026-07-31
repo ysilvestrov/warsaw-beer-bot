@@ -137,17 +137,37 @@ describe('onemorebeer technical panel (#369)', () => {
     expect(pinta.style).toBe('West Coast IPA');
   });
 
-  it('parses a 0.0% product as 0, not undefined', () => {
-    const doc = new DOMParser().parseFromString(
-      `<div class="one-catalog-view-list">${wrappedTile('AleBrowar', 'ALEBROWAR KWAS CHLEBOWY JASNY BUT. 0,5 L', [
-        ['Pojemność', '0,5l'], ['Moc (%)', '0.0%'], ['Styl', 'Kwas Chlebowy'],
-      ])}</div>`,
-      'text/html',
-    );
-    const parsed = onemorebeer.parseCards(doc);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].abv).toBe(0); // MUST be 0 — a falsy check here breaks #322
-    expect(parsed[0].style).toBe('Kwas Chlebowy');
+  // Real capture of https://onemorebeer.pl/bezalkoholowe/inne — the page orphan 29552
+  // (AleBrowar KWAS CHLEBOWY JASNY) was scraped from. Regenerate with
+  // `npm run capture-omb-abv`. Real markup rather than a synthetic tile, so this also
+  // pins the wrapper/panel structure the adapter depends on.
+  // Asserts the invariant the fixture exists to pin — a published 0.0% parses to 0 and
+  // not undefined — deliberately NOT which breweries or styles are in stock. The shop's
+  // inventory rotates, so asserting "AleBrowar is present" or "every style is Kwas
+  // Chlebowy" would make a routine re-capture fail the test for no real reason. The
+  // capture script guarantees exactly this much: at least one 0.0% product carrying a style.
+  it('parses a real 0.0% product as 0, not undefined', () => {
+    const abvHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/onemorebeer.abv.html'), 'utf8');
+    const parsed = onemorebeer.parseCards(new DOMParser().parseFromString(abvHtml, 'text/html'));
+    expect(parsed.length).toBeGreaterThan(0);
+
+    const zero = parsed.filter((c) => c.abv === 0); // MUST be 0 — a falsy check here breaks #322
+    expect(zero.length).toBeGreaterThan(0);
+    for (const card of zero) {
+      expect(card.abv).toBe(0);
+      expect(card.abv).not.toBeUndefined();
+      expect(card.brewery.length).toBeGreaterThan(0);
+    }
+
+    // Style parses alongside abv from the same panel. Only "at least one" — that is what
+    // the capture guard promises, and a 0.0% product legitimately need not publish a Styl
+    // row (the main onemorebeer fixture contains such a product).
+    expect(zero.some((c) => c.style)).toBe(true);
+
+    // No card may come back with a non-zero ABV it did not publish.
+    for (const card of parsed) {
+      if (card.abv !== undefined) expect(Number.isFinite(card.abv)).toBe(true);
+    }
   });
 
   it('accepts a comma decimal separator', () => {

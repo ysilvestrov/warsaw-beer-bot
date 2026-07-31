@@ -15,6 +15,7 @@
     "package:store": "CWS_BUILD=1 vite build && python3 scripts/zip-dist.py",
     "release": "npm run package && cd .. && npx tsx scripts/publish-extension-release.ts",
     "capture-omb": "tsx scripts/capture-omb-fixture.ts",
+    "capture-omb-abv": "tsx scripts/capture-omb-abv-fixture.ts",
     "capture-flasker": "tsx scripts/capture-flasker-fixture.ts",
     "gen-flasker-breweries": "tsx scripts/gen-flasker-breweries.ts"
   },

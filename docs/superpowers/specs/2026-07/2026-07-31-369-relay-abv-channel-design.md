@@ -260,19 +260,28 @@ recorded for orphan **29552 `AleBrowar / KWAS CHLEBOWY JASNY`** (`abv` NULL,
 should be dense with 0.0% products rather than containing a single one.
 
 The catalog is client-rendered (Nuxt): `curl` returns an SSR shell with **zero**
-product tiles, so the capture must come from a hydrated browser DOM. Helper:
-`tmp/capture-onemorebeer.js` (paste into DevTools console; it reports tile /
-panel / 0.0% counts and downloads `onemorebeer.abv.html`). The
-`Dane techniczne` panels must **not** be expanded before capturing — they are
-already in the DOM and hidden, which is precisely the state under test.
+product tiles, so the capture must come from a hydrated browser DOM. The repo
+already automates exactly this — `npm run capture-omb-abv`
+(`extension/scripts/capture-omb-abv-fixture.ts`, Playwright), a sibling of the
+existing `capture-omb` / `capture-omb-nonbeer` scripts. It writes
+`extension/tests/fixtures/onemorebeer.abv.html`.
 
-Save as `extension/tests/fixtures/onemorebeer.abv.html`. This follows the
-existing multi-fixture convention (`flasker.table.html`, `flasker.block.html`);
-`conformance.test.ts` keys strictly on `<id>.html`, so an extra fixture is picked
-up only by the adapter's own tests and cannot disturb the contract suite.
+The `Dane techniczne` panels are **not** expanded — they are already in the DOM
+and hidden, which is precisely the state under test.
 
-Fallback, only if the captured page yields no 0.0% product: a small synthetic
-tile. Prefer the real capture.
+The script **refuses to write** a fixture it cannot justify: zero tiles (the
+observed mid-hydration failure, where wrappers hold a technical panel but no
+tile and the fixture parses to zero cards), zero tile→panel resolutions, or zero
+0.0% products all abort. That guard exists because a hand-captured file with 5
+panels and 0 tiles was silently unusable.
+
+Captured 2026-07-31: 2 tiles, both resolving to a panel, both `Moc (%) 0.0%` —
+`ALEBROWAR KWAS CHLEBOWY RYE` and `SADY KWAS CHLEBOWY`, style `Kwas Chlebowy`.
+
+This follows the existing multi-fixture convention (`flasker.table.html`,
+`flasker.block.html`); `conformance.test.ts` keys strictly on `<id>.html`, so an
+extra fixture is picked up only by the adapter's own tests and cannot disturb the
+contract suite.
 
 Beyond the guard:
 
