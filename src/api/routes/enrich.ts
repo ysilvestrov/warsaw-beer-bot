@@ -43,8 +43,10 @@ const CandidatesBody = z.object({
       name: z.string().max(BEER_TEXT_LIMIT_CHARS),
       // #369: deliberately unbounded here — sanitizeAbv applies the sanity range.
       // A strict .min/.max would reject the entire 200-beer batch over one rogue card.
-      abv: z.number().optional(),
-      style: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
+      // nullable() for the same reason: JSON.stringify turns NaN/Infinity into null,
+      // so a single malformed card would otherwise 400 the whole page's payload.
+      abv: z.number().nullable().optional(),
+      style: z.string().max(BEER_TEXT_LIMIT_CHARS).nullable().optional(),
     }))
     .min(1)
     .max(200),
@@ -53,8 +55,8 @@ const CandidatesBody = z.object({
 const ResultBody = z.object({
   brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
   name: z.string().max(BEER_TEXT_LIMIT_CHARS),
-  abv: z.number().optional(),
-  style: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
+  abv: z.number().nullable().optional(),
+  style: z.string().max(BEER_TEXT_LIMIT_CHARS).nullable().optional(),
   html: z.string().max(ENRICH_HTML_LIMIT_CHARS).optional(),
   algolia: z.object({
     hits: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -107,7 +109,9 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const now = new Date();
     const candidates = deps.db.transaction(() =>
       beers.map((b) => {
-        const row = ensureBeerRow(deps.db, b.brewery, b.name, { abv: b.abv, style: b.style });
+        const row = ensureBeerRow(deps.db, b.brewery, b.name, {
+          abv: b.abv ?? undefined, style: b.style ?? undefined,
+        });
         const eligible =
           row.untappd_id == null &&
           !isWontfix(deps.db, row.id) &&
@@ -131,7 +135,9 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     zValidator('json', ResultBody, payloadSizeValidationHook(deps) as never),
     async (c) => {
     const { brewery, name, abv, style, html, algolia, pageUrl } = c.req.valid('json');
-    const row = ensureBeerRow(deps.db, brewery, name, { abv, style });
+    const row = ensureBeerRow(deps.db, brewery, name, {
+      abv: abv ?? undefined, style: style ?? undefined,
+    });
     // Only orphans need enrichment. If the row was already enriched by an earlier
     // relay/cron, report the existing canonical match so the extension can update
     // the page without reprocessing or overwriting it.

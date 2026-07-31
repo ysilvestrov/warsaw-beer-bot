@@ -489,3 +489,37 @@ describe('POST /enrich/result', () => {
     expect(res.status).toBe(200);
   });
 });
+
+// #369 review follow-up: one malformed card must never 400 a 200-beer batch. JSON
+// serializes NaN/Infinity as null, so null has to be tolerated and dropped, not rejected.
+describe('enrich payload tolerance', () => {
+  it('accepts a null abv on /enrich/candidates and drops it instead of rejecting the batch', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [
+        { brewery: 'PINTA', name: 'Null Abv', abv: null },
+        { brewery: 'PINTA', name: 'Good Abv', abv: 5.2 },
+      ],
+    });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Null Abv'))!.abv).toBeNull();
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Good Abv'))!.abv).toBe(5.2);
+  });
+
+  it('accepts a null style without rejecting the batch', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Null Style', style: null }],
+    });
+    expect(res.status).toBe(200);
+    expect(findBeerByNormalized(db, normalizeBrewery('PINTA'), normalizeName('Null Style'))!.style).toBeNull();
+  });
+
+  it('accepts a null abv on /enrich/result', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA', name: 'Null Abv', abv: null, style: null, algolia: { hits: [], nbHits: 0 },
+    });
+    expect(res.status).toBe(200);
+  });
+});

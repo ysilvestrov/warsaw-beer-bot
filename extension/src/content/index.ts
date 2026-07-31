@@ -2,6 +2,7 @@ import type { Card, SiteAdapter } from '../sites/types';
 import type { MatchResult, RawBeer } from '../api/types';
 import { getCached, setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
+import { usableAbv } from '../shared/abv';
 import { renderBadge, markSeen } from './badge';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
@@ -44,18 +45,24 @@ export async function runOverlay(
 
     if (adapter.loadCardDetails) await adapter.loadCardDetails(misses.map((m) => m.card));
 
-    // `card` is kept alongside `raw` because /match carries only abv, while the
-    // enrich payload also needs the shop style (#369).
-    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer; card: Card }[] = misses
+    // `abv` is sanitized once, here, where a card's shop-published value first enters a
+    // payload — that covers every adapter and both the /match and /enrich/* paths (#369).
+    // `card` is kept alongside `raw` because /match carries only abv, while the enrich
+    // payload also needs the shop style.
+    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer; card: Card; abv?: number }[] = misses
       .filter(({ card }) => !card.skip)
-      .map(({ el, card }) => ({
-        el,
-        key: normalizeKey(card.brewery, card.name),
-        raw: card.abv !== undefined
-          ? { brewery: card.brewery, name: card.name, abv: card.abv }
-          : { brewery: card.brewery, name: card.name },
-        card,
-      }));
+      .map(({ el, card }) => {
+        const abv = usableAbv(card.abv);
+        return {
+          el,
+          key: normalizeKey(card.brewery, card.name),
+          raw: abv !== undefined
+            ? { brewery: card.brewery, name: card.name, abv }
+            : { brewery: card.brewery, name: card.name },
+          card,
+          ...(abv !== undefined ? { abv } : {}),
+        };
+      });
     if (rawMisses.length === 0) return;
 
     let results: MatchResult[];
@@ -90,7 +97,7 @@ export async function runOverlay(
           name: x.miss!.raw.name,
           // `!== undefined`, never truthiness: 0.0% is a real ABV and the only thing
           // separating some same-brewery twins (#322).
-          ...(x.miss!.card.abv !== undefined ? { abv: x.miss!.card.abv } : {}),
+          ...(x.miss!.abv !== undefined ? { abv: x.miss!.abv } : {}),
           ...(x.miss!.card.style !== undefined ? { style: x.miss!.card.style } : {}),
         }));
       if (orphans.length) enrich(orphans);

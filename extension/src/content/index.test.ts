@@ -224,3 +224,40 @@ describe('runOverlay orphan facts (#369)', () => {
     });
   });
 });
+
+// #369 review follow-up: an impossible shop ABV must not reach /match (which has no
+// server-side sanitizer) nor the enrich payload (where NaN would serialize as null).
+describe('runOverlay sanitizes shop ABV (#369)', () => {
+  const orphanResult = (brewery: string, name: string): MatchResult => ({
+    raw: { brewery, name },
+    matched_beer: { id: 1, name, brewery, rating_global: null, untappd_id: null },
+    is_drunk: false, drunk_uncertain: false, user_rating: null,
+  });
+
+  it.each([
+    ['out of range', 9999],
+    ['negative', -1],
+    ['NaN', NaN],
+    ['Infinity', Infinity],
+  ])('drops an %s abv from both the /match and enrich payloads', async (_label, bad) => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Bad Abv', abv: bad }]);
+    const sendMatch = vi.fn(async (_b: RawBeer[]) => [orphanResult('B', 'Bad Abv')]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, sendMatch, enrich);
+
+    expect(sendMatch.mock.calls[0][0][0]).toEqual({ brewery: 'B', name: 'Bad Abv' });
+    expect((enrich.mock.calls[0][0][0] as { abv?: number }).abv).toBeUndefined();
+  });
+
+  it('still passes a legitimate 0 through both payloads', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Zero', abv: 0 }]);
+    const sendMatch = vi.fn(async (_b: RawBeer[]) => [orphanResult('B', 'Zero')]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, sendMatch, enrich);
+
+    expect(sendMatch.mock.calls[0][0][0]).toEqual({ brewery: 'B', name: 'Zero', abv: 0 });
+    expect((enrich.mock.calls[0][0][0] as { abv?: number }).abv).toBe(0);
+  });
+});
