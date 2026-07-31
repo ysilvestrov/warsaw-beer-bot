@@ -18,6 +18,8 @@
     "scripts/cws-client.ts",
     "scripts/cws-client.test.ts",
     "scripts/cws-auth-bootstrap.ts",
-    "scripts/cws-auth-bootstrap.test.ts"
+    "scripts/cws-auth-bootstrap.test.ts",
+    "scripts/publish-store-release.ts",
+    "scripts/publish-store-release.test.ts"
   ]
 }
