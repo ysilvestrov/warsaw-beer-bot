@@ -137,17 +137,24 @@ describe('onemorebeer technical panel (#369)', () => {
     expect(pinta.style).toBe('West Coast IPA');
   });
 
-  it('parses a 0.0% product as 0, not undefined', () => {
-    const doc = new DOMParser().parseFromString(
-      `<div class="one-catalog-view-list">${wrappedTile('AleBrowar', 'ALEBROWAR KWAS CHLEBOWY JASNY BUT. 0,5 L', [
-        ['Pojemność', '0,5l'], ['Moc (%)', '0.0%'], ['Styl', 'Kwas Chlebowy'],
-      ])}</div>`,
-      'text/html',
-    );
-    const parsed = onemorebeer.parseCards(doc);
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0].abv).toBe(0); // MUST be 0 — a falsy check here breaks #322
-    expect(parsed[0].style).toBe('Kwas Chlebowy');
+  // Real capture of https://onemorebeer.pl/bezalkoholowe/inne — the page orphan 29552
+  // (AleBrowar KWAS CHLEBOWY JASNY) was scraped from. Regenerate with
+  // `npm run capture-omb-abv`. Real markup rather than a synthetic tile, so this also
+  // pins the wrapper/panel structure the adapter depends on.
+  it('parses real 0.0% products as 0, not undefined', () => {
+    const abvHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/onemorebeer.abv.html'), 'utf8');
+    const parsed = onemorebeer.parseCards(new DOMParser().parseFromString(abvHtml, 'text/html'));
+    expect(parsed.length).toBeGreaterThan(0);
+
+    // Every product on the alcohol-free page publishes Moc (%) = 0.0%.
+    for (const card of parsed) {
+      expect(card.abv).toBe(0); // MUST be 0 — a falsy check here breaks #322
+      expect(card.style).toBe('Kwas Chlebowy');
+    }
+
+    const ale = parsed.find((c) => c.brewery === 'AleBrowar')!;
+    expect(ale).toBeDefined();
+    expect(ale.abv).toBe(0);
   });
 
   it('accepts a comma decimal separator', () => {
