@@ -8,12 +8,14 @@ describe('cities', () => {
     expect(isKnownCity('warszawa')).toBe(true);
     expect(isKnownCity('krakow')).toBe(true);
     expect(isKnownCity('lublin')).toBe(true);
+    expect(isKnownCity('szczecin')).toBe(true);
     expect(isKnownCity('atlantis')).toBe(false);
     expect(isKnownCity('')).toBe(false);
   });
   test('cityLabel returns the label for a known slug, echoes unknown', () => {
     expect(cityLabel('warszawa')).toBe('Warszawa');
     expect(cityLabel('lublin')).toBe('Lublin');
+    expect(cityLabel('szczecin')).toBe('Szczecin');
     expect(cityLabel('atlantis')).toBe('atlantis');
   });
 });
