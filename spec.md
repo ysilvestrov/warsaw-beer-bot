@@ -1286,9 +1286,11 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   **Історична пастка (#368, виправлено).** `selectRearmTargets` не вимагає рядка в
   `match_links`, тож до появи relay-пулу ре-арм для cron-недосяжних рядків був no-op:
   `untappd_lookup_count` чесно скидався, але крон їх однаково не бачив (45 із 93
-  ре-армлених `matcher_bug`-рядків станом на 2026-08-08; 93 — рядки, що збігаються з
-  власним фільтром `selectRearmTargets`: `untappd_lookup_count > 0 AND
-  review_class = 'matcher_bug' AND candidates_count > 0`). Тепер relay-пул їх підбирає.
+  ре-армлених `matcher_bug`-рядків станом на 2026-08-08). Відтворення цифри: `applyRearm`
+  виставляє `untappd_lookup_count = 0`, тож **уже ре-армлені** рядки — це
+  `untappd_lookup_count = 0 AND review_class = 'matcher_bug' AND candidates_count > 0`
+  (дзеркало фільтра `selectRearmTargets`, який бере ще-не-ре-армлені, тобто `> 0`).
+  Тепер relay-пул їх підбирає.
 - **Ops-тули: конвенція аргументів.** Список `beer_id` передається через
   `--ids <csv>` (кома-розділений, пробіл після прапорця), запис вмикається
   `--apply` (dry-run за замовчуванням) — однаково для `rearm-matcher-bug-orphans`
