@@ -119,6 +119,10 @@ export const pl: Messages = {
     'rozszerzenia (pole „API Token"). Poprzedni token, jeśli istniał, przestał działać.\n' +
     'Adres API: {url}',
   'extension.download': 'Aktualna wersja rozszerzenia: v{version} (plik poniżej).',
+  'extension.store':
+    'Zainstaluj rozszerzenie: {url}\n' +
+    'Jeśli zobaczysz „Item not available", zaloguj się na konto Google i odśwież stronę ' +
+    '(rozszerzenie jest oznaczone 18+ ze względu na tematykę piwną).',
   'extrel.no_match':
     'Ten plik nie odpowiada ostatniemu wydaniu w tabeli. Najpierw uruchom npm run release, potem wyślij ten zip.',
   'extrel.attached': 'Dołączono plik do v{version}. Otrzyma {n} testerów.',

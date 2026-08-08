@@ -98,6 +98,7 @@ export interface Messages {
   // extension (browser-extension API token)
   'extension.success': string;   // {url} — instructional text; token sent separately in <code>
   'extension.download': string;  // {version} — caption for the latest release zip
+  'extension.store': string;     // {url} — Chrome Web Store listing link
 
   // status (/status — per-user freshness + settings)
   'status.title': string;

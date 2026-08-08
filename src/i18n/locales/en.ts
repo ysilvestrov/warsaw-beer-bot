@@ -119,6 +119,10 @@ export const en: Messages = {
     "settings (the \"API Token\" field). Any previous token has been revoked.\n" +
     'API URL: {url}',
   'extension.download': 'Current extension version: v{version} (file below).',
+  'extension.store':
+    'Install the extension: {url}\n' +
+    'If you see "Item not available", sign in to your Google account and reload ' +
+    '(the extension is flagged 18+ because it is about beer).',
   'extrel.no_match':
     'This file does not match the latest release row. Run npm run release first, then send that exact zip.',
   'extrel.attached': 'Attached the file to v{version}. {n} tester(s) will receive it.',
