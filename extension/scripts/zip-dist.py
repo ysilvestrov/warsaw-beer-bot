@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Package the built dist/ into a single loadable .zip (dist contents at the zip root).
 
-Used by `npm run package`. Kept in Python because the host has no `zip` binary and
+Runs as the `postbuild` hook of `npm run build` (and inside `npm run package:store`).
+Kept in Python because the host has no `zip` binary and
 Node has no stdlib zip writer. The resulting archive, once unzipped, is a folder you
 load via chrome://extensions -> Load unpacked.
 
@@ -11,7 +12,7 @@ Override the source dir / output path via ZIP_DIST_SRC / ZIP_DIST_OUT (used by t
 
 When CWS_BUILD=1 (the Chrome Web Store build, invoked via `npm run package:store`),
 the output gets a `-store` suffix so it cannot collide with / overwrite the dev build's
-zip (whose sha256 is recorded in the bot's extension_releases table).
+zip.
 """
 import json
 import os
@@ -27,7 +28,7 @@ with open(os.path.join(EXT_ROOT, "package.json"), encoding="utf-8") as f:
 DIST = os.environ.get("ZIP_DIST_SRC", os.path.join(EXT_ROOT, "dist"))
 # The store build (CWS_BUILD=1) is a DIFFERENT artefact from the dev build (no `key`,
 # no broad optional host permission), so it gets its own filename — otherwise it would
-# silently overwrite the dev zip whose sha256 is already in `extension_releases`.
+# silently overwrite the dev build's zip.
 SUFFIX = "-store" if os.environ.get("CWS_BUILD") == "1" else ""
 OUT = os.environ.get(
     "ZIP_DIST_OUT", os.path.join(EXT_ROOT, f"warsaw-beer-overlay-{VERSION}{SUFFIX}.zip")
@@ -36,7 +37,7 @@ OUT = os.environ.get(
 FIXED_DATE = (1980, 1, 1, 0, 0, 0)  # zip epoch floor — stable across runs
 
 if not os.path.isdir(DIST):
-    sys.exit(f"{DIST} not found — run `npm run build` first (or use `npm run package`).")
+    sys.exit(f"{DIST} not found — run `npm run build` first (it runs automatically as the postbuild hook).")
 
 if os.path.exists(OUT):
     os.remove(OUT)
