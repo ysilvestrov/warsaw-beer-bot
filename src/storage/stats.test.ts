@@ -130,7 +130,7 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
 it('orphansOffCron counts orphans with no match_links row, minus wontfix/retired', () => {
   const db = fresh();
   // 1) relay-orphan без лінка → рахується
-  const relay = upsertBeer(db, {
+  upsertBeer(db, {
     name: 'Barrel Pie', brewery: 'The Bruery', style: null, abv: null, rating_global: null,
     normalized_name: 'barrel pie', normalized_brewery: 'the bruery',
   });
@@ -154,5 +154,4 @@ it('orphansOffCron counts orphans with no match_links row, minus wontfix/retired
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
   expect(m.orphansOffCron).toBe(1);
-  expect(relay).toBeGreaterThan(0);
 });

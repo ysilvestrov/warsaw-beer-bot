@@ -2,6 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
+import { orphanWithoutMatchLinkPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
@@ -74,16 +75,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
           )`,
     ),
     orphansOffCron: count(
-      `SELECT COUNT(*) AS c FROM beers b
-        WHERE b.untappd_id IS NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM enrich_failures ef
-            WHERE ef.beer_id = b.id
-              AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
-          )`,
+      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanWithoutMatchLinkPredicate}`,
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),

@@ -270,6 +270,26 @@ export function listLookupCandidates(
   return eligible.slice(0, limit);
 }
 
+// #368: shared WHERE predicate — "orphan with no match_links row" (untappd_id
+// IS NULL, minus wontfix/retired, minus anything already linked). Used by
+// listRelayLookupCandidates below (the drain query) AND by orphansOffCron in
+// stats.ts (the digest metric), so the two can't silently diverge if one is
+// edited later. Bakes in `b` as the `beers` table alias — every call site
+// must FROM/JOIN beers AS b. Fragment only, no WHERE keyword/SELECT/ORDER
+// BY/LIMIT — each caller keeps owning its own query shape. The digest metric
+// interpolates this as-is and deliberately skips the JS-side backoff filter
+// (isEligible) applied below: it counts the whole drain queue, not just the
+// slice eligible to query right now.
+export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM enrich_failures ef
+           WHERE ef.beer_id = b.id
+             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
+         )`;
+
 // #368: relay-пул — orphan'и, яких on-tap пул не побачить НІКОЛИ. Рядки, намінчені
 // `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
 // отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
@@ -287,15 +307,7 @@ export function listRelayLookupCandidates(
       `SELECT b.id, b.brewery, b.name,
               b.untappd_lookup_at, b.untappd_lookup_count
        FROM beers b
-       WHERE b.untappd_id IS NULL
-         AND NOT EXISTS (
-           SELECT 1 FROM enrich_failures ef
-           WHERE ef.beer_id = b.id
-             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
-         )
-         AND NOT EXISTS (
-           SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
-         )
+       WHERE ${orphanWithoutMatchLinkPredicate}
        ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
     )
     .all() as LookupCandidate[];
