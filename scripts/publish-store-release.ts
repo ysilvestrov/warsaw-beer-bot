@@ -12,8 +12,8 @@ import {
 
 // Uploads the store build to the Chrome Web Store and submits it for review (#266).
 // Run via `npm run release:store` from the repo root, which builds the store package
-// first. Modelled on publish-extension-release.ts (the off-store bot channel), which
-// stays a separate command.
+// first. This is the only release channel — the off-store bot channel was retired in
+// #267.
 
 export const DEFAULT_ITEM_ID = 'fdelmnhijeiojadcaihfdpecfcldbndg';
 
