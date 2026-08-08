@@ -97,7 +97,6 @@ export interface Messages {
 
   // extension (browser-extension API token)
   'extension.success': string;   // {url} — instructional text; token sent separately in <code>
-  'extension.download': string;  // {version} — caption for the latest release zip
   'extension.store': string;     // {url} — Chrome Web Store listing link
 
   // status (/status — per-user freshness + settings)
@@ -121,17 +120,6 @@ export interface Messages {
   'status.distinct_beers': string;    // {count}
   'status.last_checkin': string;      // {date}
   'status.no_checkins': string;
-
-  // extension release / distribution (admin-facing + broadcast)
-  'extrel.no_match': string;
-  'extrel.attached': string;          // {version}, {n}
-  'extrel.btn_send': string;
-  'extrel.btn_cancel': string;
-  'extrel.sending': string;           // {version}
-  'extrel.broadcast_done': string;    // {sent}, {failed}
-  'extrel.cancelled': string;
-  'extrel.new_version': string;       // {version}
-  'extrel.how_to_update': string;
 }
 
 export type Translator = (
