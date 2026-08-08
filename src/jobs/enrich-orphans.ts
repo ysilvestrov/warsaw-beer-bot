@@ -18,7 +18,9 @@ export interface EnrichOrphansResult {
   skipped: number;
   blocked: number;
   // #368: скільки кандидатів узято з кожного пулу. Без цього розкладу неможливо
-  // побачити, чи дренаж узагалі біжить, — `processed` їх змішує.
+  // побачити, чи дренаж узагалі біжить, — `processed` їх змішує. Це розміри
+  // пулів ДО циклу — коли breaker обривається на середині прогону, вони можуть
+  // перевищувати `processed`, і це очікувано, а не подвійний рахунок.
   on_tap_selected: number;
   relay_selected: number;
 }

@@ -438,4 +438,30 @@ describe('enrichOrphans — relay pool budget (#368)', () => {
     expect(result.matched).toBe(1);
     expect(getBeer(db, relay)?.untappd_id).toBe(6430654);
   });
+
+  test('breaker trips on the on-tap item: selected counts are pre-loop pool sizes, not processed counts', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'OnTapBrewery', 'Tapped');
+    seedRelayOrphan(db, 'RelayBrewery', 'Shopped');
+    const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {} });
+    const search = {
+      async search(q: string): Promise<SearchResult[]> {
+        if (q === CANARY_QUERY) return [GUINNESS_HIT];
+        throw new HttpError(403, 'u');
+      },
+    };
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search, breaker, sleepMs: 0, limit: 20, now: () => fixedNow,
+    });
+
+    // On-tap опрацьовується першим і саме на ньому блокується — breaker відкривається
+    // й цикл зупиняється ДО того, як relay-кандидат дійде до пошуку. selected-поля,
+    // однак, зафіксовані ДО циклу як розміри пулів, тож relay_selected лишається 1,
+    // а не 0: розбіжність із `processed` — очікувана поведінка, а не подвійний рахунок.
+    expect(result.on_tap_selected).toBe(1);
+    expect(result.relay_selected).toBe(1);
+    expect(result.processed).toBe(1);
+    expect(result.blocked).toBe(1);
+  });
 });
