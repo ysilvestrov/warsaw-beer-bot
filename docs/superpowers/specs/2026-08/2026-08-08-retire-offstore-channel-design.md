@@ -30,7 +30,7 @@ Off-store канал (§6.1) далі не потрібен: CWS оновлює 
    дебажних версій «суто для себе». Шов чистий: `extension/scripts/zip-dist.py`
    самодостатній, а `zip-determinism.test.ts` згадує `extension_releases` лише в коментарі,
    без імпорту.
-   **Лишається:** `build`, `package` (dev-zip), `build:store`, `package:store`,
+   **Лишається:** `build` (+ хук `postbuild`, який і робить zip), `build:store`, `package:store`,
    `zip-dist.py`, `key` у dev-маніфесті (пінить dev extension ID, тож токен переживає
    переустановку) і `zip-determinism.test.ts`.
    **Іде:** усе, що штовхає збірку в канал — включно з release-notes машинерією (див. нижче).
@@ -64,26 +64,26 @@ Off-store канал (§6.1) далі не потрібен: CWS оновлює 
 | `deploy/bin/apply-extension-release.sh` + `scripts/apply-extension-release.test.ts` | привілейований applier для прод-БД (сам applier — shell-скрипт, `.ts`-сиблінга нема) |
 | `src/bot/commands/extension-release.ts` (+ тест) | приймання zip від адміна + двокрокова розсилка |
 | `src/storage/extension_releases.ts` (+ тест) | увесь доступ до таблиці стає непотрібним |
-| `extension/package.json` → скрипт `release` | лише він склеює `package` з публікацією |
+| `extension/package.json` → скрипти `release` і `package` | `release` тягне публікацію; `package` без release-notes дублює `build` |
 | i18n `extrel.*` та `extension.download` (uk/en/pl + `types.ts`) | рядки лише цього каналу |
 | `extension/scripts/release-notes.ts` | пише `dist/RELEASE_NOTES.txt` — артефакт **лише** для каналу |
 | `extension/src/shared/release-notes.ts` (+ тест) | `extractNotes` має єдиного споживача — файл вище |
-| `extension/package.json` → `tsx scripts/release-notes.ts` зі скрипта `package` | наслідок двох рядків вище |
+| `extension/package.json` → виклик `tsx scripts/release-notes.ts` | наслідок двох рядків вище |
 
 `listExtensionTokenHolders` живе в `extension_releases.ts`, але читає `api_tokens`; єдиний
 її споживач — розсилка, тож вона йде разом з модулем.
 
 ### Явно НЕ чіпати (збірка лишається)
 
-`extension/package.json` → `build`, `package`, `build:store`, `package:store`;
+`extension/package.json` → `build`, `postbuild`, `build:store`, `package:store`;
 `extension/scripts/zip-dist.py`; `key` у dev-гілці `manifest.config.ts`;
 `extension/src/build/zip-determinism.test.ts`.
 
-**Дебажний потік після ретайру:** `npm run package` у `extension/` → один архів
+**Дебажний потік після ретайру:** `npm run build` у `extension/` → один архів
 `extension/warsaw-beer-overlay-<version>.zip` → власник качає його з файлового дерева
 code-server, розпаковує локально, ставить через Load unpacked.
 
-Скрипт `package` при цьому **спрощується** до `vite build && python3 scripts/zip-dist.py`.
+Скрипт `package` при цьому **зникає** (див. рішення 4): без release-notes він був би точним дублікатом `build`.
 Видалення `release-notes.ts` — не побічний збиток, а прибирання тертя: `extractNotes`
 **падає**, якщо в `CHANGELOG.md` нема секції під поточну версію, тобто зараз дебажну
 збірку неопублікованої версії зібрати не можна взагалі. Єдиним споживачем
@@ -109,14 +109,14 @@ store-шлях не зачеплено.
   (Mature Content), бо інакше це виглядає як битий лінк.
 - `docs/extension-release.md` — прибрати рунбук off-store каналу (пересилання zip боту,
   двокрокова розсилка, applier); лишити `npm run release:store` як релізний шлях і додати
-  короткий розділ про дебажну збірку (`npm run package` → скачати zip із сервера →
+  короткий розділ про дебажну збірку (`npm run build` → скачати zip із сервера →
   розпакувати → Load unpacked локально).
 
 ### Спека
 
 - **§6.1** — прибрати legacy-банер і бульєти каналу («бот zip не парсить», розсилка,
   оновлення розпакуванням поверх теки). Лишити бейджі; бульєт про збірку переписати:
-  `release:store` для релізу + локальний `build`/`package` як дебажний інструмент
+  `release:store` для релізу + локальний `build` як дебажний інструмент
   мейнтейнера, без згадок про запис у `extension_releases` і стейджинг у
   `~/extension-releases/`. Секцію перейменувати відповідно до залишку.
 - **§3.12 `extension_releases`** — позначити як retired: таблиця лишається, не пишеться.
@@ -158,11 +158,11 @@ store-шлях не зачеплено.
   видаленого коду не має). Оновити в ньому лише застарілий коментар: детермінізм існував
   заради upsert-no-op по sha256 в `extension_releases`, і ця причина зникає — тест
   лишаємо як гарантію відтворюваності збірки.
-- **Ключова регресія цієї зміни:** `npm run package` має відпрацювати для версії, якої
+- **Ключова регресія цієї зміни:** `npm run build` має відпрацювати для версії, якої
   **нема** в `CHANGELOG.md` — саме це раніше валило збірку і саме заради цього виймаємо
   `release-notes.ts`. Перевіряється тимчасовим бампом версії в `extension/package.json`
   без правки CHANGELOG.
-- Ручна перевірка дебажного потоку: `npm run package` → скачати
+- Ручна перевірка дебажного потоку: `npm run build` → скачати
   `extension/warsaw-beer-overlay-<v>.zip` → розпакувати → Load unpacked → бейджі
   малюються, токен зберігається (dev `key` на місці).
 - `extension/src/shared/release-notes.test.ts` видаляється разом із модулем; переконатися,

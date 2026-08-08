@@ -10,8 +10,14 @@ npm run release:store                 # package:store → upload → submit for 
 npm run release:store -- --dry-run    # лише креденшели + preflight, нічого не мутує
 ```
 
-Спершу підніми версію в `extension/package.json`: preflight відмовиться перезаливати
-версію, яку чернетка в сторі вже несе.
+Спершу:
+
+1. Підніми версію в `extension/package.json` — preflight відмовиться перезаливати
+   версію, яку чернетка в сторі вже несе.
+2. Додай секцію `## [x.y.z]` у `extension/CHANGELOG.md`. Для **релізу** вона обов'язкова:
+   `scripts/publish-store-release.ts` вимагає збігу, а `scripts/render-docs.ts` публікує
+   цей файл як користувацький чейнджлог на GitHub Pages. (Дебажної збірки це не
+   стосується — див. нижче.)
 
 Store-збірка пишеться в **окремий** файл `warsaw-beer-overlay-<version>-store.zip` — вона
 не той самий артефакт, що dev-zip (без `key`, вужчі дозволи), і не має його затирати.
