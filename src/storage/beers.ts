@@ -295,8 +295,9 @@ export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
 // отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
 // EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
 // структурно, а не тому, що вони зійшли з кранів. Виключення wontfix/retired, backoff
-// і сортування — ті самі; інвертовано лише join, тож пули диз'юнктні за побудовою
-// і дедуп їм не потрібен.
+// і сортування — ті самі; інвертований предикат робить пули диз'юнктними за
+// побудовою (дедуп не потрібен), але НЕ покриває orphan'а з рядком у match_links,
+// чий кран зійшов з останнього снапшоту — той не потрапляє в жоден пул.
 export function listRelayLookupCandidates(
   db: DB,
   limit: number,

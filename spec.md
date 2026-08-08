@@ -1081,8 +1081,13 @@ Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збережено�
 намінтив `/enrich/candidates` (`ensureBeerRow` біжить по кожній картці сторінки крамниці),
 а лінки пише лише on-tap ingest, тож on-tap join виключав їх **структурно**, а не через
 схід із кранів (на 2026-08-08 це 846 із 1427 orphan'ів, 532 з них не шукані жодного разу).
-Предикати інвертні (`EXISTS` ⊕ `NOT EXISTS`), тож пули не перетинаються і дедупу не
-потребують. `LIMIT 20` — **сумарний** бюджет запуску: on-tap вичерпується першим і не може
+Предикати взаємовиключні (`NOT EXISTS(ml)` ⇒ `¬EXISTS(ml→taps→latest)`), тож пули не
+перетинаються і дедупу не потребують — але вони не покривають усіх orphan'ів: orphan із
+рядком у `match_links`, чий кран зійшов з останнього снапшоту, не потрапляє в жоден пул
+(387 рядків станом на 2026-08-08) і лишається cron-недосяжним, поки не повернеться на
+кран. Це навмисне виключення — on-tap gate свідомо ігнорує пиво, яке зараз ніхто не
+наливає, — а не дефект; `orphansOffCron` міряє саме чергу relay-дренажу, а не сумарну
+cron-недосяжність. `LIMIT 20` — **сумарний** бюджет запуску: on-tap вичерпується першим і не може
 бути витіснений, relay добирає лише невикористані слоти (до зміни простоювало ~89%
 місткості: 17 lookup/добу зі 160). Обидва пули однаково виключають
 `review_class = 'wontfix'` і `retired_at IS NOT NULL` і однаково фільтруються backoff'ом.
@@ -1263,7 +1268,8 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   (`domain/lookup-backoff.ts`, `BACKOFF_HOURS = [0, 72, 168, 728]`): 4 спроби,
   після чого orphan **термінально dormant** (`isEligible` → false назавжди,
   поки `untappd_lookup_count` не скинуто). Орфани з `enrich_failures.review_class
-  = 'wontfix'` повністю виключені з пулу кандидатів (`listLookupCandidates`).
+  = 'wontfix'` повністю виключені з обох пулів кандидатів (`listLookupCandidates` і
+  `listRelayLookupCandidates`).
 - Після matcher-виправлення оператор запускає
   `npm run rearm-matcher-bug-orphans` (dry-run), перевіряє список і повторює з
   `npm run rearm-matcher-bug-orphans -- --apply`. Команда скидає backoff лише для
@@ -1280,7 +1286,9 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   **Історична пастка (#368, виправлено).** `selectRearmTargets` не вимагає рядка в
   `match_links`, тож до появи relay-пулу ре-арм для cron-недосяжних рядків був no-op:
   `untappd_lookup_count` чесно скидався, але крон їх однаково не бачив (45 із 93
-  ре-армлених `matcher_bug`-рядків станом на 2026-08-08). Тепер relay-пул їх підбирає.
+  ре-армлених `matcher_bug`-рядків станом на 2026-08-08; 93 — рядки, що збігаються з
+  власним фільтром `selectRearmTargets`: `untappd_lookup_count > 0 AND
+  review_class = 'matcher_bug' AND candidates_count > 0`). Тепер relay-пул їх підбирає.
 - **Ops-тули: конвенція аргументів.** Список `beer_id` передається через
   `--ids <csv>` (кома-розділений, пробіл після прапорця), запис вмикається
   `--apply` (dry-run за замовчуванням) — однаково для `rearm-matcher-bug-orphans`

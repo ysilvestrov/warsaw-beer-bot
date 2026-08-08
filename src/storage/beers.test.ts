@@ -538,6 +538,37 @@ describe('listRelayLookupCandidates', () => {
     expect(c.untappd_lookup_at).toBeNull();
     expect(c.untappd_lookup_count).toBe(0);
   });
+
+  test('an orphan with a link that fell off the latest snapshot is in NEITHER pool (the on-tap gate, #368)', () => {
+    const db = fresh();
+    const beerId = seedBeerOnTapLocal(db, { brewery: 'Magic Road', name: 'Clementine' });
+
+    // Sanity: the beer really has a match_links row. Otherwise it would
+    // trivially land in the relay pool (NOT EXISTS match_links) and this
+    // test would pass for the wrong reason.
+    const linked = db
+      .prepare('SELECT 1 FROM match_links WHERE untappd_beer_id = ?')
+      .get(beerId);
+    expect(linked).toBeTruthy();
+
+    // Pub's tap list changes: a NEWER snapshot for the same pub that does
+    // NOT include this beer's tap — exactly what happens in production
+    // when a pub rotates its taps. seedBeerOnTapLocal's own snapshot
+    // (2026-05-26T12:00:00Z) is now no longer the latest for this pub, so
+    // the beer's match_links row no longer joins to a current tap.
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const newerSnapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
+    insertTaps(db, newerSnapId, [{
+      tap_number: 1, beer_ref: 'Someone Else Entirely', brewery_ref: 'Someone Else',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    expect(listLookupCandidates(db, 10, NOW)).toEqual([]);
+    expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
+  });
 });
 
 // ---------------------------------------------------------------------------
