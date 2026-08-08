@@ -21,7 +21,6 @@ import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
 import { cityCommand } from './bot/commands/city';
 import { extensionCommand } from './bot/commands/extension';
-import { extensionReleaseCommand } from './bot/commands/extension-release';
 import { helpCommand } from './bot/commands/help';
 import { statusCommand } from './bot/commands/status';
 import { createApiApp, createApiServer } from './api';
@@ -186,10 +185,6 @@ async function main(): Promise<void> {
   bot.use(
     startCommand,
     linkCommand,
-    // Must precede importCommand: import's on('document') consumes every
-    // document (and .zip is a valid import format). The release handler falls
-    // through (next) for anything that isn't an admin release-zip upload.
-    extensionReleaseCommand,
     importCommand,
     newbeersCommand,
     beersCommand,
