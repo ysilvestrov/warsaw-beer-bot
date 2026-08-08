@@ -270,6 +270,45 @@ export function listLookupCandidates(
   return eligible.slice(0, limit);
 }
 
+// #368: relay-пул — orphan'и, яких on-tap пул не побачить НІКОЛИ. Рядки, намінчені
+// `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
+// отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
+// EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
+// структурно, а не тому, що вони зійшли з кранів. Виключення wontfix/retired, backoff
+// і сортування — ті самі; інвертовано лише join, тож пули диз'юнктні за побудовою
+// і дедуп їм не потрібен.
+export function listRelayLookupCandidates(
+  db: DB,
+  limit: number,
+  now: Date,
+): LookupCandidate[] {
+  const rows = db
+    .prepare(
+      `SELECT b.id, b.brewery, b.name,
+              b.untappd_lookup_at, b.untappd_lookup_count
+       FROM beers b
+       WHERE b.untappd_id IS NULL
+         AND NOT EXISTS (
+           SELECT 1 FROM enrich_failures ef
+           WHERE ef.beer_id = b.id
+             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
+         )
+       ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
+    )
+    .all() as LookupCandidate[];
+
+  // Той самий JS-фільтр backoff, що й у listLookupCandidates: відтворювати його
+  // математику в julianday-арифметиці SQLite означало б дублювати розклад.
+  const eligible = rows.filter((r) =>
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+  );
+
+  return eligible.slice(0, limit);
+}
+
 export function recordRatingSuccess(
   db: DB,
   beerId: number,
