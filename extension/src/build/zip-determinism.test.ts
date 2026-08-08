@@ -46,7 +46,7 @@ describe('zip-dist naming', () => {
     // to the temp dir and the default OUT path lands there too. This still exercises the
     // real DEFAULT output path (no ZIP_DIST_OUT override) — the whole point of the test —
     // without ever writing to, or deleting from, the real extension/ directory, which
-    // holds real release zips whose sha256 is recorded in extension_releases.
+    // holds real build zips; determinism keeps rebuilds byte-identical (reproducible builds).
     const dir = mkdtempSync(join(tmpdir(), 'zipname-'));
     const scriptsDir = join(dir, 'scripts');
     mkdirSync(scriptsDir, { recursive: true });
