@@ -10,6 +10,10 @@ export interface StatusMetrics {
   beersTotal: number;
   beersMatched: number;
   orphansPending: number;
+  // #368: orphan'и, яких enrich-крон не бачив би без relay-пулу (немає рядка в
+  // `match_links`), за винятком wontfix/retired. Той самий предикат, що і в
+  // listRelayLookupCandidates, мінус backoff — тобто розмір черги дренажу.
+  orphansOffCron: number;
   ratingsMissing: number;
   snapshots: number;
   taps: number;
@@ -67,6 +71,18 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
           AND NOT EXISTS (
             SELECT 1 FROM enrich_failures ef
             WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
+          )`,
+    ),
+    orphansOffCron: count(
+      `SELECT COUNT(*) AS c FROM beers b
+        WHERE b.untappd_id IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM enrich_failures ef
+            WHERE ef.beer_id = b.id
+              AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
           )`,
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),

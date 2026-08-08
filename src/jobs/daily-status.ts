@@ -18,7 +18,7 @@ export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: 
     '',
     'Стан',
     `• Останній скрейп: ${scrapeLine}`,
-    `• Каталог: ${group(m.beersTotal)} пив · ${matchPct}% зматчено · ${group(m.orphansPending)} orphan'ів у черзі`,
+    `• Каталог: ${group(m.beersTotal)} пив · ${matchPct}% зматчено · ${group(m.orphansPending)} orphan'ів у черзі · ${group(m.orphansOffCron)} поза cron`,
     `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
     `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
     ...(triageLine ? [`• ${triageLine}`] : []),
