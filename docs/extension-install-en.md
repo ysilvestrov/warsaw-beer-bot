@@ -86,7 +86,8 @@ Send:
 ```
 
 The bot will reply with instructions and a token in a copyable block
-(`<code>…</code>`), plus the **API address**.
+(`<code>…</code>`), plus the **API address** and a **Chrome Web Store link**.
+The bot no longer sends zip files.
 
 > **Important:** the token rotates **1:1** — every `/extension` call creates
 > a new token and **invalidates the previous one**. If you ever run
@@ -99,46 +100,41 @@ Copy the token — you'll need it in Part 3.
 
 ## Part 2. Install the extension
 
-> 🏪 **Coming soon — Chrome Web Store.** The extension has been submitted to
-> the Chrome Web Store (under review). **Once it's approved, the
-> recommended way will be to install it from the store**
-> (`https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg`)
-> — it will then update **automatically**. The store version has a
-> **different ID**, so after switching from the store you'll have to
-> **re-enter the token** in Options and remove the unpacked version. While
-> the review is in progress (transition period) — use the method below
-> (unpacked, via the bot).
+The extension is installed **from the Chrome Web Store** — building from
+source is **not required**, and the bot **no longer sends zip files**.
 
-The bot itself provides the extension — building from source is **not
-required**.
+### 2.1. Install from the store
 
-### 2.1. Get the zip
+Open the extension's store page and click **"Add to Chrome"**:
 
-Send **`/extension`**. The bot will send the token (Part 1.4) **and a file**
-`warsaw-beer-overlay-<version>.zip`. Save it and **unpack it into a
-permanent folder** (e.g. `~/warsaw-beer-overlay/`) — this is the folder
-you'll load into the browser, and the one you'll update in place.
+```
+https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
+```
 
-### 2.2. Load it into the browser (Chrome example)
-
-1. Open **`chrome://extensions`** (in Edge — `edge://extensions`, Brave — `brave://extensions`).
-2. Turn on **"Developer mode"** (toggle in the top right).
-3. Click **"Load unpacked"**.
-4. Select the folder you unpacked the zip into.
+> **If you see "This item is not available"** — sign in to your Google
+> account in the browser and reload the page. The extension is flagged
+> **18+** (beer content), so the store hides it from signed-out visitors and
+> never shows it in store search. The direct link works for anyone signed in.
 
 The extension will appear in the list. Pin its icon to the toolbar
 (optional, but handy).
 
-### 2.3. Updating
+### 2.2. Updating
 
-When a new version comes out, the bot will send a new zip on its own.
-**Unpack it over the same folder** (overwriting it) and click **↻** on the
-extension's card in `chrome://extensions`. The token and settings will be
-preserved — the extension ID is fixed.
+Updates arrive **automatically** — Chrome pulls new versions from the store
+on its own. Nothing to download, unpack, or reload.
+
+> **Switching from an older unpacked build?** Paste the token in Options
+> (Part 3) and **remove the old copy** in `chrome://extensions`. It's the
+> same token — no need to re-issue it: it isn't tied to an extension ID and
+> works in both copies at once until you remove the old one. Do remove the
+> old copy, though: two installed copies both draw badges on the same shop
+> page and duplicate each other.
 
 > **For developers: building from source.** If you want to build it
 > yourself: `cd extension && npm install && npm run build` → load
-> `extension/dist/`. `npm run package` additionally packs `dist/` into a zip.
+> `extension/dist/`. The same `npm run build` also writes
+> `extension/warsaw-beer-overlay-<version>.zip` next to it.
 
 ---
 
@@ -268,9 +264,10 @@ Supporter.
 
 ## In short (quick start)
 
-1. In the bot: `/start` → `/link <username>` → `/import` (send your Untappd export) → `/extension` (copy the token **and** save the zip).
-2. Unpack the zip into a permanent folder (e.g. `~/warsaw-beer-overlay/`).
-3. `chrome://extensions` → Developer mode → Load unpacked → this folder.
-4. Extension Options → paste the token → Save → Test connection → ✅.
-5. Go to a supported shop — "already had it" badges + ratings will appear on their own.
-6. Updating: the bot sends a new zip → unpack it over the same folder → **↻ reload**.
+1. In the bot: `/start` → `/link <username>` → `/import` (send your Untappd export) → `/extension` (copy the token; the bot also gives you the store link).
+2. Install the extension from the store:
+   `https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg`
+   (if you see "Item not available" — sign in to Google and reload).
+3. Extension Options → paste the token → Save → Test connection → ✅.
+4. Go to a supported shop — "already had it" badges + ratings will appear on their own.
+5. Updating: automatic, straight from the store — nothing to download.
