@@ -18,7 +18,10 @@ const NON_BEER_NAME_RE = new RegExp(
     'surprise box',
     'signature box',
     'craftbeer box',
-    'energy drinks?\\b',   // bounded: must not eat "Energy Drinkability IPA"; plural kept
+    // Bounded on BOTH sides: the right \b keeps "Energy Drinkability IPA" a beer, the
+    // left one keeps "Bioenergy Drink IPA" one too. `s?` keeps the plural, which is the
+    // commoner shelf spelling and would be lost to a bare trailing boundary.
+    '\\benergy drinks?\\b',
     'gift set',
     'gift box',
     'gift pack',

@@ -112,6 +112,10 @@ describe('review follow-ups (#383)', () => {
     expect(isNonBeerName('Energy Drinkability IPA')).toBe(false);
   });
 
+  it('keeps a beer where the phrase is glued to a preceding word', () => {
+    expect(isNonBeerName('Bioenergy Drink IPA')).toBe(false);
+  });
+
   it('still drops the plural form', () => {
     expect(isNonBeerName('Doze Energy Drinks 250ml')).toBe(true);
     expect(isNonBeerName('Doze energy drink zero')).toBe(true);
