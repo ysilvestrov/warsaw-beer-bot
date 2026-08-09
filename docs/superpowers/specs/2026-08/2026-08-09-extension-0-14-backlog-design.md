@@ -105,8 +105,21 @@ A pure `abv == 0 ⇒ not beer` rule is also forbidden, and this is load-bearing:
 thing separating AleBrowar Kwas Chlebowy Bright (0.0%) from Light (0.5%) — the
 feature shipped in 0.13.0. Alcohol-free beer is beer and is on Untappd.
 
-*Rule:* name matches an ambiguous soft-drink family (`ginger beer`, `root beer`)
-**AND** ABV is 0 ⇒ not beer. `energy drink` is unambiguous and needs no ABV gate.
+*Rule:* the **name or the shop-published style** matches an ambiguous soft-drink
+family (`ginger beer`, `root beer`) **AND** ABV is 0 ⇒ not beer. `energy drink` is
+unambiguous and needs no ABV gate.
+
+The ABV gate is scoped strictly to that family and carries no meaning outside it:
+"ginger beer" and "root beer" are simply the names English gave to two
+non-fermented soft drinks, while alcoholic versions of both exist and are on
+Untappd. Alcohol-free **beer** (kvass, 0.0% lagers) is untouched by this rule — it
+never matches the family in the first place, and nothing here may be generalised
+into "0.0% is not beer".
+
+*Style availability:* `Card.style` is currently populated by **onemorebeer only**
+(the "Dane techniczne" panel, #369); flasker publishes none, so both known rows are
+decided by name + ABV today. The style surface is in the rule because it is the
+correct signal and costs nothing, not because it changes the current two rows.
 *When ABV is absent* (the four adapters that publish none on listings): **keep the
 product**. A stray orphan is cheaper than silently hiding a real beer from the user.
 *Evidence:* stored ABV is 0.0 for both rows; the Ципа ciders in the same batch carry
