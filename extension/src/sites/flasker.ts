@@ -1,6 +1,6 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
-import { isNonBeerName } from './non-beer';
+import { isNonBeerName, isNonAlcoholicSoftDrinkFamily } from './non-beer';
 import { FLASKER_BREWERIES, type FlaskerBrewery } from './flasker-breweries.generated';
 
 // --- volume / abv --------------------------------------------------------
@@ -217,7 +217,9 @@ export function parseTitle(
   const abvMatch = title.match(ABV_RE);
   const abvAt = abvMatch?.index ?? -1;
   const headEnd = abvAt >= 0 ? Math.min(abvAt, volAt) : volAt;
-  const head = title.slice(0, headEnd).trim();
+  // The banner must go BEFORE the split: otherwise splitBreweryName takes "ПРЕДРЕЛІЗ"
+  // as the brewery and the later name-side strip has nothing left to clean (#376).
+  const head = stripMerchandisingPrefix(title.slice(0, headEnd).trim());
   if (!head) return null;
 
   const abv = abvMatch ? Number(abvMatch[1].replace(',', '.')) : undefined;
@@ -337,6 +339,10 @@ export const flasker: SiteAdapter = {
         productUrl: e.productUrl,
       });
       if (!parsed) continue;
+      // Match the family against brewery+name together: splitBreweryName can hand the
+      // leading brand token ("Ginger") to the brewery, leaving "Beer" alone in the name,
+      // which would otherwise escape the gate (#376 follow-up).
+      if (isNonAlcoholicSoftDrinkFamily({ name: `${parsed.brewery} ${parsed.name}`, abv: parsed.abv })) continue;
       cards.push({ el: e.el, ...parsed });
     }
     return cards;

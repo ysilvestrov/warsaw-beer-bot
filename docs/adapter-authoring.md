@@ -13,8 +13,9 @@
 1. **Зняти фікстуру сторінки колекції** → `extension/tests/fixtures/<id>.html`,
    де `<id>` — короткий стабільний ідентифікатор магазину.
    - SSR-магазин: `curl -A 'Mozilla/5.0' '<url колекції>' > extension/tests/fixtures/<id>.html`
-   - SPA-магазин: дамп після рендеру (приклад headless-Playwright захоплення зі
-     scroll — `extension/scripts/capture-omb-fixture.ts`).
+   - SPA-магазин: дамп після рендеру через headless-Playwright — `npm run capture --
+     <name> --parse` (`extension/scripts/capture-fixture.ts`), конфіг цілей —
+     `extension/scripts/capture-targets.ts`.
 
 2. **Реалізувати `SiteAdapter`** у `extension/src/sites/<id>.ts`:
    - обов'язкові: `id` (= ім'я фікстури), `hostMatch(url)`, `parseCards(root)`;

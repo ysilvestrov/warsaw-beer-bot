@@ -12,14 +12,14 @@
     "render-icons": "tsx scripts/render-icons.ts",
     "build:store": "CWS_BUILD=1 vite build",
     "package:store": "CWS_BUILD=1 vite build && CWS_BUILD=1 python3 scripts/zip-dist.py",
-    "capture-omb": "tsx scripts/capture-omb-fixture.ts",
+    "capture": "tsx scripts/capture-fixture.ts",
     "capture-omb-abv": "tsx scripts/capture-omb-abv-fixture.ts",
-    "capture-flasker": "tsx scripts/capture-flasker-fixture.ts",
     "gen-flasker-breweries": "tsx scripts/gen-flasker-breweries.ts"
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
     "@types/chrome": "^0.0.270",
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^22.19.20",
     "jsdom": "^25.0.1",
     "playwright": "^1.60.0",

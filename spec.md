@@ -1640,8 +1640,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   бренд-стрічки `mb-brand-tile`, звірений з каталогом Untappd для canonical-форми)
   за product-tag, потім за title-head (найдовший збіг), fallback — existing title
   parser (зазвичай перше слово, з відомою обробкою two-word/parenthetical cases);
-  відомий display-prefix brewery
-  видаляється з name, leading `ПРЕДРЕЛІЗ`/`ПРЕДРЕДІЗ`/`ПРОБНИК:` labels теж;
+  leading `ПРЕДРЕЛІЗ`/`ПРЕДРЕДІЗ`/`ПРОБНИК:` labels знімаються з head **до** всього
+  ланцюга резолву — інакше fallback-split забирає банер як броварню (#376);
+  відомий display-prefix brewery видаляється з name;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
   відкидається; ABV із `%` у title), домен `flasker.com.ua`), `piwnemosty`
   (Piwne Mosty IdoSell SSR — `.product`, brewery/title з GA
@@ -1660,11 +1661,18 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   Кожен адаптер ПОВИНЕН виключати не-пива — детекція шоп-специфічна: назва через
   `non-beer.ts isNonBeerName` (паки/сети/сертифікати), шоп-локальні токени (мерч onemorebeer:
   `szklanka/pokal/kufel/koszulka/książka`, onemorebeer soft drinks:
-  `kofola/kombucha/vita aloe`), URL колекції (`hoptimaal`), або **гейт цілої
+  `kofola/kombucha/vita aloe`), спільний ABV-гейтований гейт содових родин
+  (`non-beer.ts isNonAlcoholicSoftDrinkFamily`: `ginger beer`/`root beer` у парі
+  brewery+name або в опублікованому шопом стилі **І** `abv === 0` ⇒ не пиво; без ABV
+  лишаємо товар; опублікований не-родинний стиль ветує відкидання) плюс беззастережний
+  `energy drink` у `isNonBeerName`, URL колекції (`hoptimaal`), або **гейт цілої
   категорії** через опційний `SiteAdapter.isNonBeerPage(url)` — overlay пропускає сторінку
   повністю тільки коли broad skip не може сховати eligible cider/mead/kvass. Kvass/`квас`/
   `Kwas chlebowy` є eligible категорією і не фільтрується ні shared helper'ом, ні
-  шоп-локальними фільтрами, ні page-gate'ами. FP-гарди: банка з заставою
+  шоп-локальними фільтрами, ні page-gate'ами. `abv === 0` саме по собі НІКОЛИ не є
+  ознакою не-пива: безалкогольне пиво — пиво, і 0.0% — єдине, що відрізняє AleBrowar
+  Kwas Chlebowy Bright від Light (#322/#369). Гейт содових родин спрацьовує виключно
+  на перетині нуля з родиною `ginger beer`/`root beer`. FP-гарди: банка з заставою
   (`MAGIC ROAD … PUSZKA … KAUCJA`) і kvass лишаються пивом. Форситься конформанс-тестом
   (див. **Тести**).
 - **Потік:** content script парсить видиму сітку → short-TTL кеш
