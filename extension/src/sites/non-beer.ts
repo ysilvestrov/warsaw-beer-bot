@@ -18,7 +18,7 @@ const NON_BEER_NAME_RE = new RegExp(
     'surprise box',
     'signature box',
     'craftbeer box',
-    'energy drink',
+    'energy drinks?\\b',   // bounded: must not eat "Energy Drinkability IPA"; plural kept
     'gift set',
     'gift box',
     'gift pack',
@@ -73,6 +73,10 @@ export function isNonAlcoholicSoftDrinkFamily(
   fields: { name: string; style?: string; abv?: number },
 ): boolean {
   if (fields.abv !== 0) return false;
-  if (fields.style !== undefined) return SOFT_DRINK_FAMILY_RE.test(fields.style);
+  // An empty/whitespace style is not a published style — a shop that renders the row
+  // with no value has told us nothing, so fall back to the name rather than letting
+  // "" veto the drop.
+  const style = fields.style?.trim();
+  if (style) return SOFT_DRINK_FAMILY_RE.test(style);
   return SOFT_DRINK_FAMILY_RE.test(fields.name);
 }

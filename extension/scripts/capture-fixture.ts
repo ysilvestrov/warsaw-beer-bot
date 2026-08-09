@@ -71,7 +71,12 @@ async function main(argv: string[]): Promise<void> {
   if (argv.includes('--list') || (names.length === 0 && !argv.includes('--all'))) {
     console.log('Targets:');
     for (const t of CAPTURE_TARGETS) console.log(`  ${t.name.padEnd(16)} ${t.url}`);
-    console.log('\nUsage: npm run capture -- <name...> | --all [--parse] [--force] [--list]');
+    console.log(
+      '\nUsage: npm run capture -- <name...> | --all [--parse] [--force] [--no-capture] [--list]'
+      + '\n  --parse       run the capture through the real adapter and print the cards'
+      + '\n  --no-capture  skip the fetch and re-parse the fixture already on disk'
+      + '\n  --force       accept a capture below half the existing fixture card count',
+    );
     return;
   }
 

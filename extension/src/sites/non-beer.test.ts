@@ -101,3 +101,19 @@ describe('isNonBeerName — energy drinks', () => {
     expect(isNonBeerName('Liquid Energy IPA')).toBe(false);
   });
 });
+
+describe('review follow-ups (#383)', () => {
+  it('treats an empty style as absent and still drops a 0% root beer', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Classic Root Beer', style: '', abv: 0 })).toBe(true);
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Classic Root Beer', style: '   ', abv: 0 })).toBe(true);
+  });
+
+  it('keeps a beer whose name merely starts with the energy-drink phrase', () => {
+    expect(isNonBeerName('Energy Drinkability IPA')).toBe(false);
+  });
+
+  it('still drops the plural form', () => {
+    expect(isNonBeerName('Doze Energy Drinks 250ml')).toBe(true);
+    expect(isNonBeerName('Doze energy drink zero')).toBe(true);
+  });
+});
