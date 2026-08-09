@@ -184,6 +184,32 @@ describe('parseTitle', () => {
     expect(parseTitle('Unknownbrew Mystery Ale 5% 330ml'))
       .toEqual({ brewery: 'Unknownbrew', name: 'Mystery Ale', abv: 5 });
   });
+
+  it('does not let a pre-release banner become the brewery (#376)', () => {
+    expect(parseTitle('ПРЕДРЕЛІЗ White Chalk Stout 6% 330ml'))
+      .toEqual({ brewery: 'White', name: 'Chalk Stout', abv: 6 });
+  });
+
+  it('resolves the registry brewery hidden behind a banner prefix (#376)', () => {
+    // "DE ZWARTE REGEL" from the task brief has no registry entry reachable by
+    // breweryFromRegistryHead (confirmed live: it is only known via a
+    // productUrl family-slug rule, not by title text) — REBREW is a real
+    // registry entry, so it demonstrates the actual bug: pre-fix, the banner
+    // sits in front of "REBREW" so breweryFromRegistryHead's prefix match
+    // never fires and splitBreweryName takes "ПРЕДРЕЛІЗ" as the brewery;
+    // post-fix, the banner is stripped first and the registry match succeeds.
+    expect(parseTitle('ПРЕДРЕЛІЗ REBREW Some Guest Gose 4% 330ml'))
+      .toEqual({ brewery: 'Rebrew', name: 'Some Guest Gose', abv: 4 });
+  });
+
+  it('leaves a colon-bearing brewery alone when there is no banner (negative guard)', () => {
+    // No registry entry for "DE ZWARTE REGEL" exists (verified against
+    // flasker-breweries.generated.ts), so this is the pre-existing
+    // first-word fallback — unrelated to the fix, and unchanged by it since
+    // there is no banner here for stripMerchandisingPrefix to act on.
+    expect(parseTitle('DE ZWARTE REGEL: Laatste Plicht 9 9% 330ml'))
+      .toEqual({ brewery: 'DE', name: 'ZWARTE REGEL: Laatste Plicht 9', abv: 9 });
+  });
 });
 
 describe('stripMerchandisingPrefix', () => {
