@@ -414,3 +414,15 @@ describe('registry lookup helpers', () => {
     expect(breweryFromRegistryHead('ШО (IIIO) Totem IPA')).toBeNull();
   });
 });
+
+describe('flasker non-beer gates', () => {
+  it('drops a 0% ginger beer but keeps a 0% beer (#376)', () => {
+    const html = `<ul>
+      <li class="product"><h2 class="woocommerce-loop-product__title">Old Jamaica Ginger Beer Regular 0% 330ml</h2></li>
+      <li class="product"><h2 class="woocommerce-loop-product__title">AleBrowar Kwas Chlebowy Jasny 0% 500ml</h2></li>
+    </ul>`;
+    const names = flasker.parseCards(new DOMParser().parseFromString(html, 'text/html')).map((c) => c.name);
+    expect(names).toContain('Kwas Chlebowy Jasny');
+    expect(names.join(' ')).not.toContain('Ginger Beer');
+  });
+});

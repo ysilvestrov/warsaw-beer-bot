@@ -18,6 +18,7 @@ const NON_BEER_NAME_RE = new RegExp(
     'surprise box',
     'signature box',
     'craftbeer box',
+    'energy drink',
     'gift set',
     'gift box',
     'gift pack',
@@ -44,4 +45,22 @@ const NON_BEER_NAME_RE = new RegExp(
 
 export function isNonBeerName(name: string): boolean {
   return NON_BEER_NAME_RE.test(name);
+}
+
+// "Ginger beer" and "root beer" are the names English gave to two non-fermented soft
+// drinks — but alcoholic versions of both exist and are on Untappd. So the family alone
+// decides nothing; only family + a published 0% does. When the shop publishes no ABV we
+// KEEP the product: a stray orphan row is cheaper than silently hiding a real beer.
+//
+// This gate is scoped to that family and must never be generalised into "0.0% is not
+// beer" — see shared/abv.ts: 0 is a legitimate value and the only thing separating
+// AleBrowar Kwas Chlebowy Bright (0.0%) from Light (0.5%).
+const SOFT_DRINK_FAMILY_RE = /\b(?:ginger|root)\s+beer\b/iu;
+
+export function isNonAlcoholicSoftDrinkFamily(
+  fields: { name: string; style?: string; abv?: number },
+): boolean {
+  if (fields.abv !== 0) return false;
+  return SOFT_DRINK_FAMILY_RE.test(fields.name)
+    || (fields.style !== undefined && SOFT_DRINK_FAMILY_RE.test(fields.style));
 }

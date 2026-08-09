@@ -1,6 +1,6 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
-import { isNonBeerName } from './non-beer';
+import { isNonBeerName, isNonAlcoholicSoftDrinkFamily } from './non-beer';
 import { FLASKER_BREWERIES, type FlaskerBrewery } from './flasker-breweries.generated';
 
 // --- volume / abv --------------------------------------------------------
@@ -339,6 +339,7 @@ export const flasker: SiteAdapter = {
         productUrl: e.productUrl,
       });
       if (!parsed) continue;
+      if (isNonAlcoholicSoftDrinkFamily(parsed)) continue;
       cards.push({ el: e.el, ...parsed });
     }
     return cards;

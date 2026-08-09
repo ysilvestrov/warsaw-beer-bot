@@ -1,6 +1,6 @@
 import type { Card, SiteAdapter } from './types';
 import { waitForSelector } from '../content/grid-ready';
-import { isNonBeerName } from './non-beer';
+import { isNonBeerName, isNonAlcoholicSoftDrinkFamily } from './non-beer';
 import { usableAbv } from '../shared/abv';
 
 const CARD_SELECTOR = '.one-product-list-view__tile';
@@ -88,7 +88,9 @@ export const onemorebeer: SiteAdapter = {
       if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) continue;
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
-      cards.push({ el, brewery, name, ...technicalFacts(el) });
+      const facts = technicalFacts(el);
+      if (isNonAlcoholicSoftDrinkFamily({ name, style: facts.style, abv: facts.abv })) continue;
+      cards.push({ el, brewery, name, ...facts });
     }
     return cards;
   },

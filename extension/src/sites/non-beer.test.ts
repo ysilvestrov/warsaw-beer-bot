@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isNonBeerName } from './non-beer';
+import { isNonBeerName, isNonAlcoholicSoftDrinkFamily } from './non-beer';
 
 describe('isNonBeerName', () => {
   it.each([
@@ -40,5 +40,42 @@ describe('isNonBeerName', () => {
     'Twelve Packard Stout',
   ])('keeps real beer %j', (name) => {
     expect(isNonBeerName(name)).toBe(false);
+  });
+});
+
+describe('isNonAlcoholicSoftDrinkFamily', () => {
+  it('drops a 0% ginger beer — the soft drink that borrowed the word "beer"', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Jamaica Ginger Beer Regular', abv: 0 })).toBe(true);
+  });
+
+  it('drops a 0% root beer', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Classic Root Beer', abv: 0 })).toBe(true);
+  });
+
+  it('keeps an alcoholic ginger beer', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Alcoholic Ginger Beer', abv: 4 })).toBe(false);
+  });
+
+  it('keeps the product when the shop publishes no ABV — never hide a beer on a guess', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Ginger Beer' })).toBe(false);
+  });
+
+  it('matches on the shop style as well as the name', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Old Jamaica', style: 'Ginger Beer', abv: 0 })).toBe(true);
+  });
+
+  it('never touches alcohol-free beer: 0.0% is a real ABV (#322)', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Kwas Chlebowy Jasny', abv: 0 })).toBe(false);
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'BezalkØ Pan IPAni', style: 'Pale Ale', abv: 0 })).toBe(false);
+  });
+});
+
+describe('isNonBeerName — energy drinks', () => {
+  it('drops energy drinks unconditionally', () => {
+    expect(isNonBeerName('Doze energy drink zero')).toBe(true);
+  });
+
+  it('keeps a beer that merely mentions energy', () => {
+    expect(isNonBeerName('Liquid Energy IPA')).toBe(false);
   });
 });
