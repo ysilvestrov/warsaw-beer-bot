@@ -48,6 +48,23 @@ describe('pinMatch', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM enrich_failures').get()).toEqual({ n: 0 });
   });
 
+  test('#384: merge case stamps the canonical row curated — it is now a reviewed_by_user=1 target', () => {
+    const db = newDb();
+    const canonicalId = upsertBeer(db, {
+      untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
+      style: null, abv: null, rating_global: 4.1,
+      normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
+    });
+    upsertMatch(db, 'Banany Na Rauszu', canonicalId, 1.0);
+    const orphanId = orphan(db, 'Recraft / Z INNEJ BECZKI Brewery', 'Urodzinowe');
+    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+
+    pinMatch(db, orphanId, 6614460, AT);
+
+    const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(canonicalId);
+    expect(row).toEqual({ untappd_id_source: 'curated' });
+  });
+
   test('merge case: redirects the orphan checkins to the canonical row (no FK abort)', () => {
     const db = newDb();
     const canonicalId = upsertBeer(db, {

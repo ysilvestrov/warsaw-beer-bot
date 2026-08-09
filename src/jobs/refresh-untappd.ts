@@ -87,6 +87,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
             rating_global: it.global_rating,
             normalized_name: nn,
             normalized_brewery: nb,
+            untappd_id_source: 'checkin',
           });
         }
         markHad(db, p.telegram_id, beerId, new Date().toISOString());

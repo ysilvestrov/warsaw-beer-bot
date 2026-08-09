@@ -26,6 +26,11 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
       const info = db
         .prepare('UPDATE match_links SET untappd_beer_id = ?, reviewed_by_user = 1 WHERE untappd_beer_id = ?')
         .run(canonical.id, beerId);
+      // #384: the canonical row is now the target of a reviewed_by_user=1 link — the exact
+      // condition the v22 backfill uses to mark a row 'curated'. Without this stamp, whether
+      // this row is protected from a later published-bid override would depend on whether the
+      // pin happened before or after that migration ran, for the identical human action.
+      db.prepare(`UPDATE beers SET untappd_id_source = 'curated' WHERE id = ?`).run(canonical.id);
       // Redirect the orphan's checkins too: checkins.beer_id → beers(id) has NO ON DELETE
       // CASCADE, so with foreign_keys=ON a checkin on the orphan would abort the DELETE.
       // Point them at the canonical row (its real Untappd identity) before removing the orphan.
