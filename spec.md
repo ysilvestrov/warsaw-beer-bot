@@ -1645,9 +1645,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   банер (`предреліз-`/`предредіз-`/`пробник-`) знімається зі **slug** перед звіркою
   префіксів, бо інакше pre-release listing ховає за банером і family-, і brewery-префікс (#385);
   product-family slug prefixes покривають серії, які магазин виставляє без назви броварні
-  в title (`lost-philosopher-`, `de-zwarte-regel-`, `tomatol-wasabi-` → Mad Brew;
-  серія Tomatøl навмисно перелічена по-продуктно, а не як `tomatol-`: для `Tomatol Bulgogi`
-  відкритий brewery-gate веде name-stage до чужого запису, і хибний лінк гірший за orphan — #385/#384);
+  в title (`lost-philosopher-`, `de-zwarte-regel-`, `tomatol-` → Mad Brew; для
+  `Tomatol Bulgogi` це свідомо прийнятий компроміс — відкритий brewery-gate веде
+  name-stage до чужого запису (`Tomatol: Bulgogi Sriracha` замість опублікованого
+  магазином `Tomatøl:BULDAK BULGOGI`), доки не буде #384 — #385);
   відомий display-prefix brewery видаляється з name;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
   відкидається; ABV із `%` у title), домен `flasker.com.ua`), `piwnemosty`

@@ -137,19 +137,22 @@ describe('parseTitle', () => {
 
   // #385: Tomatøl is a Mad Brew series, and the title carries only the series
   // name — the fallback split would emit "Tomatol" as the brewery.
-  it('resolves the Tomatol Wasabi product to Mad Brew from the product slug', () => {
+  it('resolves the Tomatol series to Mad Brew from the product slug', () => {
     expect(parseTitle('Tomatol Wasabi 3.8% 330мл', {
       productUrl: 'https://flasker.com.ua/product/tomatol-wasabi-3-8-330%d0%bc%d0%bb/',
     })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Wasabi', abv: 3.8 });
-  });
-
-  // Guard for the deliberate narrowness of the rule above (see flasker.ts): resolving
-  // Bulgogi to Mad Brew makes the matcher pick the wrong Untappd record, so this stays
-  // an orphan on purpose until #384/#334. Flip this expectation when widening.
-  it('leaves Tomatol Bulgogi unresolved on purpose (would mis-match — #384/#334)', () => {
     expect(parseTitle('Tomatol Bulgogi 3.8% 330мл', {
       productUrl: 'https://flasker.com.ua/product/tomatol-bulgogi-3-8-330мл/',
-    })).toEqual({ brewery: 'Tomatol', name: 'Bulgogi', abv: 3.8 });
+    })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8 });
+  });
+
+  // Prefix-boundary guard: `tomatol-` must not spill onto a longer stem. Named after
+  // Tomatoland only because it is the collision the Untappd searches surface — the
+  // shop does not stock it; the assertion is about the prefix shape, not the listing.
+  it('does not let the tomatol- family prefix swallow a longer stem', () => {
+    expect(parseTitle('Tomatoland Mountain Herbs 5% 330ml', {
+      productUrl: 'https://flasker.com.ua/product/tomatoland-mountain-herbs-5-330ml/',
+    })).toEqual({ brewery: 'Tomatoland', name: 'Mountain Herbs', abv: 5 });
   });
 
   // #385/#376: pre-release listings prefix the slug with `предреліз-`, which hid the

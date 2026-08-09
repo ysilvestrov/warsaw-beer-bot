@@ -57,14 +57,14 @@ const BREWERY_RULES: BreweryRule[] = [
       'lost-philosopher-',
       'the-lost-philosopher-',
       'de-zwarte-regel-',
-      // Tomatøl series (#385). Deliberately per-product rather than a bare `tomatol-`:
-      // resolving `Tomatol Bulgogi` to Mad Brew opens the brewery gate, and the name
-      // stage then prefers `Tomatol: Bulgogi Sriracha` over the beer the shop actually
-      // links (`Tomatøl:BULDAK BULGOGI`) — the shop title omits "Buldak", so the input
-      // tokens are a strict subset of the wrong candidate. A wrong link is worse than
-      // an orphan, so only the verified-unambiguous member is listed here. Widen to
-      // `tomatol-` once #384 (use the shop's published bid) or #334 lands.
-      'tomatol-wasabi-',
+      // Tomatøl series (#385). KNOWN COST, accepted deliberately: this resolves
+      // `Tomatol Bulgogi` to Mad Brew, which opens the brewery gate, and the name stage
+      // then prefers `Tomatol: Bulgogi Sriracha` over the beer the shop actually links
+      // (`Tomatøl:BULDAK BULGOGI`) — the shop title omits "Buldak", so the input tokens
+      // are a strict subset of the wrong candidate and both are 4.2% so ABV cannot break
+      // the tie. #384 (use the shop's published bid) closes it; until then Bulgogi
+      // carries a wrong link rather than no link.
+      'tomatol-',
     ],
     titleAliases: ['Mad Brew'],
   },
