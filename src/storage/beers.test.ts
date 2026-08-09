@@ -976,3 +976,42 @@ describe('rearmLookup', () => {
     expect(row.untappd_lookup_count).toBe(0);
   });
 });
+
+describe('#384 provenance', () => {
+  it('recordLookupSuccess stamps search', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: null, name: 'N', brewery: 'B',
+      normalized_name: 'n', normalized_brewery: 'b',
+    });
+    recordLookupSuccess(db, id, { bid: 900, style: null, abv: null, global_rating: null }, '2026-08-09T00:00:00Z');
+    const row = db.prepare('SELECT untappd_id, untappd_id_source FROM beers WHERE id = ?').get(id);
+    expect(row).toEqual({ untappd_id: 900, untappd_id_source: 'search' });
+  });
+
+  it('upsertBeer records the source it is given', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 901, name: 'N', brewery: 'B',
+      normalized_name: 'n', normalized_brewery: 'b',
+      untappd_id_source: 'checkin',
+    });
+    const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(id);
+    expect(row).toEqual({ untappd_id_source: 'checkin' });
+  });
+
+  it('upsertBeer leaves the source alone when not given one', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 902, name: 'N', brewery: 'B',
+      normalized_name: 'n', normalized_brewery: 'b',
+      untappd_id_source: 'checkin',
+    });
+    upsertBeer(db, {
+      untappd_id: 902, name: 'N2', brewery: 'B',
+      normalized_name: 'n2', normalized_brewery: 'b',
+    });
+    const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(id);
+    expect(row).toEqual({ untappd_id_source: 'checkin' });
+  });
+});

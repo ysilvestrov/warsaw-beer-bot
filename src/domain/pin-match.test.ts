@@ -161,3 +161,14 @@ describe('unpin & list', () => {
     ]);
   });
 });
+
+test('#384: a pin stamps curated so a published bid can never override it', () => {
+  const db = newDb();
+  const id = upsertBeer(db, {
+    untappd_id: null, name: 'Urodzinowe', brewery: 'Recraft',
+    normalized_name: 'urodzinowe', normalized_brewery: 'recraft',
+  });
+  pinMatch(db, id, 6614460, '2026-08-09T00:00:00Z');
+  const row = db.prepare('SELECT untappd_id, untappd_id_source FROM beers WHERE id = ?').get(id);
+  expect(row).toEqual({ untappd_id: 6614460, untappd_id_source: 'curated' });
+});

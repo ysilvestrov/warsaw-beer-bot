@@ -35,7 +35,7 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
       return { kind: 'merged', canonicalId: canonical.id, redirected: info.changes as number };
     }
     // New bid (or already this bid) → set on the orphan's own row and pin its links.
-    db.prepare('UPDATE beers SET untappd_id = ?, untappd_lookup_at = ? WHERE id = ?')
+    db.prepare(`UPDATE beers SET untappd_id = ?, untappd_id_source = 'curated', untappd_lookup_at = ? WHERE id = ?`)
       .run(untappdId, at, beerId);
     db.prepare('UPDATE match_links SET reviewed_by_user = 1 WHERE untappd_beer_id = ?').run(beerId);
     db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);

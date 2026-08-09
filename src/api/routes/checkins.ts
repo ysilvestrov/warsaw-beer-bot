@@ -67,6 +67,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           rating_global: null,
           normalized_name: normalizeName(ci.beer_name),
           normalized_brewery: normalizeBrewery(ci.brewery_name),
+          untappd_id_source: 'checkin',
         });
         mergeCheckin(deps.db, {
           checkin_id: ci.checkin_id,
