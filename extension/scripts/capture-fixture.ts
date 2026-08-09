@@ -19,6 +19,15 @@ function parseFixture(target: CaptureTarget): void {
   const adapter = ADAPTERS.find((a) => a.id === target.adapter);
   if (!adapter) throw new Error(`no adapter with id "${target.adapter}"`);
   const dom = new JSDOM(readFileSync(`${FIXTURE_DIR}${target.out}`, 'utf8'));
+  // Adapters run in a page, so some reach for constructors as globals rather than
+  // through the document (beerfreak's `root instanceof Document`). Vitest's jsdom
+  // environment provides these; a plain node process does not.
+  // Reassign per fixture, never `??=`: keeping the first window's constructors would
+  // make `x instanceof Document` silently false for every later target, and beerfreak
+  // would then parse with an empty product-meta map instead of failing loudly.
+  const g = globalThis as Record<string, unknown>;
+  const w = dom.window as unknown as Record<string, unknown>;
+  for (const name of ['Document', 'HTMLElement', 'Element', 'Node', 'DOMParser']) g[name] = w[name];
   const cards = adapter.parseCards(dom.window.document);
   console.log(`  parsed ${cards.length} cards:`);
   for (const c of cards) {
@@ -74,11 +83,15 @@ async function main(argv: string[]): Promise<void> {
         return t;
       });
 
+  // --no-capture re-parses the fixture already on disk. The gate needs to re-read a
+  // capture after a parser change without hitting the shop again.
+  const noCapture = argv.includes('--no-capture');
+
   let failed = 0;
   for (const t of targets) {
-    const ok = await capture(t, force);
+    const ok = noCapture ? true : await capture(t, force);
     if (!ok) failed++;
-    else if (doParse) parseFixture(t);
+    else if (doParse || noCapture) parseFixture(t);
   }
   if (failed) {
     console.error(`\n${failed} target(s) refused — fixtures left untouched.`);
