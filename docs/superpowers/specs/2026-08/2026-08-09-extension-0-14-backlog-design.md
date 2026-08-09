@@ -34,6 +34,10 @@ Production, `retired_at IS NULL`, 2026-08-09:
 | funkyshop | 16 | 4 |
 | onemorebeer / piwnemosty / bierloods22 | 6 / 2 / 2 | 0 |
 
+Read the flasker `parser_bug` figure with care: **22 of those 55 rows are #382**, a
+server-side query bug (§4.3), not adapter work. The pool this release can actually
+address is closer to 33.
+
 ## 2. The rule that governs this release
 
 **Only proven-live defects enter 0.14.** For every candidate class we first show
@@ -175,11 +179,28 @@ the `search_url` recorded in production. No network needed.
 The extension supplied a correct brewery and name in every case. The Cyrillic tokens
 are dropped **server-side**, in query construction.
 
-**Consequences:** hypothesis (3) of #376 is refuted and must be corrected on the
-issue; the class leaves 0.14 and becomes a matcher-side issue (adjacent to #320,
-which covers Cyrillic↔Latin *folding* — this is Cyrillic token *dropping*, a
-different mechanism); and it is a third same-day instance of `parser_bug` pointing at
-the wrong codebase, which is the thesis of #381.
+**Mechanism:** `foldToken` (`normalize.ts:136`) folds to ASCII, so an all-Cyrillic
+token becomes `''` and `cleanSearchQuery`'s `MIN_QUERY_TOKEN_LENGTH` gate — added by
+#350 to drop *one-character* tokens — discards it. The gate tests the fold, not the
+token, so it cannot tell "one character" from "not written in Latin".
+
+**Size — four times the five examples.** Replaying all 684 active failures through
+the current builder: 74 carry a Cyrillic token, 71 lose at least one, 66 lose all
+Cyrillic content. Of those, **22 are flasker rows filed as `parser_bug`** — i.e. 22
+of the 55 rows in this release's largest pool are not extension work at all. (The
+winetime rows in that count are grocery junk, so the headline 66 must not be quoted
+as beer impact.)
+
+**Consequences:** hypothesis (3) of #376 is refuted (comment posted); the class
+leaves 0.14 and is filed as **#382** (adjacent to #320, which covers Cyrillic↔Latin
+*folding* — this is token *deletion* during query construction, a different
+mechanism); and it is a third same-day instance of `parser_bug` pointing at the wrong
+codebase, which is the thesis of #381.
+
+**The two defects stack on the same rows:** fixing the banner ordering in F1 still
+leaves the remaining Cyrillic name tokens to be deleted server-side, so the flasker
+orphans in this overlap will not resolve until #382 ships too. Measure the release
+accordingly — F1's row count is not a promise of that many recovered beers.
 
 **Had it been an extension defect,** the fix would have belonged with F1 in the
 flasker split path. It is not, so no extension work follows.
