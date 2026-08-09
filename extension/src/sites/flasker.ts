@@ -339,7 +339,10 @@ export const flasker: SiteAdapter = {
         productUrl: e.productUrl,
       });
       if (!parsed) continue;
-      if (isNonAlcoholicSoftDrinkFamily(parsed)) continue;
+      // Match the family against brewery+name together: splitBreweryName can hand the
+      // leading brand token ("Ginger") to the brewery, leaving "Beer" alone in the name,
+      // which would otherwise escape the gate (#376 follow-up).
+      if (isNonAlcoholicSoftDrinkFamily({ name: `${parsed.brewery} ${parsed.name}`, abv: parsed.abv })) continue;
       cards.push({ el: e.el, ...parsed });
     }
     return cards;

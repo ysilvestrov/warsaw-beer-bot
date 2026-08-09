@@ -92,10 +92,18 @@ describe('parseTitle', () => {
     })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Winter Cherry', abv: 8 });
   });
 
-  it('cleans a merchandising label after metadata resolution', () => {
+  it('cleans a leading merchandising banner before metadata resolution', () => {
     expect(parseTitle('ПРЕДРЕЛІЗ Galaxy Juice 6% 330ml', {
       productTags: ['mad brew'],
     })).toEqual({ brewery: 'Mad Brew', name: 'Galaxy Juice', abv: 6 });
+  });
+
+  // The name-side stripMerchandisingPrefix call is only reachable for a banner that
+  // lands mid-title (not at the very head, which the head-level strip above already
+  // handles) — here the fallback splitBreweryName hands "Foo" to the brewery, leaving
+  // the banner leading the name, where the second strip removes it.
+  it('cleans a mid-title merchandising banner on the name side (fallback split)', () => {
+    expect(parseTitle('Foo ПРЕДРЕЛІЗ Bar 4% 330ml')).toEqual({ brewery: 'Foo', name: 'Bar', abv: 4 });
   });
 
   it('keeps Lost Philosopher names under Mad Brew when tags identify the brewery', () => {
@@ -424,5 +432,23 @@ describe('flasker non-beer gates', () => {
     const names = flasker.parseCards(new DOMParser().parseFromString(html, 'text/html')).map((c) => c.name);
     expect(names).toContain('Kwas Chlebowy Jasny');
     expect(names.join(' ')).not.toContain('Ginger Beer');
+  });
+
+  // #376 follow-up: splitBreweryName hands the leading brand token ("Ginger"/"Root") to
+  // the brewery, so a name-only check would miss these — the gate must see brewery+name.
+  it('drops a title that STARTS with the family phrase, where the brand token goes to the brewery', () => {
+    const html = `<ul>
+      <li class="product"><h2 class="woocommerce-loop-product__title">Ginger Beer Old Jamaica 0% 330ml</h2></li>
+    </ul>`;
+    const cards = flasker.parseCards(new DOMParser().parseFromString(html, 'text/html'));
+    expect(cards).toEqual([]);
+  });
+
+  it('drops a 0% root beer title', () => {
+    const html = `<ul>
+      <li class="product"><h2 class="woocommerce-loop-product__title">Root Beer 0% 355ml</h2></li>
+    </ul>`;
+    const cards = flasker.parseCards(new DOMParser().parseFromString(html, 'text/html'));
+    expect(cards).toEqual([]);
   });
 });

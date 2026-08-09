@@ -228,3 +228,34 @@ describe('onemorebeer ABV bounds (#369)', () => {
     expect(onemorebeer.parseCards(doc)[0].abv).toBe(0);
   });
 });
+
+// #376 follow-up: the style arm had no adapter-level coverage — a reviewer mutation that
+// dropped the `style` argument from the isNonAlcoholicSoftDrinkFamily call left the whole
+// suite green. These pin the wired-in behaviour through parseCards, not just the predicate.
+// The title deliberately does NOT contain "ginger beer" itself, so the drop below can only
+// happen via the Styl row — a mutation that stops passing style through would keep it.
+describe('onemorebeer ginger/root beer gate (#376)', () => {
+  it('drops a 0.0% tile whose published Styl is Ginger beer', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('Old Jamaica', 'OLD JAMAICA REGULAR BUT. 0,33 L', [
+        ['Moc (%)', '0.0%'],
+        ['Styl', 'Ginger beer'],
+      ])}</div>`,
+      'text/html',
+    );
+    expect(onemorebeer.parseCards(doc)).toEqual([]);
+  });
+
+  it('keeps a tile with no Moc row (ABV absent, style irrelevant) even when Styl is Ginger beer', () => {
+    const doc = new DOMParser().parseFromString(
+      `<div class="one-catalog-view-list">${wrappedTile('Old Jamaica', 'OLD JAMAICA REGULAR BUT. 0,33 L', [
+        ['Styl', 'Ginger beer'],
+      ])}</div>`,
+      'text/html',
+    );
+    const parsed = onemorebeer.parseCards(doc);
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].abv).toBeUndefined();
+    expect(parsed[0].style).toBe('Ginger beer');
+  });
+});

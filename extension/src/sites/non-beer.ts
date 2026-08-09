@@ -52,6 +52,18 @@ export function isNonBeerName(name: string): boolean {
 // decides nothing; only family + a published 0% does. When the shop publishes no ABV we
 // KEEP the product: a stray orphan row is cheaper than silently hiding a real beer.
 //
+// Callers must match the family against the FULL brewery+name string, not the post-split
+// name alone: brewery/name splitting can hand the leading brand token ("Ginger") to the
+// brewery, leaving "Beer" alone in the name, which would otherwise escape this gate
+// (#376 follow-up).
+//
+// When the shop also publishes a style, the STYLE — not the name — decides:
+//   - style absent            → fall back to guessing from name/brewery+name, as above
+//   - style matches the family (e.g. "Ginger beer") → drop, the shop confirms the soft drink
+//   - style is anything else (e.g. "Stout")          → KEEP, the shop just told us this is
+//     a real 0.0% beer that merely happens to mention "ginger beer"/"root beer" in its name
+// A published style always outranks a name guess — never let the name override it.
+//
 // This gate is scoped to that family and must never be generalised into "0.0% is not
 // beer" — see shared/abv.ts: 0 is a legitimate value and the only thing separating
 // AleBrowar Kwas Chlebowy Bright (0.0%) from Light (0.5%).
@@ -61,6 +73,6 @@ export function isNonAlcoholicSoftDrinkFamily(
   fields: { name: string; style?: string; abv?: number },
 ): boolean {
   if (fields.abv !== 0) return false;
-  return SOFT_DRINK_FAMILY_RE.test(fields.name)
-    || (fields.style !== undefined && SOFT_DRINK_FAMILY_RE.test(fields.style));
+  if (fields.style !== undefined) return SOFT_DRINK_FAMILY_RE.test(fields.style);
+  return SOFT_DRINK_FAMILY_RE.test(fields.name);
 }

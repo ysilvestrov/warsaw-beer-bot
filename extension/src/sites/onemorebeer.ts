@@ -89,7 +89,10 @@ export const onemorebeer: SiteAdapter = {
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
       const facts = technicalFacts(el);
-      if (isNonAlcoholicSoftDrinkFamily({ name, style: facts.style, abv: facts.abv })) continue;
+      // Match the family against brewery+name together: cleanName strips the brewery
+      // prefix from the title, so a name-only check misses cases where the brand carries
+      // the family words (#376 follow-up).
+      if (isNonAlcoholicSoftDrinkFamily({ name: `${brewery} ${name}`, style: facts.style, abv: facts.abv })) continue;
       cards.push({ el, brewery, name, ...facts });
     }
     return cards;

@@ -68,6 +68,28 @@ describe('isNonAlcoholicSoftDrinkFamily', () => {
     expect(isNonAlcoholicSoftDrinkFamily({ name: 'Kwas Chlebowy Jasny', abv: 0 })).toBe(false);
     expect(isNonAlcoholicSoftDrinkFamily({ name: 'BezalkØ Pan IPAni', style: 'Pale Ale', abv: 0 })).toBe(false);
   });
+
+  // #376 follow-up: callers must pass the FULL brewery+name string, not the post-split
+  // name alone — splitBreweryName can hand the leading brand token ("Ginger") to the
+  // brewery, leaving "Beer" alone in the name, which used to escape the gate.
+  it('drops when the family spans a brewery+name join (e.g. brewery "Ginger", name "Beer")', () => {
+    expect(isNonAlcoholicSoftDrinkFamily({ name: 'Ginger Beer', abv: 0 })).toBe(true);
+  });
+
+  describe('a published style outranks the name guess (#376 follow-up)', () => {
+    it('style absent: falls back to deciding from name/brewery+name, as before', () => {
+      expect(isNonAlcoholicSoftDrinkFamily({ name: 'Classic Root Beer', abv: 0 })).toBe(true);
+      expect(isNonAlcoholicSoftDrinkFamily({ name: 'Kwas Chlebowy Jasny', abv: 0 })).toBe(false);
+    });
+
+    it('style published and matches the family: drop (shop confirms the soft drink)', () => {
+      expect(isNonAlcoholicSoftDrinkFamily({ name: 'Old Jamaica', style: 'Root beer', abv: 0 })).toBe(true);
+    });
+
+    it('style published and is anything else: KEEP even though the name says "ginger beer" — the shop contradicted the name guess', () => {
+      expect(isNonAlcoholicSoftDrinkFamily({ name: 'Ginger Beer Stout', style: 'Stout', abv: 0 })).toBe(false);
+    });
+  });
 });
 
 describe('isNonBeerName — energy drinks', () => {
