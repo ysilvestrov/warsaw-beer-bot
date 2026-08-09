@@ -94,10 +94,19 @@ then cleans a remainder that no longer contains the prefix. This is why row 3419
 leaked in August despite the regex existing.
 
 *Fix:* strip the banner from `head` **before** the split / registry lookup.
-*Rows:* 29780, 29795, 29898, 29912, 34198. Two of them (`ПРЕДРЕЛІЗ: DE ZWARTE
-REGEL: …`) should additionally start resolving through the registry once the banner
-is gone, closing two classes with one change.
+*Rows:* 29780, 29795, 29898, 29912, 34198.
 *Risk:* low, mechanism read directly in the live path.
+
+*Correction (2026-08-09, during implementation):* the claim that the two
+`ПРЕДРЕЛІЗ: DE ZWARTE REGEL: …` rows would additionally start resolving through the
+registry is **wrong**. `DE ZWARTE REGEL` is not reachable by title text at all — it
+is a Mad Brew series resolved by a `productUrl` slug rule (`flasker.ts:57-58`), and
+that rule list already contains a banner-prefixed duplicate, `предреліз-de-zwarte-regel-`.
+So on a real page those two rows already resolve to `Mad Brew`, which makes them
+probable **dead rows** for the gate to confirm, not a bonus from F1. Note what the
+duplicate slug tells us: someone papered over this ordering bug once already, on the
+URL side, instead of fixing the order. F1's real value is the rows with no slug rule,
+such as 34198 `ПРЕДРЕЛІЗ: Tomatol Wasabi`.
 
 **F5 — ambiguous soft-drink families, ABV-gated.**
 `Doze energy drink zero` and `Old Jamaica Ginger Beer Regular` pass every current
