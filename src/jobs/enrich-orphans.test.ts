@@ -49,6 +49,18 @@ function seedOrphanOnTap(
   return beerId;
 }
 
+// Relay-orphan: рядок у `beers` БЕЗ match_links — те, що мінтить /enrich/candidates.
+function seedRelayOrphan(
+  db: ReturnType<typeof fresh>,
+  brewery: string,
+  name: string,
+): number {
+  return upsertBeer(db, {
+    name, brewery, style: null, abv: null, rating_global: null,
+    normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase(),
+  });
+}
+
 describe('enrichOrphans', () => {
   test('processes orphans on current taps, returns stats', async () => {
     const db = fresh();
@@ -182,7 +194,10 @@ describe('enrichOrphans', () => {
       now: () => new Date('2026-05-26T12:00:00Z'),
     });
 
-    expect(result).toEqual({ processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0 });
+    expect(result).toEqual({
+      processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0,
+      skipped: 0, blocked: 0, on_tap_selected: 0, relay_selected: 0,
+    });
     expect(calls).toBe(0);
   });
 
@@ -320,5 +335,133 @@ describe('enrichOrphans', () => {
     });
     expect(res.processed).toBeGreaterThan(0);
     expect(JSON.parse(getJobState(db, CANARY_STATE_KEY)!).ok).toBe(true);
+  });
+});
+
+describe('enrichOrphans — relay pool budget (#368)', () => {
+  const fixedNow = new Date('2026-05-26T12:00:00Z');
+
+  function searchStub(onQuery?: (q: string) => void) {
+    return {
+      async search(q: string): Promise<SearchResult[]> {
+        if (q === CANARY_QUERY) return [GUINNESS_HIT];
+        onQuery?.(q);
+        return [];   // усе інше — not_found, нам важливий добір, а не матчинг
+      },
+    };
+  }
+
+  test('relay candidates fill the slots the on-tap pool left unused', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'Magic Road', 'Clementine');
+    seedRelayOrphan(db, 'The Bruery', 'Barrel Pie');
+    seedRelayOrphan(db, 'Finback', 'Starry Eyed');
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search: searchStub(), sleepMs: 0, limit: 20,
+      now: () => fixedNow,
+    });
+
+    expect(result.on_tap_selected).toBe(1);
+    expect(result.relay_selected).toBe(2);
+    expect(result.processed).toBe(3);
+    expect(result.not_found).toBe(3);
+  });
+
+  test('a full on-tap pool leaves no room: relay is not consulted at all', async () => {
+    const db = fresh();
+    for (let i = 0; i < 3; i++) seedOrphanOnTap(db, `Brew ${i}`, `Beer ${i}`);
+    seedRelayOrphan(db, 'The Bruery', 'Barrel Pie');
+
+    // limit=3 повністю з'їдається on-tap пулом.
+    const result = await enrichOrphans({
+      db, log: silentLog, search: searchStub(), sleepMs: 0, limit: 3,
+      now: () => fixedNow,
+    });
+
+    expect(result.on_tap_selected).toBe(3);
+    expect(result.relay_selected).toBe(0);
+    expect(result.processed).toBe(3);
+  });
+
+  test('the total budget is the shared limit, never limit per pool', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'Magic Road', 'Clementine');
+    for (let i = 0; i < 5; i++) seedRelayOrphan(db, `Brew ${i}`, `Beer ${i}`);
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search: searchStub(), sleepMs: 0, limit: 3,
+      now: () => fixedNow,
+    });
+
+    expect(result.on_tap_selected).toBe(1);
+    expect(result.relay_selected).toBe(2);
+    expect(result.processed).toBe(3);   // НЕ 1 + 3
+  });
+
+  test('on-tap candidates are processed before relay ones', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'OnTapBrewery', 'Tapped');
+    seedRelayOrphan(db, 'RelayBrewery', 'Shopped');
+    const queries: string[] = [];
+
+    await enrichOrphans({
+      db, log: silentLog, search: searchStub((q) => queries.push(q)),
+      sleepMs: 0, limit: 20, now: () => fixedNow,
+    });
+
+    const first = queries.findIndex((q) => q.includes('OnTapBrewery'));
+    const second = queries.findIndex((q) => q.includes('RelayBrewery'));
+    expect(first).toBeGreaterThanOrEqual(0);
+    expect(second).toBeGreaterThanOrEqual(0);
+    expect(first).toBeLessThan(second);
+  });
+
+  test('a relay orphan that matches is written back like any other candidate', async () => {
+    const db = fresh();
+    const relay = seedRelayOrphan(db, 'The Bruery', 'Barrel Pie');
+    const search = {
+      async search(q: string): Promise<SearchResult[]> {
+        if (q === CANARY_QUERY) return [GUINNESS_HIT];
+        return [{
+          bid: 6430654, beer_name: 'Barrel Pie', brewery_name: 'The Bruery',
+          style: null, abv: null, global_rating: null,
+        }];
+      },
+    };
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search, sleepMs: 0, limit: 20, now: () => fixedNow,
+    });
+
+    expect(result.relay_selected).toBe(1);
+    expect(result.matched).toBe(1);
+    expect(getBeer(db, relay)?.untappd_id).toBe(6430654);
+  });
+
+  test('breaker trips on the on-tap item: selected counts are pre-loop pool sizes, not processed counts', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'OnTapBrewery', 'Tapped');
+    seedRelayOrphan(db, 'RelayBrewery', 'Shopped');
+    const breaker = createCircuitBreaker({ cooldownMs: 6 * 3600_000, onTrip: () => {}, onRecover: () => {} });
+    const search = {
+      async search(q: string): Promise<SearchResult[]> {
+        if (q === CANARY_QUERY) return [GUINNESS_HIT];
+        throw new HttpError(403, 'u');
+      },
+    };
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search, breaker, sleepMs: 0, limit: 20, now: () => fixedNow,
+    });
+
+    // On-tap опрацьовується першим і саме на ньому блокується — breaker відкривається
+    // й цикл зупиняється ДО того, як relay-кандидат дійде до пошуку. selected-поля,
+    // однак, зафіксовані ДО циклу як розміри пулів, тож relay_selected лишається 1,
+    // а не 0: розбіжність із `processed` — очікувана поведінка, а не подвійний рахунок.
+    expect(result.on_tap_selected).toBe(1);
+    expect(result.relay_selected).toBe(1);
+    expect(result.processed).toBe(1);
+    expect(result.blocked).toBe(1);
   });
 });

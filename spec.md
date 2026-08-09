@@ -390,7 +390,7 @@ Untappd — `Banany Na Rauszu 2026`), людина фіксує матч вру�
 | `reviewed_at` | TEXT | nullable | час розмітки (ISO); виставляється ендпоінтом `POST /admin/enrich-failures/review` |
 | `retired_at` | TEXT | nullable (міграція 18) | термінальний стан для класифікованого провалу, чия причина вже усунена (відповідний фікс задеплоєно). Виставляється ops-тулою `retire-resolved-orphans`. Рядок **зберігає** початковий `review_class` (для аудиту); `review_note` доповнюється причиною |
 
-**Retirement (`retired_at`).** Класифіковані рядки провалів залишаються в БД назавжди (видаляються лише на `matched`), тож уже вирішені кластери (вино/спирт тепер фільтруються, brewery=name #238 тощо) продовжують виглядати «активними» й роздувати лічильник orphan'ів. `retire-resolved-orphans` (npm-скрипт, dry-run за замовчуванням, `--apply`) переводить **доказово вирішені** рядки в `retired_at`. Вибір — лише верифікований, ніколи за віком чи класом: **авто-шлях** бере класифікованих orphan'ів, яких поточний `isOntapNonBeerTap` тепер відкидає (доказ вирішення); **escape-hatch `--ids <csv> --reason "<text>"`** — явно задані оператором `beer_id` (для фіксів, яких предикат не ловить — напр. `VINO KARPATIA` italian-`vino`, або parse-split кластери після шипу фіксу). Retired-рядки виключені з enrich-пулу (`listLookupCandidates`, поряд із `wontfix`) та з лічильника `orphansPending` у щоденному дайджесті.
+**Retirement (`retired_at`).** Класифіковані рядки провалів залишаються в БД назавжди (видаляються лише на `matched`), тож уже вирішені кластери (вино/спирт тепер фільтруються, brewery=name #238 тощо) продовжують виглядати «активними» й роздувати лічильник orphan'ів. `retire-resolved-orphans` (npm-скрипт, dry-run за замовчуванням, `--apply`) переводить **доказово вирішені** рядки в `retired_at`. Вибір — лише верифікований, ніколи за віком чи класом: **авто-шлях** бере класифікованих orphan'ів, яких поточний `isOntapNonBeerTap` тепер відкидає (доказ вирішення); **escape-hatch `--ids <csv> --reason "<text>"`** — явно задані оператором `beer_id` (для фіксів, яких предикат не ловить — напр. `VINO KARPATIA` italian-`vino`, або parse-split кластери після шипу фіксу). Retired-рядки виключені з обох enrich-пулів (`listLookupCandidates` і `listRelayLookupCandidates`, поряд із `wontfix`) та з лічильника `orphansPending` у щоденному дайджесті.
 
 **Хто що пише:** `applyLookupOutcome` (спільний для серверного крона і client-relay)
 upsert'ить рядок на `not_found`/`blocked` і **видаляє** його на `matched`. Один рядок на
@@ -1061,10 +1061,10 @@ Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збережено�
 |-------|---------|-------------|
 | `refreshOntap` | `0 */12 * * *` | обхід ontap.pl → tap-exclusion gate → snapshots → match |
 | `refreshAllUntappd` | `0 3 * * *` | скрейп профілів → checkins/untappd_had (лише якщо є cookie) |
-| `enrichOrphans` | `30 */3 * * *` | lookup orphan-beers у Untappd (LIMIT 20/запуск) |
+| `enrichOrphans` | `30 */3 * * *` | lookup orphan-beers у Untappd (LIMIT 20/запуск, сумарно на on-tap + relay пули, див. «Два пули кандидатів, один бюджет (#368)» нижче) |
 | `refreshTapRatings` | `30 1,4,7,10,13,16,19,22 * * *` | дотягування рейтингів кранів (offset 1 год від enrich) |
 | `cleanupOldSnapshots` | `0 5 * * *` | видалення `tap_snapshots` старших за `SNAPSHOT_RETENTION_DAYS` (default 14); latest-per-pub завжди зберігається |
-| `dailyStatus` | `*/15 * * * *` | health-дайджест адміну. UTC-тік; джоба сама шле раз на варшавську добу у вікні `[09:00, 12:00)` Europe/Warsaw, ідемпотентно за `job_state.daily_status_last_sent` (лише якщо є `ADMIN_TELEGRAM_ID`). Раніше `0 9 * * * {tz}` — timezone-тік node-cron виявився ненадійним. Дайджест включає секцію **Enrich**: `enrichMatched24h` зматчених orphan'ів, `enrichFailures24h` провалів, індикатор здоров'я Untappd-пошуку (`untappdSearchHealthy` = останній canary ok І breaker не відкритий). Рядок «Розширення /match (вчора)»: усього запитів, з них анонімних, і сума пив за **останню повну варшавську добу** (з таблиці `api_usage`, §3.15). Нулі показуються, якщо трафіку не було |
+| `dailyStatus` | `*/15 * * * *` | health-дайджест адміну. UTC-тік; джоба сама шле раз на варшавську добу у вікні `[09:00, 12:00)` Europe/Warsaw, ідемпотентно за `job_state.daily_status_last_sent` (лише якщо є `ADMIN_TELEGRAM_ID`). Раніше `0 9 * * * {tz}` — timezone-тік node-cron виявився ненадійним. Дайджест включає секцію **Enrich**: `enrichMatched24h` зматчених orphan'ів, `enrichFailures24h` провалів, індикатор здоров'я Untappd-пошуку (`untappdSearchHealthy` = останній canary ok І breaker не відкритий). Рядок «Каталог» також несе `orphansOffCron` («N поза cron») — orphan'и без рядка в `match_links`, за винятком `wontfix`/`retired`, тобто розмір черги relay-дренажу (#368). Рядок «Розширення /match (вчора)»: усього запитів, з них анонімних, і сума пив за **останню повну варшавську добу** (з таблиці `api_usage`, §3.15). Нулі показуються, якщо трафіку не було |
 
 **Startup-джоби** (`src/index.ts`, до launch): `dedupeBreweryAliases`
 (злиття дублів каталогу), `cleanupPollutedOntap` (чистка «брудних» назв) і
@@ -1073,6 +1073,27 @@ Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збережено�
 Додатково після `bot.launch()` один раз викликається `dailyStatus` (catch-up:
 якщо бот був недоступний о 09:00, але піднявся в межах ранкового вікна — дайджест
 виходить одразу; ідемпотентний за `job_state`).
+
+**Два пули кандидатів, один бюджет (#368).** `enrichOrphans` добирає кандидатів із двох
+диз'юнктних пулів. **On-tap пул** (`listLookupCandidates`) — orphan'и, чий `beer_id` є на
+останньому снапшоті хоча б одного паба (`match_links → taps → tap_snapshots`). **Relay-пул**
+(`listRelayLookupCandidates`) — orphan'и, у яких рядка в `match_links` немає взагалі: їх
+намінтив `/enrich/candidates` (`ensureBeerRow` біжить по кожній картці сторінки крамниці),
+а лінки пише лише on-tap ingest, тож on-tap join виключав їх **структурно**, а не через
+схід із кранів (на 2026-08-08 це 846 із 1427 orphan'ів, 532 з них не шукані жодного разу).
+Предикати взаємовиключні (`NOT EXISTS(ml)` ⇒ `¬EXISTS(ml→taps→latest)`), тож пули не
+перетинаються і дедупу не потребують — але вони не покривають усіх orphan'ів: orphan із
+рядком у `match_links`, чий кран зійшов з останнього снапшоту, не потрапляє в жоден пул
+(387 рядків станом на 2026-08-08) і лишається cron-недосяжним, поки не повернеться на
+кран. Це навмисне виключення — on-tap gate свідомо ігнорує пиво, яке зараз ніхто не
+наливає, — а не дефект; `orphansOffCron` міряє саме чергу relay-дренажу, а не сумарну
+cron-недосяжність. `LIMIT 20` — **сумарний** бюджет запуску: on-tap вичерпується першим і не може
+бути витіснений, relay добирає лише невикористані слоти (до зміни простоювало ~89%
+місткості: 17 lookup/добу зі 160). Обидва пули однаково виключають
+`review_class = 'wontfix'` і `retired_at IS NOT NULL` і однаково фільтруються backoff'ом.
+Спільна трьохклаузна умова живе в експортованій константі
+`orphanWithoutMatchLinkPredicate` (`src/storage/beers.ts`) і переюзається лічильником
+`orphansOffCron` у дайджесті — щоб пул і лічильник не розійшлись.
 
 **Багатомісто (#146).** `refreshOntap` проходить по курованому списку міст
 (`src/domain/cities.ts`, `CITIES`) — для кожного `GET https://ontap.pl/<slug>`,
@@ -1241,11 +1262,14 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   (~1 req/2s до ontap; Nominatim ~1 rps).
 - **User-Agent з контактом** (`NOMINATIM_USER_AGENT`).
 - Untappd-enrich батчиться (LIMIT 20/запуск) з offset'ами cron, щоб два джоби
-  не били Untappd одночасно; lookup має експоненційний backoff
+  не били Untappd одночасно; LIMIT 20 — бюджет на запуск, спільний для on-tap і
+  relay пулів кандидатів (#368), тож стеля навантаження на Untappd лишається
+  незмінною — 160/добу; lookup має експоненційний backoff
   (`domain/lookup-backoff.ts`, `BACKOFF_HOURS = [0, 72, 168, 728]`): 4 спроби,
   після чого orphan **термінально dormant** (`isEligible` → false назавжди,
   поки `untappd_lookup_count` не скинуто). Орфани з `enrich_failures.review_class
-  = 'wontfix'` повністю виключені з пулу кандидатів (`listLookupCandidates`).
+  = 'wontfix'` повністю виключені з обох пулів кандидатів (`listLookupCandidates` і
+  `listRelayLookupCandidates`).
 - Після matcher-виправлення оператор запускає
   `npm run rearm-matcher-bug-orphans` (dry-run), перевіряє список і повторює з
   `npm run rearm-matcher-bug-orphans -- --apply`. Команда скидає backoff лише для
@@ -1259,6 +1283,14 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   `untappd_id IS NULL`) — для zero-candidate класів (напр. #326 query-noise), яких
   дефолтний фільтр `candidates_count > 0` не ловить; неіснуючі чи вже зматчені id
   пропускаються з попередженням.
+  **Історична пастка (#368, виправлено).** `selectRearmTargets` не вимагає рядка в
+  `match_links`, тож до появи relay-пулу ре-арм для cron-недосяжних рядків був no-op:
+  `untappd_lookup_count` чесно скидався, але крон їх однаково не бачив (45 із 93
+  ре-армлених `matcher_bug`-рядків станом на 2026-08-08). Відтворення цифри: `applyRearm`
+  виставляє `untappd_lookup_count = 0`, тож **уже ре-армлені** рядки — це
+  `untappd_lookup_count = 0 AND review_class = 'matcher_bug' AND candidates_count > 0`
+  (дзеркало фільтра `selectRearmTargets`, який бере ще-не-ре-армлені, тобто `> 0`).
+  Тепер relay-пул їх підбирає.
 - **Ops-тули: конвенція аргументів.** Список `beer_id` передається через
   `--ids <csv>` (кома-розділений, пробіл після прапорця), запис вмикається
   `--apply` (dry-run за замовчуванням) — однаково для `rearm-matcher-bug-orphans`

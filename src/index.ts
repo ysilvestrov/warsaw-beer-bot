@@ -229,8 +229,14 @@ async function main(): Promise<void> {
     }),
     // enrich-orphans runs every 3h at xx:30 (offset to avoid the busy
     // on-the-hour slot used by refreshOntap and refreshAllUntappd).
-    // 8 runs/day × LIMIT 20 = 160 lookups/day; 287-orphan backlog drains
-    // in ~1.8 days. Burst signature unchanged (20 calls × 500ms = ~10s).
+    // 8 runs/day × LIMIT 20 = 160 lookups/day. LIMIT 20 is now a SHARED budget
+    // across the on-tap and relay candidate pools (#368; see spec.md § "Два
+    // пули кандидатів, один бюджет") — on-tap drains first, relay only fills
+    // otherwise-idle slots. Catalog holds 1427 orphans as of 2026-08-08; the
+    // old "287-orphan backlog / ~1.8 days" estimate below was for on-tap alone
+    // and is stale now that relay adds a much larger, heterogeneous queue —
+    // see the spec section for the current breakdown and drain checkpoint.
+    // Burst signature unchanged (20 calls × 500ms = ~10s).
     // Bumped from '0 6,18 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
     cron.schedule('30 */3 * * *', () => {
       enrichOrphans({

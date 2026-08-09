@@ -226,7 +226,7 @@ import { upsertPub } from './pubs';
 import { createSnapshot, insertTaps } from './snapshots';
 import { upsertMatch } from './match_links';
 import { recordEnrichFailure, setEnrichFailureReview } from './enrich_failures';
-import { listLookupCandidates } from './beers';
+import { listLookupCandidates, listRelayLookupCandidates } from './beers';
 
 describe('listLookupCandidates', () => {
   function seedBeerOnTap(
@@ -371,6 +371,203 @@ describe('listLookupCandidates', () => {
     expect(c.name).toBe('Clementine & Passionfruit');
     expect(c.untappd_lookup_at).toBeNull();
     expect(c.untappd_lookup_count).toBe(0);
+  });
+});
+
+describe('listRelayLookupCandidates', () => {
+  // Relay-orphan: рядок у `beers` БЕЗ жодного рядка в `match_links`. Саме такі
+  // мінтить `/enrich/candidates` через ensureBeerRow для кожної картки крамниці.
+  function seedRelayOrphan(
+    db: ReturnType<typeof fresh>,
+    opts: { brewery: string; name: string; untappdId?: number | null;
+            lookupAt?: string | null; lookupCount?: number },
+  ): number {
+    const beerId = upsertBeer(db, {
+      untappd_id: opts.untappdId ?? null,
+      name: opts.name, brewery: opts.brewery,
+      style: null, abv: null, rating_global: null,
+      normalized_name: opts.name.toLowerCase(),
+      normalized_brewery: opts.brewery.toLowerCase(),
+    });
+    if (opts.lookupAt !== undefined || opts.lookupCount !== undefined) {
+      db.prepare(
+        'UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = ? WHERE id = ?',
+      ).run(opts.lookupAt ?? null, opts.lookupCount ?? 0, beerId);
+    }
+    return beerId;
+  }
+
+  // Той самий on-tap сид, що й у listLookupCandidates: beers + pub + snapshot +
+  // match_links + taps. Потрібен, щоб довести диз'юнктність пулів.
+  function seedBeerOnTapLocal(
+    db: ReturnType<typeof fresh>,
+    opts: { brewery: string; name: string },
+  ): number {
+    const beerId = upsertBeer(db, {
+      untappd_id: null,
+      name: opts.name, brewery: opts.brewery,
+      style: null, abv: null, rating_global: null,
+      normalized_name: opts.name.toLowerCase(),
+      normalized_brewery: opts.brewery.toLowerCase(),
+    });
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+    const ref = `${opts.brewery} ${opts.name}`;
+    upsertMatch(db, ref, beerId, 1.0);
+    insertTaps(db, snapId, [{
+      tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    return beerId;
+  }
+
+  const NOW = new Date('2026-05-26T12:00:00Z');
+
+  test('returns an orphan that has no match_links row at all', () => {
+    const db = fresh();
+    const id = seedRelayOrphan(db, { brewery: 'The Bruery', name: 'All the Creamy Cows' });
+    const out = listRelayLookupCandidates(db, 10, NOW);
+    expect(out.map((c) => c.id)).toEqual([id]);
+  });
+
+  test('the two pools are disjoint: an on-tap linked orphan is NOT in the relay pool', () => {
+    const db = fresh();
+    const onTap = seedBeerOnTapLocal(db, { brewery: 'Magic Road', name: 'Clementine' });
+    const relay = seedRelayOrphan(db, { brewery: 'The Bruery', name: 'Toasted Delight' });
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([relay]);
+    expect(listLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([onTap]);
+  });
+
+  test('omits beers already matched (untappd_id set)', () => {
+    const db = fresh();
+    seedRelayOrphan(db, { brewery: 'Pinta', name: 'Atak', untappdId: 12345 });
+    expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
+  });
+
+  test('excludes orphans triaged as wontfix', () => {
+    const db = fresh();
+    const wontfix = seedRelayOrphan(db, { brewery: 'Stoelzle', name: 'Kelih Fino 545' });
+    const live = seedRelayOrphan(db, { brewery: 'The Bruery', name: 'Barrel Pie' });
+    recordEnrichFailure(db, {
+      beer_id: wontfix, brewery: 'Stoelzle', name: 'Kelih Fino 545',
+      search_url: '', source_url: 'https://winetime.com.ua/x', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-05-26T11:30:00Z');
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([live]);
+  });
+
+  test('excludes retired orphans (retired_at set)', () => {
+    const db = fresh();
+    const retired = seedRelayOrphan(db, { brewery: 'VINO KARPATIA', name: 'Bialy bez' });
+    const live = seedRelayOrphan(db, { brewery: 'The Bruery', name: 'Barrel Pie' });
+    recordEnrichFailure(db, {
+      beer_id: retired, brewery: 'VINO KARPATIA', name: 'Bialy bez',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, retired, 'parser_bug', 'wine', '2026-05-26T11:30:00Z');
+    db.prepare('UPDATE enrich_failures SET retired_at = ? WHERE beer_id = ?')
+      .run('2026-05-26T11:45:00Z', retired);
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([live]);
+  });
+
+  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug re-armed by rearm-*)', () => {
+    const db = fresh();
+    const matcherBug = seedRelayOrphan(db, { brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny' });
+    recordEnrichFailure(db, {
+      beer_id: matcherBug, brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny',
+      search_url: '', source_url: 'https://onemorebeer.pl/x', outcome: 'not_found',
+      candidates_count: 1, candidates_summary: 'x — y', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, matcherBug, 'matcher_bug', null, '2026-05-26T11:30:00Z');
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([matcherBug]);
+  });
+
+  test('respects backoff: not eligible when lookup_at + delay > now', () => {
+    const db = fresh();
+    seedRelayOrphan(db, {
+      brewery: 'The Bruery', name: 'Barrel Pie',
+      lookupAt: '2026-05-26T11:00:00Z', lookupCount: 1,
+    });
+    expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
+  });
+
+  test('backoff-eligible orphan IS returned', () => {
+    const db = fresh();
+    // count=1 → затримка 72 год; 73 год тому вже прострочено.
+    const id = seedRelayOrphan(db, {
+      brewery: 'The Bruery', name: 'Barrel Pie',
+      lookupAt: '2026-05-23T11:00:00Z', lookupCount: 1,
+    });
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([id]);
+  });
+
+  test('orders never-searched (count=0) ahead of already-searched (count=1)', () => {
+    const db = fresh();
+    const searched = seedRelayOrphan(db, {
+      brewery: 'Transient', name: 'Junie',
+      lookupAt: '2026-05-23T11:00:00Z', lookupCount: 1,
+    });
+    const never = seedRelayOrphan(db, { brewery: 'Finback', name: 'Starry Eyed' });
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([never, searched]);
+  });
+
+  test('applies the limit', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) {
+      seedRelayOrphan(db, { brewery: `Brew ${i}`, name: `Beer ${i}` });
+    }
+    expect(listRelayLookupCandidates(db, 2, NOW).length).toBe(2);
+  });
+
+  test('returned shape carries raw brewery and name plus backoff fields', () => {
+    const db = fresh();
+    seedRelayOrphan(db, { brewery: 'Magic Road', name: 'Clementine & Passionfruit' });
+    const [c] = listRelayLookupCandidates(db, 10, NOW);
+    expect(c.brewery).toBe('Magic Road');
+    expect(c.name).toBe('Clementine & Passionfruit');
+    expect(c.untappd_lookup_at).toBeNull();
+    expect(c.untappd_lookup_count).toBe(0);
+  });
+
+  test('an orphan with a link that fell off the latest snapshot is in NEITHER pool (the on-tap gate, #368)', () => {
+    const db = fresh();
+    const beerId = seedBeerOnTapLocal(db, { brewery: 'Magic Road', name: 'Clementine' });
+
+    // Sanity: the beer really has a match_links row. Otherwise it would
+    // trivially land in the relay pool (NOT EXISTS match_links) and this
+    // test would pass for the wrong reason.
+    const linked = db
+      .prepare('SELECT 1 FROM match_links WHERE untappd_beer_id = ?')
+      .get(beerId);
+    expect(linked).toBeTruthy();
+
+    // Pub's tap list changes: a NEWER snapshot for the same pub that does
+    // NOT include this beer's tap — exactly what happens in production
+    // when a pub rotates its taps. seedBeerOnTapLocal's own snapshot
+    // (2026-05-26T12:00:00Z) is now no longer the latest for this pub, so
+    // the beer's match_links row no longer joins to a current tap.
+    const pubId = upsertPub(db, {
+      slug: `pub-${beerId}`, name: `Pub ${beerId}`,
+      address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const newerSnapId = createSnapshot(db, pubId, '2026-05-27T12:00:00Z');
+    insertTaps(db, newerSnapId, [{
+      tap_number: 1, beer_ref: 'Someone Else Entirely', brewery_ref: 'Someone Else',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    expect(listLookupCandidates(db, 10, NOW)).toEqual([]);
+    expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
   });
 });
 

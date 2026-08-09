@@ -6,6 +6,8 @@ import { createSnapshot, insertTaps } from './snapshots';
 import { collectStatus } from './stats';
 import { setJobState } from './job_state';
 import { recordMatchUsage } from './api_usage';
+import { upsertMatch } from './match_links';
+import { recordEnrichFailure, setEnrichFailureReview } from './enrich_failures';
 import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
 
 function fresh() {
@@ -48,6 +50,7 @@ test('collectStatus computes all metrics', () => {
     beersTotal: 3,
     beersMatched: 2,
     orphansPending: 1,
+    orphansOffCron: 1,   // orphan 'C' із seed() не має рядка в match_links
     ratingsMissing: 1,
     snapshots: 3,
     taps: 4,
@@ -122,4 +125,33 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   expect(m.extMatchRequests).toBe(2);
   expect(m.extMatchAnon).toBe(1);
   expect(m.extMatchBeers).toBe(5);
+});
+
+it('orphansOffCron counts orphans with no match_links row, minus wontfix/retired', () => {
+  const db = fresh();
+  // 1) relay-orphan без лінка → рахується
+  upsertBeer(db, {
+    name: 'Barrel Pie', brewery: 'The Bruery', style: null, abv: null, rating_global: null,
+    normalized_name: 'barrel pie', normalized_brewery: 'the bruery',
+  });
+  // 2) relay-orphan, протриажений як wontfix → НЕ рахується
+  const wontfix = upsertBeer(db, {
+    name: 'Kelih Fino 545', brewery: 'Stoelzle', style: null, abv: null, rating_global: null,
+    normalized_name: 'kelih fino 545', normalized_brewery: 'stoelzle',
+  });
+  recordEnrichFailure(db, {
+    beer_id: wontfix, brewery: 'Stoelzle', name: 'Kelih Fino 545',
+    search_url: '', source_url: '', outcome: 'not_found',
+    candidates_count: 0, candidates_summary: '', at: '2026-06-04T11:00:00Z',
+  });
+  setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-06-04T11:30:00Z');
+  // 3) orphan із лінком (on-tap шлях) → НЕ рахується, крон його й так бачить
+  const linked = upsertBeer(db, {
+    name: 'Clementine', brewery: 'Magic Road', style: null, abv: null, rating_global: null,
+    normalized_name: 'clementine', normalized_brewery: 'magic road',
+  });
+  upsertMatch(db, 'Magic Road Clementine', linked, 1.0);
+
+  const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
+  expect(m.orphansOffCron).toBe(1);
 });

@@ -1,7 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
-import { listLookupCandidates } from '../storage/beers';
+import { listLookupCandidates, listRelayLookupCandidates } from '../storage/beers';
 import { enrichOneOrphan } from './untappd-enrich';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
 import { setJobState } from '../storage/job_state';
@@ -17,6 +17,12 @@ export interface EnrichOrphansResult {
   transient: number;
   skipped: number;
   blocked: number;
+  // #368: скільки кандидатів узято з кожного пулу. Без цього розкладу неможливо
+  // побачити, чи дренаж узагалі біжить, — `processed` їх змішує. Це розміри
+  // пулів ДО циклу — коли breaker обривається на середині прогону, вони можуть
+  // перевищувати `processed`, і це очікувано, а не подвійний рахунок.
+  on_tap_selected: number;
+  relay_selected: number;
 }
 
 export interface EnrichOrphansDeps {
@@ -37,6 +43,7 @@ export interface EnrichOrphansDeps {
 
 const ZERO_RESULT: EnrichOrphansResult = {
   processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0,
+  on_tap_selected: 0, relay_selected: 0,
 };
 
 export async function enrichOrphans(
@@ -77,8 +84,20 @@ export async function enrichOrphans(
     return { ...ZERO_RESULT, blocked: 1 };
   }
 
-  const candidates = listLookupCandidates(deps.db, limit, now());
-  const result: EnrichOrphansResult = { ...ZERO_RESULT };
+  // #368: `limit` — СУМАРНИЙ бюджет запуску, не бюджет пулу. On-tap вичерпується
+  // першим, тож витіснити його неможливо за побудовою; relay добирає лише те, що
+  // лишилося невикористаним (а простоює ~89% місткості). Стеля навантаження на
+  // Untappd лишається незмінною.
+  const onTap = listLookupCandidates(deps.db, limit, now());
+  const relay = onTap.length < limit
+    ? listRelayLookupCandidates(deps.db, limit - onTap.length, now())
+    : [];
+  const candidates = [...onTap, ...relay];
+  const result: EnrichOrphansResult = {
+    ...ZERO_RESULT,
+    on_tap_selected: onTap.length,
+    relay_selected: relay.length,
+  };
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];

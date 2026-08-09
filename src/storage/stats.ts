@@ -2,6 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
+import { orphanWithoutMatchLinkPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
@@ -10,6 +11,10 @@ export interface StatusMetrics {
   beersTotal: number;
   beersMatched: number;
   orphansPending: number;
+  // #368: orphan'и, яких enrich-крон не бачив би без relay-пулу (немає рядка в
+  // `match_links`), за винятком wontfix/retired. Той самий предикат, що і в
+  // listRelayLookupCandidates, мінус backoff — тобто розмір черги дренажу.
+  orphansOffCron: number;
   ratingsMissing: number;
   snapshots: number;
   taps: number;
@@ -68,6 +73,9 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
             SELECT 1 FROM enrich_failures ef
             WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
           )`,
+    ),
+    orphansOffCron: count(
+      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanWithoutMatchLinkPredicate}`,
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),
