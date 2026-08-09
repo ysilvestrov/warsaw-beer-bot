@@ -18,10 +18,12 @@ const NON_BEER_NAME_RE = new RegExp(
     'surprise box',
     'signature box',
     'craftbeer box',
-    // Bounded on BOTH sides: the right \b keeps "Energy Drinkability IPA" a beer, the
-    // left one keeps "Bioenergy Drink IPA" one too. `s?` keeps the plural, which is the
-    // commoner shelf spelling and would be lost to a bare trailing boundary.
-    '\\benergy drinks?\\b',
+    // Bounded on both sides by Unicode letter/digit lookarounds, not \b: JS \b is
+    // ASCII-only, so it would still fire inside a mixed-script glue like "Біоenergy
+    // Drink" — and glued mixed script is normal in this catalogue (cf. "NEІРА").
+    // Same idiom as beerfreak's bundle regex. `s?` keeps the plural, the commoner
+    // shelf spelling, which a bare trailing boundary would have dropped.
+    '(?<![\\p{L}\\p{N}])energy drinks?(?![\\p{L}\\p{N}])',
     'gift set',
     'gift box',
     'gift pack',

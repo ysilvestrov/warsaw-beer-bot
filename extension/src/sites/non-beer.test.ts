@@ -116,6 +116,15 @@ describe('review follow-ups (#383)', () => {
     expect(isNonBeerName('Bioenergy Drink IPA')).toBe(false);
   });
 
+  it('keeps it glued across scripts too — JS \\b is ASCII-only', () => {
+    expect(isNonBeerName('Біоenergy Drink IPA')).toBe(false);
+    expect(isNonBeerName('Енергyenergy Drinks IPA')).toBe(false);
+  });
+
+  it('still drops the phrase after Cyrillic punctuation/space', () => {
+    expect(isNonBeerName('Доза energy drink zero')).toBe(true);
+  });
+
   it('still drops the plural form', () => {
     expect(isNonBeerName('Doze Energy Drinks 250ml')).toBe(true);
     expect(isNonBeerName('Doze energy drink zero')).toBe(true);
