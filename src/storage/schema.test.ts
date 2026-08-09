@@ -286,4 +286,44 @@ describe('schema migrations', () => {
     const cols = (db.prepare('PRAGMA table_info(match_links)').all() as { name: string }[]).map((c) => c.name);
     expect(cols).toContain('merged_at');
   });
+
+  describe('migration v22 — untappd_id_source', () => {
+    it('adds the column, enforces the CHECK, and backfills exactly the pinned rows', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+
+      // Two beers: one pinned via match_links, one not.
+      db.prepare(
+        `INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+         VALUES (1, 111, 'Pinned', 'B', 'pinned', 'b'), (2, 222, 'Plain', 'B', 'plain', 'b')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user)
+         VALUES ('ref-1', 1, 1.0, 1), ('ref-2', 2, 0.9, 0)`,
+      ).run();
+
+      // Re-run the backfill statement the migration ships, to prove it selects the pin set.
+      db.prepare(
+        `UPDATE beers SET untappd_id_source = 'curated'
+          WHERE id IN (SELECT untappd_beer_id FROM match_links WHERE reviewed_by_user = 1)`,
+      ).run();
+
+      const rows = db.prepare('SELECT id, untappd_id_source FROM beers ORDER BY id').all();
+      expect(rows).toEqual([
+        { id: 1, untappd_id_source: 'curated' },
+        { id: 2, untappd_id_source: null },
+      ]);
+
+      expect(() =>
+        db.prepare('UPDATE beers SET untappd_id_source = ? WHERE id = 2').run('bogus'),
+      ).toThrow(/CHECK constraint failed/);
+    });
+
+    it('reaches version 22', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+      expect(v.v).toBe(22);
+    });
+  });
 });
