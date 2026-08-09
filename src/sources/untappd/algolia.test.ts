@@ -123,3 +123,48 @@ describe('createAlgoliaSearch (403 handling)', () => {
     await expect(s.search('x')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
   });
 });
+
+describe('hydrateByBid (#384)', () => {
+  it('sends one batched objectID request and maps results positionally', async () => {
+    let captured: { url: string; body: unknown } | null = null;
+    const fetchImpl = (async (url: string, init: RequestInit) => {
+      captured = { url, body: JSON.parse(init.body as string) };
+      return new Response(JSON.stringify({
+        results: [
+          { bid: 6648348, beer_name: 'Tomatøl:BULDAK BULGOGI', brewery_name: 'Mad Brew',
+            brewery_alias: ['madbrew'], beer_slug: 'mad-brew-tomatol-buldak-bulgogi',
+            type_name: 'Gose', beer_abv: 4.2, rating_score: 4.06 },
+          null,
+        ],
+      }), { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const search = createAlgoliaSearch({ appId: 'APP', searchKey: 'KEY', fetchImpl, minGapMs: 0 });
+    const out = await search.hydrateByBid([6648348, 999999999]);
+
+    expect(captured!.url).toContain('/1/indexes/*/objects');
+    expect(captured!.body).toEqual({
+      requests: [
+        { indexName: 'beer', objectID: '6648348' },
+        { indexName: 'beer', objectID: '999999999' },
+      ],
+    });
+    expect(out.get(6648348)).toEqual({
+      bid: 6648348,
+      beer_name: 'Tomatøl:BULDAK BULGOGI',
+      brewery_name: 'Mad Brew',
+      brewery_alias: ['madbrew'],
+      beer_slug: 'mad-brew-tomatol-buldak-bulgogi',
+      style: 'Gose',
+      abv: 4.2,
+      global_rating: 4.06,
+    });
+    expect(out.has(999999999)).toBe(false);
+  });
+
+  it('returns an empty map for an empty input without calling the network', async () => {
+    const fetchImpl = (async () => { throw new Error('must not be called'); }) as unknown as typeof fetch;
+    const search = createAlgoliaSearch({ appId: 'APP', searchKey: 'KEY', fetchImpl, minGapMs: 0 });
+    expect((await search.hydrateByBid([])).size).toBe(0);
+  });
+});

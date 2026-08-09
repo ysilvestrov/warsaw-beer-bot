@@ -11,12 +11,19 @@ export interface SearchResult {
   global_rating: number | null;
 }
 
+export interface HydratedBeer extends SearchResult {
+  beer_slug: string | null;
+  brewery_alias: string[];
+}
+
 // Decouples the matching pipeline (lookupBeer) from the search transport.
 // Implementations: createAlgoliaSearch (server), htmlSearch (relay adapter).
 // Throws HttpError on a hard block (after exhausting retries); throws other
 // errors for transient failures; resolves [] for a genuine no-result query.
 export interface BeerSearch {
   search(query: string): Promise<SearchResult[]>;
+  /** #384: fetch full records by bid (objectID === bid). Missing bids are absent from the map. */
+  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer>>;
 }
 
 const MAX_ITEMS = 5;
