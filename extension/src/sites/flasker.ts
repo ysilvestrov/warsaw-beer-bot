@@ -51,11 +51,13 @@ const BREWERY_RULES: BreweryRule[] = [
     canonical: 'Mad Brew',
     tags: ['mad brew'],
     slugPrefixes: ['mad-brew-', 'mad-'],
+    // Product families the shop lists under the series name alone, with no trace of
+    // the brewery in the title — the slug is the only brewery signal on the grid.
     familySlugPrefixes: [
       'lost-philosopher-',
       'the-lost-philosopher-',
       'de-zwarte-regel-',
-      'предреліз-de-zwarte-regel-',
+      'tomatol-',            // Tomatøl series (#385) — the hyphen keeps Tomatoland out
     ],
     titleAliases: ['Mad Brew'],
   },
@@ -83,6 +85,10 @@ function normalizeTag(tag: string): string {
   return tag.replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+// Slug-side twin of MERCH_PREFIX_RE (below). Slugs are lowercase and hyphen-joined,
+// so the banner arrives as `предреліз-…` rather than `ПРЕДРЕЛІЗ: …`.
+const SLUG_MERCH_PREFIX_RE = /^(?:предреліз|предредіз|пробник)-/u;
+
 function productSlug(productUrl: string | undefined): string | null {
   if (!productUrl) return null;
   try {
@@ -91,7 +97,11 @@ function productSlug(productUrl: string | undefined): string | null {
     if (hostname !== 'flasker.com.ua' && !hostname.endsWith('.flasker.com.ua')) return null;
     const match = url.pathname.match(/\/product\/([^/]+)\/?$/u);
     if (!match) return null;
-    return decodeURIComponent(match[1]).toLowerCase();
+    const slug = decodeURIComponent(match[1]).toLowerCase();
+    // Pre-release/sample listings carry the same banner in the slug as in the title
+    // (`предреліз-tomatol-wasabi-…`), which would hide the brewery prefix behind it
+    // (#385). Mirrors MERCH_PREFIX_RE on the title side.
+    return slug.replace(SLUG_MERCH_PREFIX_RE, '');
   } catch {
     return null;
   }
@@ -175,6 +185,7 @@ export function breweryFromRegistryHead(
   return best;
 }
 
+// Title-side twin of SLUG_MERCH_PREFIX_RE (above) — keep the two vocabularies in step.
 const MERCH_PREFIX_RE = /^(?:(?:ПРЕДРЕЛІЗ|ПРЕДРЕДІЗ)(?=$|[\s:–—-])|ПРОБНИК:)[\s:–—-]*/iu;
 
 export function stripMerchandisingPrefix(name: string): string {
