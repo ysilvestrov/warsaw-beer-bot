@@ -135,6 +135,41 @@ describe('parseTitle', () => {
     })).toEqual({ brewery: 'Mad Brew', name: 'DE ZWARTE REGEL: Tweede Kring', abv: 6.5 });
   });
 
+  // #385: Tomatøl is a Mad Brew series, and the title carries only the series
+  // name — the fallback split would emit "Tomatol" as the brewery.
+  it('resolves the Tomatol series to Mad Brew from the product slug', () => {
+    expect(parseTitle('Tomatol Wasabi 3.8% 330мл', {
+      productUrl: 'https://flasker.com.ua/product/tomatol-wasabi-3-8-330%d0%bc%d0%bb/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Wasabi', abv: 3.8 });
+    expect(parseTitle('Tomatol Bulgogi 3.8% 330мл', {
+      productUrl: 'https://flasker.com.ua/product/tomatol-bulgogi-3-8-330мл/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8 });
+  });
+
+  // Prefix-boundary guard: `tomatol-` must not spill onto a longer stem. Named after
+  // Tomatoland only because it is the collision the Untappd searches surface — the
+  // shop does not stock it; the assertion is about the prefix shape, not the listing.
+  it('does not let the tomatol- family prefix swallow a longer stem', () => {
+    expect(parseTitle('Tomatoland Mountain Herbs 5% 330ml', {
+      productUrl: 'https://flasker.com.ua/product/tomatoland-mountain-herbs-5-330ml/',
+    })).toEqual({ brewery: 'Tomatoland', name: 'Mountain Herbs', abv: 5 });
+  });
+
+  // #385/#376: pre-release listings prefix the slug with `предреліз-`, which hid the
+  // family prefix from the resolver (34198 "ПРЕДРЕЛІЗ: Tomatol Wasabi"). The banner
+  // is stripped from the slug the same way it is stripped from the title.
+  it('sees through the ПРЕДРЕЛІЗ slug banner to the family prefix', () => {
+    expect(parseTitle('ПРЕДРЕЛІЗ: Tomatol Wasabi 3.8% 330мл', {
+      productUrl: 'https://flasker.com.ua/product/предреліз-tomatol-wasabi-3-8-330мл/',
+    })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Wasabi', abv: 3.8 });
+  });
+
+  it('sees through the ПРЕДРЕЛІЗ slug banner to a plain brewery prefix', () => {
+    expect(parseTitle('Hoppy Hog Charred Memory IS 10% 330ml', {
+      productUrl: 'https://flasker.com.ua/product/предреліз-hoppy-hog-charred-memory-is-10-330ml/',
+    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory IS', abv: 10 });
+  });
+
   it('no abv → volume marks the head end', () => {
     expect(parseTitle('Orval {2025} 330ml')).toEqual({ brewery: 'Orval', name: '{2025}' });
   });
