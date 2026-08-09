@@ -23,7 +23,9 @@ const NON_BEER_NAME_RE = new RegExp(
     // Drink" — and glued mixed script is normal in this catalogue (cf. "NEІРА").
     // Same idiom as beerfreak's bundle regex. `s?` keeps the plural, the commoner
     // shelf spelling, which a bare trailing boundary would have dropped.
-    '(?<![\\p{L}\\p{N}])energy drinks?(?![\\p{L}\\p{N}])',
+    // \p{M} covers decomposed input: a combining mark is part of the preceding letter,
+    // not a separator, so "Caféenergy Drink" stays glued and stays a beer.
+    '(?<![\\p{L}\\p{N}\\p{M}])energy drinks?(?![\\p{L}\\p{N}\\p{M}])',
     'gift set',
     'gift box',
     'gift pack',

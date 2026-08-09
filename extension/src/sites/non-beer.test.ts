@@ -121,6 +121,10 @@ describe('review follow-ups (#383)', () => {
     expect(isNonBeerName('Енергyenergy Drinks IPA')).toBe(false);
   });
 
+  it('keeps it glued to a decomposed (NFD) letter', () => {
+    expect(isNonBeerName('Cafe\u0301energy Drink IPA')).toBe(false);
+  });
+
   it('still drops the phrase after Cyrillic punctuation/space', () => {
     expect(isNonBeerName('Доза energy drink zero')).toBe(true);
   });
