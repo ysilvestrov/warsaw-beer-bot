@@ -57,7 +57,14 @@ const BREWERY_RULES: BreweryRule[] = [
       'lost-philosopher-',
       'the-lost-philosopher-',
       'de-zwarte-regel-',
-      'tomatol-',            // Tomatøl series (#385) — the hyphen keeps Tomatoland out
+      // Tomatøl series (#385). Deliberately per-product rather than a bare `tomatol-`:
+      // resolving `Tomatol Bulgogi` to Mad Brew opens the brewery gate, and the name
+      // stage then prefers `Tomatol: Bulgogi Sriracha` over the beer the shop actually
+      // links (`Tomatøl:BULDAK BULGOGI`) — the shop title omits "Buldak", so the input
+      // tokens are a strict subset of the wrong candidate. A wrong link is worse than
+      // an orphan, so only the verified-unambiguous member is listed here. Widen to
+      // `tomatol-` once #384 (use the shop's published bid) or #334 lands.
+      'tomatol-wasabi-',
     ],
     titleAliases: ['Mad Brew'],
   },

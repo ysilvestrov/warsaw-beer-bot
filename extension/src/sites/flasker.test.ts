@@ -137,21 +137,19 @@ describe('parseTitle', () => {
 
   // #385: Tomatøl is a Mad Brew series, and the title carries only the series
   // name — the fallback split would emit "Tomatol" as the brewery.
-  it('resolves the Tomatol series to Mad Brew from the product slug', () => {
-    expect(parseTitle('Tomatol Bulgogi 3.8% 330мл', {
-      productUrl: 'https://flasker.com.ua/product/tomatol-bulgogi-3-8-330мл/',
-    })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8 });
+  it('resolves the Tomatol Wasabi product to Mad Brew from the product slug', () => {
     expect(parseTitle('Tomatol Wasabi 3.8% 330мл', {
       productUrl: 'https://flasker.com.ua/product/tomatol-wasabi-3-8-330%d0%bc%d0%bb/',
     })).toEqual({ brewery: 'Mad Brew', name: 'Tomatol Wasabi', abv: 3.8 });
   });
 
-  // The trailing hyphen is what keeps `tomatol-` off Tomatoland (a real, unrelated
-  // Odna Tonna beer) — without it the prefix would swallow that brewery too.
-  it('does not let the Tomatol family prefix swallow Tomatoland', () => {
-    expect(parseTitle('Tomatoland Mountain Herbs 5% 330ml', {
-      productUrl: 'https://flasker.com.ua/product/tomatoland-mountain-herbs-5-330ml/',
-    })).toEqual({ brewery: 'Tomatoland', name: 'Mountain Herbs', abv: 5 });
+  // Guard for the deliberate narrowness of the rule above (see flasker.ts): resolving
+  // Bulgogi to Mad Brew makes the matcher pick the wrong Untappd record, so this stays
+  // an orphan on purpose until #384/#334. Flip this expectation when widening.
+  it('leaves Tomatol Bulgogi unresolved on purpose (would mis-match — #384/#334)', () => {
+    expect(parseTitle('Tomatol Bulgogi 3.8% 330мл', {
+      productUrl: 'https://flasker.com.ua/product/tomatol-bulgogi-3-8-330мл/',
+    })).toEqual({ brewery: 'Tomatol', name: 'Bulgogi', abv: 3.8 });
   });
 
   // #385/#376: pre-release listings prefix the slug with `предреліз-`, which hid the
