@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -426,5 +426,134 @@ describe("Series: label strip (#303)", () => {
   test('negative guard: leaves names without a series label untouched', () => {
     expect(stripSearchNoise('Time Series IPA')).toBe('Time Series IPA');
     expect(stripSearchNoise('Double Dry Hopped Galaxy')).toBe('Double Dry Hopped Galaxy');
+  });
+});
+
+describe('repairHomoglyphs', () => {
+  test.each([
+    ['Companу', 'Company'],
+    ['Сherry', 'Cherry'],
+    ['Сider', 'Cider'],
+    ['Coоkies', 'Cookies'],
+    ['СOMMA', 'COMMA'],
+    ['Soаked', 'Soaked'],
+    ['TOMATO+Сhipotle', 'TOMATO+Chipotle'],
+    ['СINNAMON', 'CINNAMON'],
+    ['СOCORITA', 'COCORITA'],
+    ['СITRA+CITRA', 'CITRA+CITRA'],
+    ['Сhristmas', 'Christmas'],
+    ['NEІРА', 'NEIPA'],
+  ])('repairs %s toward Latin', (input, expected) => {
+    expect(repairHomoglyphs(input)).toBe(expected);
+  });
+
+  test.each([
+    ['Свiтле)', 'Світле)'],
+    ['Проскурiвське', 'Проскурівське'],
+    ['ИмбирьOK', 'ИмбирьОК'],
+    ['(Зiберт', '(Зіберт'],
+    ['Aваддон', 'Аваддон'],
+    ['Вiд', 'Від'],
+    ['Класiчнае)', 'Класічнае)'],
+    ['Премiум)', 'Преміум)'],
+    ['(Львiвське', '(Львівське'],
+    ['Бiлий', 'Білий'],
+    ["Рiздв'яний", "Різдв'яний"],
+  ])('repairs %s toward Cyrillic', (input, expected) => {
+    expect(repairHomoglyphs(input)).toBe(expected);
+  });
+
+  test.each([
+    'BeerЛога', 'Hellь', 'CowКава', 'Mozaїка', 'Enкel',
+    'ZЁZЯ', 'ЭльFan', 'NEЗагравай', 'миcola', 'Trymaysя!',
+  ])('leaves genuinely mixed token %s untouched', (input) => {
+    expect(repairHomoglyphs(input)).toBe(input);
+  });
+
+  test('never transliterates a single-script token, even when every character has a homoglyph', () => {
+    // `Аса` is pure Cyrillic and each of А/с/а has a Latin twin. The Latin `IPA`
+    // elsewhere in the string gets the whole string past the fast path, so only the
+    // per-token single-script guard stops `Аса` from being corrupted into `Aca`.
+    expect(repairHomoglyphs('Аса IPA')).toBe('Аса IPA');
+    // Mirror case: a pure-Latin token beside a Cyrillic one.
+    expect(repairHomoglyphs('CAT Пиво')).toBe('CAT Пиво');
+  });
+
+  test('single-script strings pass through unchanged', () => {
+    expect(repairHomoglyphs('Pinta Atak Chmielu')).toBe('Pinta Atak Chmielu');
+    expect(repairHomoglyphs('Ципа Блонда')).toBe('Ципа Блонда');
+  });
+
+  test('repairs per token, preserving the original spacing', () => {
+    expect(repairHomoglyphs('Malle  Belgian Сhristmas Ale'))
+      .toBe('Malle  Belgian Christmas Ale');
+  });
+
+  test('a token mixing scripts across a word boundary is judged per token', () => {
+    // "Ципа" is pure Cyrillic and "PERRY" pure Latin: neither token is mixed,
+    // so nothing is repaired even though the string carries both scripts.
+    expect(repairHomoglyphs('Ципа Сидр Грушевий PERRY')).toBe('Ципа Сидр Грушевий PERRY');
+  });
+});
+
+describe('#382 homoglyph repair reaches name matching', () => {
+  test('a Cyrillic С in a Latin word no longer blocks the match', () => {
+    expect(normalizeName('Belgian Сhristmas Ale')).toBe(normalizeName('Belgian Christmas Ale'));
+  });
+
+  test('a Latin i in a Cyrillic word no longer blocks the match', () => {
+    expect(normalizeName('Львiвське Бiле')).toBe(normalizeName('Львівське Біле'));
+  });
+
+  test('brewery normalization gets the same repair', () => {
+    expect(normalizeBrewery('Проскурiвське')).toBe(normalizeBrewery('Проскурівське'));
+  });
+
+  test('a genuinely mixed name is still not equated with either script', () => {
+    expect(normalizeName('BeerЛога')).not.toBe(normalizeName('BeerLoga'));
+  });
+});
+
+describe('searchQueryLadder', () => {
+  test('all-Latin input yields a single rung — no ladder, no extra request', () => {
+    expect(searchQueryLadder('Pinta', 'Atak Chmielu')).toEqual(['Pinta Atak Chmielu']);
+  });
+
+  test('the last rung always equals cleanSearchQuery', () => {
+    const rungs = searchQueryLadder('Ципа', 'Сидр Грушевий PERRY');
+    expect(rungs[rungs.length - 1]).toBe(cleanSearchQuery('Ципа', 'Сидр Грушевий PERRY'));
+  });
+
+  test('the narrow rung keeps Cyrillic the ASCII fold deletes', () => {
+    // Today's query is the bare style word `PERRY`, which matches thousands of
+    // unrelated beers; the narrow rung carries the identity tokens.
+    expect(searchQueryLadder('Ципа', 'Сидр Грушевий PERRY')).toEqual([
+      'Ципа Сидр Грушевий PERRY',
+      'PERRY',
+    ]);
+  });
+
+  test('the narrow rung still drops one-character tokens (#350 is script-aware, not disabled)', () => {
+    expect(searchQueryLadder('Pinta Brewery', 'Rock n Roll')).toEqual(['Pinta Rock Roll']);
+    // `Шо` folds to two characters under the unicode fold and is therefore kept.
+    expect(searchQueryLadder('SHO Brewery', 'Шо Забіяка')).toEqual(['SHO Шо Забіяка', 'SHO']);
+  });
+
+  test('the narrow rung drops a one-character BREWERY token too (#350 applies to both loops)', () => {
+    // `X` folds to one character under either fold and must never reach Algolia — a
+    // one-character term ANDs the whole query to zero (#350). `Брю` survives only on
+    // the narrow rung, which is what makes this case able to see the brewery loop's gate.
+    expect(searchQueryLadder('X Брю', 'Забіяка')).toEqual(['Брю Забіяка', 'Забіяка']);
+  });
+
+  test('the echo strip is no longer blind on Cyrillic', () => {
+    // Both tokens fold to '' under the ASCII fold, so the reduced rung cannot tell
+    // that the name restates the brewery; the narrow rung strips the leading echo.
+    expect(searchQueryLadder('Ципа', 'Ципа Блонда')[0]).toBe('Ципа Блонда');
+  });
+
+  test('homoglyph repair reaches both rungs', () => {
+    expect(searchQueryLadder('Malle', 'Belgian Сhristmas Ale'))
+      .toEqual(['Malle Belgian Christmas Ale']);
   });
 });
