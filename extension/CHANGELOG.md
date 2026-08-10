@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Fixed BeerFreak brewery detection for products the shop publishes without a brand label: titles led by a brewery word ("Brasserie", "Browar", "Brouwerij", "Pivovar", "Birrificio", "Brauerei") no longer swallow the beer name into the brewery, so "Brasserie du Bocq Blanche de Namur" is now the beer "Blanche de Namur" by "Brasserie du Bocq" instead of a beer called "Namur".
+
 ## [0.13.0] - 2026-07-31
 
 - Missing beers are now matched using the alcohol strength the shop publishes, instead of ignoring it. This tells apart releases that share a brewery, a style and a name and differ only in strength — for example AleBrowar's alcohol-free Kwas Chlebowy versus its 0.5% version — so more ⚪ beers become ⭐ instead of staying unmatched.
