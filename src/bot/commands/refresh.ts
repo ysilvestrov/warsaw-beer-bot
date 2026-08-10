@@ -8,6 +8,7 @@ import { listPubs } from '../../storage/pubs';
 import { type NewbeersDeps, type NewbeersResult, filterPubsByQuery } from './newbeers-build';
 import { getUserCity } from '../../storage/user_profiles';
 import { trackProgress } from '../active-progress';
+import { CITIES, type City } from '../../domain/cities';
 
 const FULL_COOLDOWN_MS = 5 * 60 * 1000;
 const SCOPED_COOLDOWN_MS = 30 * 1000;
@@ -15,7 +16,9 @@ const PROGRESS_MIN_INTERVAL_MS = 2000;
 const lastFullCall = new Map<number, number>();
 const lastScopedCall = new Map<number, number>();
 
-export function cooldownWindowFor(kind: 'all' | 'scoped'): number {
+export type RefreshCooldownKind = 'all' | 'scoped';
+
+export function cooldownWindowFor(kind: RefreshCooldownKind): number {
   return kind === 'all' ? FULL_COOLDOWN_MS : SCOPED_COOLDOWN_MS;
 }
 
@@ -78,37 +81,93 @@ export async function runRefreshPipeline(args: RunRefreshPipelineArgs): Promise<
 }
 
 export type RefreshScope =
-  | { kind: 'all' }
-  | { kind: 'scoped'; slugs: Set<string>; query: string }
+  | {
+      kind: 'run';
+      cooldown: RefreshCooldownKind;
+      cities?: readonly City[];
+      pubSlugs?: Set<string>;
+      pubIds?: Set<number>;
+      telegramIds?: Set<number>;
+    }
   | { kind: 'pub_not_found'; query: string };
 
-export function resolveRefreshScope(db: DB, arg: string): RefreshScope {
+export interface ResolveRefreshScopeArgs {
+  db: DB;
+  telegramId: number;
+  adminTelegramId?: string;
+  city: string;
+  arg: string;
+}
+
+export function resolveRefreshScope(args: ResolveRefreshScopeArgs): RefreshScope {
+  const { db, telegramId, adminTelegramId, city, arg } = args;
   const query = arg.trim();
-  if (!query) return { kind: 'all' };
-  const matched = filterPubsByQuery(listPubs(db), query);
+  const isAdmin = adminTelegramId != null && String(telegramId) === adminTelegramId;
+  const activeCities = CITIES.filter((candidate) => candidate.slug === city);
+
+  if (isAdmin && !query) return { kind: 'run', cooldown: 'all' };
+  if (isAdmin && query.toLowerCase() === 'me') {
+    return {
+      kind: 'run',
+      cooldown: 'all',
+      cities: activeCities,
+      telegramIds: new Set([telegramId]),
+    };
+  }
+  if (!isAdmin && !query) {
+    return {
+      kind: 'run',
+      cooldown: 'all',
+      cities: activeCities,
+      telegramIds: new Set([telegramId]),
+    };
+  }
+
+  const matched = filterPubsByQuery(listPubs(db, isAdmin ? undefined : city), query);
   if (matched.length === 0) return { kind: 'pub_not_found', query };
-  return { kind: 'scoped', slugs: new Set(matched.map((p) => p.slug)), query };
+  const matchedCities = new Set(matched.map((pub) => pub.city));
+  const pubScope = {
+    kind: 'run',
+    cooldown: isAdmin ? 'all' : 'scoped',
+    cities: CITIES.filter((candidate) => matchedCities.has(candidate.slug)),
+    pubSlugs: new Set(matched.map((pub) => pub.slug)),
+    pubIds: new Set(matched.map((pub) => pub.id)),
+  } as const;
+  return isAdmin ? pubScope : { ...pubScope, telegramIds: new Set([telegramId]) };
+}
+
+export interface RefreshRunOptions {
+  cities?: readonly City[];
+  pubSlugs?: Set<string>;
+  telegramIds?: Set<number>;
 }
 
 export function createRefreshCommand(
-  run: (notify: ProgressFn, opts?: { pubSlugs?: Set<string> }) => Promise<void>,
+  run: (notify: ProgressFn, opts: RefreshRunOptions) => Promise<void>,
   postRun?: (deps: NewbeersDeps) => NewbeersResult,
 ) {
   const cmd = new Composer<BotContext>();
   cmd.command('refresh', async (ctx) => {
     const arg = ctx.message.text.split(' ').slice(1).join(' ').trim();
-    const scope = resolveRefreshScope(ctx.deps.db, arg);
+    const city = getUserCity(ctx.deps.db, ctx.from.id);
+    const scope = resolveRefreshScope({
+      db: ctx.deps.db,
+      telegramId: ctx.from.id,
+      adminTelegramId: ctx.deps.env.ADMIN_TELEGRAM_ID,
+      city,
+      arg,
+    });
 
     if (scope.kind === 'pub_not_found') {
       await ctx.reply(ctx.t('newbeers.pub_not_found', { query: scope.query }));
       return;
     }
 
-    const cooldownMap = scope.kind === 'all' ? lastFullCall : lastScopedCall;
+    const cooldownMap = scope.cooldown === 'all' ? lastFullCall : lastScopedCall;
     const allowed = checkAndStampCooldown(
       cooldownMap,
       ctx.from.id,
-      cooldownWindowFor(scope.kind),
+      cooldownWindowFor(scope.cooldown),
       Date.now(),
     );
     if (!allowed) {
@@ -125,8 +184,10 @@ export function createRefreshCommand(
     const db = ctx.deps.db;
     const telegramId = ctx.from.id;
     const locale = ctx.locale;
-    const pubSlugs = scope.kind === 'scoped' ? scope.slugs : undefined;
-    const pubQuery = scope.kind === 'scoped' ? scope.query : undefined;
+    const cities = scope.cities;
+    const pubSlugs = scope.pubSlugs;
+    const pubIds = scope.pubIds;
+    const telegramIds = scope.telegramIds;
     const tracker = trackProgress(chatId, messageId, locale);
 
     const notify = makeThrottledProgress(
@@ -139,19 +200,14 @@ export function createRefreshCommand(
       PROGRESS_MIN_INTERVAL_MS,
     );
 
-    const postRunClosure = postRun
+    const postRunClosure = postRun && pubIds
       ? async () => {
-          const result = postRun({ db, telegramId, locale, t, pubQuery, city: getUserCity(db, telegramId) });
+          const result = postRun({ db, telegramId, locale, t, pubIds, city });
           if (result.kind === 'ok') {
             await telegram.sendMessage(chatId, result.html, { parse_mode: 'HTML' });
-          } else if (result.kind === 'empty' && pubSlugs) {
-            // Scoped refresh: the user asked about a specific pub, so a silent
-            // "nothing new" would be confusing. Full refresh stays silent on
-            // empty to avoid spamming after a successful city-wide sweep.
+          } else if (result.kind === 'empty') {
             await telegram.sendMessage(chatId, t('newbeers.empty'));
           }
-          // 'pub_not_found' cannot occur here: a non-matching query was already
-          // short-circuited above before any refresh started.
         }
       : undefined;
 
@@ -162,7 +218,7 @@ export function createRefreshCommand(
     void (async () => {
       try {
         await runRefreshPipeline({
-          run: (n) => run(n, { pubSlugs }),
+          run: (n) => run(n, { cities, pubSlugs, telegramIds }),
           notify,
           t,
           log,
