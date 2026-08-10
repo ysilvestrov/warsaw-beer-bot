@@ -539,6 +539,13 @@ describe('searchQueryLadder', () => {
     expect(searchQueryLadder('SHO Brewery', 'Шо Забіяка')).toEqual(['SHO Шо Забіяка', 'SHO']);
   });
 
+  test('the narrow rung drops a one-character BREWERY token too (#350 applies to both loops)', () => {
+    // `X` folds to one character under either fold and must never reach Algolia — a
+    // one-character term ANDs the whole query to zero (#350). `Брю` survives only on
+    // the narrow rung, which is what makes this case able to see the brewery loop's gate.
+    expect(searchQueryLadder('X Брю', 'Забіяка')).toEqual(['Брю Забіяка', 'Забіяка']);
+  });
+
   test('the echo strip is no longer blind on Cyrillic', () => {
     // Both tokens fold to '' under the ASCII fold, so the reduced rung cannot tell
     // that the name restates the brewery; the narrow rung strips the leading echo.
