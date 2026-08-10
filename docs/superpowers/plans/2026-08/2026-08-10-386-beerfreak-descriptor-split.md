@@ -12,6 +12,42 @@
 
 ---
 
+## Corrections found during execution
+
+This plan was executed as written and then reviewed. Six of its instructions were wrong.
+They are listed here rather than silently edited, because the pattern is the point: every
+one of them was a confident prediction that no measurement backed.
+
+**Wrong in a way that changed the code:**
+
+1. **Task 3 Step 1** — the heading says "Add `'brouwers'`" while its snippet adds `'brewers'`
+   too. `'brewers'` is unattested, untested, and it also widened `stripLeadingBreweryRun`,
+   the set's other consumer. Superseded: neither word goes into `BREWERY_DESCRIPTORS`; the
+   trailing run has its own `TRAILING_BREWERY_DESCRIPTORS`.
+2. **Task 3 Step 1 (same snippet)** — reusing `BREWERY_DESCRIPTORS` for the trailing run puts
+   `family`/`company`/`co` in it, which are ordinary beer-name words. `Brasserie Dupont Family
+   Reunion` split as `Brasserie Dupont Family` + `Reunion`. See spec §3.2/§4.
+3. **Task 2, second test** — `never leaves a descriptor-led brandless title without a beer
+   name` is unfalsifiable: `parseCards` drops empty-name cards and backfills from the raw
+   title, so deleting the clamp left the suite green. Replaced by an assertion on the split.
+   Its rationale text was also wrong twice — the clamp guards the empty *name* (an empty
+   brewery is impossible from `i >= 2` regardless), and `Browar Kormoran` never enters the
+   descriptor branch at all, since it has 2 tokens and the guard requires 3.
+
+**Wrong but harmless:**
+
+4. **Task 2 Step 2** — "Expected: FAIL" for both new tests; only the first was red.
+5. **Task 4 Step 2** — predicted received `'du Bocq Blanche de Namur'`; actual was
+   `'Bocq Blanche de Namur'` (the old code sliced two tokens, not descriptor + qualifier).
+6. **Line citations** — Task 3 Step 1 `:19-22` → `:21-24`; Task 4 Step 4 `:115` → `:116`;
+   spec §4 `beerfreak.test.ts:247` → `:245`; spec §1 `:130-136` → `:131-136`.
+
+The lesson for the next plan: mutation testing belongs in the plan, not in the review. A test
+the plan specifies is a hypothesis about what constrains the code, and three of the six errors
+above were only visible by deleting a line and watching nothing fail.
+
+---
+
 ## Working agreement
 
 **Run every command from `extension/`**, not the repo root. The extension is its own npm
