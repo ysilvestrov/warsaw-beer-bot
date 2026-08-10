@@ -495,3 +495,21 @@ describe('repairHomoglyphs', () => {
     expect(repairHomoglyphs('Ципа Сидр Грушевий PERRY')).toBe('Ципа Сидр Грушевий PERRY');
   });
 });
+
+describe('#382 homoglyph repair reaches name matching', () => {
+  test('a Cyrillic С in a Latin word no longer blocks the match', () => {
+    expect(normalizeName('Belgian Сhristmas Ale')).toBe(normalizeName('Belgian Christmas Ale'));
+  });
+
+  test('a Latin i in a Cyrillic word no longer blocks the match', () => {
+    expect(normalizeName('Львiвське Бiле')).toBe(normalizeName('Львівське Біле'));
+  });
+
+  test('brewery normalization gets the same repair', () => {
+    expect(normalizeBrewery('Проскурiвське')).toBe(normalizeBrewery('Проскурівське'));
+  });
+
+  test('a genuinely mixed name is still not equated with either script', () => {
+    expect(normalizeName('BeerЛога')).not.toBe(normalizeName('BeerLoga'));
+  });
+});

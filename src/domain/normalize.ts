@@ -127,7 +127,7 @@ function preserveDecimalIdentifiers(s: string): string {
 }
 
 export function baseNormalize(s: string): string {
-  return stripDiacritics(s).toLowerCase()
+  return stripDiacritics(repairHomoglyphs(s)).toLowerCase()
     .replace(/[^\p{L}\p{N}\s\uE000]/gu, ' ')
     .replaceAll(DECIMAL_SEPARATOR, '.')
     .replace(/\s+/g, ' ')
