@@ -34,6 +34,17 @@ describe('resolveByBid', () => {
     expect(out.kind).toBe('accepted');
     if (out.kind !== 'accepted') throw new Error('unreachable');
     expect(out.result.bid).toBe(6648348);
+    expect(out.source).toBe('hydrated');
+  });
+
+  it('records slug, name, and abv divergence together in notes', async () => {
+    const out = await resolveByBid({
+      db: freshDb(), bid: 6648348, bidSlug: 'something-else', brand: 'Mad Brew',
+      shopName: 'Tomatol Bulgogi', shopAbv: 3.8, hydrate: hydrateWith(BULGOGI),
+    });
+    expect(out.kind).toBe('accepted');
+    if (out.kind !== 'accepted') throw new Error('unreachable');
+    expect(out.notes).toEqual(['slug-divergence', 'name-divergence', 'abv-divergence']);
   });
 
   // The two negative assertions that matter most: both of these divergences are
@@ -79,7 +90,7 @@ describe('resolveByBid', () => {
     expect(out.kind).toBe('accepted');
   });
 
-  it('skips the guard when the shop publishes no brand', async () => {
+  it('rejects when the shop publishes no brand to verify against', async () => {
     const out = await resolveByBid({
       db: freshDb(), bid: 6648348, bidSlug: 'mad-brew-tomatol-buldak-bulgogi',
       hydrate: hydrateWith(BULGOGI),
@@ -90,6 +101,13 @@ describe('resolveByBid', () => {
   it('rejects when the bid hydrates to nothing', async () => {
     const out = await resolveByBid({
       db: freshDb(), bid: 999999999, brand: 'Mad Brew', hydrate: hydrateWith(null),
+    });
+    expect(out).toEqual({ kind: 'rejected', reason: 'not-hydrated' });
+  });
+
+  it('rejects when hydrate is absent and the local catalog misses', async () => {
+    const out = await resolveByBid({
+      db: freshDb(), bid: 6648348, brand: 'Mad Brew',
     });
     expect(out).toEqual({ kind: 'rejected', reason: 'not-hydrated' });
   });
@@ -114,6 +132,8 @@ describe('resolveByBid', () => {
       db, bid: 6648348, bidSlug: 'mad-brew-tomatol-buldak-bulgogi', brand: 'Mad Brew', hydrate,
     });
     expect(out.kind).toBe('accepted');
+    if (out.kind !== 'accepted') throw new Error('unreachable');
+    expect(out.source).toBe('local');
     expect(hydrate).not.toHaveBeenCalled();
   });
 
