@@ -129,9 +129,14 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // #384: a linked row is normally done. The exception is a shop that publishes a
         // *different* Untappd id than the one we stored — then the row is a repair
         // candidate. refusesBidOverride is the same helper /enrich/result applies, so a
-        // curated or check-in-sourced link is never even offered here. The wontfix veto
-        // and the backoff still apply: the backoff is what keeps a contradicted link
-        // from being retried on every page load.
+        // curated or check-in-sourced link is never even offered here.
+        //
+        // The wontfix veto and the lookup backoff still apply, but note what the backoff
+        // does NOT cover: /enrich/result records nothing when it *rejects* a bid (guard
+        // veto, hydrate failure, unknown bid) — it returns the stored link untouched — so
+        // untappd_lookup_at/count never move and such a row stays eligible indefinitely.
+        // What bounds it is the extension's badge cache: a card that stays a cache hit is
+        // never re-offered, so a rejected bid costs one search slot per ~8h per browser.
         const contradicts =
           b.bid !== undefined && row.untappd_id != null && row.untappd_id !== b.bid;
         const eligible =

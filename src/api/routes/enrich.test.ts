@@ -278,7 +278,9 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
-  // The backoff is what stops a contradicted link being retried on every page load.
+  // The backoff still gates a contradicted link — for rows that have a recorded lookup
+  // attempt. A bid /enrich/result rejects records nothing, so that path is bounded by the
+  // extension's badge cache instead; see the route comment.
   it('still applies the lookup backoff to a contradicted link', async () => {
     const { db, app } = setup();
     const id = linkedRow(db, 6708599, 'search');

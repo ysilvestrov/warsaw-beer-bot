@@ -29,7 +29,10 @@ function sendBg<T>(message: unknown): Promise<T | undefined> {
 
 // Bridges the page's orphan beers into the enrichment queue: gated on the opt-in setting,
 // relays Untappd fetch + /enrich/* calls through the service worker, and drives badge states.
-const enrichOrphans: EnrichOrphans = (orphans) => {
+// Exported for tests only: the two mappings below are plain field copies, so a dropped
+// optional field (a bid that never reaches the server) still compiles and still passes
+// every other test — the "ships dead" failure mode #384 already paid for once.
+export const enrichOrphans: EnrichOrphans = (orphans) => {
   void (async () => {
     const { enrichEnabled } = await getSettings();
     if (!enrichEnabled) return;
