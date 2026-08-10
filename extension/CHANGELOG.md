@@ -1,8 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [0.14.0] - 2026-08-10
 
+- Flasker beers now match through the Untappd link the shop itself publishes on a product page, instead of being searched for by name. Where that link exists it settles the identity outright, so releases whose shop name and Untappd name simply disagree stop sitting unmatched — and a wrong ⭐ that name-matching had picked is corrected.
+- Fixed Flasker pre-release banners ("PRE-ORDER", "СКОРО" and similar) leaking into the brewery: the banner is now removed before the brewery is worked out, not after, so those products identify the right brewery instead of one prefixed with shelf text.
+- Fixed Flasker's Tomatøl series being attributed to the wrong brewery; the products now resolve to Mad Brew through the shop's own product address.
+- Ginger beer, root beer and energy drinks are no longer matched as beer. The rule is gated on alcohol strength, so an alcohol-free beer at 0.0% still matches as it always did, and a published style overrides the name — a 0.0% "Stout" that merely mentions ginger beer stays a beer.
 - Fixed BeerFreak brewery detection for products the shop publishes without a brand label: titles led by a brewery word ("Brasserie", "Browar", "Brouwerij", "Pivovar", "Birrificio", "Brauerei") no longer swallow the beer name into the brewery, so "Brasserie du Bocq Blanche de Namur" is now the beer "Blanche de Namur" by "Brasserie du Bocq" instead of a beer called "Namur".
+- Beers whose names carry Cyrillic words are now searched for with those words kept, falling back to the previous broader search only when the narrow one finds nothing. Previously the search dropped them, which left Ukrainian- and Russian-named releases unmatched even when Untappd had them.
 
 ## [0.13.0] - 2026-07-31
 
