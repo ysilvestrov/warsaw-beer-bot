@@ -191,6 +191,39 @@ export async function upsertReview(
   return 'created';
 }
 
+export const FAILURE_MARKER = '<!-- ai-pr-review-failure -->';
+const FAILURE_COMMENT_TIMEOUT_MS = 10_000;
+
+function failureCommentBody(message: string, headSha: string): string {
+  const detail = message.trim().slice(0, 1_000).replace(/\r?\n/g, '\n> ');
+  return [
+    FAILURE_MARKER,
+    '',
+    '## ⚠️ AI PR Review failed',
+    '',
+    `The required AI review did not complete for commit \`${headSha}\`.`,
+    'The failing check remains authoritative; this PR has not received an AI review.',
+    '',
+    `> ${detail}`,
+  ].join('\n');
+}
+
+async function postFailureComment(
+  deps: GithubDeps,
+  message: string,
+  headSha: string,
+): Promise<void> {
+  const fetchFn = deps.fetchFn ?? fetch;
+  const url = `https://api.github.com/repos/${deps.repo}/issues/${deps.prNumber}/comments`;
+  const res = await fetchFn(url, {
+    method: 'POST',
+    headers: githubHeaders(deps.token),
+    body: JSON.stringify({ body: failureCommentBody(message, headSha) }),
+    signal: AbortSignal.timeout(FAILURE_COMMENT_TIMEOUT_MS),
+  });
+  if (!res.ok) throw await githubError('create failure comment', res);
+}
+
 /**
  * Reads a changed file for review context, or null if it cannot be reviewed.
  *
@@ -248,7 +281,7 @@ function toVerifyRequest(id: string, f: GatedFinding | StoredFinding): VerifyReq
   };
 }
 
-export async function runReview(cfg: Config, deps: ReviewDeps): Promise<void> {
+async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
   const gh: GithubDeps = {
     repo: cfg.repo,
     prNumber: cfg.prNumber,
@@ -440,6 +473,31 @@ export async function runReview(cfg: Config, deps: ReviewDeps): Promise<void> {
       `${carried.length} carried, ${closed.length} closed ` +
       `(${reviewable.length} file(s) in scope, ${runUsage.calls} API call(s)).`,
   );
+}
+
+export async function runReview(cfg: Config, deps: ReviewDeps): Promise<void> {
+  try {
+    await runReviewOnce(cfg, deps);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    try {
+      await postFailureComment(
+        {
+          repo: cfg.repo,
+          prNumber: cfg.prNumber,
+          token: cfg.githubToken,
+          fetchFn: deps.githubFetch,
+        },
+        message,
+        deps.headSha,
+      );
+      deps.log(`::notice::AI review failure comment posted on PR #${cfg.prNumber}.`);
+    } catch (commentErr) {
+      const commentMessage = commentErr instanceof Error ? commentErr.message : String(commentErr);
+      deps.log(`::error::AI review failure comment could not be posted: ${commentMessage}`);
+    }
+    throw err;
+  }
 }
 
 function gitOk(args: string[]): boolean {

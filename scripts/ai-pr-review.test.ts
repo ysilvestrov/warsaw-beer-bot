@@ -17,6 +17,7 @@ describe('filterReviewableFiles', () => {
       'tests/b.ts',
       'scripts/c.ts',
       'extension/d.ts',
+      'extension/tests/fixtures/flasker.product.html',
       '.github/workflows/ci.yml',
       'src/e.js',
       'README.md',
@@ -176,7 +177,7 @@ describe('readReviewableFile', () => {
   });
 });
 
-import { findExistingReview, runReview, type ReviewDeps } from './ai-pr-review';
+import { FAILURE_MARKER, findExistingReview, runReview, type ReviewDeps } from './ai-pr-review';
 import { renderState } from './ai-review/state';
 
 const CFG = {
@@ -276,6 +277,51 @@ describe('runReview — full mode', () => {
     expect(ai.calls).toHaveLength(2); // one find, one verify
     expect(gh.put.body).toContain('merge reported as failure');
     expect(gh.put.body).toContain('ai-pr-review-state');
+  });
+
+  it('posts a PR failure comment and still rejects when OpenAI returns an empty completion', async () => {
+    const ai = openaiFetch(['']);
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) return jsonResponse([]);
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    const comment = calls.find(({ url }) => url.endsWith('/issues/7/comments'));
+    expect(comment?.init?.method).toBe('POST');
+    const body = JSON.parse(comment!.init!.body as string).body;
+    expect(body).toContain(FAILURE_MARKER);
+    expect(body).toContain('AI PR Review failed');
+    expect(body).toContain('OpenAI returned an empty completion');
+    expect(body).toContain('b'.repeat(40));
+  });
+
+  it('keeps the original review error when posting the failure comment also fails', async () => {
+    const ai = openaiFetch(['']);
+    const logs: string[] = [];
+    let failureSignal: AbortSignal | null | undefined;
+    const githubFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined) return jsonResponse([]);
+      failureSignal = init.signal;
+      return jsonResponse({ message: 'Forbidden' }, 403);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runReview(CFG, deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch,
+        log: (message) => logs.push(message),
+      })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+    expect(failureSignal).toBeInstanceOf(AbortSignal);
+    expect(logs.some((message) => message.includes('failure comment could not be posted'))).toBe(
+      true,
+    );
   });
 });
 
