@@ -104,8 +104,21 @@ stay at the head of the name — the shape `stripBreweryFromName` already tolera
 shape the issue's own probe showed to be survivable.
 
 Today's rule is the mirror image: at a 2-token name all 342 are too long. That is the shape
-that produced the single measured MISS. The bounded rule cannot produce a one-token name at
-all, so that failure mode is eliminated by construction rather than by tuning.
+that produced the single measured MISS.
+
+**The "never too long" property is a property of the trailing set, not of the rule.** An
+earlier draft claimed the bounded rule "cannot produce a one-token name at all… eliminated by
+construction". Review refuted that: the trailing-descriptor run can over-eat if it contains
+words that are also beer-name words. With `family`/`company`/`co` in the run,
+`Brasserie Dupont Family Reunion` split as `Brasserie Dupont Family` + `Reunion` — exactly the
+failure shape the rule is supposed to remove.
+
+That is why the trailing set is narrowed to structural brewery words only (§4). Measured:
+dropping `family`, `company`, `co`, `co.` from the run costs **zero** accuracy — 266/342
+either way — so the hazard is removable for free, and the "0 too long" column above holds for
+the narrowed set. The honest claim is: too-long splits are possible in principle and are
+excluded by keeping beer-name words out of the trailing set, which is a decision the tests
+pin rather than a guarantee of the algorithm.
 
 All seven titles from the issue's probe split correctly under the bounded rule, including
 the one that fails today.
@@ -138,15 +151,31 @@ same direction and with the same accuracy characteristics as §3.
 `LEADING_BREWERY_DESCRIPTORS`, compared through the existing `normalizedToken`
 (which lowercases and strips `(`, `)`, `,`).
 
-The **trailing** run reuses the existing `BREWERY_DESCRIPTORS` set with `'brouwers'` added —
-no third set. This was measured, not assumed: `BREWERY_DESCRIPTORS + brouwers` scores the
-same 266/342 (76 too short, 0 too long) as the ad-hoc trailing sets tried during design, so
-the shared set costs nothing in accuracy and removes a concept.
+The **trailing** run gets its own set, `TRAILING_BREWERY_TOKENS`:
 
-Adding `'brouwers'` also affects `stripLeadingBreweryRun`, the set's other consumer, where
-it is semantically correct — `brouwers` is a brewery descriptor there too. The existing
-tests for that function (`beerfreak.test.ts:229`, `:247`) pin the behaviour and must stay
-green.
+```ts
+const TRAILING_BREWERY_TOKENS = new Set([
+  ...LEADING_BREWERY_DESCRIPTORS, 'brewery', 'brewing', 'brouwers',
+]);
+```
+
+An earlier draft of this design reused the existing `BREWERY_DESCRIPTORS` set instead,
+arguing "no third set". That was wrong, and review caught it: `BREWERY_DESCRIPTORS` contains
+`family`, `company`, `co`, `co.`, which are ordinary beer-name words — see §3.2. The measured
+justification for a separate set is that removing those four from the run costs nothing:
+
+| trailing set | exact recovery (2-token name) |
+|---|---|
+| `BREWERY_DESCRIPTORS` (+`brouwers`) | 266/342 — 76 too short, 0 too long |
+| `TRAILING_BREWERY_TOKENS` (this design) | 266/342 — 76 too short, 0 too long |
+| no trailing run at all | 239/342 — 103 too short, 0 too long |
+
+So the narrow set buys the same 78% with a strictly smaller hazard. `BREWERY_DESCRIPTORS` is
+therefore left **unmodified**, and `stripLeadingBreweryRun` — its other consumer — is
+untouched by this change.
+
+`brouwers` earns its place in the trailing set on its own: it is attested by
+`Brouwerij De Dolle Brouwers`, which an existing test pins (§5).
 
 ### 4.1 Empty brewery
 
@@ -171,11 +200,22 @@ Vitest, alongside the existing beerfreak tests.
   (the measured MISS)
 - `Brouwerij van Steenberge Gulden Draak 9000 Quadruple` → `Brouwerij van Steenberge` + tail
 
-**Invariants:**
-- the name is never empty and never a single token stolen from a longer name
-- a two-token descriptor-led title (`Browar Kormoran`) keeps a non-empty name
+**Invariants — each must be pinned by a test that goes red when its clause is deleted:**
+- the clamp: `Brasserie de la Senne` → `Brasserie de la` + `Senne`. The rule runs out of
+  title before it finds a proper noun, so the clamp alone decides the boundary. Asserting on
+  the split (not on `parseCards` output) is required — `parseCards` drops empty-name cards and
+  backfills the name from the raw title, so an "is not empty" assertion there is
+  unfalsifiable. An earlier draft of this design specified exactly that unfalsifiable test;
+  mutation testing caught it, with the clamp deleted and the suite still green.
+- the trailing set's narrowness: `Brasserie Dupont Family Reunion` → `Brasserie Dupont` +
+  `Family Reunion`, and `Browar Pinta Company Man` → `Browar Pinta` + `Company Man`
 - `stripCollaboratorName` on a descriptor-led collaborator title drops the brewery run,
   not a fixed two tokens
+
+**Mutation testing is part of the definition of done for this change**, not an optional
+extra. Every clause of `descriptorBreweryEnd` — the qualifier loop, the proper-noun step, the
+trailing loop, the clamp — and each contested set member must have a test that fails when it
+is removed.
 
 ## 6. Relationship to the splitter issue
 
