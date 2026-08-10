@@ -119,6 +119,12 @@ interface ReviewRow {
   user?: { type?: string };
 }
 
+interface IssueCommentRow {
+  id: number;
+  body?: string;
+  user?: { type?: string };
+}
+
 // Surfaces the GitHub response status AND body so a failed post fails loudly with a
 // clear, actionable reason (mirrors the OpenAI non-ok path) rather than a bare code.
 async function githubError(action: string, res: Response): Promise<Error> {
@@ -202,7 +208,7 @@ function failureCommentBody(message: string, headSha: string): string {
     '## ⚠️ AI PR Review failed',
     '',
     `The required AI review did not complete for commit \`${headSha}\`.`,
-    'The failing check remains authoritative; this PR has not received an AI review.',
+    'The failing check remains authoritative. No new AI review was published for this run.',
     '',
     `> ${detail}`,
   ].join('\n');
@@ -215,13 +221,24 @@ async function postFailureComment(
 ): Promise<void> {
   const fetchFn = deps.fetchFn ?? fetch;
   const url = `https://api.github.com/repos/${deps.repo}/issues/${deps.prNumber}/comments`;
-  const res = await fetchFn(url, {
-    method: 'POST',
-    headers: githubHeaders(deps.token),
-    body: JSON.stringify({ body: failureCommentBody(message, headSha) }),
-    signal: AbortSignal.timeout(FAILURE_COMMENT_TIMEOUT_MS),
+  const headers = githubHeaders(deps.token);
+  const signal = AbortSignal.timeout(FAILURE_COMMENT_TIMEOUT_MS);
+  const body = failureCommentBody(message, headSha);
+  const list = await fetchFn(`${url}?per_page=100`, { headers, signal });
+  if (!list.ok) throw await githubError('list failure comments', list);
+  const comments = (await list.json()) as IssueCommentRow[];
+  const existing = comments.find(
+    (comment) => comment.user?.type === 'Bot' && (comment.body ?? '').includes(FAILURE_MARKER),
+  );
+  if (existing?.body === body) return;
+
+  const res = await fetchFn(existing ? `${url}/${existing.id}` : url, {
+    method: existing ? 'PATCH' : 'POST',
+    headers,
+    body: JSON.stringify({ body }),
+    signal,
   });
-  if (!res.ok) throw await githubError('create failure comment', res);
+  if (!res.ok) throw await githubError(existing ? 'update failure comment' : 'create failure comment', res);
 }
 
 /**

@@ -299,6 +299,39 @@ describe('runReview — full mode', () => {
     expect(body).toContain('AI PR Review failed');
     expect(body).toContain('OpenAI returned an empty completion');
     expect(body).toContain('b'.repeat(40));
+    expect(body).toContain('No new AI review was published for this run.');
+    expect(body).not.toContain('this PR has not received an AI review');
+  });
+
+  it('reuses the failure marker comment across identical failed reruns', async () => {
+    const issueComments: Array<{ id: number; body: string; user: { type: string } }> = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) {
+        if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+        return jsonResponse(issueComments);
+      }
+      const body = JSON.parse(init.body as string).body;
+      if (init.method === 'POST') {
+        issueComments.push({ id: 99, body, user: { type: 'Bot' } });
+      } else if (init.method === 'PATCH') {
+        issueComments[0].body = body;
+      }
+      return jsonResponse({ id: 99, body });
+    }) as unknown as typeof fetch;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const ai = openaiFetch(['']);
+      await expect(
+        runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+      ).rejects.toThrow('OpenAI returned an empty completion');
+    }
+
+    const writes = calls.filter(({ init }) => init?.method === 'POST' || init?.method === 'PATCH');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].init?.method).toBe('POST');
+    expect(issueComments).toHaveLength(1);
   });
 
   it('keeps the original review error when posting the failure comment also fails', async () => {
