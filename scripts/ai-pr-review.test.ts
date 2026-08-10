@@ -17,6 +17,7 @@ describe('filterReviewableFiles', () => {
       'tests/b.ts',
       'scripts/c.ts',
       'extension/d.ts',
+      'extension/tests/fixtures/flasker.product.html',
       '.github/workflows/ci.yml',
       'src/e.js',
       'README.md',
@@ -176,7 +177,7 @@ describe('readReviewableFile', () => {
   });
 });
 
-import { findExistingReview, runReview, type ReviewDeps } from './ai-pr-review';
+import { FAILURE_MARKER, findExistingReview, runReview, type ReviewDeps } from './ai-pr-review';
 import { renderState } from './ai-review/state';
 
 const CFG = {
@@ -276,6 +277,201 @@ describe('runReview — full mode', () => {
     expect(ai.calls).toHaveLength(2); // one find, one verify
     expect(gh.put.body).toContain('merge reported as failure');
     expect(gh.put.body).toContain('ai-pr-review-state');
+  });
+
+  it('posts a PR failure comment and still rejects when OpenAI returns an empty completion', async () => {
+    const ai = openaiFetch(['']);
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) return jsonResponse([]);
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    const comment = calls.find(({ url }) => url.endsWith('/issues/7/comments'));
+    expect(comment?.init?.method).toBe('POST');
+    const body = JSON.parse(comment!.init!.body as string).body;
+    expect(body).toContain(FAILURE_MARKER);
+    expect(body).toContain('AI PR Review failed');
+    expect(body).toContain('OpenAI returned an empty completion');
+    expect(body).toContain('b'.repeat(40));
+    expect(body).toContain('No new AI review was published for this run.');
+    expect(body).not.toContain('this PR has not received an AI review');
+  });
+
+  it('reuses the failure marker comment across identical failed reruns', async () => {
+    const issueComments: Array<{ id: number; body: string; user: { type: string } }> = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) {
+        if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+        return jsonResponse(issueComments);
+      }
+      const body = JSON.parse(init.body as string).body;
+      if (init.method === 'POST') {
+        issueComments.push({ id: 99, body, user: { type: 'Bot' } });
+      } else if (init.method === 'PATCH') {
+        issueComments[0].body = body;
+      }
+      return jsonResponse({ id: 99, body });
+    }) as unknown as typeof fetch;
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const ai = openaiFetch(['']);
+      await expect(
+        runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+      ).rejects.toThrow('OpenAI returned an empty completion');
+    }
+
+    const writes = calls.filter(({ init }) => init?.method === 'POST' || init?.method === 'PATCH');
+    expect(writes).toHaveLength(1);
+    expect(writes[0].init?.method).toBe('POST');
+    expect(issueComments).toHaveLength(1);
+  });
+
+  it('updates a changed failure through the issue-comment endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) {
+        if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+        return jsonResponse([{ id: 99, body: `${FAILURE_MARKER}\nold`, user: { type: 'Bot' } }]);
+      }
+      return jsonResponse({ id: 99 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    const update = calls.find(({ init }) => init?.method === 'PATCH');
+    expect(update?.url).toBe('https://api.github.com/repos/o/r/issues/comments/99');
+  });
+
+  it('searches every issue-comment page before creating a failure marker', async () => {
+    const markerBody = [
+      FAILURE_MARKER,
+      '',
+      '## ⚠️ AI PR Review failed',
+      '',
+      `The required AI review did not complete for commit \`${'b'.repeat(40)}\`.`,
+      'The failing check remains authoritative. No new AI review was published for this run.',
+      '',
+      '> OpenAI returned an empty completion',
+    ].join('\n');
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (url.includes('page=2')) {
+        return jsonResponse([{ id: 99, body: markerBody, user: { type: 'Bot' } }]);
+      }
+      return {
+        ...jsonResponse(Array.from({ length: 100 }, (_, id) => ({ id, body: 'ordinary' }))),
+        headers: new Headers({
+          link: '<https://api.github.com/repos/o/r/issues/7/comments?per_page=100&page=2>; rel="next"',
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ url }) => url.includes('page=2'))).toBe(true);
+    expect(calls.filter(({ init }) => init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('attempts to create the failure marker when listing comments fails', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (!init?.method) return jsonResponse({ message: 'Bad gateway' }, 502);
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ url, init }) => url.endsWith('/issues/7/comments') && init?.method === 'POST')).toBe(true);
+  });
+
+  it('reserves a fresh timeout for creating the marker after lookup aborts', async () => {
+    const signals: AbortSignal[] = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (init?.signal) signals.push(init.signal);
+      if (!init?.method) throw new DOMException('lookup timed out', 'AbortError');
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ init }) => init?.method === 'POST')).toBe(true);
+    expect(signals).toHaveLength(2);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
+  it('attempts marker creation when reading the lookup response body aborts', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (!init?.method) {
+        return {
+          ...jsonResponse([]),
+          json: async () => {
+            throw new DOMException('lookup body timed out', 'AbortError');
+          },
+        } as Response;
+      }
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ init }) => init?.method === 'POST')).toBe(true);
+  });
+
+  it('keeps the original review error when posting the failure comment also fails', async () => {
+    const ai = openaiFetch(['']);
+    const logs: string[] = [];
+    let failureSignal: AbortSignal | null | undefined;
+    const githubFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined) return jsonResponse([]);
+      failureSignal = init.signal;
+      return jsonResponse({ message: 'Forbidden' }, 403);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      runReview(CFG, deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch,
+        log: (message) => logs.push(message),
+      })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+    expect(failureSignal).toBeInstanceOf(AbortSignal);
+    expect(logs.some((message) => message.includes('failure comment could not be posted'))).toBe(
+      true,
+    );
   });
 });
 
