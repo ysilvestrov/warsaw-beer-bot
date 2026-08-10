@@ -181,6 +181,17 @@ describe('beerfreak adapter', () => {
     }));
   });
 
+  it('keeps the three-token descriptor split unchanged (#386 negative test)', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10480, brand_title: null, title: 'Browar Kormoran Orkiszowe' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Browar Kormoran',
+      name: 'Orkiszowe',
+    }));
+  });
+
   it('falls back to card title text when embedded product metadata is absent', () => {
     const doc = new DOMParser().parseFromString(withoutProductMetadata(html), 'text/html');
     const parsed = beerfreak.parseCards(doc);
