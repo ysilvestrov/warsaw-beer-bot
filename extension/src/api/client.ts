@@ -87,6 +87,8 @@ export async function postEnrichResult(
     bid?: number;
     bidSlug?: string;
     brand?: string;
+    /** #391: the ladder rung whose response `algolia` holds — the server records it as the failure search_url. */
+    query?: string;
     pageUrl?: string;
   },
   timeoutMs: number = DEFAULT_TIMEOUT_MS,

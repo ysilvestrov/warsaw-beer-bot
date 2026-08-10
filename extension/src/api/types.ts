@@ -41,7 +41,13 @@ export interface EnrichCandidate {
   brewery: string;
   name: string;
   eligible: boolean;
+  /** The wide rung — what this field has always carried (#391). */
   algolia: AlgoliaQuery;
+  /**
+   * #391: the narrow rung of the #382 ladder, present only when it differs from `algolia`.
+   * Executed FIRST; `algolia` is the fallback for a zero-hit narrow result.
+   */
+  algoliaNarrow?: AlgoliaQuery;
 }
 
 export interface EnrichResult {
