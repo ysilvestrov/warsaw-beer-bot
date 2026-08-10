@@ -406,6 +406,27 @@ describe('runReview — full mode', () => {
     expect(calls.some(({ url, init }) => url.endsWith('/issues/7/comments') && init?.method === 'POST')).toBe(true);
   });
 
+  it('reserves a fresh timeout for creating the marker after lookup aborts', async () => {
+    const signals: AbortSignal[] = [];
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (init?.signal) signals.push(init.signal);
+      if (!init?.method) throw new DOMException('lookup timed out', 'AbortError');
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ init }) => init?.method === 'POST')).toBe(true);
+    expect(signals).toHaveLength(2);
+    expect(signals[1]).not.toBe(signals[0]);
+  });
+
   it('keeps the original review error when posting the failure comment also fails', async () => {
     const ai = openaiFetch(['']);
     const logs: string[] = [];

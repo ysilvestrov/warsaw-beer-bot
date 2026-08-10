@@ -198,7 +198,8 @@ export async function upsertReview(
 }
 
 export const FAILURE_MARKER = '<!-- ai-pr-review-failure -->';
-const FAILURE_COMMENT_TIMEOUT_MS = 10_000;
+const FAILURE_COMMENT_LOOKUP_TIMEOUT_MS = 2_000;
+const FAILURE_COMMENT_WRITE_TIMEOUT_MS = 8_000;
 
 function failureCommentBody(message: string, headSha: string): string {
   const detail = message.trim().slice(0, 1_000).replace(/\r?\n/g, '\n> ');
@@ -222,12 +223,17 @@ async function postFailureComment(
   const fetchFn = deps.fetchFn ?? fetch;
   const url = `https://api.github.com/repos/${deps.repo}/issues/${deps.prNumber}/comments`;
   const headers = githubHeaders(deps.token);
-  const signal = AbortSignal.timeout(FAILURE_COMMENT_TIMEOUT_MS);
+  const lookupSignal = AbortSignal.timeout(FAILURE_COMMENT_LOOKUP_TIMEOUT_MS);
   const body = failureCommentBody(message, headSha);
   let pageUrl: string | null = `${url}?per_page=100`;
   let existing: IssueCommentRow | undefined;
   while (pageUrl) {
-    const list: Response = await fetchFn(pageUrl, { headers, signal });
+    let list: Response;
+    try {
+      list = await fetchFn(pageUrl, { headers, signal: lookupSignal });
+    } catch {
+      break;
+    }
     if (!list.ok) break;
     const comments = (await list.json()) as IssueCommentRow[];
     existing = comments.find(
@@ -243,7 +249,7 @@ async function postFailureComment(
     method: existing ? 'PATCH' : 'POST',
     headers,
     body: JSON.stringify({ body }),
-    signal,
+    signal: AbortSignal.timeout(FAILURE_COMMENT_WRITE_TIMEOUT_MS),
   });
   if (!res.ok) throw await githubError(existing ? 'update failure comment' : 'create failure comment', res);
 }
