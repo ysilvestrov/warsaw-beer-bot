@@ -43,7 +43,7 @@ export interface EnrichFetchMessage { type: 'enrich:fetch'; algolia: AlgoliaQuer
 // #384: `bid` (+ the slug/brand the server's guard verifies it against) is the Untappd
 // identity the shop publishes on its own product page. Absent for shops that publish none.
 export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string; abv?: number; style?: string; bid?: number }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; bid?: number; bidSlug?: string; brand?: string; pageUrl?: string }
+export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; bid?: number; bidSlug?: string; brand?: string; query?: string; pageUrl?: string }
 
 async function enrichAllowed(): Promise<boolean> {
   const { enrichEnabled } = await getSettings();
@@ -98,6 +98,7 @@ export async function handleEnrichResult(
       ...(msg.bid !== undefined ? { bid: msg.bid } : {}),
       ...(msg.bidSlug !== undefined ? { bidSlug: msg.bidSlug } : {}),
       ...(msg.brand !== undefined ? { brand: msg.brand } : {}),
+      ...(msg.query !== undefined ? { query: msg.query } : {}),
       pageUrl: msg.pageUrl,
     });
     return { type: 'enrich:result:ok', result };
