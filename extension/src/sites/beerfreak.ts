@@ -26,7 +26,7 @@ const QUALIFIER_TOKENS = new Set([
 // Brouwers", "Brasserie Cantillon Brewery"). Narrower than BREWERY_DESCRIPTORS on
 // purpose: 'family'/'company'/'co' are real beer-name words ("Family Reunion"),
 // and dropping them from this run costs no accuracy against the catalogue.
-const TRAILING_BREWERY_TOKENS = new Set([
+const TRAILING_BREWERY_DESCRIPTORS = new Set([
   ...LEADING_BREWERY_DESCRIPTORS, 'brewery', 'brewing', 'brouwers',
 ]);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
@@ -103,14 +103,15 @@ function normalizedToken(token: string): string {
 }
 
 // Index where a descriptor-led brewery ends: the descriptor, its run of
-// grammatical qualifiers, one proper noun, then a trailing run of brewery
-// descriptors. Clamped so the beer name always keeps at least one token.
-// Callers must have established that tokens[0] is a leading descriptor.
+// grammatical qualifiers, one proper noun, then a trailing run of
+// TRAILING_BREWERY_DESCRIPTORS. Clamped so the beer name always keeps at least
+// one token. Callers must have established that tokens[0] is a leading
+// descriptor and that tokens.length >= 3.
 function descriptorBreweryEnd(tokens: string[]): number {
   let i = 1;
   while (i < tokens.length && QUALIFIER_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
   i += 1; // the proper noun
-  while (i < tokens.length && TRAILING_BREWERY_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
+  while (i < tokens.length && TRAILING_BREWERY_DESCRIPTORS.has(normalizedToken(tokens[i]))) i += 1;
   return Math.min(i, tokens.length - 1);
 }
 
@@ -154,7 +155,7 @@ function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string 
   }
 
   const tokens = title.split(/\s+/).filter(Boolean);
-  const first = tokens[0]?.toLowerCase();
+  const first = normalizedToken(tokens[0] ?? '');
 
   if (tokens.length >= 3 && first && LEADING_BREWERY_DESCRIPTORS.has(first)) {
     const end = descriptorBreweryEnd(tokens);

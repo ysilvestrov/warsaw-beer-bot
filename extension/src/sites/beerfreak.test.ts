@@ -197,6 +197,7 @@ describe('beerfreak adapter', () => {
       { id: 10481, brand_title: null, title: 'Brasserie du Bocq Blanche de Namur' },
       { id: 10482, brand_title: null, title: 'Birrificio Del Ducato Verdi Imperial Stout' },
       { id: 10483, brand_title: null, title: 'Brouwerij van Steenberge Gulden Draak 9000 Quadruple' },
+      { id: 10490, brand_title: null, title: 'Brasserie Cantillon Brewery Kriek' },
     ]));
 
     expect(parsed).toContainEqual(expect.objectContaining({
@@ -211,6 +212,10 @@ describe('beerfreak adapter', () => {
       brewery: 'Brouwerij van Steenberge',
       name: 'Gulden Draak 9000 Quadruple',
     }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie Cantillon Brewery',
+      name: 'Kriek',
+    }));
   });
 
   it('clamps a fully-qualified descriptor title so the beer name keeps a token', () => {
@@ -218,9 +223,9 @@ describe('beerfreak adapter', () => {
       { id: 10484, brand_title: null, title: 'Brasserie de la Senne' },
     ]));
 
-    // The rule runs out of title before it finds a proper noun, so the clamp — not
-    // the rule — decides the boundary. Erring short is the documented, tolerated
-    // direction; leaving the name empty is not.
+    // Descriptor + qualifier run + proper noun consumes the whole title, so the
+    // clamp — not the rule — decides the boundary. Erring short is the documented,
+    // tolerated direction; leaving the name empty is not.
     expect(parsed).toContainEqual(expect.objectContaining({
       brewery: 'Brasserie de la',
       name: 'Senne',
@@ -338,6 +343,17 @@ describe('beerfreak adapter', () => {
 
     expect(parsed).toContainEqual(expect.objectContaining({
       brewery: 'Popihn',
+      name: 'Blanche de Namur',
+    }));
+  });
+
+  it('gates the descriptor branch on the normalized first token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10489, brand_title: null, title: '(Brasserie) du Bocq Blanche de Namur' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: '(Brasserie) du Bocq',
       name: 'Blanche de Namur',
     }));
   });

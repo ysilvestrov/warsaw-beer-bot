@@ -151,10 +151,10 @@ same direction and with the same accuracy characteristics as §3.
 `LEADING_BREWERY_DESCRIPTORS`, compared through the existing `normalizedToken`
 (which lowercases and strips `(`, `)`, `,`).
 
-The **trailing** run gets its own set, `TRAILING_BREWERY_TOKENS`:
+The **trailing** run gets its own set, `TRAILING_BREWERY_DESCRIPTORS`:
 
 ```ts
-const TRAILING_BREWERY_TOKENS = new Set([
+const TRAILING_BREWERY_DESCRIPTORS = new Set([
   ...LEADING_BREWERY_DESCRIPTORS, 'brewery', 'brewing', 'brouwers',
 ]);
 ```
@@ -167,7 +167,7 @@ justification for a separate set is that removing those four from the run costs 
 | trailing set | exact recovery (2-token name) |
 |---|---|
 | `BREWERY_DESCRIPTORS` (+`brouwers`) | 266/342 — 76 too short, 0 too long |
-| `TRAILING_BREWERY_TOKENS` (this design) | 266/342 — 76 too short, 0 too long |
+| `TRAILING_BREWERY_DESCRIPTORS` (this design) | 266/342 — 76 too short, 0 too long |
 | no trailing run at all | 239/342 — 103 too short, 0 too long |
 
 So the narrow set buys the same 78% with a strictly smaller hazard. `BREWERY_DESCRIPTORS` is
