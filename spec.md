@@ -882,17 +882,34 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}` (+ опційний
 `bid` на кожному пиві, #384 — лише перевіряє суперечність зі збереженим лінком, гейт
 далі верифікує), апсертить кожне нове пиво як orphan (`untappd_id` NULL) і повертає
-`{candidates:[{brewery,name,eligible,algolia}]}`, де `eligible` = backoff-due
+`{candidates:[{brewery,name,eligible,algolia,algoliaNarrow?}]}`, де `eligible` = backoff-due
 (`isEligible`) і **не** `wontfix`, та (пиво ще orphan **або** — #384 — воно вже лінковане,
 але надісланий `bid` суперечить збереженому і той лінк не `curated`/`checkin` — нижче).
-`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`; `query`
-будується через `cleanSearchQuery(brewery,name)` і лишається серверним контрактом.
+`algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
+його `query` будується через `cleanSearchQuery(brewery,name)` і лишається серверним
+контрактом. Додатково (#391) відповідь несе опційний `algoliaNarrow` — той самий об'єкт із
+**вузькою** сходинкою драбини `searchQueryLadder` (#382); поле присутнє лише коли сходинки
+різні (практично — лише для нелатинських назв). Розширення виконує `algoliaNarrow`
+**першим** і падає на `algolia` лише коли вузька сходинка повернула **нуль** хітів; після
+непорожньої сходинки воно не розширюється ніколи, навіть якщо сервер відповів `not_found`
+(ширша сходинка дала б надмножину, яку ті самі стадії матчера щойно відхилили). Бюджет
+сторінки (`MAX_SEARCHES_PER_PAGE`) рахує **пошуки**, а не пиво, і тролінг спить між
+пошуками; якщо вузька сходинка дала нуль, а бюджету на широку вже немає, пиво не
+сабмітиться взагалі — недобігнута драбина не є вердиктом, і порожній payload лише спалив би
+слот backoff. Старі збірки поля не знають: вони виконують `algolia` й поводяться як раніше.
 Розширення, якщо користувач увімкнув opt-in і дав runtime-дозвіл `untappd.com` + `*.algolia.net`, робить
 браузерний `POST https://{appId}-dsn.algolia.net/1/indexes/beer/query` з цими параметрами
 та публічними Algolia headers, а потім шле JSON hits у `/enrich/result`.
-`/enrich/result` приймає `{brewery,name,algolia,pageUrl?}` (`pageUrl` — опційна URL сторінки магазину,
+`/enrich/result` приймає `{brewery,name,algolia,query?,pageUrl?}` (`pageUrl` — опційна URL сторінки магазину,
 зберігається як `source_url` в `enrich_failures`), проганяє `parseAlgoliaResponse(algolia)` через
-наявний `lookupBeer` pipeline і застосовує спільний `applyLookupOutcome`. Legacy `{html}` payload
+наявний `lookupBeer` pipeline і застосовує спільний `applyLookupOutcome`.
+`query` (#391) — сходинка, яку клієнт реально виконав. Сервер перераховує
+`searchQueryLadder(brewery,name)` і приймає значення, лише якщо воно збігається з однією зі
+сходинок; тоді воно замінює `searchUrls` у результаті `lookupBeer` і потрапляє в
+`enrich_failures.search_url`. Будь-яке інше значення ігнорується. Це прибирає давню неправду
+релейного шляху: інжектований `search` віддає той самий payload на будь-який запит, тож URL,
+які будувала внутрішня драбина `lookupBeer`, описували пошуки, яких ніхто не виконував —
+а саме цей стовпець читає orphan-triage як доказ. Legacy `{html}` payload
 зберігається як сумісний fallback через `htmlSearch`, але основний relay-контракт — Algolia JSON.
 Логіка `applyLookupOutcome`:
 matched → `recordLookupSuccess` (bid+рейтинг; UNIQUE-клеш → merge у канонічний рядок),

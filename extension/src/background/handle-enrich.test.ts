@@ -165,4 +165,31 @@ describe('handleEnrichResult', () => {
     expect(Object.keys(body)).not.toContain('bidSlug');
     expect(Object.keys(body)).not.toContain('brand');
   });
+
+  // #391: the service worker is the only hop between the page and the API — a query
+  // dropped here is a search_url the server has to keep guessing.
+  it('forwards the executed ladder rung as query', async () => {
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await handleEnrichResult({
+      type: 'enrich:result', brewery: 'CITADEL', name: 'Томатка',
+      algolia: { hits: [] }, query: 'CITADEL Томатка',
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    expect(body.query).toBe('CITADEL Томатка');
+  });
+
+  it('omits query entirely when the caller reports none', async () => {
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>;
+    expect(Object.keys(body)).not.toContain('query');
+  });
 });

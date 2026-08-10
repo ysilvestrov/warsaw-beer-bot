@@ -4,8 +4,9 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
-import { normalizeName, normalizeBrewery } from '../../domain/normalize';
+import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
+import { buildSearchUrl } from '../../sources/untappd/search';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
   BEER_TEXT_LIMIT_CHARS,
@@ -311,6 +312,43 @@ describe('POST /enrich/candidates', () => {
     expect(res.status).toBe(400);
   });
 
+  // #391: the relay half of the #382 ladder. `algolia` must keep carrying today's
+  // (wide) query — a published 0.13.0 client executes that field and nothing else.
+  it('carries the narrow rung as algoliaNarrow for a two-rung (Cyrillic) pair', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'CITADEL', name: 'Томатка' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe('CITADEL');
+    expect(body.candidates[0].algoliaNarrow).toMatchObject({
+      appId: '9WBO4RQ3HO',
+      searchKey: '1d347324d67ec472bb7132c66aead485',
+      indexName: 'beer',
+      query: 'CITADEL Томатка',
+      hitsPerPage: 5,
+    });
+  });
+
+  it('omits algoliaNarrow when both rungs agree (all-Latin pair)', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Atak Chmielu' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe('PINTA Atak Chmielu');
+    expect(Object.keys(body.candidates[0])).not.toContain('algoliaNarrow');
+  });
+
+  it('keeps algolia byte-identical to cleanSearchQuery for a two-rung pair', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Гонір', name: 'Квас / Kvass' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe(cleanSearchQuery('Гонір', 'Квас / Kvass'));
+  });
+
   it('keeps a 200-beer payload with abv and style inside the route byte limit', () => {
     const beers = Array.from({ length: 200 }, (_, i) => ({
       brewery: 'Browar Stu Mostow Wroclaw',
@@ -581,6 +619,70 @@ describe('POST /enrich/result', () => {
       brewery: 'PINTA', name: 'Atak Chmielu', algolia: { hits: [], nbHits: 0 },
     });
     expect(res.status).toBe(200);
+  });
+
+  // #391: the client widened after a zero-hit narrow rung, so the relayed hits answer the
+  // WIDE query — while lookupBeer's own ladder still records the narrow rung first. Without
+  // the override the failure row cites the search the client did not run.
+  it('records the client-reported rung as the failure search_url', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      query: 'CITADEL',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    expect((await res.json()).status).toBe('not_found');
+
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).toBe(buildSearchUrl('CITADEL'));
+    expect(fail.search_url).not.toBe(buildSearchUrl('CITADEL Томатка')); // not lookupBeer's own first rung
+  });
+
+  it('ignores a query that is not one of the rungs it would have offered', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      query: 'drop table beers',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).not.toContain('drop');
+    expect(fail.search_url).toContain('untappd.com');
+  });
+
+  it('leaves the search_url alone when the client reports no query (old build)', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).toBe(buildSearchUrl('CITADEL Томатка'));
+  });
+
+  // #391 (AI review): a rung is built from brewery AND name, so the longest query this
+  // server can itself offer is ~2×BEER_TEXT_LIMIT_CHARS. Bounding the field by the
+  // single-field limit made the endpoint 413 a payload it had just asked for, and a 413
+  // loses the whole enrichment — for a field whose worst case is being ignored.
+  it('accepts a rung built from a maximal brewery and name', async () => {
+    const { app } = setup();
+    const brewery = 'B'.repeat(BEER_TEXT_LIMIT_CHARS);
+    const name = 'N'.repeat(BEER_TEXT_LIMIT_CHARS);
+    const query = `${brewery} ${name}`;
+    expect(query.length).toBeGreaterThan(BEER_TEXT_LIMIT_CHARS); // the case the old bound rejected
+
+    const res = await post(app, '/enrich/result', {
+      brewery, name, query,
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe('not_found');
   });
 });
 

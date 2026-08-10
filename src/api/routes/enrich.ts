@@ -14,9 +14,9 @@ import {
   type OrphanFacts,
 } from '../../storage/beers';
 import { isWontfix } from '../../storage/enrich_failures';
-import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
+import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
-import { htmlSearch } from '../../sources/untappd/search';
+import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import {
   ALGOLIA_DEFAULTS,
   ALGOLIA_HITS_PER_PAGE,
@@ -25,7 +25,7 @@ import {
   type AlgoliaQuery,
   type AlgoliaResponse,
 } from '../../sources/untappd/algolia';
-import { lookupBeer } from '../../domain/untappd-lookup';
+import { lookupBeer, type LookupOutcome } from '../../domain/untappd-lookup';
 import { resolveByBid } from '../../domain/bid-identity';
 import { lookupWithFallback } from '../../domain/web-fallback';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
@@ -76,6 +76,16 @@ const ResultBody = z.object({
     hits: z.array(z.record(z.string(), z.unknown())).optional(),
     nbHits: z.number().optional(),
   }).optional(),
+  // #391: the ladder rung the client actually executed. The relayed hits answer exactly
+  // one query, and only the client knows which — without this the failure row cites a
+  // search nobody ran. Optional: absent from every build below 0.14.
+  //
+  // The bound is derived, not borrowed: a rung is built from brewery AND name (joined by a
+  // space), each of which /enrich/candidates accepts at BEER_TEXT_LIMIT_CHARS. Reusing the
+  // single-field limit here would 413 the whole request over a query this very server had
+  // offered — losing the enrichment entirely for an advisory field whose only other failure
+  // mode is being silently ignored (withRelayQuery).
+  query: z.string().max(BEER_TEXT_LIMIT_CHARS * 2 + 1).optional(),
   pageUrl: z.string().max(PAGE_URL_LIMIT_CHARS).optional(),
 }).refine((v) => typeof v.html === 'string' || v.algolia !== undefined, {
   message: 'html or algolia is required',
@@ -89,6 +99,23 @@ function algoliaQuery(deps: ApiDeps, query: string): AlgoliaQuery {
     query,
     hitsPerPage: ALGOLIA_HITS_PER_PAGE,
   };
+}
+
+// #391: replace the search URLs `lookupBeer` invented with the rung the client reports
+// having executed. Only a value that is genuinely one of the rungs /enrich/candidates
+// would have offered is honoured — the check is a pure function, and it keeps a buggy or
+// forged client from writing arbitrary text into the column triage reads (#381).
+function withRelayQuery(
+  outcome: LookupOutcome,
+  brewery: string,
+  name: string,
+  query: string | undefined,
+): LookupOutcome {
+  if (query === undefined || !searchQueryLadder(brewery, name).includes(query)) return outcome;
+  const url = buildSearchUrl(query);
+  if (outcome.kind === 'not_found') return { ...outcome, searchUrls: [url] };
+  if (outcome.kind === 'blocked') return { ...outcome, searchUrl: url };
+  return outcome;
 }
 
 // Ensures a beer row exists for (brewery, name) and returns it.
@@ -144,12 +171,19 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
             (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
           !isWontfix(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
-        const query = cleanSearchQuery(b.brewery, b.name);
+        // #391: the #382 ladder, narrowest first. The LAST rung is by construction
+        // cleanSearchQuery(brewery, name) — the query this endpoint has always sent — so
+        // `algolia` keeps its meaning and a published 0.13.0 client is untouched. The
+        // narrow rung travels as an extra optional field the old client ignores, and is
+        // absent whenever the rungs agree (every all-Latin pair).
+        const rungs = searchQueryLadder(b.brewery, b.name);
+        const narrow = rungs.length > 1 ? rungs[0] : null;
         return {
           brewery: b.brewery,
           name: b.name,
           eligible,
-          algolia: algoliaQuery(deps, query),
+          algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
+          ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
         };
       }),
     )();
@@ -162,7 +196,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     payloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES, 'route'),
     zValidator('json', ResultBody, payloadSizeValidationHook(deps) as never),
     async (c) => {
-    const { brewery, name, abv, style, html, algolia, pageUrl, bid, bidSlug, brand } =
+    const { brewery, name, abv, style, html, algolia, pageUrl, bid, bidSlug, brand, query } =
       c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name, {
       abv: abv ?? undefined, style: style ?? undefined,
@@ -241,10 +275,15 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const search = algolia
       ? { search: async () => parseAlgoliaResponse(algolia as AlgoliaResponse) }
       : htmlSearch(html!);
-    const outcome = await lookupWithFallback(
-      () => lookupBeer({ brewery, name, abv: row.abv, search }),
-      row.id,
-      deps.webFallback ?? null,
+    const outcome = withRelayQuery(
+      await lookupWithFallback(
+        () => lookupBeer({ brewery, name, abv: row.abv, search }),
+        row.id,
+        deps.webFallback ?? null,
+      ),
+      brewery,
+      name,
+      query,
     );
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
