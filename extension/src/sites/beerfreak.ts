@@ -13,6 +13,22 @@ interface ProductMeta {
 
 const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)\s+/i;
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
+// Grammatical particles that bind a brewery descriptor to its proper noun
+// ("Brasserie du Bocq", "Brouwerij De Dolle Brouwers", "Browar na Jurze").
+// Taken from the shape of real brewery names in the catalogue, not invented.
+const QUALIFIER_TOKENS = new Set([
+  'de', 'du', 'des', 'del', 'della', 'dei', 'di', 'da', "d'",
+  'la', 'le', 'les', 'lo', "l'", 'the',
+  'van', 'von', 'der', 'den', 'het', "'t", 'en', 'y',
+  'na', 'za', 'w',
+]);
+// Words that continue a brewery name after its proper noun ("Brouwerij De Dolle
+// Brouwers", "Brasserie Cantillon Brewery"). Narrower than BREWERY_DESCRIPTORS on
+// purpose: 'family'/'company'/'co' are real beer-name words ("Family Reunion"),
+// and dropping them from this run costs no accuracy against the catalogue.
+const TRAILING_BREWERY_DESCRIPTORS = new Set([
+  ...LEADING_BREWERY_DESCRIPTORS, 'brewery', 'brewing', 'brouwers',
+]);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
 const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
 // Words that appear as brewery descriptors in a title's leading brewery form
@@ -86,13 +102,26 @@ function normalizedToken(token: string): string {
   return token.toLowerCase().replace(/[(),]/g, '');
 }
 
+// Index where a descriptor-led brewery ends: the descriptor, its run of
+// grammatical qualifiers, one proper noun, then a trailing run of
+// TRAILING_BREWERY_DESCRIPTORS. Clamped so the beer name always keeps at least
+// one token. Callers must have established that tokens[0] is a leading
+// descriptor and that tokens.length >= 3.
+function descriptorBreweryEnd(tokens: string[]): number {
+  let i = 1;
+  while (i < tokens.length && QUALIFIER_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
+  i += 1; // the proper noun
+  while (i < tokens.length && TRAILING_BREWERY_DESCRIPTORS.has(normalizedToken(tokens[i]))) i += 1;
+  return Math.min(i, tokens.length - 1);
+}
+
 function stripCollaboratorName(rawTitle: string): string {
   const tokens = rawTitle.split(/\s+/).filter(Boolean);
   if (tokens.length < 2) return rawTitle.trim();
 
   const first = normalizedToken(tokens[0]);
   if (LEADING_BREWERY_DESCRIPTORS.has(first) && tokens.length >= 3) {
-    return tokens.slice(2).join(' ');
+    return tokens.slice(descriptorBreweryEnd(tokens)).join(' ');
   }
 
   for (let i = 0; i < tokens.length - 1; i += 1) {
@@ -126,12 +155,13 @@ function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string 
   }
 
   const tokens = title.split(/\s+/).filter(Boolean);
-  const first = tokens[0]?.toLowerCase();
+  const first = normalizedToken(tokens[0] ?? '');
 
   if (tokens.length >= 3 && first && LEADING_BREWERY_DESCRIPTORS.has(first)) {
+    const end = descriptorBreweryEnd(tokens);
     return {
-      brewery: tokens.slice(0, -1).join(' '),
-      name: tokens[tokens.length - 1],
+      brewery: tokens.slice(0, end).join(' '),
+      name: tokens.slice(end).join(' '),
     };
   }
 

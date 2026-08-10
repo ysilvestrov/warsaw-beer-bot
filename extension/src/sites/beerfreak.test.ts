@@ -181,6 +181,73 @@ describe('beerfreak adapter', () => {
     }));
   });
 
+  it('keeps the three-token descriptor split unchanged (#386 negative test)', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10480, brand_title: null, title: 'Browar Kormoran Orkiszowe' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Browar Kormoran',
+      name: 'Orkiszowe',
+    }));
+  });
+
+  it('bounds a descriptor-led brandless brewery instead of taking all but the last token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10481, brand_title: null, title: 'Brasserie du Bocq Blanche de Namur' },
+      { id: 10482, brand_title: null, title: 'Birrificio Del Ducato Verdi Imperial Stout' },
+      { id: 10483, brand_title: null, title: 'Brouwerij van Steenberge Gulden Draak 9000 Quadruple' },
+      { id: 10490, brand_title: null, title: 'Brasserie Cantillon Brewery Kriek' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie du Bocq',
+      name: 'Blanche de Namur',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Birrificio Del Ducato',
+      name: 'Verdi Imperial Stout',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brouwerij van Steenberge',
+      name: 'Gulden Draak 9000 Quadruple',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie Cantillon Brewery',
+      name: 'Kriek',
+    }));
+  });
+
+  it('clamps a fully-qualified descriptor title so the beer name keeps a token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10484, brand_title: null, title: 'Brasserie de la Senne' },
+    ]));
+
+    // Descriptor + qualifier run + proper noun consumes the whole title, so the
+    // clamp — not the rule — decides the boundary. Erring short is the documented,
+    // tolerated direction; leaving the name empty is not.
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie de la',
+      name: 'Senne',
+    }));
+  });
+
+  it('does not let the trailing brewery run swallow beer-name words', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10487, brand_title: null, title: 'Brasserie Dupont Family Reunion' },
+      { id: 10488, brand_title: null, title: 'Browar Pinta Company Man' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie Dupont',
+      name: 'Family Reunion',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Browar Pinta',
+      name: 'Company Man',
+    }));
+  });
+
   it('falls back to card title text when embedded product metadata is absent', () => {
     const doc = new DOMParser().parseFromString(withoutProductMetadata(html), 'text/html');
     const parsed = beerfreak.parseCards(doc);
@@ -266,6 +333,28 @@ describe('beerfreak adapter', () => {
     expect(parsed).toContainEqual(expect.objectContaining({
       brewery: 'SHO BREWERY',
       name: '(IIIO) Narcissus',
+    }));
+  });
+
+  it('drops the whole descriptor-led brewery run from a collaborator segment, not two tokens', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10486, brand_title: null, title: 'Popihn/Brasserie du Bocq Blanche de Namur' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Popihn',
+      name: 'Blanche de Namur',
+    }));
+  });
+
+  it('gates the descriptor branch on the normalized first token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10489, brand_title: null, title: '(Brasserie) du Bocq Blanche de Namur' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: '(Brasserie) du Bocq',
+      name: 'Blanche de Namur',
     }));
   });
 });
