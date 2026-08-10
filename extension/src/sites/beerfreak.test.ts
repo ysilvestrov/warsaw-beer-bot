@@ -192,6 +192,39 @@ describe('beerfreak adapter', () => {
     }));
   });
 
+  it('bounds a descriptor-led brandless brewery instead of taking all but the last token', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10481, brand_title: null, title: 'Brasserie du Bocq Blanche de Namur' },
+      { id: 10482, brand_title: null, title: 'Birrificio Del Ducato Verdi Imperial Stout' },
+      { id: 10483, brand_title: null, title: 'Brouwerij van Steenberge Gulden Draak 9000 Quadruple' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie du Bocq',
+      name: 'Blanche de Namur',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Birrificio Del Ducato',
+      name: 'Verdi Imperial Stout',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brouwerij van Steenberge',
+      name: 'Gulden Draak 9000 Quadruple',
+    }));
+  });
+
+  it('never leaves a descriptor-led brandless title without a beer name', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10484, brand_title: null, title: 'Browar Kormoran' },
+      { id: 10485, brand_title: null, title: 'Brasserie de la Senne' },
+    ]));
+
+    for (const beer of parsed) {
+      expect(beer.name).not.toBe('');
+      expect(beer.brewery).not.toBe('');
+    }
+  });
+
   it('falls back to card title text when embedded product metadata is absent', () => {
     const doc = new DOMParser().parseFromString(withoutProductMetadata(html), 'text/html');
     const parsed = beerfreak.parseCards(doc);
