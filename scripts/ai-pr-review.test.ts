@@ -334,6 +334,78 @@ describe('runReview — full mode', () => {
     expect(issueComments).toHaveLength(1);
   });
 
+  it('updates a changed failure through the issue-comment endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (!init || init.method === undefined) {
+        if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+        return jsonResponse([{ id: 99, body: `${FAILURE_MARKER}\nold`, user: { type: 'Bot' } }]);
+      }
+      return jsonResponse({ id: 99 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    const update = calls.find(({ init }) => init?.method === 'PATCH');
+    expect(update?.url).toBe('https://api.github.com/repos/o/r/issues/comments/99');
+  });
+
+  it('searches every issue-comment page before creating a failure marker', async () => {
+    const markerBody = [
+      FAILURE_MARKER,
+      '',
+      '## ⚠️ AI PR Review failed',
+      '',
+      `The required AI review did not complete for commit \`${'b'.repeat(40)}\`.`,
+      'The failing check remains authoritative. No new AI review was published for this run.',
+      '',
+      '> OpenAI returned an empty completion',
+    ].join('\n');
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (url.includes('page=2')) {
+        return jsonResponse([{ id: 99, body: markerBody, user: { type: 'Bot' } }]);
+      }
+      return {
+        ...jsonResponse(Array.from({ length: 100 }, (_, id) => ({ id, body: 'ordinary' }))),
+        headers: new Headers({
+          link: '<https://api.github.com/repos/o/r/issues/7/comments?per_page=100&page=2>; rel="next"',
+        }),
+      } as Response;
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ url }) => url.includes('page=2'))).toBe(true);
+    expect(calls.filter(({ init }) => init?.method === 'POST')).toHaveLength(0);
+  });
+
+  it('attempts to create the failure marker when listing comments fails', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (!init?.method) return jsonResponse({ message: 'Bad gateway' }, 502);
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ url, init }) => url.endsWith('/issues/7/comments') && init?.method === 'POST')).toBe(true);
+  });
+
   it('keeps the original review error when posting the failure comment also fails', async () => {
     const ai = openaiFetch(['']);
     const logs: string[] = [];

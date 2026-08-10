@@ -224,15 +224,22 @@ async function postFailureComment(
   const headers = githubHeaders(deps.token);
   const signal = AbortSignal.timeout(FAILURE_COMMENT_TIMEOUT_MS);
   const body = failureCommentBody(message, headSha);
-  const list = await fetchFn(`${url}?per_page=100`, { headers, signal });
-  if (!list.ok) throw await githubError('list failure comments', list);
-  const comments = (await list.json()) as IssueCommentRow[];
-  const existing = comments.find(
-    (comment) => comment.user?.type === 'Bot' && (comment.body ?? '').includes(FAILURE_MARKER),
-  );
+  let pageUrl: string | null = `${url}?per_page=100`;
+  let existing: IssueCommentRow | undefined;
+  while (pageUrl) {
+    const list: Response = await fetchFn(pageUrl, { headers, signal });
+    if (!list.ok) break;
+    const comments = (await list.json()) as IssueCommentRow[];
+    existing = comments.find(
+      (comment) => comment.user?.type === 'Bot' && (comment.body ?? '').includes(FAILURE_MARKER),
+    );
+    if (existing) break;
+    pageUrl = list.headers?.get('link')?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
+  }
   if (existing?.body === body) return;
 
-  const res = await fetchFn(existing ? `${url}/${existing.id}` : url, {
+  const updateUrl = `https://api.github.com/repos/${deps.repo}/issues/comments/${existing?.id}`;
+  const res = await fetchFn(existing ? updateUrl : url, {
     method: existing ? 'PATCH' : 'POST',
     headers,
     body: JSON.stringify({ body }),
