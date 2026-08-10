@@ -665,6 +665,25 @@ describe('POST /enrich/result', () => {
     const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
     expect(fail.search_url).toBe(buildSearchUrl('CITADEL Томатка'));
   });
+
+  // #391 (AI review): a rung is built from brewery AND name, so the longest query this
+  // server can itself offer is ~2×BEER_TEXT_LIMIT_CHARS. Bounding the field by the
+  // single-field limit made the endpoint 413 a payload it had just asked for, and a 413
+  // loses the whole enrichment — for a field whose worst case is being ignored.
+  it('accepts a rung built from a maximal brewery and name', async () => {
+    const { app } = setup();
+    const brewery = 'B'.repeat(BEER_TEXT_LIMIT_CHARS);
+    const name = 'N'.repeat(BEER_TEXT_LIMIT_CHARS);
+    const query = `${brewery} ${name}`;
+    expect(query.length).toBeGreaterThan(BEER_TEXT_LIMIT_CHARS); // the case the old bound rejected
+
+    const res = await post(app, '/enrich/result', {
+      brewery, name, query,
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe('not_found');
+  });
 });
 
 // --- #384: the shop-published Untappd bid ------------------------------------

@@ -79,7 +79,13 @@ const ResultBody = z.object({
   // #391: the ladder rung the client actually executed. The relayed hits answer exactly
   // one query, and only the client knows which — without this the failure row cites a
   // search nobody ran. Optional: absent from every build below 0.14.
-  query: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
+  //
+  // The bound is derived, not borrowed: a rung is built from brewery AND name (joined by a
+  // space), each of which /enrich/candidates accepts at BEER_TEXT_LIMIT_CHARS. Reusing the
+  // single-field limit here would 413 the whole request over a query this very server had
+  // offered — losing the enrichment entirely for an advisory field whose only other failure
+  // mode is being silently ignored (withRelayQuery).
+  query: z.string().max(BEER_TEXT_LIMIT_CHARS * 2 + 1).optional(),
   pageUrl: z.string().max(PAGE_URL_LIMIT_CHARS).optional(),
 }).refine((v) => typeof v.html === 'string' || v.algolia !== undefined, {
   message: 'html or algolia is required',
