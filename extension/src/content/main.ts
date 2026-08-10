@@ -53,9 +53,9 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
         (await sendBg<{ candidates: EnrichCandidate[] }>({ type: 'enrich:candidates', beers: bs }))?.candidates ?? [],
       fetchSearch: async (algolia) =>
         (await sendBg<{ algolia: AlgoliaResponse | null }>({ type: 'enrich:fetch', algolia }))?.algolia ?? null,
-      submitResult: async (brewery, name, algolia, facts) =>
+      submitResult: async (brewery, name, algolia, facts, query) =>
         (await sendBg<{ result: EnrichResult | null }>({
-          type: 'enrich:result', brewery, name, algolia,
+          type: 'enrich:result', brewery, name, algolia, query,
           ...(facts?.abv !== undefined ? { abv: facts.abv } : {}),
           ...(facts?.style !== undefined ? { style: facts.style } : {}),
           ...(facts?.bid !== undefined ? { bid: facts.bid } : {}),

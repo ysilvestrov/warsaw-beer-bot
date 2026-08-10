@@ -117,6 +117,22 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     });
   });
 
+  // #391: the executed ladder rung must survive the content-script → service-worker hop.
+  it('forwards the executed query into the enrich:result message', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N' }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+
+    const result = sent.find((m) => m.type === 'enrich:result')!;
+    // stubServiceWorker's /enrich/candidates answer offers a single rung with query: 'q' —
+    // assert the exact rung that was executed, not merely that *some* string arrived.
+    expect(result.query).toBe('q');
+  });
+
   it('omits every optional fact when the shop published none', async () => {
     await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
     const sent = stubServiceWorker();
