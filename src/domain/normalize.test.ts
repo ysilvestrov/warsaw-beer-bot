@@ -470,6 +470,15 @@ describe('repairHomoglyphs', () => {
     expect(repairHomoglyphs(input)).toBe(input);
   });
 
+  test('never transliterates a single-script token, even when every character has a homoglyph', () => {
+    // `Аса` is pure Cyrillic and each of А/с/а has a Latin twin. The Latin `IPA`
+    // elsewhere in the string gets the whole string past the fast path, so only the
+    // per-token single-script guard stops `Аса` from being corrupted into `Aca`.
+    expect(repairHomoglyphs('Аса IPA')).toBe('Аса IPA');
+    // Mirror case: a pure-Latin token beside a Cyrillic one.
+    expect(repairHomoglyphs('CAT Пиво')).toBe('CAT Пиво');
+  });
+
   test('single-script strings pass through unchanged', () => {
     expect(repairHomoglyphs('Pinta Atak Chmielu')).toBe('Pinta Atak Chmielu');
     expect(repairHomoglyphs('Ципа Блонда')).toBe('Ципа Блонда');
