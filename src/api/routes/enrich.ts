@@ -14,7 +14,7 @@ import {
   type OrphanFacts,
 } from '../../storage/beers';
 import { isWontfix } from '../../storage/enrich_failures';
-import { normalizeBrewery, normalizeName, cleanSearchQuery } from '../../domain/normalize';
+import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
 import { htmlSearch } from '../../sources/untappd/search';
 import {
@@ -144,12 +144,19 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
             (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
           !isWontfix(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
-        const query = cleanSearchQuery(b.brewery, b.name);
+        // #391: the #382 ladder, narrowest first. The LAST rung is by construction
+        // cleanSearchQuery(brewery, name) — the query this endpoint has always sent — so
+        // `algolia` keeps its meaning and a published 0.13.0 client is untouched. The
+        // narrow rung travels as an extra optional field the old client ignores, and is
+        // absent whenever the rungs agree (every all-Latin pair).
+        const rungs = searchQueryLadder(b.brewery, b.name);
+        const narrow = rungs.length > 1 ? rungs[0] : null;
         return {
           brewery: b.brewery,
           name: b.name,
           eligible,
-          algolia: algoliaQuery(deps, query),
+          algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
+          ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
         };
       }),
     )();

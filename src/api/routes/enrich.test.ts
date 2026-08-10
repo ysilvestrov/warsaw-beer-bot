@@ -4,7 +4,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
-import { normalizeName, normalizeBrewery } from '../../domain/normalize';
+import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
@@ -309,6 +309,43 @@ describe('POST /enrich/candidates', () => {
       beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 0 }],
     });
     expect(res.status).toBe(400);
+  });
+
+  // #391: the relay half of the #382 ladder. `algolia` must keep carrying today's
+  // (wide) query — a published 0.13.0 client executes that field and nothing else.
+  it('carries the narrow rung as algoliaNarrow for a two-rung (Cyrillic) pair', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'CITADEL', name: 'Томатка' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe('CITADEL');
+    expect(body.candidates[0].algoliaNarrow).toMatchObject({
+      appId: '9WBO4RQ3HO',
+      searchKey: '1d347324d67ec472bb7132c66aead485',
+      indexName: 'beer',
+      query: 'CITADEL Томатка',
+      hitsPerPage: 5,
+    });
+  });
+
+  it('omits algoliaNarrow when both rungs agree (all-Latin pair)', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'PINTA', name: 'Atak Chmielu' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe('PINTA Atak Chmielu');
+    expect(Object.keys(body.candidates[0])).not.toContain('algoliaNarrow');
+  });
+
+  it('keeps algolia byte-identical to cleanSearchQuery for a two-rung pair', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Гонір', name: 'Квас / Kvass' }],
+    });
+    const body = await res.json();
+    expect(body.candidates[0].algolia.query).toBe(cleanSearchQuery('Гонір', 'Квас / Kvass'));
   });
 
   it('keeps a 200-beer payload with abv and style inside the route byte limit', () => {
