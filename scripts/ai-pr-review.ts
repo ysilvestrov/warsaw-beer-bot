@@ -228,19 +228,18 @@ async function postFailureComment(
   let pageUrl: string | null = `${url}?per_page=100`;
   let existing: IssueCommentRow | undefined;
   while (pageUrl) {
-    let list: Response;
     try {
-      list = await fetchFn(pageUrl, { headers, signal: lookupSignal });
+      const list: Response = await fetchFn(pageUrl, { headers, signal: lookupSignal });
+      if (!list.ok) break;
+      const comments = (await list.json()) as IssueCommentRow[];
+      existing = comments.find(
+        (comment) => comment.user?.type === 'Bot' && (comment.body ?? '').includes(FAILURE_MARKER),
+      );
+      if (existing) break;
+      pageUrl = list.headers?.get('link')?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
     } catch {
       break;
     }
-    if (!list.ok) break;
-    const comments = (await list.json()) as IssueCommentRow[];
-    existing = comments.find(
-      (comment) => comment.user?.type === 'Bot' && (comment.body ?? '').includes(FAILURE_MARKER),
-    );
-    if (existing) break;
-    pageUrl = list.headers?.get('link')?.match(/<([^>]+)>;\s*rel="next"/)?.[1] ?? null;
   }
   if (existing?.body === body) return;
 

@@ -427,6 +427,30 @@ describe('runReview — full mode', () => {
     expect(signals[1]).not.toBe(signals[0]);
   });
 
+  it('attempts marker creation when reading the lookup response body aborts', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const githubFetch = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      if (url.includes('/pulls/7/reviews')) return jsonResponse([]);
+      if (!init?.method) {
+        return {
+          ...jsonResponse([]),
+          json: async () => {
+            throw new DOMException('lookup body timed out', 'AbortError');
+          },
+        } as Response;
+      }
+      return jsonResponse({ id: 1 });
+    }) as unknown as typeof fetch;
+
+    const ai = openaiFetch(['']);
+    await expect(
+      runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch })),
+    ).rejects.toThrow('OpenAI returned an empty completion');
+
+    expect(calls.some(({ init }) => init?.method === 'POST')).toBe(true);
+  });
+
   it('keeps the original review error when posting the failure comment also fails', async () => {
     const ai = openaiFetch(['']);
     const logs: string[] = [];
