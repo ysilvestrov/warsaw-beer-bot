@@ -50,7 +50,13 @@ reads when it classifies the row (#381), and what seeds junk brewery identities 
 ## 3. The rule, chosen from data
 
 Candidate rule: the brewery is **the descriptor + its run of grammatical qualifiers +
-exactly one proper noun**, clamped so the name always retains at least one token.
+one proper noun + a trailing run of brewery-descriptor words**, clamped so the name always
+retains at least one token.
+
+The trailing run is not decoration: `Brouwerij De Dolle Brouwers` is covered by an existing
+test (`beerfreak.test.ts:175`), and without it the rule would cut that brewery to
+`Brouwerij De Dolle`. Attested trailing words in the catalogue: `brewery` (31 breweries),
+`brewing` (2), `brouwers` (1), `co.` (1), `brasserie` (1).
 
 The qualifier list is derived from the catalogue, not invented. Over the 3+ token
 descriptor-led breweries with `untappd_id IS NOT NULL`, the second token is:
@@ -66,29 +72,40 @@ descriptor-led breweries with `untappd_id IS NOT NULL`, the second token is:
 | `des` | 3 |
 
 plus singletons `del`, `della`, `dei`, `di`, `da`, `der`, `den`, `von`, `l'`, `d'`, `le`,
-`les`, `en`, `y`, `the`.
+`les`, `lo`, `en`, `y`, `the`, and the Polish prepositions `na`, `za`, `w` (attested by
+`Browar na Jurze`, `Browar Za Miastem`).
 
 ### 3.1 Accuracy against the catalogue
 
 Both rules were replayed against **all 342 descriptor-led breweries** in the
-`untappd_id IS NOT NULL` catalogue, by synthesising a title (`<brewery> <name tail>`) and
-asking each rule to recover the brewery exactly:
+`untappd_id IS NOT NULL` catalogue, by synthesising a title (`<brewery> <name>`) and asking
+each rule to recover the brewery exactly. The result is reported **conditioned on how many
+tokens the beer name has**, because today's rule is a pure function of that:
 
-| rule | exact recovery |
-|---|---|
-| today (`tokens.slice(0, -1)`) | 94 / 342 — **27%** |
-| bounded (this design) | 236 / 342 — **69%** |
+| rule | 1-token name | 2-token name | 3-token name |
+|---|---|---|---|
+| today (`tokens.slice(0, -1)`) | 342/342 — **100%** | 0/342 — **0%** | 0/342 — **0%** |
+| bounded, no trailing run | 239/342 — 70% | 239/342 — 70% | 239/342 — 70% |
+| bounded + trailing run (this design) | 266/342 — **78%** | 266/342 — **78%** | 266/342 — **78%** |
+
+Today's rule is correct only when the beer name happens to be exactly one token, and wrong
+otherwise — it never reads the brewery, it assumes the name is one word. The bounded rule is
+independent of the name length, which is the property that makes it usable at all.
+
+An earlier draft of this design reported 27% vs 69%. Those numbers were an artefact of
+mixing name lengths in one harness run; the table above supersedes them. The conclusion is
+unchanged and stronger.
 
 ### 3.2 The direction of the residual error matters
 
-The bounded rule's 106 misses all fail by producing a **shorter** brewery
-(`Brouwerij De Halve Maan` → `Brouwerij De Halve`), leaving the surplus tokens at the head
-of the name — the shape `stripBreweryFromName` already tolerates, and the shape the issue's
-own probe showed to be survivable.
+At a 2-token name the bounded rule's 76 misses are **all** too short
+(`Brouwerij De Halve Maan` → `Brouwerij De Halve`) and **none** too long. Surplus tokens
+stay at the head of the name — the shape `stripBreweryFromName` already tolerates, and the
+shape the issue's own probe showed to be survivable.
 
-Today's rule fails by producing a **longer** brewery, which is the shape that produced the
-single measured MISS. The bounded rule cannot produce a one-token name at all, so that
-failure mode is eliminated by construction rather than by tuning.
+Today's rule is the mirror image: at a 2-token name all 342 are too long. That is the shape
+that produced the single measured MISS. The bounded rule cannot produce a one-token name at
+all, so that failure mode is eliminated by construction rather than by tuning.
 
 All seven titles from the issue's probe split correctly under the bounded rule, including
 the one that fails today.
@@ -99,8 +116,9 @@ One new helper in `extension/src/sites/beerfreak.ts`:
 
 ```ts
 // Index where a descriptor-led brewery ends: the descriptor, its run of
-// grammatical qualifiers, then one proper noun — clamped so the name keeps
-// at least one token. Callers pass tokens whose [0] is a known descriptor.
+// grammatical qualifiers, one proper noun, then a trailing run of brewery
+// descriptors — clamped so the name keeps at least one token. Callers pass
+// tokens whose [0] is a known descriptor.
 function descriptorBreweryEnd(tokens: string[]): number
 ```
 
@@ -120,6 +138,16 @@ same direction and with the same accuracy characteristics as §3.
 `LEADING_BREWERY_DESCRIPTORS`, compared through the existing `normalizedToken`
 (which lowercases and strips `(`, `)`, `,`).
 
+The **trailing** run reuses the existing `BREWERY_DESCRIPTORS` set with `'brouwers'` added —
+no third set. This was measured, not assumed: `BREWERY_DESCRIPTORS + brouwers` scores the
+same 266/342 (76 too short, 0 too long) as the ad-hoc trailing sets tried during design, so
+the shared set costs nothing in accuracy and removes a concept.
+
+Adding `'brouwers'` also affects `stripLeadingBreweryRun`, the set's other consumer, where
+it is semantically correct — `brouwers` is a brewery descriptor there too. The existing
+tests for that function (`beerfreak.test.ts:229`, `:247`) pin the behaviour and must stay
+green.
+
 ### 4.1 Empty brewery
 
 The bounded rule always yields `end >= 2`, so this branch cannot emit an empty brewery.
@@ -130,8 +158,12 @@ alone: it is the single-token-title case, unreachable from this branch.
 
 Vitest, alongside the existing beerfreak tests.
 
-**Negative test, required by the issue** — today's behaviour must not change:
-- `Browar Kormoran Orkiszowe` → `Browar Kormoran` + `Orkiszowe`
+**Negative tests — today's behaviour must not change:**
+- required by the issue: `Browar Kormoran Orkiszowe` → `Browar Kormoran` + `Orkiszowe`
+- the **existing** test at `beerfreak.test.ts:175`:
+  `Brouwerij De Dolle Brouwers Oerbier` → `Brouwerij De Dolle Brouwers` + `Oerbier`.
+  This is what forced the trailing-descriptor run into the rule (§3); it must stay green
+  unmodified, and it is the plan's canary for that clause.
 
 **Corrections:**
 - `Brasserie du Bocq Blanche de Namur` → `Brasserie du Bocq` + `Blanche de Namur`
