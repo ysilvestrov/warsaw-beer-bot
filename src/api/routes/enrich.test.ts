@@ -621,21 +621,23 @@ describe('POST /enrich/result', () => {
     expect(res.status).toBe(200);
   });
 
-  // #391: the relayed payload is the answer to ONE query the client chose from the
-  // ladder. Without this the failure row cites a search that never happened.
+  // #391: the client widened after a zero-hit narrow rung, so the relayed hits answer the
+  // WIDE query — while lookupBeer's own ladder still records the narrow rung first. Without
+  // the override the failure row cites the search the client did not run.
   it('records the client-reported rung as the failure search_url', async () => {
     const { db, app } = setup();
     const res = await post(app, '/enrich/result', {
       brewery: 'CITADEL',
       name: 'Томатка',
-      query: 'CITADEL Томатка',
+      query: 'CITADEL',
       algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
     });
     expect((await res.json()).status).toBe('not_found');
 
     const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
     const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
-    expect(fail.search_url).toBe(buildSearchUrl('CITADEL Томатка'));
+    expect(fail.search_url).toBe(buildSearchUrl('CITADEL'));
+    expect(fail.search_url).not.toBe(buildSearchUrl('CITADEL Томатка')); // not lookupBeer's own first rung
   });
 
   it('ignores a query that is not one of the rungs it would have offered', async () => {
@@ -661,7 +663,7 @@ describe('POST /enrich/result', () => {
     });
     const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
     const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
-    expect(fail.search_url).toContain('untappd.com');
+    expect(fail.search_url).toBe(buildSearchUrl('CITADEL Томатка'));
   });
 });
 
