@@ -173,6 +173,28 @@ export function breweryFromRegistryTags(tags: string[]): FlaskerBrewery | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// #384: the shop's JSON-LD `brand.name` is the SAME shop display string that
+// FLASKER_BREWERIES.match and BREWERY_RULES.tags/titleAliases were built from
+// (scripts/gen-flasker-breweries.ts strips it straight off the shop's own brand
+// tile) — it is not independently canonical. Using it verbatim would silently
+// UNDO the catalog reconciliation those tables exist to perform (e.g. "Правда"
+// instead of the registry's "Pravda", which the server then can't search: #382
+// found cleanSearchQuery deletes all-Cyrillic tokens outright). So map the brand
+// through the same registry/rule lookups the title-parsing path already uses,
+// and only pass it through unchanged when neither table knows it — which is
+// exactly the case that makes the brand useful in the first place: series names
+// the title alone never reveals (Tomatol/Vespers/MGM-15 -> Mad Brew, Morava ->
+// Vibrant Pour).
+function canonicalizeBrand(brand: string): string {
+  const normalized = normalizeTag(brand);
+  const rule = BREWERY_RULES.find((r) =>
+    r.tags.some((tag) => normalizeTag(tag) === normalized) ||
+    r.titleAliases.some((alias) => normalizeTag(alias) === normalized),
+  );
+  if (rule) return rule.canonical;
+  return breweryFromRegistryTags([brand])?.canonical ?? brand;
+}
+
 // Registry path: resolve a brewery that appears as the leading prefix of the title
 // head. Longest match wins (so "Хмільний кіт" beats a bare "Хмільний"). Requires a
 // word boundary (exact head or `<brewery> `) so "DUMArine" never matches "DUMA".
@@ -436,9 +458,11 @@ export const flasker: SiteAdapter = {
       const url = detailUrls.get(card.el);
       if (!url) return;
       const detail = await loadDetail(url);
-      // The JSON-LD brand has 100% coverage and beats every heuristic in this file
-      // (BREWERY_RULES / familySlugPrefixes / the registry) — let it override.
-      if (detail.brand) card.brewery = detail.brand;
+      // The JSON-LD brand has 100% coverage and resolves series names the title
+      // never reveals — but it is the shop's own display string, not a canonical
+      // one, so it must be mapped through the registry/rules first (canonicalizeBrand)
+      // or it would de-canonicalize breweries those tables already reconciled.
+      if (detail.brand) card.brewery = canonicalizeBrand(detail.brand);
       if (detail.bid !== undefined) {
         card.bid = detail.bid;
         card.bidSlug = detail.bidSlug;

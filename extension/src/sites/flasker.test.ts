@@ -512,7 +512,9 @@ describe('#384 product-detail parsing', () => {
   });
 
   it('ignores an Untappd link that is not a beer URL', () => {
-    expect(parseProductDetail('<a href="https://untappd.com/user/someone">u</a>')).toEqual({});
+    // Numeric tail present (unlike /user/someone) so this actually pins the
+    // required `/b/` segment, not merely the presence of a trailing digit run.
+    expect(parseProductDetail('<a href="https://untappd.com/w/some-brewery/123456">u</a>')).toEqual({});
   });
 
   it('never throws on a malformed brand escape (odd trailing backslash)', () => {
@@ -627,5 +629,66 @@ describe('#384 flasker.loadCardDetails', () => {
     await flasker.loadCardDetails?.([{ el: document.createElement('div'), brewery: 'X', name: 'Y' }]);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+});
+
+// #384 review fix: the JSON-LD brand is the shop's own display string — the
+// same one FLASKER_BREWERIES.match / BREWERY_RULES.tags were stripped from —
+// not an independently canonical form. Passing it through verbatim would undo
+// the catalog reconciliation those tables perform (measured live: "Правда",
+// "Volta", "Ten Men", "Heather House Brewery", "Vibrant Pour", "MUZA BREWING
+// CO" all regressed). It must be mapped through the registry/rules first.
+describe('#384 brand canonicalization (post-review fix)', () => {
+  async function detailBrewery(url: string, heuristicTitle: string, jsonLdBrand: string): Promise<string | undefined> {
+    const doc = new DOMParser().parseFromString(`<ul>${archiveCard(url, heuristicTitle)}</ul>`, 'text/html');
+    const cards = flasker.parseCards(doc);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => `<script>{"brand":{"@type":"Brand","name":"${jsonLdBrand}"}}</script>`,
+    } as Response);
+    await flasker.loadCardDetails?.(cards);
+    fetchSpy.mockRestore();
+    return cards[0]?.brewery;
+  }
+
+  // Registry canonical forms read from flasker-breweries.generated.ts (not guessed):
+  // { match: ["Правда"], canonical: "Pravda" }, { match: ["Volta"], canonical: "Volta Brewery" }.
+  it('maps the shop\'s "Правда" brand to the registry canonical "Pravda"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/pravda-gvara-8-330ml/', 'Правда Ґвара №8 5% 330ml', 'Правда',
+    );
+    expect(brewery).toBe('Pravda');
+  });
+
+  it('maps the shop\'s "Volta" brand to the registry canonical "Volta Brewery"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/volta-kometa-ipa-330ml/', 'VOLTA KOMETA IPA 6% 330ml', 'Volta',
+    );
+    expect(brewery).toBe('Volta Brewery');
+  });
+
+  // BREWERY_RULES canonical (flasker.ts): { canonical: 'VibrantPour', tags: ['vibrant pour'] }.
+  it('maps the shop\'s "Vibrant Pour" brand to the BREWERY_RULES canonical "VibrantPour"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/vibrantpour-spontan-330ml/', 'VibrantPour Spontan 5% 330ml', 'Vibrant Pour',
+    );
+    expect(brewery).toBe('VibrantPour');
+  });
+
+  it('passes a brand through unchanged when neither the registry nor BREWERY_RULES knows it', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/unknown-brand-beer-330ml/', 'Mystery House Beer 5% 330ml', 'Some Totally New Brewery',
+    );
+    expect(brewery).toBe('Some Totally New Brewery');
+  });
+
+  // The series case the brand override exists for: the title alone gives no brewery
+  // signal ("Vespers" carries no trace of Mad Brew), so the heuristic falls back to
+  // splitting the first token as the brewery. A rule-known brand must still override it.
+  it('still lets a known-rule "Mad Brew" brand override a wrong heuristic brewery (series case)', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/vespers-330ml/', 'Vespers 6% 330ml', 'Mad Brew',
+    );
+    expect(brewery).toBe('Mad Brew');
   });
 });
