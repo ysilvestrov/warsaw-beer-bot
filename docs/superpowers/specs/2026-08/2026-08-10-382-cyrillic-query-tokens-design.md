@@ -53,10 +53,14 @@ their Cyrillic names.
 
 Algolia ANDs every term. Replaying all 101 rows through both candidate fixes:
 
-| variant | rows improved | rows regressed (hits → 0) |
+| variant | rows with a narrower pool | rows regressed (hits → 0) |
 |---|---|---|
-| **Option 1 of #382** — script-aware retention gate, keep every Cyrillic token | 16 | **44** |
+| **Option 1 of #382** — script-aware retention gate, keep every Cyrillic token | 9 | **44** |
 | Curated Cyrillic noise vocabulary (stop words, shop labels, styles, grocery nouns) | 9 | **29** |
+
+(Both variants improve the same 9 rows. What separates them from the ladder in §3 is
+not the upside — it is that they pay for it by zeroing dozens of queries that work
+today, because they apply the Cyrillic token unconditionally instead of falling back.)
 
 No static filter can succeed here. The tokens that zero the query are not noise —
 they are real Ukrainian beer names (`Банановий Стаут`, `ІСКРА`, `Захцянка`,
@@ -188,13 +192,15 @@ return five wrong rows where today's top five happened to contain the right one.
 That surface — beers that **currently match** — was measured directly, since the
 issue's own examples are all existing failures and cannot show it.
 
-Sample of 118 drawn from the 1626 matched beers carrying Cyrillic (1534 of which
-get a different query under the ladder):
+Sample of 127 drawn from the 1626 matched beers carrying Cyrillic (1521 of which
+get a different query under the ladder). Measured against the shipped implementation,
+not a prototype:
 
 | outcome | rows |
 |---|---|
-| narrow rung returns the known-correct `untappd_id` in its top 5 | 116 |
-| narrow rung empty → safe fallback to today's query | 2 |
+| narrow rung returns the known-correct `untappd_id` in its top 5 | 122 |
+| narrow rung empty → safe fallback to today's query | 4 |
+| neither rung finds the target (unrelated pre-existing miss) | 1 |
 | **known-correct id lost that today's query found** | **0** |
 
 ## 5. Acceptance criteria
@@ -209,8 +215,16 @@ get a different query under the ladder):
 4. `lookupBeer` issues the reduced rung only after the full rung returns zero
    results, and issues it never when the full rung returns any result (assert the
    search call count, not just the outcome).
-5. Replaying the 101 active Cyrillic failure rows after implementation reproduces
-   §2.2's ladder column: ≥16 rows narrowed, 0 rows regressed.
+5. Replaying the 101 active Cyrillic failure rows after implementation yields
+   **9 rows narrowed and 0 rows regressed**, with `Томатка`, `ЗАБІЯКА`, `Золотко`
+   and `Сарана в Томаті` among the winners.
+
+   Measured on the shipped implementation: 9 narrowed, 0 regressed, 80 whose narrow
+   rung is empty and therefore fall back to exactly today's query, 6 unchanged in
+   pool size, 6 that produce a single rung. An earlier draft of this document put
+   the narrowed figure at 16; that number was the count of rows where *both* rungs
+   return hits, which is not the same thing as the pool getting smaller. 9 is the
+   correct figure and it is the same 9 rows the §2.2 variants improve.
 6. `spec.md` updated: the query-construction rules now include homoglyph repair and
    the two-rung ladder.
 

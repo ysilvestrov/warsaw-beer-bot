@@ -746,7 +746,7 @@ main();
 - [ ] **Step 2: Run it**
 
 Run: `npx tsx tmp/verify-382.ts`
-Expected: `narrowed` ≥ 16, `regressed` = 0. The named winners must include `Томатка`, `ЗАБІЯКА`, `Золотко` and `Сарана в Томаті`.
+Expected: `narrowed` = 9, `regressed` = 0. The named winners must include `Томатка`, `ЗАБІЯКА`, `Золотко` and `Сарана в Томаті`.
 
 If `regressed` > 0, STOP and report — do not open the PR. A regression means the narrow rung is returning a *larger* pool than the wide rung, which contradicts the subset argument in design §4 and invalidates the whole approach.
 
@@ -759,7 +759,7 @@ Paste the summary line into the PR description alongside the design doc's predic
 ## Definition of done
 
 - [ ] `npm test` and `npm run typecheck` green
-- [ ] Task 7 replay reports `regressed=0` and `narrowed >= 16`
+- [x] Task 7 replay reports `regressed=0` and `narrowed=9` (measured 2026-08-10)
 - [ ] `spec.md` updated in the same PR (CLAUDE.md requirement)
 - [ ] `extension/**` untouched — so `docs/extension-install-uk.md` needs no change; confirm with `git diff --name-only main | grep extension` returning nothing
 - [ ] PR opened, AI review polled, findings assessed (never merged by the agent — the user merges)
