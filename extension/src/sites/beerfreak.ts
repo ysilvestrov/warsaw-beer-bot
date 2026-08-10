@@ -13,14 +13,23 @@ interface ProductMeta {
 
 const BREWERY_NOISE_PREFIX_RE = /^(?:brewery|brewing|browar|brouwerij|brasserie)\s+/i;
 const LEADING_BREWERY_DESCRIPTORS = new Set(['brouwerij', 'brasserie', 'browar', 'pivovar', 'birrificio', 'brauerei']);
+// Grammatical particles that bind a brewery descriptor to its proper noun
+// ("Brasserie du Bocq", "Brouwerij De Dolle Brouwers", "Browar na Jurze").
+// Taken from the shape of real brewery names in the catalogue, not invented.
+const QUALIFIER_TOKENS = new Set([
+  'de', 'du', 'des', 'del', 'della', 'dei', 'di', 'da', "d'",
+  'la', 'le', 'les', 'lo', "l'", 'the',
+  'van', 'von', 'der', 'den', 'het', "'t", 'en', 'y',
+  'na', 'za', 'w',
+]);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
 const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
 // Words that appear as brewery descriptors in a title's leading brewery form
 // (structural forms + "family" for "<X> Family Brewery"). Lowercased; compared
 // with normalizedToken (which strips ( ) , ).
 const BREWERY_DESCRIPTORS = new Set([
-  'brewery', 'brewing', 'browar', 'brasserie', 'brouwerij', 'brauerei',
-  'pivovar', 'birrificio', 'company', 'co', 'co.', 'family',
+  'brewery', 'brewing', 'brewers', 'brouwers', 'browar', 'brasserie', 'brouwerij',
+  'brauerei', 'pivovar', 'birrificio', 'company', 'co', 'co.', 'family',
 ]);
 const BEERFREAK_BUNDLE_RE = /(?:^|[^\p{L}\p{N}])(?:mix\s+pack|tasting\s+set|set|сет)(?=$|[^\p{L}\p{N}])/iu;
 const BEERFREAK_NUMBERED_SERIES_RE = /(?:^|[^\p{L}\p{N}])series\s*[-:]?\s*\d+\s+special\s+beers?(?=$|[^\p{L}\p{N}])/iu;
@@ -86,6 +95,18 @@ function normalizedToken(token: string): string {
   return token.toLowerCase().replace(/[(),]/g, '');
 }
 
+// Index where a descriptor-led brewery ends: the descriptor, its run of
+// grammatical qualifiers, one proper noun, then a trailing run of brewery
+// descriptors. Clamped so the beer name always keeps at least one token.
+// Callers must have established that tokens[0] is a leading descriptor.
+function descriptorBreweryEnd(tokens: string[]): number {
+  let i = 1;
+  while (i < tokens.length && QUALIFIER_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
+  i += 1; // the proper noun
+  while (i < tokens.length && BREWERY_DESCRIPTORS.has(normalizedToken(tokens[i]))) i += 1;
+  return Math.min(i, tokens.length - 1);
+}
+
 function stripCollaboratorName(rawTitle: string): string {
   const tokens = rawTitle.split(/\s+/).filter(Boolean);
   if (tokens.length < 2) return rawTitle.trim();
@@ -129,9 +150,10 @@ function splitBrandlessTitle(rawTitle: string): { brewery: string; name: string 
   const first = tokens[0]?.toLowerCase();
 
   if (tokens.length >= 3 && first && LEADING_BREWERY_DESCRIPTORS.has(first)) {
+    const end = descriptorBreweryEnd(tokens);
     return {
-      brewery: tokens.slice(0, -1).join(' '),
-      name: tokens[tokens.length - 1],
+      brewery: tokens.slice(0, end).join(' '),
+      name: tokens.slice(end).join(' '),
     };
   }
 
