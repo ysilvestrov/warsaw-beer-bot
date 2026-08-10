@@ -4,7 +4,21 @@ import { breweryAliases, breweryAliasesMatch } from './matcher';
 
 export type BidResolution =
   | { kind: 'accepted'; result: SearchResult; source: 'local' | 'hydrated'; notes: string[] }
-  | { kind: 'rejected'; reason: BidRejection };
+  | {
+      kind: 'rejected';
+      reason: BidRejection;
+      /**
+       * The swallowed hydrate error ('hydrate-failed' only). Carried out so the caller
+       * can log it: a 403 IP-block, a transient 5xx and a programming error are otherwise
+       * indistinguishable downstream.
+       */
+      error?: unknown;
+      /**
+       * The brewery on the record the bid actually points at ('brewery-mismatch' only).
+       * Logged next to the shop's brand so alias blind spots are measurable in production.
+       */
+      recordBrewery?: string;
+    };
 
 export type BidRejection =
   | 'not-hydrated'
@@ -84,8 +98,8 @@ export async function resolveByBid(args: ResolveByBidArgs): Promise<BidResolutio
     let hydrated: HydratedBeer | undefined;
     try {
       hydrated = (await args.hydrate([bid])).get(bid);
-    } catch {
-      return { kind: 'rejected', reason: 'hydrate-failed' };
+    } catch (e: unknown) {
+      return { kind: 'rejected', reason: 'hydrate-failed', error: e };
     }
     if (!hydrated) return { kind: 'rejected', reason: 'not-hydrated' };
     candidate = {
@@ -105,7 +119,12 @@ export async function resolveByBid(args: ResolveByBidArgs): Promise<BidResolutio
 
   // 3. Guard.
   if (!brand) return { kind: 'rejected', reason: 'no-brand-to-verify' };
-  if (!breweryAgrees(brand, candidate)) return { kind: 'rejected', reason: 'brewery-mismatch' };
+  if (!breweryAgrees(brand, candidate)) {
+    return {
+      kind: 'rejected', reason: 'brewery-mismatch',
+      recordBrewery: candidate.result.brewery_name,
+    };
+  }
 
   // Divergences worth seeing in logs, deliberately NOT vetoes — every one of these is
   // real for Tomatol Bulgogi, the case this feature exists to fix.

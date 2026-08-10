@@ -319,7 +319,11 @@ async function main(): Promise<void> {
   dailyStatus({ db, log, notifyAdmin })
     .catch((e) => log.error({ err: e }, 'daily-status startup'));
 
-  const apiApp = createApiApp({ db, env, log, webFallback });
+  const apiApp = createApiApp({
+    db, env, log, webFallback,
+    // #384: lets /enrich/result resolve a shop-published bid the local catalog misses.
+    hydrateByBid: (bids) => algoliaSearch.hydrateByBid(bids),
+  });
   const apiServer = createApiServer(apiApp, env, log);
 
   // Without an explicit exit, node-cron schedules and the SQLite handle keep

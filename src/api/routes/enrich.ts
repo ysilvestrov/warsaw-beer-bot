@@ -8,7 +8,9 @@ import {
   upsertBeer,
   fillOrphanFacts,
   rearmLookup,
+  refusesBidOverride,
   sanitizeAbv,
+  stampBidProvenance,
   type OrphanFacts,
 } from '../../storage/beers';
 import { isWontfix } from '../../storage/enrich_failures';
@@ -24,6 +26,7 @@ import {
   type AlgoliaResponse,
 } from '../../sources/untappd/algolia';
 import { lookupBeer } from '../../domain/untappd-lookup';
+import { resolveByBid } from '../../domain/bid-identity';
 import { lookupWithFallback } from '../../domain/web-fallback';
 import { applyLookupOutcome } from '../../domain/lookup-outcome';
 import {
@@ -57,6 +60,12 @@ const ResultBody = z.object({
   name: z.string().max(BEER_TEXT_LIMIT_CHARS),
   abv: z.number().nullable().optional(),
   style: z.string().max(BEER_TEXT_LIMIT_CHARS).nullable().optional(),
+  // #384: the Untappd identity the shop publishes on its own product page, plus the
+  // page's brand (what the guard verifies against). Optional — absent from every
+  // client below 0.14, and absent from every shop that does not publish a bid.
+  bid: z.number().int().positive().optional(),
+  bidSlug: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
+  brand: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
   html: z.string().max(ENRICH_HTML_LIMIT_CHARS).optional(),
   algolia: z.object({
     hits: z.array(z.record(z.string(), z.unknown())).optional(),
@@ -134,16 +143,80 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     payloadBodyLimit(deps, ENRICH_RESULT_BODY_LIMIT_BYTES, 'route'),
     zValidator('json', ResultBody, payloadSizeValidationHook(deps) as never),
     async (c) => {
-    const { brewery, name, abv, style, html, algolia, pageUrl } = c.req.valid('json');
+    const { brewery, name, abv, style, html, algolia, pageUrl, bid, bidSlug, brand } =
+      c.req.valid('json');
     const row = ensureBeerRow(deps.db, brewery, name, {
       abv: abv ?? undefined, style: style ?? undefined,
     });
     // Only orphans need enrichment. If the row was already enriched by an earlier
     // relay/cron, report the existing canonical match so the extension can update
     // the page without reprocessing or overwriting it.
-    if (row.untappd_id != null) {
-      return c.json({ status: 'matched', untappd_id: row.untappd_id, rating_global: row.rating_global });
+    //
+    // #384: EXCEPT when the shop publishes a bid that disagrees with a link we
+    // derived ourselves. Without that exception a wrong machine-made link is
+    // unreachable here and can never be repaired. Inert for every client that
+    // sends no bid — i.e. everything in production today.
+    const stored = row.untappd_id ?? null;
+    const mayOverride =
+      bid !== undefined && stored !== bid && !refusesBidOverride(row.untappd_id_source);
+    if (stored != null && !mayOverride) {
+      return c.json({ status: 'matched', untappd_id: stored, rating_global: row.rating_global });
     }
+
+    const nowIso = new Date().toISOString();
+
+    // The shop knows its own product's Untappd page; that beats our guessing. Any
+    // rejection (guard veto, hydrate failure, unknown bid) falls through to the
+    // normal pipeline below, so this path is never worse than not having it.
+    if (bid !== undefined) {
+      const resolved = await resolveByBid({
+        db: deps.db, bid, bidSlug, brand,
+        shopName: name, shopAbv: abv ?? null,
+        hydrate: deps.hydrateByBid,
+      });
+      if (resolved.kind === 'accepted') {
+        // `notes` (slug/name/abv divergence) are the only signal that would ever
+        // surface a same-brewery wrong bid, which the guard cannot veto.
+        deps.log.info(
+          {
+            beerId: row.id, bid, source: resolved.source,
+            notes: resolved.notes, replaced: stored,
+          },
+          'enrich: identity from shop-published bid',
+        );
+        // Reuses the shared writer: UNIQUE clash → merge into the canonical row.
+        const kind = applyLookupOutcome(
+          { db: deps.db, log: deps.log }, row.id,
+          { kind: 'matched', result: resolved.result }, nowIso,
+          { brewery, name, sourceUrl: pageUrl },
+        );
+        if (kind === 'matched' || kind === 'merged') {
+          stampBidProvenance(deps.db, resolved.result.bid);
+          return c.json({
+            status: 'matched',
+            untappd_id: resolved.result.bid,
+            rating_global: resolved.result.global_rating,
+          });
+        }
+      } else {
+        deps.log.warn(
+          {
+            beerId: row.id, bid, reason: resolved.reason,
+            brand, recordBrewery: resolved.recordBrewery, err: resolved.error,
+          },
+          'enrich: shop-published bid rejected',
+        );
+      }
+    }
+
+    // The bid did not produce a link. A row that already has one must go back to
+    // answering with it: only an orphan belongs in the search pipeline, and letting
+    // a linked row through would mean a transient hydrate failure could re-guess and
+    // clobber the stored link — strictly worse than not consulting the bid at all.
+    if (stored != null) {
+      return c.json({ status: 'matched', untappd_id: stored, rating_global: row.rating_global });
+    }
+
     // Reuse the full server pick pipeline; the client already fetched, so the
     // injected search adapter just returns the relayed result payload.
     const search = algolia
@@ -154,7 +227,6 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       row.id,
       deps.webFallback ?? null,
     );
-    const nowIso = new Date().toISOString();
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
     // A merge is a success: the bid is real and already owned by a canonical row,

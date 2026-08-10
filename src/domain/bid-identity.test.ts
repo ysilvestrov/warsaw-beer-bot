@@ -79,7 +79,10 @@ describe('resolveByBid', () => {
       db: freshDb(), bid: 6648348, bidSlug: 'mad-brew-tomatol-buldak-bulgogi',
       brand: 'Browar Stu Mostów', hydrate: hydrateWith(BULGOGI),
     });
-    expect(out).toEqual({ kind: 'rejected', reason: 'brewery-mismatch' });
+    // recordBrewery is what the caller logs next to the shop brand.
+    expect(out).toEqual({
+      kind: 'rejected', reason: 'brewery-mismatch', recordBrewery: 'Mad Brew',
+    });
   });
 
   it('accepts on a brewery ALIAS match', async () => {
@@ -113,11 +116,14 @@ describe('resolveByBid', () => {
   });
 
   it('rejects rather than throwing when hydration fails', async () => {
+    const err = new Error('blocked');
     const out = await resolveByBid({
       db: freshDb(), bid: 6648348, brand: 'Mad Brew',
-      hydrate: vi.fn(async () => { throw new Error('blocked'); }),
+      hydrate: vi.fn(async () => { throw err; }),
     });
-    expect(out).toEqual({ kind: 'rejected', reason: 'hydrate-failed' });
+    // The error is carried out, not swallowed: a 403 IP-block, a transient 5xx and a
+    // programming error must stay distinguishable in the caller's log.
+    expect(out).toEqual({ kind: 'rejected', reason: 'hydrate-failed', error: err });
   });
 
   it('resolves from the local catalog without calling Algolia', async () => {
@@ -146,6 +152,8 @@ describe('resolveByBid', () => {
     const out = await resolveByBid({
       db, bid: 6648348, brand: 'Browar Stu Mostów', hydrate: vi.fn(async () => new Map()),
     });
-    expect(out).toEqual({ kind: 'rejected', reason: 'brewery-mismatch' });
+    expect(out).toEqual({
+      kind: 'rejected', reason: 'brewery-mismatch', recordBrewery: 'Mad Brew',
+    });
   });
 });
