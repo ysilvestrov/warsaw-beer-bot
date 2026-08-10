@@ -877,9 +877,12 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 
 #### `POST /enrich/candidates` / `POST /enrich/result` — client-relay Untappd enrichment
 
-Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}`, апсертить
-кожне нове пиво як orphan (`untappd_id` NULL) і повертає `{candidates:[{brewery,name,
-eligible,algolia}]}`, де `eligible` = backoff-due (`isEligible`), пиво ще orphan і **не** `wontfix`.
+Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}` (+ опційний
+`bid` на кожному пиві, #384 — лише перевіряє суперечність зі збереженим лінком, гейт
+далі верифікує), апсертить кожне нове пиво як orphan (`untappd_id` NULL) і повертає
+`{candidates:[{brewery,name,eligible,algolia}]}`, де `eligible` = backoff-due
+(`isEligible`) і **не** `wontfix`, та (пиво ще orphan **або** — #384 — воно вже лінковане,
+але надісланий `bid` суперечить збереженому і той лінк не `curated`/`checkin` — нижче).
 `algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`; `query`
 будується через `cleanSearchQuery(brewery,name)` і лишається серверним контрактом.
 Розширення, якщо користувач увімкнув opt-in і дав runtime-дозвіл `untappd.com` + `*.algolia.net`, робить
@@ -894,6 +897,33 @@ matched → `recordLookupSuccess` (bid+рейтинг; UNIQUE-клеш → merge
 not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не пише в backoff (блок
 ніколи не мутує backoff). Той самий orphan-пул і backoff, що й у серверного enrich-крона —
 клієнт лише дозбирює видиме й due.
+
+**Ідентичність за опублікованим bid (#384).** Коли шоп публікує власний Untappd-лінк на
+сторінці товару (наразі — лише `flasker`, §6 «Per-site адаптери»), `/enrich/candidates` і `/enrich/result`
+додатково приймають `bid` (`/enrich/result` — ще й `bidSlug`+`brand`, потрібні лише
+гейту). `/enrich/result` резолвить bid **до** пошукового пайплайна: спершу локальний
+каталог (`beers.untappd_id`, UNIQUE-індекс, без Algolia-виклику), при промасі —
+batched Algolia hydrate за `objectID` (нижче, `hydrateByBid`). **Єдине вето** гейта
+(`resolveByBid`, `src/domain/bid-identity.ts`) — збіг пивоварні (`brand` ⟷
+`brewery_name`/`brewery_alias` через `breweryAliases`); розбіжність назви, ABV чи slug
+лише логується (`notes`), ніколи не ветує — для `Tomatol Bulgogi` шоп каже
+`3,8%`/`Tomatol Bulgogi`, а зв'язаний Untappd-запис — `4,2%`/`Tomatøl:BULDAK BULGOGI`,
+і bid все одно правильний.
+
+Провенанс живе в `beers.untappd_id_source` (міграція **v22**: `search`/`bid`/`curated`/
+`checkin`). Опублікований bid перезаписує `search`/`bid`/`NULL`, але ніколи `curated` чи
+`checkin` (`stampBidProvenance`/`refusesBidOverride`, `src/storage/beers.ts`) — інакше
+bid міг би **послабити** ручний пін (#343) чи check-in-based зв'язок. Бекфіл міграції
+позначає всі наявні піни (`match_links.reviewed_by_user = 1`) як `curated`: без нього
+кожен існуючий пін читався б як NULL = machine-derived = перезаписуваний. Обидва
+ендпоінти гейтяться тим самим `refusesBidOverride`: `/enrich/candidates` виставляє
+`eligible: true` для розбіжного bid лише коли збережений лінк **не** `curated`/`checkin`
+— клієнт шукає тільки `eligible`-рядки (`MAX_SEARCHES_PER_PAGE`-зрізом), тож курований
+лінк на практиці ніколи не йде в пошук чи в `/enrich/result`.
+
+Відхилення bid (вето гейта, hydrate-фейл, невідомий bid) провалюється у звичайний
+пошуковий пайплайн нижче; рядок, що вже має лінк, повертається з тим самим лінком —
+консультація bid ніколи не гірша за її відсутність.
 
 Якщо знайдений bid уже належить іншому рядку каталогу, сирота **зливається** в канонічний
 (`mergeIntoCanonical`) і ендпоінт відповідає `{"status":"matched","untappd_id":<bid>}` —
@@ -973,6 +1003,17 @@ Body:    {"query": "<cleanSearchQuery>", "hitsPerPage": 5}
 `1d347324…`), перевизначаються через опційні env-змінні `UNTAPPD_ALGOLIA_APP_ID` /
 `UNTAPPD_ALGOLIA_SEARCH_KEY`.
 
+**`hydrateByBid` (#384) — batched get-by-id.** Другий Algolia-запит, окремий від пошуку:
+Untappd індексує `objectID === bid`, тож пряме отримання записів за bid — це один
+batched-виклик до multi-get, а не N окремих пошуків.
+```
+POST https://{appId}-dsn.algolia.net/1/indexes/*/objects
+Body: {"requests": [{"indexName": "beer", "objectID": "<bid>"}, …]}
+```
+Результати позиційно вирівняні із запитом; невідомий `objectID` повертається `null`.
+Той самий `withRecovery` (key auto-refresh → proxy fallback), що й у `search`. Викликається
+лише з `resolveByBid` на промасі в локальному каталозі (вище, `POST /enrich/result`).
+
 **Класифікація відповіді:**
 | Результат | Умова | Мутує backoff? |
 |-----------|-------|---------------|
@@ -994,7 +1035,12 @@ HTML-сторінку пошуку Untappd, витягує актуальні Al
 
 **Інтерфейс `BeerSearch`:**
 ```ts
-interface BeerSearch { search(query: string): Promise<SearchResult[]> }
+interface BeerSearch {
+  search(query: string): Promise<SearchResult[]>;
+  // #384: опційний — лише createAlgoliaSearch його реалізує; htmlSearch (relay) не має
+  // batched get-by-id, тож local-catalog miss без hydrate одразу відхиляється.
+  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer>>;
+}
 ```
 Реалізації: `createAlgoliaSearch` (серверний path, `src/sources/untappd/algolia.ts`) і
 `htmlSearch` (relay-адаптер, `src/sources/untappd/search.ts`). `lookupBeer` приймає
@@ -1648,10 +1694,22 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   в title (`lost-philosopher-`, `de-zwarte-regel-`, `tomatol-` → Mad Brew; для
   `Tomatol Bulgogi` це свідомо прийнятий компроміс — відкритий brewery-gate веде
   name-stage до чужого запису (`Tomatol: Bulgogi Sriracha` замість опублікованого
-  магазином `Tomatøl:BULDAK BULGOGI`), доки не буде #384 — #385);
+  магазином `Tomatøl:BULDAK BULGOGI`) — #385; коли товар публікує bid, канал identity
+  за published bid (#384, вище) виправляє це напряму по bid і обходить name-stage
+  цілком; для товарів без bid компроміс і далі чинний);
   відомий display-prefix brewery видаляється з name;
   volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
-  відкидається; ABV із `%` у title), домен `flasker.com.ua`), `piwnemosty`
+  відкидається; ABV із `%` у title; для кожної ще не кешованої картки `loadCardDetails`
+  довантажує сторінку товару (#384: до `MAX_DETAIL_FETCHES_PER_PASS = 20` запитів за
+  прохід, дедуп за URL, помилки проковтуються — картка лишається на даних із title).
+  Звідти читаються два сигнали: JSON-LD `brand` (покриття **45/45**) — мапиться через
+  `BREWERY_RULES`/реєстр (`canonicalizeBrand`) **до** заміни розпізнаної з title
+  пивоварні, бо сирий `brand` це відображуване ім'я магазину, а `canonical` реєстру —
+  вивірена Untappd-форма (без мапінгу override відкотив би реконсиляцію: `Правда`
+  замість `Pravda`, `Volta` замість `Volta Brewery`, `MUZA` замість `MUZA BREWING CO`);
+  і опублікований `untappd.com/b/<slug>/<bid>` (покриття **37/45**) — ретранслюється як
+  `bid`/`bidSlug`/`brand` у `/enrich/candidates`/`/enrich/result` (identity-канал —
+  вище, `POST /enrich/candidates` / `POST /enrich/result`)), домен `flasker.com.ua`), `piwnemosty`
   (Piwne Mosty IdoSell SSR — `.product`, brewery/title з GA
   `view_item_list` metadata keyed by `data-product_id`, fallback на visible title
   `"{brewery}: {name} - puszka/butelka N ml"`; категорії `/pol_m_PRZEKASKI*` і

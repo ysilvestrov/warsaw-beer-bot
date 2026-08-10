@@ -160,6 +160,14 @@ this guide first.
    anti-ban limits. The browser will ask for permission to access
    `untappd.com` and `*.algolia.net` — allow it.
    **Off** by default.
+
+   > **Separately from this checkbox, on Flasker.** On `flasker.com.ua` pages, the
+   > extension automatically opens each new product's own page in the background
+   > (up to 20 per page load) even without this permission, to read the brewery and
+   > the Untappd link the shop publishes on the product's own page. Requests go only
+   > to `flasker.com.ua` itself — no new browser permission is needed. Thanks to
+   > this, beers the shop links directly to Untappd are matched exactly, and a badge
+   > that previously pointed at the wrong beer can now correct itself.
 5. Click **"Save"**.
    - If you changed the URL to a non-default one, the browser will ask for
      permission to access that host — allow it, otherwise the extension
