@@ -5,6 +5,10 @@ export interface Card {
   abv?: number;
   /** Shop-published style, relayed to /enrich/* for orphan rows (#369). Not sent to /match. */
   style?: string;
+  /** #384: Untappd beer id the shop publishes on its product page. */
+  bid?: number;
+  /** #384: the slug published alongside `bid`; server-side integrity signal. */
+  bidSlug?: string;
   skip?: boolean;
 }
 

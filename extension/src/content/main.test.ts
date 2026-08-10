@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { startOverlay } from './main';
+import { startOverlay, enrichOrphans } from './main';
 import { isSeen } from './badge';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchResult } from '../api/types';
@@ -53,5 +53,96 @@ describe('startOverlay', () => {
     await tick(40);
     expect(isSeen(fresh)).toBe(true); // re-ran without a selector
     stop();
+  });
+});
+
+// The two mappings inside enrichOrphans are the last hops before the service worker, and
+// they are plain field copies — TypeScript cannot catch a *dropped* optional field, so
+// omitting `bid` here would compile and pass every other test while shipping the #384
+// override dead. This drives the real runEnrichment against a stubbed service worker.
+describe('enrichOrphans relays shop facts to the service worker', () => {
+  type Msg = Record<string, unknown> & { type: string };
+
+  function stubServiceWorker(): Msg[] {
+    const sent: Msg[] = [];
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: Msg, cb: (r: unknown) => void) => {
+        sent.push(msg);
+        if (msg.type === 'enrich:candidates') {
+          const beers = msg.beers as { brewery: string; name: string }[];
+          cb({
+            candidates: beers.map((b) => ({
+              brewery: b.brewery, name: b.name, eligible: true,
+              algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'q', hitsPerPage: 5 },
+            })),
+          });
+        } else if (msg.type === 'enrich:fetch') {
+          cb({ algolia: { hits: [{ bid: 6648348 }] } });
+        } else if (msg.type === 'enrich:result') {
+          cb({ result: { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    return sent;
+  }
+
+  async function until(pred: () => boolean): Promise<void> {
+    for (let i = 0; i < 200 && !pred(); i++) await tick(0);
+  }
+
+  it('carries bid, bidSlug, abv and style through both mappings', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{
+      key: 'k0', el, brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', abv: 5.5, style: 'IPA',
+    }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+
+    // mapping 1: orphan -> OrphanBeer, observed via the /enrich/candidates payload
+    const candidates = sent.find((m) => m.type === 'enrich:candidates')!;
+    expect((candidates.beers as unknown[])[0]).toEqual({
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 6648348, abv: 5.5, style: 'IPA',
+    });
+
+    // mapping 2: OrphanFacts -> the enrich:result message
+    expect(sent.find((m) => m.type === 'enrich:result')).toMatchObject({
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+      abv: 5.5, style: 'IPA',
+    });
+  });
+
+  it('omits every optional fact when the shop published none', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N' }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+
+    expect((sent.find((m) => m.type === 'enrich:candidates')!.beers as unknown[])[0])
+      .toEqual({ brewery: 'B', name: 'N' });
+    const result = sent.find((m) => m.type === 'enrich:result')!;
+    for (const k of ['bid', 'bidSlug', 'brand', 'abv', 'style']) {
+      expect(Object.keys(result)).not.toContain(k);
+    }
+  });
+
+  it('does nothing at all while the enrich opt-in is off', async () => {
+    await chrome.storage.local.set({ enrichEnabled: false, token: 't' });
+    const sent = stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', bid: 6648348 }]);
+    await until(() => sent.length > 0);
+
+    expect(sent).toEqual([]);
   });
 });

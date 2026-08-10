@@ -52,7 +52,10 @@ export async function postMatch(
 export async function postEnrichCandidates(
   baseUrl: string,
   token: string,
-  beers: { brewery: string; name: string; abv?: number; style?: string }[],
+  // #384: `bid` is the Untappd id the shop publishes on its own product page. The server
+  // needs it here to see that a stored link is contradicted; the slug/brand it verifies
+  // against are only sent with the result.
+  beers: { brewery: string; name: string; abv?: number; style?: string; bid?: number }[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<EnrichCandidate[]> {
   let res: Response;
@@ -79,6 +82,11 @@ export async function postEnrichResult(
     algolia: AlgoliaResponse;
     abv?: number;
     style?: string;
+    // #384: the identity the shop publishes for this product, and the brand it publishes
+    // it next to — the server's guard verifies one against the other before overriding.
+    bid?: number;
+    bidSlug?: string;
+    brand?: string;
     pageUrl?: string;
   },
   timeoutMs: number = DEFAULT_TIMEOUT_MS,

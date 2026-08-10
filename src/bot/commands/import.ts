@@ -65,6 +65,7 @@ importCommand.on('document', async (ctx) => {
         rating_global: r.global_rating,
         normalized_name: normalizeName(r.beer_name),
         normalized_brewery: normalizeBrewery(r.brewery_name),
+        untappd_id_source: 'checkin',
       });
       mergeCheckin(db, {
         checkin_id: r.checkin_id,

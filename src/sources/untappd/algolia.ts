@@ -1,6 +1,6 @@
 import { ProxyAgent } from 'undici';
 import { HttpError, normalizeProxyUrl } from '../http';
-import type { BeerSearch, SearchResult } from './search';
+import type { BeerSearch, SearchResult, HydratedBeer } from './search';
 
 interface AlgoliaHit {
   bid?: unknown;
@@ -53,6 +53,28 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
   return out;
 }
 
+function strList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBeer | null {
+  if (!h) return null;
+  const bid = num(h.bid);
+  if (bid === null) return null;
+  const style = str(h.type_name);
+  const slug = str(h.beer_slug);
+  return {
+    bid,
+    beer_name: str(h.beer_name),
+    brewery_name: str(h.brewery_name),
+    style: style.length > 0 ? style : null,
+    abv: num(h.beer_abv),
+    global_rating: num(h.rating_score),
+    beer_slug: slug.length > 0 ? slug : null,
+    brewery_alias: strList(h.brewery_alias),
+  };
+}
+
 export interface AlgoliaKeys { appId: string; searchKey: string }
 
 // Untappd embeds Algolia creds in inline page JS, either as
@@ -80,7 +102,7 @@ function endpoint(appId: string): string {
   return `https://${appId}-dsn.algolia.net/1/indexes/beer/query`;
 }
 
-export function createAlgoliaSearch(opts: AlgoliaSearchOpts): BeerSearch {
+export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
   const f = opts.fetchImpl ?? fetch;
   const gap = opts.minGapMs ?? 250;
   const proxy = opts.proxyUrl ? new ProxyAgent(normalizeProxyUrl(opts.proxyUrl)) : undefined;
@@ -106,28 +128,63 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts): BeerSearch {
     return parseAlgoliaResponse((await res.json()) as AlgoliaResponse);
   }
 
+  async function rawHydrate(bids: number[], useProxy: boolean): Promise<Map<number, HydratedBeer>> {
+    const wait = Math.max(0, lastAt + gap - Date.now());
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const init: RequestInit & { dispatcher?: unknown } = {
+      method: 'POST',
+      headers: {
+        'X-Algolia-Application-Id': keys.appId,
+        'X-Algolia-API-Key': keys.searchKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        requests: bids.map((b) => ({ indexName: ALGOLIA_INDEX_NAME, objectID: String(b) })),
+      }),
+    };
+    if (useProxy && proxy) init.dispatcher = proxy;
+    const url = `https://${keys.appId}-dsn.algolia.net/1/indexes/*/objects`;
+    const res = await f(url, init);
+    lastAt = Date.now();
+    if (!res.ok) throw new HttpError(res.status, url);
+    // Results are positionally aligned with the requests; unknown objectIDs come back null.
+    const json = (await res.json()) as { results?: (Record<string, unknown> | null)[] };
+    const out = new Map<number, HydratedBeer>();
+    for (const raw of json.results ?? []) {
+      const parsed = parseHydratedBeer(raw);
+      if (parsed) out.set(parsed.bid, parsed);
+    }
+    return out;
+  }
+
   function isAuthBlock(e: unknown): e is HttpError {
     return e instanceof HttpError && (e.status === 401 || e.status === 403);
   }
 
-  return {
-    async search(query: string): Promise<SearchResult[]> {
-      try {
-        return await rawSearch(query, false);
-      } catch (e1) {
-        if (!isAuthBlock(e1)) throw e1; // 5xx/network → transient upstream
-        // 1) try refreshing keys, retry direct if they actually changed
-        if (opts.refreshKeys) {
-          const fresh = await opts.refreshKeys().catch(() => null);
-          if (fresh && fresh.searchKey !== keys.searchKey) {
-            keys = fresh;
-            try { return await rawSearch(query, false); } catch (e2) { if (!isAuthBlock(e2)) throw e2; }
-          }
+  // Shared recovery: refresh a stale key, then fall back to the proxy on an IP ban.
+  // Extracted from search() so hydrateByBid gets identical handling (#384).
+  async function withRecovery<T>(run: (useProxy: boolean) => Promise<T>): Promise<T> {
+    try {
+      return await run(false);
+    } catch (e1) {
+      if (!isAuthBlock(e1)) throw e1; // 5xx/network → transient upstream
+      if (opts.refreshKeys) {
+        const fresh = await opts.refreshKeys().catch(() => null);
+        if (fresh && fresh.searchKey !== keys.searchKey) {
+          keys = fresh;
+          try { return await run(false); } catch (e2) { if (!isAuthBlock(e2)) throw e2; }
         }
-        // 2) fall back to the proxy (possible IP ban)
-        if (proxy) return await rawSearch(query, true);
-        throw e1;
       }
+      if (proxy) return await run(true);
+      throw e1;
+    }
+  }
+
+  return {
+    search: (query: string) => withRecovery((useProxy) => rawSearch(query, useProxy)),
+    async hydrateByBid(bids: number[]) {
+      if (bids.length === 0) return new Map<number, HydratedBeer>();
+      return withRecovery((useProxy) => rawHydrate(bids, useProxy));
     },
-  };
+  } satisfies BeerSearch;
 }

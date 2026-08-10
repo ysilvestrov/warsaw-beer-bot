@@ -177,9 +177,11 @@ describe('POST /checkins/sync', () => {
     expect(countCheckins(db, TELEGRAM_ID)).toBe(1);
 
     // Beer row created with correct untappd_id
-    const beer = db.prepare('SELECT * FROM beers WHERE untappd_id = 42').get() as { untappd_id: number } | undefined;
+    const beer = db.prepare('SELECT * FROM beers WHERE untappd_id = 42').get() as { untappd_id: number; untappd_id_source: string } | undefined;
     expect(beer).toBeDefined();
     expect(beer!.untappd_id).toBe(42);
+    // #384: check-in sync writes Untappd's own record — provenance is 'checkin'
+    expect(beer!.untappd_id_source).toBe('checkin');
 
     // user_rating round-trips through the parser and storage
     const row = db.prepare('SELECT user_rating FROM checkins WHERE checkin_id = ?').get('555') as { user_rating: number };

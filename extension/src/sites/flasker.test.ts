@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   parseTitle, stripMerchandisingPrefix, isNonBeerTitle, isNonBeerCategory, flasker,
-  breweryFromRegistryTags, breweryFromRegistryHead,
+  breweryFromRegistryTags, breweryFromRegistryHead, parseProductDetail,
 } from './flasker';
 
 const load = (name: string) =>
@@ -485,5 +485,210 @@ describe('flasker non-beer gates', () => {
     </ul>`;
     const cards = flasker.parseCards(new DOMParser().parseFromString(html, 'text/html'));
     expect(cards).toEqual([]);
+  });
+});
+
+describe('#384 product-detail parsing', () => {
+  // jsdom's global URL (not node:url's) is in scope here, whose file:// resolution
+  // against import.meta.url does not satisfy readFileSync — use the file's existing
+  // resolve(__dirname, ...) convention instead (see `load` above).
+  const html = readFileSync(resolve(__dirname, '../../tests/fixtures/flasker.product.html'), 'utf8');
+
+  it('reads the published bid, its slug, and the JSON-LD brand', () => {
+    expect(parseProductDetail(html)).toEqual({
+      bid: 6648348,
+      bidSlug: 'mad-brew-tomatol-buldak-bulgogi',
+      brand: 'Mad Brew',
+    });
+  });
+
+  it('returns the brand alone when the page publishes no Untappd link', () => {
+    expect(parseProductDetail('<script type="application/ld+json">{"brand":{"@type":"Brand","name":"Vibrant Pour"}}</script>'))
+      .toEqual({ brand: 'Vibrant Pour' });
+  });
+
+  it('returns an empty object for a page with neither signal', () => {
+    expect(parseProductDetail('<html><body>nope</body></html>')).toEqual({});
+  });
+
+  it('ignores an Untappd link that is not a beer URL', () => {
+    // Numeric tail present (unlike /user/someone) so this actually pins the
+    // required `/b/` segment, not merely the presence of a trailing digit run.
+    expect(parseProductDetail('<a href="https://untappd.com/w/some-brewery/123456">u</a>')).toEqual({});
+  });
+
+  it('never throws on a malformed brand escape (odd trailing backslash)', () => {
+    // A single trailing backslash inside the captured run (regex only excludes a
+    // literal `"`, not backslash sequences) makes the synthetic `"${brand[1]}"`
+    // string invalid JSON — verified standalone: JSON.parse('"Foo\\"') throws
+    // SyntaxError: Unterminated string. parseProductDetail must swallow that
+    // rather than throw, and simply omit `brand`.
+    const malformed = '<script>{"brand":{"@type":"Brand","name":"Foo\\"}}</script>';
+    expect(() => parseProductDetail(malformed)).not.toThrow();
+    expect(parseProductDetail(malformed).brand).toBeUndefined();
+  });
+});
+
+function archiveCard(url: string, title: string): string {
+  return `<li class="product">
+    <a href="${url}" class="woocommerce-LoopProduct-link woocommerce-loop-product__link"></a>
+    <h2 class="woocommerce-loop-product__title">${title}</h2>
+  </li>`;
+}
+
+describe('#384 flasker.loadCardDetails', () => {
+  it('overrides the heuristic brewery with the JSON-LD brand and sets bid/bidSlug', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard('https://flasker.com.ua/product/foo-bar-5-330ml/', 'Foo Bar 5% 330ml')}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+    expect(cards[0]).toMatchObject({ brewery: 'Foo', name: 'Bar' }); // pre-hydration heuristic
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () =>
+        '<a href="https://untappd.com/b/real-brewery-bar/123456">u</a>' +
+        '<script>{"brand":{"@type":"Brand","name":"Real Brewery"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledWith('https://flasker.com.ua/product/foo-bar-5-330ml/', { credentials: 'omit' });
+    expect(cards[0]).toMatchObject({
+      brewery: 'Real Brewery',
+      name: 'Bar',
+      bid: 123456,
+      bidSlug: 'real-brewery-bar',
+    });
+    fetchSpy.mockRestore();
+  });
+
+  it('leaves the heuristic brewery and bid fields untouched when the detail fetch fails', async () => {
+    // Distinct URL from the previous test: loadDetail caches per URL at module
+    // scope across the whole file, so a shared URL would hit that cache instead
+    // of exercising this mock.
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard('https://flasker.com.ua/product/foo-bar-5-330ml-fails/', 'Foo Bar 5% 330ml')}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({ brewery: 'Foo', name: 'Bar' });
+    expect(cards[0].bid).toBeUndefined();
+    expect(cards[0].bidSlug).toBeUndefined();
+    fetchSpy.mockRestore();
+  });
+
+  it('shares one detail fetch across cards with the same product URL', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard('https://flasker.com.ua/product/shared-5-330ml/', 'Shared Beer A 5% 330ml')}
+            ${archiveCard('https://flasker.com.ua/product/shared-5-330ml/', 'Shared Beer B 5% 330ml')}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<script>{"brand":{"@type":"Brand","name":"Shared Brand"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(cards.map((c) => c.brewery)).toEqual(['Shared Brand', 'Shared Brand']);
+    fetchSpy.mockRestore();
+  });
+
+  it('caps detail fetches at MAX_DETAIL_FETCHES_PER_PASS (20) per pass', async () => {
+    const items = Array.from({ length: 21 }, (_, i) =>
+      archiveCard(`https://flasker.com.ua/product/beer-${i}-5-330ml/`, `Beer${i} Name 5% 330ml`));
+    const doc = new DOMParser().parseFromString(`<ul>${items.join('')}</ul>`, 'text/html');
+    const cards = flasker.parseCards(doc);
+    expect(cards.length).toBe(21);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<script>{"brand":{"@type":"Brand","name":"Capped Brand"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(20);
+    expect(cards.slice(0, 20).every((c) => c.brewery === 'Capped Brand')).toBe(true);
+    expect(cards[20].brewery).not.toBe('Capped Brand');
+    fetchSpy.mockRestore();
+  });
+
+  it('does not fetch for cards whose URL was never recorded (defensive)', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    await flasker.loadCardDetails?.([{ el: document.createElement('div'), brewery: 'X', name: 'Y' }]);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+});
+
+// #384 review fix: the JSON-LD brand is the shop's own display string — the
+// same one FLASKER_BREWERIES.match / BREWERY_RULES.tags were stripped from —
+// not an independently canonical form. Passing it through verbatim would undo
+// the catalog reconciliation those tables perform (measured live: "Правда",
+// "Volta", "Ten Men", "Heather House Brewery", "Vibrant Pour", "MUZA BREWING
+// CO" all regressed). It must be mapped through the registry/rules first.
+describe('#384 brand canonicalization (post-review fix)', () => {
+  async function detailBrewery(url: string, heuristicTitle: string, jsonLdBrand: string): Promise<string | undefined> {
+    const doc = new DOMParser().parseFromString(`<ul>${archiveCard(url, heuristicTitle)}</ul>`, 'text/html');
+    const cards = flasker.parseCards(doc);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => `<script>{"brand":{"@type":"Brand","name":"${jsonLdBrand}"}}</script>`,
+    } as Response);
+    await flasker.loadCardDetails?.(cards);
+    fetchSpy.mockRestore();
+    return cards[0]?.brewery;
+  }
+
+  // Registry canonical forms read from flasker-breweries.generated.ts (not guessed):
+  // { match: ["Правда"], canonical: "Pravda" }, { match: ["Volta"], canonical: "Volta Brewery" }.
+  it('maps the shop\'s "Правда" brand to the registry canonical "Pravda"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/pravda-gvara-8-330ml/', 'Правда Ґвара №8 5% 330ml', 'Правда',
+    );
+    expect(brewery).toBe('Pravda');
+  });
+
+  it('maps the shop\'s "Volta" brand to the registry canonical "Volta Brewery"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/volta-kometa-ipa-330ml/', 'VOLTA KOMETA IPA 6% 330ml', 'Volta',
+    );
+    expect(brewery).toBe('Volta Brewery');
+  });
+
+  // BREWERY_RULES canonical (flasker.ts): { canonical: 'VibrantPour', tags: ['vibrant pour'] }.
+  it('maps the shop\'s "Vibrant Pour" brand to the BREWERY_RULES canonical "VibrantPour"', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/vibrantpour-spontan-330ml/', 'VibrantPour Spontan 5% 330ml', 'Vibrant Pour',
+    );
+    expect(brewery).toBe('VibrantPour');
+  });
+
+  it('passes a brand through unchanged when neither the registry nor BREWERY_RULES knows it', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/unknown-brand-beer-330ml/', 'Mystery House Beer 5% 330ml', 'Some Totally New Brewery',
+    );
+    expect(brewery).toBe('Some Totally New Brewery');
+  });
+
+  // The series case the brand override exists for: the title alone gives no brewery
+  // signal ("Vespers" carries no trace of Mad Brew), so the heuristic falls back to
+  // splitting the first token as the brewery. A rule-known brand must still override it.
+  it('still lets a known-rule "Mad Brew" brand override a wrong heuristic brewery (series case)', async () => {
+    const brewery = await detailBrewery(
+      'https://flasker.com.ua/product/vespers-330ml/', 'Vespers 6% 330ml', 'Mad Brew',
+    );
+    expect(brewery).toBe('Mad Brew');
   });
 });

@@ -87,6 +87,8 @@ describe('refreshAllUntappd', () => {
     expect(row!.rating_global).toBe(4.12);
     expect(row!.abv).toBeNull();
     expect(row!.style).toBe('IPA');
+    // #384: had-list scrape writes Untappd's own record — provenance is 'checkin'
+    expect(row!.untappd_id_source).toBe('checkin');
   });
 
   test('inserts a new beer with abv parsed from /beers', async () => {

@@ -12,12 +12,20 @@ export interface OrphanBeer {
   abv?: number;
   /** Shop-published style, persisted server-side for orphan rows (#369). */
   style?: string;
+  /** #384: the Untappd beer id the shop publishes on its own product page. */
+  bid?: number;
+  /** #384: the slug published alongside `bid`; a server-side integrity signal. */
+  bidSlug?: string;
 }
 
 /** The shop-published facts that travel with a beer to /enrich/* (#369). */
 export interface OrphanFacts {
   abv?: number;
   style?: string;
+  /** #384: shop-published Untappd identity, and the brand the server verifies it against. */
+  bid?: number;
+  bidSlug?: string;
+  brand?: string;
 }
 
 export interface EnrichDeps {
@@ -45,11 +53,36 @@ const pairKey = (brewery: string, name: string) => `${brewery} ${name}`;
 // runEnrichment is exported, so it re-applies usableAbv rather than trusting its
 // caller to have sanitized: JSON.stringify would turn a stray NaN into a null, and
 // null is not a number the enrich schema can map to "no ABV".
-const orphanFacts = (o: OrphanFacts): OrphanFacts => {
+// #384: the server's schema demands a positive integer bid; a malformed one would 400
+// the whole relay, so it is dropped here for the same reason a stray ABV is.
+const usableBid = (bid: number | undefined): number | undefined =>
+  bid !== undefined && Number.isInteger(bid) && bid > 0 ? bid : undefined;
+
+// #384: `brand` is the brewery the shop published next to the bid — after the adapter's
+// detail hydration the card's brewery IS that brand. It is what the server's guard checks
+// the Untappd record against, so slug and brand only travel when a usable bid does.
+const orphanFacts = (o: OrphanFacts & { brewery?: string }): OrphanFacts => {
   const abv = usableAbv(o.abv);
+  const bid = usableBid(o.bid);
+  const brand = o.brand ?? o.brewery;
   return {
     ...(abv !== undefined ? { abv } : {}),
     ...(o.style !== undefined ? { style: o.style } : {}),
+    ...(bid !== undefined ? { bid } : {}),
+    ...(bid !== undefined && o.bidSlug !== undefined ? { bidSlug: o.bidSlug } : {}),
+    ...(bid !== undefined && brand !== undefined ? { brand } : {}),
+  };
+};
+
+// /enrich/candidates only answers "is this beer worth searching?", and for that the bid
+// alone is the question ("does the shop's identity contradict the stored link?"). Sending
+// the slug/brand it never reads would only inflate a 200-beer batch.
+const candidateFacts = (o: OrphanBeer): OrphanFacts => {
+  const { abv, style, bid } = orphanFacts(o);
+  return {
+    ...(abv !== undefined ? { abv } : {}),
+    ...(style !== undefined ? { style } : {}),
+    ...(bid !== undefined ? { bid } : {}),
   };
 };
 
@@ -60,7 +93,7 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
   if (orphans.length === 0) return;
 
   const candidates = await deps.getCandidates(
-    orphans.map((o) => ({ brewery: o.brewery, name: o.name, ...orphanFacts(o) })),
+    orphans.map((o) => ({ brewery: o.brewery, name: o.name, ...candidateFacts(o) })),
   );
   const byPair = new Map(orphans.map((o) => [pairKey(o.brewery, o.name), o]));
   const eligible = candidates.filter((c) => c.eligible).slice(0, MAX_SEARCHES_PER_PAGE);

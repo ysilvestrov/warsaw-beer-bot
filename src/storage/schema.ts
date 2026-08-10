@@ -267,6 +267,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE match_links ADD COLUMN merged_at TEXT;
     `,
   },
+  {
+    version: 22,
+    // #384: provenance for beers.untappd_id, so a shop-published bid may override a
+    // machine-derived link but never a curated or check-in-sourced one.
+    // The backfill is load-bearing, not cosmetic: without it every existing pin
+    // reads as NULL = machine-derived = overridable, silently undoing #343.
+    // match_links.untappd_beer_id is a LOCAL beers.id, not an Untappd bid.
+    sql: `
+      ALTER TABLE beers ADD COLUMN untappd_id_source TEXT
+        CHECK (untappd_id_source IN ('search','bid','curated','checkin'));
+      UPDATE beers SET untappd_id_source = 'curated'
+       WHERE id IN (SELECT untappd_beer_id FROM match_links WHERE reviewed_by_user = 1);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

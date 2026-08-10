@@ -69,7 +69,9 @@ describe('runOverlay', () => {
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0', abv: 7.3 }]);
   });
 
-  it('uses the hydrated brewery identity for matching and cache writes', async () => {
+  // #384: /match sees the hydrated identity, but the cache is keyed on the identity the
+  // lookup used (pre-hydration) — see "cache key stability" below for why they must agree.
+  it('uses the hydrated brewery identity for matching and the looked-up key for the cache', async () => {
     vi.mocked(chrome.storage.local.set).mockClear();
     const card: Card = { el: cardEl(), brewery: '', name: 'Aloha' };
     const adapter = {
@@ -84,7 +86,7 @@ describe('runOverlay', () => {
 
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'Funky Fluid', name: 'Aloha' }]);
     const storageSet = vi.mocked(chrome.storage.local.set).mock.calls.at(-1)?.[0] as Record<string, unknown>;
-    expect(Object.keys(storageSet)).toEqual([`mc2:${normalizeKey('Funky Fluid', 'Aloha')}`]);
+    expect(Object.keys(storageSet)).toEqual([`mc2:${normalizeKey('', 'Aloha')}`]);
   });
 
   it('does not match cards skipped during detail loading', async () => {
@@ -179,6 +181,102 @@ describe('runOverlay', () => {
     const enriched = enrich.mock.calls[0][0] as Array<{ name: string }>;
     expect(enriched).toHaveLength(1);
     expect(enriched[0]).toMatchObject({ name: 'Regular Orphan' });
+  });
+});
+
+// #384: a card whose shop-published bid disagrees with the link /match returned is the
+// only way the server's repair path can ever be reached — a wrongly-linked card comes
+// back *matched* and would otherwise never be offered for enrichment.
+describe('runOverlay bid-contradiction orphans (#384)', () => {
+  const linked = (brewery: string, name: string, untappd_id: number, over: Partial<MatchResult> = {}): MatchResult => ({
+    raw: { brewery, name },
+    matched_beer: { id: 7, name, brewery, rating_global: 3.5, untappd_id },
+    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    ...over,
+  });
+
+  it('enriches a matched card whose published bid contradicts the stored link', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([
+      { el: a, brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi' },
+    ]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, async () => [linked('Mad Brew', 'Tomatol Bulgogi', 6708599)], enrich);
+
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(enrich.mock.calls[0][0][0]).toMatchObject({
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi',
+    });
+  });
+
+  it('leaves a matched card alone when the published bid agrees with the stored link', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'Mad Brew', name: 'Agreeing', bid: 6708599 }]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, async () => [linked('Mad Brew', 'Agreeing', 6708599)], enrich);
+
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('leaves a matched card alone when the shop publishes no bid at all', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'Mad Brew', name: 'No Bid' }]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, async () => [linked('Mad Brew', 'No Bid', 6708599)], enrich);
+
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  // Deliberate: a check-in means the user engaged with this beer, and re-linking
+  // underneath them is a bigger surprise than one wrong badge.
+  it.each([
+    ['is_drunk', { is_drunk: true }],
+    ['drunk_uncertain', { drunk_uncertain: true }],
+  ])('never re-links a %s card, contradicting bid or not', async (_label, over) => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'Mad Brew', name: 'Drunk', bid: 6648348 }]);
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, async () => [linked('Mad Brew', 'Drunk', 6708599, over)], enrich);
+
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
+  it('still relays the bid for a plain (unmatched) orphan', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan', bid: 555, bidSlug: 'b-orphan' }]);
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'Orphan' },
+      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
+    };
+    const enrich = vi.fn();
+    await runOverlay(document, adapter, async () => [orphan], enrich);
+
+    expect(enrich.mock.calls[0][0][0]).toMatchObject({ bid: 555, bidSlug: 'b-orphan' });
+  });
+});
+
+// #384: the cache lookup key is computed before loadCardDetails; the write key used to be
+// recomputed after it. For every hydrated card the two diverged, so the card was a
+// permanent cache miss — /match plus a detail fetch on every page load, and the
+// MAX_SEARCHES_PER_PAGE window frozen on the same first cards forever.
+describe('runOverlay cache key stability (#384)', () => {
+  it('stores under the key it looked up, so a second overlay pass is a cache hit', async () => {
+    const freshCard = (): Card => ({ el: cardEl(), brewery: '', name: 'Aloha' });
+    let card = freshCard();
+    const adapter: SiteAdapter = {
+      id: 'test',
+      hostMatch: () => true,
+      parseCards: () => [card],
+      loadCardDetails: async (cards: Card[]) => { cards[0].brewery = 'Pravda'; },
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('Pravda', 'Aloha')]);
+
+    await runOverlay(document, adapter, sendMatch);
+    card = freshCard(); // a real re-parse of the same DOM yields the pre-hydration identity
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledTimes(1);
   });
 });
 

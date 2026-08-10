@@ -1,6 +1,27 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
 
+export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
+
+// #384: a stored link may be replaced by a shop-published bid only when WE put it there
+// by guessing. 'curated' is a human decision; 'checkin' is Untappd's own record. The same
+// list keeps a bid from *weakening* either stamp when it merely confirms the link.
+export const PROVENANCE_REFUSING_OVERRIDE: readonly UntappdIdSource[] = ['curated', 'checkin'];
+
+export function refusesBidOverride(source: string | null | undefined): boolean {
+  return (PROVENANCE_REFUSING_OVERRIDE as readonly string[]).includes(source ?? '');
+}
+
+// Stamps 'bid' on whichever row now owns this untappd_id (the enriched row, or the
+// canonical row it was merged into). untappd_id is UNIQUE, so this touches one row.
+export function stampBidProvenance(db: DB, bid: number): void {
+  const holes = PROVENANCE_REFUSING_OVERRIDE.map(() => '?').join(', ');
+  db.prepare(
+    `UPDATE beers SET untappd_id_source = 'bid'
+       WHERE untappd_id = ? AND COALESCE(untappd_id_source, '') NOT IN (${holes})`,
+  ).run(bid, ...PROVENANCE_REFUSING_OVERRIDE);
+}
+
 export interface BeerInput {
   untappd_id?: number | null;
   name: string;
@@ -10,6 +31,8 @@ export interface BeerInput {
   rating_global?: number | null;
   normalized_name: string;
   normalized_brewery: string;
+  /** #384: provenance of untappd_id. Omitted leaves any existing value untouched. */
+  untappd_id_source?: UntappdIdSource;
 }
 
 export interface BeerRow extends BeerInput {
@@ -42,20 +65,23 @@ export function upsertBeer(db: DB, b: BeerInput): number {
     db.prepare(
       `UPDATE beers SET untappd_id = COALESCE(?, untappd_id), name = ?, brewery = ?,
          style = ?, abv = ?, rating_global = ?,
-         normalized_name = ?, normalized_brewery = ? WHERE id = ?`,
+         normalized_name = ?, normalized_brewery = ?,
+         untappd_id_source = COALESCE(?, untappd_id_source) WHERE id = ?`,
     ).run(b.untappd_id ?? null, b.name, b.brewery, b.style ?? null,
           b.abv ?? null, b.rating_global ?? null,
-          b.normalized_name, b.normalized_brewery, existing.id);
+          b.normalized_name, b.normalized_brewery,
+          b.untappd_id_source ?? null, existing.id);
     bumpCatalogVersion();
     return existing.id;
   }
 
   const res = db.prepare(
     `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global,
-       normalized_name, normalized_brewery)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+       normalized_name, normalized_brewery, untappd_id_source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(b.untappd_id ?? null, b.name, b.brewery, b.style ?? null, b.abv ?? null,
-        b.rating_global ?? null, b.normalized_name, b.normalized_brewery);
+        b.rating_global ?? null, b.normalized_name, b.normalized_brewery,
+        b.untappd_id_source ?? null);
   bumpCatalogVersion();
   return Number(res.lastInsertRowid);
 }
@@ -160,6 +186,7 @@ export function recordLookupSuccess(
   db.prepare(
     `UPDATE beers SET
        untappd_id = ?,
+       untappd_id_source = 'search',
        style = COALESCE(?, style),
        abv = COALESCE(?, abv),
        rating_global = COALESCE(?, rating_global),

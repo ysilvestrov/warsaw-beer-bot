@@ -29,7 +29,10 @@ function sendBg<T>(message: unknown): Promise<T | undefined> {
 
 // Bridges the page's orphan beers into the enrichment queue: gated on the opt-in setting,
 // relays Untappd fetch + /enrich/* calls through the service worker, and drives badge states.
-const enrichOrphans: EnrichOrphans = (orphans) => {
+// Exported for tests only: the two mappings below are plain field copies, so a dropped
+// optional field (a bid that never reaches the server) still compiles and still passes
+// every other test — the "ships dead" failure mode #384 already paid for once.
+export const enrichOrphans: EnrichOrphans = (orphans) => {
   void (async () => {
     const { enrichEnabled } = await getSettings();
     if (!enrichEnabled) return;
@@ -40,6 +43,10 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
       name: o.name,
       ...(o.abv !== undefined ? { abv: o.abv } : {}),
       ...(o.style !== undefined ? { style: o.style } : {}),
+      // #384: the shop-published Untappd identity. runEnrichment derives the `brand` the
+      // server checks it against from the (hydrated) brewery, so it is not carried here.
+      ...(o.bid !== undefined ? { bid: o.bid } : {}),
+      ...(o.bidSlug !== undefined ? { bidSlug: o.bidSlug } : {}),
     }));
     await runEnrichment(beers, {
       getCandidates: async (bs) =>
@@ -51,6 +58,9 @@ const enrichOrphans: EnrichOrphans = (orphans) => {
           type: 'enrich:result', brewery, name, algolia,
           ...(facts?.abv !== undefined ? { abv: facts.abv } : {}),
           ...(facts?.style !== undefined ? { style: facts.style } : {}),
+          ...(facts?.bid !== undefined ? { bid: facts.bid } : {}),
+          ...(facts?.bidSlug !== undefined ? { bidSlug: facts.bidSlug } : {}),
+          ...(facts?.brand !== undefined ? { brand: facts.brand } : {}),
           pageUrl: window.location.href,
         }))?.result ?? { status: 'transient' },
       setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },

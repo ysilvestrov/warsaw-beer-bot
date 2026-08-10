@@ -128,6 +128,20 @@ describe('postEnrichCandidates', () => {
     expect(calls[0].url).toBe('https://api/enrich/candidates');
     vi.unstubAllGlobals();
   });
+
+  // #384: eligibility now depends on the shop-published bid, so it has to be on the wire.
+  it('forwards a published bid', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) =>
+      new Response(JSON.stringify({ candidates: [] }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await postEnrichCandidates('https://api', 'tok', [{ brewery: 'B', name: 'N', bid: 6648348 }]);
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toEqual({
+      beers: [{ brewery: 'B', name: 'N', bid: 6648348 }],
+    });
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('postEnrichResult', () => {
@@ -143,6 +157,24 @@ describe('postEnrichResult', () => {
       brewery: 'B',
       name: 'N',
       algolia: { hits: [{ bid: 5001 }] },
+    });
+    vi.unstubAllGlobals();
+  });
+
+  // #384: the identity the shop publishes, plus the brand the server's guard checks it
+  // against. All three travel together or the override cannot be verified.
+  it('forwards the published bid, slug and brand', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      new Response(JSON.stringify({ status: 'matched', untappd_id: 6648348, rating_global: 3.9 }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await postEnrichResult('https://api', 'tok', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi', algolia: { hits: [] },
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+    });
+    const init = fetchMock.mock.calls[0]![1] as RequestInit;
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
     });
     vi.unstubAllGlobals();
   });

@@ -173,6 +173,28 @@ export function breweryFromRegistryTags(tags: string[]): FlaskerBrewery | null {
   return hits.length === 1 ? hits[0] : null;
 }
 
+// #384: the shop's JSON-LD `brand.name` is the SAME shop display string that
+// FLASKER_BREWERIES.match and BREWERY_RULES.tags/titleAliases were built from
+// (scripts/gen-flasker-breweries.ts strips it straight off the shop's own brand
+// tile) — it is not independently canonical. Using it verbatim would silently
+// UNDO the catalog reconciliation those tables exist to perform (e.g. "Правда"
+// instead of the registry's "Pravda", which the server then can't search: #382
+// found cleanSearchQuery deletes all-Cyrillic tokens outright). So map the brand
+// through the same registry/rule lookups the title-parsing path already uses,
+// and only pass it through unchanged when neither table knows it — which is
+// exactly the case that makes the brand useful in the first place: series names
+// the title alone never reveals (Tomatol/Vespers/MGM-15 -> Mad Brew, Morava ->
+// Vibrant Pour).
+function canonicalizeBrand(brand: string): string {
+  const normalized = normalizeTag(brand);
+  const rule = BREWERY_RULES.find((r) =>
+    r.tags.some((tag) => normalizeTag(tag) === normalized) ||
+    r.titleAliases.some((alias) => normalizeTag(alias) === normalized),
+  );
+  if (rule) return rule.canonical;
+  return breweryFromRegistryTags([brand])?.canonical ?? brand;
+}
+
 // Registry path: resolve a brewery that appears as the leading prefix of the title
 // head. Longest match wins (so "Хмільний кіт" beats a bare "Хмільний"). Requires a
 // word boundary (exact head or `<brewery> `) so "DUMArine" never matches "DUMA".
@@ -264,6 +286,66 @@ export function parseTitle(
   }
   const name = stripMerchandisingPrefix(nameBeforeCleanup);
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
+}
+
+// --- product-detail fetch (#384) ------------------------------------------
+// Bounded detail hydration for fields absent from every listing grid: the shop
+// publishes a JSON-LD `brand` and (on most products) a direct Untappd beer link
+// only on the product detail page. Mirrors the beerfreak.ts precedent.
+const MAX_DETAIL_FETCHES_PER_PASS = 20;
+const detailUrls = new WeakMap<HTMLElement, string>();
+const detailByUrl = new Map<string, Promise<ProductDetail>>();
+
+export interface ProductDetail {
+  bid?: number;
+  bidSlug?: string;
+  brand?: string;
+}
+
+const UNTAPPD_BEER_RE = /untappd\.com\/b\/([a-z0-9-]+)\/(\d+)/i;
+const LD_BRAND_RE = /"brand"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]{1,80})"/;
+
+// Pure string parsing so it is testable against a captured fixture without a DOM.
+export function parseProductDetail(html: string): ProductDetail {
+  const out: ProductDetail = {};
+  const link = html.match(UNTAPPD_BEER_RE);
+  if (link) {
+    const bid = parseInt(link[2], 10);
+    if (Number.isFinite(bid) && bid > 0) {
+      out.bid = bid;
+      out.bidSlug = link[1].toLowerCase();
+    }
+  }
+  const brand = html.match(LD_BRAND_RE);
+  if (brand) {
+    // WooCommerce emits JSON-LD with \uXXXX escapes for Cyrillic brands, so the
+    // captured text is unescaped via JSON.parse of a synthetic one-token string.
+    // The regex only excludes literal `"`, not backslash sequences, so a captured
+    // run ending in an odd number of backslashes (or another malformed escape)
+    // makes that synthetic string invalid JSON — guard against throwing.
+    try {
+      out.brand = JSON.parse(`"${brand[1]}"`);
+    } catch {
+      // leave brand unset rather than surface a raw, still-escaped string
+    }
+  }
+  return out;
+}
+
+async function loadDetail(url: string): Promise<ProductDetail> {
+  const cached = detailByUrl.get(url);
+  if (cached) return cached;
+  const p = (async () => {
+    try {
+      const res = await fetch(url, { credentials: 'omit' });
+      if (!res.ok) return {};
+      return parseProductDetail(await res.text());
+    } catch {
+      return {}; // a failed detail fetch must never be worse than not fetching
+    }
+  })();
+  detailByUrl.set(url, p);
+  return p;
 }
 
 // --- view extractors -----------------------------------------------------
@@ -361,8 +443,30 @@ export const flasker: SiteAdapter = {
       // leading brand token ("Ginger") to the brewery, leaving "Beer" alone in the name,
       // which would otherwise escape the gate (#376 follow-up).
       if (isNonAlcoholicSoftDrinkFamily({ name: `${parsed.brewery} ${parsed.name}`, abv: parsed.abv })) continue;
+      if (e.productUrl) detailUrls.set(e.el, e.productUrl);
       cards.push({ el: e.el, ...parsed });
     }
     return cards;
+  },
+
+  async loadCardDetails(cards) {
+    const limited = cards
+      .filter((card) => detailUrls.has(card.el))
+      .slice(0, MAX_DETAIL_FETCHES_PER_PASS);
+
+    await Promise.all(limited.map(async (card) => {
+      const url = detailUrls.get(card.el);
+      if (!url) return;
+      const detail = await loadDetail(url);
+      // The JSON-LD brand has 100% coverage and resolves series names the title
+      // never reveals — but it is the shop's own display string, not a canonical
+      // one, so it must be mapped through the registry/rules first (canonicalizeBrand)
+      // or it would de-canonicalize breweries those tables already reconciled.
+      if (detail.brand) card.brewery = canonicalizeBrand(detail.brand);
+      if (detail.bid !== undefined) {
+        card.bid = detail.bid;
+        card.bidSlug = detail.bidSlug;
+      }
+    }));
   },
 };

@@ -134,4 +134,35 @@ describe('handleEnrichResult', () => {
     expect(body.pageUrl).toBe('https://beerfreak.org/p/x');
     expect(body.algolia).toEqual({ hits: [] });
   });
+
+  // #384: the service worker is the only hop between the page and the API, so a bid
+  // dropped here is a bid the server never sees.
+  it('forwards the published bid, slug and brand', async () => {
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await handleEnrichResult({
+      type: 'enrich:result', brewery: 'Mad Brew', name: 'Tomatol Bulgogi', algolia: { hits: [] },
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+    });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string);
+    expect(body).toMatchObject({
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+    });
+  });
+
+  it('omits the bid keys entirely when the shop published none', async () => {
+    vi.stubGlobal('chrome', { storage: { local: { get: async () => ({ enrichEnabled: true, token: 't', baseUrl: 'https://api' }) } } });
+    const fetchMock = vi.fn(
+      async (_url: string, _init?: RequestInit) => new Response(JSON.stringify({ status: 'not_found' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await handleEnrichResult({ type: 'enrich:result', brewery: 'B', name: 'N', algolia: { hits: [] } });
+    const body = JSON.parse(fetchMock.mock.calls[0][1]!.body as string) as Record<string, unknown>;
+    expect(Object.keys(body)).not.toContain('bid');
+    expect(Object.keys(body)).not.toContain('bidSlug');
+    expect(Object.keys(body)).not.toContain('brand');
+  });
 });

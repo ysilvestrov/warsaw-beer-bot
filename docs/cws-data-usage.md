@@ -26,8 +26,9 @@ domains + `beer-api` + optional hosts) — paste the consolidated text from
 
 ## Data collected (dashboard checkboxes)
 - **Authentication information** — YES (the user's API token).
-- **Website content** — YES (beer/brewery names read from shop pages; HTML of the user's own
-  Untappd check-in feed when they use Sync).
+- **Website content** — YES (beer/brewery names read from shop pages, including — on Flasker
+  — each product's own page fetched in the background for the same beer/brewery data; HTML
+  of the user's own Untappd check-in feed when they use Sync).
 - Personally identifiable info, health, financial, personal communications, location, web
   history, user activity (analytics-style) — NO.
 
@@ -39,3 +40,9 @@ domains + `beer-api` + optional hosts) — paste the consolidated text from
 ## Notes
 - Both Untappd-touching behaviours are opt-in and separately permissioned; they are described
   in the privacy policy and must be described in the store listing (#246).
+- **Flasker product-detail fetch (#384, not opt-in).** On Flasker listings, the content
+  script also fetches each new product's own page in the background (capped at 20 per page
+  load) to read the brewery and the Untappd link the shop publishes there — same data
+  category ("Website content") and same already-granted content-script host, so no new
+  permission and no dashboard-answer change; noted here because it is a second network
+  request per product, not just a DOM read of the page the user is on.

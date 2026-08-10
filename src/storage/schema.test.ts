@@ -286,4 +286,47 @@ describe('schema migrations', () => {
     const cols = (db.prepare('PRAGMA table_info(match_links)').all() as { name: string }[]).map((c) => c.name);
     expect(cols).toContain('merged_at');
   });
+
+  describe('migration v22 — untappd_id_source', () => {
+    it('adds the column, enforces the CHECK, and backfills exactly the pinned rows', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+
+      // Rewind past v22 so we can populate fixtures on a v21 schema, then let the
+      // real migration (not a hand-typed copy of its SQL) run over populated data.
+      db.exec('ALTER TABLE beers DROP COLUMN untappd_id_source');
+      db.prepare('DELETE FROM schema_version WHERE version = 22').run();
+
+      // Two beers: one pinned via match_links, one not.
+      db.prepare(
+        `INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+         VALUES (1, 111, 'Pinned', 'B', 'pinned', 'b'), (2, 222, 'Plain', 'B', 'plain', 'b')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user)
+         VALUES ('ref-1', 1, 1.0, 1), ('ref-2', 2, 0.9, 0)`,
+      ).run();
+
+      // MAX(version) is now 21, so this re-applies only v22 — this time over populated
+      // tables — and its backfill UPDATE is what has to produce the result below.
+      migrate(db);
+
+      const rows = db.prepare('SELECT id, untappd_id_source FROM beers ORDER BY id').all();
+      expect(rows).toEqual([
+        { id: 1, untappd_id_source: 'curated' },
+        { id: 2, untappd_id_source: null },
+      ]);
+
+      expect(() =>
+        db.prepare('UPDATE beers SET untappd_id_source = ? WHERE id = 2').run('bogus'),
+      ).toThrow(/CHECK constraint failed/);
+    });
+
+    it('reaches version 22', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+      expect(v.v).toBe(22);
+    });
+  });
 });

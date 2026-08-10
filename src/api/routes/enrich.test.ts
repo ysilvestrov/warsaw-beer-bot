@@ -19,10 +19,11 @@ function setup(depsOverride?: Partial<ApiDeps>) {
   const db = openDb(':memory:');
   migrate(db);
   const warn = vi.fn();
-  const log = { ...pino({ level: 'silent' }), warn } as never;
+  const info = vi.fn();
+  const log = { ...pino({ level: 'silent' }), warn, info } as never;
   const app = new Hono<ApiEnv>();
   enrichRoute(app, { db, env: {} as never, log, ...depsOverride });
-  return { db, app, warn };
+  return { db, app, warn, info };
 }
 
 function post(app: Hono<ApiEnv>, path: string, body: unknown) {
@@ -215,6 +216,99 @@ describe('POST /enrich/candidates', () => {
       beers: [{ brewery: 'PINTA', name: 'Atak Chmielu', style: 's'.repeat(BEER_TEXT_LIMIT_CHARS + 1) }],
     });
     expect(res.status).toBe(413);
+  });
+
+  // --- #384: a shop-published bid that contradicts the stored link ----------------
+  //
+  // Without this, a wrongly-linked row is never offered as a candidate and the repair
+  // path in /enrich/result is unreachable. The gate here must agree exactly with the
+  // one there — same refusesBidOverride helper — so a link that would be refused is
+  // never offered in the first place.
+
+  function linkedRow(db: ReturnType<typeof setup>['db'], untappd_id: number, source?: string) {
+    return upsertBeer(db, {
+      untappd_id, name: 'Tomatol Bulgogi', brewery: 'Mad Brew',
+      style: null, abv: null, rating_global: 3.7,
+      normalized_name: normalizeName('Tomatol Bulgogi'),
+      normalized_brewery: normalizeBrewery('Mad Brew'),
+      ...(source ? { untappd_id_source: source as 'search' } : {}),
+    });
+  }
+
+  const candidatesForMadBrew = (app: Hono<ApiEnv>, bid?: number) =>
+    post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', ...(bid !== undefined ? { bid } : {}) }],
+    });
+
+  it('is eligible when a published bid contradicts a link we guessed ourselves', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(true);
+  });
+
+  it.each(['curated', 'checkin'])(
+    'is not eligible when the stored link is %s — the same links /enrich/result refuses',
+    async (source) => {
+      const { db, app } = setup();
+      linkedRow(db, 6708599, source);
+      const body = await (await candidatesForMadBrew(app, 6648348)).json();
+      expect(body.candidates[0].eligible).toBe(false);
+    },
+  );
+
+  it('is eligible when the stored link predates provenance stamping (NULL source)', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599);
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(true);
+  });
+
+  it('is not eligible when the published bid agrees with the stored link', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app, 6708599)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('is not eligible for a linked row when the shop publishes no bid', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  // The backoff still gates a contradicted link — for rows that have a recorded lookup
+  // attempt. A bid /enrich/result rejects records nothing, so that path is bounded by the
+  // extension's badge cache instead; see the route comment.
+  it('still applies the lookup backoff to a contradicted link', async () => {
+    const { db, app } = setup();
+    const id = linkedRow(db, 6708599, 'search');
+    db.prepare('UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 1 WHERE id = ?')
+      .run(new Date(Date.now() - 3600_000).toISOString(), id);
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('still applies the wontfix triage veto to a contradicted link', async () => {
+    const { db, app } = setup();
+    const id = linkedRow(db, 6708599, 'search');
+    recordEnrichFailure(db, {
+      beer_id: id, brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: new Date().toISOString(),
+    });
+    setEnrichFailureReview(db, id, 'wontfix', null, new Date().toISOString());
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('rejects a non-positive bid rather than treating it as a contradiction', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 0 }],
+    });
+    expect(res.status).toBe(400);
   });
 
   it('keeps a 200-beer payload with abv and style inside the route byte limit', () => {
@@ -487,6 +581,247 @@ describe('POST /enrich/result', () => {
       brewery: 'PINTA', name: 'Atak Chmielu', algolia: { hits: [], nbHits: 0 },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+// --- #384: the shop-published Untappd bid ------------------------------------
+//
+// flasker publishes untappd.com/b/<slug>/<bid> on its product pages. When the shop
+// tells us the identity, that beats guessing — but only over a link WE guessed.
+const BULGOGI = {
+  bid: 6648348,
+  beer_name: 'Tomatøl:BULDAK BULGOGI',
+  brewery_name: 'Mad Brew',
+  brewery_alias: ['madbrew'],
+  beer_slug: 'mad-brew-tomatol-buldak-bulgogi',
+  style: 'Sour - Tomato / Vegetable Gose',
+  abv: 4.2,
+  global_rating: 4.06,
+};
+const hydrateBulgogi = () => vi.fn(async () => new Map([[BULGOGI.bid, BULGOGI]]));
+
+const shopRowInput = (over: Record<string, unknown> = {}) => ({
+  name: 'Tomatol Bulgogi', brewery: 'Mad Brew',
+  normalized_name: normalizeName('Tomatol Bulgogi'),
+  normalized_brewery: normalizeBrewery('Mad Brew'),
+  ...over,
+});
+const sourceOf = (db: ReturnType<typeof openDb>, id: number) =>
+  (db.prepare('SELECT untappd_id, untappd_id_source FROM beers WHERE id = ?').get(id) as
+    | { untappd_id: number | null; untappd_id_source: string | null }
+    | undefined);
+
+describe('POST /enrich/result — published bid (#384)', () => {
+  it('overrides a machine-derived link and merges into the canonical row', async () => {
+    const { app, db, info } = setup({ hydrateByBid: hydrateBulgogi() });
+    // The canonical row, as created by the check-ins sync.
+    const canonical = upsertBeer(db, {
+      untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
+      normalized_name: normalizeName('Tomatøl:BULDAK BULGOGI'),
+      normalized_brewery: normalizeBrewery('Mad Brew'),
+    });
+    // The shop-identity row, wrongly matched by search.
+    const shopRow = upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8,
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-buldak-bulgogi', brand: 'Mad Brew',
+      algolia: { hits: [] },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6648348 });
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(shopRow)).toBeUndefined();
+    expect(sourceOf(db, canonical)!.untappd_id).toBe(6648348);
+    // The accepted line names what it replaced — the only trace of a repaired link.
+    expect(info.mock.calls.map((c) => c[0])).toContainEqual(
+      expect.objectContaining({ bid: 6648348, source: 'local', replaced: 6708599 }),
+    );
+  });
+
+  it.each(['curated', 'checkin'] as const)('refuses to override a %s link', async (source) => {
+    const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
+    const protectedRow = upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: source }));
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
+    });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6708599 });
+    expect(sourceOf(db, protectedRow)).toEqual({ untappd_id: 6708599, untappd_id_source: source });
+  });
+
+  // Regression guard for the relaxed early return: every client in production today
+  // sends no bid, and must see byte-for-byte the old behaviour.
+  it('is unchanged for a client that sends no bid', async () => {
+    const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
+    const row = upsertBeer(db, shopRowInput({
+      untappd_id: 6708599, untappd_id_source: 'search', rating_global: 3.1,
+    }));
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi', algolia: { hits: [] },
+    });
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 6708599, rating_global: 3.1 });
+    expect(sourceOf(db, row)).toEqual({ untappd_id: 6708599, untappd_id_source: 'search' });
+  });
+
+  // A request that carries the SAME bid as the stored link is not an override —
+  // it must take the cheap early return, not re-resolve and re-write.
+  it('takes the early return when the bid agrees with the stored link', async () => {
+    const hydrate = hydrateBulgogi();
+    const { app, db } = setup({ hydrateByBid: hydrate });
+    const row = upsertBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'search' }));
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
+    });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6648348 });
+    expect(hydrate).not.toHaveBeenCalled();
+    expect(sourceOf(db, row)).toEqual({ untappd_id: 6648348, untappd_id_source: 'search' });
+  });
+
+  // The spec claims search cannot clobber a bid-sourced link "by construction",
+  // because the early return fires for any request that carries no bid. Assert it
+  // rather than trusting the prose.
+  it('a later search cannot clobber a bid-sourced link', async () => {
+    const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
+    const row = upsertBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'bid' }));
+    // A relay carrying search candidates but no bid — the pre-0.14 shape.
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      algolia: { hits: [{ bid: 6708599, beer_name: 'Tomatol: Bulgogi Sriracha', brewery_name: 'Mad Brew' }] },
+    });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6648348 });
+    expect(sourceOf(db, row)).toEqual({ untappd_id: 6648348, untappd_id_source: 'bid' });
+  });
+
+  it('links an orphan straight from the bid, stamps provenance, and logs the divergences', async () => {
+    const hydrate = hydrateBulgogi();
+    const { app, db, info } = setup({ hydrateByBid: hydrate });
+    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8,
+      bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew',
+      algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 6648348, rating_global: 4.06 });
+    expect(hydrate).toHaveBeenCalledWith([6648348]);
+    expect(sourceOf(db, orphan)).toEqual({ untappd_id: 6648348, untappd_id_source: 'bid' });
+    // notes are the ONLY signal that would ever surface a same-brewery wrong bid.
+    expect(info.mock.calls.map((c) => c[0])).toContainEqual(
+      expect.objectContaining({
+        bid: 6648348, source: 'hydrated',
+        notes: ['slug-divergence', 'name-divergence', 'abv-divergence'],
+      }),
+    );
+  });
+
+  // Provenance may be raised by a bid, never lowered: merging into a check-in-sourced
+  // canonical row must not restamp it 'bid' and thereby make it overridable.
+  it('does not weaken the canonical row\'s stamp when merging into it', async () => {
+    const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
+    const canonical = upsertBeer(db, {
+      untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
+      normalized_name: normalizeName('Tomatøl:BULDAK BULGOGI'),
+      normalized_brewery: normalizeBrewery('Mad Brew'),
+      untappd_id_source: 'checkin',
+    });
+    upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6648348 });
+    expect(sourceOf(db, canonical)).toEqual({ untappd_id: 6648348, untappd_id_source: 'checkin' });
+  });
+
+  it('falls through to the normal pipeline when the guard vetoes', async () => {
+    const { app, db, warn } = setup({ hydrateByBid: hydrateBulgogi() });
+    const orphan = upsertBeer(db, {
+      untappd_id: null, name: 'Tomatol Bulgogi', brewery: 'Browar Stu Mostów',
+      normalized_name: normalizeName('Tomatol Bulgogi'),
+      normalized_brewery: normalizeBrewery('Browar Stu Mostów'),
+    });
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Browar Stu Mostów', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Browar Stu Mostów', algolia: { hits: [] },
+    });
+    // Guard vetoes on brewery, normal pipeline finds nothing → orphan, not a wrong link.
+    expect(await res.json()).toMatchObject({ status: 'not_found' });
+    expect(sourceOf(db, orphan)).toEqual({ untappd_id: null, untappd_id_source: null });
+    // Logged with both breweries: this is the alias blind spot, and it has to be
+    // measurable in production rather than invisible.
+    expect(warn.mock.calls.map((c) => c[0])).toContainEqual(
+      expect.objectContaining({
+        bid: 6648348, reason: 'brewery-mismatch',
+        brand: 'Browar Stu Mostów', recordBrewery: 'Mad Brew',
+      }),
+    );
+  });
+
+  it('falls through and logs the underlying error when hydration fails', async () => {
+    const err = new Error('403 blocked');
+    const { app, db, warn } = setup({ hydrateByBid: vi.fn(async () => { throw err; }) });
+    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew',
+      algolia: {
+        hits: [{ bid: 4242, beer_name: 'Tomatol Bulgogi', brewery_name: 'Mad Brew', rating_score: 3.2 }],
+      },
+    });
+
+    // Never a request error, and never worse than today: the search pipeline still runs.
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 4242 });
+    expect(sourceOf(db, orphan)).toEqual({ untappd_id: 4242, untappd_id_source: 'search' });
+    expect(warn.mock.calls.map((c) => c[0])).toContainEqual(
+      expect.objectContaining({ bid: 6648348, reason: 'hydrate-failed', err }),
+    );
+  });
+
+  // Falling through to search would let a transient Untappd block turn "keep the
+  // stored link" into "re-guess it" — strictly worse than before this feature.
+  it('keeps an existing link when the bid fails to resolve, instead of re-guessing', async () => {
+    const { app, db } = setup({ hydrateByBid: vi.fn(async () => { throw new Error('403 blocked'); }) });
+    const row = upsertBeer(db, shopRowInput({
+      untappd_id: 6708599, untappd_id_source: 'search', rating_global: 3.1,
+    }));
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew',
+      algolia: {
+        hits: [{ bid: 4242, beer_name: 'Tomatol Bulgogi', brewery_name: 'Mad Brew', rating_score: 3.2 }],
+      },
+    });
+    expect(await res.json()).toEqual({ status: 'matched', untappd_id: 6708599, rating_global: 3.1 });
+    expect(sourceOf(db, row)).toEqual({ untappd_id: 6708599, untappd_id_source: 'search' });
+  });
+
+  it('falls through when no hydrate function is wired and the bid is unknown locally', async () => {
+    const { app, db } = setup(); // no hydrateByBid dep at all
+    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ status: 'not_found' });
+    expect(sourceOf(db, orphan)).toEqual({ untappd_id: null, untappd_id_source: null });
+  });
+
+  it('rejects a non-positive or non-integer bid at schema validation', async () => {
+    const { app } = setup({ hydrateByBid: hydrateBulgogi() });
+    for (const bid of [0, -1, 1.5]) {
+      const res = await post(app, '/enrich/result', {
+        brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid, algolia: { hits: [] },
+      });
+      expect(res.status).toBe(400);
+    }
   });
 });
 
