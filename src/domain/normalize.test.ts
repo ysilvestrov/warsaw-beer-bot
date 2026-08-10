@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -511,5 +511,42 @@ describe('#382 homoglyph repair reaches name matching', () => {
 
   test('a genuinely mixed name is still not equated with either script', () => {
     expect(normalizeName('BeerЛога')).not.toBe(normalizeName('BeerLoga'));
+  });
+});
+
+describe('searchQueryLadder', () => {
+  test('all-Latin input yields a single rung — no ladder, no extra request', () => {
+    expect(searchQueryLadder('Pinta', 'Atak Chmielu')).toEqual(['Pinta Atak Chmielu']);
+  });
+
+  test('the last rung always equals cleanSearchQuery', () => {
+    const rungs = searchQueryLadder('Ципа', 'Сидр Грушевий PERRY');
+    expect(rungs[rungs.length - 1]).toBe(cleanSearchQuery('Ципа', 'Сидр Грушевий PERRY'));
+  });
+
+  test('the narrow rung keeps Cyrillic the ASCII fold deletes', () => {
+    // Today's query is the bare style word `PERRY`, which matches thousands of
+    // unrelated beers; the narrow rung carries the identity tokens.
+    expect(searchQueryLadder('Ципа', 'Сидр Грушевий PERRY')).toEqual([
+      'Ципа Сидр Грушевий PERRY',
+      'PERRY',
+    ]);
+  });
+
+  test('the narrow rung still drops one-character tokens (#350 is script-aware, not disabled)', () => {
+    expect(searchQueryLadder('Pinta Brewery', 'Rock n Roll')).toEqual(['Pinta Rock Roll']);
+    // `Шо` folds to two characters under the unicode fold and is therefore kept.
+    expect(searchQueryLadder('SHO Brewery', 'Шо Забіяка')).toEqual(['SHO Шо Забіяка', 'SHO']);
+  });
+
+  test('the echo strip is no longer blind on Cyrillic', () => {
+    // Both tokens fold to '' under the ASCII fold, so the reduced rung cannot tell
+    // that the name restates the brewery; the narrow rung strips the leading echo.
+    expect(searchQueryLadder('Ципа', 'Ципа Блонда')[0]).toBe('Ципа Блонда');
+  });
+
+  test('homoglyph repair reaches both rungs', () => {
+    expect(searchQueryLadder('Malle', 'Belgian Сhristmas Ale'))
+      .toEqual(['Malle Belgian Christmas Ale']);
   });
 });

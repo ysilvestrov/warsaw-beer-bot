@@ -190,13 +190,6 @@ function foldToken(tok: string): string {
   return stripDiacritics(tok).toLowerCase().replace(/[^a-z0-9]/g, '');
 }
 
-// Build an Untappd search query from a shop brewery+name without doubling the brewery.
-// Cleans the COMBINED "brewery name" string: strip legal-entity forms from the brewery
-// (as stripBreweryNoise did), drop BREWERY_NOISE tokens, and dedup repeated tokens (by
-// fold), keeping survivors in their original raw form. Fixes #126: a name that repeats
-// the brewery ("Track Brewing Company Taking Shape" + "Track Brewing Co.") otherwise
-// AND-searches duplicated terms and returns nothing. The raw name is used only as a
-// last-resort non-empty fallback when cleaning removes everything and no brewery survives.
 // Strip structural search noise from a raw brewery/name string before it becomes an
 // Untappd (Algolia) query. Algolia ANDs every term, so bracketed adjunct lists, collab
 // parentheticals, and ABV/spec strings over-constrain the search to zero hits (#236).
@@ -250,7 +243,29 @@ export function stripQueryTokenNoise(s: string): string {
 // query ↔ name-normalisation asymmetry and can only widen the candidate pool, never narrow it.
 const MIN_QUERY_TOKEN_LENGTH = 2;
 
-export function cleanSearchQuery(brewery: string, name: string): string {
+// Retention fold for the narrow rung. Identical to foldToken except that it keeps every
+// Unicode letter and digit instead of `[a-z0-9]`, so a Cyrillic token measures its real
+// length instead of collapsing to ''. MIN_QUERY_TOKEN_LENGTH still applies — #350's
+// finding (Algolia does not match a one-character token) is script-independent; the gate
+// simply stops mistaking "not written in Latin" for "one character" (#382).
+function unicodeFoldToken(tok: string): string {
+  return stripDiacritics(tok).toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+}
+
+// Build an Untappd search query from a shop brewery+name without doubling the brewery.
+// Cleans the COMBINED "brewery name" string: strip legal-entity forms from the brewery
+// (as stripBreweryNoise did), drop BREWERY_NOISE tokens, and dedup repeated tokens (by
+// fold), keeping survivors in their original raw form. Fixes #126: a name that repeats
+// the brewery ("Track Brewing Company Taking Shape" + "Track Brewing Co.") otherwise
+// AND-searches duplicated terms and returns nothing. The raw name is used only as a
+// last-resort non-empty fallback when cleaning removes everything and no brewery survives.
+function buildSearchQuery(
+  breweryRaw: string,
+  nameRaw: string,
+  fold: (tok: string) => string,
+): string {
+  const brewery = repairHomoglyphs(breweryRaw);
+  const name = repairHomoglyphs(nameRaw);
   const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery))));
   const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
 
@@ -259,7 +274,7 @@ export function cleanSearchQuery(brewery: string, name: string): string {
   const brandTokens: string[] = [];
   const brandFolds = new Set<string>();
   for (const tok of cleanBrewery.split(COLLAB_SEP).join(' ').split(/\s+/)) {
-    const f = foldToken(tok);
+    const f = fold(tok);
     if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f) || brandFolds.has(f)) continue;
     brandFolds.add(f);
     brandTokens.push(tok);
@@ -271,7 +286,7 @@ export function cleanSearchQuery(brewery: string, name: string): string {
   // collab-brewery separator.
   const nameTokens: string[] = [];
   for (const tok of cleanName.replace(/\//g, ' ').split(/\s+/)) {
-    const f = foldToken(tok);
+    const f = fold(tok);
     if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f)) continue;
     nameTokens.push(tok);
   }
@@ -282,10 +297,25 @@ export function cleanSearchQuery(brewery: string, name: string): string {
   // them is harmless while dropping them destroyed the beer name.
   let start = 0;
   let end = nameTokens.length;
-  while (start < end && brandFolds.has(foldToken(nameTokens[start]))) start++;
-  while (end > start && brandFolds.has(foldToken(nameTokens[end - 1]))) end--;
+  while (start < end && brandFolds.has(fold(nameTokens[start]))) start++;
+  while (end > start && brandFolds.has(fold(nameTokens[end - 1]))) end--;
 
   const out = [...brandTokens, ...nameTokens.slice(start, end)];
   // Last resort: never emit an empty query.
   return out.length ? out.join(' ') : (cleanName || cleanBrewery || name.trim());
+}
+
+export function cleanSearchQuery(brewery: string, name: string): string {
+  return buildSearchQuery(brewery, name, foldToken);
+}
+
+// The rungs of the #382 query ladder, narrowest first. The narrow rung's term set is a
+// superset of the wide rung's, so its result set is a subset: a caller that widens ONLY on
+// a zero result can never see fewer candidates than it sees today. Rungs collapse to one
+// entry whenever the folds agree, which is every all-Latin input — the Latin majority of
+// the catalogue therefore pays nothing.
+export function searchQueryLadder(brewery: string, name: string): string[] {
+  const narrow = buildSearchQuery(brewery, name, unicodeFoldToken);
+  const wide = cleanSearchQuery(brewery, name);
+  return narrow === wide ? [narrow] : [narrow, wide];
 }
