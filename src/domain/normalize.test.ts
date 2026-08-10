@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -426,5 +426,63 @@ describe("Series: label strip (#303)", () => {
   test('negative guard: leaves names without a series label untouched', () => {
     expect(stripSearchNoise('Time Series IPA')).toBe('Time Series IPA');
     expect(stripSearchNoise('Double Dry Hopped Galaxy')).toBe('Double Dry Hopped Galaxy');
+  });
+});
+
+describe('repairHomoglyphs', () => {
+  test.each([
+    ['Companу', 'Company'],
+    ['Сherry', 'Cherry'],
+    ['Сider', 'Cider'],
+    ['Coоkies', 'Cookies'],
+    ['СOMMA', 'COMMA'],
+    ['Soаked', 'Soaked'],
+    ['TOMATO+Сhipotle', 'TOMATO+Chipotle'],
+    ['СINNAMON', 'CINNAMON'],
+    ['СOCORITA', 'COCORITA'],
+    ['СITRA+CITRA', 'CITRA+CITRA'],
+    ['Сhristmas', 'Christmas'],
+    ['NEІРА', 'NEIPA'],
+  ])('repairs %s toward Latin', (input, expected) => {
+    expect(repairHomoglyphs(input)).toBe(expected);
+  });
+
+  test.each([
+    ['Свiтле)', 'Світле)'],
+    ['Проскурiвське', 'Проскурівське'],
+    ['ИмбирьOK', 'ИмбирьОК'],
+    ['(Зiберт', '(Зіберт'],
+    ['Aваддон', 'Аваддон'],
+    ['Вiд', 'Від'],
+    ['Класiчнае)', 'Класічнае)'],
+    ['Премiум)', 'Преміум)'],
+    ['(Львiвське', '(Львівське'],
+    ['Бiлий', 'Білий'],
+    ["Рiздв'яний", "Різдв'яний"],
+  ])('repairs %s toward Cyrillic', (input, expected) => {
+    expect(repairHomoglyphs(input)).toBe(expected);
+  });
+
+  test.each([
+    'BeerЛога', 'Hellь', 'CowКава', 'Mozaїка', 'Enкel',
+    'ZЁZЯ', 'ЭльFan', 'NEЗагравай', 'миcola', 'Trymaysя!',
+  ])('leaves genuinely mixed token %s untouched', (input) => {
+    expect(repairHomoglyphs(input)).toBe(input);
+  });
+
+  test('single-script strings pass through unchanged', () => {
+    expect(repairHomoglyphs('Pinta Atak Chmielu')).toBe('Pinta Atak Chmielu');
+    expect(repairHomoglyphs('Ципа Блонда')).toBe('Ципа Блонда');
+  });
+
+  test('repairs per token, preserving the original spacing', () => {
+    expect(repairHomoglyphs('Malle  Belgian Сhristmas Ale'))
+      .toBe('Malle  Belgian Christmas Ale');
+  });
+
+  test('a token mixing scripts across a word boundary is judged per token', () => {
+    // "Ципа" is pure Cyrillic and "PERRY" pure Latin: neither token is mixed,
+    // so nothing is repaired even though the string carries both scripts.
+    expect(repairHomoglyphs('Ципа Сидр Грушевий PERRY')).toBe('Ципа Сидр Грушевий PERRY');
   });
 });

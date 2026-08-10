@@ -62,6 +62,59 @@ function stripDiacritics(s: string): string {
     .replace(/ł/g, 'l').replace(/Ł/g, 'L');
 }
 
+// Cyrillic ↔ Latin homoglyph pairs: characters that render identically in the fonts
+// shops and Untappd use. Both sides of the pipeline carry tokens typed in the wrong
+// script — `NEІРА` is `NEIPA` with Cyrillic І/Р/А, `Свiтле` is a Cyrillic word carrying
+// a Latin `i` (#382). Such a token is doubly harmful: it sends query characters no index
+// entry contains, and it blocks a name match Algolia already found, because
+// `Belgian Сhristmas Ale` can never normalize onto `Belgian Christmas Ale`.
+//
+// The map is restricted to visually identical pairs. Lowercase к/м/т/в/н are deliberately
+// absent: they are not reliably confusable with k/m/t/b/h. Excluding them costs exactly one
+// legitimate repair in the whole catalogue (`Enкel`) and prevents a false one — adding в→b
+// would corrupt `CowКава` into `CowKaba`.
+const CYRILLIC_TO_LATIN = new Map<string, string>(Object.entries({
+  'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P',
+  'С': 'C', 'Т': 'T', 'У': 'Y', 'Х': 'X', 'І': 'I', 'Ј': 'J', 'Ѕ': 'S',
+  'а': 'a', 'е': 'e', 'о': 'o', 'р': 'p', 'с': 'c', 'у': 'y', 'х': 'x', 'і': 'i',
+  'ј': 'j', 'ѕ': 's',
+}));
+const LATIN_TO_CYRILLIC = new Map<string, string>(
+  [...CYRILLIC_TO_LATIN].map(([cyrillic, latin]) => [latin, cyrillic]),
+);
+
+const HAS_CYRILLIC = /\p{Script=Cyrillic}/u;
+const HAS_LATIN = /[A-Za-z]/;
+
+function repairToken(tok: string): string {
+  const chars = [...tok];
+  const cyrillic = chars.filter((c) => HAS_CYRILLIC.test(c));
+  const latin = chars.filter((c) => HAS_LATIN.test(c));
+  if (cyrillic.length === 0 || latin.length === 0) return tok;
+  // Latin is tried FIRST and this ordering is load-bearing, not a tie-break: `NEІРА`
+  // is Cyrillic-majority (3 vs 2) yet wants Latin, so a majority rule yields `НЕІРА`.
+  if (cyrillic.every((c) => CYRILLIC_TO_LATIN.has(c))) {
+    return chars.map((c) => CYRILLIC_TO_LATIN.get(c) ?? c).join('');
+  }
+  if (latin.every((c) => LATIN_TO_CYRILLIC.has(c))) {
+    return chars.map((c) => LATIN_TO_CYRILLIC.get(c) ?? c).join('');
+  }
+  return tok;
+}
+
+// Repair mixed-script tokens. Only tokens containing BOTH scripts are touched; a token
+// written wholly in one script is never transliterated (that is #320, a different job).
+export function repairHomoglyphs(s: string): string {
+  // Fast path. normalizeName runs on every candidate inside the fuzzy loop and the
+  // catalogue is overwhelmingly single-script, so the common case must cost two regex
+  // tests and no allocation.
+  if (!HAS_CYRILLIC.test(s) || !HAS_LATIN.test(s)) return s;
+  return s
+    .split(/(\s+)/)
+    .map((part) => (/^\s*$/.test(part) ? part : repairToken(part)))
+    .join('');
+}
+
 // Private-use sentinel survives baseNormalize's punctuation pass, then becomes a
 // canonical dot. Percentage/strength suffixes deliberately bypass this protection.
 const DECIMAL_SEPARATOR = '\uE000';
