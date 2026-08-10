@@ -312,4 +312,15 @@ describe('beerfreak adapter', () => {
       name: '(IIIO) Narcissus',
     }));
   });
+
+  it('drops the whole descriptor-led brewery run from a collaborator segment, not two tokens', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10486, brand_title: null, title: 'Popihn/Brasserie du Bocq Blanche de Namur' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Popihn',
+      name: 'Blanche de Namur',
+    }));
+  });
 });

@@ -113,7 +113,7 @@ function stripCollaboratorName(rawTitle: string): string {
 
   const first = normalizedToken(tokens[0]);
   if (LEADING_BREWERY_DESCRIPTORS.has(first) && tokens.length >= 3) {
-    return tokens.slice(2).join(' ');
+    return tokens.slice(descriptorBreweryEnd(tokens)).join(' ');
   }
 
   for (let i = 0; i < tokens.length - 1; i += 1) {
