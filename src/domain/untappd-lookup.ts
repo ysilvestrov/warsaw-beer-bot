@@ -182,23 +182,12 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
 
-  for (const part of parts) {
-    const query = cleanSearchQuery(part, name);
-    triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
-
-    let results: SearchResult[];
-    try {
-      results = await args.search.search(query);
-    } catch (error) {
-      if (error instanceof HttpError && isBlockStatus(error.status)) {
-        return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
-      }
-      return { kind: 'transient', error };
-    }
-
-    seenCandidates.push(...results);
-    if (results.length === 0) continue;
-
+  // One search attempt's candidate list run through every match stage. Returns a matched
+  // outcome, or null when this list yields nothing. Extracted from the search loop so the
+  // query ladder (#382) can iterate rungs without duplicating 130 lines of staging — and
+  // so "no match" is a return value rather than a `continue` whose meaning depends on how
+  // many loops happen to enclose it.
+  function matchAgainst(results: SearchResult[]): LookupOutcome | null {
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
     // #120 contained non-leading brewery token — EXACT name only, never approximate
@@ -226,7 +215,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
     const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
     const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
-    if (strictPool.length === 0 && relaxedPool.length === 0 && brandPool.length === 0) continue;
+    if (strictPool.length === 0 && relaxedPool.length === 0 && brandPool.length === 0) return null;
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
     // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
@@ -350,7 +339,28 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
-    // No name match in this search part — fall through to the next part.
+    return null;
+  }
+
+  for (const part of parts) {
+    const query = cleanSearchQuery(part, name);
+    triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
+
+    let results: SearchResult[];
+    try {
+      results = await args.search.search(query);
+    } catch (error) {
+      if (error instanceof HttpError && isBlockStatus(error.status)) {
+        return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
+      }
+      return { kind: 'transient', error };
+    }
+
+    seenCandidates.push(...results);
+    if (results.length === 0) continue;
+
+    const outcome = matchAgainst(results);
+    if (outcome) return outcome;
   }
 
   // #271 fallback: the search returned zero candidates across every brewery part — a genuine
