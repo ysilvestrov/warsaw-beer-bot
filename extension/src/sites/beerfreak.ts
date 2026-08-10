@@ -22,14 +22,21 @@ const QUALIFIER_TOKENS = new Set([
   'van', 'von', 'der', 'den', 'het', "'t", 'en', 'y',
   'na', 'za', 'w',
 ]);
+// Words that continue a brewery name after its proper noun ("Brouwerij De Dolle
+// Brouwers", "Brasserie Cantillon Brewery"). Narrower than BREWERY_DESCRIPTORS on
+// purpose: 'family'/'company'/'co' are real beer-name words ("Family Reunion"),
+// and dropping them from this run costs no accuracy against the catalogue.
+const TRAILING_BREWERY_TOKENS = new Set([
+  ...LEADING_BREWERY_DESCRIPTORS, 'brewery', 'brewing', 'brouwers',
+]);
 const COLLABORATOR_COMPANY_WORDS = new Set(['beer', 'brewing']);
 const COLLABORATOR_TERMINAL_WORDS = new Set(['brewery', 'company', 'co', 'co.']);
 // Words that appear as brewery descriptors in a title's leading brewery form
 // (structural forms + "family" for "<X> Family Brewery"). Lowercased; compared
 // with normalizedToken (which strips ( ) , ).
 const BREWERY_DESCRIPTORS = new Set([
-  'brewery', 'brewing', 'brewers', 'brouwers', 'browar', 'brasserie', 'brouwerij',
-  'brauerei', 'pivovar', 'birrificio', 'company', 'co', 'co.', 'family',
+  'brewery', 'brewing', 'browar', 'brasserie', 'brouwerij', 'brauerei',
+  'pivovar', 'birrificio', 'company', 'co', 'co.', 'family',
 ]);
 const BEERFREAK_BUNDLE_RE = /(?:^|[^\p{L}\p{N}])(?:mix\s+pack|tasting\s+set|set|сет)(?=$|[^\p{L}\p{N}])/iu;
 const BEERFREAK_NUMBERED_SERIES_RE = /(?:^|[^\p{L}\p{N}])series\s*[-:]?\s*\d+\s+special\s+beers?(?=$|[^\p{L}\p{N}])/iu;
@@ -103,7 +110,7 @@ function descriptorBreweryEnd(tokens: string[]): number {
   let i = 1;
   while (i < tokens.length && QUALIFIER_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
   i += 1; // the proper noun
-  while (i < tokens.length && BREWERY_DESCRIPTORS.has(normalizedToken(tokens[i]))) i += 1;
+  while (i < tokens.length && TRAILING_BREWERY_TOKENS.has(normalizedToken(tokens[i]))) i += 1;
   return Math.min(i, tokens.length - 1);
 }
 

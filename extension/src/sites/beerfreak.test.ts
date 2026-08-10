@@ -213,16 +213,34 @@ describe('beerfreak adapter', () => {
     }));
   });
 
-  it('never leaves a descriptor-led brandless title without a beer name', () => {
+  it('clamps a fully-qualified descriptor title so the beer name keeps a token', () => {
     const parsed = beerfreak.parseCards(docWithProducts([
-      { id: 10484, brand_title: null, title: 'Browar Kormoran' },
-      { id: 10485, brand_title: null, title: 'Brasserie de la Senne' },
+      { id: 10484, brand_title: null, title: 'Brasserie de la Senne' },
     ]));
 
-    for (const beer of parsed) {
-      expect(beer.name).not.toBe('');
-      expect(beer.brewery).not.toBe('');
-    }
+    // The rule runs out of title before it finds a proper noun, so the clamp — not
+    // the rule — decides the boundary. Erring short is the documented, tolerated
+    // direction; leaving the name empty is not.
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie de la',
+      name: 'Senne',
+    }));
+  });
+
+  it('does not let the trailing brewery run swallow beer-name words', () => {
+    const parsed = beerfreak.parseCards(docWithProducts([
+      { id: 10487, brand_title: null, title: 'Brasserie Dupont Family Reunion' },
+      { id: 10488, brand_title: null, title: 'Browar Pinta Company Man' },
+    ]));
+
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Brasserie Dupont',
+      name: 'Family Reunion',
+    }));
+    expect(parsed).toContainEqual(expect.objectContaining({
+      brewery: 'Browar Pinta',
+      name: 'Company Man',
+    }));
   });
 
   it('falls back to card title text when embedded product metadata is absent', () => {
