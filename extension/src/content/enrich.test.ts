@@ -95,6 +95,51 @@ describe('runEnrichment relays orphan facts (#369)', () => {
   });
 });
 
+// #384: the shop-published bid must reach both endpoints — /enrich/candidates needs it to
+// see that a stored link is contradicted, /enrich/result to repair it.
+describe('runEnrichment relays the published bid (#384)', () => {
+  const orphan = {
+    key: 'k0', brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+    bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi',
+  };
+
+  it('sends the bid to getCandidates, but not the slug/brand it has no use for', async () => {
+    const d = deps();
+    await runEnrichment([orphan], d);
+    expect(d.getCandidates).toHaveBeenCalledWith([
+      { brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 6648348 },
+    ]);
+  });
+
+  it('sends bid, slug and the card brand as brand to submitResult', async () => {
+    const d = deps();
+    await runEnrichment([orphan], d);
+    expect(d.submitResult).toHaveBeenCalledWith(
+      'Mad Brew', 'Tomatol Bulgogi', { hits: [{ bid: 7 }] },
+      { bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew' },
+    );
+  });
+
+  it('sends no slug or brand when the shop published no bid', async () => {
+    const d = deps();
+    await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', bidSlug: 'stray' }], d);
+    expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+  });
+
+  // runEnrichment is exported: a bid the server's schema would reject (non-positive,
+  // fractional, NaN) must be dropped here rather than 400 the whole relay.
+  it.each([['zero', 0], ['negative', -5], ['fractional', 1.5], ['NaN', NaN], ['Infinity', Infinity]])(
+    'drops a %s bid from both endpoints',
+    async (_label, bad) => {
+      const d = deps();
+      await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', bid: bad, bidSlug: 's' }], d);
+      expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
+      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+    },
+  );
+});
+
 // #369 review follow-up: runEnrichment is exported, so it sanitizes rather than
 // trusting its caller — a stray NaN would serialize as null and be unmappable.
 describe('runEnrichment sanitizes orphan abv (#369)', () => {

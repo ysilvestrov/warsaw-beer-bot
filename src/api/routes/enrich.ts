@@ -50,6 +50,11 @@ const CandidatesBody = z.object({
       // so a single malformed card would otherwise 400 the whole page's payload.
       abv: z.number().nullable().optional(),
       style: z.string().max(BEER_TEXT_LIMIT_CHARS).nullable().optional(),
+      // #384: the Untappd id the shop publishes for this product. Only the id is needed
+      // here — eligibility asks whether it contradicts the stored link; the slug/brand
+      // the guard verifies against travel with /enrich/result. Strict (unlike abv):
+      // a bid is machine-extracted from a URL, so a malformed one is a client bug.
+      bid: z.number().int().positive().optional(),
     }))
     .min(1)
     .max(200),
@@ -121,8 +126,17 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         const row = ensureBeerRow(deps.db, b.brewery, b.name, {
           abv: b.abv ?? undefined, style: b.style ?? undefined,
         });
+        // #384: a linked row is normally done. The exception is a shop that publishes a
+        // *different* Untappd id than the one we stored — then the row is a repair
+        // candidate. refusesBidOverride is the same helper /enrich/result applies, so a
+        // curated or check-in-sourced link is never even offered here. The wontfix veto
+        // and the backoff still apply: the backoff is what keeps a contradicted link
+        // from being retried on every page load.
+        const contradicts =
+          b.bid !== undefined && row.untappd_id != null && row.untappd_id !== b.bid;
         const eligible =
-          row.untappd_id == null &&
+          (row.untappd_id == null ||
+            (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
           !isWontfix(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
         const query = cleanSearchQuery(b.brewery, b.name);

@@ -218,6 +218,97 @@ describe('POST /enrich/candidates', () => {
     expect(res.status).toBe(413);
   });
 
+  // --- #384: a shop-published bid that contradicts the stored link ----------------
+  //
+  // Without this, a wrongly-linked row is never offered as a candidate and the repair
+  // path in /enrich/result is unreachable. The gate here must agree exactly with the
+  // one there — same refusesBidOverride helper — so a link that would be refused is
+  // never offered in the first place.
+
+  function linkedRow(db: ReturnType<typeof setup>['db'], untappd_id: number, source?: string) {
+    return upsertBeer(db, {
+      untappd_id, name: 'Tomatol Bulgogi', brewery: 'Mad Brew',
+      style: null, abv: null, rating_global: 3.7,
+      normalized_name: normalizeName('Tomatol Bulgogi'),
+      normalized_brewery: normalizeBrewery('Mad Brew'),
+      ...(source ? { untappd_id_source: source as 'search' } : {}),
+    });
+  }
+
+  const candidatesForMadBrew = (app: Hono<ApiEnv>, bid?: number) =>
+    post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', ...(bid !== undefined ? { bid } : {}) }],
+    });
+
+  it('is eligible when a published bid contradicts a link we guessed ourselves', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(true);
+  });
+
+  it.each(['curated', 'checkin'])(
+    'is not eligible when the stored link is %s — the same links /enrich/result refuses',
+    async (source) => {
+      const { db, app } = setup();
+      linkedRow(db, 6708599, source);
+      const body = await (await candidatesForMadBrew(app, 6648348)).json();
+      expect(body.candidates[0].eligible).toBe(false);
+    },
+  );
+
+  it('is eligible when the stored link predates provenance stamping (NULL source)', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599);
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(true);
+  });
+
+  it('is not eligible when the published bid agrees with the stored link', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app, 6708599)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('is not eligible for a linked row when the shop publishes no bid', async () => {
+    const { db, app } = setup();
+    linkedRow(db, 6708599, 'search');
+    const body = await (await candidatesForMadBrew(app)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  // The backoff is what stops a contradicted link being retried on every page load.
+  it('still applies the lookup backoff to a contradicted link', async () => {
+    const { db, app } = setup();
+    const id = linkedRow(db, 6708599, 'search');
+    db.prepare('UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 1 WHERE id = ?')
+      .run(new Date(Date.now() - 3600_000).toISOString(), id);
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('still applies the wontfix triage veto to a contradicted link', async () => {
+    const { db, app } = setup();
+    const id = linkedRow(db, 6708599, 'search');
+    recordEnrichFailure(db, {
+      beer_id: id, brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: new Date().toISOString(),
+    });
+    setEnrichFailureReview(db, id, 'wontfix', null, new Date().toISOString());
+    const body = await (await candidatesForMadBrew(app, 6648348)).json();
+    expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('rejects a non-positive bid rather than treating it as a contradiction', async () => {
+    const { app } = setup();
+    const res = await post(app, '/enrich/candidates', {
+      beers: [{ brewery: 'Mad Brew', name: 'Tomatol Bulgogi', bid: 0 }],
+    });
+    expect(res.status).toBe(400);
+  });
+
   it('keeps a 200-beer payload with abv and style inside the route byte limit', () => {
     const beers = Array.from({ length: 200 }, (_, i) => ({
       brewery: 'Browar Stu Mostow Wroclaw',

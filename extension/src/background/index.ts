@@ -40,8 +40,10 @@ export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
 export interface EnrichFetchMessage { type: 'enrich:fetch'; algolia: AlgoliaQuery }
 // #369: abv/style are optional shop-published facts. Absent fields are omitted,
 // never sent as null, and an abv of 0 is a real value.
-export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string; abv?: number; style?: string }[] }
-export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; pageUrl?: string }
+// #384: `bid` (+ the slug/brand the server's guard verifies it against) is the Untappd
+// identity the shop publishes on its own product page. Absent for shops that publish none.
+export interface EnrichCandidatesMessage { type: 'enrich:candidates'; beers: { brewery: string; name: string; abv?: number; style?: string; bid?: number }[] }
+export interface EnrichResultMessage { type: 'enrich:result'; brewery: string; name: string; algolia: AlgoliaResponse; abv?: number; style?: string; bid?: number; bidSlug?: string; brand?: string; pageUrl?: string }
 
 async function enrichAllowed(): Promise<boolean> {
   const { enrichEnabled } = await getSettings();
@@ -93,6 +95,9 @@ export async function handleEnrichResult(
       brewery: msg.brewery, name: msg.name, algolia: msg.algolia,
       ...(msg.abv !== undefined ? { abv: msg.abv } : {}),
       ...(msg.style !== undefined ? { style: msg.style } : {}),
+      ...(msg.bid !== undefined ? { bid: msg.bid } : {}),
+      ...(msg.bidSlug !== undefined ? { bidSlug: msg.bidSlug } : {}),
+      ...(msg.brand !== undefined ? { brand: msg.brand } : {}),
       pageUrl: msg.pageUrl,
     });
     return { type: 'enrich:result:ok', result };
