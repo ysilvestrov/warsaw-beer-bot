@@ -618,3 +618,88 @@ describe('#369/#322 — a relayed 0.0% ABV disambiguates same-brewery twins', ()
     expect(out.kind === 'matched' && out.result.bid).toBe(5489375);
   });
 });
+
+describe('#382 query ladder', () => {
+  function recordingSearch(fn: (q: string) => SearchResult[]) {
+    const queries: string[] = [];
+    return {
+      queries,
+      search: { search: async (q: string) => { queries.push(q); return fn(q); } } as BeerSearch,
+    };
+  }
+
+  test('widens to the reduced rung when the narrow rung returns nothing', async () => {
+    const { queries, search } = recordingSearch((q) =>
+      q === 'Ципа Сидр Грушевий PERRY'
+        ? []
+        : [{ bid: 7001, beer_name: 'Сидр Грушевий PERRY', brewery_name: 'Ципа', style: 'Cider', abv: 5, global_rating: 3.5 }],
+    );
+    const out = await lookupBeer({ brewery: 'Ципа', name: 'Сидр Грушевий PERRY', search });
+    expect(queries).toEqual(['Ципа Сидр Грушевий PERRY', 'PERRY']);
+    expect(out.kind).toBe('matched');
+  });
+
+  test('never widens when the narrow rung returned candidates, even if none match', async () => {
+    // The wide rung's extra candidates are a superset the narrow rung already excluded;
+    // re-searching would only re-offer rows the same stages just rejected.
+    const { queries, search } = recordingSearch((q) =>
+      q === 'Ципа Сидр Грушевий PERRY'
+        ? [{ bid: 7002, beer_name: 'Something Else', brewery_name: 'Other Brewery', style: 'IPA', abv: 5, global_rating: 3.5 }]
+        : [{ bid: 7003, beer_name: 'Сидр Грушевий PERRY', brewery_name: 'Ципа', style: 'Cider', abv: 5, global_rating: 3.5 }],
+    );
+    const out = await lookupBeer({ brewery: 'Ципа', name: 'Сидр Грушевий PERRY', search });
+    expect(queries).toEqual(['Ципа Сидр Грушевий PERRY']);
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('all-Latin input issues exactly one query per brewery part', async () => {
+    const { queries, search } = recordingSearch(() => []);
+    await lookupBeer({ brewery: 'Pinta', name: 'Atak Chmielu', search });
+    expect(queries).toEqual(['Pinta Atak Chmielu']);
+  });
+
+  test('every attempted rung is reported in searchUrls', async () => {
+    const { search } = recordingSearch(() => []);
+    const out = await lookupBeer({ brewery: 'Ципа', name: 'Сидр Грушевий PERRY', search });
+    expect(out.kind).toBe('not_found');
+    if (out.kind !== 'not_found') return;
+    expect(out.searchUrls).toHaveLength(2);
+    expect(decodeURIComponent(out.searchUrls[0])).toContain('Ципа Сидр Грушевий PERRY');
+    expect(decodeURIComponent(out.searchUrls[1])).toContain('PERRY');
+  });
+
+  test('a block on the narrow rung returns blocked without trying the wide rung', async () => {
+    const { queries, search } = recordingSearch(() => { throw new HttpError(403, 'https://untappd.com'); });
+    const out = await lookupBeer({ brewery: 'Ципа', name: 'Сидр Грушевий PERRY', search });
+    expect(out.kind).toBe('blocked');
+    expect(queries).toEqual(['Ципа Сидр Грушевий PERRY']);
+  });
+
+  test('#271 head-retry still fires when every rung of every part is empty', async () => {
+    const queries: string[] = [];
+    const search: BeerSearch = { search: async (q) => { queries.push(q); return []; } };
+    const out = await lookupBeer({ brewery: 'Ципа', name: 'Орєнтал, Лохина, Чорна Смородина', search });
+    expect(out.kind).toBe('not_found');
+    // the head-only retry ran in addition to the ladder rungs
+    expect(queries.length).toBeGreaterThan(2);
+  });
+
+  test('a collab part whose candidates all fail the brewery gate falls through to the next part', async () => {
+    const queries: string[] = [];
+    const search: BeerSearch = {
+      search: async (q) => {
+        queries.push(q);
+        // First collab part returns a candidate from an unrelated brewery (fails the gate);
+        // the second part returns the real match.
+        return q.includes('Alpha')
+          ? [{ bid: 8001, beer_name: 'Some Beer', brewery_name: 'Unrelated Brewery', style: 'IPA', abv: 5, global_rating: 3.5 }]
+          : [{ bid: 8002, beer_name: 'Some Beer', brewery_name: 'Beta', style: 'IPA', abv: 5, global_rating: 4.1 }];
+      },
+    };
+    const out = await lookupBeer({ brewery: 'Alpha x Beta', name: 'Some Beer', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(8002);
+    expect(queries.length).toBeGreaterThan(1);
+  });
+});

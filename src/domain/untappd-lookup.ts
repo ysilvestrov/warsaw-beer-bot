@@ -1,6 +1,6 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripBreweryFromName } from './matcher';
-import { normalizeBrewery, normalizeName, cleanSearchQuery } from './normalize';
+import { normalizeBrewery, normalizeName, searchQueryLadder } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
@@ -343,24 +343,29 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   }
 
   for (const part of parts) {
-    const query = cleanSearchQuery(part, name);
-    triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
+    for (const query of searchQueryLadder(part, name)) {
+      triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
 
-    let results: SearchResult[];
-    try {
-      results = await args.search.search(query);
-    } catch (error) {
-      if (error instanceof HttpError && isBlockStatus(error.status)) {
-        return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
+      let results: SearchResult[];
+      try {
+        results = await args.search.search(query);
+      } catch (error) {
+        if (error instanceof HttpError && isBlockStatus(error.status)) {
+          return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
+        }
+        return { kind: 'transient', error };
       }
-      return { kind: 'transient', error };
+
+      seenCandidates.push(...results);
+      // Zero results → widen to the next rung. A rung that DID return candidates is never
+      // abandoned: its results are a subset of the wider rung's, so widening after a matcher
+      // rejection could only re-offer rows the same stages just rejected (#382 §3.3).
+      if (results.length === 0) continue;
+
+      const outcome = matchAgainst(results);
+      if (outcome) return outcome;
+      break;
     }
-
-    seenCandidates.push(...results);
-    if (results.length === 0) continue;
-
-    const outcome = matchAgainst(results);
-    if (outcome) return outcome;
   }
 
   // #271 fallback: the search returned zero candidates across every brewery part — a genuine
