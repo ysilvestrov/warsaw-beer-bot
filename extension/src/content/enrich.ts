@@ -1,4 +1,4 @@
-import type { AlgoliaQuery, AlgoliaResponse, EnrichResult } from '../api/types';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult } from '../api/types';
 import { usableAbv } from '../shared/abv';
 
 export const MAX_SEARCHES_PER_PAGE = 20;
@@ -31,13 +31,15 @@ export interface OrphanFacts {
 export interface EnrichDeps {
   getCandidates: (
     beers: ({ brewery: string; name: string } & OrphanFacts)[],
-  ) => Promise<{ brewery: string; name: string; eligible: boolean; algolia: AlgoliaQuery }[]>;
+  ) => Promise<EnrichCandidate[]>;
   fetchSearch: (algolia: AlgoliaQuery) => Promise<AlgoliaResponse | null>;
   submitResult: (
     brewery: string,
     name: string,
     algolia: AlgoliaResponse,
-    facts?: OrphanFacts,
+    facts: OrphanFacts | undefined,
+    /** #391: the ladder rung that produced `algolia` — the server records it as search_url. */
+    query: string,
   ) => Promise<EnrichResult>;
   setSearching: (key: string) => void;
   setEnriched: (key: string, untappdId: number, ratingGlobal: number | null) => void;
@@ -96,21 +98,45 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
     orphans.map((o) => ({ brewery: o.brewery, name: o.name, ...candidateFacts(o) })),
   );
   const byPair = new Map(orphans.map((o) => [pairKey(o.brewery, o.name), o]));
-  const eligible = candidates.filter((c) => c.eligible).slice(0, MAX_SEARCHES_PER_PAGE);
+  // #391: the budget counts SEARCHES, not beers. A two-rung ladder can cost two Algolia
+  // calls, and what this cap protects is what the page draws from the user's session.
+  // Beers past the cap are not lost: the orphan pool is shared with the next page load
+  // and with the server cron.
+  const eligible = candidates.filter((c) => c.eligible);
 
   const delayMs = deps.delayMs ?? DEFAULT_DELAY_MS;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
 
-  for (let i = 0; i < eligible.length; i++) {
-    const cand = eligible[i];
+  let searches = 0;
+  for (const cand of eligible) {
+    if (searches >= MAX_SEARCHES_PER_PAGE) break;
     const beer = byPair.get(pairKey(cand.brewery, cand.name));
     if (!beer) continue;
 
+    // Narrowest first. `algoliaNarrow` is absent unless the two rungs differ (#382).
+    const rungs = cand.algoliaNarrow ? [cand.algoliaNarrow, cand.algolia] : [cand.algolia];
+
     deps.setSearching(beer.key);
     try {
-      const algolia = await deps.fetchSearch(cand.algolia);
-      const res = algolia
-        ? await deps.submitResult(cand.brewery, cand.name, algolia, orphanFacts(beer))
+      let response: AlgoliaResponse | null = null;
+      let query = rungs[0].query;
+      // True only when a zero-hit rung left a wider rung unrun for want of budget.
+      let abandoned = false;
+      for (const r of rungs) {
+        if (searches >= MAX_SEARCHES_PER_PAGE) { abandoned = true; break; }
+        if (searches > 0) await sleep(delayMs);
+        searches++;
+        query = r.query;
+        response = await deps.fetchSearch(r);
+        // A rung that returned candidates is never widened on: the wide rung's result set
+        // is a superset the matcher stages would only re-reject (#382 design §3.3).
+        if (response === null || (response.hits?.length ?? 0) > 0) break;
+      }
+
+      // A half-run ladder is not a verdict. Submitting the empty narrow payload would make
+      // the server record not_found and burn a backoff slot on a search we never finished.
+      const res = !abandoned && response
+        ? await deps.submitResult(cand.brewery, cand.name, response, orphanFacts(beer), query)
         : null;
       if (res && res.status === 'matched' && res.untappd_id != null) {
         deps.setEnriched(beer.key, res.untappd_id, res.rating_global ?? null);
@@ -120,7 +146,5 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
     } catch {
       deps.setOrphan(beer.key, cand.brewery, cand.name);
     }
-
-    if (i < eligible.length - 1) await sleep(delayMs);
   }
 }

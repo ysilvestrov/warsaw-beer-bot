@@ -26,6 +26,37 @@ function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
 const beers = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ key: `k${i}`, brewery: 'B', name: `N${i}` }));
 
+const rung = (query: string) =>
+  ({ appId: 'APP', searchKey: 'KEY', indexName: 'beer' as const, query, hitsPerPage: 5 });
+
+// Every beer carries a two-rung ladder: narrow `n:<name>`, wide `q:<name>`.
+const ladderCandidates = () =>
+  vi.fn(async (bs: { brewery: string; name: string }[]) =>
+    bs.map((b) => ({
+      brewery: b.brewery,
+      name: b.name,
+      eligible: true,
+      algolia: rung(`q:${b.name}`),
+      algoliaNarrow: rung(`n:${b.name}`),
+    })),
+  );
+
+// The first beer is single-rung, every later beer two-rung. With an even budget this makes
+// the budget run out INSIDE a ladder (1 + 2k searches), which is the only way to reach the
+// half-run-ladder refusal.
+const ladderCandidatesAfterFirst = () =>
+  vi.fn(async (bs: { brewery: string; name: string }[]) =>
+    bs.map((b, i) => ({
+      brewery: b.brewery,
+      name: b.name,
+      eligible: true,
+      algolia: rung(`q:${b.name}`),
+      ...(i === 0 ? {} : { algoliaNarrow: rung(`n:${b.name}`) }),
+    })),
+  );
+
+const zeroHits = () => vi.fn(async () => ({ hits: [] as { bid: number }[] }));
+
 describe('runEnrichment', () => {
   it('registers all orphans but searches at most MAX_SEARCHES_PER_PAGE (no abstain on big pages)', async () => {
     const d = deps();
@@ -40,7 +71,8 @@ describe('runEnrichment', () => {
     expect(d.getCandidates).toHaveBeenCalledTimes(1);
     expect(d.fetchSearch).toHaveBeenCalledTimes(2);
     // #369: submitResult now takes a 4th `facts` argument; these beers publish none.
-    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+    // #391: and a 5th — the ladder rung that actually produced the hits.
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
     expect(d.setSearching).toHaveBeenCalledTimes(2);
     expect(d.setEnriched).toHaveBeenCalledWith('k0', 7, 4.0);
     expect(d.sleep).toHaveBeenCalledTimes(1); // between the two
@@ -83,7 +115,7 @@ describe('runEnrichment relays orphan facts (#369)', () => {
     ]);
     expect(d.submitResult).toHaveBeenCalledWith(
       'AleBrowar', 'Kwas Chlebowy Jasny', { hits: [{ bid: 7 }] },
-      { abv: 0, style: 'Kwas Chlebowy' },
+      { abv: 0, style: 'Kwas Chlebowy' }, 'q:Kwas Chlebowy Jasny',
     );
   });
 
@@ -91,7 +123,7 @@ describe('runEnrichment relays orphan facts (#369)', () => {
     const d = deps();
     await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0' }], d);
     expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
-    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
   });
 });
 
@@ -116,7 +148,7 @@ describe('runEnrichment relays the published bid (#384)', () => {
     await runEnrichment([orphan], d);
     expect(d.submitResult).toHaveBeenCalledWith(
       'Mad Brew', 'Tomatol Bulgogi', { hits: [{ bid: 7 }] },
-      { bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew' },
+      { bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', brand: 'Mad Brew' }, 'q:Tomatol Bulgogi',
     );
   });
 
@@ -124,7 +156,7 @@ describe('runEnrichment relays the published bid (#384)', () => {
     const d = deps();
     await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', bidSlug: 'stray' }], d);
     expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
-    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
   });
 
   // runEnrichment is exported: a bid the server's schema would reject (non-positive,
@@ -135,7 +167,7 @@ describe('runEnrichment relays the published bid (#384)', () => {
       const d = deps();
       await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', bid: bad, bidSlug: 's' }], d);
       expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
-      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
     },
   );
 });
@@ -149,7 +181,7 @@ describe('runEnrichment sanitizes orphan abv (#369)', () => {
       const d = deps();
       await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', abv: bad }], d);
       expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0' }]);
-      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {});
+      expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
     },
   );
 
@@ -157,5 +189,72 @@ describe('runEnrichment sanitizes orphan abv (#369)', () => {
     const d = deps();
     await runEnrichment([{ key: 'k0', brewery: 'B', name: 'N0', abv: 0 }], d);
     expect(d.getCandidates).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0', abv: 0 }]);
+  });
+});
+
+// #391: the relay half of the #382 ladder. The narrow rung runs first; the wide rung is a
+// fallback for a ZERO-HIT narrow response and for nothing else.
+describe('runEnrichment query ladder (#391)', () => {
+  it('searches the narrow rung first and stops there when it returns hits', async () => {
+    const fetchSearch = vi.fn(async (_q: { query: string }) => ({ hits: [{ bid: 7 }] }));
+    const d = deps({ getCandidates: ladderCandidates(), fetchSearch });
+    await runEnrichment(beers(1), d);
+    expect(fetchSearch.mock.calls.map((c) => c[0].query)).toEqual(['n:N0']);
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'n:N0');
+  });
+
+  it('widens to the wide rung only when the narrow rung returns zero hits', async () => {
+    const fetchSearch = vi.fn(async (q: { query: string }) =>
+      q.query.startsWith('n:') ? { hits: [] as { bid: number }[] } : { hits: [{ bid: 7 }] },
+    );
+    const d = deps({ getCandidates: ladderCandidates(), fetchSearch });
+    await runEnrichment(beers(1), d);
+    expect(fetchSearch.mock.calls.map((c) => c[0].query)).toEqual(['n:N0', 'q:N0']);
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
+  });
+
+  it('does not widen after a non-empty narrow rung the server rejects', async () => {
+    const fetchSearch = vi.fn(async (_q: { query: string }) => ({ hits: [{ bid: 7 }] }));
+    const d = deps({
+      getCandidates: ladderCandidates(),
+      fetchSearch,
+      submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'not_found' })),
+    });
+    await runEnrichment(beers(1), d);
+    expect(fetchSearch).toHaveBeenCalledTimes(1);
+    expect(d.setOrphan).toHaveBeenCalledWith('k0', 'B', 'N0');
+  });
+
+  it('reports the executed query for a single-rung beer too', async () => {
+    const d = deps();
+    await runEnrichment(beers(1), d);
+    expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
+  });
+
+  it('spends the page budget on searches, not beers', async () => {
+    const fetchSearch = zeroHits();
+    const d = deps({ getCandidates: ladderCandidates(), fetchSearch });
+    await runEnrichment(beers(MAX_SEARCHES_PER_PAGE), d); // 20 beers × 2 rungs
+    expect(fetchSearch).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE); // 20 searches, 10 beers
+    expect(d.submitResult).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE / 2);
+    expect(d.sleep).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE - 1); // throttle between searches
+  });
+
+  it('does not submit a beer whose ladder ran out of budget mid-way', async () => {
+    // Beer 0 is single-rung (1 search), beers 1..9 are two-rung (18) → 19 searches spent.
+    // Beer 10 runs its narrow rung (search 20, zero hits) and has no budget to widen.
+    const fetchSearch = zeroHits();
+    const d = deps({ getCandidates: ladderCandidatesAfterFirst(), fetchSearch });
+    await runEnrichment(beers(MAX_SEARCHES_PER_PAGE), d);
+
+    expect(fetchSearch).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE);
+    // 10 completed ladders submit; beer 10 (`N10`) was searched but must NOT be submitted.
+    expect(d.submitResult).toHaveBeenCalledTimes(10);
+    expect(d.submitResult).not.toHaveBeenCalledWith('B', 'N10', expect.anything(), expect.anything(), expect.anything());
+    // It was shown as ⏳, so it must be put back to ⚪ rather than left spinning.
+    expect(d.setSearching).toHaveBeenCalledWith('k10');
+    expect(d.setOrphan).toHaveBeenCalledWith('k10', 'B', 'N10');
+    // Beer 11 was never searched at all.
+    expect(d.setSearching).not.toHaveBeenCalledWith('k11');
   });
 });
