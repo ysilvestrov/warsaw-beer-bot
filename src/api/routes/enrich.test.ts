@@ -6,6 +6,7 @@ import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
+import { buildSearchUrl } from '../../sources/untappd/search';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
   BEER_TEXT_LIMIT_CHARS,
@@ -618,6 +619,49 @@ describe('POST /enrich/result', () => {
       brewery: 'PINTA', name: 'Atak Chmielu', algolia: { hits: [], nbHits: 0 },
     });
     expect(res.status).toBe(200);
+  });
+
+  // #391: the relayed payload is the answer to ONE query the client chose from the
+  // ladder. Without this the failure row cites a search that never happened.
+  it('records the client-reported rung as the failure search_url', async () => {
+    const { db, app } = setup();
+    const res = await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      query: 'CITADEL Томатка',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    expect((await res.json()).status).toBe('not_found');
+
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).toBe(buildSearchUrl('CITADEL Томатка'));
+  });
+
+  it('ignores a query that is not one of the rungs it would have offered', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      query: 'drop table beers',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).not.toContain('drop');
+    expect(fail.search_url).toContain('untappd.com');
+  });
+
+  it('leaves the search_url alone when the client reports no query (old build)', async () => {
+    const { db, app } = setup();
+    await post(app, '/enrich/result', {
+      brewery: 'CITADEL',
+      name: 'Томатка',
+      algolia: { hits: [{ bid: 9000, beer_name: 'Totally Different', brewery_name: 'Other' }] },
+    });
+    const row = findBeerByNormalized(db, normalizeBrewery('CITADEL'), normalizeName('Томатка'))!;
+    const fail = db.prepare('SELECT search_url FROM enrich_failures WHERE beer_id = ?').get(row.id) as any;
+    expect(fail.search_url).toContain('untappd.com');
   });
 });
 
