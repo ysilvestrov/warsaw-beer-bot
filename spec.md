@@ -320,7 +320,7 @@ Untappd — `Banany Na Rauszu 2026`), людина фіксує матч вру�
 | `untappd_username` | TEXT | nullable | прив'язаний профіль |
 | `created_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | |
 | `language` | TEXT | nullable (v3) | `uk`/`pl`/`en`; авто-детект, override через `/lang` |
-| `city` | TEXT | nullable (v14) | обране місто; `NULL` → `DEFAULT_CITY` (`'warszawa'`) |
+| `city` | TEXT | nullable (v14) | обране місто; `NULL` або невідомий slug → `OUTSIDE_CITY` (`'outside-pl'`, #399) |
 
 ### 3.9 `user_filters` — фільтри користувача
 | Поле | Тип | Обмеження | Опис |
@@ -490,15 +490,23 @@ pubs          *───* pubs             via pub_distances (a<b)
 
 ### `/start` та `/help` — реєстрація + довідник команд
 `/start` створює профіль (ключ — `telegram_id`; ідемпотентно) і друкує довідку.
-`/help` друкує **той самий** текст без сайд-ефектів. Джерело тексту —
-`buildHelpText` з `src/bot/commands/catalog.ts`: `COMMAND_CATALOG` (єдиний
-впорядкований список усіх команд) + i18n-описи `cmd.*` / `help.intro`.
+`/help` друкує **той самий** текст — і теж викликає `ensureProfile` (щоб знати
+активне місто користувача перед фільтрацією списку), тож більше не є
+side-effect-free. Джерело тексту — `buildHelpText` з `src/bot/commands/catalog.ts`:
+`COMMAND_CATALOG` (єдиний впорядкований список усіх команд, кожен запис може
+нести прапор `cityScoped: true`) + i18n-описи `cmd.*` / `help.intro`. Для
+користувача без активного польського міста (`isKnownCity(getUserCity(...))` =
+`false`) `buildHelpText` приховує city-scoped команди (`/newbeers`, `/route`,
+`/pubs`, `/beers`, `/refresh`) і додає рядок-підказку `help.city_hint` (#399).
 Локалізовано (uk/pl/en).
 
 Нативне меню Telegram («/») заповнюється на старті через
 `registerCommandMenu` (`src/bot/register-command-menu.ts`): `setMyCommands` для
-`uk`/`pl`/`en` + дефолтний англійський scope, з того ж каталогу. Збій
-`setMyCommands` лише логується (`warn`), старт не падає.
+`uk`/`pl`/`en` + дефолтний англійський scope, з того ж каталогу (`buildCommandMenu`).
+Збій `setMyCommands` лише логується (`warn`), старт не падає. На відміну від
+`/help`, це меню реєструється глобально per-locale, а не per-user, тож воно
+**не фільтрується** — завжди перелічує всі команди, навіть city-scoped, для
+будь-якого користувача (#399).
 
 ### `/link <username>` — прив'язка Untappd
 Приймає bare-username, `untappd.com/user/<u>`, з/без `www`. Валідація у
@@ -600,20 +608,43 @@ Telegram Bot API не передає ОС клієнта, тож відрізн�
 Persist у `user_profiles.language`.
 
 ### `/city` — вибір активного міста
-**`/city`.** Inline-клавіатура курованих міст; вибір зберігається в
-`user_profiles.city` (валідація `isKnownCity`; невідомий slug ігнорується). Команди
-`/pubs`, `/route`, `/newbeers`, `/beers` фільтрують паби за активним містом користувача
-(`getUserCity` → `listPubs(db, city)`); усі, хто не обрав місто (вкл. наявних
-користувачів), бачать Варшаву. Каталог пива, рейтинги, drunk-статус і розширення/`/match`
-лишаються глобальними (міста-незалежними).
+**`/city`.** Inline-клавіатура (`cityKeyboard`, `src/bot/keyboards.ts`) курованих
+міст + псевдо-місто «поза Польщею» завжди останньою кнопкою, з локалізованою
+міткою (`cityDisplayLabel` → i18n-ключ `city.outside`). Вибір зберігається в
+`user_profiles.city`; валідація вибору — `isSelectableCity` (справжнє куроване
+місто **або** псевдо-місто `OUTSIDE_CITY` = `'outside-pl'`, #399). `OUTSIDE_CITY`
+навмисно відсутній у `CITIES` (той самий масив — список для кроулу
+`refreshOntap`), тож псевдо-місто ніколи не потрапляє в crawl і не отримує
+власного `pubs.city`.
+
+**Гейт city-scoped команд.** П'ять команд позначені в `COMMAND_CATALOG`
+прапором `cityScoped: true`: `/newbeers`, `/route`, `/pubs`, `/beers`,
+`/refresh`. Вони фільтрують паби за активним містом користувача (`getUserCity`
+→ `listPubs(db, city)`), тож без справжнього польського міста немає що
+фільтрувати. Composer `cityGate` (`src/bot/commands/city-gate.ts`), зареєстрований
+**першим** у `bot.use(...)` (`src/index.ts`), перехоплює виклик будь-якої з цих
+команд і, якщо `isKnownCity(getUserCity(...))` = `false` (користувач на
+псевдо-місті або взагалі без вибору), відповідає рядком `city.blocked` замість
+запуску обробника. Список city-scoped команд для гейту й фільтр `/help`
+(`buildHelpText`) обчислюються з одного й того самого прапора `cityScoped` у
+`COMMAND_CATALOG`, тож вони не можуть розійтися. Нативне меню Telegram
+лишається глобальним і показує всі команди без фільтрації (див. §4 `/start` та
+`/help`).
+
+Усі, хто ніколи не обирав місто — включно з наявними користувачами (стара
+`NULL`-семантика) і користувачами, що прийшли лише через розширення — тепер
+бачать «поза Польщею» (`OUTSIDE_CITY`), а не Варшаву (#399): показ чужого міста
+за замовчуванням був гіршим, ніж показ нічого. Каталог пива, рейтинги,
+drunk-статус і розширення/`/match` лишаються глобальними (міста-незалежними).
 
 ### `/status` — статус і налаштування користувача
 
 Особиста зведена картка (HTML, локалізована uk/pl/en). Дві секції:
 
-**Налаштування (завжди):** активне місто, мова інтерфейсу, короткий
-однорядковий підсумок фільтрів (стилі / мін. рейтинг / ABV / N маршруту), з
-підказкою `/filters` для редагування.
+**Налаштування (завжди):** активне місто (локалізована мітка через
+`cityDisplayLabel`, `src/bot/city-label.ts` — може бути «поза Польщею», #399),
+мова інтерфейсу, короткий однорядковий підсумок фільтрів (стилі / мін. рейтинг
+/ ABV / N маршруту), з підказкою `/filters` для редагування.
 
 **Untappd / синхронізація:**
 - якщо не прив'язано — підказка `/link` (+ `/import`), без статистики;
@@ -1202,10 +1233,13 @@ cron-недосяжність. `LIMIT 20` — **сумарний** бюджет 
 (`src/domain/cities.ts`, `CITIES`) — для кожного `GET https://ontap.pl/<slug>`,
 парсить індекс (`parseOntapCityIndex`, спільний DOM) і проставляє паба `pubs.city =
 <slug>`. Невдале завантаження індексу міста логується й пропускається (інші міста
-скрейпляться далі). Інлайн-енрич свіжих орфанів обмежений **бюджетом на запуск**
-(`inlineEnrichBudget`, дефолт 20) — решта добирається rate-limited `enrich-orphans`
-кроном (захист від Untappd-бану). schema_version **14** додає `pubs.city`
-(`NOT NULL DEFAULT 'warszawa'`) та `user_profiles.city` (nullable; NULL → `DEFAULT_CITY`).
+скрейпляться далі). Псевдо-місто `OUTSIDE_CITY` (`'outside-pl'`, #399) навмисно
+відсутнє в `CITIES`, тож `refreshOntap` ніколи його не бачить і не намагається
+зробити для нього `GET https://ontap.pl/outside-pl`. Інлайн-енрич свіжих орфанів
+обмежений **бюджетом на запуск** (`inlineEnrichBudget`, дефолт 20) — решта
+добирається rate-limited `enrich-orphans` кроном (захист від Untappd-бану).
+schema_version **14** додає `pubs.city` (`NOT NULL DEFAULT 'warszawa'`) та
+`user_profiles.city` (nullable; `NULL` або невідомий slug → `OUTSIDE_CITY`, #399).
 
 **Підготовка каталогу раз на запуск (#278).** `refreshOntap` готує prepared-каталог
 **один раз на запуск** чанк-білдером із поступкою event-loop (`prepareCatalogChunked`),
