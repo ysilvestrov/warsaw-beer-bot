@@ -21,6 +21,10 @@ export const en: Messages = {
   'cmd.city': 'choose city',
   'city.prompt': 'Current city: {name}. Choose a city:',
   'city.changed': '✅ City changed to {name}.',
+  'city.outside': '🌍 Outside Poland',
+  'city.blocked': 'This command only works for cities in Poland. Pick a city: /city',
+  'help.city_hint':
+    'A few more commands (pubs, route, top beers) unlock once you pick a city — /city',
   'cmd.help': 'this help',
   'cmd.start': 'start',
   'cmd.extension': 'browser-extension access token',

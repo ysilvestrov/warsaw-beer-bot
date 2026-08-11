@@ -21,6 +21,10 @@ export const pl: Messages = {
   'cmd.city': 'wybierz miasto',
   'city.prompt': 'Aktualne miasto: {name}. Wybierz miasto:',
   'city.changed': '✅ Zmieniono miasto na {name}.',
+  'city.outside': '🌍 Poza Polską',
+  'city.blocked': 'Ta komenda działa tylko dla miast w Polsce. Wybierz miasto: /city',
+  'help.city_hint':
+    'Kilka dodatkowych komend (puby, trasa, top piw) pojawi się po wyborze miasta — /city',
   'cmd.help': 'ta pomoc',
   'cmd.start': 'start',
   'cmd.extension': 'token dla rozszerzenia przeglądarki',

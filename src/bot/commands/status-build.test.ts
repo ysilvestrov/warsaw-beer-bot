@@ -96,4 +96,10 @@ describe('buildStatusMessage', () => {
     expect(out).toContain('a&lt;b&gt;&amp;');
     expect(out).not.toContain('a<b>&"x');
   });
+
+  it('renders the outside-Poland pseudo-city with its localized label (#399)', () => {
+    const out = buildStatusMessage(t, { ...base, city: 'outside-pl' });
+    expect(out).toContain('🌍 Outside Poland');
+    expect(out).not.toContain('outside-pl');
+  });
 });

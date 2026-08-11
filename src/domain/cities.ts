@@ -20,12 +20,22 @@ export const CITIES: readonly City[] = [
   { slug: 'szczecin', label: 'Szczecin' },
 ];
 
-export const DEFAULT_CITY = 'warszawa';
+// Pseudo-city for users who are not in Poland (extension-only users, #399).
+// Deliberately NOT in CITIES: that array is also the crawl list for refreshOntap,
+// and `outside-pl` is not an ontap.pl path segment.
+export const OUTSIDE_CITY = 'outside-pl';
 
 const SLUGS = new Set(CITIES.map((c) => c.slug));
 
 export function isKnownCity(slug: string): boolean {
   return SLUGS.has(slug);
+}
+
+// A slug the user is allowed to pick in /city: a real ontap city, or the pseudo-city.
+// `isKnownCity` stays the narrower predicate — it also answers "are city-scoped
+// commands available for this user?".
+export function isSelectableCity(slug: string): boolean {
+  return isKnownCity(slug) || slug === OUTSIDE_CITY;
 }
 
 export function cityLabel(slug: string): string {
