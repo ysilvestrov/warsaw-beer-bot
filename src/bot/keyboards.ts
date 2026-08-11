@@ -14,6 +14,8 @@ export const langKeyboard = () =>
 
 export const cityKeyboard = (t: Translator, current: string) =>
   Markup.inlineKeyboard(
+    // Pseudo-city deliberately appended last: real cities first, "outside Poland" as
+    // the final fallback row (#399).
     [...CITIES.map((c) => c.slug), OUTSIDE_CITY].map((slug) => [
       Markup.button.callback(
         slug === current

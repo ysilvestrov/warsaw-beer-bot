@@ -19,7 +19,10 @@ export const cityCommand = new Composer<BotContext>();
 cityCommand.command('city', async (ctx) => {
   ensureProfile(ctx.deps.db, ctx.from.id);
   const current = getUserCity(ctx.deps.db, ctx.from.id);
-  await ctx.reply(ctx.t('city.prompt', { name: cityDisplayLabel(ctx.t, current) }), cityKeyboard(ctx.t, current));
+  await ctx.reply(
+    ctx.t('city.prompt', { name: cityDisplayLabel(ctx.t, current) }),
+    cityKeyboard(ctx.t, current),
+  );
 });
 
 cityCommand.action(/^city:([a-z-]+)$/, async (ctx) => {
