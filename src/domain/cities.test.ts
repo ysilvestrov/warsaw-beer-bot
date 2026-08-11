@@ -1,9 +1,6 @@
-import { CITIES, DEFAULT_CITY, isKnownCity, cityLabel, OUTSIDE_CITY, isSelectableCity } from './cities';
+import { CITIES, isKnownCity, cityLabel, OUTSIDE_CITY, isSelectableCity } from './cities';
 
 describe('cities', () => {
-  test('DEFAULT_CITY is one of the configured cities', () => {
-    expect(CITIES.some((c) => c.slug === DEFAULT_CITY)).toBe(true);
-  });
   test('isKnownCity recognises configured slugs and rejects others', () => {
     expect(isKnownCity('warszawa')).toBe(true);
     expect(isKnownCity('krakow')).toBe(true);

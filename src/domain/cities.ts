@@ -20,8 +20,6 @@ export const CITIES: readonly City[] = [
   { slug: 'szczecin', label: 'Szczecin' },
 ];
 
-export const DEFAULT_CITY = 'warszawa';
-
 // Pseudo-city for users who are not in Poland (extension-only users, #399).
 // Deliberately NOT in CITIES: that array is also the crawl list for refreshOntap,
 // and `outside-pl` is not an ontap.pl path segment.

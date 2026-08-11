@@ -1,6 +1,6 @@
 import type { DB } from './db';
 import type { Locale } from '../i18n/types';
-import { DEFAULT_CITY, isKnownCity } from '../domain/cities';
+import { OUTSIDE_CITY, isSelectableCity } from '../domain/cities';
 
 export interface ProfileRow {
   telegram_id: number;
@@ -31,7 +31,9 @@ export function getUserCity(db: DB, telegramId: number): string {
     .prepare('SELECT city FROM user_profiles WHERE telegram_id = ?')
     .get(telegramId) as { city: string | null } | undefined;
   const v = row?.city;
-  return v != null && isKnownCity(v) ? v : DEFAULT_CITY;
+  // NULL (never chose a city) and any stale/unknown slug both mean "outside Poland":
+  // showing a stranger's Warszawa would be worse than showing nothing (#399).
+  return v != null && isSelectableCity(v) ? v : OUTSIDE_CITY;
 }
 
 export function setUserCity(db: DB, telegramId: number, slug: string): void {
