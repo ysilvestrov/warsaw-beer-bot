@@ -24,10 +24,14 @@ describe('User city storage', () => {
     expect(getUserCity(db, 1)).toBe('krakow');
   });
 
-  test('setUserCity round-trips the pseudo-city', () => {
+  test('setUserCity persists the pseudo-city literally, and it reads back unchanged', () => {
     const db = fresh();
     ensureProfile(db, 1);
     setUserCity(db, 1, OUTSIDE_CITY);
+    const raw = db
+      .prepare('SELECT city FROM user_profiles WHERE telegram_id = 1')
+      .get() as { city: string | null };
+    expect(raw.city).toBe(OUTSIDE_CITY); // written to the row, not just inferred by the fallback
     expect(getUserCity(db, 1)).toBe(OUTSIDE_CITY);
   });
 
