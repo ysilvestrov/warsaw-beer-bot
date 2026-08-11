@@ -51,4 +51,14 @@ describe('createTranslator', () => {
       '✅ Language switched to English.',
     );
   });
+
+  test('#399 outside-Poland strings resolve in all three locales', () => {
+    expect(createTranslator('uk')('city.outside')).toBe('🌍 Поза Польщею');
+    expect(createTranslator('pl')('city.outside')).toBe('🌍 Poza Polską');
+    expect(createTranslator('en')('city.outside')).toBe('🌍 Outside Poland');
+    for (const loc of ['uk', 'pl', 'en'] as const) {
+      expect(createTranslator(loc)('city.blocked')).toContain('/city');
+      expect(createTranslator(loc)('help.city_hint')).toContain('/city');
+    }
+  });
 });

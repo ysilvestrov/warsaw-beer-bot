@@ -28,6 +28,9 @@ export interface Messages {
   'cmd.city': string;
   'city.prompt': string;                 // {name} = current city
   'city.changed': string;                // {name}
+  'city.outside': string;                // #399 label of the outside-pl pseudo-city
+  'city.blocked': string;                // #399 reply when a city-scoped command is blocked
+  'help.city_hint': string;              // #399 /help footer for outside-pl users
   'cmd.help': string;
   'cmd.start': string;
   'cmd.extension': string;
