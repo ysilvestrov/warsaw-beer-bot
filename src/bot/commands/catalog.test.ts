@@ -5,15 +5,30 @@ import type { Locale } from '../../i18n/types';
 const LOCALES: Locale[] = ['uk', 'pl', 'en'];
 
 describe('buildHelpText', () => {
-  test('includes the intro and one line per command, each starting with /command', () => {
+  test('allowed=true: intro + one line per command, each starting with /command', () => {
     const t = createTranslator('en');
-    const text = buildHelpText(t);
+    const text = buildHelpText(t, true);
     expect(text).toContain(t('help.intro'));
     for (const e of COMMAND_CATALOG) {
       expect(text).toContain(`/${e.command} — ${t(e.descKey)}`);
     }
     const cmdLines = text.split('\n').filter((l) => l.startsWith('/'));
     expect(cmdLines).toHaveLength(COMMAND_CATALOG.length);
+    expect(text).not.toContain(t('help.city_hint'));
+  });
+
+  test('allowed=false: hides exactly the city-scoped commands and adds the hint (#399)', () => {
+    const t = createTranslator('en');
+    const text = buildHelpText(t, false);
+    const scoped = COMMAND_CATALOG.filter((e) => e.cityScoped).map((e) => e.command);
+    expect(scoped.sort()).toEqual(['beers', 'newbeers', 'pubs', 'refresh', 'route']);
+    for (const c of scoped) expect(text).not.toContain(`/${c} —`);
+    for (const e of COMMAND_CATALOG.filter((x) => !x.cityScoped)) {
+      expect(text).toContain(`/${e.command} — ${t(e.descKey)}`);
+    }
+    const cmdLines = text.split('\n').filter((l) => l.startsWith('/'));
+    expect(cmdLines).toHaveLength(COMMAND_CATALOG.length - scoped.length);
+    expect(text).toContain(t('help.city_hint'));
   });
 });
 
@@ -26,6 +41,11 @@ describe('buildCommandMenu', () => {
       expect(c.command.length).toBeLessThanOrEqual(32);
       expect(c.description.length).toBeGreaterThan(0);
     }
+  });
+
+  test('the native menu is unaffected by #399 — it still lists every command', () => {
+    const menu = buildCommandMenu(createTranslator('uk'));
+    expect(menu.map((c) => c.command)).toEqual(COMMAND_CATALOG.map((e) => e.command));
   });
 });
 
