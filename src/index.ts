@@ -9,6 +9,7 @@ import { createRotatingDispatcher } from './sources/proxy-rotator';
 import { isBlockStatus, isBlockPage } from './sources/untappd/block';
 import { createGeocoder } from './sources/geocoder';
 import { createBot } from './bot';
+import { cityGate } from './bot/commands/city-gate';
 import { startCommand } from './bot/commands/start';
 import { linkCommand } from './bot/commands/link';
 import { importCommand } from './bot/commands/import';
@@ -183,6 +184,7 @@ async function main(): Promise<void> {
   });
 
   bot.use(
+    cityGate,
     startCommand,
     linkCommand,
     importCommand,
