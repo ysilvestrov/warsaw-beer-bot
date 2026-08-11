@@ -1,6 +1,6 @@
 import type { Locale, Translator } from '../../i18n/types';
 import type { Filters } from '../../storage/user_filters';
-import { cityLabel } from '../../domain/cities';
+import { cityDisplayLabel } from '../city-label';
 import { escapeHtml } from './html';
 import { LOCALE_NAMES } from '../../i18n/locale-names';
 
@@ -47,7 +47,7 @@ export function buildStatusMessage(t: Translator, view: StatusView): string {
 
   // Settings — always shown, independent of Untappd linking.
   lines.push(bold(t('status.settings_header')));
-  lines.push(esc(t('status.city', { name: cityLabel(view.city) })));
+  lines.push(esc(t('status.city', { name: cityDisplayLabel(t, view.city) })));
   lines.push(
     esc(
       t('status.language', {
