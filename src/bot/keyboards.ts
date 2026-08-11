@@ -2,7 +2,8 @@ import { Markup } from 'telegraf';
 import type { Translator } from '../i18n/types';
 import { ABV_PRESETS } from '../domain/filters';
 import { OTHER_FAMILY } from '../domain/style-family';
-import { CITIES } from '../domain/cities';
+import { CITIES, OUTSIDE_CITY } from '../domain/cities';
+import { cityDisplayLabel } from './city-label';
 
 export const langKeyboard = () =>
   Markup.inlineKeyboard([
@@ -11,12 +12,14 @@ export const langKeyboard = () =>
     [Markup.button.callback('🇬🇧 English', 'lang:en')],
   ]);
 
-export const cityKeyboard = (current: string) =>
+export const cityKeyboard = (t: Translator, current: string) =>
   Markup.inlineKeyboard(
-    CITIES.map((c) => [
+    [...CITIES.map((c) => c.slug), OUTSIDE_CITY].map((slug) => [
       Markup.button.callback(
-        c.slug === current ? `✓ ${c.label}` : c.label,
-        `city:${c.slug}`,
+        slug === current
+          ? `✓ ${cityDisplayLabel(t, slug)}`
+          : cityDisplayLabel(t, slug),
+        `city:${slug}`,
       ),
     ]),
   );
