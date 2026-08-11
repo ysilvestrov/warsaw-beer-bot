@@ -20,6 +20,7 @@ interface Deps {
   notifyAdmin?: (msg: string) => Promise<void>;
   breaker?: CircuitBreaker;
   now?: () => Date;
+  telegramIds?: ReadonlySet<number>;
 }
 
 export interface RefreshUntappdResult {
@@ -36,6 +37,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
     notifyAdmin,
     breaker = noopBreaker,
     now = () => new Date(),
+    telegramIds,
   } = deps;
 
   if (!breaker.canAttempt(now())) {
@@ -43,7 +45,9 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
     return { ok: 0, rotated: 0 };
   }
 
-  const profiles = allProfiles(db).filter((p) => p.untappd_username);
+  const profiles = allProfiles(db)
+    .filter((p) => telegramIds === undefined || telegramIds.has(p.telegram_id))
+    .filter((p) => p.untappd_username);
   const rotatedBefore = http.rotations?.() ?? 0;
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 

@@ -45,6 +45,7 @@ function seedTwoPubs(db: ReturnType<typeof fresh>) {
     tap_number: 1, beer_ref: 'Stu Mostow Buty Skejta', brewery_ref: 'Stu Mostow',
     abv: 5.0, ibu: null, style: 'Pils', u_rating: 3.7,
   }]);
+  return { pubA, pubB };
 }
 
 function seedOrphanAndEmptyTap(db: ReturnType<typeof fresh>) {
@@ -212,6 +213,81 @@ describe('buildNewbeersMessage', () => {
     // Both pubs visible — same as no-arg call.
     expect(out.html).toContain('Pub A');
     expect(out.html).toContain('Pub B');
+  });
+
+  test('explicit pubIds can select matched pubs across city boundaries', () => {
+    const db = fresh();
+    const warsaw = upsertPub(db, {
+      slug: 'warsaw-pub', name: 'Warsaw Pub', address: null,
+      lat: null, lon: null, city: 'warszawa',
+    });
+    const krakow = upsertPub(db, {
+      slug: 'krakow-pub', name: 'Krakow Pub', address: null,
+      lat: null, lon: null, city: 'krakow',
+    });
+    const unselected = upsertPub(db, {
+      slug: 'gdansk-pub', name: 'Unselected Pub', address: null,
+      lat: null, lon: null, city: 'gdansk',
+    });
+    const beerRows = [
+      { pubId: warsaw, ref: 'Warsaw Beer', beerId: 101 },
+      { pubId: krakow, ref: 'Krakow Beer', beerId: 102 },
+      { pubId: unselected, ref: 'Unselected Beer', beerId: 103 },
+    ];
+    for (const row of beerRows) {
+      const snap = createSnapshot(db, row.pubId, '2026-08-10T12:00:00Z');
+      const beerId = upsertBeer(db, {
+        untappd_id: row.beerId, name: row.ref, brewery: 'Test', style: 'IPA',
+        abv: 6, rating_global: 4, normalized_name: row.ref.toLowerCase(),
+        normalized_brewery: 'test',
+      });
+      upsertMatch(db, row.ref, beerId, 1);
+      insertTaps(db, snap, [{
+        tap_number: 1, beer_ref: row.ref, brewery_ref: 'Test', abv: 6,
+        ibu: null, style: 'IPA', u_rating: 4,
+      }]);
+    }
+    const t = createTranslator('uk');
+
+    const out = buildNewbeersMessage({
+      db, telegramId: 1, locale: 'uk', t, city: 'warszawa',
+      pubIds: new Set([warsaw, krakow]),
+    });
+
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.html).toContain('Warsaw Pub');
+    expect(out.html).toContain('Krakow Pub');
+    expect(out.html).not.toContain('Unselected Pub');
+  });
+
+  test('empty pubIds selects no pubs instead of falling back to the active city', () => {
+    const db = fresh();
+    seedTwoPubs(db);
+    const t = createTranslator('uk');
+
+    expect(buildNewbeersMessage({
+      db, telegramId: 1, locale: 'uk', t, city: 'warszawa',
+      pubIds: new Set(),
+    })).toEqual({ kind: 'empty' });
+  });
+
+  test('explicit pubIds takes precedence over a pubQuery selecting a different pub', () => {
+    const db = fresh();
+    const { pubB } = seedTwoPubs(db);
+    const t = createTranslator('uk');
+
+    const out = buildNewbeersMessage({
+      db, telegramId: 1, locale: 'uk', t, city: 'warszawa',
+      pubQuery: 'A', pubIds: new Set([pubB]),
+    });
+
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    expect(out.html).toContain('Buty Skejta');
+    expect(out.html).toContain('Pub B');
+    expect(out.html).not.toContain('Atak Chmielu');
+    expect(out.html).not.toContain('Pub A');
   });
 });
 

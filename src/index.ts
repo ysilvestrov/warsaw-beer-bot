@@ -201,16 +201,16 @@ async function main(): Promise<void> {
         await refreshOntap({
           db, log, http, geocoder, onProgress: notify,
           lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
-          pubSlugs: opts?.pubSlugs,
+          pubSlugs: opts.pubSlugs,
+          cities: opts.cities,
           breaker: algoliaBreaker,
           search: algoliaSearch,
         });
-        // Scoped refresh (a specific pub) is ontap-only: the Untappd had-list
-        // is not pub-specific and is refreshed daily + on a full /refresh.
-        if (!opts?.pubSlugs && untappdHttp) {
+        if (untappdHttp) {
           await refreshAllUntappd({
             db, log, http: untappdHttp, onProgress: notify, notifyAdmin,
             breaker: profileHttpBreaker,
+            telegramIds: opts.telegramIds,
           });
         }
       },

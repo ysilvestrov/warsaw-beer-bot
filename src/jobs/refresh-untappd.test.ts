@@ -249,6 +249,48 @@ describe('refreshAllUntappd', () => {
     expect(seenUrls).toEqual(['https://untappd.com/user/real/beers']);
   });
 
+  test('refreshes only linked profiles selected by telegram id', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 2, 'bob');
+
+    const seenUrls: string[] = [];
+    const http: Http = {
+      async get(url: string) {
+        seenUrls.push(url);
+        return '';
+      },
+    };
+
+    await refreshAllUntappd({
+      db,
+      log: silentLog,
+      http,
+      telegramIds: new Set([2]),
+    });
+
+    expect(seenUrls).toEqual(['https://untappd.com/user/bob/beers']);
+  });
+
+  test('empty telegram id selection makes no HTTP calls', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'alice');
+    const http: Http = { get: vi.fn(async () => '') };
+
+    const result = await refreshAllUntappd({
+      db,
+      log: silentLog,
+      http,
+      telegramIds: new Set(),
+    });
+
+    expect(http.get).not.toHaveBeenCalled();
+    expect(result).toEqual({ ok: 0, rotated: 0 });
+  });
+
   test('breaker open: skips the whole profile scrape without HTTP', async () => {
     const db = fresh();
     ensureProfile(db, 1);

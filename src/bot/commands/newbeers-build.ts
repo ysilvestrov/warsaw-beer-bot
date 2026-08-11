@@ -38,6 +38,7 @@ export interface NewbeersDeps {
   locale: Locale;
   t: Translator;
   pubQuery?: string;
+  pubIds?: ReadonlySet<number>;
   city: string;
 }
 
@@ -63,11 +64,13 @@ export function buildNewbeersMessage(deps: NewbeersDeps): NewbeersResult {
       abv_max: null,
       default_route_n: null,
     };
-  const pubs = new Map(listPubs(db, deps.city).map((p) => [p.id, p]));
+  const pubRows = listPubs(db, deps.pubIds == null ? deps.city : undefined)
+    .filter((p) => deps.pubIds == null || deps.pubIds.has(p.id));
+  const pubs = new Map(pubRows.map((p) => [p.id, p]));
 
   const q = deps.pubQuery?.trim().toLowerCase() ?? '';
   let matchedIds: Set<number> | null = null;
-  if (q) {
+  if (q && deps.pubIds == null) {
     const filtered = filterPubsByQuery([...pubs.values()], q);
     if (filtered.length === 0) return { kind: 'pub_not_found', query: deps.pubQuery! };
     matchedIds = new Set(filtered.map((p) => p.id));
