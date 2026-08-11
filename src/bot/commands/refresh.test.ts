@@ -462,6 +462,11 @@ describe('createRefreshCommand scope forwarding', () => {
   test('pub_not_found starts no work and does not consume the caller scoped cooldown', async () => {
     const { db } = dbWithPubs();
     const telegramId = 1201;
+    // A caller reaching /refresh has passed the city gate, so they necessarily have a
+    // real city: since #399 an unset city reads as `outside-pl`, which scopes to zero
+    // pubs and would make even the second (valid) call find nothing.
+    ensureProfile(db, telegramId);
+    setUserCity(db, telegramId, 'warszawa');
     const sent: Array<{ text: string; extra?: unknown }> = [];
     let runCalls = 0;
     let postRunCalls = 0;
