@@ -134,8 +134,7 @@ Callback-кнопок гейт не потребує: жодна з 5 коман
 | `storage/user_profiles.test.ts` | `NULL → outside-pl`; `szczecin → szczecin`; невідомий слаг → `outside-pl` |
 | `bot/commands/city-gate.test.ts` | заблокована команда: `next` не викликано + надіслано `city.blocked`; дозволена: `next` викликано, нічого не надіслано |
 | `bot/commands/catalog.test.ts` | `allowed = false` ховає рівно 5 команд і додає підказку; `allowed = true` дає нинішній текст |
-| `bot/keyboards.test.ts` | кнопка «поза Польщею» остання; ✓ на ній при `current = outside-pl` |
-| `bot/commands/city.test.ts` | `applyCitySelection(db, id, 'outside-pl') === true` і слаг збережено |
+| `bot/commands/city.test.ts` | кнопка «поза Польщею» остання; ✓ на ній при `current = outside-pl` (тести `cityKeyboard` уже живуть тут, не в `keyboards.test.ts`); `applyCitySelection(db, id, 'outside-pl') === true` і слаг збережено |
 | `bot/commands/status-build.test.ts` | рядок міста показує локалізовану мітку |
 
 ## Оновлення `spec.md`
