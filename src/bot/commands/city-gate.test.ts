@@ -1,10 +1,9 @@
 import { vi } from 'vitest';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { ensureProfile, setUserCity } from '../../storage/user_profiles';
+import { ensureProfile, getProfile, setUserCity } from '../../storage/user_profiles';
 import { createTranslator } from '../../i18n';
-import { COMMAND_CATALOG } from './catalog';
-import { CITY_SCOPED_COMMANDS, cityGateHandler } from './city-gate';
+import { CITY_SCOPED_COMMANDS, cityGateHandler, type CommandCtx } from './city-gate';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -15,14 +14,12 @@ function fresh() {
 function ctxFor(db: ReturnType<typeof fresh>, telegramId: number) {
   const reply = vi.fn();
   const ctx = { deps: { db }, t: createTranslator('en'), from: { id: telegramId }, reply };
-  return { ctx: ctx as never, reply };
+  return { ctx: ctx as unknown as CommandCtx, reply };
 }
 
 test('the gated command list comes from the catalog flag', () => {
   expect([...CITY_SCOPED_COMMANDS].sort()).toEqual(['beers', 'newbeers', 'pubs', 'refresh', 'route']);
-  expect(CITY_SCOPED_COMMANDS).toEqual(
-    COMMAND_CATALOG.filter((e) => e.cityScoped).map((e) => e.command),
-  );
+  expect(CITY_SCOPED_COMMANDS).toEqual(['newbeers', 'route', 'pubs', 'beers', 'refresh']);
 });
 
 test('a user with a Polish city passes through untouched', async () => {
@@ -63,7 +60,7 @@ test('a user who explicitly picked outside-pl is blocked too', async () => {
   expect(reply).toHaveBeenCalledTimes(1);
 });
 
-test('the gate creates a profile for a first-time user instead of throwing', async () => {
+test('the gate creates a profile for a first-time user (and still blocks them)', async () => {
   const db = fresh(); // no ensureProfile
   const { ctx, reply } = ctxFor(db, 99);
   const next = vi.fn();
@@ -72,4 +69,5 @@ test('the gate creates a profile for a first-time user instead of throwing', asy
 
   expect(next).not.toHaveBeenCalled();
   expect(reply).toHaveBeenCalledTimes(1);
+  expect(getProfile(db, 99)).not.toBeNull();
 });
