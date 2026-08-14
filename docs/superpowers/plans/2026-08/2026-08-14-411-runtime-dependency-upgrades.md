@@ -167,4 +167,3 @@ Expected: no whitespace errors, a clean worktree, and only the design, plan,
 
 Report the audit, test, typecheck, build, smoke, and scope evidence. Do not push
 or open a pull request until the user confirms.
-

@@ -93,4 +93,3 @@ explicitly authorized step after merge.
 - Tests, typecheck, build, and local API lifecycle smoke checks pass.
 - No application behavior, architecture, or extension artifact changes unless a
   verified compatibility failure makes a focused adjustment necessary.
-
