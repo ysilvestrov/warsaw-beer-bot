@@ -715,6 +715,18 @@ describe('#347 curated alias batch', () => {
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(323265);
+
+    // The decoys only separate on ABV when they come first: reversed and without an ABV
+    // the 0,0% sibling wins, so this second lookup is what makes the tiebreak load-bearing.
+    const reversed = fakeSearch(() => [
+      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2 },
+      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1 },
+      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4 },
+    ]);
+    const outReversed = await lookupBeer({ brewery: 'Browary Książęce Brewery', name: 'Złote Pszeniczne', abv: 4.9, search: reversed });
+    expect(outReversed.kind).toBe('matched');
+    if (outReversed.kind !== 'matched') return;
+    expect(outReversed.result.bid).toBe(323265);
   });
 
   test('11995: portfolio label reaches the group brewery', async () => {
@@ -773,8 +785,13 @@ describe('#347 curated alias batch', () => {
     expect(out.result.bid).toBe(6819716);
   });
 
-  test('34351: a contradicting shop ABV must not veto the published beer', async () => {
+  test('34351: a contradicting shop ABV must not veto the published beer (sibling separated only by result order)', async () => {
     // flasker prints 3.8% in the title while the linked Untappd record says 4.2%.
+    // Both candidates tie: each normalizes to three tokens against the one-token target
+    // `bulgogi`, so both score the same near-name value, and both fall outside the ABV
+    // window. The winner is whichever Algolia returned first — this test pins the observed
+    // live order (2026-08-14), NOT a discriminator. A deterministic tie-break needs the bid
+    // flasker publishes (#384); see the follow-up issue linked from the PR.
     const search = fakeSearch(() => [
       { bid: 6648348, beer_name: 'Tomatøl:BULDAK BULGOGI', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.6 },
       { bid: 6708599, beer_name: 'Tomatol: Bulgogi Sriracha', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.5 },
