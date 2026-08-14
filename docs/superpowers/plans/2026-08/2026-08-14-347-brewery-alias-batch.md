@@ -379,11 +379,37 @@ Expected: each row prints either `MATCHED → <brewery> — <beer> (bid …)` or
 
 Confirm all three by reading the output:
 
-1. No row matched a beer whose ABV contradicts the shop's beyond ±0.5 (`ABV_TOLERANCE`).
+1. No row matched a beer whose ABV contradicts the shop's beyond `ABV_TOLERANCE` (0.3, `src/domain/matcher.ts:37`), except where the row's own documented evidence says the shop ABV is the unreliable one.
 2. No row matched a brewer other than the one documented in the design doc's table.
 3. These are expected to stay `NOT_FOUND` and are **not** failures — they belong to other issues: 34642 (name stage, #322/#334), 25802 (`PSZENICA` ↔ `Pšenice`, #322), 30273 (zero candidates, #388/#406), 30059 (ambiguous `PLATAN`, #334), 30063 / 30233 / 31201 / 31808 (zero candidates, #406).
 
 Already established during Task 1 (2026-08-14), so treat any deviation as a regression: 31808 `Cydr Melon` stays unmatched because the product word `Cydr` zeroes its query, and 34518 `Apple Cider` matches bid 402651 on the pair alone — the unpaired Belarusian `Royal Fruit Bel` records are gated out, so the pick is forced rather than arbitrary.
+
+### Result of the run (2026-08-14)
+
+Twelve of the twenty rows now match, all to their documented targets:
+
+| matched | target |
+|---|---|
+| 33544 | bid 323265 `Tyskie Browary Książęce — Książęce Złote Pszeniczne` 4.9 |
+| 33571 | bid 6682946 `Brouwerij De Brabandere — Petrus Kriek` 4.0 |
+| 33664 | bid 2204361 `Hubertus — Hořký ležák L.P. 1457` 4.4 |
+| 34252 | bid 4586540 `Mazurski Browar — Mazurskie Lager Ciemny` 5.1 |
+| 11995 | bid 71011 `Pivovar Jihlava — Ježek Kvasnicový` 4.9 |
+| 34336 | bid 301434 `Pivovar Rychtář — Rychtář Premium` 5.0 |
+| 34371 | bid 1036654 `Arcyksiążęcy Browar Zamkowy Cieszyn — Pszeniczne Cieszyńskie` 5.4 |
+| 34518 | bid 402651 `Royal Fruit Garden — Cidre Royal Apple Cider Demi-Sec` 5.0 |
+| 34351 | bid 6648348 `Mad Brew — Tomatøl:BULDAK BULGOGI` 4.2 |
+| 34352 | bid 6819716 `Mad Brew — Tomatol Wasabi` 3.8 |
+| 25802 | bid 1149149 `Pivovary Lobkowicz — Lobkowicz Pšenice` 4.5 — **unplanned**, see below |
+| 34703 | bid 538519 `Hubertus — Světlý ležák Medium 11°` 4.4 — the predicted free win via the #321 Czech-grade stage |
+
+Two deviations from the predictions, both benign and both reported rather than absorbed:
+
+- **25802** `Lobkowicz / PSZENICA` was routed to #322 as a PL↔CZ name divergence and was expected to stay unmatched; it matches `Lobkowicz Pšenice` (shop 4.3 vs record 4.5, inside tolerance) and the beer is right. Its earlier probe only showed the gate passing — the full lookup was never run before, so the row may simply have been stale rather than fixed by this batch.
+- **34351** matches at shop 3.8 vs record 4.2, a gap of 0.4 that exceeds `ABV_TOLERANCE`. This is the documented exception: flasker's own product page publishes the Untappd link to 6648348, and its printed ABV contradicts the linked record (#384).
+
+Unmatched, each owned elsewhere: 34607 (no pair by design — pinned in prod), 34642 (#322/#334), 30059 (#334), 30273 / 30063 / 30233 / 31201 / 31808 (zero candidates, #406).
 
 If any row matches a brewer outside the documented table, stop and remove the offending pair — a wrong match is worse than an orphan, because it silently mislabels a beer for every user.
 
