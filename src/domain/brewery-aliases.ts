@@ -61,6 +61,36 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Rescues 219 (Guinness Draught); the bare-"Guinness"-name misses (11851) are a
   // name-stage issue, not a gate issue. Verified via alias-key.
   ['st james s gate', 'guinness'],
+  // #347 batch (2026-08-14): gate misses where the search returned the beer at the
+  // shop's own ABV and only the brewer label diverged. Every pair was verified by
+  // replaying the orphan live through lookupBeer() against Algolia before curating;
+  // keys produced with `npm run alias-key`. See
+  // docs/superpowers/specs/2026-08/2026-08-14-347-brewery-alias-batch-design.md
+  ['ksiazece', 'tyskie ksiazece'],   // 33544 Złote Pszeniczne -> bid 323265, abv 4.9 = 4.9
+  ['petrus', 'de brabandere'],       // 33571 Kriek -> bid 6682946, abv 4.0 = 4.0 (Petrus is a De Brabandere brand)
+  ['kacov', 'hubertus'],             // 33664 Hořký ležák L.P. 1457 -> bid 2204361, abv 4.4 = 4.4
+  // Morphological variant ("Mazurskie Brewery" / "Mazurski Browar"), not a brand
+  // relation; same shape as ['ziemia obiacana', 'ziemia obiecana']. Redundant if
+  // #407 ever adds an edit-distance rescue to the gate.
+  ['mazurskie', 'mazurski'],         // 34252 Lager Ciemny -> bid 4586540, abv 5.1 = 5.1
+  // Portfolio owner: the shop files group beers under "Lobkowicz". A hub, so the
+  // two group breweries never become equivalent to each other.
+  ['lobkowicz', 'jihlava'],          // 11995 Ježek Kvasnicový -> bid 71011, abv 4.9 = 4.9
+  ['lobkowicz', 'rychtar'],          // 34336 Rychtář Premium -> bid 301434, abv 5.0 = 5.0
+
+  ['cieszyn', 'arcyksiazecy zamkowy cieszyn'], // 34371 Pszeniczne -> bid 1036654, abv 5.4 = 5.4
+  // Cidre Royal is the brand of the Ukrainian producer Royal Fruit Garden; the
+  // Belarusian licensee (Royal Fruit Bel) is deliberately NOT paired — no observed
+  // row belongs to it. 34518 is also pinned in production for durability, even
+  // though the pair alone already selects the right record.
+  ['cidre royal', 'royal fruit garden'], // 34518 Apple Cider -> bid 402651, abv 5.0 = 5.0; the unpaired Belarusian licensee (Royal Fruit Bel) is gated out, so the pick is forced rather than arbitrary
+  // Tomatøl is a Mad Brew series filed as a brewery, exactly like smoothiemaker
+  // above. Server-side twin of the client-side #385/#384 fixes, so 0.13.0 clients
+  // benefit too.
+  ['tomatol', 'mad brew'],           // 34352 Wasabi -> bid 6819716, abv 3.8 = 3.8; also 34351 Bulgogi -> bid 6648348 (shop 3.8 vs record 4.2)
+  // Necessary but not sufficient for 34642: after the gate opens, WEIZENBIER vs
+  // Weizen still fails the name stage (#322 / #334).
+  ['nachod', 'primator'],            // 34642 Weizenbier -> bid 30947, abv 4.7 vs 4.8
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
