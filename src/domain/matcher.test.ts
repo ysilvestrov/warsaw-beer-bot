@@ -1052,3 +1052,73 @@ describe('#306 bare-brand guard', () => {
       .toBeNull();
   });
 });
+
+describe('#347 alias hubs', () => {
+  test('the portfolio label expands to every group brewery', () => {
+    expect(breweryAliases('Lobkowicz Brewery').sort()).toEqual(['jihlava', 'lobkowicz', 'rychtar']);
+  });
+
+  test('a spoke does not expand back to the hub', () => {
+    expect(breweryAliases('Pivovar Rychtář')).toEqual(['rychtar']);
+  });
+
+  test('the portfolio label reaches each group brewery at match time', () => {
+    expect(breweryAliasesMatch(breweryAliases('Pivovar Rychtář'), breweryAliases('Lobkowicz Brewery')))
+      .toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('Pivovar Jihlava'), breweryAliases('Lobkowicz Brewery')))
+      .toBe(true);
+  });
+
+  // Holds because `rychtar` is a pure spoke (one neighbour), while `jihlava` is both a
+  // spoke of `lobkowicz` and a hub over `jezek kwasnicowy`, so only `jihlava` expands
+  // upward. If a later batch makes `rychtar` a hub it will inherit `lobkowicz` and this
+  // WILL fail — that failure is real (the two group breweries would cross-match), so do
+  // not relax the assertion. For the same reason the sorted `toEqual` above is a
+  // membership snapshot to extend when a fourth Lobkowicz-group brewery is curated, not
+  // a fixed invariant — the group has around ten real breweries.
+  test('group breweries do not become equivalent to each other', () => {
+    expect(breweryAliasesMatch(breweryAliases('Pivovar Rychtář'), breweryAliases('Pivovar Jihlava')))
+      .toBe(false);
+  });
+
+  test('a series name reaches its brewer through the hub', () => {
+    expect(breweryAliasesMatch(breweryAliases('Mad Brew'), breweryAliases('Tomatol')))
+      .toBe(true);
+  });
+
+  test('two Mad Brew series do not become equivalent to each other', () => {
+    expect(breweryAliasesMatch(breweryAliases('Tomatol'), breweryAliases('SmoothieMaker')))
+      .toBe(false);
+  });
+
+  test('pre-existing jezek path survives jihlava becoming a hub', () => {
+    expect(breweryAliasesMatch(breweryAliases('Pivovar Jihlava'), breweryAliases('Ježek Kwasnicowy')))
+      .toBe(true);
+  });
+
+  test('pre-existing smoothiemaker path survives mad brew becoming a hub', () => {
+    expect(breweryAliasesMatch(breweryAliases('Mad Brew'), breweryAliases('SmoothieMaker')))
+      .toBe(true);
+  });
+
+  test('pre-existing bracki path survives the Cieszyn brewery becoming a hub', () => {
+    expect(breweryAliasesMatch(
+      breweryAliases('Arcyksiążęcy Browar Zamkowy Cieszyn'),
+      breweryAliases('Bracki Browar Zamkowy w Cieszynie'),
+    )).toBe(true);
+  });
+
+  test('the bare-town label reaches the full brewery name', () => {
+    expect(breweryAliasesMatch(
+      breweryAliases('Arcyksiążęcy Browar Zamkowy Cieszyn'),
+      breweryAliases('Cieszyn Brewery'),
+    )).toBe(true);
+  });
+
+  test('the two Cieszyn shop labels do not become equivalent to each other', () => {
+    expect(breweryAliasesMatch(
+      breweryAliases('Cieszyn Brewery'),
+      breweryAliases('Bracki Browar Zamkowy w Cieszynie'),
+    )).toBe(false);
+  });
+});
