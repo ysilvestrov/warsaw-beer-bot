@@ -122,3 +122,21 @@ Revert the commit — the table is data, and the enrich path re-derives everythi
   rows. Deliberate: no row observed so far belongs to Bel.
 - `['nachod', 'primator']` will not close 34642 by itself (`WEIZENBIER` vs `Weizen`, abv 4.7 vs 4.8). It is
   curated because it is factually right and it moves the row to the name stage, where #322 / #334 own it.
+- **The batch turns three existing forms into alias hubs** — `jihlava` (gains `lobkowicz` beside
+  `jezek kwasnicowy`), `mad brew` (gains `tomatol` beside `smoothiemaker`) and `arcyksiazecy zamkowy cieszyn`
+  (gains `cieszyn` beside `bracki zamkowy w cieszynie`). Verified empirically (2026-08-14): every
+  pre-existing path still matches, because a hub candidate expands to all its spokes even though the spokes
+  no longer expand to the hub, and no two spokes become equivalent to each other.
+
+  The portfolio pairs do widen the gate in the reverse direction: a `Pivovar Rychtář` row can now gate-pass a
+  `Pivovary Lobkowicz` beer, and the group has colliding names (`Rychtář Premium` 5.0% vs `Lobkowicz Premium
+  ležák` 4.7%). Tested against the real candidate pool: shop `Rychtář / Premium` still resolves to bid 301434
+  with and without ABV, and `Lobkowicz / Premium ležák` still resolves to 215285 — the name stage
+  discriminates. This is locked in by a regression test rather than left to trust.
+
+## Consequences for the existing test suite
+
+Two assertions in `brewery-aliases.test.ts` encode "this batch creates no hub" for the #318 and #329 batches
+and will fail by design: `mad brew` and `arcyksiazecy zamkowy cieszyn` each gain a second neighbour. Both are
+updated with a comment naming the pair that widened them — the invariant they defend (no *accidental* hub)
+still holds for every other form in those batches.
