@@ -74,7 +74,9 @@ test('happy path: comment + new issue + quiet; DB and job_state written', async 
       { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
       { beer_id: 1, review_class: 'not_on_untappd', review_note: 'small batch', issue_number: null, new_issue_key: null },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+    }],
   };
   const github = gh();
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
@@ -153,7 +155,9 @@ test('github createIssue failure: its verdicts stay untriaged, other groups proc
       { beer_id: 2, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
       { beer_id: 3, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+    }],
   };
   const github = gh({ createIssue: vi.fn().mockRejectedValue(new Error('boom')) });
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
@@ -526,7 +530,9 @@ test('no duplicate GitHub side effects across a transient retry', async () => {
       { beer_id: 1, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
       { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+    }],
   };
   // One github stub shared across both ticks, so call counts accumulate.
   const github = gh();

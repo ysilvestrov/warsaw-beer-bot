@@ -5,7 +5,9 @@ const v = (over: Partial<Verdict>): Verdict => ({
   beer_id: 1, review_class: 'matcher_bug', review_note: 'note',
   issue_number: null, new_issue_key: null, ...over,
 });
-const issue = (key: string) => ({ key, title: `t-${key}`, body: 'b', labels: ['wrong'] });
+const issue = (key: string) => ({
+  key, title: `t-${key}`, body: 'b', labels: ['wrong'], scope: { beer_ids: [], where: [] },
+});
 
 test('routes verdicts: existing issue, new issue, quiet', () => {
   const a: Analysis = {
@@ -65,11 +67,11 @@ test('dedupes duplicate new_issues keys: first occurrence wins, no wasted cap sl
     // k1 appears 3 times — duplicates must not spawn duplicate issues nor
     // consume cap slots, so k2 and k3 still fit under MAX_NEW_ISSUES_PER_RUN.
     new_issues: [
-      { key: 'k1', title: 'first', body: 'first-body', labels: [] },
-      { key: 'k1', title: 'dup', body: 'dup-body', labels: [] },
-      { key: 'k2', title: 't-k2', body: 'b', labels: [] },
-      { key: 'k1', title: 'dup2', body: 'dup2-body', labels: [] },
-      { key: 'k3', title: 't-k3', body: 'b', labels: [] },
+      { key: 'k1', title: 'first', body: 'first-body', labels: [], scope: { beer_ids: [], where: [] } },
+      { key: 'k1', title: 'dup', body: 'dup-body', labels: [], scope: { beer_ids: [], where: [] } },
+      { key: 'k2', title: 't-k2', body: 'b', labels: [], scope: { beer_ids: [], where: [] } },
+      { key: 'k1', title: 'dup2', body: 'dup2-body', labels: [], scope: { beer_ids: [], where: [] } },
+      { key: 'k3', title: 't-k3', body: 'b', labels: [], scope: { beer_ids: [], where: [] } },
     ],
   };
   const plan = planTriageActions(a, [], [1, 2, 3]);

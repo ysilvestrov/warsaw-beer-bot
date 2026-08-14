@@ -1,6 +1,7 @@
 import {
   AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA,
 } from './triage-analysis';
+import { ScopeSchema } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 
 const orphan: UntriagedFailure = {
@@ -35,7 +36,8 @@ test('AnalysisSchema: accepts a valid payload', () => {
       issue_number: null, new_issue_key: 'alias-nepomucen',
     }],
     new_issues: [{ key: 'alias-nepomucen', title: 'Alias: Nepomucen → Nepo Brewing',
-      body: 'examples…', labels: ['orphan-triage'] }],
+      body: 'examples…', labels: ['orphan-triage'],
+      scope: { beer_ids: [7], where: [] } }],
   });
   expect(a.verdicts[0].beer_id).toBe(7);
 });
@@ -62,8 +64,9 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
   expect(p).toContain('essentially correct');
   // Change 2: garbled shop-source rows are not parser_bug
   expect(p).toContain('read it correctly');
-  // Change 3: findability Scope line, no global counts
-  expect(p).toContain('machine-findable');
+  // Change 3: structured scope field, no global counts (#408 — a free-text Scope
+  // line couldn't be checked against a row, so it always trivially "covered" it)
+  expect(p).toContain('`scope` object naming the rows');
   expect(p).toContain('only see the current batch');
   // NOTE: each asserted phrase lives on ONE array line — the prompt is join('\n'),
   // so a phrase spanning two array elements would be split by a newline and fail.
@@ -214,4 +217,61 @@ test('ANALYSIS_TOOL_SCHEMA: mirrors the zod schemas (drift guard)', () => {
     .toEqual(sorted(Object.keys(newIssueShape)));
   expect(sorted(newIssueItem.required))
     .toEqual(sorted(Object.keys(newIssueShape)));
+});
+
+test('new_issues carries a structured scope', () => {
+  const parsed = AnalysisSchema.parse({
+    verdicts: [],
+    new_issues: [{
+      key: 'k', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [1], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
+  });
+  expect(parsed.new_issues[0].scope.where[0]).toEqual({ col: 'candidates_count', op: '=', value: 0 });
+});
+
+test('a new_issue without a scope fails to parse', () => {
+  expect(AnalysisSchema.safeParse({
+    verdicts: [], new_issues: [{ key: 'k', title: 't', body: 'b', labels: [] }],
+  }).success).toBe(false);
+});
+
+test('the tool schema requires scope on every new_issue', () => {
+  const item = ANALYSIS_TOOL_SCHEMA.properties.new_issues.items as { required: readonly string[] };
+  expect(item.required).toContain('scope');
+});
+
+test('the prompt asks for a structured scope and no longer offers the whole-class example', () => {
+  const prompt = buildTriagePrompt({ orphans: [], openIssues: [] });
+  expect(prompt).not.toContain("review_class='matcher_bug'");
+  expect(prompt).toContain('scope');
+});
+
+// AnalysisSchema.new_issues[].scope is a HAND-KEPT structural mirror of
+// triage-scope.ts's ScopeSchema, not a re-export (see the #408 comment on
+// NewIssueScopeSchema in triage-analysis.ts for why: importing the real ScopeSchema
+// value here would form a circular module dependency with triage-scope.ts, which is
+// fatal at load time under this project's test runner). This test cross-checks a
+// representative batch of payloads against BOTH schemas so the mirror can't silently
+// drift from the real one.
+test('the new_issues scope mirror agrees with the real ScopeSchema', () => {
+  const cases: unknown[] = [
+    { beer_ids: [1, 2], where: [] },
+    { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    { beer_ids: [], where: [{ col: 'fail_count', op: '>=', value: 3 }] },
+    { beer_ids: [], where: [{ col: 'source_url', op: 'non_empty' }] },
+    { beer_ids: [], where: [{ col: 'brewery', op: 'contains', value: 'Nepomucen' }] },
+    { beer_ids: [], where: [{ col: 'abv', op: 'is_null' }] },
+    { beer_ids: [], where: [{ col: 'style', op: 'is_not_null' }] },
+    { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'matcher_bug' }] },
+    // invalid shapes
+    { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'not_a_class' }] },
+    { beer_ids: [], where: [{ col: 'candidates_count', op: 'contains', value: 'x' }] },
+    { beer_ids: 'nope', where: [] },
+    {},
+  ];
+  const analysisScope = AnalysisSchema.shape.new_issues.element.shape.scope;
+  for (const c of cases) {
+    expect(analysisScope.safeParse(c).success).toBe(ScopeSchema.safeParse(c).success);
+  }
 });
