@@ -1069,6 +1069,13 @@ describe('#347 alias hubs', () => {
       .toBe(true);
   });
 
+  // Holds because `rychtar` is a pure spoke (one neighbour), while `jihlava` is both a
+  // spoke of `lobkowicz` and a hub over `jezek kwasnicowy`, so only `jihlava` expands
+  // upward. If a later batch makes `rychtar` a hub it will inherit `lobkowicz` and this
+  // WILL fail — that failure is real (the two group breweries would cross-match), so do
+  // not relax the assertion. For the same reason the sorted `toEqual` above is a
+  // membership snapshot to extend when a fourth Lobkowicz-group brewery is curated, not
+  // a fixed invariant — the group has around ten real breweries.
   test('group breweries do not become equivalent to each other', () => {
     expect(breweryAliasesMatch(breweryAliases('Pivovar Rychtář'), breweryAliases('Pivovar Jihlava')))
       .toBe(false);
@@ -1106,5 +1113,12 @@ describe('#347 alias hubs', () => {
       breweryAliases('Arcyksiążęcy Browar Zamkowy Cieszyn'),
       breweryAliases('Cieszyn Brewery'),
     )).toBe(true);
+  });
+
+  test('the two Cieszyn shop labels do not become equivalent to each other', () => {
+    expect(breweryAliasesMatch(
+      breweryAliases('Cieszyn Brewery'),
+      breweryAliases('Bracki Browar Zamkowy w Cieszynie'),
+    )).toBe(false);
   });
 });
