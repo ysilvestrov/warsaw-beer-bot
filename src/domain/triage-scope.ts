@@ -120,3 +120,44 @@ export function rowSatisfiesScope(
   if (scope.where.length === 0) return false;
   return scope.where.every((t) => termMatches(row, verdictClass, t));
 }
+
+const BLOCK_RE = /```triage-scope\s*\n([\s\S]*?)\n?```/;
+
+function describeTerm(t: ScopeTerm): string {
+  return 'value' in t ? `${t.col} ${t.op} ${t.value}` : `${t.col} ${t.op}`;
+}
+
+// We render this ourselves and parse our own output back on the next run. The model
+// never authors the text — it submits the structured field, which the tool schema
+// already validates. That is the whole point: a parser exists, but its input is not
+// model prose.
+export function renderScopeBlock(scope: Scope): string {
+  const parts: string[] = [];
+  if (scope.beer_ids.length > 0) parts.push(`beer_ids ${scope.beer_ids.join(', ')}`);
+  if (scope.where.length > 0) parts.push(scope.where.map(describeTerm).join(' AND '));
+  // A free-text `contains` value can legally contain a backtick run (e.g. a source_url
+  // fragment). JSON does not escape backticks, so an unescaped ` ``` ` inside the JSON
+  // payload would look like the fence's own closing delimiter to BLOCK_RE and truncate
+  // the capture mid-string, breaking JSON.parse on the next run. ` is a valid JSON
+  // string escape for backtick that JSON.parse decodes back to `, so this keeps every
+  // literal backtick out of the fenced content without changing the parsed value.
+  const json = JSON.stringify(scope).replace(/`/g, '\\u0060');
+  return [
+    `Scope: ${parts.join(' OR ')}`,
+    '',
+    '```triage-scope',
+    json,
+    '```',
+  ].join('\n');
+}
+
+export function parseScopeBlock(body: string): Scope | null {
+  const m = BLOCK_RE.exec(body);
+  if (!m) return null;
+  try {
+    const parsed = ScopeSchema.safeParse(JSON.parse(m[1]));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}

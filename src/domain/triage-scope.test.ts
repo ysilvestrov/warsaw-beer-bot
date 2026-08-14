@@ -1,4 +1,4 @@
-import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
+import { isLegalScope, rowSatisfiesScope, renderScopeBlock, parseScopeBlock, type Scope } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 
 const row = (over: Partial<UntriagedFailure> = {}): UntriagedFailure => ({
@@ -64,4 +64,43 @@ test('string and null operators', () => {
     { beer_ids: [], where: [{ col: 'abv', op: 'is_null' }] })).toBe(true);
   expect(rowSatisfiesScope(row({ style: 'IPA' }), 'matcher_bug',
     { beer_ids: [], where: [{ col: 'style', op: 'is_not_null' }] })).toBe(true);
+});
+
+test('render then parse round-trips a scope', () => {
+  const scope: Scope = {
+    beer_ids: [34005, 11952],
+    where: [{ col: 'candidates_count', op: '=', value: 0 }],
+  };
+  const body = `Some prose about the pattern.\n\n${renderScopeBlock(scope)}\n\nMore prose.`;
+  expect(parseScopeBlock(body)).toEqual(scope);
+});
+
+test('a body with no block is unscoped', () => {
+  expect(parseScopeBlock("Scope: all orphans in this class — enrich_failures WHERE review_class='matcher_bug'."))
+    .toBeNull();
+});
+
+test('a malformed or unknown-column block is unscoped, never a throw', () => {
+  expect(parseScopeBlock('```triage-scope\n{not json\n```')).toBeNull();
+  expect(parseScopeBlock('```triage-scope\n{"beer_ids":[],"where":[{"col":"secret","op":"=","value":1}]}\n```'))
+    .toBeNull();
+});
+
+test('the rendered block carries a human-readable Scope line next to it', () => {
+  const out = renderScopeBlock({ beer_ids: [7], where: [{ col: 'brewery', op: 'empty' }] });
+  expect(out).toContain('```triage-scope');
+  expect(out).toContain('Scope:');
+  expect(out).toContain('brewery empty');
+  expect(out).toContain('7');
+});
+
+test('a contains value holding a backtick fence still round-trips', () => {
+  // A free-text `contains` value is not restricted from containing backticks. JSON
+  // does not escape them, so an unescaped run of three backticks inside the payload
+  // would read as the fence's own closing delimiter and truncate the capture.
+  const scope: Scope = {
+    beer_ids: [],
+    where: [{ col: 'source_url', op: 'contains', value: 'a```b' }],
+  };
+  expect(parseScopeBlock(renderScopeBlock(scope))).toEqual(scope);
 });
