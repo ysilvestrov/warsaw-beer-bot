@@ -39,6 +39,20 @@ export function isLegalScope(scope: Scope): boolean {
   return scope.where.some((t) => t.col !== 'review_class');
 }
 
+// Narrows `term` itself (not just `term.col`) to the schema variant(s) whose `col` is
+// in `cols`. The predicate must take the whole object — TS's discriminant narrowing
+// does not propagate from a guard called on a bare `term.col` property access back up
+// to `term` (verified empirically; only guards applied to the object itself narrow
+// it). Using a real type guard instead of a plain boolean-and-cast means the
+// `term as Extract<...>` casts are gone: there is nothing left for a mis-cast to hide
+// behind.
+function hasCol<T extends readonly ScopeTerm['col'][]>(
+  term: ScopeTerm,
+  cols: T,
+): term is Extract<ScopeTerm, { col: T[number] }> {
+  return (cols as readonly string[]).includes(term.col);
+}
+
 function termMatches(
   row: UntriagedFailure,
   verdictClass: (typeof REVIEW_CLASSES)[number],
@@ -53,27 +67,40 @@ function termMatches(
   // discriminant: NUMERIC_COLS/TEXT_COLS/NULLABLE_COLS are disjoint, so each branch
   // below narrows `term` to exactly one schema variant and `row[term.col]` to that
   // variant's field type — no `any`, no widened `string | number | null`.
-  if ((NUMERIC_COLS as readonly string[]).includes(term.col)) {
-    const t = term as Extract<ScopeTerm, { col: (typeof NUMERIC_COLS)[number] }>;
-    const v = row[t.col];
-    switch (t.op) {
-      case '=': return v === t.value;
-      case '!=': return v !== t.value;
-      case '<': return v < t.value;
-      case '<=': return v <= t.value;
-      case '>': return v > t.value;
-      case '>=': return v >= t.value;
+  //
+  // Every branch below is fail-closed by construction, not just by convention: the
+  // numeric switch ends in `default: op satisfies never`, so a new operator added to
+  // NUMERIC_COLS's op enum without a matching `case` is a COMPILE error, not a
+  // fall-through. And the final `term satisfies never` is only reachable if `term`'s
+  // col is in none of review_class/NUMERIC_COLS/NULLABLE_COLS/TEXT_COLS — impossible
+  // today, and a compile error the day a new column group is added and forgotten
+  // here. (An earlier version of this function used `term as Extract<...>` casts and
+  // let an unmatched case fall through the numeric branch into the text branch, where
+  // it mis-cast a numeric term and reported a silent false "match" — see #408 review.)
+  if (hasCol(term, NUMERIC_COLS)) {
+    const v = row[term.col];
+    switch (term.op) {
+      case '=': return v === term.value;
+      case '!=': return v !== term.value;
+      case '<': return v < term.value;
+      case '<=': return v <= term.value;
+      case '>': return v > term.value;
+      case '>=': return v >= term.value;
+      default:
+        term satisfies never;
+        return false; // unreachable: compile error above if a new op is ever added
     }
   }
-  if ((NULLABLE_COLS as readonly string[]).includes(term.col)) {
-    const t = term as Extract<ScopeTerm, { col: (typeof NULLABLE_COLS)[number] }>;
-    const v = row[t.col];
-    return t.op === 'is_null' ? v === null : v !== null;
+  if (hasCol(term, NULLABLE_COLS)) {
+    const v = row[term.col];
+    return term.op === 'is_null' ? v === null : v !== null;
   }
-  const t = term as Extract<ScopeTerm, { col: (typeof TEXT_COLS)[number] }>;
-  const v = row[t.col];
-  if (t.op === 'contains') return v.toLowerCase().includes(t.value.toLowerCase());
-  return t.op === 'empty' ? v === '' : v !== '';
+  if (hasCol(term, TEXT_COLS)) {
+    const v = row[term.col];
+    if (term.op === 'contains') return v.toLowerCase().includes(term.value.toLowerCase());
+    return term.op === 'empty' ? v === '' : v !== '';
+  }
+  return term satisfies never; // unreachable: compile error above if a new col group is ever added
 }
 
 export function rowSatisfiesScope(
