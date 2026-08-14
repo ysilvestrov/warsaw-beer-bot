@@ -381,7 +381,9 @@ Confirm all three by reading the output:
 
 1. No row matched a beer whose ABV contradicts the shop's beyond ±0.5 (`ABV_TOLERANCE`).
 2. No row matched a brewer other than the one documented in the design doc's table.
-3. These are expected to stay `NOT_FOUND` and are **not** failures — they belong to other issues: 34642 (name stage, #322/#334), 25802 (`PSZENICA` ↔ `Pšenice`, #322), 30273 (zero candidates, #388/#406), 30059 (ambiguous `PLATAN`, #334), 30063 / 30233 / 31201 (zero candidates, #406).
+3. These are expected to stay `NOT_FOUND` and are **not** failures — they belong to other issues: 34642 (name stage, #322/#334), 25802 (`PSZENICA` ↔ `Pšenice`, #322), 30273 (zero candidates, #388/#406), 30059 (ambiguous `PLATAN`, #334), 30063 / 30233 / 31201 / 31808 (zero candidates, #406).
+
+Already established during Task 1 (2026-08-14), so treat any deviation as a regression: 31808 `Cydr Melon` stays unmatched because the product word `Cydr` zeroes its query, and 34518 `Apple Cider` matches bid 402651 on the pair alone — the unpaired Belarusian `Royal Fruit Bel` records are gated out, so the pick is forced rather than arbitrary.
 
 If any row matches a brewer outside the documented table, stop and remove the offending pair — a wrong match is worse than an orphan, because it silently mislabels a beer for every user.
 

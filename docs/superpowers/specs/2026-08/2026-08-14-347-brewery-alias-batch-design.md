@@ -32,7 +32,7 @@ pair does what it claims for *every* orphan it touches, not only for the row tha
 | `['lobkowicz', 'jihlava']` | portfolio owner → group brewery | 11995 | bid 71011, abv 4.9 = 4.9 |
 | `['lobkowicz', 'rychtar']` | portfolio owner → group brewery | 34336 | bid 301434, abv 5.0 = 5.0 |
 | `['cieszyn', 'arcyksiazecy zamkowy cieszyn']` | town label → full brewery name | 34371 | bid 1036654, abv 5.4 = 5.4 |
-| `['cidre royal', 'royal fruit garden']` | brand → Ukrainian producer | 34518 (pinned) / 31808 | see below |
+| `['cidre royal', 'royal fruit garden']` | brand → Ukrainian producer | 34518 | bid 402651, abv 5.0 = 5.0 |
 | `['tomatol', 'mad brew']` | Mad Brew series filed as brewery | 34351, 34352 | bids 6648348 / 6819716 |
 | `['nachod', 'primator']` | town/company label → brewery brand | 34642 | bid 30947 (not sufficient alone) |
 
@@ -50,6 +50,13 @@ All keys produced with `npm run alias-key`. An earlier simulation (pairs added i
   The row carries `style = "Apple Cider (Ukraina)"`; `Royal Fruit Garden` is the Ukrainian producer and Bel
   the Belarusian licensee (bid 402651 predates the 57xxxxx records). Leaving the choice to the matcher is the
   #334 failure mode, so the target is pinned and the pair points at Garden.
+
+  **Revised during implementation (2026-08-14):** with the pair in place the row resolves to 402651 on its
+  own, because the unpaired Bel records never pass the gate — the pick is forced, not arbitrary, so the
+  premise that motivated the pin ("three candidates at 5.0%") no longer holds at match time. The pin is kept
+  anyway: it is durable against catalogue drift (a new Garden variant appearing at 5.0%) and sets
+  `reviewed_by_user`, but its purpose is now insurance rather than tie-breaking. The sibling 31808
+  `Cydr Melon` does **not** benefit from the pair — its query zeroes on the product word `Cydr` (#406).
 
 Both rows are pub taps and therefore pinnable. Note the #343 hard limit: pins bind pub taps only — shop and
 relay beers regenerate through `ensureBeerRow`, which is why 34351/34352 (flasker rows) get a pair and not a
