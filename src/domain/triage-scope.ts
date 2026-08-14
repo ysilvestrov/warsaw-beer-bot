@@ -100,7 +100,12 @@ function termMatches(
     if (term.op === 'contains') return v.toLowerCase().includes(term.value.toLowerCase());
     return term.op === 'empty' ? v === '' : v !== '';
   }
-  return term satisfies never; // unreachable: compile error above if a new col group is ever added
+  // Unreachable: a compile error fires above the day a new column group is added and
+  // forgotten here. The explicit `false` matters anyway — `return term satisfies never`
+  // type-checks but RETURNS THE TERM OBJECT at runtime, which is truthy, i.e. the same
+  // silent false "match" this function was just fixed to stop. Fail closed.
+  term satisfies never;
+  return false;
 }
 
 export function rowSatisfiesScope(
