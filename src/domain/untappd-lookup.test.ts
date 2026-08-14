@@ -703,3 +703,85 @@ describe('#382 query ladder', () => {
     expect(queries.length).toBeGreaterThan(1);
   });
 });
+
+describe('#347 curated alias batch', () => {
+  test('33544: parent-company prefix, ABV separates the decoy siblings', async () => {
+    const search = fakeSearch(() => [
+      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4 },
+      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1 },
+      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Browary Książęce Brewery', name: 'Złote Pszeniczne', abv: 4.9, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(323265);
+  });
+
+  test('11995: portfolio label reaches the group brewery', async () => {
+    const search = fakeSearch(() => [
+      { bid: 71011, beer_name: 'Ježek Kvasnicový', brewery_name: 'Pivovar Jihlava', style: 'Pilsner - Czech / Bohemian', abv: 4.9, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Lobkowicz Brewery', name: 'Ježek Kvasnicovy', abv: 4.9, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(71011);
+  });
+
+  test('34336: picks the group brewery over the same-named house beer', async () => {
+    const search = fakeSearch(() => [
+      { bid: 215285, beer_name: 'Lobkowicz Premium ležák', brewery_name: 'Pivovary Lobkowicz', style: 'Pilsner - Czech / Bohemian', abv: 4.7, global_rating: 3.4 },
+      { bid: 301434, beer_name: 'Rychtář Premium', brewery_name: 'Pivovar Rychtář', style: 'Pilsner - Czech / Bohemian', abv: 5.0, global_rating: 3.5 },
+      { bid: 897066, beer_name: 'Lobkowicz Premium Černý', brewery_name: 'Pivovary Lobkowicz', style: 'Lager - Tmavé (Czech Dark)', abv: 4.7, global_rating: 3.3 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Pivovar Lobkowicz Brewery', name: 'Rychtář Premium 12°', abv: 5.0, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(301434);
+  });
+
+  test('the widened gate does not let a Rychtář row take a Lobkowicz beer', async () => {
+    const search = fakeSearch(() => [
+      { bid: 215285, beer_name: 'Lobkowicz Premium ležák', brewery_name: 'Pivovary Lobkowicz', style: 'Pilsner - Czech / Bohemian', abv: 4.7, global_rating: 3.4 },
+      { bid: 301434, beer_name: 'Rychtář Premium', brewery_name: 'Pivovar Rychtář', style: 'Pilsner - Czech / Bohemian', abv: 5.0, global_rating: 3.5 },
+    ]);
+    // No ABV on purpose: the name stage alone must discriminate.
+    const out = await lookupBeer({ brewery: 'Pivovar Rychtář', name: 'Premium', search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(301434);
+  });
+
+  test('34371: bare-town shop label reaches the full brewery name', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1036654, beer_name: 'Pszeniczne Cieszyńskie', brewery_name: 'Arcyksiążęcy Browar Zamkowy Cieszyn', style: 'Wheat Beer - Hefeweizen', abv: 5.4, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Cieszyn Brewery', name: 'Pszeniczne 12,5°', abv: 5.4, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1036654);
+  });
+
+  test('34352: series-as-brewery reaches Mad Brew, not the other tomato goses', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6819716, beer_name: 'Tomatol Wasabi', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 3.8, global_rating: 3.6 },
+      { bid: 6689682, beer_name: 'KOTOMATO WASABI TOMATO GOSE', brewery_name: 'Rebrew', style: 'Sour - Tomato / Vegetable Gose', abv: 5, global_rating: 3.5 },
+      { bid: 5970182, beer_name: 'WASABI TOMATO GOSE', brewery_name: 'LiS Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 6, global_rating: 3.4 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Tomatol', name: 'Wasabi', abv: 3.8, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6819716);
+  });
+
+  test('34351: a contradicting shop ABV must not veto the published beer', async () => {
+    // flasker prints 3.8% in the title while the linked Untappd record says 4.2%.
+    const search = fakeSearch(() => [
+      { bid: 6648348, beer_name: 'Tomatøl:BULDAK BULGOGI', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.6 },
+      { bid: 6708599, beer_name: 'Tomatol: Bulgogi Sriracha', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Tomatol', name: 'Bulgogi', abv: 3.8, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6648348);
+  });
+});
