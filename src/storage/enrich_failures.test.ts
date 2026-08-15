@@ -317,7 +317,10 @@ describe('isWebFallbackBlocked', () => {
     db.close();
   });
 
-  test.each(['wontfix', 'parser_bug', 'not_on_untappd'] as const)(
+  // `unidentifiable` is blocked here even though it is NOT a pool exclusion: the free
+  // Algolia retry keeps running for it, only the paid path stays shut (#349). Dropping
+  // it from the IN list turns this red.
+  test.each(['not_a_beer', 'unidentifiable', 'parser_bug', 'not_on_untappd'] as const)(
     'is true for %s',
     (cls) => {
       const { db, id } = freshDbWithBeer();

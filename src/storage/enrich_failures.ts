@@ -54,31 +54,36 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
 }
 
-// True when the beer was triaged as `wontfix` (intentionally never matched).
-// Such orphans are excluded from enrich pools so we stop re-querying Untappd.
-export function isWontfix(db: DB, beerId: number): boolean {
+// True when the row is not a beer product at all (merch, glassware, wine, kombucha,
+// bundles and mystery boxes). The only class that excludes an orphan from the enrich
+// pools: every other verdict is a statement about our current resolving power and can
+// be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
+export function isNotABeer(db: DB, beerId: number): boolean {
   return (
     db
       .prepare(
-        `SELECT 1 FROM enrich_failures WHERE beer_id = ? AND review_class = 'wontfix'`,
+        `SELECT 1 FROM enrich_failures WHERE beer_id = ? AND review_class = 'not_a_beer'`,
       )
       .get(beerId) !== undefined
   );
 }
 
 // True when the METERED web fallback (#139) must not spend a request on this beer.
-// Superset of isWontfix: `parser_bug` means the query string itself is garbage, so
-// searching the web with the same wrong string cannot help; `not_on_untappd` means
-// triage already established the page does not exist; `retired_at` means a shipped
-// fix already resolved the row. The free Algolia retry keeps running for all of
-// these — only the paid path is tightened (#351).
+// Wider than isNotABeer: `parser_bug` means the query string itself is garbage, so
+// searching the web with the same wrong string cannot help; `not_on_untappd` means a
+// probe already established the page does not exist; `unidentifiable` means we cannot
+// say WHICH beer is meant, and the paid quota should not be spent on the population
+// whose verdicts we trust least — revisit once #349's ambiguity guard lands, since
+// that guard is precisely what would make an ambiguous row safe to resolve from the
+// web; `retired_at` means a shipped fix already resolved the row. The free Algolia
+// retry keeps running for all of these — only the paid path is tightened (#351).
 export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
   return (
     db
       .prepare(
         `SELECT 1 FROM enrich_failures
           WHERE beer_id = ?
-            AND (review_class IN ('wontfix', 'parser_bug', 'not_on_untappd')
+            AND (review_class IN ('not_a_beer', 'unidentifiable', 'parser_bug', 'not_on_untappd')
                  OR retired_at IS NOT NULL)`,
       )
       .get(beerId) !== undefined

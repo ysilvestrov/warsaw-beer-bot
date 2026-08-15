@@ -12,7 +12,7 @@ export interface StatusMetrics {
   beersMatched: number;
   orphansPending: number;
   // #368: orphan'и, яких enrich-крон не бачив би без relay-пулу (немає рядка в
-  // `match_links`), за винятком wontfix/retired. Той самий предикат, що і в
+  // `match_links`), за винятком not_a_beer/retired. Той самий предикат, що і в
   // listRelayLookupCandidates, мінус backoff — тобто розмір черги дренажу.
   orphansOffCron: number;
   ratingsMissing: number;

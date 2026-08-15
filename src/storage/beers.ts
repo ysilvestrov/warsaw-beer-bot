@@ -135,7 +135,7 @@ export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): Fil
 
 // #369: a row that just gained an ABV deserves an immediate retry — the previous
 // lookup ran blind, which is the whole bug. Resets the backoff so isEligible()
-// returns true at once. isWontfix still gates eligibility separately.
+// returns true at once. isNotABeer still gates eligibility separately.
 export function rearmLookup(db: DB, beerId: number): void {
   db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
     .run(beerId);
@@ -257,9 +257,14 @@ export function listLookupCandidates(
   now: Date,
 ): LookupCandidate[] {
   // SQL pre-filter: orphan beers (untappd_id NULL) whose beer_id is on the
-  // latest snapshot of at least one pub, excluding ones triaged as `wontfix`
-  // (intentionally never matched — re-querying them just wastes Untappd calls)
-  // or retired (provably resolved by a shipped fix — re-querying is dead work).
+  // latest snapshot of at least one pub, excluding ones triaged as `not_a_beer`
+  // (merch, bundles, wine — re-querying a T-shirt can never match) or retired
+  // (provably resolved by a shipped fix — re-querying is dead work).
+  // #377 part B: `not_a_beer` is the ONLY verdict that removes a row from a pool.
+  // Every other class is a statement about what we can resolve TODAY and is
+  // overturned by shipped fixes, so those rows must stay reachable — otherwise the
+  // 0<->>0 auto-unseal in recordEnrichFailure can never fire, because the seal is
+  // what keeps the row away from the lookup that would lift it.
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
@@ -269,7 +274,7 @@ export function listLookupCandidates(
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
-             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+             AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
          AND EXISTS (
            SELECT 1 FROM match_links ml
@@ -298,7 +303,7 @@ export function listLookupCandidates(
 }
 
 // #368: shared WHERE predicate — "orphan with no match_links row" (untappd_id
-// IS NULL, minus wontfix/retired, minus anything already linked). Used by
+// IS NULL, minus not_a_beer/retired, minus anything already linked). Used by
 // listRelayLookupCandidates below (the drain query) AND by orphansOffCron in
 // stats.ts (the digest metric), so the two can't silently diverge if one is
 // edited later. Bakes in `b` as the `beers` table alias — every call site
@@ -311,7 +316,7 @@ export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
-             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+             AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
          AND NOT EXISTS (
            SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
@@ -321,7 +326,7 @@ export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
 // `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
 // отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
 // EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
-// структурно, а не тому, що вони зійшли з кранів. Виключення wontfix/retired, backoff
+// структурно, а не тому, що вони зійшли з кранів. Виключення not_a_beer/retired, backoff
 // і сортування — ті самі; інвертований предикат робить пули диз'юнктними за
 // побудовою (дедуп не потрібен), але НЕ покриває orphan'а з рядком у match_links,
 // чий кран зійшов з останнього снапшоту — той не потрапляє в жоден пул.

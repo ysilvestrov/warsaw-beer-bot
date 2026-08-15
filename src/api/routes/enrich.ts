@@ -13,7 +13,7 @@ import {
   stampBidProvenance,
   type OrphanFacts,
 } from '../../storage/beers';
-import { isWontfix } from '../../storage/enrich_failures';
+import { isNotABeer } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { isEligible } from '../../domain/lookup-backoff';
 import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
@@ -158,7 +158,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // candidate. refusesBidOverride is the same helper /enrich/result applies, so a
         // curated or check-in-sourced link is never even offered here.
         //
-        // The wontfix veto and the lookup backoff still apply, but note what the backoff
+        // The not_a_beer veto and the lookup backoff still apply, but note what the backoff
         // does NOT cover: /enrich/result records nothing when it *rejects* a bid (guard
         // veto, hydrate failure, unknown bid) — it returns the stored link untouched — so
         // untappd_lookup_at/count never move and such a row stays eligible indefinitely.
@@ -169,7 +169,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         const eligible =
           (row.untappd_id == null ||
             (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
-          !isWontfix(deps.db, row.id) &&
+          !isNotABeer(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
         // #391: the #382 ladder, narrowest first. The LAST rung is by construction
         // cleanSearchQuery(brewery, name) — the query this endpoint has always sent — so
