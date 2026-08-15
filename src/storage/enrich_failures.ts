@@ -35,8 +35,11 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   // triage queue over an outage that had nothing to do with them.
   //
   // The whole function body — the existence check, the branch decision, the narrow UPDATE,
-  // and the fall-through upsert — runs inside one transaction, so a concurrent writer
-  // cannot insert-and-triage a row between our check and our write. This process is the
+  // and the fall-through upsert — runs inside one transaction, so a write decided on a
+  // stale read cannot land. Note the mechanism under WAL: a reader does not block a writer,
+  // so a second process CAN insert-and-triage a row in that window; what the transaction
+  // buys is that our own later write then aborts (SQLITE_BUSY_SNAPSHOT) instead of silently
+  // upserting outcome='blocked' over the verdict it just missed. This process is the
   // only writer today, so the wrapper buys nothing yet, but recordEnrichFailure is also
   // invoked from compiled ops runners against the prod DB (a second process on the same
   // file); wrapping the bare INSERT ... ON CONFLICT costs nothing (better-sqlite3 already
