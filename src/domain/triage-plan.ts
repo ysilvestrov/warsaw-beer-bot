@@ -37,7 +37,7 @@ export type GuardReason = 'illegal_scope' | 'scope_violation' | 'saturated' | 'u
 export interface TriagePlan {
   newIssues: PlannedNewIssue[];   // deduped + capped, labels forced, only keys actually referenced
   comments: PlannedComment[];     // grouped per existing issue
-  quiet: Verdict[];               // not_on_untappd / wontfix — DB write only
+  quiet: Verdict[];               // not_on_untappd / unidentifiable — DB write only
   skipped: number;                // invalid verdicts left untriaged for tomorrow
   guardHits: Record<GuardReason, number>;
 }
@@ -84,7 +84,7 @@ function pushInto<K>(map: Map<K, ActionableVerdict[]>, key: K, verdict: Actionab
 // older beer_ids inside open-issue bodies/comment tables, so the model can echo
 // a stray id that isn't part of the current selection — that verdict must never
 // reach the unconditional `UPDATE ... WHERE beer_id=?` write, actionable or
-// quiet alike (a stray wontfix would permanently exclude a foreign row).
+// quiet alike (a stray not_a_beer would permanently exclude a foreign row).
 // Skipped verdicts keep review_class NULL and re-enter tomorrow's selection.
 //
 // #408 adds the scope guards. It takes the batch ROWS (not just their ids) and the
@@ -145,7 +145,7 @@ export function planTriageActions(
         guardHits.unprobed_absence += 1;
         // matcher_bug with no target falls into the `quiet` branch below: the class is
         // recorded so the row leaves the UNTRIAGED pool, but it stays in the
-        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only wontfix and
+        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only not_a_beer and
         // retired_at), so the cron keeps retrying it under BACKOFF_HOURS.
         // Wrong-but-recoverable replaces wrong-and-terminal.
         quiet.push({

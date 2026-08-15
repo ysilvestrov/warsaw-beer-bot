@@ -347,7 +347,7 @@ describe('listLookupCandidates', () => {
     expect(out.map((c) => c.id)).toEqual([live]);
   });
 
-  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug)', () => {
+  test('keeps orphans triaged with a non-terminal class (e.g. matcher_bug)', () => {
     const db = fresh();
     const matcherBug = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
     recordEnrichFailure(db, {
@@ -524,7 +524,7 @@ describe('listRelayLookupCandidates', () => {
     expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([live]);
   });
 
-  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug re-armed by rearm-*)', () => {
+  test('keeps orphans triaged with a non-terminal class (e.g. matcher_bug re-armed by rearm-*)', () => {
     const db = fresh();
     const matcherBug = seedRelayOrphan(db, { brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny' });
     recordEnrichFailure(db, {

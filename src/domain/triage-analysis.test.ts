@@ -57,13 +57,15 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
   });
   expect(p).toContain('"beer_id": 7');
   expect(p).toContain('#228');
-  for (const cls of ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix']) {
+  for (const cls of ['parser_bug', 'matcher_bug', 'not_on_untappd', 'unidentifiable', 'not_a_beer']) {
     expect(p).toContain(cls);
   }
-  // Change 1: explicit parser/matcher boundary test
-  expect(p).toContain('essentially correct');
-  // Change 2: garbled shop-source rows are not parser_bug
-  expect(p).toContain('read it correctly');
+  // #377 part B: the classes are the NO branches of one ordered decision tree, so the
+  // set is complete and mutually exclusive. Reverting the prompt to the old bulleted
+  // class list turns this red.
+  expect(p).toContain('decision tree IN ORDER and stopping at the');
+  // Change 2 (kept): garbled shop-source rows are not parser_bug
+  expect(p).toContain('adapter read it correctly');
   // Change 3: structured scope field, no global counts (#408 — a free-text Scope
   // line couldn't be checked against a row, so it always trivially "covered" it)
   expect(p).toContain('`scope` object naming the rows');
@@ -268,3 +270,41 @@ test('the prompt asks for a structured scope and no longer offers the whole-clas
 // its own leaf module, so the circular import that once forced a hand-kept mirror is
 // gone. The drift-guard test that policed that mirror was deleted with it: it would
 // now assert a schema equals itself, which can never fail and so proves nothing.
+
+// #377 part B. The old prompt carried two defects that produced 41 of the 47
+// mis-sealed rows measured on 2026-08-15, and both are absences — so they need their
+// own assertions or nothing would catch a regression that reintroduces them.
+test('the prompt never asks the model to judge whether a fix is worth making', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+
+  // The exact phrasing that sealed row 31145 ("one-off collab long gone; hopeless").
+  // Restoring `- wontfix: not worth fixing (one-off collab long gone, ...)` turns this red.
+  expect(p).not.toMatch(/not worth fixing/i);
+  expect(p).not.toMatch(/one-off collab/i);
+  expect(p).toContain('never weigh effort or value');
+});
+
+test('non-beer rows have exactly one home in the prompt', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+
+  // The old prompt listed merch/glassware/wine under parser_bug AND under wontfix, so
+  // the same T-shirt was legal in two classes at once. Adding merch back to the
+  // parser_bug branch turns this red.
+  const parserBranch = p.slice(
+    p.indexOf('2. Is OUR row faithful'),
+    p.indexOf('3. Can you say WHICH beer'),
+  );
+  expect(parserBranch).not.toMatch(/merch|glassware|wine|kombucha/i);
+
+  const notABeerBranch = p.slice(
+    p.indexOf('1. Is the row a beer product'),
+    p.indexOf('2. Is OUR row faithful'),
+  );
+  expect(notABeerBranch).toMatch(/merch/i);
+  expect(notABeerBranch).toMatch(/bundle/i);
+});
+
+test('the retired vocabulary is gone from the prompt', () => {
+  const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
+  expect(p).not.toContain('wontfix');
+});
