@@ -61,7 +61,12 @@ export interface TriageOutcome {
   commented: { issueNumber: number; count: number }[];
   created: { issueNumber: number; count: number }[];
   notOnUntappd: number;
-  wontfix: number;
+  unidentifiable: number;
+  notABeer: number;
+  // Actionable classes recorded with no issue attached — an unproven cause the
+  // verification gate stripped, or an absence the class gate downgraded. These used to
+  // be tallied as `wontfix`, which made the digest overstate the terminal classes.
+  recordedNoIssue: number;
   skipped: number;
   unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
@@ -84,7 +89,9 @@ export function buildTriageLine(o: TriageOutcome): string {
     ...o.created.map((c) => `${c.count} нова #${c.issueNumber}`),
   ];
   if (o.notOnUntappd > 0) parts.push(`${o.notOnUntappd} not_on_untappd`);
-  if (o.wontfix > 0) parts.push(`${o.wontfix} wontfix`);
+  if (o.unidentifiable > 0) parts.push(`${o.unidentifiable} unidentifiable`);
+  if (o.notABeer > 0) parts.push(`${o.notABeer} not_a_beer`);
+  if (o.recordedNoIssue > 0) parts.push(`${o.recordedNoIssue} без issue`);
   if (o.unverified > 0) parts.push(`${o.unverified} неперевірених`);
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
@@ -155,7 +162,8 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       return date === dateKey && Number.isInteger(parsed) && parsed >= 0 ? parsed : 0;
     };
     const empty: TriageOutcome = {
-      total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+      total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0,
+      notABeer: 0, recordedNoIssue: 0,
       skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
     };
 
@@ -365,7 +373,9 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     for (const v of plan.quiet) {
       review(v, null);
       if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
-      else outcome.wontfix++;
+      else if (v.review_class === 'unidentifiable') outcome.unidentifiable++;
+      else if (v.review_class === 'not_a_beer') outcome.notABeer++;
+      else outcome.recordedNoIssue++;
     }
 
     finish(outcome);

@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { verifyCauses } from './triage-verify';
+import { isCausal, verifyCauses } from './triage-verify';
 import type { Verdict } from './triage-analysis';
 import type { SearchResult } from '../sources/untappd/search';
 
@@ -69,4 +69,25 @@ test('verdicts past the search budget are unverified rather than skipped', async
   expect(res.get(1)).toBe(true);
   expect(res.get(2)).toBe(false);
   expect(search.search).toHaveBeenCalledTimes(1);
+});
+
+// #377 part B: a not_a_beer verdict claims something about the PRODUCT, not about a
+// query. Deleting the `not_a_beer` early return in isCausal turns both of these red —
+// and in production it would make the gate strip every correct not_a_beer attachment,
+// because no query can ever return a T-shirt from a beer index.
+test('not_a_beer is never causal, whatever it is attached to', () => {
+  expect(isCausal(causal({ review_class: 'not_a_beer' }))).toBe(false);
+  expect(isCausal(causal({ review_class: 'not_a_beer', issue_number: null, new_issue_key: 'merch' })))
+    .toBe(false);
+  expect(isCausal(causal({ review_class: 'matcher_bug' }))).toBe(true);
+});
+
+test('a not_a_beer verdict is not spent on a verification search', async () => {
+  const search = { search: vi.fn().mockResolvedValue([]) };
+  const verified = await verifyCauses({
+    verdicts: [causal({ review_class: 'not_a_beer' })], search, limit: 10,
+  });
+
+  expect(search.search).not.toHaveBeenCalled();
+  expect(verified.size).toBe(0);
 });

@@ -33,7 +33,7 @@ test('routes verdicts: existing issue, new issue, quiet', () => {
       v({ beer_id: 1, issue_number: 228 }),
       v({ beer_id: 2, new_issue_key: 'k1', review_class: 'parser_bug' }),
       v({ beer_id: 3, review_class: 'not_on_untappd' }),
-      v({ beer_id: 4, review_class: 'wontfix' }),
+      v({ beer_id: 4, review_class: 'unidentifiable' }),
     ],
     new_issues: [issue('k1')],
   };
@@ -134,7 +134,7 @@ test('drops verdicts whose beer_id is outside the current batch (actionable and 
     verdicts: [
       v({ beer_id: 1, issue_number: 228 }),                          // in batch, fine
       v({ beer_id: 999, issue_number: 228 }),                        // actionable, foreign row
-      v({ beer_id: 998, review_class: 'wontfix' }),                  // quiet, foreign row
+      v({ beer_id: 998, review_class: 'unidentifiable' }),                  // quiet, foreign row
     ],
     new_issues: [],
   };
@@ -148,7 +148,7 @@ test('dedupes duplicate beer_id verdicts: first wins, later ones skipped', () =>
   const a: Analysis = {
     verdicts: [
       v({ beer_id: 1, issue_number: 228, review_note: 'first' }),
-      v({ beer_id: 1, review_class: 'wontfix', review_note: 'second' }),
+      v({ beer_id: 1, review_class: 'unidentifiable', review_note: 'second' }),
       v({ beer_id: 2, review_class: 'not_on_untappd' }),
     ],
     new_issues: [],
@@ -329,12 +329,12 @@ test('a probe that returned hits is not absence evidence', () => {
   expect(plan.guardHits.unprobed_absence).toBe(1);
 });
 
-// wontfix is terminal too, but it is a judgement about the row being a beer at all,
-// which a search probe cannot settle. Only the absence claim is gated here.
-test('wontfix is untouched by the class gate', () => {
-  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'wontfix' })], new_issues: [] };
+// `unidentifiable` says we cannot tell WHICH beer is meant — a probe cannot settle
+// that, so only the absence claim is gated here.
+test('unidentifiable is untouched by the class gate', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'unidentifiable' })], new_issues: [] };
   const plan = planTriageActions(a, [], rows(1), noProbes);
-  expect(plan.quiet[0].review_class).toBe('wontfix');
+  expect(plan.quiet[0].review_class).toBe('unidentifiable');
   expect(plan.guardHits.unprobed_absence).toBe(0);
 });
 
@@ -355,4 +355,38 @@ test('an illegal proposal does not consume a new-issue cap slot', () => {
   const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes);
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k2', 'k3', 'k4']);
   expect(plan.guardHits.illegal_scope).toBe(1);
+});
+
+// #377 part B: not_a_beer is actionable — it has a fix owner (the ingest filter: a
+// T-shirt should never have reached `beers`), and it is the only irreversible class,
+// so it must leave a scoped issue trail instead of being written silently into a
+// column. Removing `not_a_beer` from CLASS_LABELS turns this red.
+test('routes not_a_beer to GitHub instead of writing it quietly', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, review_class: 'not_a_beer', new_issue_key: 'merch',
+                   review_note: 'mystery box SKU' })],
+    new_issues: [issue('merch')],
+  };
+  const plan = planTriageActions(a, [], rows(1), noProbes);
+
+  expect(plan.quiet).toHaveLength(0);
+  expect(plan.newIssues).toHaveLength(1);
+  expect(plan.newIssues[0].labels).toContain('not-a-beer');
+  expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([1]);
+});
+
+// The scope guard still binds not_a_beer: being actionable does not exempt it from
+// having to match the issue it attaches to.
+test('a not_a_beer verdict whose row contradicts the issue scope is refused', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 5, review_class: 'not_a_beer', issue_number: 228 })],
+    new_issues: [],
+  };
+  const scope: ScopedIssue['scope'] = {
+    beer_ids: [], where: [{ col: 'name', op: 'contains', value: 'Pack' }],
+  };
+  const plan = planTriageActions(a, [open(228, { scope })], [row(5, { name: 'Jasne Pelne' })], noProbes);
+
+  expect(plan.comments).toEqual([]);
+  expect(plan.guardHits.scope_violation).toBe(1);
 });

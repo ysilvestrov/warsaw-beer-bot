@@ -55,9 +55,15 @@ export const MAX_ROWS_PER_ISSUE = 12;
 
 // Single source of truth for which classes go to GitHub and which label each
 // maps to — the actionable check derives from these keys.
+//
+// #377 part B: not_a_beer is actionable on the same criterion as the other two — it
+// has a fix owner, namely the ingest filter that let a T-shirt into `beers`. It is
+// also the only class whose consequence is irreversible, and an irreversible verdict
+// that leaves a scoped issue trail is safer than one written silently into a column.
 const CLASS_LABELS = {
   parser_bug: 'parser-bug',
   matcher_bug: 'matcher-bug',
+  not_a_beer: 'not-a-beer',
 } as const;
 
 type ActionableClass = keyof typeof CLASS_LABELS;
