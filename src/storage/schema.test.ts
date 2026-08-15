@@ -294,8 +294,12 @@ describe('schema migrations', () => {
 
       // Rewind past v22 so we can populate fixtures on a v21 schema, then let the
       // real migration (not a hand-typed copy of its SQL) run over populated data.
+      // Everything from 22 up must be rewound, not just 22: migrate() compares against
+      // MAX(version), so leaving a LATER row in place would make it skip v22 entirely
+      // and this test would silently assert nothing.
       db.exec('ALTER TABLE beers DROP COLUMN untappd_id_source');
-      db.prepare('DELETE FROM schema_version WHERE version = 22').run();
+      db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
+      db.prepare('DELETE FROM schema_version WHERE version >= 22').run();
 
       // Two beers: one pinned via match_links, one not.
       db.prepare(
@@ -322,11 +326,51 @@ describe('schema migrations', () => {
       ).toThrow(/CHECK constraint failed/);
     });
 
-    it('reaches version 22', () => {
+  });
+
+  describe('migration v23 — enrich_failures.issue_number', () => {
+    it('adds the column and backfills it from the legacy note suffix', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+
+      // Rewind v23 and populate on a v22 schema, so the real migration runs over
+      // populated data rather than a hand-typed copy of its SQL.
+      db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
+      db.prepare('DELETE FROM schema_version WHERE version = 23').run();
+
+      db.prepare(
+        `INSERT INTO beers (id, name, brewery, normalized_name, normalized_brewery)
+         VALUES (1, 'A', 'B', 'a', 'b'), (2, 'C', 'B', 'c', 'b'), (3, 'D', 'B', 'd', 'b')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO enrich_failures
+           (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary,
+            last_at, review_note)
+         VALUES
+           (1, 'B', 'A', 'u', 'not_found', 0, '', '2026-08-01T00:00:00Z', 'alias gap → #347'),
+           (2, 'B', 'C', 'u', 'not_found', 0, '', '2026-08-01T00:00:00Z',
+            'moved → #405 (re-routed 2026-08-14 from #347)'),
+           (3, 'B', 'D', 'u', 'not_found', 0, '', '2026-08-01T00:00:00Z', 'no issue here')`,
+      ).run();
+
+      migrate(db);
+
+      const rows = db.prepare('SELECT beer_id, issue_number FROM enrich_failures ORDER BY beer_id')
+        .all();
+      expect(rows).toEqual([
+        { beer_id: 1, issue_number: 347 },
+        // The 2026-08-14 re-routing notes broke the clean suffix; CAST stops at the
+        // first non-digit, so they still resolve instead of being lost.
+        { beer_id: 2, issue_number: 405 },
+        { beer_id: 3, issue_number: null },
+      ]);
+    });
+
+    it('reaches version 23', () => {
       const db = openDb(':memory:');
       migrate(db);
       const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      expect(v.v).toBe(22);
+      expect(v.v).toBe(23);
     });
   });
 });

@@ -291,8 +291,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     outcome.unverified = unverified;
 
     const review = (v: Verdict, issueNumber: number | null): void => {
+      // The "→ #N" suffix stays: it is what a human sees reading review_note in an ad-hoc
+      // query. But issue_number (v23) is now the AUTHORITATIVE link — the suffix was never
+      // queryable and re-routing notes already mangled it, which is why the saturation
+      // guard could not count rows per issue before.
       const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso)) {
+      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso, issueNumber)) {
         // Row self-cleared between selection and write (the beer matched meanwhile).
         log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
       }
