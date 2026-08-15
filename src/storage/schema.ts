@@ -1,5 +1,21 @@
 import type { DB } from './db';
 
+// Exported so a test can exercise the EXACT statement migration 23 runs. Re-running the
+// whole v23 entry to test it is impossible — its ALTER TABLE would fail with "duplicate
+// column name" — and a re-typed copy in the test would silently drift from this one.
+//
+// Offsets are character-based (SQLite instr/substr on TEXT), and '→ #' is three
+// characters, so +3 lands on the first digit; +4 would drop it and turn #347 into 47.
+// No trimming is needed either way: CAST stops at the first non-digit, so the mangled
+// "→ #405 (re-routed 2026-08-14 from #347)" still resolves to 405, and a note with no
+// arrow casts to 0 and is excluded by the > 0 guard.
+export const V23_BACKFILL_SQL = `
+  UPDATE enrich_failures
+     SET issue_number = CAST(substr(review_note, instr(review_note, '→ #') + 3) AS INTEGER)
+   WHERE review_note LIKE '%→ #%'
+     AND CAST(substr(review_note, instr(review_note, '→ #') + 3) AS INTEGER) > 0;
+`;
+
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
@@ -279,6 +295,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         CHECK (untappd_id_source IN ('search','bid','curated','checkin'));
       UPDATE beers SET untappd_id_source = 'curated'
        WHERE id IN (SELECT untappd_beer_id FROM match_links WHERE reviewed_by_user = 1);
+    `,
+  },
+  {
+    version: 23,
+    // #408: the row -> issue link existed only as a free-text suffix appended by
+    // orphan-triage ("... -> #123"), which nothing could query and which the re-routing
+    // notes written on 2026-08-14 already broke ("-> #405 (re-routed ...)"). Without the
+    // column the saturation guard cannot count rows per issue, and neither #408 nor #381
+    // can be audited after the fact — "which rows went to this issue" is not answerable
+    // today. Backfill is in V23_BACKFILL_SQL so a test can exercise the exact statement.
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN issue_number INTEGER;
+      ${V23_BACKFILL_SQL}
     `,
   },
 ];

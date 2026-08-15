@@ -2,12 +2,13 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
-  listUntriagedFailures, setEnrichFailureReview, type UntriagedFailure,
+  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue, type UntriagedFailure,
 } from '../storage/enrich_failures';
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
-import { planTriageActions } from '../domain/triage-plan';
+import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
+import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
@@ -242,7 +243,15 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         log.info({ rowsWithEvidence: probes.size, probeFailures, causesChecked, unverified, verifyFailures },
           'orphan-triage: evidence summary');
       }
-      plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
+      // #408: the guards judge a routing decision, so they need the evidence it was
+      // made about — the issues' parsed scopes and the batch rows, not just their ids.
+      // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
+      const scopedIssues: ScopedIssue[] = openIssues.map((i) => ({
+        number: i.number,
+        scope: parseScopeBlock(i.body),
+        postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
+      }));
+      plan = planTriageActions(analysis, scopedIssues, orphans, probes);
     } catch (e) {
       const attempt = attemptsToday() + 1;
       const transient = isTransient(e);
@@ -276,14 +285,25 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       return;
     }
     if (covered < orphans.length) {
-      log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
+      // guardHits is why, not just how many. Three of the four #408 guards end in
+      // `skipped`, and a skipped row keeps review_class NULL and comes back tomorrow —
+      // so a model that keeps making the same illegal proposal would recirculate the
+      // same rows forever while the batch silently filled with repeat offenders. One
+      // line has to make that visible instead of leaving it to be inferred from a
+      // backlog that stopped moving.
+      log.warn({ covered, batch: orphans.length, guardHits: plan.guardHits },
+        'orphan-triage: verdict shortfall');
     }
     outcome.skipped = plan.skipped;
     outcome.unverified = unverified;
 
     const review = (v: Verdict, issueNumber: number | null): void => {
+      // The "→ #N" suffix stays: it is what a human sees reading review_note in an ad-hoc
+      // query. But issue_number (v23) is now the AUTHORITATIVE link — the suffix was never
+      // queryable and re-routing notes already mangled it, which is why the saturation
+      // guard could not count rows per issue before.
       const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso)) {
+      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso, issueNumber)) {
         // Row self-cleared between selection and write (the beer matched meanwhile).
         log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
       }
@@ -291,7 +311,17 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     for (const issue of plan.newIssues) {
       try {
-        const number = await github.createIssue({ title: issue.title, body: issue.body, labels: issue.labels });
+        // The scope block is appended by US, not written by the model: the model
+        // submits the structured field and we render it, so tomorrow's run parses our
+        // own output rather than model prose. Without this the issue would be born
+        // unscoped and could never accept a row (#408 guard 2).
+        //
+        // issue.body IS model-authored, and it lands BEFORE our block, so a fence
+        // written there would win parseScopeBlock's first-match race and define the
+        // issue's scope instead of the structured field. Strip any such fence first so
+        // exactly one exists and it is ours.
+        const body = `${stripScopeBlocks(issue.body)}\n\n${renderScopeBlock(issue.scope)}`;
+        const number = await github.createIssue({ title: issue.title, body, labels: issue.labels });
         issue.verdicts.forEach((v) => review(v, number));
         outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
       } catch (e) {

@@ -98,15 +98,31 @@ export function setEnrichFailureReview(
   reviewClass: ReviewClass,
   note: string | null,
   atIso: string,
+  issueNumber: number | null = null,
 ): boolean {
   const info = db
     .prepare(
       `UPDATE enrich_failures
-         SET review_class = ?, review_note = ?, reviewed_at = ?
+         SET review_class = ?, review_note = ?, reviewed_at = ?, issue_number = ?
        WHERE beer_id = ?`,
     )
-    .run(reviewClass, note, atIso, beerId);
+    .run(reviewClass, note, atIso, issueNumber, beerId);
   return info.changes > 0;
+}
+
+// Rows attached to an issue AFTER a given instant — the saturation signal (#408).
+// It counts post-creation rows on purpose: #405 was created carrying 15 enumerated
+// rows, which is exactly the proposed threshold, so counting lifetime rows would
+// reject the very shape (a narrow issue born from a split) that the guard exists to
+// encourage.
+export function countRowsForIssue(db: DB, issueNumber: number, sinceIso: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM enrich_failures
+        WHERE issue_number = ? AND reviewed_at > ?`,
+    )
+    .get(issueNumber, sinceIso) as { n: number };
+  return row.n;
 }
 
 // Terminal state for a classified failure whose underlying problem is resolved

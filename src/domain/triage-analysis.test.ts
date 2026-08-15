@@ -1,6 +1,7 @@
 import {
   AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA,
 } from './triage-analysis';
+import { ScopeSchema, SCOPE_COLS } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 
 const orphan: UntriagedFailure = {
@@ -35,7 +36,8 @@ test('AnalysisSchema: accepts a valid payload', () => {
       issue_number: null, new_issue_key: 'alias-nepomucen',
     }],
     new_issues: [{ key: 'alias-nepomucen', title: 'Alias: Nepomucen → Nepo Brewing',
-      body: 'examples…', labels: ['orphan-triage'] }],
+      body: 'examples…', labels: ['orphan-triage'],
+      scope: { beer_ids: [7], where: [] } }],
   });
   expect(a.verdicts[0].beer_id).toBe(7);
 });
@@ -51,7 +53,7 @@ test('AnalysisSchema: rejects unknown review_class', () => {
 test('buildTriagePrompt: contains orphans, issues and class definitions', () => {
   const p = buildTriagePrompt({
     orphans: [orphan],
-    openIssues: [{ number: 228, title: 'nano-noise tokens', body: 'strip nano', labels: ['orphan-triage'] }],
+    openIssues: [{ number: 228, title: 'nano-noise tokens', body: 'strip nano', labels: ['orphan-triage'], createdAt: '2026-01-01T00:00:00Z' }],
   });
   expect(p).toContain('"beer_id": 7');
   expect(p).toContain('#228');
@@ -62,8 +64,9 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
   expect(p).toContain('essentially correct');
   // Change 2: garbled shop-source rows are not parser_bug
   expect(p).toContain('read it correctly');
-  // Change 3: findability Scope line, no global counts
-  expect(p).toContain('machine-findable');
+  // Change 3: structured scope field, no global counts (#408 — a free-text Scope
+  // line couldn't be checked against a row, so it always trivially "covered" it)
+  expect(p).toContain('`scope` object naming the rows');
   expect(p).toContain('only see the current batch');
   // NOTE: each asserted phrase lives on ONE array line — the prompt is join('\n'),
   // so a phrase spanning two array elements would be split by a newline and fail.
@@ -72,7 +75,7 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
 test('buildTriagePrompt: truncates over-long issue bodies', () => {
   const p = buildTriagePrompt({
     orphans: [],
-    openIssues: [{ number: 1, title: 't', body: 'x'.repeat(2500), labels: [] }],
+    openIssues: [{ number: 1, title: 't', body: 'x'.repeat(2500), labels: [], createdAt: '2026-01-01T00:00:00Z' }],
   });
   expect(p).toContain('x'.repeat(2000));
   expect(p).not.toContain('x'.repeat(2001));
@@ -102,7 +105,7 @@ test('buildTriagePrompt: bounds scraped orphan fields', () => {
 
 test('buildTriagePrompt: caps rendered open issues at 30', () => {
   const openIssues = Array.from({ length: 40 }, (_, i) => ({
-    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [],
+    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [], createdAt: '2026-01-01T00:00:00Z',
   }));
   const p = buildTriagePrompt({ orphans: [], openIssues });
   expect(p).toContain('#30 ');
@@ -215,3 +218,53 @@ test('ANALYSIS_TOOL_SCHEMA: mirrors the zod schemas (drift guard)', () => {
   expect(sorted(newIssueItem.required))
     .toEqual(sorted(Object.keys(newIssueShape)));
 });
+
+test('new_issues carries a structured scope', () => {
+  const parsed = AnalysisSchema.parse({
+    verdicts: [],
+    new_issues: [{
+      key: 'k', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [1], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
+  });
+  expect(parsed.new_issues[0].scope.where[0]).toEqual({ col: 'candidates_count', op: '=', value: 0 });
+});
+
+test('a new_issue without a scope fails to parse', () => {
+  expect(AnalysisSchema.safeParse({
+    verdicts: [], new_issues: [{ key: 'k', title: 't', body: 'b', labels: [] }],
+  }).success).toBe(false);
+});
+
+// An unconstrained col/op lets the provider emit a tool-VALID term that zod then
+// rejects, which fails the entire run instead of the one term.
+test('the tool schema enumerates scope columns and operators', () => {
+  const term = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.properties as unknown as {
+    scope: { properties: { where: { items: { properties: Record<string, { enum?: readonly string[] }> } } } };
+  }).scope.properties.where.items.properties;
+  expect(term.col.enum).toContain('candidates_count');
+  expect(term.col.enum).toContain('review_class');
+  expect(term.col.enum).not.toContain('secret');
+  expect(term.op.enum).toContain('is_null');
+  expect(term.op.enum).not.toContain('LIKE');
+  // Drift guard: every enumerated value must be one zod actually accepts.
+  for (const col of term.col.enum!) {
+    expect(SCOPE_COLS as readonly string[]).toContain(col);
+  }
+});
+
+test('the tool schema requires scope on every new_issue', () => {
+  const item = ANALYSIS_TOOL_SCHEMA.properties.new_issues.items as { required: readonly string[] };
+  expect(item.required).toContain('scope');
+});
+
+test('the prompt asks for a structured scope and no longer offers the whole-class example', () => {
+  const prompt = buildTriagePrompt({ orphans: [], openIssues: [] });
+  expect(prompt).not.toContain("review_class='matcher_bug'");
+  expect(prompt).toContain('scope');
+});
+
+// `AnalysisSchema.new_issues[].scope` IS `ScopeSchema` now — REVIEW_CLASSES moved to
+// its own leaf module, so the circular import that once forced a hand-kept mirror is
+// gone. The drift-guard test that policed that mirror was deleted with it: it would
+// now assert a schema equals itself, which can never fail and so proves nothing.

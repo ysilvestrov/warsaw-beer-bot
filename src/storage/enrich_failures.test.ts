@@ -1,5 +1,5 @@
 import { openDb } from './db';
-import { migrate } from './schema';
+import { migrate, V23_BACKFILL_SQL } from './schema';
 import { upsertBeer } from './beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import {
@@ -9,6 +9,7 @@ import {
   listUntriagedFailures,
   retireEnrichFailure,
   isWebFallbackBlocked,
+  countRowsForIssue,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -305,6 +306,64 @@ describe('isWebFallbackBlocked', () => {
     setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-07-27T00:00:00.000Z');
     retireEnrichFailure(db, id, 'retired: fix shipped', '2026-07-27T00:00:00.000Z');
     expect(isWebFallbackBlocked(db, id)).toBe(true);
+    db.close();
+  });
+
+  // #408: before v23 the row -> issue link was a free-text suffix nothing could query.
+  test('setEnrichFailureReview records the issue number in its own column', () => {
+    const db = testDb();
+    const id = insertBeer(db, 1);
+    recordEnrichFailure(db, row({ beer_id: id }));
+    setEnrichFailureReview(db, id, 'matcher_bug', 'note', '2026-08-14T00:00:00.000Z', 408);
+    const got = db.prepare('SELECT issue_number FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { issue_number: number | null };
+    expect(got.issue_number).toBe(408);
+    db.close();
+  });
+
+  test('countRowsForIssue counts only rows reviewed after the given instant', () => {
+    const db = testDb();
+    const a = insertBeer(db, 1);
+    const b = insertBeer(db, 2);
+    recordEnrichFailure(db, row({ beer_id: a }));
+    recordEnrichFailure(db, row({ beer_id: b }));
+    setEnrichFailureReview(db, a, 'matcher_bug', 'a', '2026-08-01T00:00:00.000Z', 408);
+    setEnrichFailureReview(db, b, 'matcher_bug', 'b', '2026-08-10T00:00:00.000Z', 408);
+    expect(countRowsForIssue(db, 408, '2026-08-05T00:00:00.000Z')).toBe(1);
+    expect(countRowsForIssue(db, 408, '2026-07-01T00:00:00.000Z')).toBe(2);
+    db.close();
+  });
+
+  test('the v23 backfill recovers issue numbers from the legacy note suffix', () => {
+    const db = testDb();
+    const id = insertBeer(db, 1);
+    recordEnrichFailure(db, row({ beer_id: id }));
+    db.prepare("UPDATE enrich_failures SET review_note = 'alias gap → #347', issue_number = NULL WHERE beer_id = ?")
+      .run(id);
+    db.exec(V23_BACKFILL_SQL);          // the exact statement the migration runs
+    const got = db.prepare('SELECT issue_number FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { issue_number: number | null };
+    expect(got.issue_number).toBe(347);
+    db.close();
+  });
+
+  // The re-routing notes written on 2026-08-14 broke the clean suffix; CAST stops at the
+  // first non-digit, so they still resolve rather than being lost.
+  test('the v23 backfill survives a mangled suffix and ignores notes without one', () => {
+    const db = testDb();
+    const a = insertBeer(db, 1);
+    const b = insertBeer(db, 2);
+    recordEnrichFailure(db, row({ beer_id: a }));
+    recordEnrichFailure(db, row({ beer_id: b }));
+    db.prepare("UPDATE enrich_failures SET review_note = 'x → #405 (re-routed 2026-08-14 from #347)', issue_number = NULL WHERE beer_id = ?")
+      .run(a);
+    db.prepare("UPDATE enrich_failures SET review_note = 'plain note', issue_number = NULL WHERE beer_id = ?")
+      .run(b);
+    db.exec(V23_BACKFILL_SQL);
+    const got = (id: number) => (db.prepare('SELECT issue_number FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { issue_number: number | null }).issue_number;
+    expect(got(a)).toBe(405);
+    expect(got(b)).toBeNull();
     db.close();
   });
 });

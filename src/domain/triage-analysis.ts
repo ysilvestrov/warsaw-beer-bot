@@ -1,8 +1,16 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
+import { ScopeSchema, SCOPE_COLS, SCOPE_OPS } from './triage-scope';
 
-export const REVIEW_CLASSES = ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix'] as const;
+// REVIEW_CLASSES lives in its own leaf module and is re-exported here so existing
+// importers of it from this file keep working. It used to be defined in this file
+// directly, which is what made triage-scope.ts's `import { REVIEW_CLASSES } from
+// './triage-analysis'` a real two-file cycle once this file needed ScopeSchema back
+// (#408) — moving it to a dependency-free leaf breaks the cycle at its root instead of
+// working around it.
+export { REVIEW_CLASSES } from './review-class';
+import { REVIEW_CLASSES } from './review-class';
 
 export const VerdictSchema = z.object({
   beer_id: z.number().int(),
@@ -32,6 +40,9 @@ export const AnalysisSchema = z.object({
     title: z.string().min(1).max(200),
     body: z.string().min(1),
     labels: z.array(z.string()),
+    // #408: machine-readable scope. Free-text Scope lines could not be checked against
+    // a row, so every issue trivially "already covered" every future row of its class.
+    scope: ScopeSchema,
   })),
 });
 export type Analysis = z.infer<typeof AnalysisSchema>;
@@ -41,6 +52,10 @@ export interface OpenIssue {
   title: string;
   body: string;
   labels: string[];
+  // ISO instant the issue was opened. Only the saturation guard reads it (#408) — it
+  // counts rows attached AFTER creation, because an issue born from a split starts out
+  // carrying its whole evidence cohort.
+  createdAt: string;
 }
 
 export interface TriageInput {
@@ -85,8 +100,40 @@ export const ANALYSIS_TOOL_SCHEMA = {
           title: { type: 'string' },
           body: { type: 'string' },
           labels: { type: 'array', items: { type: 'string' } },
+          scope: {
+            type: 'object',
+            properties: {
+              beer_ids: { type: 'array', items: { type: 'integer' } },
+              where: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: {
+                    // Enumerated, not free strings: an unconstrained `col`/`op` lets the
+                    // provider emit a tool-VALID term that ScopeTermSchema then rejects,
+                    // which fails the whole run rather than the one term. The lists come
+                    // from triage-scope.ts so they cannot drift. JSON Schema can only
+                    // express the real col-to-op pairing with anyOf, which strict tool use
+                    // does not accept, so this narrows the space without reproducing it —
+                    // zod stays the authority on valid COMBINATIONS.
+                    col: { type: 'string', enum: [...SCOPE_COLS] },
+                    op: { type: 'string', enum: [...SCOPE_OPS] },
+                    // Nullable-and-required rather than optional: strict tool use demands
+                    // properties == required, and `value` is genuinely absent for operators
+                    // like empty/non_empty/is_null/is_not_null (see ScopeTermSchema). Same
+                    // convention as proposed_query/expected_target on VerdictSchema above.
+                    value: { type: ['string', 'number', 'null'] },
+                  },
+                  required: ['col', 'op', 'value'],
+                  additionalProperties: false,
+                },
+              },
+            },
+            required: ['beer_ids', 'where'],
+            additionalProperties: false,
+          },
         },
-        required: ['key', 'title', 'body', 'labels'],
+        required: ['key', 'title', 'body', 'labels', 'scope'],
         additionalProperties: false,
       },
     },
@@ -214,10 +261,15 @@ export function buildTriagePrompt(input: TriageInput): string {
     '  the examples and your hypothesis) and reference it via new_issue_key.',
     '- AT MOST 3 new_issues. Prefer fewer, broader patterns over many narrow ones; if',
     '  two patterns share the same fix, merge them into one issue.',
-    '- Each new_issue body must END with a Scope line giving a machine-findable filter,',
-    '  e.g. "Scope: all orphans in this class — enrich_failures WHERE',
-    '  review_class=\'matcher_bug\'". Label the examples as "from today\'s batch". Do',
-    '  NOT state a total count — you only see the current batch of orphans below.',
+    '- Each new_issue must carry a `scope` object naming the rows it can ever cover:',
+    '  `beer_ids` (the rows from today you are filing it for) and/or `where`, a list of',
+    '  {col, op, value} terms ANDed together. Allowed col: candidates_count, fail_count',
+    '  (= != < <= > >=); source_url, brewery, name (empty, non_empty, contains);',
+    '  abv, style (is_null, is_not_null); review_class (=). A `where` made only of',
+    '  review_class is REJECTED — scope the mechanism, not the whole class. The scope is a',
+    '  necessary condition: a row that contradicts it can never be attached to the issue.',
+    '  Label the examples as "from today\'s batch". Do NOT state a total count — you',
+    '  only see the current batch of orphans below.',
     '- not_on_untappd / wontfix verdicts must have issue_number: null and new_issue_key: null.',
     'review_note: one short sentence naming the pattern (English, ≤200 chars).',
     'Submit via the submit_triage tool. Do not invent issue numbers not listed below.',

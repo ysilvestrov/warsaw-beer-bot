@@ -4,6 +4,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
@@ -45,8 +46,20 @@ function seedOrphan(d: ReturnType<typeof db>, beerId: number) {
   });
 }
 
+// #408: an open issue whose body carries no `triage-scope` block is UNSCOPED and
+// accepts no attachment, so the default stub has to render one or every routing test
+// here would be asserting the guard rather than the routing it means to test. The
+// cohort deliberately covers the small beer_ids these tests seed.
+const SCOPED_BODY = 'b\n\n```triage-scope\n{"beer_ids":[1,2,3,4,5,6],"where":[]}\n```';
+
 const gh = (over = {}) => ({
-  listOpenIssues: vi.fn().mockResolvedValue([{ number: 228, title: 't', body: 'b', labels: [] }]),
+  // createdAt is required by OpenIssue and read by the saturation guard. A mock is not
+  // type-checked, and a missing value does NOT throw — better-sqlite3 binds undefined,
+  // the comparison goes NULL, and countRowsForIssue quietly returns 0, which would
+  // disable the guard while every test still passed. So it is set deliberately.
+  listOpenIssues: vi.fn().mockResolvedValue([
+    { number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+  ]),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   ...over,
@@ -74,7 +87,9 @@ test('happy path: comment + new issue + quiet; DB and job_state written', async 
       { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
       { beer_id: 1, review_class: 'not_on_untappd', review_note: 'small batch', issue_number: null, new_issue_key: null },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
+    }],
   };
   const github = gh();
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
@@ -86,7 +101,13 @@ test('happy path: comment + new issue + quiet; DB and job_state written', async 
   const rows = d.prepare(
     'SELECT beer_id, review_class, review_note FROM enrich_failures ORDER BY beer_id',
   ).all() as { beer_id: number; review_class: string; review_note: string }[];
-  expect(rows.map((r) => r.review_class)).toEqual(['not_on_untappd', 'parser_bug', 'matcher_bug']);
+  // #408 guard 3: this run has no `search` dep, so no probe ran, so beer 1's
+  // not_on_untappd claim has NO absence evidence behind it and is degraded to
+  // matcher_bug. That keeps the row in the enrichment pool (only wontfix/retired_at
+  // are excluded there) instead of closing it on a guess — #377 measured 7 of 14
+  // weakly-evidenced absence verdicts as flat wrong.
+  expect(rows.map((r) => r.review_class)).toEqual(['matcher_bug', 'parser_bug', 'matcher_bug']);
+  expect(rows[0].review_note).toBe('no absence evidence: small batch');
   expect(rows[1].review_note).toBe('merch → #231');
   expect(rows[2].review_note).toBe('alias → #228');
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
@@ -153,7 +174,9 @@ test('github createIssue failure: its verdicts stay untriaged, other groups proc
       { beer_id: 2, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
       { beer_id: 3, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
+    }],
   };
   const github = gh({ createIssue: vi.fn().mockRejectedValue(new Error('boom')) });
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
@@ -331,6 +354,83 @@ const petrusHit = {
   bid: 6682946, beer_name: 'Petrus Kriek', brewery_name: 'Brouwerij De Brabandere',
   style: null, abv: 4, global_rating: null,
 };
+
+// A created issue must be born SCOPED, or guard 2 could never let a row attach to it
+// tomorrow — the block is rendered by us from the model's structured field.
+test('a created issue body carries the triage-scope block', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 1, review_class: 'matcher_bug', review_note: 'n',
+      issue_number: null, new_issue_key: 'k1',
+    }],
+    new_issues: [{
+      key: 'k1', title: 't', body: 'prose about the pattern', labels: [],
+      scope: { beer_ids: [1], where: [] },
+    }],
+  };
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  const body = (github.createIssue.mock.calls[0][0] as { body: string }).body;
+  expect(body).toContain('prose about the pattern');
+  expect(body).toContain('```triage-scope');
+  expect(parseScopeBlock(body)).toEqual({ beer_ids: [1], where: [] });
+});
+
+test('the shortfall log carries per-guard counts', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  seedOrphan(d, 2);
+  const warns: Record<string, unknown>[] = [];
+  const spyLog = { ...log, info: () => {}, error: () => {}, debug: () => {},
+    warn: (o: unknown) => { warns.push(o as Record<string, unknown>); } } as unknown as typeof log;
+  // A verdict for beer 2 only (so `covered` falls short), pointing at an issue whose
+  // scope it violates: seedOrphan writes candidates_count 0, the scope demands > 0.
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 2, review_class: 'matcher_bug', review_note: 'n',
+      issue_number: 228, new_issue_key: null,
+    }],
+    new_issues: [],
+  };
+  await orphanTriage({
+    db: d, log: spyLog, llm: llm(analysis),
+    github: gh({ listOpenIssues: vi.fn().mockResolvedValue([{
+      number: 228, title: 't', labels: [], createdAt: '2026-01-01T00:00:00.000Z',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":">","value":0}]}\n```',
+    }]) }),
+    now: inWindow,
+  });
+
+  const line = warns.find((l) => 'guardHits' in l);
+  expect(line).toBeDefined();
+  expect((line!.guardHits as Record<string, number>).scope_violation).toBe(1);
+});
+
+// The other side of #408 guard 3: with a search dep the probes actually run, and an
+// empty result IS evidence of absence, so the terminal class survives end to end. This
+// is what stops the guard from collapsing into "always degrade".
+test('not_on_untappd survives the job when the probes ran and found nothing', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 1, review_class: 'not_on_untappd', review_note: 'small batch',
+      issue_number: null, new_issue_key: null,
+    }],
+    new_issues: [],
+  };
+  await orphanTriage({
+    db: d, log, llm: llm(analysis), github: gh(), search: searchStub(), now: inWindow,
+  });
+
+  const row = d.prepare('SELECT review_class, review_note FROM enrich_failures WHERE beer_id = 1')
+    .get() as { review_class: string; review_note: string };
+  expect(row.review_class).toBe('not_on_untappd');
+  expect(row.review_note).toBe('small batch');
+});
 
 test('an unverified cause is downgraded: no GitHub write, note prefixed', async () => {
   const d = db();
@@ -526,7 +626,9 @@ test('no duplicate GitHub side effects across a transient retry', async () => {
       { beer_id: 1, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
       { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
     ],
-    new_issues: [{ key: 'k1', title: 'Adapter noise', body: 'b', labels: [] }],
+    new_issues: [{
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
+    }],
   };
   // One github stub shared across both ticks, so call counts accumulate.
   const github = gh();
