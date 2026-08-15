@@ -10,6 +10,17 @@ export interface TriageProbe {
   name?: string;      // top-3 for the name-only query
 }
 
+// Absence is claimable only from a probe that RAN and came back empty. `''` = ran,
+// no results (strong evidence); `undefined` = never ran (no evidence at all). The two
+// are kept distinct on purpose, and collapsing them is exactly the guess this
+// predicate exists to stop. Lives here rather than in either consumer because BOTH
+// the routing guard (planTriageActions) and the write chokepoint must answer the
+// question the same way — two copies of this condition drifting apart is how a
+// verdict gets written past a guard that thinks it blocked it.
+export function absenceProvedBy(probe: TriageProbe | undefined): boolean {
+  return probe?.brewery === '' || probe?.name === '';
+}
+
 export interface CollectProbesArgs {
   orphans: UntriagedFailure[];
   search: BeerSearch;

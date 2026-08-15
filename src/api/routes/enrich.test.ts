@@ -111,7 +111,7 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
-  it('is not eligible when triaged as wontfix', async () => {
+  it('is not eligible when triaged as not_a_beer', async () => {
     const { db, app } = setup();
     const id = upsertBeer(db, {
       untappd_id: null, name: 'Never', brewery: 'Hopeless', style: null, abv: null, rating_global: null,
@@ -122,7 +122,7 @@ describe('POST /enrich/candidates', () => {
       search_url: '', source_url: '', outcome: 'not_found',
       candidates_count: 0, candidates_summary: '', at: new Date().toISOString(),
     });
-    setEnrichFailureReview(db, id, 'wontfix', null, new Date().toISOString());
+    setEnrichFailureReview(db, id, 'not_a_beer', null, new Date().toISOString());
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Hopeless', name: 'Never' }] });
     const body = await res.json();
     expect(body.candidates[0].eligible).toBe(false);
@@ -291,7 +291,7 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
-  it('still applies the wontfix triage veto to a contradicted link', async () => {
+  it('still applies the not_a_beer triage veto to a contradicted link', async () => {
     const { db, app } = setup();
     const id = linkedRow(db, 6708599, 'search');
     recordEnrichFailure(db, {
@@ -299,7 +299,7 @@ describe('POST /enrich/candidates', () => {
       search_url: '', source_url: '', outcome: 'not_found',
       candidates_count: 0, candidates_summary: '', at: new Date().toISOString(),
     });
-    setEnrichFailureReview(db, id, 'wontfix', null, new Date().toISOString());
+    setEnrichFailureReview(db, id, 'not_a_beer', null, new Date().toISOString());
     const body = await (await candidatesForMadBrew(app, 6648348)).json();
     expect(body.candidates[0].eligible).toBe(false);
   });

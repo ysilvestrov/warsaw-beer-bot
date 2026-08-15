@@ -304,20 +304,30 @@ describe('listLookupCandidates', () => {
     expect(out.map((c) => c.id)).toEqual([id]);
   });
 
-  test('excludes orphans triaged as wontfix', () => {
+  // #377 part B: not_a_beer is the ONLY class that leaves the pool. Adding
+  // 'unidentifiable' back into the exclusion clause in listLookupCandidates turns
+  // this red — and that clause is the whole of the change.
+  test('excludes only not_a_beer; an unidentifiable orphan stays in the on-tap pool', () => {
     const db = fresh();
-    const wontfix = seedBeerOnTap(db, { brewery: 'Hopeless', name: 'Never' });
+    const notABeer = seedBeerOnTap(db, { brewery: 'Beer Republic', name: 'Surprise Box XL (36)' });
+    const unidentifiable = seedBeerOnTap(db, { brewery: 'MGM-15', name: 'MGM-15' });
     const live = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
-    recordEnrichFailure(db, {
-      beer_id: wontfix, brewery: 'Hopeless', name: 'Never',
-      search_url: '', source_url: '', outcome: 'not_found',
-      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
-    });
-    setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-05-26T11:30:00Z');
+    for (const [id, brewery, name] of [
+      [notABeer, 'Beer Republic', 'Surprise Box XL (36)'],
+      [unidentifiable, 'MGM-15', 'MGM-15'],
+    ] as const) {
+      recordEnrichFailure(db, {
+        beer_id: id, brewery, name,
+        search_url: '', source_url: '', outcome: 'not_found',
+        candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+      });
+    }
+    setEnrichFailureReview(db, notABeer, 'not_a_beer', null, '2026-05-26T11:30:00Z');
+    setEnrichFailureReview(db, unidentifiable, 'unidentifiable', null, '2026-05-26T11:30:00Z');
 
     const now = new Date('2026-05-26T12:00:00Z');
     const out = listLookupCandidates(db, 10, now);
-    expect(out.map((c) => c.id)).toEqual([live]);
+    expect(out.map((c) => c.id).sort()).toEqual([unidentifiable, live].sort());
   });
 
   test('excludes retired orphans (retired_at set)', () => {
@@ -337,7 +347,7 @@ describe('listLookupCandidates', () => {
     expect(out.map((c) => c.id)).toEqual([live]);
   });
 
-  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug)', () => {
+  test('keeps orphans triaged with a non-terminal class (e.g. matcher_bug)', () => {
     const db = fresh();
     const matcherBug = seedBeerOnTap(db, { brewery: 'Magic Road', name: 'Clementine' });
     recordEnrichFailure(db, {
@@ -448,18 +458,54 @@ describe('listRelayLookupCandidates', () => {
     expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
   });
 
-  test('excludes orphans triaged as wontfix', () => {
+  // The relay pool is where 51 of the 75 sealed rows actually sit, so this is the
+  // clause that does the work in production. Restoring 'unidentifiable' to the
+  // exclusion in orphanWithoutMatchLinkPredicate turns this red.
+  test('excludes only not_a_beer; an unidentifiable orphan stays in the relay pool', () => {
     const db = fresh();
-    const wontfix = seedRelayOrphan(db, { brewery: 'Stoelzle', name: 'Kelih Fino 545' });
+    const notABeer = seedRelayOrphan(db, { brewery: 'Stoelzle', name: 'Kelih Fino 545' });
+    const unidentifiable = seedRelayOrphan(db, { brewery: '', name: 'N/A' });
     const live = seedRelayOrphan(db, { brewery: 'The Bruery', name: 'Barrel Pie' });
-    recordEnrichFailure(db, {
-      beer_id: wontfix, brewery: 'Stoelzle', name: 'Kelih Fino 545',
-      search_url: '', source_url: 'https://winetime.com.ua/x', outcome: 'not_found',
-      candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
-    });
-    setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-05-26T11:30:00Z');
+    for (const [id, brewery, name] of [
+      [notABeer, 'Stoelzle', 'Kelih Fino 545'],
+      [unidentifiable, '', 'N/A'],
+    ] as const) {
+      recordEnrichFailure(db, {
+        beer_id: id, brewery, name,
+        search_url: '', source_url: 'https://winetime.com.ua/x', outcome: 'not_found',
+        candidates_count: 0, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+      });
+    }
+    setEnrichFailureReview(db, notABeer, 'not_a_beer', null, '2026-05-26T11:30:00Z');
+    setEnrichFailureReview(db, unidentifiable, 'unidentifiable', null, '2026-05-26T11:30:00Z');
 
-    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([live]);
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id).sort())
+      .toEqual([unidentifiable, live].sort());
+  });
+
+  // The mechanism part B exists to unlock. recordEnrichFailure already clears the
+  // verdict when candidates_count crosses 0 <-> >0, but under the old `wontfix`
+  // exclusion the row never reached a lookup, so this transition could not occur at
+  // all. Re-adding 'unidentifiable' to the exclusion does not turn this red directly —
+  // it makes the row unreachable, which the two pool tests above catch.
+  test('a re-observed unidentifiable orphan loses its verdict when candidates appear', () => {
+    const db = fresh();
+    const id = seedRelayOrphan(db, { brewery: 'Krusnohor Brewery', name: 'Jedenactka' });
+    const failure = {
+      beer_id: id, brewery: 'Krusnohor Brewery', name: 'Jedenactka',
+      search_url: '', source_url: 'https://flasker.pl/x', outcome: 'not_found' as const,
+      candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    };
+    recordEnrichFailure(db, { ...failure, candidates_count: 0 });
+    setEnrichFailureReview(db, id, 'unidentifiable', 'cannot tell which beer', '2026-05-26T11:30:00Z');
+
+    recordEnrichFailure(db, { ...failure, candidates_count: 3, at: '2026-06-01T11:00:00Z' });
+
+    const row = db
+      .prepare('SELECT review_class AS c, reviewed_at AS r FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { c: string | null; r: string | null };
+    expect(row.c).toBeNull();
+    expect(row.r).toBeNull();
   });
 
   test('excludes retired orphans (retired_at set)', () => {
@@ -478,7 +524,7 @@ describe('listRelayLookupCandidates', () => {
     expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([live]);
   });
 
-  test('keeps orphans triaged with a non-wontfix class (e.g. matcher_bug re-armed by rearm-*)', () => {
+  test('keeps orphans triaged with a non-terminal class (e.g. matcher_bug re-armed by rearm-*)', () => {
     const db = fresh();
     const matcherBug = seedRelayOrphan(db, { brewery: 'AleBrowar', name: 'Kwas Chlebowy Jasny' });
     recordEnrichFailure(db, {

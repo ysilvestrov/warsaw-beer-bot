@@ -1,6 +1,6 @@
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
-import type { TriageProbe } from './triage-probes';
+import { absenceProvedBy, type TriageProbe } from './triage-probes';
 import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
 
 export interface PlannedNewIssue {
@@ -37,7 +37,7 @@ export type GuardReason = 'illegal_scope' | 'scope_violation' | 'saturated' | 'u
 export interface TriagePlan {
   newIssues: PlannedNewIssue[];   // deduped + capped, labels forced, only keys actually referenced
   comments: PlannedComment[];     // grouped per existing issue
-  quiet: Verdict[];               // not_on_untappd / wontfix — DB write only
+  quiet: Verdict[];               // not_on_untappd / unidentifiable — DB write only
   skipped: number;                // invalid verdicts left untriaged for tomorrow
   guardHits: Record<GuardReason, number>;
 }
@@ -55,9 +55,15 @@ export const MAX_ROWS_PER_ISSUE = 12;
 
 // Single source of truth for which classes go to GitHub and which label each
 // maps to — the actionable check derives from these keys.
+//
+// #377 part B: not_a_beer is actionable on the same criterion as the other two — it
+// has a fix owner, namely the ingest filter that let a T-shirt into `beers`. It is
+// also the only class whose consequence is irreversible, and an irreversible verdict
+// that leaves a scoped issue trail is safer than one written silently into a column.
 const CLASS_LABELS = {
   parser_bug: 'parser-bug',
   matcher_bug: 'matcher-bug',
+  not_a_beer: 'not-a-beer',
 } as const;
 
 type ActionableClass = keyof typeof CLASS_LABELS;
@@ -78,7 +84,7 @@ function pushInto<K>(map: Map<K, ActionableVerdict[]>, key: K, verdict: Actionab
 // older beer_ids inside open-issue bodies/comment tables, so the model can echo
 // a stray id that isn't part of the current selection — that verdict must never
 // reach the unconditional `UPDATE ... WHERE beer_id=?` write, actionable or
-// quiet alike (a stray wontfix would permanently exclude a foreign row).
+// quiet alike (a stray not_a_beer would permanently exclude a foreign row).
 // Skipped verdicts keep review_class NULL and re-enter tomorrow's selection.
 //
 // #408 adds the scope guards. It takes the batch ROWS (not just their ids) and the
@@ -135,13 +141,11 @@ export function planTriageActions(
     // unrelated candidates is retried instead of being closed, which is the cheaper
     // error of the two.
     if (verdict.review_class === 'not_on_untappd') {
-      const probe = probes.get(verdict.beer_id);
-      const proved = probe?.brewery === '' || probe?.name === '';
-      if (!proved) {
+      if (!absenceProvedBy(probes.get(verdict.beer_id))) {
         guardHits.unprobed_absence += 1;
         // matcher_bug with no target falls into the `quiet` branch below: the class is
         // recorded so the row leaves the UNTRIAGED pool, but it stays in the
-        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only wontfix and
+        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only not_a_beer and
         // retired_at), so the cron keeps retrying it under BACKOFF_HOURS.
         // Wrong-but-recoverable replaces wrong-and-terminal.
         quiet.push({

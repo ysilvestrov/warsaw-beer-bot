@@ -4,4 +4,6 @@
 // this project's test runner, which fully evaluates a module's static imports before
 // running its own top-level code). Giving REVIEW_CLASSES its own leaf module breaks
 // the cycle at its root instead of working around it.
-export const REVIEW_CLASSES = ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix'] as const;
+export const REVIEW_CLASSES = [
+  'parser_bug', 'matcher_bug', 'not_on_untappd', 'unidentifiable', 'not_a_beer',
+] as const;

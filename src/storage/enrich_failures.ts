@@ -1,4 +1,5 @@
 import type { DB } from './db';
+import { REVIEW_CLASSES } from '../domain/review-class';
 
 export interface EnrichFailureRow {
   beer_id: number;
@@ -53,45 +54,62 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
 }
 
-// True when the beer was triaged as `wontfix` (intentionally never matched).
-// Such orphans are excluded from enrich pools so we stop re-querying Untappd.
-export function isWontfix(db: DB, beerId: number): boolean {
+// True when the row is not a beer product at all (merch, glassware, wine, kombucha,
+// bundles and mystery boxes). The only class that excludes an orphan from the enrich
+// pools: every other verdict is a statement about our current resolving power and can
+// be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
+export function isNotABeer(db: DB, beerId: number): boolean {
   return (
     db
       .prepare(
-        `SELECT 1 FROM enrich_failures WHERE beer_id = ? AND review_class = 'wontfix'`,
+        `SELECT 1 FROM enrich_failures WHERE beer_id = ? AND review_class = 'not_a_beer'`,
       )
       .get(beerId) !== undefined
   );
 }
 
 // True when the METERED web fallback (#139) must not spend a request on this beer.
-// Superset of isWontfix: `parser_bug` means the query string itself is garbage, so
-// searching the web with the same wrong string cannot help; `not_on_untappd` means
-// triage already established the page does not exist; `retired_at` means a shipped
-// fix already resolved the row. The free Algolia retry keeps running for all of
-// these — only the paid path is tightened (#351).
+// Wider than isNotABeer: `parser_bug` means the query string itself is garbage, so
+// searching the web with the same wrong string cannot help; `not_on_untappd` means a
+// probe already established the page does not exist; `unidentifiable` means we cannot
+// say WHICH beer is meant, and the paid quota should not be spent on the population
+// whose verdicts we trust least — revisit once #349's ambiguity guard lands, since
+// that guard is precisely what would make an ambiguous row safe to resolve from the
+// web; `retired_at` means a shipped fix already resolved the row. The free Algolia
+// retry keeps running for all of these — only the paid path is tightened (#351).
 export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
   return (
     db
       .prepare(
         `SELECT 1 FROM enrich_failures
           WHERE beer_id = ?
-            AND (review_class IN ('wontfix', 'parser_bug', 'not_on_untappd')
+            AND (review_class IN ('not_a_beer', 'unidentifiable', 'parser_bug', 'not_on_untappd')
                  OR retired_at IS NOT NULL)`,
       )
       .get(beerId) !== undefined
   );
 }
 
-// Values must stay in sync with the CHECK on enrich_failures.review_class (schema migration 12).
-export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix';
+// Values must stay in sync with the CHECK on enrich_failures.review_class (migration 24).
+// Derived from REVIEW_CLASSES rather than repeated: the two lists silently diverging is
+// exactly how `wontfix` ended up meaning two different things.
+export type ReviewClass = (typeof REVIEW_CLASSES)[number];
 
-// Marks an orphan failure as triaged. Returns false if no row exists for beerId
-// (e.g. the failure already cleared because the beer matched). A later recurring
-// failure only resets these fields via recordEnrichFailure's ON CONFLICT clause
-// when candidates_count crosses the 0↔>0 boundary; otherwise the classification
-// is preserved.
+export type SetReviewResult =
+  | 'written'
+  | 'no_row'
+  | 'refused_unaskable'
+  | 'refused_unproved_absence';
+
+// The single write site for a triage verdict: the LLM job and the admin route both
+// go through here, so a rule added here binds both. Raw bulk SQL does NOT come
+// through here — that is why the "no verdict on an unaskable row" rule ALSO exists
+// as a table CHECK (migration 24). This function turns that constraint violation
+// into a countable refusal instead of an exception.
+//
+// `evidence.absenceProved` defaults to false so the safe answer is the default one:
+// a caller that has not looked cannot accidentally assert absence. The admin route
+// deliberately never sets it.
 export function setEnrichFailureReview(
   db: DB,
   beerId: number,
@@ -99,7 +117,17 @@ export function setEnrichFailureReview(
   note: string | null,
   atIso: string,
   issueNumber: number | null = null,
-): boolean {
+  evidence: { absenceProved: boolean } = { absenceProved: false },
+): SetReviewResult {
+  const existing = db
+    .prepare('SELECT outcome FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { outcome: string } | undefined;
+  if (!existing) return 'no_row';
+  if (existing.outcome !== 'not_found') return 'refused_unaskable';
+  if (reviewClass === 'not_on_untappd' && !evidence.absenceProved) {
+    return 'refused_unproved_absence';
+  }
+
   const info = db
     .prepare(
       `UPDATE enrich_failures
@@ -107,7 +135,7 @@ export function setEnrichFailureReview(
        WHERE beer_id = ?`,
     )
     .run(reviewClass, note, atIso, issueNumber, beerId);
-  return info.changes > 0;
+  return info.changes > 0 ? 'written' : 'no_row';
 }
 
 // Rows attached to an issue AFTER a given instant — the saturation signal (#408).

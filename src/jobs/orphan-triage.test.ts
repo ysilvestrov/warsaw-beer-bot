@@ -103,7 +103,7 @@ test('happy path: comment + new issue + quiet; DB and job_state written', async 
   ).all() as { beer_id: number; review_class: string; review_note: string }[];
   // #408 guard 3: this run has no `search` dep, so no probe ran, so beer 1's
   // not_on_untappd claim has NO absence evidence behind it and is degraded to
-  // matcher_bug. That keeps the row in the enrichment pool (only wontfix/retired_at
+  // matcher_bug. That keeps the row in the enrichment pool (only not_a_beer/retired_at
   // are excluded there) instead of closing it on a guess — #377 measured 7 of 14
   // weakly-evidenced absence verdicts as flat wrong.
   expect(rows.map((r) => r.review_class)).toEqual(['matcher_bug', 'parser_bug', 'matcher_bug']);
@@ -122,7 +122,7 @@ test('github comment failure: affected orphan stays untriaged, others proceed', 
   const analysis: Analysis = {
     verdicts: [
       { beer_id: 1, review_class: 'matcher_bug', review_note: 'x', issue_number: 228, new_issue_key: null },
-      { beer_id: 2, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
+      { beer_id: 2, review_class: 'unidentifiable', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
     new_issues: [],
   };
@@ -132,7 +132,7 @@ test('github comment failure: affected orphan stays untriaged, others proceed', 
     'SELECT review_class FROM enrich_failures WHERE beer_id = ?',
   ).get(id) as { review_class: string | null }).review_class;
   expect(cls(1)).toBeNull();   // GitHub failed → no DB write
-  expect(cls(2)).toBe('wontfix');
+  expect(cls(2)).toBe('unidentifiable');
   const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
   expect(result.line).toContain('пропущено');
 });
@@ -172,7 +172,7 @@ test('github createIssue failure: its verdicts stay untriaged, other groups proc
     verdicts: [
       { beer_id: 1, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
       { beer_id: 2, review_class: 'matcher_bug', review_note: 'alias', issue_number: 228, new_issue_key: null },
-      { beer_id: 3, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
+      { beer_id: 3, review_class: 'unidentifiable', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
     new_issues: [{
       key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
@@ -185,7 +185,7 @@ test('github createIssue failure: its verdicts stay untriaged, other groups proc
   ).get(id) as { review_class: string | null }).review_class;
   expect(cls(1)).toBeNull();          // createIssue failed → no DB write
   expect(cls(2)).toBe('matcher_bug'); // comment group still proceeds
-  expect(cls(3)).toBe('wontfix');     // quiet group still proceeds
+  expect(cls(3)).toBe('unidentifiable');     // quiet group still proceeds
   expect(github.commentOnIssue).toHaveBeenCalledTimes(1);
   const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
   expect(result.line).toContain('1 пропущено');
@@ -227,7 +227,7 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
 
   resolveAnalyze(exchange({
-    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x', issue_number: null, new_issue_key: null }],
     new_issues: [],
   }));
   await first;
@@ -237,14 +237,14 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, wontfix: 0, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
+    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
     skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
     skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
@@ -275,7 +275,7 @@ test('empty verdicts then non-empty retry: proceeds normally', async () => {
   const good = exchange({
     verdicts: [
       { beer_id: 1, review_class: 'matcher_bug', review_note: 'x', issue_number: 228, new_issue_key: null },
-      { beer_id: 2, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
+      { beer_id: 2, review_class: 'unidentifiable', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
     new_issues: [],
   });
@@ -290,7 +290,7 @@ test('empty verdicts then non-empty retry: proceeds normally', async () => {
   const cls = (id: number) => (d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
     .get(id) as { review_class: string | null }).review_class;
   expect(cls(1)).toBe('matcher_bug');
-  expect(cls(2)).toBe('wontfix');
+  expect(cls(2)).toBe('unidentifiable');
 });
 
 test('partial shortfall: fewer verdicts than batch → still processes, run marked', async () => {
@@ -298,7 +298,7 @@ test('partial shortfall: fewer verdicts than batch → still processes, run mark
   [1, 2].forEach((n) => seedOrphan(d, n));
   // Only beer_id 1 gets a verdict; beer_id 2 is uncovered (shortfall).
   const analyze = vi.fn().mockResolvedValue(exchange({
-    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x', issue_number: null, new_issue_key: null }],
     new_issues: [],
   }));
   const github = gh();
@@ -307,7 +307,7 @@ test('partial shortfall: fewer verdicts than batch → still processes, run mark
   expect(analyze).toHaveBeenCalledTimes(1);             // non-empty → no retry
   const cls = (id: number) => (d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
     .get(id) as { review_class: string | null }).review_class;
-  expect(cls(1)).toBe('wontfix');
+  expect(cls(1)).toBe('unidentifiable');
   expect(cls(2)).toBeNull();                            // uncovered → re-enters tomorrow
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
 });
@@ -318,7 +318,7 @@ test('archive: write called once with both exchanges', async () => {
   const analyze = vi.fn()
     .mockResolvedValueOnce(exchange({ verdicts: [], new_issues: [] }, 'end_turn'))
     .mockResolvedValueOnce(exchange({
-      verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'x', issue_number: null, new_issue_key: null }],
+      verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x', issue_number: null, new_issue_key: null }],
       new_issues: [],
     }));
   const archive = { write: vi.fn().mockResolvedValue(undefined) };
@@ -537,7 +537,7 @@ test('without a search dep the job behaves exactly as before', async () => {
 test('buildTriageLine reports the unverified count', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, wontfix: 0, skipped: 0, unverified: 2,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0, skipped: 0, unverified: 2,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
@@ -564,7 +564,7 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
 test('buildTriageLine: transient attempts vs final failure', () => {
   const base = {
-    total: 5, commented: [], created: [], notOnUntappd: 0, wontfix: 0,
+    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
     skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
     attempt: null as number | null,
   };
@@ -660,7 +660,7 @@ test('transient then success: normal result line, day closed', async () => {
   const d = db();
   seedOrphan(d, 1);
   const analysis: Analysis = {
-    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null }],
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'y', issue_number: null, new_issue_key: null }],
     new_issues: [],
   };
   await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
@@ -676,7 +676,7 @@ test('closing the day clears the attempt counter', async () => {
   const d = db();
   seedOrphan(d, 1);
   const analysis: Analysis = {
-    verdicts: [{ beer_id: 1, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null }],
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'y', issue_number: null, new_issue_key: null }],
     new_issues: [],
   };
   await orphanTriage({ db: d, log, llm: transientLlm(), github: gh(), now: inWindow });
