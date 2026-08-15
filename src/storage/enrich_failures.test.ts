@@ -88,7 +88,10 @@ describe('enrich_failures', () => {
     recordEnrichFailure(db, row({ beer_id: id, outcome: 'blocked', candidates_count: 0, at: '2026-06-11T01:00:00Z' }));
     const got = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.fail_count).toBe(2);
-    expect(got.outcome).toBe('blocked');
+    // #425: outcome no longer moves on an existing row for a blocked attempt — it learned
+    // nothing, so the prior real observation (not_found) stands. See the dedicated
+    // 'blocked never downgrades' tests below for the full set of guarantees.
+    expect(got.outcome).toBe('not_found');
     expect(got.last_at).toBe('2026-06-11T01:00:00Z');
   });
 
@@ -400,6 +403,135 @@ describe('isWebFallbackBlocked', () => {
     expect(got(a)).toBe(405);
     expect(got(b)).toBeNull();
     db.close();
+  });
+});
+
+describe('recordEnrichFailure: blocked never downgrades', () => {
+  // THE REPORTED CRASH. Red if the blocked guard is removed: this throws
+  // SqliteError: CHECK constraint failed: review_class IS NULL OR outcome = 'not_found'
+  // because the 0<->>0 clause does not fire (both counts are 0), so the verdict survives
+  // the upsert onto outcome='blocked'.
+  test('a blocked record on a triaged zero-candidate row preserves the verdict', () => {
+    const db = freshDb();
+    seedFailure(db, 1);
+    expect(setEnrichFailureReview(db, 1, 'matcher_bug', 'alias gap', NOW, 347)).toBe('written');
+
+    expect(() => recordEnrichFailure(db, {
+      beer_id: 1, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    })).not.toThrow();
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 1').get() as any;
+    expect(row.outcome).toBe('not_found');
+    expect(row.review_class).toBe('matcher_bug');
+    expect(row.reviewed_at).toBe(NOW);
+    expect(row.fail_count).toBe(2);
+    expect(row.last_at).toBe('2026-08-15T10:00:00.000Z');
+  });
+
+  // THE NEGATIVE CONTROL, and the reason #377's suite missed the bug: with candidates_count
+  // > 0 the old code also survived — but only because the 0<->>0 clause nulled the verdict
+  // first, i.e. it passed for the wrong reason. After the fix the verdict must SURVIVE.
+  // Red if the guard keys off candidates_count instead of outcome.
+  test('a blocked record on a triaged row with candidates preserves the verdict too', () => {
+    const db = freshDb();
+    seedFailure(db, 2);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3, candidates_summary = ? WHERE beer_id = 2')
+      .run('Mad Elf; MadTree; Mad Tom');
+    expect(setEnrichFailureReview(db, 2, 'matcher_bug', 'alias gap', NOW, 347)).toBe('written');
+
+    recordEnrichFailure(db, {
+      beer_id: 2, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    });
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 2').get() as any;
+    expect(row.review_class).toBe('matcher_bug');
+    expect(row.candidates_count).toBe(3);
+    expect(row.candidates_summary).toBe('Mad Elf; MadTree; Mad Tom');
+  });
+
+  // Red if the narrow UPDATE widens to touch diagnostics: a blocked attempt learned nothing,
+  // so the last real evidence must stay readable for triage.
+  test('a blocked record leaves search_url and the diagnostics of the last real attempt', () => {
+    const db = freshDb();
+    seedFailure(db, 3);
+    db.prepare('UPDATE enrich_failures SET search_url = ? WHERE beer_id = 3')
+      .run('https://untappd.com/search?q=real');
+
+    recordEnrichFailure(db, {
+      beer_id: 3, brewery: 'b', name: 'n', search_url: 'https://untappd.com/search?q=blocked',
+      source_url: '', outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    });
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 3').get() as any;
+    expect(row.search_url).toBe('https://untappd.com/search?q=real');
+  });
+
+  // Red if the guard swallows creates as well as updates: a beer we have never recorded still
+  // needs its blocked row (#377 relies on such rows existing and carrying no class).
+  test('a blocked record still creates a row for a beer with no prior failure', () => {
+    const db = freshDb();
+    db.prepare(
+      'INSERT INTO beers (id, brewery, name, normalized_name, normalized_brewery) VALUES (4, ?, ?, ?, ?)',
+    ).run('b', 'n', 'n', 'b');
+
+    recordEnrichFailure(db, {
+      beer_id: 4, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    });
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 4').get() as any;
+    expect(row.outcome).toBe('blocked');
+    expect(row.review_class).toBeNull();
+    expect(row.fail_count).toBe(1);
+  });
+
+  // Red if `outcome` is allowed to move on an existing row. A block window is about us, not
+  // about the beer, and listUntriagedFailures excludes blocked — so letting it move silently
+  // drops untriaged rows out of the triage queue.
+  test('a block window does not push an untriaged row out of the triage queue', () => {
+    const db = freshDb();
+    seedFailure(db, 5);
+
+    recordEnrichFailure(db, {
+      beer_id: 5, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    });
+
+    expect(listUntriagedFailures(db, 10).map((r) => r.beer_id)).toContain(5);
+  });
+
+  // Red if the guard is applied to an already-blocked row in some other way: two blocked
+  // attempts in a row are just a counter bump, and the row keeps outcome='blocked'.
+  //
+  // The incoming brewery/name/search_url deliberately differ from what seedFailure(6, ...)
+  // stored in enrich_failures (literal 'b'/'n'/''). Without the guard, the fall-through
+  // INSERT...ON CONFLICT would overwrite all three from `excluded` — outcome/fail_count
+  // alone stay byte-identical whether the guard exists or not, so they can't distinguish
+  // the two code paths.
+  test('a blocked record on an already-blocked row bumps the counter and touches nothing else', () => {
+    const db = freshDb();
+    seedFailure(db, 6, { outcome: 'blocked' });
+
+    recordEnrichFailure(db, {
+      beer_id: 6, brewery: 'incoming-brewery', name: 'incoming-name',
+      search_url: 'https://untappd.com/search?q=incoming', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-15T10:00:00.000Z',
+    });
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 6').get() as any;
+    expect(row.outcome).toBe('blocked');
+    expect(row.fail_count).toBe(2);
+    expect(row.brewery).toBe('b');
+    expect(row.name).toBe('n');
+    expect(row.search_url).toBe('');
   });
 });
 
