@@ -17,6 +17,9 @@ export interface EnrichOrphansResult {
   transient: number;
   skipped: number;
   blocked: number;
+  // #425: кандидати, на яких enrichOneOrphan кинув виняток (сховище чи fallback) —
+  // спроба залічена й прогін продовжується з наступним кандидатом.
+  errors: number;
   // #368: скільки кандидатів узято з кожного пулу. Без цього розкладу неможливо
   // побачити, чи дренаж узагалі біжить, — `processed` їх змішує. Це розміри
   // пулів ДО циклу — коли breaker обривається на середині прогону, вони можуть
@@ -43,7 +46,7 @@ export interface EnrichOrphansDeps {
 
 const ZERO_RESULT: EnrichOrphansResult = {
   processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0, skipped: 0, blocked: 0,
-  on_tap_selected: 0, relay_selected: 0,
+  errors: 0, on_tap_selected: 0, relay_selected: 0,
 };
 
 export async function enrichOrphans(
@@ -101,10 +104,23 @@ export async function enrichOrphans(
 
   for (let i = 0; i < candidates.length; i++) {
     const c = candidates[i];
-    const kind = await enrichOneOrphan(
-      { db: deps.db, log: deps.log, search: deps.search, now, webFallback: deps.webFallback },
-      c.id,
-    );
+    let kind;
+    try {
+      kind = await enrichOneOrphan(
+        { db: deps.db, log: deps.log, search: deps.search, now, webFallback: deps.webFallback },
+        c.id,
+      );
+    } catch (e) {
+      // #425: containment. One row must never end a run of ~20 network-and-DB operations.
+      // Deliberately NOT reported to the breaker: onResult(true) means "Untappd blocked us",
+      // and a storage or fallback exception is not evidence about Untappd — feeding it in
+      // would let a local bug open the circuit and stop all enrichment for the backoff window.
+      deps.log.error({ err: e, beerId: c.id }, 'enrich-orphans: beer failed, continuing');
+      result.errors++;
+      result.processed++;
+      if (sleepMs > 0 && i < candidates.length - 1) await sleep(sleepMs);
+      continue;
+    }
     if (kind === 'blocked') {
       breaker.onResult(true, now());
       result.blocked++;
