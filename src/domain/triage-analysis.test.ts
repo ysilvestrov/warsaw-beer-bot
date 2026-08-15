@@ -1,7 +1,7 @@
 import {
   AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA,
 } from './triage-analysis';
-import { ScopeSchema } from './triage-scope';
+import { ScopeSchema, SCOPE_COLS } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 
 const orphan: UntriagedFailure = {
@@ -234,6 +234,23 @@ test('a new_issue without a scope fails to parse', () => {
   expect(AnalysisSchema.safeParse({
     verdicts: [], new_issues: [{ key: 'k', title: 't', body: 'b', labels: [] }],
   }).success).toBe(false);
+});
+
+// An unconstrained col/op lets the provider emit a tool-VALID term that zod then
+// rejects, which fails the entire run instead of the one term.
+test('the tool schema enumerates scope columns and operators', () => {
+  const term = (ANALYSIS_TOOL_SCHEMA.properties.new_issues.items.properties as unknown as {
+    scope: { properties: { where: { items: { properties: Record<string, { enum?: readonly string[] }> } } } };
+  }).scope.properties.where.items.properties;
+  expect(term.col.enum).toContain('candidates_count');
+  expect(term.col.enum).toContain('review_class');
+  expect(term.col.enum).not.toContain('secret');
+  expect(term.op.enum).toContain('is_null');
+  expect(term.op.enum).not.toContain('LIKE');
+  // Drift guard: every enumerated value must be one zod actually accepts.
+  for (const col of term.col.enum!) {
+    expect(SCOPE_COLS as readonly string[]).toContain(col);
+  }
 });
 
 test('the tool schema requires scope on every new_issue', () => {

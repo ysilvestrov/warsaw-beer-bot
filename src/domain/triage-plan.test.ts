@@ -268,6 +268,35 @@ test('an issue born with a large cohort but no post-creation rows still accepts'
   expect(plan.guardHits.saturated).toBe(0);
 });
 
+// A batch must not walk an issue past the limit three rows at a time: without counting
+// what this run already accepted, each verdict would independently see 11 >= 12 as false.
+test('rows accepted earlier in the same run count toward saturation', () => {
+  const issues = [open(347, { postCreationRows: 11 })];
+  const a: Analysis = {
+    verdicts: [1, 2, 3].map((n) => v({ beer_id: n, issue_number: 347 })),
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, issues, rows(1, 2, 3), noProbes);
+  expect(plan.comments[0].verdicts).toHaveLength(1);
+  expect(plan.guardHits.saturated).toBe(2);
+});
+
+// Guard 2 must apply to a PROPOSED issue as well, or a model could file one whose scope
+// its own founding row contradicts — born unable to accept the row that created it.
+test('a verdict whose row contradicts its proposed issue scope is refused', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: 'k1' })],
+    new_issues: [{
+      key: 'k1', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
+    }],
+  };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes);
+  expect(plan.newIssues).toHaveLength(0);
+  expect(plan.skipped).toBe(1);
+  expect(plan.guardHits.scope_violation).toBe(1);
+});
+
 // --- #408 guard 3: absence must be evidenced, not inferred -----------------------
 
 // #377 measured this: of 14 weakly-evidenced not_on_untappd verdicts, 7 were beers that

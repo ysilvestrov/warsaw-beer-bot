@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
-import { ScopeSchema } from './triage-scope';
+import { ScopeSchema, SCOPE_COLS, SCOPE_OPS } from './triage-scope';
 
 // REVIEW_CLASSES lives in its own leaf module and is re-exported here so existing
 // importers of it from this file keep working. It used to be defined in this file
@@ -109,8 +109,15 @@ export const ANALYSIS_TOOL_SCHEMA = {
                 items: {
                   type: 'object',
                   properties: {
-                    col: { type: 'string' },
-                    op: { type: 'string' },
+                    // Enumerated, not free strings: an unconstrained `col`/`op` lets the
+                    // provider emit a tool-VALID term that ScopeTermSchema then rejects,
+                    // which fails the whole run rather than the one term. The lists come
+                    // from triage-scope.ts so they cannot drift. JSON Schema can only
+                    // express the real col-to-op pairing with anyOf, which strict tool use
+                    // does not accept, so this narrows the space without reproducing it —
+                    // zod stays the authority on valid COMBINATIONS.
+                    col: { type: 'string', enum: [...SCOPE_COLS] },
+                    op: { type: 'string', enum: [...SCOPE_OPS] },
                     // Nullable-and-required rather than optional: strict tool use demands
                     // properties == required, and `value` is genuinely absent for operators
                     // like empty/non_empty/is_null/is_not_null (see ScopeTermSchema). Same

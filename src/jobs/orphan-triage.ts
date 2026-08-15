@@ -8,7 +8,7 @@ import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
-import { parseScopeBlock, renderScopeBlock } from '../domain/triage-scope';
+import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
@@ -315,7 +315,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         // submits the structured field and we render it, so tomorrow's run parses our
         // own output rather than model prose. Without this the issue would be born
         // unscoped and could never accept a row (#408 guard 2).
-        const body = `${issue.body}\n\n${renderScopeBlock(issue.scope)}`;
+        //
+        // issue.body IS model-authored, and it lands BEFORE our block, so a fence
+        // written there would win parseScopeBlock's first-match race and define the
+        // issue's scope instead of the structured field. Strip any such fence first so
+        // exactly one exists and it is ours.
+        const body = `${stripScopeBlocks(issue.body)}\n\n${renderScopeBlock(issue.scope)}`;
         const number = await github.createIssue({ title: issue.title, body, labels: issue.labels });
         issue.verdicts.forEach((v) => review(v, number));
         outcome.created.push({ issueNumber: number, count: issue.verdicts.length });

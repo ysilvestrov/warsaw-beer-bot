@@ -173,7 +173,11 @@ export function planTriageActions(
       // Guard 4: a saturated issue stops accepting rows. #347 took 36 rows across 18
       // comment batches in 19 days and shipped nothing — the pile itself was the
       // signal, and nothing was watching it.
-      if (target.postCreationRows >= MAX_ROWS_PER_ISSUE) {
+      // Rows already accepted for this issue in THIS run count too, or a batch could
+      // walk an issue sitting at 11 straight past the limit: each verdict would see
+      // 11 >= 12 as false and all of them would land in one comment.
+      const accepted = byIssue.get(verdict.issue_number!)?.length ?? 0;
+      if (target.postCreationRows + accepted >= MAX_ROWS_PER_ISSUE) {
         guardHits.saturated += 1;
         skipped++;
         continue;
@@ -190,7 +194,18 @@ export function planTriageActions(
       }
       pushInto(byIssue, verdict.issue_number!, verdict);
     } else {
-      if (!allowedKeys.has(verdict.new_issue_key!)) { skipped++; continue; }
+      const proposed = uniqueIssues.get(verdict.new_issue_key!);
+      if (!proposed || !allowedKeys.has(verdict.new_issue_key!)) { skipped++; continue; }
+      // Guard 2 applies to a PROPOSED issue too. Without this a model could file an
+      // issue whose scope its own founding row contradicts — the consequence would be
+      // applied with no row evidence, which is the invariant this whole change exists
+      // to enforce, and the issue would be born unable to accept the very row that
+      // created it.
+      if (!rowSatisfiesScope(row, verdict.review_class, proposed.scope)) {
+        guardHits.scope_violation += 1;
+        skipped++;
+        continue;
+      }
       pushInto(byKey, verdict.new_issue_key!, verdict);
     }
   }

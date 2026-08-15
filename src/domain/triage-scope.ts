@@ -30,13 +30,32 @@ export const ScopeSchema = z.object({
 });
 export type Scope = z.infer<typeof ScopeSchema>;
 
+// Flat vocabularies for the JSON-Schema mirror in triage-analysis.ts. Derived from the
+// lists above rather than re-typed, so the tool schema cannot drift from what zod will
+// actually accept. They are deliberately flat: JSON Schema could only express the real
+// col↔op pairing with anyOf, which Anthropic strict tool use does not take, so the mirror
+// narrows the space (no invented column, no invented operator) without reproducing it —
+// zod remains the authority on which COMBINATIONS are valid.
+export const SCOPE_COLS = [
+  ...NUMERIC_COLS, ...TEXT_COLS, ...NULLABLE_COLS, 'review_class',
+] as const;
+export const SCOPE_OPS = [
+  '=', '!=', '<', '<=', '>', '>=', 'empty', 'non_empty', 'contains', 'is_null', 'is_not_null',
+] as const;
+
 // Legality: an enumerated cohort is the narrowest scope there is, so it always
 // qualifies. A `where` qualifies only if it constrains something other than the class
 // itself — "all orphans in this class" is the exact shape that turned #347 into a
 // dumping ground, and four open issues still carry it verbatim.
 export function isLegalScope(scope: Scope): boolean {
-  if (scope.beer_ids.length > 0) return true;
-  return scope.where.some((t) => t.col !== 'review_class');
+  // A `where` that constrains nothing but the class is illegal on its own terms, and a
+  // cohort does NOT launder it: rowSatisfiesScope ORs the two, so for every row OUTSIDE
+  // the cohort the `where` is what decides — and a review_class-only `where` matches
+  // every future row of that class. That is the dumping ground wearing a disguise.
+  const whereIsWholeClass =
+    scope.where.length > 0 && !scope.where.some((t) => t.col !== 'review_class');
+  if (whereIsWholeClass) return false;
+  return scope.beer_ids.length > 0 || scope.where.length > 0;
 }
 
 // Narrows `term` itself (not just `term.col`) to the schema variant(s) whose `col` is
@@ -157,6 +176,19 @@ export function renderScopeBlock(scope: Scope): string {
     json,
     '```',
   ].join('\n');
+}
+
+// Removes every `triage-scope` fence from text we did not author. The issue BODY is
+// model-authored prose and gets concatenated BEFORE our rendered block, so a fence
+// written there would win parseScopeBlock's first-match race and silently define the
+// issue's scope — the same defect as an unescaped prose value, arriving through the
+// other input. Callers must run this over the model's body before appending the real
+// block, so exactly one such fence exists and it is ours. Ordinary fenced code
+// (```sql, ```ts) is untouched: only the triage-scope marker is targeted.
+const ALL_BLOCKS_RE = /```triage-scope\s*\n[\s\S]*?\n?```/g;
+
+export function stripScopeBlocks(body: string): string {
+  return body.replace(ALL_BLOCKS_RE, '');
 }
 
 export function parseScopeBlock(body: string): Scope | null {
