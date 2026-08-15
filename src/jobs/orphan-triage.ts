@@ -303,7 +303,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // queryable and re-routing notes already mangled it, which is why the saturation
       // guard could not count rows per issue before.
       const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-      if (!setEnrichFailureReview(db, v.beer_id, v.review_class, note, nowIso, issueNumber)) {
+      // planTriageActions already ran its own not_on_untappd guard (it needs the
+      // counter for guardHits), so absence reaching here has already been proved.
+      const written = setEnrichFailureReview(
+        db, v.beer_id, v.review_class, note, nowIso, issueNumber,
+        { absenceProved: v.review_class === 'not_on_untappd' },
+      );
+      if (written !== 'written') {
         // Row self-cleared between selection and write (the beer matched meanwhile).
         log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
       }

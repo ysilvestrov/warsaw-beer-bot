@@ -51,7 +51,7 @@ describe('POST /admin/enrich-failures/review', () => {
 
   it('404 when no failure exists for beer_id', async () => {
     const { app } = setup();
-    const res = await review(app, { beer_id: 99999, review_class: 'wontfix' });
+    const res = await review(app, { beer_id: 99999, review_class: 'matcher_bug' });
     expect(res.status).toBe(404);
   });
 
@@ -63,7 +63,7 @@ describe('POST /admin/enrich-failures/review', () => {
 
   it('accepts an explicit null note', async () => {
     const { db, app, id } = setup();
-    const res = await review(app, { beer_id: id, review_class: 'wontfix', note: null });
+    const res = await review(app, { beer_id: id, review_class: 'matcher_bug', note: null });
     expect(res.status).toBe(200);
     const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_note).toBeNull();
@@ -71,7 +71,17 @@ describe('POST /admin/enrich-failures/review', () => {
 
   it('401 with a bad admin token', async () => {
     const { app, id } = setup();
-    const res = await review(app, { beer_id: id, review_class: 'wontfix' }, 'wrong');
+    const res = await review(app, { beer_id: id, review_class: 'matcher_bug' }, 'wrong');
     expect(res.status).toBe(401);
+  });
+
+  // The route never passes an `evidence` argument, so this exercises the chokepoint's
+  // default — the same default that, if flipped, would let the admin route assert
+  // absence it never checked (Task 2 brief mutation test).
+  it('rejects an absence claim from the admin route — it cannot prove one', async () => {
+    const { app, id } = setup();
+    const res = await review(app, { beer_id: id, review_class: 'not_on_untappd' });
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: 'refused_unproved_absence' });
   });
 });

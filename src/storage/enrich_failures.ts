@@ -1,4 +1,5 @@
 import type { DB } from './db';
+import { REVIEW_CLASSES } from '../domain/review-class';
 
 export interface EnrichFailureRow {
   beer_id: number;
@@ -87,14 +88,23 @@ export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
 // Values must stay in sync with the CHECK on enrich_failures.review_class (migration 24).
 // Derived from REVIEW_CLASSES rather than repeated: the two lists silently diverging is
 // exactly how `wontfix` ended up meaning two different things.
-import { REVIEW_CLASSES } from '../domain/review-class';
 export type ReviewClass = (typeof REVIEW_CLASSES)[number];
 
-// Marks an orphan failure as triaged. Returns false if no row exists for beerId
-// (e.g. the failure already cleared because the beer matched). A later recurring
-// failure only resets these fields via recordEnrichFailure's ON CONFLICT clause
-// when candidates_count crosses the 0↔>0 boundary; otherwise the classification
-// is preserved.
+export type SetReviewResult =
+  | 'written'
+  | 'no_row'
+  | 'refused_unaskable'
+  | 'refused_unproved_absence';
+
+// The single write site for a triage verdict: the LLM job and the admin route both
+// go through here, so a rule added here binds both. Raw bulk SQL does NOT come
+// through here — that is why the "no verdict on an unaskable row" rule ALSO exists
+// as a table CHECK (migration 24). This function turns that constraint violation
+// into a countable refusal instead of an exception.
+//
+// `evidence.absenceProved` defaults to false so the safe answer is the default one:
+// a caller that has not looked cannot accidentally assert absence. The admin route
+// deliberately never sets it.
 export function setEnrichFailureReview(
   db: DB,
   beerId: number,
@@ -102,7 +112,17 @@ export function setEnrichFailureReview(
   note: string | null,
   atIso: string,
   issueNumber: number | null = null,
-): boolean {
+  evidence: { absenceProved: boolean } = { absenceProved: false },
+): SetReviewResult {
+  const existing = db
+    .prepare('SELECT outcome FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { outcome: string } | undefined;
+  if (!existing) return 'no_row';
+  if (existing.outcome !== 'not_found') return 'refused_unaskable';
+  if (reviewClass === 'not_on_untappd' && !evidence.absenceProved) {
+    return 'refused_unproved_absence';
+  }
+
   const info = db
     .prepare(
       `UPDATE enrich_failures
@@ -110,7 +130,7 @@ export function setEnrichFailureReview(
        WHERE beer_id = ?`,
     )
     .run(reviewClass, note, atIso, issueNumber, beerId);
-  return info.changes > 0;
+  return info.changes > 0 ? 'written' : 'no_row';
 }
 
 // Rows attached to an issue AFTER a given instant — the saturation signal (#408).
