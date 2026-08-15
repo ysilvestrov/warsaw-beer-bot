@@ -24,7 +24,7 @@ test('buildBeersMessage cannot find an out-of-city pub', () => {
   const db = fresh();
   upsertPub(db, { slug: 'wa', name: 'Pub WA', city: 'warszawa', ...base });
   upsertPub(db, { slug: 'kr', name: 'Pub KR', city: 'krakow', ...base });
-  const res = buildBeersMessage({ db, locale: 'en', t, pubQuery: 'Pub WA', city: 'krakow' });
+  const res = buildBeersMessage({ db, locale: 'en', t, pubQuery: 'Pub WA', city: 'krakow', telegramId: 1 });
   expect(res.kind).toBe('pub_not_found');
 });
 

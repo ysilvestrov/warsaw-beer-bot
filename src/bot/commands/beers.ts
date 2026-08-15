@@ -13,6 +13,7 @@ beersCommand.command('beers', async (ctx) => {
     t: ctx.t,
     pubQuery: arg || undefined,
     city: getUserCity(ctx.deps.db, ctx.from.id),
+    telegramId: ctx.from.id,
   });
   switch (result.kind) {
     case 'ok':
