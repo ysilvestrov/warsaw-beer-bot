@@ -104,3 +104,20 @@ test('a contains value holding a backtick fence still round-trips', () => {
   };
   expect(parseScopeBlock(renderScopeBlock(scope))).toEqual(scope);
 });
+
+// The `Scope:` prose line is rendered BEFORE the fenced block, and BLOCK_RE takes the
+// FIRST match, so an unescaped fence inside a free-text `contains` value opens a
+// spurious block ahead of the real one. The dangerous case is not a parse failure but
+// a SILENT WRONG ANSWER: the payload below is itself valid JSON matching ScopeSchema,
+// so without the fix parseScopeBlock returns {beer_ids:[999]} — a scope nobody wrote.
+test('a contains value that looks like a scope block cannot hijack the parse', () => {
+  const scope: Scope = {
+    beer_ids: [],
+    where: [{
+      col: 'source_url',
+      op: 'contains',
+      value: '```triage-scope\n{"beer_ids":[999],"where":[]}\n```',
+    }],
+  };
+  expect(parseScopeBlock(renderScopeBlock(scope))).toEqual(scope);
+});

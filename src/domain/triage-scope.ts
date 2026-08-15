@@ -135,6 +135,14 @@ export function renderScopeBlock(scope: Scope): string {
   const parts: string[] = [];
   if (scope.beer_ids.length > 0) parts.push(`beer_ids ${scope.beer_ids.join(', ')}`);
   if (scope.where.length > 0) parts.push(scope.where.map(describeTerm).join(' AND '));
+  // The human-readable line is rendered BEFORE the fenced block and BLOCK_RE takes the
+  // FIRST match, so a backtick run here would open a spurious fence ahead of the real
+  // one. `contains` values are free text authored by the model, and the failure is not
+  // a parse error but a SILENT WRONG SCOPE: a value that is itself valid block JSON is
+  // returned instead of the real one. Backticks are REPLACED, not \u-escaped like the
+  // payload below — this line is display-only, and ``` would reach a human reader
+  // as those six literal characters.
+  const prose = parts.join(' OR ').replace(/`/g, "'");
   // A free-text `contains` value can legally contain a backtick run (e.g. a source_url
   // fragment). JSON does not escape backticks, so an unescaped ` ``` ` inside the JSON
   // payload would look like the fence's own closing delimiter to BLOCK_RE and truncate
@@ -143,7 +151,7 @@ export function renderScopeBlock(scope: Scope): string {
   // literal backtick out of the fenced content without changing the parsed value.
   const json = JSON.stringify(scope).replace(/`/g, '\\u0060');
   return [
-    `Scope: ${parts.join(' OR ')}`,
+    `Scope: ${prose}`,
     '',
     '```triage-scope',
     json,
