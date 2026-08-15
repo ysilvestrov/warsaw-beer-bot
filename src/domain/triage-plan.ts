@@ -1,6 +1,6 @@
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
-import type { TriageProbe } from './triage-probes';
+import { absenceProvedBy, type TriageProbe } from './triage-probes';
 import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
 
 export interface PlannedNewIssue {
@@ -135,9 +135,7 @@ export function planTriageActions(
     // unrelated candidates is retried instead of being closed, which is the cheaper
     // error of the two.
     if (verdict.review_class === 'not_on_untappd') {
-      const probe = probes.get(verdict.beer_id);
-      const proved = probe?.brewery === '' || probe?.name === '';
-      if (!proved) {
+      if (!absenceProvedBy(probes.get(verdict.beer_id))) {
         guardHits.unprobed_absence += 1;
         // matcher_bug with no target falls into the `quiet` branch below: the class is
         // recorded so the row leaves the UNTRIAGED pool, but it stays in the

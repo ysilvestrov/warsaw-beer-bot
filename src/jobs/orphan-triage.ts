@@ -9,7 +9,7 @@ import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
 import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
-import { collectTriageProbes } from '../domain/triage-probes';
+import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
 import type { BeerSearch } from '../sources/untappd/search';
@@ -179,6 +179,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     let probeFailures = 0;
     let verifyFailures = 0;
     let causesChecked = 0;
+    // Declared out here, not inside the try: the write loop below needs the SAME
+    // evidence the routing guard saw, so it can prove absence per row instead of
+    // asserting it from the verdict's own class (#377 part B).
+    let probes: Map<number, TriageProbe> = new Map();
     const exchanges: TriageExchange[] = [];
     const probeLimit = deps.probeLimit ?? TRIAGE_PROBE_LIMIT_DEFAULT;
     try {
@@ -186,7 +190,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // Deterministic evidence first: without it the model is asked to explain a
       // zero-candidate search with nothing but the query string, which is where its
       // wrong hypotheses come from (2026-07-28 review).
-      const probes = deps.search
+      probes = deps.search
         ? await collectTriageProbes({
             orphans, search: deps.search, limit: probeLimit,
             onError: (query, err) => {
@@ -303,15 +307,21 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // queryable and re-routing notes already mangled it, which is why the saturation
       // guard could not count rows per issue before.
       const note = issueNumber === null ? v.review_note : `${v.review_note} → #${issueNumber}`;
-      // planTriageActions already ran its own not_on_untappd guard (it needs the
-      // counter for guardHits), so absence reaching here has already been proved.
+      // The chokepoint re-checks absence against the probe evidence itself, NOT against
+      // the verdict's own class — deriving the flag from `review_class` would make the
+      // check a tautology and leave planTriageActions as the only real guard.
       const written = setEnrichFailureReview(
         db, v.beer_id, v.review_class, note, nowIso, issueNumber,
-        { absenceProved: v.review_class === 'not_on_untappd' },
+        { absenceProved: absenceProvedBy(probes.get(v.beer_id)) },
       );
-      if (written !== 'written') {
+      if (written === 'no_row') {
         // Row self-cleared between selection and write (the beer matched meanwhile).
         log.warn({ beerId: v.beer_id }, 'orphan-triage: review write no-op (row gone)');
+      } else if (written !== 'written') {
+        // A refusal is not a no-op: the chokepoint rejected a verdict the routing guard
+        // let through, which means the two disagree and one of them is wrong.
+        log.error({ beerId: v.beer_id, reason: written, reviewClass: v.review_class },
+          'orphan-triage: chokepoint refused a planned verdict');
       }
     };
 
