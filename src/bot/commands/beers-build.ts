@@ -6,6 +6,8 @@ import { filterPubsByQuery } from './newbeers-build';
 import { escapeHtml, fmtStyle } from './newbeers-format';
 import { beerNameHtml } from './beer-link';
 import { isOntapEmptyTapRef } from '../../sources/ontap/pub';
+import { triedBeerIds } from '../../storage/untappd_had';
+import { latestRatingsByBeer } from '../../storage/checkins';
 
 export interface BeersDeps {
   db: DB;
@@ -13,6 +15,7 @@ export interface BeersDeps {
   t: Translator;
   pubQuery?: string;
   city: string;
+  telegramId: number;
 }
 
 export type BeersResult =
@@ -47,6 +50,8 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
 
   const taps = tapsForSnapshotWithBeer(db, snap.id);
   if (taps.length === 0) return { kind: 'empty', pub: pub.name };
+  const triedIds = triedBeerIds(db, deps.telegramId);
+  const personalRatings = latestRatingsByBeer(db, deps.telegramId);
 
   const address = pub.address ? ` — ${escapeHtml(pub.address)}` : '';
   const header = t('beers.header', {
@@ -64,7 +69,11 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
     const display = tap.brewery_ref
       ? `${tap.brewery_ref} ${tap.beer_ref}`.trim()
       : tap.beer_ref;
-    const icon = tap.untappd_id != null ? '🟢' : '⚪';
+    const tried = tap.beer_id != null && triedIds.has(tap.beer_id);
+    const personalRating = tap.beer_id == null ? undefined : personalRatings.get(tap.beer_id);
+    const icon = tried
+      ? `✅${personalRating == null ? '' : ` ${personalRating.toFixed(1)}`}`
+      : tap.untappd_id != null ? '⭐' : '⚪';
     const nameHtml = beerNameHtml(display, tap.untappd_id);
     return (
       `${fmtTapNum(tap.tap_number)} • ${nameHtml}${fmtStyle(tap.style)}` +

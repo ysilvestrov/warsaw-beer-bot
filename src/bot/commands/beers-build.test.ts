@@ -4,6 +4,7 @@ import { upsertPub } from '../../storage/pubs';
 import { createSnapshot, insertTaps } from '../../storage/snapshots';
 import { upsertBeer } from '../../storage/beers';
 import { upsertMatch } from '../../storage/match_links';
+import { mergeCheckin } from '../../storage/checkins';
 import { createTranslator } from '../../i18n';
 import { buildBeersMessage } from './beers-build';
 
@@ -14,8 +15,8 @@ function fresh() {
 }
 
 const t = createTranslator('uk');
-const base = (db: ReturnType<typeof fresh>, pubQuery?: string) =>
-  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa' });
+const base = (db: ReturnType<typeof fresh>, pubQuery?: string, telegramId = 1) =>
+  buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa', telegramId });
 
 describe('buildBeersMessage — resolution', () => {
   test('missing argument returns no_arg', () => {
@@ -73,7 +74,7 @@ describe('buildBeersMessage — resolution', () => {
 });
 
 describe('buildBeersMessage — ok rendering', () => {
-  test('shows every tap incl. orphan and already-tried, with 🟢/⚪ icons', () => {
+  test('tried matched beer stays listed with its latest personal rating', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: 'Foo 1', lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
@@ -83,32 +84,52 @@ describe('buildBeersMessage — ok rendering', () => {
       normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
     });
     upsertMatch(db, 'PINTA Atak Chmielu', beerId, 1.0);
-    // tap 1: matched; tap 2: orphan (no match_link)
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'PINTA Atak Chmielu', brewery_ref: 'PINTA',
         abv: 6.1, ibu: null, style: 'AIPA & <Ale>', u_rating: 3.9 },
-      { tap_number: 2, beer_ref: 'Mystery Brew', brewery_ref: 'Unknown Co',
-        abv: 5.0, ibu: null, style: null, u_rating: 4.2 },
     ]);
-    // mark the matched beer as already tried — must STILL appear (no filtering)
-    db.prepare('INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at) VALUES (?, ?, ?)')
-      .run(1, beerId, '2026-05-25T11:00:00Z');
+    mergeCheckin(db, {
+      checkin_id: 'checkin-1', telegram_id: 1, beer_id: beerId,
+      user_rating: 4.2, checkin_at: '2026-05-25T11:00:00Z', venue: null,
+    });
 
     const out = base(db, 'kufel');
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
-    expect(out.html).toContain('PINTA Atak Chmielu'); // tried, still shown
-    expect(out.html).toContain('Mystery Brew');       // orphan, still shown
-    expect(out.html).toContain('🟢');                 // matched icon
-    expect(out.html).toContain('⚪');                 // orphan icon
-    expect(out.html).toContain('Kufel');              // header pub name
-    expect(out.html).toContain('Foo 1');              // header address
-    expect(out.html).toContain('Кранів: 2');          // header count
+    expect(out.html).toContain('PINTA Atak Chmielu');
+    expect(out.html).toContain('Kufel');
+    expect(out.html).toContain('Foo 1');
+    expect(out.html).toContain('Кранів: 1');
     const matchedLine = out.html.split('\n').find((line) => line.startsWith('1 '))!;
-    expect(matchedLine).toContain(
+    expect(matchedLine).toBe(
+      '1 • ' +
       '<a href="https://untappd.com/beer/1"><b>PINTA PINTA Atak Chmielu</b></a>' +
-      ' • AIPA &amp; &lt;Ale&gt; • 6.1%',
+      ' • AIPA &amp; &lt;Ale&gt; • 6.1% • 3.9 • ✅ 4.2',
     );
+  });
+
+  test('beer tried only through untappd_had shows bare ✅ even for an orphan beers row', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
+    const orphanId = upsertBeer(db, {
+      untappd_id: null, name: 'Wocky Talky', brewery: 'JBW Brewery', style: null,
+      abv: 4.2, rating_global: null,
+      normalized_name: 'wocky talky', normalized_brewery: 'jbw',
+    });
+    upsertMatch(db, 'JBW Brewery Wocky Talky', orphanId, 1.0);
+    insertTaps(db, snap, [
+      { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
+        abv: 4.2, ibu: null, style: null, u_rating: null },
+    ]);
+    db.prepare('INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at) VALUES (?, ?, ?)')
+      .run(1, orphanId, '2026-05-25T11:00:00Z');
+
+    const out = base(db, 'kufel');
+    expect(out.kind).toBe('ok');
+    if (out.kind !== 'ok') return;
+    const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
+    expect(line).toMatch(/ • ✅$/);
   });
 
   test('null tap_number / abv / rating render as em dash', () => {
@@ -141,7 +162,7 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(line).toBe('2 • N/A'); // no abv/rating/icon trailing fields
   });
 
-  test('tap matched to an orphan beers row (untappd_id NULL) shows ⚪, not 🟢', () => {
+  test('untried tap matched to an orphan beers row shows ⚪', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
@@ -162,11 +183,10 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
-    expect(line).toContain('⚪');
-    expect(line).not.toContain('🟢');
+    expect(line).toMatch(/ • ⚪$/);
   });
 
-  test('tap matched to a real catalog beer (untappd_id set) shows 🟢', () => {
+  test('untried real catalog beer shows ⭐', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
@@ -185,7 +205,7 @@ describe('buildBeersMessage — ok rendering', () => {
     expect(out.kind).toBe('ok');
     if (out.kind !== 'ok') return;
     const line = out.html.split('\n').find((l) => l.startsWith('1 '))!;
-    expect(line).toContain('🟢');
+    expect(line).toMatch(/ • ⭐$/);
   });
 
   test('matched beer name is a tappable Untappd link', () => {
