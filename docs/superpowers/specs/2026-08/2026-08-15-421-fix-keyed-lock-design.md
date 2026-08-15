@@ -86,8 +86,10 @@ coarse signal is strictly cheaper than what it replaces.
 
 Two things make that cheapness real rather than assumed:
 
-- **A project rule** (added to `CLAUDE.md` in this change): *decomposing an issue obliges you to
-  remap its rows onto the sub-issues* (`enrich_failures.issue_number`). Then a parent's close means
+- **A project rule**, landed with this design in **both** `CLAUDE.md` and `AGENTS.md` — Codex fixes
+  bugs here too, and a rule only one agent reads is a rule the other one breaks: *decomposing an
+  `orphan-triage` issue obliges you to remap its rows onto the sub-issues*
+  (`enrich_failures.issue_number`), per row and never as a blanket sweep. Then a parent's close means
   what the mechanism reads it to mean, and the wasted lookup happens only when a fix genuinely failed
   to cover the row.
 - **Legacy stays out of the rule.** 114 of the 157 rows hang off #254/#255, both closed by
