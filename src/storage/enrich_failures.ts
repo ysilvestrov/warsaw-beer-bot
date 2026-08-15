@@ -34,58 +34,61 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   // excludes blocked rows, so a block window silently dropped untriaged rows out of the
   // triage queue over an outage that had nothing to do with them.
   //
-  // The SELECT and the narrow UPDATE run inside one transaction: this process is the only
-  // writer today, so the wrapper buys nothing yet — but recordEnrichFailure is also invoked
-  // from compiled ops runners against the prod DB (a second process on the same file), and
-  // a bare read-then-write pair would let that writer's insert land in the gap between our
-  // read and our write. The "no row" branch falls through to the general upsert below,
-  // outside this transaction: that upsert is itself a single atomic statement.
-  if (r.outcome === 'blocked') {
-    const handled = db.transaction(() => {
+  // The whole function body — the existence check, the branch decision, the narrow UPDATE,
+  // and the fall-through upsert — runs inside one transaction, so a concurrent writer
+  // cannot insert-and-triage a row between our check and our write. This process is the
+  // only writer today, so the wrapper buys nothing yet, but recordEnrichFailure is also
+  // invoked from compiled ops runners against the prod DB (a second process on the same
+  // file); wrapping the bare INSERT ... ON CONFLICT costs nothing (better-sqlite3 already
+  // runs a single statement in an implicit transaction), so covering it costs nothing extra
+  // while making the guarantee hold on every path, not just the one with an explicit read.
+  db.transaction(() => {
+    if (r.outcome === 'blocked') {
       // Existence is deliberately the whole test, not outcome: a blocked attempt bumps the
       // counter on ANY existing row (not_found or already-blocked) and must never reach the
       // general upsert below, so which outcome the row currently carries doesn't change
       // the decision.
       const existing = db.prepare('SELECT 1 FROM enrich_failures WHERE beer_id = ?').get(r.beer_id);
-      if (!existing) return false;
-      db.prepare(
-        `UPDATE enrich_failures
-            SET fail_count = fail_count + 1, last_at = ?
-          WHERE beer_id = ?`,
-      ).run(r.at, r.beer_id);
-      return true;
-    })();
-    if (handled) return;
-  }
+      if (existing) {
+        db.prepare(
+          `UPDATE enrich_failures
+              SET fail_count = fail_count + 1, last_at = ?
+            WHERE beer_id = ?`,
+        ).run(r.at, r.beer_id);
+        return; // returns from the transaction callback, skipping the upsert below —
+                // recordEnrichFailure itself has nothing left to do after this call returns
+      }
+    }
 
-  db.prepare(
-    `INSERT INTO enrich_failures
-       (beer_id, brewery, name, search_url, source_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-     ON CONFLICT(beer_id) DO UPDATE SET
-       brewery            = excluded.brewery,
-       name               = excluded.name,
-       search_url         = excluded.search_url,
-       source_url         = CASE WHEN excluded.source_url != '' THEN excluded.source_url
-                                 ELSE enrich_failures.source_url END,
-       outcome            = excluded.outcome,
-       candidates_count   = excluded.candidates_count,
-       candidates_summary = excluded.candidates_summary,
-       fail_count         = enrich_failures.fail_count + 1,
-       last_at            = excluded.last_at,
-       review_class       = CASE
-         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
-         THEN NULL ELSE enrich_failures.review_class END,
-       review_note        = CASE
-         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
-         THEN NULL ELSE enrich_failures.review_note END,
-       reviewed_at        = CASE
-         WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
-         THEN NULL ELSE enrich_failures.reviewed_at END`,
-  ).run(
-    r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
-    r.candidates_count, r.candidates_summary, r.at,
-  );
+    db.prepare(
+      `INSERT INTO enrich_failures
+         (beer_id, brewery, name, search_url, source_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+       ON CONFLICT(beer_id) DO UPDATE SET
+         brewery            = excluded.brewery,
+         name               = excluded.name,
+         search_url         = excluded.search_url,
+         source_url         = CASE WHEN excluded.source_url != '' THEN excluded.source_url
+                                   ELSE enrich_failures.source_url END,
+         outcome            = excluded.outcome,
+         candidates_count   = excluded.candidates_count,
+         candidates_summary = excluded.candidates_summary,
+         fail_count         = enrich_failures.fail_count + 1,
+         last_at            = excluded.last_at,
+         review_class       = CASE
+           WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+           THEN NULL ELSE enrich_failures.review_class END,
+         review_note        = CASE
+           WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+           THEN NULL ELSE enrich_failures.review_note END,
+         reviewed_at        = CASE
+           WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+           THEN NULL ELSE enrich_failures.reviewed_at END`,
+    ).run(
+      r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
+      r.candidates_count, r.candidates_summary, r.at,
+    );
+  })();
 }
 
 export function clearEnrichFailure(db: DB, beerId: number): void {
