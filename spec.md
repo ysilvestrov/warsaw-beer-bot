@@ -446,6 +446,7 @@ client-relay (`/enrich/result`), серверний крон пише `''`. За
 означає «Untappd нас заблокував», а локальний збій сховища чи fallback — це не доказ про
 Untappd; пропустити його туди означало б дозволити локальному багу відкрити circuit і спинити
 весь енрич на вікно backoff.
+
 Покроковий дебаг-ранбук: `docs/debug-orphan-matching.md`.
 
 ### 3.14 `checkin_sync_state` — resume-курсор extension-синхронізації чекінів (v13)

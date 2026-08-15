@@ -33,20 +33,29 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   // enrichOrphans and ending the whole run. (2) The quiet one: listUntriagedFailures
   // excludes blocked rows, so a block window silently dropped untriaged rows out of the
   // triage queue over an outage that had nothing to do with them.
+  //
+  // The SELECT and the narrow UPDATE run inside one transaction: this process is the only
+  // writer today, so the wrapper buys nothing yet — but recordEnrichFailure is also invoked
+  // from compiled ops runners against the prod DB (a second process on the same file), and
+  // a bare read-then-write pair would let that writer's insert land in the gap between our
+  // read and our write. The "no row" branch falls through to the general upsert below,
+  // outside this transaction: that upsert is itself a single atomic statement.
   if (r.outcome === 'blocked') {
-    const existing = db
-      .prepare('SELECT outcome FROM enrich_failures WHERE beer_id = ?')
-      .get(r.beer_id) as { outcome: string } | undefined;
-    if (existing) {
-      db.transaction(() => {
-        db.prepare(
-          `UPDATE enrich_failures
-              SET fail_count = fail_count + 1, last_at = ?
-            WHERE beer_id = ?`,
-        ).run(r.at, r.beer_id);
-      })();
-      return;
-    }
+    const handled = db.transaction(() => {
+      // Existence is deliberately the whole test, not outcome: a blocked attempt bumps the
+      // counter on ANY existing row (not_found or already-blocked) and must never reach the
+      // general upsert below, so which outcome the row currently carries doesn't change
+      // the decision.
+      const existing = db.prepare('SELECT 1 FROM enrich_failures WHERE beer_id = ?').get(r.beer_id);
+      if (!existing) return false;
+      db.prepare(
+        `UPDATE enrich_failures
+            SET fail_count = fail_count + 1, last_at = ?
+          WHERE beer_id = ?`,
+      ).run(r.at, r.beer_id);
+      return true;
+    })();
+    if (handled) return;
   }
 
   db.prepare(
