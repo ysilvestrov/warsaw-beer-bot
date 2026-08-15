@@ -17,9 +17,38 @@ export interface EnrichFailureRow {
 // diagnostic fields and bumps fail_count. The prior triage classification
 // (review_class/review_note/reviewed_at) is preserved on re-fail UNLESS
 // candidates_count crosses the 0↔>0 boundary, in which case it is cleared to
-// re-open the row for triage. The row is cleared (clearEnrichFailure)
-// when the beer eventually matches, and CASCADE-deleted if the beer row is removed.
+// re-open the row for triage. A `blocked` outcome is a separate rule (see the
+// guard below): it may CREATE a row but never overwrites an existing one. The
+// row is cleared (clearEnrichFailure) when the beer eventually matches, and
+// CASCADE-deleted if the beer row is removed.
 export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
+  // #425: `outcome` records how the last attempt THAT LEARNED SOMETHING ended. A blocked
+  // attempt learned nothing about the beer — it is a fact about us (throttled IP, open
+  // circuit), so it may CREATE a row for a beer we have never recorded, but it must never
+  // overwrite one that already carries a real observation.
+  //
+  // Two defects close here. (1) The crash: the upsert clears review_class only when
+  // candidates_count crosses the 0<->>0 boundary, so on a row already at 0 the verdict
+  // survived onto outcome='blocked' and violated migration 24's CHECK — throwing out of
+  // enrichOrphans and ending the whole run. (2) The quiet one: listUntriagedFailures
+  // excludes blocked rows, so a block window silently dropped untriaged rows out of the
+  // triage queue over an outage that had nothing to do with them.
+  if (r.outcome === 'blocked') {
+    const existing = db
+      .prepare('SELECT outcome FROM enrich_failures WHERE beer_id = ?')
+      .get(r.beer_id) as { outcome: string } | undefined;
+    if (existing) {
+      db.transaction(() => {
+        db.prepare(
+          `UPDATE enrich_failures
+              SET fail_count = fail_count + 1, last_at = ?
+            WHERE beer_id = ?`,
+        ).run(r.at, r.beer_id);
+      })();
+      return;
+    }
+  }
+
   db.prepare(
     `INSERT INTO enrich_failures
        (beer_id, brewery, name, search_url, source_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
