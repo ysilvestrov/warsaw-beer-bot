@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
-import { REVIEW_CLASSES } from './triage-analysis';
+import { REVIEW_CLASSES } from './review-class';
 
 // The scope is a NECESSARY CONDITION, never a definition of the mechanism. Most real
 // triage patterns (shop typos, packaging tokens, "the brewery field isn't a brewery")

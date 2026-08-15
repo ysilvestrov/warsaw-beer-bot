@@ -1,50 +1,16 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
-import type { Scope } from './triage-scope';
+import { ScopeSchema } from './triage-scope';
 
-export const REVIEW_CLASSES = ['parser_bug', 'matcher_bug', 'not_on_untappd', 'wontfix'] as const;
-
-// #408: local structural mirror of triage-scope.ts's ScopeSchema, NOT a re-export.
-// triage-scope.ts imports REVIEW_CLASSES from *this* module at its own top level (for
-// the review_class scope term), so a value-level `import { ScopeSchema } from
-// './triage-scope'` here would form a genuine two-file circular value dependency.
-// Under this project's test runner (vite-node/esbuild) that is fatal at load time
-// regardless of which file a caller reaches first or where the import statement sits
-// in the source: esbuild's SSR transform fully evaluates a module's static imports
-// before running any of that module's own top-level code, so triage-scope.ts's
-// `z.enum(REVIEW_CLASSES)` always runs while REVIEW_CLASSES is still unset (reproduced
-// empirically; wrapping the read in z.lazy does not help either, since the crash is in
-// triage-scope.ts's own top level, not in how this file later uses the import).
-// `require('./triage-scope')` doesn't help — Node's real CJS resolver can't find a
-// `.ts` sibling without a compiled `.js` on disk, which only exists in prod dist, not
-// under vitest running against source. So: same shape as ANALYSIS_TOOL_SCHEMA mirrors
-// AnalysisSchema below — a hand-kept mirror, `satisfies z.ZodType<Scope>` below pins
-// the two structurally at compile time, and the drift-guard test in
-// triage-analysis.test.ts cross-checks representative payloads against the real
-// ScopeSchema at run time.
-const NEW_ISSUE_SCOPE_COLS = {
-  numeric: ['candidates_count', 'fail_count'],
-  text: ['source_url', 'brewery', 'name'],
-  nullable: ['abv', 'style'],
-} as const;
-const NewIssueScopeTermSchema = z.union([
-  z.object({
-    col: z.enum(NEW_ISSUE_SCOPE_COLS.numeric),
-    op: z.enum(['=', '!=', '<', '<=', '>', '>=']),
-    value: z.number(),
-  }),
-  z.object({ col: z.enum(NEW_ISSUE_SCOPE_COLS.text), op: z.enum(['empty', 'non_empty']) }),
-  z.object({
-    col: z.enum(NEW_ISSUE_SCOPE_COLS.text), op: z.literal('contains'), value: z.string().min(1),
-  }),
-  z.object({ col: z.enum(NEW_ISSUE_SCOPE_COLS.nullable), op: z.enum(['is_null', 'is_not_null']) }),
-  z.object({ col: z.literal('review_class'), op: z.literal('='), value: z.enum(REVIEW_CLASSES) }),
-]);
-const NewIssueScopeSchema = z.object({
-  beer_ids: z.array(z.number().int()),
-  where: z.array(NewIssueScopeTermSchema),
-}) satisfies z.ZodType<Scope>;
+// REVIEW_CLASSES lives in its own leaf module and is re-exported here so existing
+// importers of it from this file keep working. It used to be defined in this file
+// directly, which is what made triage-scope.ts's `import { REVIEW_CLASSES } from
+// './triage-analysis'` a real two-file cycle once this file needed ScopeSchema back
+// (#408) — moving it to a dependency-free leaf breaks the cycle at its root instead of
+// working around it.
+export { REVIEW_CLASSES } from './review-class';
+import { REVIEW_CLASSES } from './review-class';
 
 export const VerdictSchema = z.object({
   beer_id: z.number().int(),
@@ -76,7 +42,7 @@ export const AnalysisSchema = z.object({
     labels: z.array(z.string()),
     // #408: machine-readable scope. Free-text Scope lines could not be checked against
     // a row, so every issue trivially "already covered" every future row of its class.
-    scope: NewIssueScopeSchema,
+    scope: ScopeSchema,
   })),
 });
 export type Analysis = z.infer<typeof AnalysisSchema>;

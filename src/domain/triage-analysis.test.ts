@@ -247,31 +247,7 @@ test('the prompt asks for a structured scope and no longer offers the whole-clas
   expect(prompt).toContain('scope');
 });
 
-// AnalysisSchema.new_issues[].scope is a HAND-KEPT structural mirror of
-// triage-scope.ts's ScopeSchema, not a re-export (see the #408 comment on
-// NewIssueScopeSchema in triage-analysis.ts for why: importing the real ScopeSchema
-// value here would form a circular module dependency with triage-scope.ts, which is
-// fatal at load time under this project's test runner). This test cross-checks a
-// representative batch of payloads against BOTH schemas so the mirror can't silently
-// drift from the real one.
-test('the new_issues scope mirror agrees with the real ScopeSchema', () => {
-  const cases: unknown[] = [
-    { beer_ids: [1, 2], where: [] },
-    { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
-    { beer_ids: [], where: [{ col: 'fail_count', op: '>=', value: 3 }] },
-    { beer_ids: [], where: [{ col: 'source_url', op: 'non_empty' }] },
-    { beer_ids: [], where: [{ col: 'brewery', op: 'contains', value: 'Nepomucen' }] },
-    { beer_ids: [], where: [{ col: 'abv', op: 'is_null' }] },
-    { beer_ids: [], where: [{ col: 'style', op: 'is_not_null' }] },
-    { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'matcher_bug' }] },
-    // invalid shapes
-    { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'not_a_class' }] },
-    { beer_ids: [], where: [{ col: 'candidates_count', op: 'contains', value: 'x' }] },
-    { beer_ids: 'nope', where: [] },
-    {},
-  ];
-  const analysisScope = AnalysisSchema.shape.new_issues.element.shape.scope;
-  for (const c of cases) {
-    expect(analysisScope.safeParse(c).success).toBe(ScopeSchema.safeParse(c).success);
-  }
-});
+// `AnalysisSchema.new_issues[].scope` IS `ScopeSchema` now — REVIEW_CLASSES moved to
+// its own leaf module, so the circular import that once forced a hand-kept mirror is
+// gone. The drift-guard test that policed that mirror was deleted with it: it would
+// now assert a schema equals itself, which can never fail and so proves nothing.
