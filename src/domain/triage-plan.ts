@@ -79,7 +79,7 @@ export function planTriageActions(
   analysis: Analysis,
   openIssues: ScopedIssue[],
   batchRows: UntriagedFailure[],
-  _probes: Map<number, TriageProbe>,
+  probes: Map<number, TriageProbe>,
 ): TriagePlan {
   const byNumber = new Map(openIssues.map((i) => [i.number, i]));
   const rowById = new Map(batchRows.map((r) => [r.beer_id, r]));
@@ -111,6 +111,40 @@ export function planTriageActions(
     if (!row) { skipped++; continue; }                            // foreign row — never write
     if (seenBeerIds.has(verdict.beer_id)) { skipped++; continue; } // first verdict per beer wins
     seenBeerIds.add(verdict.beer_id);
+
+    // Guard 3: absence is claimable only from a probe that RAN and came back empty.
+    // `''` = ran, no results (strong evidence); `undefined` = never ran (no evidence).
+    // triage-probes.ts keeps those distinct on purpose — collapsing them invites the
+    // guessing this guard exists to stop. #377 measured the "no probe ran" cohort as
+    // wrong 3 of 3, and hits from OTHER breweries read as absence 4 times out of 11.
+    //
+    // NOTE: collectTriageProbes skips rows with candidates_count > 0 by construction,
+    // so every candidate-bearing not_on_untappd degrades here. That is the intended
+    // direction — the prompt's own pivot rule says candidates_count > 0 means the
+    // search works and the miss is on the match side. Probing those rows too is #377's
+    // dropped proposal 2, tracked in #357; until then a genuinely absent beer with
+    // unrelated candidates is retried instead of being closed, which is the cheaper
+    // error of the two.
+    if (verdict.review_class === 'not_on_untappd') {
+      const probe = probes.get(verdict.beer_id);
+      const proved = probe?.brewery === '' || probe?.name === '';
+      if (!proved) {
+        guardHits.unprobed_absence += 1;
+        // matcher_bug with no target falls into the `quiet` branch below: the class is
+        // recorded so the row leaves the UNTRIAGED pool, but it stays in the
+        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only wontfix and
+        // retired_at), so the cron keeps retrying it under BACKOFF_HOURS.
+        // Wrong-but-recoverable replaces wrong-and-terminal.
+        quiet.push({
+          ...verdict,
+          review_class: 'matcher_bug',
+          issue_number: null,
+          new_issue_key: null,
+          review_note: `no absence evidence: ${verdict.review_note}`.slice(0, 500),
+        });
+        continue;
+      }
+    }
 
     if (!isActionable(verdict)) {
       quiet.push(verdict); // quiet classes never touch GitHub; stray refs are ignored

@@ -244,6 +244,47 @@ test('a proposed issue scoped by class AND another column survives', () => {
   expect(plan.guardHits.illegal_scope).toBe(0);
 });
 
+// --- #408 guard 3: absence must be evidenced, not inferred -----------------------
+
+// #377 measured this: of 14 weakly-evidenced not_on_untappd verdicts, 7 were beers that
+// exist on Untappd under the same brewery with ABV matching to the decimal. The "no
+// probe ran" cohort was wrong 3 of 3.
+test('not_on_untappd survives when a probe ran and returned nothing', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
+  const probes = new Map<number, TriageProbe>([[1, { brewery: '', name: '' }]]);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes);
+  expect(plan.quiet[0].review_class).toBe('not_on_untappd');
+  expect(plan.guardHits.unprobed_absence).toBe(0);
+});
+
+test('not_on_untappd degrades to matcher_bug when no probe ran', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 5 })], noProbes);
+  expect(plan.quiet[0].review_class).toBe('matcher_bug');
+  expect(plan.quiet[0].review_note).toContain('no absence evidence');
+  expect(plan.guardHits.unprobed_absence).toBe(1);
+});
+
+// `''` = the probe ran and found nothing. Hits from OTHER breweries are not evidence
+// that this beer is absent — brewery-only probes are noisy (#377: "Mad Brew" returns
+// Mad Elf / MadTree / Mad Tom), and reading that noise as absence is the actual bug.
+test('a probe that returned hits is not absence evidence', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
+  const probes = new Map<number, TriageProbe>([[1, { brewery: 'Mad Elf, MadTree', name: 'something' }]]);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes);
+  expect(plan.quiet[0].review_class).toBe('matcher_bug');
+  expect(plan.guardHits.unprobed_absence).toBe(1);
+});
+
+// wontfix is terminal too, but it is a judgement about the row being a beer at all,
+// which a search probe cannot settle. Only the absence claim is gated here.
+test('wontfix is untouched by the class gate', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'wontfix' })], new_issues: [] };
+  const plan = planTriageActions(a, [], rows(1), noProbes);
+  expect(plan.quiet[0].review_class).toBe('wontfix');
+  expect(plan.guardHits.unprobed_absence).toBe(0);
+});
+
 // An illegal proposal must not burn one of the three per-run slots either, or a model
 // emitting one bad issue would starve two good ones.
 test('an illegal proposal does not consume a new-issue cap slot', () => {
