@@ -8,7 +8,7 @@ import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
 import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
-import { parseScopeBlock } from '../domain/triage-scope';
+import { parseScopeBlock, renderScopeBlock } from '../domain/triage-scope';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
@@ -285,7 +285,14 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       return;
     }
     if (covered < orphans.length) {
-      log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
+      // guardHits is why, not just how many. Three of the four #408 guards end in
+      // `skipped`, and a skipped row keeps review_class NULL and comes back tomorrow —
+      // so a model that keeps making the same illegal proposal would recirculate the
+      // same rows forever while the batch silently filled with repeat offenders. One
+      // line has to make that visible instead of leaving it to be inferred from a
+      // backlog that stopped moving.
+      log.warn({ covered, batch: orphans.length, guardHits: plan.guardHits },
+        'orphan-triage: verdict shortfall');
     }
     outcome.skipped = plan.skipped;
     outcome.unverified = unverified;
@@ -304,7 +311,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     for (const issue of plan.newIssues) {
       try {
-        const number = await github.createIssue({ title: issue.title, body: issue.body, labels: issue.labels });
+        // The scope block is appended by US, not written by the model: the model
+        // submits the structured field and we render it, so tomorrow's run parses our
+        // own output rather than model prose. Without this the issue would be born
+        // unscoped and could never accept a row (#408 guard 2).
+        const body = `${issue.body}\n\n${renderScopeBlock(issue.scope)}`;
+        const number = await github.createIssue({ title: issue.title, body, labels: issue.labels });
         issue.verdicts.forEach((v) => review(v, number));
         outcome.created.push({ issueNumber: number, count: issue.verdicts.length });
       } catch (e) {

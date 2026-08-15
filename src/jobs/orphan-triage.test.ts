@@ -4,6 +4,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer } from '../storage/beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
@@ -353,6 +354,60 @@ const petrusHit = {
   bid: 6682946, beer_name: 'Petrus Kriek', brewery_name: 'Brouwerij De Brabandere',
   style: null, abv: 4, global_rating: null,
 };
+
+// A created issue must be born SCOPED, or guard 2 could never let a row attach to it
+// tomorrow — the block is rendered by us from the model's structured field.
+test('a created issue body carries the triage-scope block', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 1, review_class: 'matcher_bug', review_note: 'n',
+      issue_number: null, new_issue_key: 'k1',
+    }],
+    new_issues: [{
+      key: 'k1', title: 't', body: 'prose about the pattern', labels: [],
+      scope: { beer_ids: [1], where: [] },
+    }],
+  };
+  const github = gh();
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  const body = (github.createIssue.mock.calls[0][0] as { body: string }).body;
+  expect(body).toContain('prose about the pattern');
+  expect(body).toContain('```triage-scope');
+  expect(parseScopeBlock(body)).toEqual({ beer_ids: [1], where: [] });
+});
+
+test('the shortfall log carries per-guard counts', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  seedOrphan(d, 2);
+  const warns: Record<string, unknown>[] = [];
+  const spyLog = { ...log, info: () => {}, error: () => {}, debug: () => {},
+    warn: (o: unknown) => { warns.push(o as Record<string, unknown>); } } as unknown as typeof log;
+  // A verdict for beer 2 only (so `covered` falls short), pointing at an issue whose
+  // scope it violates: seedOrphan writes candidates_count 0, the scope demands > 0.
+  const analysis: Analysis = {
+    verdicts: [{
+      beer_id: 2, review_class: 'matcher_bug', review_note: 'n',
+      issue_number: 228, new_issue_key: null,
+    }],
+    new_issues: [],
+  };
+  await orphanTriage({
+    db: d, log: spyLog, llm: llm(analysis),
+    github: gh({ listOpenIssues: vi.fn().mockResolvedValue([{
+      number: 228, title: 't', labels: [], createdAt: '2026-01-01T00:00:00.000Z',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":">","value":0}]}\n```',
+    }]) }),
+    now: inWindow,
+  });
+
+  const line = warns.find((l) => 'guardHits' in l);
+  expect(line).toBeDefined();
+  expect((line!.guardHits as Record<string, number>).scope_violation).toBe(1);
+});
 
 // The other side of #408 guard 3: with a search dep the probes actually run, and an
 // empty result IS evidence of absence, so the terminal class survives end to end. This
