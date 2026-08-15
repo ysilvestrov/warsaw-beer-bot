@@ -263,8 +263,13 @@ git commit -m "feat(#421): hold rows whose verdict names an unfixed bug out of b
 ### Task 3: Beat 2 — the retry settles the verdict
 
 **Files:**
-- Modify: `src/storage/enrich_failures.ts` (the `ON CONFLICT` block of `recordEnrichFailure`, lines 22-50)
+- Modify: `src/storage/enrich_failures.ts` (the `ON CONFLICT DO UPDATE` arms of `recordEnrichFailure`)
 - Test: `src/storage/enrich_failures.test.ts`
+
+**Base changed since this plan was written (#425).** `recordEnrichFailure` now wraps its whole body in `db.transaction(...)` and short-circuits a `blocked` record against an existing row into a narrow `fail_count`/`last_at` bump. Consequences for this task, none of which change what it must do:
+
+- Edit the `INSERT … ON CONFLICT DO UPDATE` arms **inside** the transaction callback; do not restructure the transaction or the blocked guard.
+- Beat 2 fires on the `not_found` path only, which is correct and now explicit: a `blocked` record never reaches the upsert, so a transient Untappd outage can no longer settle an unlock. **Add a test pinning exactly that** — an unlocked row that receives a `blocked` record keeps its `review_class` *and* its `unlocked_at`, so the free retry is still owed. Red if the blocked guard is removed or if beat 2 is moved above it.
 
 **Interfaces:**
 - Consumes: `unlocked_at` (Task 1).
@@ -1010,7 +1015,7 @@ Comment the sample size, hit rate, and the beers that matched. This number is th
 
 - [ ] **Step 4: Full verification**
 
-Run: `npx vitest run && npx tsc --noEmit && npm run lint`
+Run: `npx vitest run && npm run typecheck`
 Expected: all green. Do not claim completion without pasting this output.
 
 - [ ] **Step 5: Commit and empty the scratch directory**
