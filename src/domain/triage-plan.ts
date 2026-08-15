@@ -1,10 +1,14 @@
 import type { Analysis, Verdict } from './triage-analysis';
+import type { UntriagedFailure } from '../storage/enrich_failures';
+import type { TriageProbe } from './triage-probes';
+import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
 
 export interface PlannedNewIssue {
   key: string;
   title: string;
   body: string;
   labels: string[];
+  scope: Scope;                   // rendered into the issue body by the job
   verdicts: Verdict[];
 }
 
@@ -13,11 +17,29 @@ export interface PlannedComment {
   verdicts: Verdict[];
 }
 
+// An open triage issue as the guards need to see it: its parsed scope (null when the
+// body carries no `triage-scope` block) and how many rows were attached to it AFTER it
+// was created. Parsing and counting are I/O, so they happen at the call site — this
+// module stays pure.
+export interface ScopedIssue {
+  number: number;
+  scope: Scope | null;
+  postCreationRows: number;
+}
+
+// Why a verdict was refused. Counted rather than logged here (this is a pure function),
+// so the job can surface them in one line — three of the guards end in `skipped`, and a
+// skipped row keeps review_class NULL and returns tomorrow. A model that keeps making
+// the same illegal proposal would recirculate the same rows forever while the batch
+// silently fills with repeat offenders, so the reason has to be visible.
+export type GuardReason = 'illegal_scope' | 'scope_violation' | 'saturated' | 'unprobed_absence';
+
 export interface TriagePlan {
   newIssues: PlannedNewIssue[];   // deduped + capped, labels forced, only keys actually referenced
   comments: PlannedComment[];     // grouped per existing issue
   quiet: Verdict[];               // not_on_untappd / wontfix — DB write only
   skipped: number;                // invalid verdicts left untriaged for tomorrow
+  guardHits: Record<GuardReason, number>;
 }
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
@@ -49,16 +71,30 @@ function pushInto<K>(map: Map<K, ActionableVerdict[]>, key: K, verdict: Actionab
 // reach the unconditional `UPDATE ... WHERE beer_id=?` write, actionable or
 // quiet alike (a stray wontfix would permanently exclude a foreign row).
 // Skipped verdicts keep review_class NULL and re-enter tomorrow's selection.
+//
+// #408 adds the scope guards. It takes the batch ROWS (not just their ids) and the
+// issues' parsed scopes because judging a routing decision requires the evidence the
+// decision was made about — the old signature could see neither.
 export function planTriageActions(
-  analysis: Analysis, openIssueNumbers: number[], batchBeerIds: number[],
+  analysis: Analysis,
+  openIssues: ScopedIssue[],
+  batchRows: UntriagedFailure[],
+  _probes: Map<number, TriageProbe>,
 ): TriagePlan {
-  const open = new Set(openIssueNumbers);
-  const batch = new Set(batchBeerIds);
+  const byNumber = new Map(openIssues.map((i) => [i.number, i]));
+  const rowById = new Map(batchRows.map((r) => [r.beer_id, r]));
+  const guardHits: Record<GuardReason, number> = {
+    illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0,
+  };
 
-  // Dedupe proposed issues by key (first occurrence wins) BEFORE applying the
-  // cap, so duplicates neither spawn duplicate GitHub issues nor waste slots.
+  // Guard 1: an illegal scope kills the proposed issue before it can claim a class.
+  // A `where` made only of `review_class` is the exact shape that turned #347 into a
+  // dumping ground — it declares the whole class as scope, so every future row of that
+  // class is trivially "already covered". Dropped BEFORE the dedupe/cap so an illegal
+  // proposal cannot consume one of the three slots either.
   const uniqueIssues = new Map<string, Analysis['new_issues'][number]>();
   for (const entry of analysis.new_issues) {
+    if (!isLegalScope(entry.scope)) { guardHits.illegal_scope += 1; continue; }
     if (!uniqueIssues.has(entry.key)) uniqueIssues.set(entry.key, entry);
   }
   const cappedIssues = [...uniqueIssues.values()].slice(0, MAX_NEW_ISSUES_PER_RUN);
@@ -71,7 +107,8 @@ export function planTriageActions(
   const seenBeerIds = new Set<number>();
 
   for (const verdict of analysis.verdicts) {
-    if (!batch.has(verdict.beer_id)) { skipped++; continue; } // foreign row — never write
+    const row = rowById.get(verdict.beer_id);
+    if (!row) { skipped++; continue; }                            // foreign row — never write
     if (seenBeerIds.has(verdict.beer_id)) { skipped++; continue; } // first verdict per beer wins
     seenBeerIds.add(verdict.beer_id);
 
@@ -88,7 +125,18 @@ export function planTriageActions(
     // hypothesis every day; it stays findable via the issues' `Scope:` queries.
     if (!hasIssue && !hasKey) { quiet.push(verdict); continue; }
     if (hasIssue) {
-      if (!open.has(verdict.issue_number!)) { skipped++; continue; }
+      const target = byNumber.get(verdict.issue_number!);
+      if (!target) { skipped++; continue; }
+      // Guard 2: the row must not contradict what the issue claims to be about. An
+      // unscoped issue (no `triage-scope` block in its body) accepts nothing — that is
+      // what makes the one-time backfill of existing issues load-bearing rather than
+      // cosmetic. We deliberately do NOT re-route on failure: choosing a different
+      // issue is exactly the title-similarity judgement that produced the pile.
+      if (target.scope === null || !rowSatisfiesScope(row, verdict.review_class, target.scope)) {
+        guardHits.scope_violation += 1;
+        skipped++;
+        continue;
+      }
       pushInto(byIssue, verdict.issue_number!, verdict);
     } else {
       if (!allowedKeys.has(verdict.new_issue_key!)) { skipped++; continue; }
@@ -101,11 +149,11 @@ export function planTriageActions(
     .map((i) => {
       const verdicts = byKey.get(i.key)!;
       const labels = ['orphan-triage', ...new Set(verdicts.map((x) => CLASS_LABELS[x.review_class]))];
-      return { key: i.key, title: i.title, body: i.body, labels, verdicts };
+      return { key: i.key, title: i.title, body: i.body, labels, scope: i.scope, verdicts };
     });
 
   const comments: PlannedComment[] = [...byIssue.entries()]
     .map(([issueNumber, verdicts]) => ({ issueNumber, verdicts }));
 
-  return { newIssues, comments, quiet, skipped };
+  return { newIssues, comments, quiet, skipped, guardHits };
 }

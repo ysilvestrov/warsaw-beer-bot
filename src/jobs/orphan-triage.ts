@@ -7,7 +7,8 @@ import {
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
-import { planTriageActions } from '../domain/triage-plan';
+import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
+import { parseScopeBlock } from '../domain/triage-scope';
 import { collectTriageProbes } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
@@ -242,7 +243,15 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         log.info({ rowsWithEvidence: probes.size, probeFailures, causesChecked, unverified, verifyFailures },
           'orphan-triage: evidence summary');
       }
-      plan = planTriageActions(analysis, openIssues.map((i) => i.number), [...byId.keys()]);
+      // #408: the guards judge a routing decision, so they need the evidence it was
+      // made about — the issues' parsed scopes and the batch rows, not just their ids.
+      // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
+      const scopedIssues: ScopedIssue[] = openIssues.map((i) => ({
+        number: i.number,
+        scope: parseScopeBlock(i.body),
+        postCreationRows: 0,
+      }));
+      plan = planTriageActions(analysis, scopedIssues, orphans, probes);
     } catch (e) {
       const attempt = attemptsToday() + 1;
       const transient = isTransient(e);

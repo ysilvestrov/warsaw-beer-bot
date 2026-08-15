@@ -45,8 +45,14 @@ function seedOrphan(d: ReturnType<typeof db>, beerId: number) {
   });
 }
 
+// #408: an open issue whose body carries no `triage-scope` block is UNSCOPED and
+// accepts no attachment, so the default stub has to render one or every routing test
+// here would be asserting the guard rather than the routing it means to test. The
+// cohort deliberately covers the small beer_ids these tests seed.
+const SCOPED_BODY = 'b\n\n```triage-scope\n{"beer_ids":[1,2,3,4,5,6],"where":[]}\n```';
+
 const gh = (over = {}) => ({
-  listOpenIssues: vi.fn().mockResolvedValue([{ number: 228, title: 't', body: 'b', labels: [] }]),
+  listOpenIssues: vi.fn().mockResolvedValue([{ number: 228, title: 't', body: SCOPED_BODY, labels: [] }]),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   ...over,
@@ -75,7 +81,7 @@ test('happy path: comment + new issue + quiet; DB and job_state written', async 
       { beer_id: 1, review_class: 'not_on_untappd', review_note: 'small batch', issue_number: null, new_issue_key: null },
     ],
     new_issues: [{
-      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
     }],
   };
   const github = gh();
@@ -156,7 +162,7 @@ test('github createIssue failure: its verdicts stay untriaged, other groups proc
       { beer_id: 3, review_class: 'wontfix', review_note: 'y', issue_number: null, new_issue_key: null },
     ],
     new_issues: [{
-      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
     }],
   };
   const github = gh({ createIssue: vi.fn().mockRejectedValue(new Error('boom')) });
@@ -531,7 +537,7 @@ test('no duplicate GitHub side effects across a transient retry', async () => {
       { beer_id: 2, review_class: 'parser_bug', review_note: 'merch', issue_number: null, new_issue_key: 'k1' },
     ],
     new_issues: [{
-      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [], where: [] },
+      key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
     }],
   };
   // One github stub shared across both ticks, so call counts accumulate.

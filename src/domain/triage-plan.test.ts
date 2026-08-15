@@ -1,13 +1,31 @@
-import { planTriageActions } from './triage-plan';
+import { planTriageActions, type ScopedIssue } from './triage-plan';
 import type { Analysis, Verdict } from './triage-analysis';
+import type { UntriagedFailure } from '../storage/enrich_failures';
+import type { TriageProbe } from './triage-probes';
 
 const v = (over: Partial<Verdict>): Verdict => ({
   beer_id: 1, review_class: 'matcher_bug', review_note: 'note',
   issue_number: null, new_issue_key: null, ...over,
 });
-const issue = (key: string) => ({
-  key, title: `t-${key}`, body: 'b', labels: ['wrong'], scope: { beer_ids: [], where: [] },
+
+const row = (id: number, over: Partial<UntriagedFailure> = {}): UntriagedFailure => ({
+  beer_id: id, brewery: 'B', name: 'N', search_url: '', source_url: '',
+  candidates_count: 3, candidates_summary: '', fail_count: 1,
+  last_at: '2026-08-14T00:00:00.000Z', abv: null, style: null, ...over,
 });
+const rows = (...ids: number[]) => ids.map((id) => row(id));
+
+// A cohort scope wide enough for the routing tests below: those tests are about
+// routing, not about scoping, so the scope must never be the reason a verdict moves.
+const COHORT: ScopedIssue['scope'] = { beer_ids: [1, 2, 3, 4, 5, 998, 999], where: [] };
+const open = (number: number, over: Partial<ScopedIssue> = {}): ScopedIssue =>
+  ({ number, scope: COHORT, postCreationRows: 0, ...over });
+
+const issue = (key: string) => ({
+  key, title: `t-${key}`, body: 'b', labels: ['wrong'], scope: { beer_ids: [1, 2, 3, 4], where: [] },
+});
+
+const noProbes = new Map<number, TriageProbe>();
 
 test('routes verdicts: existing issue, new issue, quiet', () => {
   const a: Analysis = {
@@ -19,7 +37,7 @@ test('routes verdicts: existing issue, new issue, quiet', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [228], [1, 2, 3, 4]);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 4), noProbes);
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.newIssues).toHaveLength(1);
   expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([2]);
@@ -35,7 +53,7 @@ test('forces labels from verdict classes, ignoring model labels', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [], [1, 2]);
+  const plan = planTriageActions(a, [], rows(1, 2), noProbes);
   expect(plan.newIssues[0].labels.sort())
     .toEqual(['matcher-bug', 'orphan-triage', 'parser-bug']);
 });
@@ -50,7 +68,7 @@ test('skips invalid verdicts: unknown issue, unknown key, both refs', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [228], [1, 2, 3, 5]);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 5), noProbes);
   expect(plan.skipped).toBe(3);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([5]);
   expect(plan.newIssues).toHaveLength(0); // k1 unused → not created
@@ -58,6 +76,7 @@ test('skips invalid verdicts: unknown issue, unknown key, both refs', () => {
 });
 
 test('dedupes duplicate new_issues keys: first occurrence wins, no wasted cap slots', () => {
+  const scope = { beer_ids: [1, 2, 3], where: [] };
   const a: Analysis = {
     verdicts: [
       v({ beer_id: 1, new_issue_key: 'k1' }),
@@ -67,14 +86,14 @@ test('dedupes duplicate new_issues keys: first occurrence wins, no wasted cap sl
     // k1 appears 3 times — duplicates must not spawn duplicate issues nor
     // consume cap slots, so k2 and k3 still fit under MAX_NEW_ISSUES_PER_RUN.
     new_issues: [
-      { key: 'k1', title: 'first', body: 'first-body', labels: [], scope: { beer_ids: [], where: [] } },
-      { key: 'k1', title: 'dup', body: 'dup-body', labels: [], scope: { beer_ids: [], where: [] } },
-      { key: 'k2', title: 't-k2', body: 'b', labels: [], scope: { beer_ids: [], where: [] } },
-      { key: 'k1', title: 'dup2', body: 'dup2-body', labels: [], scope: { beer_ids: [], where: [] } },
-      { key: 'k3', title: 't-k3', body: 'b', labels: [], scope: { beer_ids: [], where: [] } },
+      { key: 'k1', title: 'first', body: 'first-body', labels: [], scope },
+      { key: 'k1', title: 'dup', body: 'dup-body', labels: [], scope },
+      { key: 'k2', title: 't-k2', body: 'b', labels: [], scope },
+      { key: 'k1', title: 'dup2', body: 'dup2-body', labels: [], scope },
+      { key: 'k3', title: 't-k3', body: 'b', labels: [], scope },
     ],
   };
-  const plan = planTriageActions(a, [], [1, 2, 3]);
+  const plan = planTriageActions(a, [], rows(1, 2, 3), noProbes);
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
   expect(plan.newIssues[0].title).toBe('first');
   expect(plan.newIssues[0].body).toBe('first-body');
@@ -91,7 +110,7 @@ test('groups multiple verdicts on the same existing issue into one comment', () 
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [228, 231], [1, 2, 3]);
+  const plan = planTriageActions(a, [open(228), open(231)], rows(1, 2, 3), noProbes);
   expect(plan.comments).toHaveLength(2);
   const c228 = plan.comments.find((c) => c.issueNumber === 228)!;
   expect(c228.verdicts.map((x) => x.beer_id)).toEqual([1, 2]);
@@ -105,7 +124,7 @@ test('caps new issues at 3 in array order; overflow verdicts are skipped', () =>
     verdicts: [1, 2, 3, 4].map((n) => v({ beer_id: n, new_issue_key: `k${n}` })),
     new_issues: [issue('k1'), issue('k2'), issue('k3'), issue('k4')],
   };
-  const plan = planTriageActions(a, [], [1, 2, 3, 4]);
+  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes);
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
   expect(plan.skipped).toBe(1);
 });
@@ -119,7 +138,7 @@ test('drops verdicts whose beer_id is outside the current batch (actionable and 
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [228], [1]);
+  const plan = planTriageActions(a, [open(228)], rows(1), noProbes);
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.quiet).toEqual([]);
   expect(plan.skipped).toBe(2);
@@ -134,7 +153,7 @@ test('dedupes duplicate beer_id verdicts: first wins, later ones skipped', () =>
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [228], [1, 2]);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2), noProbes);
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([2]);
   expect(plan.skipped).toBe(1);
@@ -150,9 +169,96 @@ test('an actionable verdict without a reference is recorded quietly, not skipped
     verdicts: [v({ beer_id: 1, review_note: 'unverified: alias gap' })],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [228], [1]);
+  const plan = planTriageActions(a, [open(228)], rows(1), noProbes);
   expect(plan.skipped).toBe(0);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
   expect(plan.comments).toHaveLength(0);
   expect(plan.newIssues).toHaveLength(0);
+});
+
+// --- #408 guard 2: attachment must not contradict the issue's own scope ---------
+
+// The measured misroute: six rows with candidates_count = 0 were filed against a
+// brewery-GATE issue. The gate cannot run without candidates, so the two are mutually
+// exclusive and a deterministic check catches every one of them.
+test('a zero-candidate row cannot attach to an issue scoped candidates_count > 0', () => {
+  const issues = [open(347, {
+    scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
+  })];
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 0 })], noProbes);
+  expect(plan.comments).toHaveLength(0);
+  expect(plan.skipped).toBe(1);
+  expect(plan.guardHits.scope_violation).toBe(1);
+});
+
+test('a row that satisfies the scope still attaches', () => {
+  const issues = [open(347, {
+    scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
+  })];
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 5 })], noProbes);
+  expect(plan.comments[0].verdicts).toHaveLength(1);
+  expect(plan.guardHits.scope_violation).toBe(0);
+});
+
+// Every issue open today predates the scope block, so "unscoped accepts nothing" is
+// what makes the one-time backfill load-bearing instead of cosmetic.
+test('an unscoped issue accepts nothing', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
+  const plan = planTriageActions(a, [open(347, { scope: null })], rows(1), noProbes);
+  expect(plan.comments).toHaveLength(0);
+  expect(plan.guardHits.scope_violation).toBe(1);
+});
+
+// --- #408 guard 1: a proposed issue may not declare its whole class as scope -----
+
+test('a proposed issue scoped only by review_class is dropped with its verdicts', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: 'k1' })],
+    new_issues: [{
+      key: 'k1', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'matcher_bug' }] },
+    }],
+  };
+  const plan = planTriageActions(a, [], rows(1), noProbes);
+  expect(plan.newIssues).toHaveLength(0);
+  expect(plan.skipped).toBe(1);
+  expect(plan.guardHits.illegal_scope).toBe(1);
+});
+
+test('a proposed issue scoped by class AND another column survives', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: 'k1' })],
+    new_issues: [{
+      key: 'k1', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [
+        { col: 'review_class', op: '=', value: 'matcher_bug' },
+        { col: 'candidates_count', op: '=', value: 0 },
+      ] },
+    }],
+  };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes);
+  expect(plan.newIssues).toHaveLength(1);
+  expect(plan.newIssues[0].scope.where).toHaveLength(2);
+  expect(plan.guardHits.illegal_scope).toBe(0);
+});
+
+// An illegal proposal must not burn one of the three per-run slots either, or a model
+// emitting one bad issue would starve two good ones.
+test('an illegal proposal does not consume a new-issue cap slot', () => {
+  const legal = (key: string) => ({
+    key, title: key, body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4], where: [] },
+  });
+  const a: Analysis = {
+    verdicts: [1, 2, 3, 4].map((n) => v({ beer_id: n, new_issue_key: `k${n}` })),
+    new_issues: [
+      { key: 'k1', title: 'bad', body: 'b', labels: [],
+        scope: { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'matcher_bug' }] } },
+      legal('k2'), legal('k3'), legal('k4'),
+    ],
+  };
+  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes);
+  expect(plan.newIssues.map((i) => i.key)).toEqual(['k2', 'k3', 'k4']);
+  expect(plan.guardHits.illegal_scope).toBe(1);
 });
