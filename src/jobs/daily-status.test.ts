@@ -22,6 +22,8 @@ const base: StatusMetrics = {
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
   enrichMatched24h: 5, enrichFailures24h: 3, untappdSearchHealthy: true,
   extMatchRequests: 1234, extMatchAnon: 312, extMatchBeers: 47210,
+  sealUnidentifiable: 9, sealUnidentifiableReobserved: 7,
+  sealNotABeer: 29, sealNotABeer7d: 0, sealRetiredFalsified: 28,
 };
 
 test('buildStatusMessage: full message exact string', () => {
@@ -35,6 +37,7 @@ test('buildStatusMessage: full message exact string', () => {
       "• Каталог: 12 840 пив · 78% зматчено · 287 orphan'ів у черзі · 751 поза cron",
       '• Рейтинги: 134 зматчених пив без рейтингу',
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
+      '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
       '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',

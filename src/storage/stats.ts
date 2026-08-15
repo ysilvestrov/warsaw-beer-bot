@@ -30,11 +30,27 @@ export interface StatusMetrics {
   extMatchRequests: number;   // total /match requests, previous Warsaw day
   extMatchAnon: number;       // anonymous subset
   extMatchBeers: number;      // sum of beers, previous Warsaw day
+  // #377 part B. Two of these can refute the design that produced them:
+  // `sealUnidentifiableReobserved` at 0 means the rows are formally back in a pool but
+  // the cron never reaches them — the mechanism is dead. A high re-observed count with
+  // a FLAT `sealUnidentifiable` means it runs and buys nothing. Counting seals *lifted*
+  // is impossible after the fact: the auto-unseal in recordEnrichFailure nulls
+  // review_class AND reviewed_at, erasing the evidence the row was ever sealed.
+  sealUnidentifiable: number;
+  sealUnidentifiableReobserved: number;
+  sealNotABeer: number;
+  sealNotABeer7d: number;
+  // retired_at claims "a shipped fix resolved this". If it had, clearEnrichFailure
+  // would have deleted the row outright — so a retired row that is still an orphan is
+  // an assertion falsified by its own existence. Growth means retired_at is being
+  // written as blindly as wontfix was.
+  sealRetiredFalsified: number;
 }
 
 export function collectStatus(db: DB, now: Date): StatusMetrics {
   const nowMs = now.getTime();
   const cutoff24 = new Date(nowMs - 24 * 3600 * 1000).toISOString();
+  const cutoff7d = new Date(nowMs - 7 * 24 * 3600 * 1000).toISOString();
 
   const count = (sql: string, params: unknown[] = []): number =>
     (db.prepare(sql).get(...params) as { c: number }).c;
@@ -76,6 +92,31 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     ),
     orphansOffCron: count(
       `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanWithoutMatchLinkPredicate}`,
+    ),
+    sealUnidentifiable: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+        WHERE ef.review_class = 'unidentifiable' AND b.untappd_id IS NULL`,
+    ),
+    // "Looked up since the verdict was written" — the only observable proof that
+    // un-sealing actually put the row back in front of the cron.
+    sealUnidentifiableReobserved: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+        WHERE ef.review_class = 'unidentifiable' AND b.untappd_id IS NULL
+          AND ef.reviewed_at IS NOT NULL AND b.untappd_lookup_at > ef.reviewed_at`,
+    ),
+    // Deliberately NOT joined to beers: this is a debt counter about the ingest filter,
+    // not about orphan reachability, so a row that later acquired a bid still counts.
+    sealNotABeer: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures WHERE review_class = 'not_a_beer'`,
+    ),
+    sealNotABeer7d: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures
+        WHERE review_class = 'not_a_beer' AND reviewed_at > ?`,
+      [cutoff7d],
+    ),
+    sealRetiredFalsified: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+        WHERE ef.retired_at IS NOT NULL AND b.untappd_id IS NULL`,
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),

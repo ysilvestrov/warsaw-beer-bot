@@ -22,6 +22,9 @@ export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: 
     `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
     `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
     ...(triageLine ? [`• ${triageLine}`] : []),
+    // Standing state, read after today's run: #377 part B's audit. The first two
+    // numbers can refute the design — see the StatusMetrics comment in stats.ts.
+    `• Печатки: ${group(m.sealUnidentifiable)} unidentifiable (${group(m.sealUnidentifiableReobserved)} переспостережено) · ${group(m.sealNotABeer)} not_a_beer (+${group(m.sealNotABeer7d)}/7д) · ${group(m.sealRetiredFalsified)} спростованих retire`,
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,

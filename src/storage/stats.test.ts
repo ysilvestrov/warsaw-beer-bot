@@ -7,7 +7,7 @@ import { collectStatus } from './stats';
 import { setJobState } from './job_state';
 import { recordMatchUsage } from './api_usage';
 import { upsertMatch } from './match_links';
-import { recordEnrichFailure, setEnrichFailureReview } from './enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure } from './enrich_failures';
 import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
 
 function fresh() {
@@ -66,6 +66,11 @@ test('collectStatus computes all metrics', () => {
     extMatchRequests: 0,
     extMatchAnon: 0,
     extMatchBeers: 0,
+    sealUnidentifiable: 0,
+    sealUnidentifiableReobserved: 0,
+    sealNotABeer: 0,
+    sealNotABeer7d: 0,
+    sealRetiredFalsified: 0,
   });
 });
 
@@ -127,24 +132,24 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   expect(m.extMatchBeers).toBe(5);
 });
 
-it('orphansOffCron counts orphans with no match_links row, minus wontfix/retired', () => {
+it('orphansOffCron counts orphans with no match_links row, minus not_a_beer/retired', () => {
   const db = fresh();
   // 1) relay-orphan без лінка → рахується
   upsertBeer(db, {
     name: 'Barrel Pie', brewery: 'The Bruery', style: null, abv: null, rating_global: null,
     normalized_name: 'barrel pie', normalized_brewery: 'the bruery',
   });
-  // 2) relay-orphan, протриажений як wontfix → НЕ рахується
-  const wontfix = upsertBeer(db, {
+  // 2) relay-orphan, протриажений як not_a_beer → НЕ рахується
+  const notABeer = upsertBeer(db, {
     name: 'Kelih Fino 545', brewery: 'Stoelzle', style: null, abv: null, rating_global: null,
     normalized_name: 'kelih fino 545', normalized_brewery: 'stoelzle',
   });
   recordEnrichFailure(db, {
-    beer_id: wontfix, brewery: 'Stoelzle', name: 'Kelih Fino 545',
+    beer_id: notABeer, brewery: 'Stoelzle', name: 'Kelih Fino 545',
     search_url: '', source_url: '', outcome: 'not_found',
     candidates_count: 0, candidates_summary: '', at: '2026-06-04T11:00:00Z',
   });
-  setEnrichFailureReview(db, wontfix, 'wontfix', null, '2026-06-04T11:30:00Z');
+  setEnrichFailureReview(db, notABeer, 'not_a_beer', null, '2026-06-04T11:30:00Z');
   // 3) orphan із лінком (on-tap шлях) → НЕ рахується, крон його й так бачить
   const linked = upsertBeer(db, {
     name: 'Clementine', brewery: 'Magic Road', style: null, abv: null, rating_global: null,
@@ -154,4 +159,54 @@ it('orphansOffCron counts orphans with no match_links row, minus wontfix/retired
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
   expect(m.orphansOffCron).toBe(1);
+});
+
+// #377 part B: the seal audit. Each number falsifies a different premise — see the
+// StatusMetrics comment. Dropping the `b.untappd_lookup_at > ef.reviewed_at` clause
+// makes the re-observed count equal the total and turns this red.
+it('counts the seals, the re-observed subset and the falsified retirements', () => {
+  const db = fresh();
+  const seedOrphan = (name: string): number => upsertBeer(db, {
+    name, brewery: 'B', style: null, abv: null, rating_global: null,
+    normalized_name: name.toLowerCase(), normalized_brewery: 'b',
+  });
+  const seedFailure = (id: number, at: string): void => recordEnrichFailure(db, {
+    beer_id: id, brewery: 'B', name: 'n', search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 0, candidates_summary: '', at,
+  });
+
+  // unidentifiable, looked up AFTER its verdict → re-observed
+  const seen = seedOrphan('Seen');
+  seedFailure(seen, '2026-08-01T00:00:00.000Z');
+  setEnrichFailureReview(db, seen, 'unidentifiable', null, '2026-08-01T00:00:00.000Z');
+  db.prepare('UPDATE beers SET untappd_lookup_at = ? WHERE id = ?')
+    .run('2026-08-10T00:00:00.000Z', seen);
+
+  // unidentifiable, last looked up BEFORE its verdict → counted in the total only
+  const unseen = seedOrphan('Unseen');
+  seedFailure(unseen, '2026-08-01T00:00:00.000Z');
+  setEnrichFailureReview(db, unseen, 'unidentifiable', null, '2026-08-01T00:00:00.000Z');
+  db.prepare('UPDATE beers SET untappd_lookup_at = ? WHERE id = ?')
+    .run('2026-07-01T00:00:00.000Z', unseen);
+
+  const freshMerch = seedOrphan('Surprise Box');
+  seedFailure(freshMerch, '2026-08-14T00:00:00.000Z');
+  setEnrichFailureReview(db, freshMerch, 'not_a_beer', null, '2026-08-14T00:00:00.000Z');
+
+  const oldMerch = seedOrphan('T-shirt');
+  seedFailure(oldMerch, '2026-06-01T00:00:00.000Z');
+  setEnrichFailureReview(db, oldMerch, 'not_a_beer', null, '2026-06-01T00:00:00.000Z');
+
+  // retired, yet the beer is still an orphan — falsified by its own existence
+  const retired = seedOrphan('Retired');
+  seedFailure(retired, '2026-07-01T00:00:00.000Z');
+  setEnrichFailureReview(db, retired, 'matcher_bug', null, '2026-07-01T00:00:00.000Z');
+  retireEnrichFailure(db, retired, 'fix shipped', '2026-07-02T00:00:00.000Z');
+
+  const m = collectStatus(db, new Date('2026-08-15T12:00:00.000Z'));
+  expect(m.sealUnidentifiable).toBe(2);
+  expect(m.sealUnidentifiableReobserved).toBe(1);
+  expect(m.sealNotABeer).toBe(2);
+  expect(m.sealNotABeer7d).toBe(1);
+  expect(m.sealRetiredFalsified).toBe(1);
 });
