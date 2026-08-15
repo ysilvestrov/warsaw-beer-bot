@@ -84,8 +84,11 @@ export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
   );
 }
 
-// Values must stay in sync with the CHECK on enrich_failures.review_class (schema migration 12).
-export type ReviewClass = 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix';
+// Values must stay in sync with the CHECK on enrich_failures.review_class (migration 24).
+// Derived from REVIEW_CLASSES rather than repeated: the two lists silently diverging is
+// exactly how `wontfix` ended up meaning two different things.
+import { REVIEW_CLASSES } from '../domain/review-class';
+export type ReviewClass = (typeof REVIEW_CLASSES)[number];
 
 // Marks an orphan failure as triaged. Returns false if no row exists for beerId
 // (e.g. the failure already cleared because the beer matched). A later recurring

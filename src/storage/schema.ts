@@ -16,6 +16,91 @@ export const V23_BACKFILL_SQL = `
      AND CAST(substr(review_note, instr(review_note, '→ #') + 3) AS INTEGER) > 0;
 `;
 
+// #377 part B. The 29 rows whose product is self-evidently not a beer — read one by
+// one off prod on 2026-08-15, not derived by a LIKE over review_note. A heuristic here
+// would be the same unverified bulk write that produced the 157-row incident.
+// wine / spritz / cocktail, merch, bundle / mystery box / multipack / gift set, kombucha.
+export const V24_NOT_A_BEER_IDS: readonly number[] = [
+  19, 20, 21, 91, 116, 117, 191, 12044, 12309, 25663, 30053,
+  25708,
+  25709, 25710, 25725, 25933, 25961, 26006, 26044, 26097, 26098, 26099, 26100,
+  29486, 29487, 29488, 29489, 32178,
+  33659,
+];
+
+// SQLite cannot alter a CHECK in place, so the class-set change forces a full table
+// rebuild — which is also the only moment the legacy rows can be rewritten, because
+// the new CHECK rejects 'wontfix' outright. Hence the rewrite lives in the copy's
+// SELECT, not in a follow-up UPDATE.
+//
+// Two branches only (spec: "re-derive, do not translate"):
+//   * the enumerated ids  -> not_a_beer, verdict kept (the product is the evidence)
+//   * every other wontfix -> NULL, verdict voided, note preserved for audit
+// plus the general rule that a row we could not ask about (outcome != 'not_found')
+// carries no class at all — which the second CHECK then enforces forever.
+//
+// FK note: enrich_failures is a child table and nothing references it, so the rebuild
+// is safe with `foreign_keys = ON` and needs no PRAGMA toggle (which would be a no-op
+// inside migrate()'s transaction anyway).
+export const V24_REBUILD_SQL = `
+  CREATE TABLE enrich_failures_v24 (
+    beer_id            INTEGER NOT NULL PRIMARY KEY
+                       REFERENCES beers(id) ON DELETE CASCADE,
+    brewery            TEXT NOT NULL,
+    name               TEXT NOT NULL,
+    search_url         TEXT NOT NULL,
+    outcome            TEXT NOT NULL CHECK (outcome IN ('not_found','blocked')),
+    candidates_count   INTEGER NOT NULL,
+    candidates_summary TEXT NOT NULL,
+    fail_count         INTEGER NOT NULL DEFAULT 1,
+    last_at            TEXT NOT NULL,
+    source_url         TEXT NOT NULL DEFAULT '',
+    review_class       TEXT CHECK (review_class IN
+                         ('parser_bug','matcher_bug','not_on_untappd','unidentifiable','not_a_beer')),
+    review_note        TEXT,
+    reviewed_at        TEXT,
+    retired_at         TEXT,
+    issue_number       INTEGER,
+    CHECK (review_class IS NULL OR outcome = 'not_found')
+  );
+
+  INSERT INTO enrich_failures_v24
+    (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary,
+     fail_count, last_at, source_url, review_class, review_note, reviewed_at, retired_at, issue_number)
+  SELECT beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary,
+         fail_count, last_at, source_url,
+         CASE
+           WHEN outcome <> 'not_found' THEN NULL
+           WHEN review_class = 'wontfix' AND beer_id IN (${V24_NOT_A_BEER_IDS.join(',')}) THEN 'not_a_beer'
+           WHEN review_class = 'wontfix' THEN NULL
+           ELSE review_class
+         END,
+         CASE
+           WHEN outcome <> 'not_found' AND review_class IS NOT NULL
+             THEN '#377: verdict voided (written with no evidence — Untappd never answered). Was: '
+                  || COALESCE(review_note, '')
+           WHEN review_class = 'wontfix' AND beer_id NOT IN (${V24_NOT_A_BEER_IDS.join(',')})
+             THEN '#377: prior wontfix verdict voided (vocabulary rework); re-triage. Was: '
+                  || COALESCE(review_note, '')
+           ELSE review_note
+         END,
+         CASE
+           WHEN outcome <> 'not_found' THEN NULL
+           WHEN review_class = 'wontfix' AND beer_id NOT IN (${V24_NOT_A_BEER_IDS.join(',')}) THEN NULL
+           ELSE reviewed_at
+         END,
+         retired_at,
+         CASE
+           WHEN outcome <> 'not_found' THEN NULL
+           WHEN review_class = 'wontfix' AND beer_id NOT IN (${V24_NOT_A_BEER_IDS.join(',')}) THEN NULL
+           ELSE issue_number
+         END
+    FROM enrich_failures;
+
+  DROP TABLE enrich_failures;
+  ALTER TABLE enrich_failures_v24 RENAME TO enrich_failures;
+`;
+
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
@@ -309,6 +394,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN issue_number INTEGER;
       ${V23_BACKFILL_SQL}
     `,
+  },
+  {
+    version: 24,
+    // #377 part B: one meaning per class. Adds not_a_beer, renames wontfix ->
+    // unidentifiable (no row carries the new name at migration time — every legacy
+    // wontfix is either re-derived as not_a_beer or voided), and adds the constraint
+    // that a verdict cannot exist on a row we could not ask about.
+    sql: V24_REBUILD_SQL,
   },
 ];
 

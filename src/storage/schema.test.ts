@@ -1,5 +1,29 @@
 import { openDb } from './db';
-import { migrate } from './schema';
+import { migrate, V24_NOT_A_BEER_IDS } from './schema';
+
+// Minimal beer row so the enrich_failures FK (beer_id -> beers.id) is satisfiable.
+// normalized_name/normalized_brewery are NOT NULL on beers (migration v1) even though
+// the brief's helper omitted them; filled here with the same values as name/brewery.
+function seedBeer(db: ReturnType<typeof openDb>, id: number): void {
+  db.prepare(
+    'INSERT INTO beers (id, brewery, name, normalized_brewery, normalized_name) VALUES (?, ?, ?, ?, ?)',
+  ).run(id, `brewery-${id}`, `name-${id}`, `brewery-${id}`, `name-${id}`);
+}
+
+function insertFailure(
+  db: ReturnType<typeof openDb>,
+  id: number,
+  outcome: 'not_found' | 'blocked',
+  reviewClass: string | null,
+): void {
+  seedBeer(db, id);
+  db.prepare(
+    `INSERT INTO enrich_failures
+       (beer_id, brewery, name, search_url, source_url, outcome,
+        candidates_count, candidates_summary, fail_count, last_at, review_class)
+     VALUES (?, 'b', 'n', '', '', ?, 0, '', 1, '2026-08-01T00:00:00.000Z', ?)`,
+  ).run(id, outcome, reviewClass);
+}
 
 describe('schema migrations', () => {
   it('creates all tables in an empty db', () => {
@@ -335,8 +359,11 @@ describe('schema migrations', () => {
 
       // Rewind v23 and populate on a v22 schema, so the real migration runs over
       // populated data rather than a hand-typed copy of its SQL.
+      // Rewind >= 23, not = 23: migrate() compares against MAX(version), so leaving a
+      // LATER row (v24+) in place would make it skip v23 entirely and this test would
+      // silently assert nothing against the dropped column (see #377 v22 test history).
       db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
-      db.prepare('DELETE FROM schema_version WHERE version = 23').run();
+      db.prepare('DELETE FROM schema_version WHERE version >= 23').run();
 
       db.prepare(
         `INSERT INTO beers (id, name, brewery, normalized_name, normalized_brewery)
@@ -366,11 +393,105 @@ describe('schema migrations', () => {
       ]);
     });
 
-    it('reaches version 23', () => {
+    it('reaches at least version 23', () => {
       const db = openDb(':memory:');
       migrate(db);
       const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      expect(v.v).toBe(23);
+      // >= rather than == : this asserts v23 is registered, not that it's the head
+      // (later migrations, e.g. v24, are expected to move the head further).
+      expect(v.v).toBeGreaterThanOrEqual(23);
+    });
+  });
+
+  describe('v24 triage vocabulary', () => {
+    it('accepts the new class set and rejects wontfix', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      seedBeer(db, 900);
+      const write = (cls: string) =>
+        db.prepare(
+          `INSERT INTO enrich_failures
+             (beer_id, brewery, name, search_url, source_url, outcome,
+              candidates_count, candidates_summary, fail_count, last_at, review_class)
+           VALUES (900, 'b', 'n', '', '', 'not_found', 0, '', 1, '2026-08-01T00:00:00.000Z', ?)
+           ON CONFLICT(beer_id) DO UPDATE SET review_class = excluded.review_class`,
+        ).run(cls);
+
+      for (const cls of ['parser_bug', 'matcher_bug', 'not_on_untappd', 'unidentifiable', 'not_a_beer']) {
+        expect(() => write(cls)).not.toThrow();
+      }
+      expect(() => write('wontfix')).toThrow(/CHECK/i);
+    });
+
+    it('refuses any class on a row we could not ask about (outcome != not_found)', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      seedBeer(db, 901);
+      const insertBlocked = (cls: string | null) =>
+        db.prepare(
+          `INSERT INTO enrich_failures
+             (beer_id, brewery, name, search_url, source_url, outcome,
+              candidates_count, candidates_summary, fail_count, last_at, review_class)
+           VALUES (901, 'b', 'n', '', '', 'blocked', 0, '', 1, '2026-08-01T00:00:00.000Z', ?)
+           ON CONFLICT(beer_id) DO UPDATE SET review_class = excluded.review_class`,
+        ).run(cls);
+
+      expect(() => insertBlocked(null)).not.toThrow();
+      // The point of the constraint: this must fail for RAW SQL, not only via the chokepoint.
+      expect(() => insertBlocked('unidentifiable')).toThrow(/CHECK/i);
+    });
+
+    it('rewrites legacy wontfix rows during the rebuild', () => {
+      const db = openDb(':memory:');
+      // Rewind to v23 so the v24 migration runs against real legacy data.
+      db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);`);
+      migrate(db);
+      db.prepare('DELETE FROM schema_version WHERE version >= 24').run();
+      db.exec(`
+        DROP TABLE enrich_failures;
+        CREATE TABLE enrich_failures (
+          beer_id INTEGER NOT NULL PRIMARY KEY REFERENCES beers(id) ON DELETE CASCADE,
+          brewery TEXT NOT NULL, name TEXT NOT NULL, search_url TEXT NOT NULL,
+          outcome TEXT NOT NULL CHECK (outcome IN ('not_found','blocked')),
+          candidates_count INTEGER NOT NULL, candidates_summary TEXT NOT NULL,
+          fail_count INTEGER NOT NULL DEFAULT 1, last_at TEXT NOT NULL,
+          source_url TEXT NOT NULL DEFAULT '',
+          review_class TEXT CHECK (review_class IN ('parser_bug','matcher_bug','not_on_untappd','wontfix')),
+          review_note TEXT, reviewed_at TEXT, retired_at TEXT, issue_number INTEGER
+        );
+      `);
+
+      const notABeer = V24_NOT_A_BEER_IDS[0];
+      insertFailure(db, notABeer, 'not_found', 'wontfix');       // enumerated non-beer
+      insertFailure(db, 777001, 'not_found', 'wontfix');          // survivor -> re-triage
+      insertFailure(db, 777002, 'blocked', 'wontfix');            // sealed with no evidence
+      insertFailure(db, 777003, 'not_found', 'matcher_bug');      // untouched
+      db.prepare(`UPDATE enrich_failures SET review_note = 'old note', reviewed_at = '2026-06-19T00:00:00.000Z'
+                   WHERE beer_id IN (?, ?)`).run(notABeer, 777001);
+
+      migrate(db);
+
+      const cls = (id: number) =>
+        (db.prepare('SELECT review_class AS c FROM enrich_failures WHERE beer_id = ?').get(id) as { c: string | null }).c;
+      expect(cls(notABeer)).toBe('not_a_beer');
+      expect(cls(777001)).toBeNull();
+      expect(cls(777002)).toBeNull();
+      expect(cls(777003)).toBe('matcher_bug');
+
+      // A voided verdict must not leave a reviewed_at behind: the row has to look
+      // untriaged to listUntriagedFailures, not merely unclassified.
+      const voided = db.prepare('SELECT reviewed_at AS r, review_note AS n FROM enrich_failures WHERE beer_id = ?')
+        .get(777001) as { r: string | null; n: string };
+      expect(voided.r).toBeNull();
+      expect(voided.n).toContain('old note');   // audit trail preserved
+      expect(voided.n).toContain('#377');
+
+      // not_a_beer keeps its verdict: it was re-derived from the product itself.
+      const kept = db.prepare('SELECT reviewed_at AS r FROM enrich_failures WHERE beer_id = ?')
+        .get(notABeer) as { r: string | null };
+      expect(kept.r).not.toBeNull();
+
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(24);
     });
   });
 });
