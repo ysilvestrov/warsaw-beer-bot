@@ -509,12 +509,19 @@ describe('recordEnrichFailure: blocked never downgrades', () => {
 
   // Red if the guard is applied to an already-blocked row in some other way: two blocked
   // attempts in a row are just a counter bump, and the row keeps outcome='blocked'.
-  test('a blocked record on an already-blocked row bumps the counter', () => {
+  //
+  // The incoming brewery/name/search_url deliberately differ from what seedFailure(6, ...)
+  // stored in enrich_failures (literal 'b'/'n'/''). Without the guard, the fall-through
+  // INSERT...ON CONFLICT would overwrite all three from `excluded` — outcome/fail_count
+  // alone stay byte-identical whether the guard exists or not, so they can't distinguish
+  // the two code paths.
+  test('a blocked record on an already-blocked row bumps the counter and touches nothing else', () => {
     const db = freshDb();
     seedFailure(db, 6, { outcome: 'blocked' });
 
     recordEnrichFailure(db, {
-      beer_id: 6, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      beer_id: 6, brewery: 'incoming-brewery', name: 'incoming-name',
+      search_url: 'https://untappd.com/search?q=incoming', source_url: '',
       outcome: 'blocked', candidates_count: 0, candidates_summary: '',
       at: '2026-08-15T10:00:00.000Z',
     });
@@ -522,6 +529,9 @@ describe('recordEnrichFailure: blocked never downgrades', () => {
     const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 6').get() as any;
     expect(row.outcome).toBe('blocked');
     expect(row.fail_count).toBe(2);
+    expect(row.brewery).toBe('b');
+    expect(row.name).toBe('n');
+    expect(row.search_url).toBe('');
   });
 });
 
