@@ -52,6 +52,10 @@ export interface OpenIssue {
   title: string;
   body: string;
   labels: string[];
+  // ISO instant the issue was opened. Only the saturation guard reads it (#408) — it
+  // counts rows attached AFTER creation, because an issue born from a split starts out
+  // carrying its whole evidence cohort.
+  createdAt: string;
 }
 
 export interface TriageInput {

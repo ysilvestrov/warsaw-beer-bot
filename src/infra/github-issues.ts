@@ -44,13 +44,20 @@ export function createGithubIssuesClient(cfg: {
 
   return {
     async listOpenIssues(label) {
-      type Raw = { number: number; title: string; body: string | null; labels: { name: string }[] };
+      type Raw = {
+        number: number; title: string; body: string | null;
+        labels: { name: string }[]; created_at: string;
+      };
       const raw = await call<Raw[]>(`${base}/issues?state=open&labels=${encodeURIComponent(label)}&per_page=100`);
       return raw.map((r) => ({
         number: r.number,
         title: r.title,
         body: r.body ?? '',
         labels: r.labels.map((l) => l.name),
+        // #408 saturation counts rows attached AFTER the issue existed, so the guard
+        // needs the creation instant — an issue born from a split legitimately starts
+        // life carrying a large enumerated cohort.
+        createdAt: r.created_at,
       }));
     },
     async createIssue(i) {

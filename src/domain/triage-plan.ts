@@ -44,6 +44,15 @@ export interface TriagePlan {
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
 
+// Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
+// enumerated rows, so a lifetime count would reject the very shape (a narrow issue
+// split out of a magnet) this whole change exists to encourage. Measured on prod
+// 2026-08-14: the issues nobody complains about sit at <= 7 rows, while the magnets ran
+// to 36 (#347) and 90 (#254), so any threshold in 10-15 separates them. A judgement
+// call on measured data, not a derived constant — revisit once issue_number (v23) has
+// produced a real post-creation distribution.
+export const MAX_ROWS_PER_ISSUE = 12;
+
 // Single source of truth for which classes go to GitHub and which label each
 // maps to — the actionable check derives from these keys.
 const CLASS_LABELS = {
@@ -161,6 +170,14 @@ export function planTriageActions(
     if (hasIssue) {
       const target = byNumber.get(verdict.issue_number!);
       if (!target) { skipped++; continue; }
+      // Guard 4: a saturated issue stops accepting rows. #347 took 36 rows across 18
+      // comment batches in 19 days and shipped nothing — the pile itself was the
+      // signal, and nothing was watching it.
+      if (target.postCreationRows >= MAX_ROWS_PER_ISSUE) {
+        guardHits.saturated += 1;
+        skipped++;
+        continue;
+      }
       // Guard 2: the row must not contradict what the issue claims to be about. An
       // unscoped issue (no `triage-scope` block in its body) accepts nothing — that is
       // what makes the one-time backfill of existing issues load-bearing rather than

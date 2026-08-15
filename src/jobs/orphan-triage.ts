@@ -2,7 +2,7 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
-  listUntriagedFailures, setEnrichFailureReview, type UntriagedFailure,
+  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue, type UntriagedFailure,
 } from '../storage/enrich_failures';
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
@@ -249,7 +249,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       const scopedIssues: ScopedIssue[] = openIssues.map((i) => ({
         number: i.number,
         scope: parseScopeBlock(i.body),
-        postCreationRows: 0,
+        postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
       }));
       plan = planTriageActions(analysis, scopedIssues, orphans, probes);
     } catch (e) {

@@ -244,6 +244,30 @@ test('a proposed issue scoped by class AND another column survives', () => {
   expect(plan.guardHits.illegal_scope).toBe(0);
 });
 
+// --- #408 guard 4: a saturated issue stops accepting rows ------------------------
+
+test('a saturated issue refuses further attachment', () => {
+  const issues = [open(347, { postCreationRows: 12 })];
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, rows(1), noProbes);
+  expect(plan.comments).toHaveLength(0);
+  expect(plan.skipped).toBe(1);
+  expect(plan.guardHits.saturated).toBe(1);
+});
+
+// #405 was opened carrying 15 enumerated rows — exactly the sort of number a lifetime
+// count would trip over on day one. Only rows added AFTER creation count.
+test('an issue born with a large cohort but no post-creation rows still accepts', () => {
+  const issues = [open(405, {
+    scope: { beer_ids: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], where: [] },
+    postCreationRows: 0,
+  })];
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 405 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, rows(1), noProbes);
+  expect(plan.comments[0].verdicts).toHaveLength(1);
+  expect(plan.guardHits.saturated).toBe(0);
+});
+
 // --- #408 guard 3: absence must be evidenced, not inferred -----------------------
 
 // #377 measured this: of 14 weakly-evidenced not_on_untappd verdicts, 7 were beers that

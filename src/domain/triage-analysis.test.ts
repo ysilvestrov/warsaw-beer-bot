@@ -53,7 +53,7 @@ test('AnalysisSchema: rejects unknown review_class', () => {
 test('buildTriagePrompt: contains orphans, issues and class definitions', () => {
   const p = buildTriagePrompt({
     orphans: [orphan],
-    openIssues: [{ number: 228, title: 'nano-noise tokens', body: 'strip nano', labels: ['orphan-triage'] }],
+    openIssues: [{ number: 228, title: 'nano-noise tokens', body: 'strip nano', labels: ['orphan-triage'], createdAt: '2026-01-01T00:00:00Z' }],
   });
   expect(p).toContain('"beer_id": 7');
   expect(p).toContain('#228');
@@ -75,7 +75,7 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
 test('buildTriagePrompt: truncates over-long issue bodies', () => {
   const p = buildTriagePrompt({
     orphans: [],
-    openIssues: [{ number: 1, title: 't', body: 'x'.repeat(2500), labels: [] }],
+    openIssues: [{ number: 1, title: 't', body: 'x'.repeat(2500), labels: [], createdAt: '2026-01-01T00:00:00Z' }],
   });
   expect(p).toContain('x'.repeat(2000));
   expect(p).not.toContain('x'.repeat(2001));
@@ -105,7 +105,7 @@ test('buildTriagePrompt: bounds scraped orphan fields', () => {
 
 test('buildTriagePrompt: caps rendered open issues at 30', () => {
   const openIssues = Array.from({ length: 40 }, (_, i) => ({
-    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [],
+    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [], createdAt: '2026-01-01T00:00:00Z',
   }));
   const p = buildTriagePrompt({ orphans: [], openIssues });
   expect(p).toContain('#30 ');

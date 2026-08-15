@@ -52,7 +52,13 @@ function seedOrphan(d: ReturnType<typeof db>, beerId: number) {
 const SCOPED_BODY = 'b\n\n```triage-scope\n{"beer_ids":[1,2,3,4,5,6],"where":[]}\n```';
 
 const gh = (over = {}) => ({
-  listOpenIssues: vi.fn().mockResolvedValue([{ number: 228, title: 't', body: SCOPED_BODY, labels: [] }]),
+  // createdAt is required by OpenIssue and read by the saturation guard. A mock is not
+  // type-checked, and a missing value does NOT throw — better-sqlite3 binds undefined,
+  // the comparison goes NULL, and countRowsForIssue quietly returns 0, which would
+  // disable the guard while every test still passed. So it is set deliberately.
+  listOpenIssues: vi.fn().mockResolvedValue([
+    { number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+  ]),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   ...over,
