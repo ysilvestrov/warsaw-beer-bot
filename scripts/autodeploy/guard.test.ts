@@ -37,6 +37,8 @@ describe('autodeploy-guard.sh', () => {
   let lockOnly: string;
   let withSrc: string;
   let offMain: string;
+  let extensionLock: string;
+  let subPackage: string;
 
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), 'wbb-guard-'));
@@ -60,6 +62,18 @@ describe('autodeploy-guard.sh', () => {
     git(repo, 'checkout', '-q', '-b', 'side', basec);
     offMain = commit(repo, { 'package-lock.json': '{"lockfileVersion":3,"evil":true}' }, 'off main');
     git(repo, 'checkout', '-q', 'main');
+
+    // I1: these two stay ON main (not a side branch) so the diff each test
+    // exercises is a clean single-file change — the allowlist arm is exact
+    // string equality (`package.json|package-lock.json`), not a glob, and
+    // these pin that against a future `*package.json|*package-lock.json`
+    // regression (see the mutation proof in the fix-wave report).
+    extensionLock = commit(
+      repo,
+      { 'extension/package-lock.json': '{"lockfileVersion":3}' },
+      'extension lockfile bump',
+    );
+    subPackage = commit(repo, { 'sub/package.json': '{}' }, 'nested package.json');
   });
 
   it('accepts a lockfile-only diff that is on main', () => {
@@ -83,5 +97,23 @@ describe('autodeploy-guard.sh', () => {
   it('accepts an empty diff (nothing to deploy is not a violation)', () => {
     const r = guard(repo, lockOnly, lockOnly, 'main');
     expect(r.code).toBe(0);
+  });
+
+  it('refuses a diff that touches extension/package-lock.json (not the same file as the root lockfile)', () => {
+    const r = guard(repo, withSrc, extensionLock, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('extension/package-lock.json');
+  });
+
+  it('refuses a diff that touches a nested package.json', () => {
+    const r = guard(repo, extensionLock, subPackage, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toContain('sub/package.json');
+  });
+
+  it('C1: refuses a bogus deployed sha instead of silently accepting', () => {
+    const r = guard(repo, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', lockOnly, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/does not resolve/);
   });
 });

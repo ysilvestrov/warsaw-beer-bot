@@ -132,6 +132,32 @@ printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=\n' "$(git -C /home/ysi/warsaw-beer-bot re
   > ~/.local/state/wbb-autodeploy/state.env
 ```
 
+### A failed tag is remembered, not retried
+
+If a tag fails — the guard refuses it, `npm audit` still reports an advisory,
+the deploy comes up unhealthy, or the rollback itself fails — the run writes
+`LAST_FAILED_SHA=<that commit>` into `~/.local/state/wbb-autodeploy/state.env`
+alongside the existing `DEPLOYED_SHA`/`PREVIOUS_SHA` lines. On every later
+tick, a tag whose commit matches `LAST_FAILED_SHA` is skipped immediately —
+exit 0, one journal line, **no Telegram message**. This is deliberate: the
+operator was already paged when the failure was first recorded, and design
+§7 calls for one attempt, then a human, not a message every 5 minutes
+forever.
+
+To retry a tag by hand (after fixing whatever made it fail, or if the
+failure was a known-transient blip), clear the memory:
+
+```bash
+# delete the whole line …
+sed -i '/^LAST_FAILED_SHA=/d' ~/.local/state/wbb-autodeploy/state.env
+# … or just delete the file (loses DEPLOYED_SHA/PREVIOUS_SHA too — see
+# "seed it" above to restore the baseline afterward)
+rm ~/.local/state/wbb-autodeploy/state.env
+```
+
+The next timer tick then treats it as a fresh tag and goes through the
+guard/audit/deploy sequence again.
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2
