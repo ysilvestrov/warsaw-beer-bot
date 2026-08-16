@@ -106,22 +106,33 @@ The three mechanisms that put an actionable class into `quiet`:
 | counter | meaning |
 |---|---|
 | `guardHits.unprobed_absence` | guard 3 downgraded an unprovable absence to `matcher_bug` |
-| `unverified` | the #358 gate stripped an unverifiable cause |
-| `noTargetProposed` | the model itself named neither an issue nor a new-issue key |
+| `quietCauseStripped` | the #358 gate stripped an unverifiable cause and the row went quiet |
+| `quietNoTarget` | the model itself named neither an issue nor a new-issue key |
 
-The first two exist already. Only the third is new, and it must be counted **directly** rather than
-derived: `recordedNoIssue − unprobed_absence − unverified` can go negative when a stripped verdict is
-later skipped as a foreign row, and a report that can print a negative number is not a report.
+**All three are counted inside `planTriageActions`, where the disposition is decided.** The obvious
+shortcut — reuse the job's existing `unverified` for the middle row — is wrong: `unverified` counts
+every cause the gate stripped, including one whose verdict is later dropped as a foreign row or a
+duplicate. It answers "how much did the gate strip", which is a different question from "how did
+this row end up". Publishing it as a quiet disposition would reintroduce the same overlap in a new
+place. `unverified` keeps its meaning and stays in the evidence-summary line.
 
-Counting it directly requires `planTriageActions` to distinguish a stripped verdict from a declined
+Deriving `quietNoTarget` by subtraction is likewise rejected: `recordedNoIssue − unprobed_absence −
+unverified` can go negative for exactly the reason above, and a report that can print a negative
+number is not a report.
+
+Counting directly requires `planTriageActions` to distinguish a stripped verdict from a declined
 one. Today it cannot: the strip happens in `orphanTriage` before planning (`orphan-triage.ts:242`)
-and leaves only a `unverified: ` note prefix. **The strip will set a structured marker on the verdict
-instead** — the same "author structure, not text" rule part A applied to model output, now applied to
-our own data flow. Sniffing our own rendered prose for control flow is the defect that produced the
-part-A scope-hijack bug; there is no reason to introduce it here when a field costs nothing.
+and leaves only a `unverified: ` note prefix. **The call site will pass the set of stripped beer ids
+as an argument** — it already knows them, since it does the stripping.
+
+The rejected alternative was a `cause_stripped` field on the verdict itself. It reads better, but
+`Verdict` is `z.infer<typeof VerdictSchema>` — the model's own parsed output. A marker living there
+is one schema edit away from being model-settable, which would let a model launder a stripped cause
+into a voluntary declination. A separate argument keeps `Verdict` exactly what the model returned,
+so the constraint is enforced by the shape of the data rather than by a rule someone must remember.
 
 The note prefix stays — it is what a human sees reading `review_note` in an ad-hoc query, and it is
-what made this investigation possible at all.
+what made this investigation possible at all. It is simply never read by control flow.
 
 ### 5. What the human report shows
 
@@ -152,11 +163,13 @@ it, instead of printing a sum next to one of its own parts.
 
 ## Interfaces
 
-- `TriageOutcome` — gains `guardHits: Record<GuardReason, number>` and `noTargetProposed: number`;
-  loses `recordedNoIssue`.
-- `TriagePlan` — gains `noTargetProposed: number` (counted at `triage-plan.ts:173`).
-- The internal verdict type — gains a marker set by the #358 strip. Internal to the triage pipeline;
-  it is not part of the model's tool schema and must not be settable by the model.
+- `TriagePlan` — gains `quietCauseStripped: number` and `quietNoTarget: number`, both counted at the
+  `!hasIssue && !hasKey` branch (`triage-plan.ts:173`).
+- `planTriageActions` — gains a fifth parameter, `strippedBeerIds: ReadonlySet<number>`. Callers that
+  do no cause verification pass an empty set.
+- `TriageOutcome` — gains `guardHits: Record<GuardReason, number>`, `causeStripped: number` and
+  `noTarget: number`; loses `recordedNoIssue`. `unverified` stays, with its existing meaning.
+- `Verdict` — **unchanged**. The strip marker deliberately does not live on it.
 
 ## Constraints
 
@@ -182,9 +195,11 @@ today's code prints nothing.
 5. `verdict shortfall` still fires on a genuine shortfall and no longer carries `guardHits`.
 6. The three quiet counters are disjoint on a batch containing one of each mechanism, and they sum
    to the number of actionable-class rows written with no issue.
-7. `noTargetProposed` counts a declined verdict but not a stripped one, proving the marker is read
-   rather than the note prefix. Mutation proof: remove the marker from the strip and this test goes
-   red while the note prefix is unchanged.
+7. `quietNoTarget` counts a declined verdict and `quietCauseStripped` counts a stripped one, on a
+   batch holding both. The stripped verdict's `review_note` must carry the `unverified: ` prefix
+   while the declined one does not, so a test that passes by sniffing the prefix instead of reading
+   `strippedBeerIds` would still be wrong. Mutation proof: have the job pass an empty
+   `strippedBeerIds` and this test goes red while every note is unchanged.
 8. The digest line shows neither `unprobed_absence` nor `saturated`, and shows `scope_violation` when
    non-zero.
 
