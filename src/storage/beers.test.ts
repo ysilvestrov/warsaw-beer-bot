@@ -382,6 +382,85 @@ describe('listLookupCandidates', () => {
     expect(c.untappd_lookup_at).toBeNull();
     expect(c.untappd_lookup_count).toBe(0);
   });
+
+  // #421. A verdict naming an unfixed bug is a settled question: while the issue is open
+  // the answer cannot move, so re-asking Untappd spends quota on nothing AND burns the
+  // row's four backoff attempts before its fix ships.
+  //
+  // Seeds a failure row and a verdict in one step — the shape every locked row has.
+  function seedVerdict(
+    db: ReturnType<typeof fresh>,
+    beerId: number,
+    cls: 'matcher_bug' | 'parser_bug' | 'not_on_untappd' | 'unidentifiable',
+    issueNumber: number | null,
+  ): void {
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: 'b', name: 'n',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 3, candidates_summary: '', at: '2026-05-26T11:00:00Z',
+    });
+    // `not_on_untappd` is refused unless absence was actually proved by a probe (#408), so
+    // seeding it without this flag silently leaves review_class NULL and every assertion
+    // about that class passes vacuously. Asserted, not assumed, below.
+    const result = setEnrichFailureReview(
+      db, beerId, cls, 'note', '2026-05-26T11:30:00Z', issueNumber,
+      { absenceProved: cls === 'not_on_untappd' },
+    );
+    if (result !== 'written') throw new Error(`seedVerdict refused: ${result}`);
+  }
+
+  // Red if `AND NOT ${lockedRowPredicate}` is dropped from listLookupCandidates.
+  test('holds a locked row out of the on-tap pool until it is unlocked', () => {
+    const db = fresh();
+    const locked = seedBeerOnTap(db, { brewery: 'Mad Brew', name: 'Bitter Cost' });
+    seedVerdict(db, locked, 'matcher_bug', 347);
+    const now = new Date('2026-05-26T12:00:00Z');
+
+    expect(listLookupCandidates(db, 10, now).map((c) => c.id)).not.toContain(locked);
+
+    db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?')
+      .run('2026-05-26T11:45:00Z', locked);
+
+    expect(listLookupCandidates(db, 10, now).map((c) => c.id)).toContain(locked);
+  });
+
+  // Red if the predicate keys off the class alone. A verdict with no issue names no fix,
+  // so nothing could ever unlock it — locking it would be a permanent seal, which is the
+  // whole defect #377 spent a design removing.
+  test('does not lock an actionable row that carries no issue_number', () => {
+    const db = fresh();
+    const legacy = seedBeerOnTap(db, { brewery: 'Mad Brew', name: 'Legacy Row' });
+    seedVerdict(db, legacy, 'matcher_bug', null);
+
+    expect(listLookupCandidates(db, 10, new Date('2026-05-26T12:00:00Z')).map((c) => c.id))
+      .toContain(legacy);
+  });
+
+  // Red if the predicate widens past the two actionable classes. not_on_untappd and
+  // unidentifiable name no fix owner: the first waits on Untappd's catalogue, the second
+  // on our own resolving power. Neither is settled by an issue closing.
+  test('does not lock not_on_untappd or unidentifiable rows', () => {
+    const db = fresh();
+    const absent = seedBeerOnTap(db, { brewery: 'Hoppy Hog', name: 'Charred Memory' });
+    const garbled = seedBeerOnTap(db, { brewery: 'MGM-15', name: 'MGM-15' });
+    seedVerdict(db, absent, 'not_on_untappd', 405);
+    seedVerdict(db, garbled, 'unidentifiable', 405);
+
+    const ids = listLookupCandidates(db, 10, new Date('2026-05-26T12:00:00Z')).map((c) => c.id);
+    expect(ids).toContain(absent);
+    expect(ids).toContain(garbled);
+  });
+
+  // Red if the pool stops selecting review_class. Task 4 picks the backoff schedule from
+  // it, and a column absent from the SELECT fails silently as `undefined`.
+  test('returned shape carries review_class', () => {
+    const db = fresh();
+    const id = seedBeerOnTap(db, { brewery: 'Hoppy Hog', name: 'Charred Memory' });
+    seedVerdict(db, id, 'not_on_untappd', null);
+
+    const [c] = listLookupCandidates(db, 10, new Date('2026-05-26T12:00:00Z'));
+    expect(c.review_class).toBe('not_on_untappd');
+  });
 });
 
 describe('listRelayLookupCandidates', () => {
@@ -535,6 +614,28 @@ describe('listRelayLookupCandidates', () => {
     setEnrichFailureReview(db, matcherBug, 'matcher_bug', null, '2026-05-26T11:30:00Z');
 
     expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([matcherBug]);
+  });
+
+  // #421. Red if `AND NOT ${lockedRowPredicate}` is dropped from the relay pool's query.
+  // Both pools share the lock and it is easy to add it to one and believe it covers both;
+  // this is the assertion that proves the relay half. Note the row above — the same class,
+  // but with NO issue_number — must stay in the pool, so the two tests bracket the rule.
+  test('holds a locked row out of the relay pool until it is unlocked', () => {
+    const db = fresh();
+    const locked = seedRelayOrphan(db, { brewery: 'flasker', name: 'Cyrillic Row' });
+    recordEnrichFailure(db, {
+      beer_id: locked, brewery: 'flasker', name: 'Cyrillic Row',
+      search_url: '', source_url: 'https://flasker.com.ua/x', outcome: 'not_found',
+      candidates_count: 2, candidates_summary: 'x — y', at: '2026-05-26T11:00:00Z',
+    });
+    setEnrichFailureReview(db, locked, 'parser_bug', 'split → #376', '2026-05-26T11:30:00Z', 376);
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).not.toContain(locked);
+
+    db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?')
+      .run('2026-05-26T11:45:00Z', locked);
+
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toContain(locked);
   });
 
   test('respects backoff: not eligible when lookup_at + delay > now', () => {

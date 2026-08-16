@@ -161,6 +161,28 @@ it('orphansOffCron counts orphans with no match_links row, minus not_a_beer/reti
   expect(m.orphansOffCron).toBe(1);
 });
 
+// #421. Red if the lock clause is folded into `orphanWithoutMatchLinkPredicate` itself
+// instead of being appended at the two pool call sites. This metric counts the whole drain
+// QUEUE, not the slice eligible to run right now — which is exactly why it already skips
+// the backoff filter. Hiding locked rows here would make the backlog look like it shrank
+// when it only went quiet, and the lock's own audit counter is what reports that number.
+it('orphansOffCron still counts a row that is locked out of the pools', () => {
+  const db = fresh();
+  const locked = upsertBeer(db, {
+    name: 'Bitter Cost', brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
+    normalized_name: 'bitter cost', normalized_brewery: 'mad brew',
+  });
+  recordEnrichFailure(db, {
+    beer_id: locked, brewery: 'Mad Brew', name: 'Bitter Cost',
+    search_url: '', source_url: '', outcome: 'not_found',
+    candidates_count: 3, candidates_summary: '', at: '2026-06-04T11:00:00Z',
+  });
+  setEnrichFailureReview(db, locked, 'matcher_bug', 'alias gap', '2026-06-04T11:30:00Z', 347);
+
+  const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
+  expect(m.orphansOffCron).toBe(1);
+});
+
 // #377 part B: the seal audit. Each number falsifies a different premise — see the
 // StatusMetrics comment. Dropping the `b.untappd_lookup_at > ef.reviewed_at` clause
 // makes the re-observed count equal the total and turns this red.
