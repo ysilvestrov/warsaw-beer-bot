@@ -16,9 +16,18 @@ permissions:
   contents: read
   pull-requests: write
 
+# One run per PR (falling back to the run id on `schedule`, which has no PR
+# number of its own, so cron ticks never collide with each other). Never
+# cancel-in-progress: a half-labelled PR — one label removed, the new one not
+# yet applied — is worse than a slightly stale run finishing late.
+concurrency:
+  group: dependabot-qualify-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
 jobs:
   qualify:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: >-
       github.event_name == 'schedule' ||
       (github.event.pull_request.user.login == 'dependabot[bot]' &&
@@ -34,6 +43,10 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
 
       - name: Collect the pull requests to evaluate
         id: prs
@@ -73,12 +86,23 @@ jobs:
 
             rm -rf /tmp/q && mkdir -p /tmp/q/base /tmp/q/head
 
+            # Two-dot (`origin/${base_ref}..FETCH_HEAD`, or the plain two-arg
+            # `git diff A B` used here, which is the same comparison) reports
+            # EVERY difference between the two trees — including commits that
+            # landed on the base branch after the PR's branch point, which the
+            # PR itself never touched. A Dependabot PR that isn't the very next
+            # thing merged to main would then pick up unrelated `src/**` paths,
+            # fail the allowlist, and get mislabelled `deps-manual` — silently
+            # disabling the whole feature. Three-dot (merge-base) is the PR's
+            # OWN change. Do not "simplify" this back to two-dot.
+            merge_base=$(git merge-base "origin/${base_ref}" FETCH_HEAD) || return 1
+
             # Data only — NEVER a checkout. This job holds a write token.
             for f in package.json package-lock.json; do
-              git show "origin/${base_ref}:${f}" > "/tmp/q/base/${f}" || return 1
-              git show "FETCH_HEAD:${f}"         > "/tmp/q/head/${f}" || return 1
+              git show "${merge_base}:${f}" > "/tmp/q/base/${f}" || return 1
+              git show "FETCH_HEAD:${f}"    > "/tmp/q/head/${f}" || return 1
             done
-            git diff --name-only "origin/${base_ref}" FETCH_HEAD > /tmp/q/changed.txt || return 1
+            git diff --name-only "${merge_base}" FETCH_HEAD > /tmp/q/changed.txt || return 1
 
             # `npm audit` exits non-zero when it FINDS something, so `|| true` is
             # required — but stderr is deliberately NOT silenced: after the C1 fix

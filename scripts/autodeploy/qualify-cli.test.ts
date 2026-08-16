@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   auditReport,
+  publishedAt,
   resolvedVersions,
   selectPublishedAt,
   type LockPackages,
@@ -88,6 +89,42 @@ describe('resolvedVersions — the lockfile lookup must see nested entries', () 
 
   it('returns an empty set when the package is absent', () => {
     expect(resolvedVersions(lock({ 'node_modules/hono': '4.0.0' }), 'nanoid')).toEqual(new Set());
+  });
+});
+
+describe('publishedAt — the registry lookup behind selectPublishedAt', () => {
+  // Stub fetchImpl only — never the real network.
+  const stubFetch = (impl: (url: string) => { ok: boolean; json: () => Promise<unknown> }): typeof fetch =>
+    ((url: string) => Promise.resolve(impl(url))) as unknown as typeof fetch;
+
+  it('returns null on a non-ok response', async () => {
+    const fetchImpl = stubFetch(() => ({ ok: false, json: async () => ({}) }));
+    expect(await publishedAt('nanoid', '3.3.18', fetchImpl)).toBeNull();
+  });
+
+  it('returns null when the time map lacks the version', async () => {
+    const fetchImpl = stubFetch(() => ({
+      ok: true,
+      json: async () => ({ time: { '3.3.7': '2024-01-01T00:00:00.000Z' } }),
+    }));
+    expect(await publishedAt('nanoid', '3.3.18', fetchImpl)).toBeNull();
+  });
+
+  it('returns null when the timestamp is unparseable', async () => {
+    const fetchImpl = stubFetch(() => ({
+      ok: true,
+      json: async () => ({ time: { '3.3.18': 'not-a-date' } }),
+    }));
+    expect(await publishedAt('nanoid', '3.3.18', fetchImpl)).toBeNull();
+  });
+
+  it('returns the right Date on a good response', async () => {
+    const fetchImpl = stubFetch(() => ({
+      ok: true,
+      json: async () => ({ time: { '3.3.18': '2026-08-01T12:00:00.000Z' } }),
+    }));
+    const when = await publishedAt('nanoid', '3.3.18', fetchImpl);
+    expect(when).toEqual(new Date('2026-08-01T12:00:00.000Z'));
   });
 });
 

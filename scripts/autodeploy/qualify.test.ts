@@ -56,6 +56,18 @@ describe('qualify', () => {
     expect(r.verdict).toBe('autodeploy');
   });
 
+  it('holds a high whose publish time is unparseable, never falling through to autodeploy', () => {
+    // Guards the C3 fix: `!Number.isFinite(ageHours)` must force a hold. An
+    // invalid Date's getTime() is NaN, which makes every `<` comparison false
+    // — deleting the guard would let this fall through to the autodeploy
+    // return at the bottom of qualify() while the suite stays green.
+    const r = qualify({
+      base: report({ undici: 'high' }), head: report({}),
+      publishedAt: new Date('nonsense'), now: NOW,
+    });
+    expect(r.verdict).toBe('hold');
+  });
+
   it('takes the highest base severity, so one critical lifts the hold off a mixed batch', () => {
     const r = qualify({
       base: report({ undici: 'high', hono: 'critical' }), head: report({}),

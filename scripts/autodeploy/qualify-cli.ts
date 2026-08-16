@@ -12,7 +12,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { qualify, type AuditReport, type Severity } from './qualify';
-import { manifestScope } from './manifest-scope';
+import { manifestScope, type DepSections } from './manifest-scope';
 
 function readJson<T>(path: string): T {
   return JSON.parse(readFileSync(path, 'utf8')) as T;
@@ -41,11 +41,11 @@ export function auditReport(dir: string): AuditReport {
   return { vulnerabilities: parsed.vulnerabilities };
 }
 
-function directDeps(dir: string): Record<string, string> {
+function directDeps(dir: string): DepSections {
   const pkg = readJson<{ dependencies?: Record<string, string>; devDependencies?: Record<string, string> }>(
     join(dir, 'package.json'),
   );
-  return { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+  return { dependencies: pkg.dependencies ?? {}, devDependencies: pkg.devDependencies ?? {} };
 }
 
 export type LockPackages = Record<string, { version?: string }>;

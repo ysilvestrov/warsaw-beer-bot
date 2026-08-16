@@ -20,11 +20,16 @@ export function rangeOperator(spec: string): string {
   return /^[^0-9]*/.exec(spec)![0].trim();
 }
 
+/** `dependencies` and `devDependencies` of a `package.json`, kept apart. */
+export interface DepSections {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+}
+
 export function manifestScope(params: {
   changedPaths: string[];
-  /** Merged `dependencies` + `devDependencies` of the base `package.json`. */
-  base: Record<string, string>;
-  head: Record<string, string>;
+  base: DepSections;
+  head: DepSections;
 }): { ok: boolean; violations: string[] } {
   const { changedPaths, base, head } = params;
   const violations: string[] = [];
@@ -33,20 +38,45 @@ export function manifestScope(params: {
     if (!ALLOWED_PATHS.includes(p)) violations.push(`path outside the allowlist: ${p}`);
   }
 
-  for (const name of Object.keys(head)) {
-    if (!(name in base)) violations.push(`dependency added: ${name}`);
+  // Merged view, for name-level presence/absence and range-operator checks —
+  // those don't care which section a package lives in.
+  const baseAll = { ...base.dependencies, ...base.devDependencies };
+  const headAll = { ...head.dependencies, ...head.devDependencies };
+
+  for (const name of Object.keys(headAll)) {
+    if (!(name in baseAll)) violations.push(`dependency added: ${name}`);
   }
-  for (const name of Object.keys(base)) {
-    if (!(name in head)) violations.push(`dependency removed: ${name}`);
+  for (const name of Object.keys(baseAll)) {
+    if (!(name in headAll)) violations.push(`dependency removed: ${name}`);
   }
 
-  for (const [name, headSpec] of Object.entries(head)) {
-    const baseSpec = base[name];
+  for (const [name, headSpec] of Object.entries(headAll)) {
+    const baseSpec = baseAll[name];
     if (baseSpec === undefined) continue;
     const a = rangeOperator(baseSpec);
     const b = rangeOperator(headSpec);
     if (a !== b) {
       violations.push(`range operator changed for ${name}: "${a || '(pinned)'}" → "${b || '(pinned)'}"`);
+    }
+  }
+
+  // A package that moves between `dependencies` and `devDependencies` is
+  // invisible to the merged view above, yet it changes what `npm audit
+  // --omit=dev` sees: moving a base-vulnerable package into devDependencies
+  // makes the head audit read clean because the package left production, not
+  // because it was fixed — base-vulnerable + head-clean is exactly the
+  // pattern that reads as "qualify()'s job done, autodeploy". Catch the move
+  // itself, independent of the range-operator check above.
+  for (const name of Object.keys(baseAll)) {
+    if (!(name in headAll)) continue; // already reported as removed
+    const wasProd = name in base.dependencies;
+    const wasDev = name in base.devDependencies;
+    const isProd = name in head.dependencies;
+    const isDev = name in head.devDependencies;
+    if (wasProd && isDev && !isProd) {
+      violations.push(`dependency moved from dependencies to devDependencies: ${name}`);
+    } else if (wasDev && isProd && !isDev) {
+      violations.push(`dependency moved from devDependencies to dependencies: ${name}`);
     }
   }
 

@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { manifestScope } from './manifest-scope';
+import { manifestScope, type DepSections } from './manifest-scope';
 
-const deps = (d: Record<string, string>) => d;
+const deps = (dependencies: Record<string, string>, devDependencies: Record<string, string> = {}): DepSections => ({
+  dependencies,
+  devDependencies,
+});
 
 describe('manifestScope', () => {
   it('accepts a bump that moves only the numbers under a caret', () => {
@@ -67,5 +70,28 @@ describe('manifestScope', () => {
     });
     expect(removed.ok).toBe(false);
     expect(removed.violations.join(' ')).toMatch(/hono/);
+  });
+
+  it('rejects a dependency moved from dependencies to devDependencies', () => {
+    // The C3 case: `npm audit --omit=dev` on head reads clean because the
+    // package left production, not because it was fixed. base-vulnerable +
+    // head-clean is exactly the pattern qualify() reads as "fixed".
+    const r = manifestScope({
+      changedPaths: ['package.json', 'package-lock.json'],
+      base: deps({ undici: '^7.28.0' }),
+      head: deps({}, { undici: '^7.28.0' }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.violations.join(' ')).toMatch(/moved from dependencies to devDependencies: undici/);
+  });
+
+  it('rejects a dependency moved from devDependencies to dependencies', () => {
+    const r = manifestScope({
+      changedPaths: ['package.json', 'package-lock.json'],
+      base: deps({}, { undici: '^7.28.0' }),
+      head: deps({ undici: '^7.28.0' }),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.violations.join(' ')).toMatch(/moved from devDependencies to dependencies: undici/);
   });
 });
