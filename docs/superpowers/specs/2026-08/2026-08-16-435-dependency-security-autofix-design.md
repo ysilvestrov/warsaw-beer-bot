@@ -1,8 +1,8 @@
-# Automated reaction to production dependency vulnerabilities
+# #435 — automated reaction to production dependency vulnerabilities
 
 Date: 2026-08-16
 Status: agreed
-Issue: to be filed
+Issue: #435
 Related: `2026-08-14-411-runtime-dependency-upgrades-design.md` (the fourth manual round this
 design exists to stop repeating)
 
@@ -226,7 +226,42 @@ Notified: a successful autodeploy (what was bumped, from which advisory); a refu
 check, with paths; a health-check failure and the rollback outcome; a `deps-manual` PR awaiting
 hands.
 
-### 9. Independent daily audit
+### 9. AI review does not run on Dependabot pull requests
+
+`codex-review.yml` gains `if: github.event.pull_request.user.login != 'dependabot[bot]'`.
+
+The reason is not cost. **Measured 2026-08-16:** `IGNORE_PATTERNS` at `scripts/ai-pr-review.ts:22`
+already excludes `package-lock.json`, `*.md` and `docs/**`, so the 116 KB lockfile never enters the
+context, and `#415` — a real dependency bump — produced a 24-line lockfile diff and ~2.7 KB total.
+The marginal bill is negligible.
+
+The reason is that there is nothing to review and nobody to read it:
+
+- **No logic in scope.** After the ignore patterns, exactly one file survives on a Dependabot PR:
+  `package.json`, whose diff is version-range strings. A reviewer built to find correctness bugs in
+  code is handed a diff that contains no code. Measured fabrication rate is ~2% and recall on
+  escaped bugs 0/4 — on real source. Here the numerator has nothing to be about.
+- **No reader.** With auto-merge armed, the PR merges the moment the *required* checks pass. The AI
+  review is not a required check and must not become one — it is paid and non-deterministic. Its
+  comments therefore arrive on a pull request that is already merged and deployed. "How do we react
+  to review comments on the automated path" has no answer because the path structurally has no
+  point at which a reaction could occur.
+
+What replaces it are four deterministic checks that cover what one would actually want inspected on
+such a PR — manifest scope and semver-range style (below), plus `ci` and the audit-diff (§4). All
+four are free, reproducible, and fail the same way every time.
+
+On the `deps-manual` path a human is required by definition, and any code written to adapt to a
+breaking change lands in a **separate, human-authored** pull request that gets an ordinary review.
+So no dependency PR needs a comment-reaction protocol at either end.
+
+**Manifest-scope check** (part of qualification, §4): the PR changes only `package.json` and
+`package-lock.json`, and for every dependency the semver *range operator* is unchanged from base —
+`^` stays `^`; only the numbers move. This is the caret-range policy from
+`2026-08-14-411-runtime-dependency-upgrades-design.md`, enforced instead of remembered. It is also
+the check most likely to be asked of an LLM by habit, which is exactly why it is written as code.
+
+### 10. Independent daily audit
 
 `prod-audit.yml`, scheduled daily: `npm audit --omit=dev --audit-level=high`. If production is
 vulnerable, open or update an issue.
@@ -244,9 +279,14 @@ anything, which is what "Dependabot is a proposal, not a constant" requires.
   token on the PR path.
 - `.github/workflows/autodeploy-tag.yml` — new. `push: main`. Pushes `autodeploy-<utc-timestamp>`.
 - `.github/workflows/prod-audit.yml` — new. Daily schedule.
-- `scripts/autodeploy/qualify.ts` — new. Pure function
-  `qualify(base: AuditReport, head: AuditReport, severity, publishedAt, now) → { verdict: 'autodeploy' | 'hold' | 'manual', reason }`.
-  No I/O, so it is unit-testable; the workflow does the fetching.
+- `scripts/autodeploy/qualify.ts` — new. Pure functions, no I/O, so they are unit-testable; the
+  workflow does the fetching.
+  - `qualify(base: AuditReport, head: AuditReport, severity, publishedAt, now) → { verdict: 'autodeploy' | 'hold' | 'manual', reason }`
+  - `manifestScope(changedPaths: string[], base: PackageJson, head: PackageJson) → { ok: boolean, violations: string[] }`
+    — enforces the two-file scope and the unchanged semver range operator (§9).
+- `.github/workflows/codex-review.yml` — **modified**: the job gains
+  `if: github.event.pull_request.user.login != 'dependabot[bot]'`. The only change to an existing
+  workflow in this design.
 - `deploy/autodeploy.sh` — new. Exit codes: `0` deployed or nothing to do, `1` guard refused,
   `2` deploy failed and rollback succeeded, `3` rollback failed (operator required).
 - `deploy/wbb-autodeploy.service` / `.timer` — new.
@@ -281,9 +321,12 @@ fail is worse than no test at all.
    touching `extension/package-lock.json`, and for a tag whose commit is not an ancestor of `main`;
    and **acceptance** for a root-lockfile-only diff. Mutation proof: widen the allowlist to `**` and
    the refusal cases go green.
-3. Rollback path: force the health check to fail and assert the previous sha is redeployed and exit
+3. `manifestScope()` unit tests: accepts a bump that moves only numbers under `^`; rejects a changed
+   range operator (`^` → `~` or a pin); rejects a changed path outside the two files. Mutation proof:
+   compare only the resolved versions instead of the operator and the range case goes green.
+4. Rollback path: force the health check to fail and assert the previous sha is redeployed and exit
    code `2` is returned.
-4. `ci.yml` proves itself by running on the pull request that introduces it.
+5. `ci.yml` proves itself by running on the pull request that introduces it.
 
 The end-to-end path (alert → PR → merge → tag → timer → restart) is verified once, manually, by
 letting the first real security PR run and watching it, not by a synthetic harness.
@@ -297,6 +340,6 @@ letting the first real security PR run and watching it, not by a synthetic harne
   `release:store`, an entirely different path with its own review latency.
 - **Deploying anything but a lockfile automatically.** Feature and fix merges keep going out by
   hand.
-- **Retiring `codex-review.yml`.** It will now also run on Dependabot PRs and cost money per PR;
-  whether to exclude them is a separate decision (see `project_ai_review_cost_364`).
+- **Retiring `codex-review.yml`.** It keeps running, unchanged, on every human pull request. Only
+  the Dependabot exclusion in §9 is in scope.
 - **Litestream / database concerns.** A dependency bump does not touch schema.
