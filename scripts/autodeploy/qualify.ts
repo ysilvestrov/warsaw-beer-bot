@@ -63,6 +63,15 @@ export function qualify(params: {
   }
 
   const ageHours = (now.getTime() - publishedAt.getTime()) / 3600_000;
+  // A non-finite age (e.g. an invalid `publishedAt`) must never fall through
+  // to autodeploy — qualify() is the gate and cannot depend on its caller
+  // for a NaN check.
+  if (!Number.isFinite(ageHours)) {
+    return {
+      verdict: 'hold',
+      reason: `high advisory cleared (${fixed}) but the fixing version's publish time is unknown; ${HOLD_HOURS}h hold, treated as just published`,
+    };
+  }
   if (ageHours < HOLD_HOURS) {
     const left = Math.ceil(HOLD_HOURS - ageHours);
     return {

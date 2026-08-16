@@ -15,8 +15,9 @@ export const ALLOWED_PATHS = ['package.json', 'package-lock.json'];
 
 /** The leading non-digit run of a semver spec: `^`, `~`, `>=`, or `` for a pin. */
 export function rangeOperator(spec: string): string {
-  const m = /^[^0-9]*/.exec(spec);
-  return m ? m[0].trim() : '';
+  // `[^0-9]*` matches every string (the empty run included), so `exec` never
+  // returns null — there is no false branch to handle.
+  return /^[^0-9]*/.exec(spec)![0].trim();
 }
 
 export function manifestScope(params: {
