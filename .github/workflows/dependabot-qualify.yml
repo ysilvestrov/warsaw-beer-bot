@@ -1,0 +1,149 @@
+name: Qualify Dependabot PR
+
+on:
+  pull_request:
+  schedule:
+    # Re-evaluates open `autodeploy-pending` PRs so a `high` promotes itself
+    # when its fixing version ages past the hold. Runs from main with a full
+    # token and is unreachable from any pull request.
+    - cron: '17 * * * *'
+
+# Dependabot-triggered runs get a read-only token by default; the `permissions`
+# key is the documented way to raise it. GitHub still caps FORK pull requests at
+# read-only regardless of what is written here, so the fork case is powerless
+# without us reasoning about it.
+permissions:
+  contents: read
+  pull-requests: write
+
+# One run per PR (falling back to the run id on `schedule`, which has no PR
+# number of its own, so cron ticks never collide with each other). Never
+# cancel-in-progress: a half-labelled PR — one label removed, the new one not
+# yet applied — is worse than a slightly stale run finishing late.
+concurrency:
+  group: dependabot-qualify-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  qualify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name == 'schedule' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    steps:
+      # Tooling comes from main. NEVER check out the pull request here — this
+      # job holds a write token.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Collect the pull requests to evaluate
+        id: prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "${{ github.event.pull_request.number }}" > prs.txt
+          else
+            gh pr list --author 'app/dependabot' --state open --json number \
+              --jq '.[].number' > prs.txt
+          fi
+          echo "count=$(wc -l < prs.txt)" >> "$GITHUB_OUTPUT"
+          cat prs.txt
+
+      - name: Qualify each pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # NOT `set -e`: one pull request must never abort the others. The
+          # `schedule` run evaluates every open Dependabot PR, and qualify-cli
+          # deliberately THROWS on a malformed audit report (an absent report
+          # must be an error, never a pass) — so a transient registry failure on
+          # one PR would otherwise kill the qualification of all the rest.
+          failed=0
+
+          qualify_one() {
+            local pr=$1 base_ref out verdict reason label
+
+            base_ref=$(gh pr view "$pr" --json baseRefName --jq .baseRefName) || return 1
+
+            # pull/N/head works for any PR without needing the branch name, and
+            # the checkout above fetched only `main`.
+            git fetch -q origin "pull/${pr}/head" "$base_ref" || return 1
+
+            rm -rf /tmp/q && mkdir -p /tmp/q/base /tmp/q/head
+
+            # Two-dot (`origin/${base_ref}..FETCH_HEAD`, or the plain two-arg
+            # `git diff A B` used here, which is the same comparison) reports
+            # EVERY difference between the two trees — including commits that
+            # landed on the base branch after the PR's branch point, which the
+            # PR itself never touched. A Dependabot PR that isn't the very next
+            # thing merged to main would then pick up unrelated `src/**` paths,
+            # fail the allowlist, and get mislabelled `deps-manual` — silently
+            # disabling the whole feature. Three-dot (merge-base) is the PR's
+            # OWN change. Do not "simplify" this back to two-dot.
+            merge_base=$(git merge-base "origin/${base_ref}" FETCH_HEAD) || return 1
+
+            # Data only — NEVER a checkout. This job holds a write token.
+            for f in package.json package-lock.json; do
+              git show "${merge_base}:${f}" > "/tmp/q/base/${f}" || return 1
+              git show "FETCH_HEAD:${f}"    > "/tmp/q/head/${f}" || return 1
+            done
+            git diff --name-only "${merge_base}" FETCH_HEAD > /tmp/q/changed.txt || return 1
+
+            # `npm audit` exits non-zero when it FINDS something, so `|| true` is
+            # required — but stderr is deliberately NOT silenced: after the C1 fix
+            # a malformed report stops the run, and the reason must be readable.
+            (cd /tmp/q/base && npm audit --omit=dev --json > audit.json || true)
+            (cd /tmp/q/head && npm audit --omit=dev --json > audit.json || true)
+
+            # `env -u GITHUB_OUTPUT`: the CLI appends its verdict there, which is
+            # meaningless in a loop over N pull requests — the loop reads stdout.
+            out=$(env -u GITHUB_OUTPUT npx tsx scripts/autodeploy/qualify-cli.ts \
+                    /tmp/q/base /tmp/q/head /tmp/q/changed.txt) || return 1
+            verdict=$(printf '%s\n' "$out" | sed -n 's/^verdict=//p')
+            reason=$(printf '%s\n' "$out" | sed -n 's/^reason=//p')
+
+            case "$verdict" in
+              autodeploy) label=autodeploy ;;
+              hold)       label=autodeploy-pending ;;
+              manual)     label=deps-manual ;;
+              # An unrecognised verdict is a bug in our own tooling, not a
+              # judgement about the PR. Fail closed and say so.
+              *)          echo "::error::unrecognised verdict '${verdict}' for PR #${pr}"; return 1 ;;
+            esac
+
+            gh pr edit "$pr" \
+              --remove-label autodeploy \
+              --remove-label autodeploy-pending \
+              --remove-label deps-manual >/dev/null 2>&1 || true
+            gh pr edit "$pr" --add-label "$label" || return 1
+
+            echo "PR #${pr}: ${label} — ${reason}" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          while read -r pr; do
+            [ -n "$pr" ] || continue
+            if ! qualify_one "$pr"; then
+              failed=1
+              echo "::warning::qualification failed for PR #${pr}"
+              echo "PR #${pr}: **qualification FAILED** — see the log" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done < prs.txt
+
+          # A failure is reported, but only after every other PR has been given
+          # its verdict.
+          exit "$failed"

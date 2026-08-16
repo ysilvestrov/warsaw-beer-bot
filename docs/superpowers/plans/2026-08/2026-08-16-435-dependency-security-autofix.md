@@ -347,6 +347,25 @@ gh api repos/ysilvestrov/warsaw-beer-bot/dependabot/alerts --jq '[.[] | select(.
 - [ ] No pull request merged by itself.
 - [ ] The open alerts include the four known development-scope advisories (`nanoid`, `postcss` in both projects) and **no** `runtime`-scope advisory. If a runtime one appears, say so — it is the first real customer of this work and it must be fixed by hand now, not held until Part 4.
 
+### Gate 1 — PASSED 2026-08-16
+
+Dependabot opened 10 pull requests within minutes of alerts going on. `ci` was observed RED on #441,
+#442 and #444 and GREEN on the rest — on real traffic, not only the synthetic proof. `review`
+reported `skipping` on every Dependabot pull request. All open alerts were `scope: development`;
+none runtime.
+
+Three findings carried forward:
+
+1. **`strict: true` livelocks a queue.** Auto-merge does not update a stale branch, and every merge
+   makes every other open pull request stale. Two green PRs with auto-merge armed sat in `BEHIND`
+   until updated by hand. Remedied in Part 4 Task 2 Step 2 — see the design's §1.
+2. **npm and GitHub disagree on severity.** `GHSA-fxqj-rqcc-2cmp` is `medium` in GitHub's alert and
+   `high` in `npm audit`. Nothing breaks — `qualify()` reads severity from the audit report by design
+   — but do NOT "improve" Part 2 by switching to the alerts API.
+3. **Three bumps fail the gate for real reasons**, one of them (`#444`) a *production* group. `#441`
+   is split out as issue #446 (TypeScript removed `moduleResolution=node10`). None of them blocks
+   Part 2.
+
 ---
 
 # Part 2 — qualification, label only
@@ -937,12 +956,12 @@ jobs:
     steps:
       # Tooling comes from main. NEVER check out the pull request here — this
       # job holds a write token.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -965,44 +984,75 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          while read -r pr; do
-            [ -n "$pr" ] || continue
-            head_sha=$(gh pr view "$pr" --json headRefOid --jq .headRefOid)
-            base_ref=$(gh pr view "$pr" --json baseRefName --jq .baseRefName)
-            git fetch origin "$head_sha" "$base_ref"
+          set -uo pipefail
+          # NOT `set -e`: one pull request must never abort the others. The
+          # `schedule` run evaluates every open Dependabot PR, and qualify-cli
+          # deliberately THROWS on a malformed audit report (an absent report
+          # must be an error, never a pass) — so a transient registry failure on
+          # one PR would otherwise kill the qualification of all the rest.
+          failed=0
+
+          qualify_one() {
+            local pr=$1 base_ref out verdict reason label
+
+            base_ref=$(gh pr view "$pr" --json baseRefName --jq .baseRefName) || return 1
+
+            # pull/N/head works for any PR without needing the branch name, and
+            # the checkout above fetched only `main`.
+            git fetch -q origin "pull/${pr}/head" "$base_ref" || return 1
 
             rm -rf /tmp/q && mkdir -p /tmp/q/base /tmp/q/head
 
-            # Data only — never a checkout.
+            # Data only — NEVER a checkout. This job holds a write token.
             for f in package.json package-lock.json; do
-              git show "origin/${base_ref}:${f}" > "/tmp/q/base/${f}"
-              git show "${head_sha}:${f}"        > "/tmp/q/head/${f}"
+              git show "origin/${base_ref}:${f}" > "/tmp/q/base/${f}" || return 1
+              git show "FETCH_HEAD:${f}"         > "/tmp/q/head/${f}" || return 1
             done
-            git diff --name-only "origin/${base_ref}" "$head_sha" > /tmp/q/changed.txt
+            git diff --name-only "origin/${base_ref}" FETCH_HEAD > /tmp/q/changed.txt || return 1
 
-            # `npm audit` exits non-zero on findings; capture stdout either way.
-            (cd /tmp/q/base && npm audit --omit=dev --json > audit.json 2>/dev/null || true)
-            (cd /tmp/q/head && npm audit --omit=dev --json > audit.json 2>/dev/null || true)
+            # `npm audit` exits non-zero when it FINDS something, so `|| true` is
+            # required — but stderr is deliberately NOT silenced: after the C1 fix
+            # a malformed report stops the run, and the reason must be readable.
+            (cd /tmp/q/base && npm audit --omit=dev --json > audit.json || true)
+            (cd /tmp/q/head && npm audit --omit=dev --json > audit.json || true)
 
-            out=$(npx tsx scripts/autodeploy/qualify-cli.ts /tmp/q/base /tmp/q/head /tmp/q/changed.txt)
+            # `env -u GITHUB_OUTPUT`: the CLI appends its verdict there, which is
+            # meaningless in a loop over N pull requests — the loop reads stdout.
+            out=$(env -u GITHUB_OUTPUT npx tsx scripts/autodeploy/qualify-cli.ts \
+                    /tmp/q/base /tmp/q/head /tmp/q/changed.txt) || return 1
             verdict=$(printf '%s\n' "$out" | sed -n 's/^verdict=//p')
             reason=$(printf '%s\n' "$out" | sed -n 's/^reason=//p')
 
             case "$verdict" in
               autodeploy) label=autodeploy ;;
               hold)       label=autodeploy-pending ;;
-              *)          label=deps-manual ;;
+              manual)     label=deps-manual ;;
+              # An unrecognised verdict is a bug in our own tooling, not a
+              # judgement about the PR. Fail closed and say so.
+              *)          echo "::error::unrecognised verdict '${verdict}' for PR #${pr}"; return 1 ;;
             esac
 
             gh pr edit "$pr" \
               --remove-label autodeploy \
               --remove-label autodeploy-pending \
-              --remove-label deps-manual 2>/dev/null || true
-            gh pr edit "$pr" --add-label "$label"
+              --remove-label deps-manual >/dev/null 2>&1 || true
+            gh pr edit "$pr" --add-label "$label" || return 1
 
             echo "PR #${pr}: ${label} — ${reason}" >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          while read -r pr; do
+            [ -n "$pr" ] || continue
+            if ! qualify_one "$pr"; then
+              failed=1
+              echo "::warning::qualification failed for PR #${pr}"
+              echo "PR #${pr}: **qualification FAILED** — see the log" >> "$GITHUB_STEP_SUMMARY"
+            fi
           done < prs.txt
+
+          # A failure is reported, but only after every other PR has been given
+          # its verdict.
+          exit "$failed"
 ```
 
 - [ ] **Step 3: Commit**
@@ -1637,8 +1687,9 @@ EOF
 
 - [ ] **Step 1: Enable auto-merge on the repository**
 
+**Already done 2026-08-16** while landing the first batch of Dependabot pull requests. Verify only:
+
 ```bash
-gh api -X PATCH repos/ysilvestrov/warsaw-beer-bot -f allow_auto_merge=true
 gh api repos/ysilvestrov/warsaw-beer-bot --jq '.allow_auto_merge'   # expect: true
 ```
 
@@ -1651,8 +1702,26 @@ Immediately after the `gh pr edit "$pr" --add-label "$label"` line, add:
             if [ "$verdict" = "autodeploy" ]; then
               gh pr merge "$pr" --auto --squash
               echo "  auto-merge armed" >> "$GITHUB_STEP_SUMMARY"
+
+              # Branch protection sets strict=true, and auto-merge does NOT update a
+              # stale branch — it only waits. Every merge makes every other open PR
+              # stale, so a queue of them livelocks. MEASURED 2026-08-16: two green
+              # PRs with auto-merge armed sat in BEHIND and did not move until the
+              # branch was updated by hand. Without this, a qualified `critical` fix
+              # can wait forever inside a mechanism built so that it would not wait.
+              #
+              # No loop and no sleep: update-branch pushes a commit, which re-runs
+              # `ci`, which re-triggers this workflow. The hourly schedule is the
+              # backstop if that chain ever breaks.
+              if [ "$(gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus)" = "BEHIND" ]; then
+                gh pr update-branch "$pr" || true
+                echo "  branch was BEHIND — updated" >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
 ```
+
+Note this is inside the `autodeploy` branch deliberately. A `hold` verdict has no auto-merge to
+un-stall, and rebasing a pull request that is not going to merge yet only burns CI.
 
 - [ ] **Step 3: Commit**
 
