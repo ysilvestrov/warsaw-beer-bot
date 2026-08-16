@@ -451,6 +451,34 @@ describe('listLookupCandidates', () => {
     expect(ids).toContain(garbled);
   });
 
+  // #421. Red if the pool stops passing review_class into isEligible: the 24 not_on_untappd
+  // rows sitting one miss from exhaustion today would go dormant forever, contradicting the
+  // only justification that class has ("Untappd grows").
+  test('keeps an exhausted not_on_untappd row in the pool once the last delay has passed', () => {
+    const db = fresh();
+    const absent = seedBeerOnTap(db, {
+      brewery: 'Hoppy Hog', name: 'Charred Memory',
+      lookupAt: '2026-06-01T00:00:00Z', lookupCount: 5,
+    });
+    seedVerdict(db, absent, 'not_on_untappd', null);
+
+    expect(listLookupCandidates(db, 10, new Date('2026-07-05T00:00:00Z')).map((c) => c.id))
+      .toContain(absent);
+  });
+
+  // Red if the recurring flag leaks to every class instead of being read per row.
+  test('leaves an exhausted unidentifiable row dormant', () => {
+    const db = fresh();
+    const garbled = seedBeerOnTap(db, {
+      brewery: 'MGM-15', name: 'MGM-15',
+      lookupAt: '2026-06-01T00:00:00Z', lookupCount: 5,
+    });
+    seedVerdict(db, garbled, 'unidentifiable', null);
+
+    expect(listLookupCandidates(db, 10, new Date('2026-07-05T00:00:00Z')).map((c) => c.id))
+      .not.toContain(garbled);
+  });
+
   // Red if the pool stops selecting review_class. Task 4 picks the backoff schedule from
   // it, and a column absent from the SELECT fails silently as `undefined`.
   test('returned shape carries review_class', () => {

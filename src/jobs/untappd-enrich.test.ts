@@ -5,6 +5,7 @@ import { upsertBeer, getBeer } from '../storage/beers';
 import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 import { enrichOneOrphan } from './untappd-enrich';
+import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -213,5 +214,66 @@ describe('enrichOneOrphan', () => {
     const row = getBeer(db, id);
     expect(row?.untappd_lookup_count).toBe(0);
     expect(row?.untappd_lookup_at).toBeNull();
+  });
+});
+
+// #421. enrichOneOrphan re-checks eligibility AFTER the pool already selected the row, so
+// the recurring tail has to be known in both places or it dies silently: the pool hands the
+// row over and the job skips it, with nothing in the logs to say why.
+describe('recurring backoff tail (#421)', () => {
+  function seedExhausted(
+    db: ReturnType<typeof fresh>,
+    cls: 'not_on_untappd' | 'unidentifiable',
+  ): number {
+    const beerId = upsertBeer(db, {
+      name: 'Charred Memory', brewery: 'Hoppy Hog',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'charred memory', normalized_brewery: 'hoppy hog',
+    });
+    db.prepare(
+      'UPDATE beers SET untappd_lookup_at = ?, untappd_lookup_count = 5 WHERE id = ?',
+    ).run('2026-06-01T00:00:00Z', beerId);
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: 'Hoppy Hog', name: 'Charred Memory',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-06-01T00:00:00Z',
+    });
+    const written = setEnrichFailureReview(
+      db, beerId, cls, 'note', '2026-06-01T01:00:00Z', null,
+      { absenceProved: cls === 'not_on_untappd' },
+    );
+    // Asserted, not assumed: not_on_untappd is refused without proof of absence (#408),
+    // and a refused write would leave review_class NULL and make this test vacuous.
+    expect(written).toBe('written');
+    return beerId;
+  }
+
+  // Red if enrichOneOrphan's isEligible call stops reading the row's class: the pool would
+  // hand this row over and the job would drop it on the floor.
+  test('an exhausted not_on_untappd orphan is still attempted', async () => {
+    const db = fresh();
+    const beerId = seedExhausted(db, 'not_on_untappd');
+    const search = fakeSearch([]);
+
+    const out = await enrichOneOrphan(
+      { db, log: silentLog, search, now: () => new Date('2026-07-05T00:00:00Z') },
+      beerId,
+    );
+
+    expect(out).toBe('not_found');
+  });
+
+  // Red if the recurring flag is passed unconditionally rather than read per row.
+  test('an exhausted unidentifiable orphan is still skipped', async () => {
+    const db = fresh();
+    const beerId = seedExhausted(db, 'unidentifiable');
+    const search = fakeSearch([]);
+
+    const out = await enrichOneOrphan(
+      { db, log: silentLog, search, now: () => new Date('2026-07-05T00:00:00Z') },
+      beerId,
+    );
+
+    expect(out).toBe('skipped');
   });
 });

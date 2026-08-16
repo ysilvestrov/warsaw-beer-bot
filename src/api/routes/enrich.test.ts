@@ -111,6 +111,31 @@ describe('POST /enrich/candidates', () => {
     expect(body.candidates[0].eligible).toBe(false);
   });
 
+  // #421. Red if someone adds the fix-keyed lock here for symmetry with the enrich pools.
+  // This search runs in the USER's Untappd session (#89) and costs none of the quota the
+  // lock protects; a locked row may still be found by a client the matcher cannot reach.
+  // The asymmetry is deliberate, so it needs an assertion or it will be "fixed" later.
+  it('stays eligible for the extension while locked out of the server pools', async () => {
+    const { db, app } = setup();
+    const id = upsertBeer(db, {
+      untappd_id: null, name: 'Bitter Cost', brewery: 'Mad Brew',
+      style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Bitter Cost'),
+      normalized_brewery: normalizeBrewery('Mad Brew'),
+    });
+    recordEnrichFailure(db, {
+      beer_id: id, brewery: 'Mad Brew', name: 'Bitter Cost',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 3, candidates_summary: '', at: '2026-08-01T00:00:00Z',
+    });
+    expect(setEnrichFailureReview(db, id, 'matcher_bug', 'alias gap', '2026-08-01T01:00:00Z', 347))
+      .toBe('written');
+
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Mad Brew', name: 'Bitter Cost' }] });
+    const body = await res.json();
+    expect(body.candidates[0].eligible).toBe(true);
+  });
+
   it('is not eligible when triaged as not_a_beer', async () => {
     const { db, app } = setup();
     const id = upsertBeer(db, {

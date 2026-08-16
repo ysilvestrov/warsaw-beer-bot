@@ -241,7 +241,7 @@ export function recordLookupTransient(
   ).run(at, beerId);
 }
 
-import { isEligible } from '../domain/lookup-backoff';
+import { isEligible, RECURRING_CLASSES } from '../domain/lookup-backoff';
 
 export interface LookupCandidate {
   id: number;
@@ -331,7 +331,8 @@ export function listLookupCandidates(
   // its math in SQLite julianday arithmetic would duplicate the schedule
   // and drift over time).
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);
@@ -386,7 +387,8 @@ export function listRelayLookupCandidates(
   // Той самий JS-фільтр backoff, що й у listLookupCandidates: відтворювати його
   // математику в julianday-арифметиці SQLite означало б дублювати розклад.
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);

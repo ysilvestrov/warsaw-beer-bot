@@ -116,6 +116,17 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // bundles and mystery boxes). The only class that excludes an orphan from the enrich
 // pools: every other verdict is a statement about our current resolving power and can
 // be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
+// #421: the row's triage class, or null when it has never been triaged (or has no failure
+// row at all). The pool queries read this column inline; this is for the callers that hold
+// only a beer id — enrichOneOrphan's second eligibility gate and /enrich/candidates — and
+// need it to pick the backoff schedule (RECURRING_CLASSES).
+export function reviewClassOf(db: DB, beerId: number): string | null {
+  const row = db
+    .prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { review_class: string | null } | undefined;
+  return row ? row.review_class : null;
+}
+
 export function isNotABeer(db: DB, beerId: number): boolean {
   return (
     db
