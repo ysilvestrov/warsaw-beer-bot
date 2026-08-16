@@ -40,6 +40,12 @@ export interface TriagePlan {
   quiet: Verdict[];               // not_on_untappd / unidentifiable — DB write only
   skipped: number;                // invalid verdicts left untriaged for tomorrow
   guardHits: Record<GuardReason, number>;
+  // #432: the three ways an actionable class ends up with no issue are counted where
+  // each is decided, never as a sum. The third is guardHits.unprobed_absence. Deriving
+  // any of them by subtraction can go negative — a stripped verdict may still be dropped
+  // as a foreign row — and a report that can print a negative number is not a report.
+  quietCauseStripped: number;     // #358 gate stripped the cause, row went quiet
+  quietNoTarget: number;          // the model named neither an issue nor a key
 }
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
@@ -95,6 +101,17 @@ export function planTriageActions(
   openIssues: ScopedIssue[],
   batchRows: UntriagedFailure[],
   probes: Map<number, TriageProbe>,
+  // #432: verdicts whose cause the verification gate stripped before planning, keyed by
+  // OBJECT IDENTITY rather than beer_id. The strip decision is per-verdict, not per-beer:
+  // the model can emit two verdicts for the same beer_id (e.g. one echoed from an
+  // open-issue body), and planTriageActions keeps only the first via seenBeerIds below.
+  // An id-keyed set would misattribute the surviving first verdict to a strip that
+  // actually hit a discarded later duplicate. Identity is exact here because this
+  // function iterates the very verdict objects the job produced.
+  // Passed in rather than marked on the Verdict: Verdict is the model's own parsed
+  // output, and a marker there is one schema edit away from being model-settable, which
+  // would let a model launder a stripped cause into a voluntary declination.
+  strippedVerdicts: ReadonlySet<Verdict>,
 ): TriagePlan {
   const byNumber = new Map(openIssues.map((i) => [i.number, i]));
   const rowById = new Map(batchRows.map((r) => [r.beer_id, r]));
@@ -119,6 +136,8 @@ export function planTriageActions(
   const byIssue = new Map<number, ActionableVerdict[]>();
   const quiet: Verdict[] = [];
   let skipped = 0;
+  let quietCauseStripped = 0;
+  let quietNoTarget = 0;
   const seenBeerIds = new Set<number>();
 
   for (const verdict of analysis.verdicts) {
@@ -170,7 +189,19 @@ export function planTriageActions(
     // name a cause, or the job stripped an unverified one. Record the class so the
     // row leaves the untriaged pool instead of regenerating the same unprovable
     // hypothesis every day; it stays findable via the issues' `Scope:` queries.
-    if (!hasIssue && !hasKey) { quiet.push(verdict); continue; }
+    if (!hasIssue && !hasKey) {
+      // #432 CRITICAL 1: not_a_beer is deliberately excluded from both quiet counters.
+      // It already owns its own counter and digest part (outcome.notABeer, incremented
+      // in orphan-triage.ts from plan.quiet) — counting it again here would republish a
+      // number beside its own part, which is the exact double-count defect this branch
+      // exists to remove (12 not_a_beer + 13 без цілі reading as 25 on a 13-row day).
+      if (verdict.review_class === 'parser_bug' || verdict.review_class === 'matcher_bug') {
+        if (strippedVerdicts.has(verdict)) quietCauseStripped += 1;
+        else quietNoTarget += 1;
+      }
+      quiet.push(verdict);
+      continue;
+    }
     if (hasIssue) {
       const target = byNumber.get(verdict.issue_number!);
       if (!target) { skipped++; continue; }
@@ -225,5 +256,5 @@ export function planTriageActions(
   const comments: PlannedComment[] = [...byIssue.entries()]
     .map(([issueNumber, verdicts]) => ({ issueNumber, verdicts }));
 
-  return { newIssues, comments, quiet, skipped, guardHits };
+  return { newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget };
 }

@@ -27,6 +27,50 @@ const issue = (key: string) => ({
 
 const noProbes = new Map<number, TriageProbe>();
 
+test('splits quiet actionable verdicts into cause-stripped and no-target', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, review_note: 'unverified: cause the gate stripped' }),
+      v({ beer_id: 2, review_note: 'unverified: looks stripped but is not' }),
+    ],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [], rows(1, 2), noProbes, new Set([a.verdicts[0]]));
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1, 2]);
+  expect(plan.quietCauseStripped).toBe(1);
+  expect(plan.quietNoTarget).toBe(1);
+});
+
+// #432 fix: the stripped set is keyed by VERDICT IDENTITY, not beer_id, because the
+// strip decision is per-verdict while duplicates are collapsed first-wins by beer_id
+// (seenBeerIds below). Here the model echoes a second verdict for beer 1 — a plain,
+// untouched matcher_bug with no target survives as the FIRST verdict, while a
+// DIFFERENT object for the same beer_id is the one the verification gate stripped.
+// planTriageActions keeps only the first (seenBeerIds), so the survivor must count as
+// a voluntary no-target, not as a stripped cause. An id-keyed set gets this wrong: it
+// would see beer_id 1 in the stripped set and misattribute the survivor.
+test('a duplicate stripped verdict for the same beer does not taint the surviving first verdict', () => {
+  const first = v({ beer_id: 1, review_note: 'voluntary decline' });
+  const second = v({ beer_id: 1, review_note: 'unverified: dropped cause' });
+  const a: Analysis = { verdicts: [first, second], new_issues: [] };
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([second]));
+  expect(plan.skipped).toBe(1); // the duplicate (second) is skipped by seenBeerIds
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
+  expect(plan.quietNoTarget).toBe(1);
+  expect(plan.quietCauseStripped).toBe(0);
+});
+
+test('a downgraded absence counts in neither quiet split', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set());
+  expect(plan.guardHits.unprobed_absence).toBe(1);
+  expect(plan.quietCauseStripped).toBe(0);
+  expect(plan.quietNoTarget).toBe(0);
+});
+
 test('routes verdicts: existing issue, new issue, quiet', () => {
   const a: Analysis = {
     verdicts: [
@@ -37,7 +81,7 @@ test('routes verdicts: existing issue, new issue, quiet', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 4), noProbes);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 4), noProbes, new Set());
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.newIssues).toHaveLength(1);
   expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([2]);
@@ -53,7 +97,7 @@ test('forces labels from verdict classes, ignoring model labels', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [], rows(1, 2), noProbes);
+  const plan = planTriageActions(a, [], rows(1, 2), noProbes, new Set());
   expect(plan.newIssues[0].labels.sort())
     .toEqual(['matcher-bug', 'orphan-triage', 'parser-bug']);
 });
@@ -68,7 +112,7 @@ test('skips invalid verdicts: unknown issue, unknown key, both refs', () => {
     ],
     new_issues: [issue('k1')],
   };
-  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 5), noProbes);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2, 3, 5), noProbes, new Set());
   expect(plan.skipped).toBe(3);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([5]);
   expect(plan.newIssues).toHaveLength(0); // k1 unused → not created
@@ -93,7 +137,7 @@ test('dedupes duplicate new_issues keys: first occurrence wins, no wasted cap sl
       { key: 'k3', title: 't-k3', body: 'b', labels: [], scope },
     ],
   };
-  const plan = planTriageActions(a, [], rows(1, 2, 3), noProbes);
+  const plan = planTriageActions(a, [], rows(1, 2, 3), noProbes, new Set());
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
   expect(plan.newIssues[0].title).toBe('first');
   expect(plan.newIssues[0].body).toBe('first-body');
@@ -110,7 +154,7 @@ test('groups multiple verdicts on the same existing issue into one comment', () 
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [open(228), open(231)], rows(1, 2, 3), noProbes);
+  const plan = planTriageActions(a, [open(228), open(231)], rows(1, 2, 3), noProbes, new Set());
   expect(plan.comments).toHaveLength(2);
   const c228 = plan.comments.find((c) => c.issueNumber === 228)!;
   expect(c228.verdicts.map((x) => x.beer_id)).toEqual([1, 2]);
@@ -124,7 +168,7 @@ test('caps new issues at 3 in array order; overflow verdicts are skipped', () =>
     verdicts: [1, 2, 3, 4].map((n) => v({ beer_id: n, new_issue_key: `k${n}` })),
     new_issues: [issue('k1'), issue('k2'), issue('k3'), issue('k4')],
   };
-  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes);
+  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes, new Set());
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k1', 'k2', 'k3']);
   expect(plan.skipped).toBe(1);
 });
@@ -138,7 +182,7 @@ test('drops verdicts whose beer_id is outside the current batch (actionable and 
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [open(228)], rows(1), noProbes);
+  const plan = planTriageActions(a, [open(228)], rows(1), noProbes, new Set());
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.quiet).toEqual([]);
   expect(plan.skipped).toBe(2);
@@ -153,7 +197,7 @@ test('dedupes duplicate beer_id verdicts: first wins, later ones skipped', () =>
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [open(228)], rows(1, 2), noProbes);
+  const plan = planTriageActions(a, [open(228)], rows(1, 2), noProbes, new Set());
   expect(plan.comments).toEqual([{ issueNumber: 228, verdicts: [a.verdicts[0]] }]);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([2]);
   expect(plan.skipped).toBe(1);
@@ -169,7 +213,7 @@ test('an actionable verdict without a reference is recorded quietly, not skipped
     verdicts: [v({ beer_id: 1, review_note: 'unverified: alias gap' })],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [open(228)], rows(1), noProbes);
+  const plan = planTriageActions(a, [open(228)], rows(1), noProbes, new Set());
   expect(plan.skipped).toBe(0);
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
   expect(plan.comments).toHaveLength(0);
@@ -186,7 +230,7 @@ test('a zero-candidate row cannot attach to an issue scoped candidates_count > 0
     scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
   })];
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
-  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 0 })], noProbes);
+  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 0 })], noProbes, new Set());
   expect(plan.comments).toHaveLength(0);
   expect(plan.skipped).toBe(1);
   expect(plan.guardHits.scope_violation).toBe(1);
@@ -197,7 +241,7 @@ test('a row that satisfies the scope still attaches', () => {
     scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
   })];
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
-  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 5 })], noProbes);
+  const plan = planTriageActions(a, issues, [row(1, { candidates_count: 5 })], noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(1);
   expect(plan.guardHits.scope_violation).toBe(0);
 });
@@ -206,7 +250,7 @@ test('a row that satisfies the scope still attaches', () => {
 // what makes the one-time backfill load-bearing instead of cosmetic.
 test('an unscoped issue accepts nothing', () => {
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
-  const plan = planTriageActions(a, [open(347, { scope: null })], rows(1), noProbes);
+  const plan = planTriageActions(a, [open(347, { scope: null })], rows(1), noProbes, new Set());
   expect(plan.comments).toHaveLength(0);
   expect(plan.guardHits.scope_violation).toBe(1);
 });
@@ -221,7 +265,7 @@ test('a proposed issue scoped only by review_class is dropped with its verdicts'
       scope: { beer_ids: [], where: [{ col: 'review_class', op: '=', value: 'matcher_bug' }] },
     }],
   };
-  const plan = planTriageActions(a, [], rows(1), noProbes);
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set());
   expect(plan.newIssues).toHaveLength(0);
   expect(plan.skipped).toBe(1);
   expect(plan.guardHits.illegal_scope).toBe(1);
@@ -238,7 +282,7 @@ test('a proposed issue scoped by class AND another column survives', () => {
       ] },
     }],
   };
-  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes, new Set());
   expect(plan.newIssues).toHaveLength(1);
   expect(plan.newIssues[0].scope.where).toHaveLength(2);
   expect(plan.guardHits.illegal_scope).toBe(0);
@@ -249,7 +293,7 @@ test('a proposed issue scoped by class AND another column survives', () => {
 test('a saturated issue refuses further attachment', () => {
   const issues = [open(347, { postCreationRows: 12 })];
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
-  const plan = planTriageActions(a, issues, rows(1), noProbes);
+  const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
   expect(plan.comments).toHaveLength(0);
   expect(plan.skipped).toBe(1);
   expect(plan.guardHits.saturated).toBe(1);
@@ -263,7 +307,7 @@ test('an issue born with a large cohort but no post-creation rows still accepts'
     postCreationRows: 0,
   })];
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 405 })], new_issues: [] };
-  const plan = planTriageActions(a, issues, rows(1), noProbes);
+  const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(1);
   expect(plan.guardHits.saturated).toBe(0);
 });
@@ -276,7 +320,7 @@ test('rows accepted earlier in the same run count toward saturation', () => {
     verdicts: [1, 2, 3].map((n) => v({ beer_id: n, issue_number: 347 })),
     new_issues: [],
   };
-  const plan = planTriageActions(a, issues, rows(1, 2, 3), noProbes);
+  const plan = planTriageActions(a, issues, rows(1, 2, 3), noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(1);
   expect(plan.guardHits.saturated).toBe(2);
 });
@@ -291,7 +335,7 @@ test('a verdict whose row contradicts its proposed issue scope is refused', () =
       scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '>', value: 0 }] },
     }],
   };
-  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes, new Set());
   expect(plan.newIssues).toHaveLength(0);
   expect(plan.skipped).toBe(1);
   expect(plan.guardHits.scope_violation).toBe(1);
@@ -305,14 +349,14 @@ test('a verdict whose row contradicts its proposed issue scope is refused', () =
 test('not_on_untappd survives when a probe ran and returned nothing', () => {
   const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
   const probes = new Map<number, TriageProbe>([[1, { brewery: '', name: '' }]]);
-  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes, new Set());
   expect(plan.quiet[0].review_class).toBe('not_on_untappd');
   expect(plan.guardHits.unprobed_absence).toBe(0);
 });
 
 test('not_on_untappd degrades to matcher_bug when no probe ran', () => {
   const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
-  const plan = planTriageActions(a, [], [row(1, { candidates_count: 5 })], noProbes);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 5 })], noProbes, new Set());
   expect(plan.quiet[0].review_class).toBe('matcher_bug');
   expect(plan.quiet[0].review_note).toContain('no absence evidence');
   expect(plan.guardHits.unprobed_absence).toBe(1);
@@ -324,7 +368,7 @@ test('not_on_untappd degrades to matcher_bug when no probe ran', () => {
 test('a probe that returned hits is not absence evidence', () => {
   const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'not_on_untappd' })], new_issues: [] };
   const probes = new Map<number, TriageProbe>([[1, { brewery: 'Mad Elf, MadTree', name: 'something' }]]);
-  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes);
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], probes, new Set());
   expect(plan.quiet[0].review_class).toBe('matcher_bug');
   expect(plan.guardHits.unprobed_absence).toBe(1);
 });
@@ -333,7 +377,7 @@ test('a probe that returned hits is not absence evidence', () => {
 // that, so only the absence claim is gated here.
 test('unidentifiable is untouched by the class gate', () => {
   const a: Analysis = { verdicts: [v({ beer_id: 1, review_class: 'unidentifiable' })], new_issues: [] };
-  const plan = planTriageActions(a, [], rows(1), noProbes);
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set());
   expect(plan.quiet[0].review_class).toBe('unidentifiable');
   expect(plan.guardHits.unprobed_absence).toBe(0);
 });
@@ -352,7 +396,7 @@ test('an illegal proposal does not consume a new-issue cap slot', () => {
       legal('k2'), legal('k3'), legal('k4'),
     ],
   };
-  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes);
+  const plan = planTriageActions(a, [], rows(1, 2, 3, 4), noProbes, new Set());
   expect(plan.newIssues.map((i) => i.key)).toEqual(['k2', 'k3', 'k4']);
   expect(plan.guardHits.illegal_scope).toBe(1);
 });
@@ -367,12 +411,27 @@ test('routes not_a_beer to GitHub instead of writing it quietly', () => {
                    review_note: 'mystery box SKU' })],
     new_issues: [issue('merch')],
   };
-  const plan = planTriageActions(a, [], rows(1), noProbes);
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set());
 
   expect(plan.quiet).toHaveLength(0);
   expect(plan.newIssues).toHaveLength(1);
   expect(plan.newIssues[0].labels).toContain('not-a-beer');
   expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([1]);
+});
+
+// #432 CRITICAL 1: not_a_beer with no target must NOT land in either quiet counter —
+// it already owns outcome.notABeer / the "not_a_beer" digest part, incremented
+// separately in orphan-triage.ts from plan.quiet. Counting it here too was the
+// double-count bug (12 not_a_beer + 13 без цілі reading as 25 on a 13-row day).
+test('a not_a_beer verdict with no target is recorded quietly but counts in neither quiet split', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, review_class: 'not_a_beer', review_note: 'unverified: mystery box' })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([a.verdicts[0]]));
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
+  expect(plan.quietCauseStripped).toBe(0);
+  expect(plan.quietNoTarget).toBe(0);
 });
 
 // The scope guard still binds not_a_beer: being actionable does not exempt it from
@@ -385,7 +444,7 @@ test('a not_a_beer verdict whose row contradicts the issue scope is refused', ()
   const scope: ScopedIssue['scope'] = {
     beer_ids: [], where: [{ col: 'name', op: 'contains', value: 'Pack' }],
   };
-  const plan = planTriageActions(a, [open(228, { scope })], [row(5, { name: 'Jasne Pelne' })], noProbes);
+  const plan = planTriageActions(a, [open(228, { scope })], [row(5, { name: 'Jasne Pelne' })], noProbes, new Set());
 
   expect(plan.comments).toEqual([]);
   expect(plan.guardHits.scope_violation).toBe(1);

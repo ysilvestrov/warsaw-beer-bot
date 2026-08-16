@@ -7,7 +7,7 @@ import {
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
-import { planTriageActions, type ScopedIssue } from '../domain/triage-plan';
+import { planTriageActions, type ScopedIssue, type GuardReason } from '../domain/triage-plan';
 import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
@@ -63,10 +63,15 @@ export interface TriageOutcome {
   notOnUntappd: number;
   unidentifiable: number;
   notABeer: number;
-  // Actionable classes recorded with no issue attached — an unproven cause the
-  // verification gate stripped, or an absence the class gate downgraded. These used to
-  // be tallied as `wontfix`, which made the digest overstate the terminal classes.
-  recordedNoIssue: number;
+  // #432: the three disjoint ways an actionable class ends with no issue. Their sum used
+  // to be published as `recordedNoIssue` alongside `unverified`, which is one of its own
+  // parts — the digest read as 20 rows on a day that had 15.
+  causeStripped: number;   // the #358 gate stripped the cause
+  noTarget: number;        // the model named neither an issue nor a key
+  // Guard tallies, logged every run. Previously reachable only through the `verdict
+  // shortfall` warn, whose condition is counted BEFORE the guards run — so a refused row
+  // still counts as covered and the guards could fire any number of times in silence.
+  guardHits: Record<GuardReason, number>;
   skipped: number;
   unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
@@ -74,6 +79,19 @@ export interface TriageOutcome {
   // disabled runs and permanent errors.
   attempt: number | null;
   disabledReason: string | null;
+}
+
+// #432: routine guard work and anomalous guard work must not share a path, in either
+// direction. `unprobed_absence` fires by construction for any beer whose name is an
+// ordinary word (#357) and `saturated` is really a STATE of an issue rather than an event
+// (#431) — both are routine and stay in the outcome payload. These two mean two components
+// disagree: the model broke a prompt rule, or a row contradicts the scope of the issue it
+// was routed to. Someone has to look. Deliberately a predicate on meaning, not a threshold
+// on count — the #419 checkpoint is already trying to retire one guessed constant.
+export function reportGuardAnomalies(log: pino.Logger, g: Record<GuardReason, number>): void {
+  if (g.illegal_scope === 0 && g.scope_violation === 0) return;
+  log.warn({ illegalScope: g.illegal_scope, scopeViolation: g.scope_violation },
+    'orphan-triage: guard anomaly');
 }
 
 export function buildTriageLine(o: TriageOutcome): string {
@@ -91,8 +109,11 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.notOnUntappd > 0) parts.push(`${o.notOnUntappd} not_on_untappd`);
   if (o.unidentifiable > 0) parts.push(`${o.unidentifiable} unidentifiable`);
   if (o.notABeer > 0) parts.push(`${o.notABeer} not_a_beer`);
-  if (o.recordedNoIssue > 0) parts.push(`${o.recordedNoIssue} без issue`);
-  if (o.unverified > 0) parts.push(`${o.unverified} неперевірених`);
+  if (o.guardHits.unprobed_absence > 0) parts.push(`${o.guardHits.unprobed_absence} без доказу відсутності`);
+  if (o.causeStripped > 0) parts.push(`${o.causeStripped} неперевірених`);
+  if (o.noTarget > 0) parts.push(`${o.noTarget} без цілі`);
+  if (o.guardHits.illegal_scope > 0) parts.push(`${o.guardHits.illegal_scope} нелегальний scope`);
+  if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }
@@ -163,7 +184,9 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     };
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0,
-      notABeer: 0, recordedNoIssue: 0,
+      notABeer: 0,
+      causeStripped: 0, noTarget: 0,
+      guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
       skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
     };
 
@@ -223,6 +246,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // A cause the model cannot prove must not reach GitHub: re-run its proposed
       // query and, if the expected target does not come back, strip the issue
       // attachment and keep only the classification.
+      // Keyed by VERDICT IDENTITY, not beer_id: the strip decision is per-verdict, and
+      // the model can echo a duplicate verdict for the same beer (planTriageActions
+      // keeps only the first via seenBeerIds). An id-keyed set would misattribute a
+      // surviving, untouched first verdict to the strip that actually hit a later
+      // duplicate for the same beer.
+      const strippedVerdicts = new Set<Verdict>();
       if (deps.search) {
         const verified = await verifyCauses({
           verdicts: analysis.verdicts, search: deps.search, limit: probeLimit,
@@ -237,12 +266,14 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
           verdicts: analysis.verdicts.map((v) => {
             if (!isCausal(v) || verified.get(v.beer_id)) return v;
             unverified += 1;
-            log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target },
-              'orphan-triage: cause unverified, attachment dropped');
-            return {
+            const stripped = {
               ...v, issue_number: null, new_issue_key: null,
               review_note: `unverified: ${v.review_note}`,
             };
+            strippedVerdicts.add(stripped);
+            log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target },
+              'orphan-triage: cause unverified, attachment dropped');
+            return stripped;
           }),
         };
       }
@@ -263,7 +294,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         scope: parseScopeBlock(i.body),
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
       }));
-      plan = planTriageActions(analysis, scopedIssues, orphans, probes);
+      plan = planTriageActions(analysis, scopedIssues, orphans, probes, strippedVerdicts);
     } catch (e) {
       const attempt = attemptsToday() + 1;
       const transient = isTransient(e);
@@ -290,6 +321,16 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const covered = new Set(
       analysis.verdicts.map((v) => v.beer_id).filter((id) => byId.has(id)),
     ).size;
+    // #432 IMPORTANT 2: guard 1 (illegal_scope) is tallied over analysis.new_issues
+    // independently of any verdict, so it can fire even when covered === 0 (every
+    // verdict a foreign row, but a proposed issue still had an illegal scope). These
+    // three assignments and the anomaly warn must publish on EVERY run, so they sit
+    // ABOVE the covered === 0 early return, not after it.
+    outcome.guardHits = plan.guardHits;
+    reportGuardAnomalies(log, plan.guardHits);
+    outcome.causeStripped = plan.quietCauseStripped;
+    outcome.noTarget = plan.quietNoTarget;
+
     if (covered === 0) {
       log.error({ batch: orphans.length, stopReasons: exchanges.map((e) => e.raw.stopReason) },
         'orphan-triage: zero verdicts after retry');
@@ -297,14 +338,9 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       return;
     }
     if (covered < orphans.length) {
-      // guardHits is why, not just how many. Three of the four #408 guards end in
-      // `skipped`, and a skipped row keeps review_class NULL and comes back tomorrow —
-      // so a model that keeps making the same illegal proposal would recirculate the
-      // same rows forever while the batch silently filled with repeat offenders. One
-      // line has to make that visible instead of leaving it to be inferred from a
-      // backlog that stopped moving.
-      log.warn({ covered, batch: orphans.length, guardHits: plan.guardHits },
-        'orphan-triage: verdict shortfall');
+      // Its own meaning, unrelated to the guards: the model returned no verdict for a
+      // row, so that row recirculates tomorrow with nothing recorded about why.
+      log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
     }
     outcome.skipped = plan.skipped;
     outcome.unverified = unverified;
@@ -375,7 +411,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
       else if (v.review_class === 'unidentifiable') outcome.unidentifiable++;
       else if (v.review_class === 'not_a_beer') outcome.notABeer++;
-      else outcome.recordedNoIssue++;
+      // actionable classes are counted by planTriageActions as causeStripped / noTarget
     }
 
     finish(outcome);
