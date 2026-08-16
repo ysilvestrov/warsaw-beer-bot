@@ -598,13 +598,14 @@ test('without a search dep the job behaves exactly as before', async () => {
 
 // #432: the digest's "неперевірених" part now reads causeStripped (the disjoint,
 // row-counting field), not unverified — publishing both was the double-count bug
-// (see the TriageOutcome comment). unverified is set here too, as it would be in a
-// real run (verifyCauses and planTriageActions count the same stripped rows), to
-// prove the digest ignores it as a render source.
+// (see the TriageOutcome comment). causeStripped and unverified are deliberately
+// set to DIFFERENT values here: if the implementation regressed to rendering
+// o.unverified, the digest would show "7 неперевірених" instead of the asserted
+// "2 неперевірених" and this test would go red. Equal values would prove nothing.
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 2,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
@@ -825,17 +826,21 @@ test('narrow warn stays silent for routine guard work', () => {
   expect(warn).not.toHaveBeenCalled();
 });
 
+// #432: causeStripped and unverified are deliberately UNEQUAL in both fixtures below —
+// a regression to rendering o.unverified would show "8 неперевірених" in the first case
+// and a spurious "3 неперевірених" part (unverified: 3, causeStripped: 0 should render
+// nothing) in the second. Equal values would let a wrong field pass silently.
 test('buildTriageLine names each quiet mechanism and hides routine guards', () => {
   expect(buildTriageLine({
     total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
-    causeStripped: 5, noTarget: 1, skipped: 0, unverified: 5,
+    causeStripped: 5, noTarget: 1, skipped: 0, unverified: 8,
     guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 4, unprobed_absence: 9 },
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 15 нових → 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
   expect(buildTriageLine({
     total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
-    causeStripped: 0, noTarget: 0, skipped: 2, unverified: 0,
+    causeStripped: 0, noTarget: 0, skipped: 2, unverified: 3,
     guardHits: { illegal_scope: 1, scope_violation: 2, saturated: 0, unprobed_absence: 0 },
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 3 нових → 1 нелегальний scope, 2 поза scope, 2 пропущено');
