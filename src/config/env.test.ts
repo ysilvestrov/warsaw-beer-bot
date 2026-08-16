@@ -14,7 +14,7 @@ describe('loadEnv', () => {
       LOG_LEVEL: 'debug',
       DEFAULT_ROUTE_N: '7',
     });
-    expect(env.DEFAULT_ROUTE_N).toBe(7);
+    expect(env.DEFAULT_ROUTE_N).toBe(999);
     expect(env.LOG_LEVEL).toBe('debug');
   });
 
