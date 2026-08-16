@@ -237,16 +237,76 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
+    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
     skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
     skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
+});
+
+test('guardHits reaches the run outcome even when no guard fired', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const spy = vi.spyOn(log, 'info');
+  const theLlm = llm({
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
+      issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  });
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      outcome: expect.objectContaining({
+        guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+      }),
+    }),
+    'orphan-triage finished',
+  );
+  spy.mockRestore();
+});
+
+test('guardHits reaches the outcome when a guard fired and every row got a verdict', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const spy = vi.spyOn(log, 'info');
+  // not_on_untappd with no probe evidence: guard 3 fires, covered === batch, so the old
+  // `verdict shortfall` condition is false — this is the 2026-08-16 shape exactly.
+  const theLlm = llm({
+    verdicts: [{ beer_id: 1, review_class: 'not_on_untappd', review_note: 'absent',
+      issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  });
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  expect(spy).toHaveBeenCalledWith(
+    expect.objectContaining({
+      outcome: expect.objectContaining({
+        guardHits: expect.objectContaining({ unprobed_absence: 1 }),
+      }),
+    }),
+    'orphan-triage finished',
+  );
+  spy.mockRestore();
+});
+
+test('verdict shortfall still warns and no longer carries guardHits', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  seedOrphan(d, 2);
+  const spy = vi.spyOn(log, 'warn');
+  const theLlm = llm({
+    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
+      issue_number: null, new_issue_key: null }],
+    new_issues: [],
+  });
+  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+  // Exact object, not objectContaining: equality is what proves guardHits is gone.
+  expect(spy).toHaveBeenCalledWith({ covered: 1, batch: 2 }, 'orphan-triage: verdict shortfall');
+  spy.mockRestore();
 });
 
 test('empty verdicts: retries once; still empty → error line, run marked, nothing written', async () => {
@@ -379,13 +439,13 @@ test('a created issue body carries the triage-scope block', async () => {
   expect(parseScopeBlock(body)).toEqual({ beer_ids: [1], where: [] });
 });
 
-test('the shortfall log carries per-guard counts', async () => {
+test('guardHits on the finished outcome carries per-guard counts', async () => {
   const d = db();
   seedOrphan(d, 1);
   seedOrphan(d, 2);
-  const warns: Record<string, unknown>[] = [];
-  const spyLog = { ...log, info: () => {}, error: () => {}, debug: () => {},
-    warn: (o: unknown) => { warns.push(o as Record<string, unknown>); } } as unknown as typeof log;
+  const infos: Record<string, unknown>[] = [];
+  const spyLog = { ...log, warn: () => {}, error: () => {}, debug: () => {},
+    info: (o: unknown) => { infos.push(o as Record<string, unknown>); } } as unknown as typeof log;
   // A verdict for beer 2 only (so `covered` falls short), pointing at an issue whose
   // scope it violates: seedOrphan writes candidates_count 0, the scope demands > 0.
   const analysis: Analysis = {
@@ -404,9 +464,11 @@ test('the shortfall log carries per-guard counts', async () => {
     now: inWindow,
   });
 
-  const line = warns.find((l) => 'guardHits' in l);
+  const line = infos.find((l) => l.dateKey !== undefined
+    && (l.outcome as { guardHits?: Record<string, number> } | undefined)?.guardHits);
   expect(line).toBeDefined();
-  expect((line!.guardHits as Record<string, number>).scope_violation).toBe(1);
+  const outcome = line!.outcome as { guardHits: Record<string, number> };
+  expect(outcome.guardHits.scope_violation).toBe(1);
 });
 
 // The other side of #408 guard 3: with a search dep the probes actually run, and an
@@ -537,7 +599,7 @@ test('without a search dep the job behaves exactly as before', async () => {
 test('buildTriageLine reports the unverified count', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0, skipped: 0, unverified: 2,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 2,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
@@ -564,7 +626,7 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
 test('buildTriageLine: transient attempts vs final failure', () => {
   const base = {
-    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, recordedNoIssue: 0,
+    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
     skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
     attempt: null as number | null,
   };
