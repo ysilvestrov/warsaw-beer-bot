@@ -17,7 +17,7 @@
 - **`Verdict` must not gain a field.** It is `z.infer<typeof VerdictSchema>`, the model's own parsed output; a strip marker living there would be one schema edit away from being model-settable.
 - **Control flow must never read `review_note` prose.** The `unverified: ` prefix stays for humans reading the column; nothing may branch on it.
 - **Repo commit convention:** subject `feat(#432): …` or `test(#432): …`, and every commit message ends with the two trailer lines shown in Task 1 Step 5.
-- **Worktree guard — run before your first commit:** `git rev-parse --show-toplevel` must print a path under `.worktrees/` (NOT `/home/ysi/warsaw-beer-bot`) and `git branch --show-current` must print `worktree-432-triage-run-report`. If either is wrong, STOP and report — do not commit.
+- **Worktree guard — run before your first commit:** `git rev-parse --show-toplevel` must print exactly `/home/ysi/warsaw-beer-bot/.claude/worktrees/worktree-432-triage-run-report` (NOT `/home/ysi/warsaw-beer-bot`) and `git branch --show-current` must print `worktree-432-triage-run-report`. If either is wrong, STOP and report — do not commit.
 
 ---
 
@@ -135,7 +135,7 @@ This is the point of writing beer 2's note as `'unverified: looks stripped but i
 - [ ] **Step 6: Commit**
 
 ```bash
-git rev-parse --show-toplevel   # must be under .worktrees/, not /home/ysi/warsaw-beer-bot
+git rev-parse --show-toplevel   # /home/ysi/warsaw-beer-bot/.claude/worktrees/worktree-432-triage-run-report
 git branch --show-current       # must be worktree-432-triage-run-report
 git add src/domain/triage-plan.ts src/domain/triage-plan.test.ts
 git commit -m "$(cat <<'EOF'
@@ -320,7 +320,7 @@ Expected: PASS and clean typecheck. Existing `buildTriageLine` tests will fail t
 - [ ] **Step 5: Commit**
 
 ```bash
-git rev-parse --show-toplevel   # must be under .worktrees/
+git rev-parse --show-toplevel   # /home/ysi/warsaw-beer-bot/.claude/worktrees/worktree-432-triage-run-report
 git branch --show-current       # must be worktree-432-triage-run-report
 git add src/jobs/orphan-triage.ts src/jobs/orphan-triage.test.ts
 git commit -m "$(cat <<'EOF'
@@ -447,7 +447,7 @@ Expected: `narrow warn stays silent for routine guard work` goes RED and nothing
 - [ ] **Step 6: Commit**
 
 ```bash
-git rev-parse --show-toplevel   # must be under .worktrees/
+git rev-parse --show-toplevel   # /home/ysi/warsaw-beer-bot/.claude/worktrees/worktree-432-triage-run-report
 git branch --show-current       # must be worktree-432-triage-run-report
 git add src/jobs/orphan-triage.ts src/jobs/orphan-triage.test.ts
 git commit -m "$(cat <<'EOF'
