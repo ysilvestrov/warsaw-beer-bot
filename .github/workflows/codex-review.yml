@@ -16,6 +16,16 @@ jobs:
   review:
     runs-on: ubuntu-latest
 
+    # #435: a Dependabot PR leaves exactly one file in review scope —
+    # package.json, whose diff is version-range strings (IGNORE_PATTERNS at
+    # scripts/ai-pr-review.ts:22 already drops package-lock.json). A reviewer
+    # built to find correctness bugs in code gets a diff with no code. And with
+    # auto-merge armed the PR merges on the required checks, so any comment
+    # lands on something already merged and deployed — there is no point at
+    # which a reaction could occur. Replaced by deterministic checks: ci, the
+    # audit-diff, and manifestScope().
+    if: github.event.pull_request.user.login != 'dependabot[bot]'
+
     steps:
       - name: Checkout PR head
         uses: actions/checkout@v4
