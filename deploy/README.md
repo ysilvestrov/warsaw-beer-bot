@@ -89,6 +89,49 @@ sudo -n -u warsaw-beer-bot bash -lc \
   'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans -- --apply'
 ```
 
+## Unattended security autodeploy (#435)
+
+A timer checks for an `autodeploy-*` tag and deploys it only if the change
+touches nothing but the root `package.json` and `package-lock.json`. See
+`docs/superpowers/specs/2026-08/2026-08-16-435-dependency-security-autofix-design.md`.
+
+One-time install (as root):
+
+```bash
+# The scripts are installed to a fixed path rather than run from the operator's
+# working tree: that tree is rsynced wholesale by deploy.sh and may hold
+# uncommitted work at any moment.
+install -m 0755 deploy/autodeploy.sh       /usr/local/bin/wbb-autodeploy
+install -m 0755 deploy/autodeploy-guard.sh /usr/local/bin/wbb-autodeploy-guard
+install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
+install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
+systemctl daemon-reload
+```
+
+Re-run the two `install` lines whenever either script changes — they are copies,
+not symlinks, deliberately: the running deployer must not change under a
+`git checkout`.
+
+The timer stays **disabled** until the mechanism has been exercised by hand:
+
+```bash
+# dry run — the guard refuses anything that is not a lockfile-only change
+/usr/local/bin/wbb-autodeploy
+
+# arm it
+systemctl enable --now wbb-autodeploy.timer
+systemctl list-timers wbb-autodeploy.timer
+```
+
+The first run refuses with "no recorded baseline". Seed it with the commit
+currently deployed:
+
+```bash
+mkdir -p ~/.local/state/wbb-autodeploy
+printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=\n' "$(git -C /home/ysi/warsaw-beer-bot rev-parse origin/main)" \
+  > ~/.local/state/wbb-autodeploy/state.env
+```
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2
