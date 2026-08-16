@@ -25,6 +25,9 @@ export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: 
     // Standing state, read after today's run: #377 part B's audit. The first two
     // numbers can refute the design — see the StatusMetrics comment in stats.ts.
     `• Печатки: ${group(m.sealUnidentifiable)} unidentifiable (${group(m.sealUnidentifiableReobserved)} переспостережено) · ${group(m.sealNotABeer)} not_a_beer (+${group(m.sealNotABeer7d)}/7д) · ${group(m.sealRetiredFalsified)} спростованих retire`,
+    // #421: the fix-keyed lock's own audit. `під замком` is the quota saved; a week of
+    // zero unlocks while issues closed means the mechanism is dead.
+    `• Замок: ${group(m.lockedRows)} під замком · ${group(m.unlocked7d)} розімкнено/7д · ${group(m.verdictsOutlived7d)} вердиктів пережили фікс/7д`,
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,

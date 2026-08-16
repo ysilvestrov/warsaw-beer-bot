@@ -51,6 +51,11 @@ test('collectStatus computes all metrics', () => {
     beersMatched: 2,
     orphansPending: 1,
     orphansOffCron: 1,   // orphan 'C' із seed() не має рядка в match_links
+    // #421: seed() has no locked or unlocked rows, so all three read 0 here. The audit's
+    // own behaviour is pinned by the dedicated test below, not by this shape assertion.
+    lockedRows: 0,
+    unlocked7d: 0,
+    verdictsOutlived7d: 0,
     ratingsMissing: 1,
     snapshots: 3,
     taps: 4,
@@ -231,4 +236,47 @@ it('counts the seals, the re-observed subset and the falsified retirements', () 
   expect(m.sealNotABeer).toBe(2);
   expect(m.sealNotABeer7d).toBe(1);
   expect(m.sealRetiredFalsified).toBe(1);
+});
+
+// #421 audit. Red if any of the three counters is dropped or mis-scoped. Each falsifies a
+// different premise: lockedRows is the quota the lock saves; unlocked7d at zero across a
+// week in which issues closed means the mechanism is dead; verdictsOutlived7d near the
+// unlock count means our fixes never cover the rows that motivated them.
+it('counts locked rows, in-flight unlocks and verdicts outlived by their fix', () => {
+  const db = fresh();
+  const mk = (name: string) => upsertBeer(db, {
+    untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
+    normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
+  });
+  const fail = (id: number, name: string, at: string) => recordEnrichFailure(db, {
+    beer_id: id, brewery: 'Mad Brew', name, search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 3, candidates_summary: '', at,
+  });
+
+  // 1) locked: actionable verdict, an issue, free retry not yet spent.
+  const locked = mk('Bitter Cost');
+  fail(locked, 'Bitter Cost', '2026-08-10T00:00:00Z');
+  setEnrichFailureReview(db, locked, 'matcher_bug', 'alias gap', '2026-08-10T01:00:00Z', 347);
+
+  // 2) unlocked and still in flight: beat 1 fired, beat 2 has not.
+  const inFlight = mk('Charred Memory');
+  fail(inFlight, 'Charred Memory', '2026-08-14T00:00:00Z');
+  setEnrichFailureReview(db, inFlight, 'parser_bug', 'split', '2026-08-14T01:00:00Z', 376);
+  db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?')
+    .run('2026-08-14T02:00:00Z', inFlight);
+
+  // 3) verdict outlived its fix: beat 2 cleared the class, issue_number is the residue.
+  const outlived = mk('Siesta');
+  fail(outlived, 'Siesta', '2026-08-15T00:00:00Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 254 WHERE beer_id = ?').run(outlived);
+
+  // 4) a verdict with no issue is not locked — nothing could ever unlock it.
+  const legacy = mk('Legacy Row');
+  fail(legacy, 'Legacy Row', '2026-08-10T00:00:00Z');
+  setEnrichFailureReview(db, legacy, 'matcher_bug', 'no issue', '2026-08-10T01:00:00Z', null);
+
+  const m = collectStatus(db, new Date('2026-08-16T12:00:00Z'));
+  expect(m.lockedRows).toBe(1);
+  expect(m.unlocked7d).toBe(1);
+  expect(m.verdictsOutlived7d).toBe(1);
 });
