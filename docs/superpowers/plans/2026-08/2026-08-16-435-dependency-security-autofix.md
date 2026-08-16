@@ -347,6 +347,25 @@ gh api repos/ysilvestrov/warsaw-beer-bot/dependabot/alerts --jq '[.[] | select(.
 - [ ] No pull request merged by itself.
 - [ ] The open alerts include the four known development-scope advisories (`nanoid`, `postcss` in both projects) and **no** `runtime`-scope advisory. If a runtime one appears, say so — it is the first real customer of this work and it must be fixed by hand now, not held until Part 4.
 
+### Gate 1 — PASSED 2026-08-16
+
+Dependabot opened 10 pull requests within minutes of alerts going on. `ci` was observed RED on #441,
+#442 and #444 and GREEN on the rest — on real traffic, not only the synthetic proof. `review`
+reported `skipping` on every Dependabot pull request. All open alerts were `scope: development`;
+none runtime.
+
+Three findings carried forward:
+
+1. **`strict: true` livelocks a queue.** Auto-merge does not update a stale branch, and every merge
+   makes every other open pull request stale. Two green PRs with auto-merge armed sat in `BEHIND`
+   until updated by hand. Remedied in Part 4 Task 2 Step 2 — see the design's §1.
+2. **npm and GitHub disagree on severity.** `GHSA-fxqj-rqcc-2cmp` is `medium` in GitHub's alert and
+   `high` in `npm audit`. Nothing breaks — `qualify()` reads severity from the audit report by design
+   — but do NOT "improve" Part 2 by switching to the alerts API.
+3. **Three bumps fail the gate for real reasons**, one of them (`#444`) a *production* group. `#441`
+   is split out as issue #446 (TypeScript removed `moduleResolution=node10`). None of them blocks
+   Part 2.
+
 ---
 
 # Part 2 — qualification, label only
@@ -1637,8 +1656,9 @@ EOF
 
 - [ ] **Step 1: Enable auto-merge on the repository**
 
+**Already done 2026-08-16** while landing the first batch of Dependabot pull requests. Verify only:
+
 ```bash
-gh api -X PATCH repos/ysilvestrov/warsaw-beer-bot -f allow_auto_merge=true
 gh api repos/ysilvestrov/warsaw-beer-bot --jq '.allow_auto_merge'   # expect: true
 ```
 
@@ -1651,8 +1671,26 @@ Immediately after the `gh pr edit "$pr" --add-label "$label"` line, add:
             if [ "$verdict" = "autodeploy" ]; then
               gh pr merge "$pr" --auto --squash
               echo "  auto-merge armed" >> "$GITHUB_STEP_SUMMARY"
+
+              # Branch protection sets strict=true, and auto-merge does NOT update a
+              # stale branch — it only waits. Every merge makes every other open PR
+              # stale, so a queue of them livelocks. MEASURED 2026-08-16: two green
+              # PRs with auto-merge armed sat in BEHIND and did not move until the
+              # branch was updated by hand. Without this, a qualified `critical` fix
+              # can wait forever inside a mechanism built so that it would not wait.
+              #
+              # No loop and no sleep: update-branch pushes a commit, which re-runs
+              # `ci`, which re-triggers this workflow. The hourly schedule is the
+              # backstop if that chain ever breaks.
+              if [ "$(gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus)" = "BEHIND" ]; then
+                gh pr update-branch "$pr" || true
+                echo "  branch was BEHIND — updated" >> "$GITHUB_STEP_SUMMARY"
+              fi
             fi
 ```
+
+Note this is inside the `autodeploy` branch deliberately. A `hold` verdict has no auto-merge to
+un-stall, and rebasing a pull request that is not going to merge yet only burns CI.
 
 - [ ] **Step 3: Commit**
 

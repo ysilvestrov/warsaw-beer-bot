@@ -76,6 +76,27 @@ inbound SSH). Three consequences, all binding:
 - Protect `main`: require the `ci` status check; **do not require approving reviews**. Requiring a
   review would deadlock auto-merge forever — Dependabot cannot approve its own pull request — and
   the whole mechanism would silently degrade into a queue of open PRs.
+- `required_status_checks.strict` stays **true**, and the qualify workflow is responsible for the
+  consequence. See below.
+
+**`strict` is a stall, and the design owns it.** Measured 2026-08-16, minutes after protection went
+on: two green pull requests with auto-merge armed sat in `BEHIND` and did not move. `strict: true`
+requires a branch to be current, **auto-merge does not update the branch** — it only waits — and
+every merge makes every other open pull request stale. With a queue of them the state is a livelock,
+and it is worst exactly when activity is highest.
+
+Left alone this defeats the goal: a qualified `critical` fix could wait indefinitely inside a
+mechanism built so that it would not wait. Dependabot does rebase when the base moves, but on its own
+schedule, which is not ours to control.
+
+Two alternatives were rejected. **`strict: false`** removes the stall but also removes the protection
+against two pull requests that are each green alone and broken together — precisely the concurrent
+dependency-bump case this system generates by design. **Relying on Dependabot's own rebase** keeps a
+delay we neither bound nor observe.
+
+So: `strict` stays, and the qualify workflow calls `gh pr update-branch` when a qualified pull request
+is `BEHIND` (§4). The protection is kept and the unbounded wait is removed; the cost is one extra `ci`
+run per update, which is the cheap half of the trade.
 
 ### 2. `ci.yml` — the gate that does not exist yet
 
@@ -114,6 +135,16 @@ the highest governs.
 The publish time is that of the package version that both **changed in this PR's lockfile** and
 appears in the base report's vulnerability set. If more than one qualifies, the **most recently
 published** one governs — the hold is only as strong as its youngest component.
+
+**Un-stalling a qualified pull request.** After arming auto-merge, the workflow checks
+`mergeStateStatus`; on `BEHIND` it calls `gh pr update-branch` and stops there. It does not loop or
+wait: updating the branch pushes a commit, which re-runs `ci`, which re-triggers this workflow — and
+the hourly `schedule` run is the backstop if that chain is ever broken. Severity does not enter this;
+a `hold` verdict has no auto-merge to un-stall, and re-basing a pull request that is not going to
+merge yet only burns CI.
+
+This step is the one piece of the design that acts on a pull request for a reason other than its
+verdict, so it is deliberately the last thing the workflow does and it changes no label.
 
 The audit-diff is the core of it. Dependabot's `dependency-type` metadata cannot distinguish
 production from development for **transitive** packages — and both of today's advisories are
