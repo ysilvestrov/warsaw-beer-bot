@@ -2,7 +2,7 @@ import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
-import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure } from '../storage/enrich_failures';
 import { getJobState } from '../storage/job_state';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
@@ -131,6 +131,27 @@ describe('unlockFixedOrphans', () => {
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
     expect(out.unlocked).toBe(0);
+  });
+
+  // Red if `retired_at IS NULL` is dropped from listLockedRows. retireEnrichFailure PRESERVES
+  // review_class (deliberately, for audit), so a retired row still looks actionable — but it
+  // is held out of the pools by retired_at, not by the lock. Unlocking it stamps unlocked_at
+  // and resets the backoff for a retry that can never run, silently spending the row's one
+  // bet and leaving it marked in-flight forever, since beat 2 needs a failure that never
+  // comes. This is the invariant listLockedRows' own comment promises: it must list exactly
+  // the rows the lock holds.
+  it('ignores a retired row even though it kept its actionable verdict', async () => {
+    const db = fresh();
+    const id = seedLocked(db, 'Bitter Cost', 'parser_bug', 376);
+    expect(retireEnrichFailure(db, id, 'resolved by a shipped fix', '2026-08-10T00:00:00Z')).toBe(true);
+    db.prepare('UPDATE beers SET untappd_lookup_count = 3 WHERE id = ?').run(id);
+
+    const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
+
+    expect(out.unlocked).toBe(0);
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
+    expect(row.unlocked_at).toBeNull();
+    expect(getBeer(db, id)?.untappd_lookup_count).toBe(3); // backoff untouched
   });
 
   // Red if the job re-unlocks a row that already spent its free retry: unlocked_at is the

@@ -280,3 +280,24 @@ it('counts locked rows, in-flight unlocks and verdicts outlived by their fix', (
   expect(m.unlocked7d).toBe(1);
   expect(m.verdictsOutlived7d).toBe(1);
 });
+
+// #421. Red if `retired_at IS NULL` is dropped from the lockedRows metric. A retired row
+// keeps its review_class for audit, but it is held out of the pools by retired_at, not by
+// the lock — counting it as lock-saved quota overstates what the lock buys and hides the
+// retired-orphan debt that sealRetiredFalsified exists to report.
+it('lockedRows does not count a retired row that kept its actionable verdict', () => {
+  const db = fresh();
+  const id = upsertBeer(db, {
+    untappd_id: null, name: 'Bitter Cost', brewery: 'Mad Brew',
+    style: null, abv: null, rating_global: null,
+    normalized_name: 'bitter cost', normalized_brewery: 'mad brew',
+  });
+  recordEnrichFailure(db, {
+    beer_id: id, brewery: 'Mad Brew', name: 'Bitter Cost', search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 3, candidates_summary: '', at: '2026-08-10T00:00:00Z',
+  });
+  setEnrichFailureReview(db, id, 'matcher_bug', 'alias gap', '2026-08-10T01:00:00Z', 347);
+  expect(retireEnrichFailure(db, id, 'resolved by a shipped fix', '2026-08-11T00:00:00Z')).toBe(true);
+
+  expect(collectStatus(db, new Date('2026-08-16T12:00:00Z')).lockedRows).toBe(0);
+});

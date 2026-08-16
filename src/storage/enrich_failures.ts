@@ -112,22 +112,26 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
 }
 
-// True when the row is not a beer product at all (merch, glassware, wine, kombucha,
-// bundles and mystery boxes). The only class that excludes an orphan from the enrich
-// pools: every other verdict is a statement about our current resolving power and can
-// be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
 // #421: rows held out of the pools by `lockedRowPredicate`, with the issue each is waiting
 // on. The predicate itself lives in beers.ts because it is a pool concern; this is its
 // read-side twin and the two must agree — a row listed here but not locked there would be
 // re-armed for nothing. They cannot share text: the predicate is a fragment that hard-codes
 // the `beers` alias `b`, exactly as orphanWithoutMatchLinkPredicate does.
+//
+// `retired_at IS NULL` is not redundant with the class filter: retireEnrichFailure PRESERVES
+// review_class on purpose (for audit), so a retired row still looks actionable here. It is
+// held out of the pools by the retired clause, not by the lock — unlocking it would stamp
+// unlocked_at and reset the backoff for a retry that can never run, silently spending the
+// row's one bet and leaving it in-flight forever, since beat 2 needs a failure that never
+// comes. 3 such rows exist on prod today.
 export function listLockedRows(db: DB): { beer_id: number; issue_number: number }[] {
   return db
     .prepare(
       `SELECT beer_id, issue_number FROM enrich_failures
         WHERE review_class IN ('matcher_bug', 'parser_bug')
           AND issue_number IS NOT NULL
-          AND unlocked_at IS NULL`,
+          AND unlocked_at IS NULL
+          AND retired_at IS NULL`,
     )
     .all() as { beer_id: number; issue_number: number }[];
 }
@@ -149,6 +153,10 @@ export function reviewClassOf(db: DB, beerId: number): string | null {
   return row ? row.review_class : null;
 }
 
+// True when the row is not a beer product at all (merch, glassware, wine, kombucha,
+// bundles and mystery boxes). The only class that excludes an orphan from the enrich
+// pools: every other verdict is a statement about our current resolving power and can
+// be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
 export function isNotABeer(db: DB, beerId: number): boolean {
   return (
     db

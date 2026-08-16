@@ -123,11 +123,15 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
         WHERE review_class = 'not_a_beer' AND reviewed_at > ?`,
       [cutoff7d],
     ),
-    // #421 audit — see the StatusMetrics comment for what each number can refute.
+    // #421 audit — see the StatusMetrics comment for what each number can refute. The
+    // retired_at exclusion mirrors listLockedRows: a retired row keeps its class for audit
+    // but is held out of the pools by retired_at, so counting it here would overstate the
+    // quota the lock saves and hide the retired-orphan debt sealRetiredFalsified reports.
     lockedRows: count(
       `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.review_class IN ('matcher_bug','parser_bug')
           AND ef.issue_number IS NOT NULL AND ef.unlocked_at IS NULL
+          AND ef.retired_at IS NULL
           AND b.untappd_id IS NULL`,
     ),
     // Beat 1 firing. Counts only rows still IN FLIGHT: beat 2 clears unlocked_at, so a row
