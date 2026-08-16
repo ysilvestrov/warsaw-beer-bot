@@ -246,7 +246,12 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // A cause the model cannot prove must not reach GitHub: re-run its proposed
       // query and, if the expected target does not come back, strip the issue
       // attachment and keep only the classification.
-      const strippedBeerIds = new Set<number>();
+      // Keyed by VERDICT IDENTITY, not beer_id: the strip decision is per-verdict, and
+      // the model can echo a duplicate verdict for the same beer (planTriageActions
+      // keeps only the first via seenBeerIds). An id-keyed set would misattribute a
+      // surviving, untouched first verdict to the strip that actually hit a later
+      // duplicate for the same beer.
+      const strippedVerdicts = new Set<Verdict>();
       if (deps.search) {
         const verified = await verifyCauses({
           verdicts: analysis.verdicts, search: deps.search, limit: probeLimit,
@@ -261,13 +266,14 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
           verdicts: analysis.verdicts.map((v) => {
             if (!isCausal(v) || verified.get(v.beer_id)) return v;
             unverified += 1;
-            strippedBeerIds.add(v.beer_id);
-            log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target },
-              'orphan-triage: cause unverified, attachment dropped');
-            return {
+            const stripped = {
               ...v, issue_number: null, new_issue_key: null,
               review_note: `unverified: ${v.review_note}`,
             };
+            strippedVerdicts.add(stripped);
+            log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target },
+              'orphan-triage: cause unverified, attachment dropped');
+            return stripped;
           }),
         };
       }
@@ -288,7 +294,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
         scope: parseScopeBlock(i.body),
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
       }));
-      plan = planTriageActions(analysis, scopedIssues, orphans, probes, strippedBeerIds);
+      plan = planTriageActions(analysis, scopedIssues, orphans, probes, strippedVerdicts);
     } catch (e) {
       const attempt = attemptsToday() + 1;
       const transient = isTransient(e);

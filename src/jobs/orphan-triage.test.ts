@@ -529,8 +529,8 @@ test('an unverified cause is downgraded: no GitHub write, note prefixed', async 
 
 // #432 IMPORTANT 3: no test previously drove causeStripped through a real orphanTriage
 // run — only buildTriageLine fixtures and planTriageActions unit tests (which pass
-// strippedBeerIds directly). This exercises the actual wiring: verifyCauses strips the
-// cause (search returns nothing), the job passes the resulting strippedBeerIds set into
+// strippedVerdicts directly). This exercises the actual wiring: verifyCauses strips the
+// cause (search returns nothing), the job passes the resulting strippedVerdicts set into
 // planTriageActions, and the outcome logged on 'orphan-triage finished' must carry it.
 test('causeStripped on the outcome reflects a verdict the verification gate stripped', async () => {
   const d = db();

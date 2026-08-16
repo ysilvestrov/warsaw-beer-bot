@@ -101,11 +101,17 @@ export function planTriageActions(
   openIssues: ScopedIssue[],
   batchRows: UntriagedFailure[],
   probes: Map<number, TriageProbe>,
-  // #432: beer ids whose cause the verification gate stripped before planning. Passed in
-  // rather than marked on the Verdict: Verdict is the model's own parsed output, and a
-  // marker there is one schema edit away from being model-settable, which would let a
-  // model launder a stripped cause into a voluntary declination.
-  strippedBeerIds: ReadonlySet<number>,
+  // #432: verdicts whose cause the verification gate stripped before planning, keyed by
+  // OBJECT IDENTITY rather than beer_id. The strip decision is per-verdict, not per-beer:
+  // the model can emit two verdicts for the same beer_id (e.g. one echoed from an
+  // open-issue body), and planTriageActions keeps only the first via seenBeerIds below.
+  // An id-keyed set would misattribute the surviving first verdict to a strip that
+  // actually hit a discarded later duplicate. Identity is exact here because this
+  // function iterates the very verdict objects the job produced.
+  // Passed in rather than marked on the Verdict: Verdict is the model's own parsed
+  // output, and a marker there is one schema edit away from being model-settable, which
+  // would let a model launder a stripped cause into a voluntary declination.
+  strippedVerdicts: ReadonlySet<Verdict>,
 ): TriagePlan {
   const byNumber = new Map(openIssues.map((i) => [i.number, i]));
   const rowById = new Map(batchRows.map((r) => [r.beer_id, r]));
@@ -190,7 +196,7 @@ export function planTriageActions(
       // number beside its own part, which is the exact double-count defect this branch
       // exists to remove (12 not_a_beer + 13 без цілі reading as 25 on a 13-row day).
       if (verdict.review_class === 'parser_bug' || verdict.review_class === 'matcher_bug') {
-        if (strippedBeerIds.has(verdict.beer_id)) quietCauseStripped += 1;
+        if (strippedVerdicts.has(verdict)) quietCauseStripped += 1;
         else quietNoTarget += 1;
       }
       quiet.push(verdict);

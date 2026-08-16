@@ -122,8 +122,13 @@ number is not a report.
 
 Counting directly requires `planTriageActions` to distinguish a stripped verdict from a declined
 one. Today it cannot: the strip happens in `orphanTriage` before planning (`orphan-triage.ts:242`)
-and leaves only a `unverified: ` note prefix. **The call site will pass the set of stripped beer ids
-as an argument** — it already knows them, since it does the stripping.
+and leaves only a `unverified: ` note prefix. **The call site will pass the set of stripped verdicts
+as an argument** — it already knows them, since it does the stripping. The set is keyed by verdict
+OBJECT IDENTITY, not by beer id: an id-keyed set misattributes the survivor when the model emits a
+duplicate verdict for the same beer, because the strip decision is per-verdict while
+`planTriageActions` keeps only the first verdict per beer id (`seenBeerIds`) — a stripped *second*
+verdict for a beer would then wrongly taint an untouched *first* verdict for the same beer that
+`planTriageActions` actually kept.
 
 The rejected alternative was a `cause_stripped` field on the verdict itself. It reads better, but
 `Verdict` is `z.infer<typeof VerdictSchema>` — the model's own parsed output. A marker living there
@@ -165,8 +170,9 @@ it, instead of printing a sum next to one of its own parts.
 
 - `TriagePlan` — gains `quietCauseStripped: number` and `quietNoTarget: number`, both counted at the
   `!hasIssue && !hasKey` branch (`triage-plan.ts:173`).
-- `planTriageActions` — gains a fifth parameter, `strippedBeerIds: ReadonlySet<number>`. Callers that
-  do no cause verification pass an empty set.
+- `planTriageActions` — gains a fifth parameter, `strippedVerdicts: ReadonlySet<Verdict>`, keyed by
+  verdict OBJECT IDENTITY rather than beer id — the function iterates the very verdict objects the
+  job produced, so identity is exact. Callers that do no cause verification pass an empty set.
 - `TriageOutcome` — gains `guardHits: Record<GuardReason, number>`, `causeStripped: number` and
   `noTarget: number`; loses `recordedNoIssue`. `unverified` stays, with its existing meaning.
 - `Verdict` — **unchanged**. The strip marker deliberately does not live on it.
@@ -198,8 +204,8 @@ today's code prints nothing.
 7. `quietNoTarget` counts a declined verdict and `quietCauseStripped` counts a stripped one, on a
    batch holding both. The stripped verdict's `review_note` must carry the `unverified: ` prefix
    while the declined one does not, so a test that passes by sniffing the prefix instead of reading
-   `strippedBeerIds` would still be wrong. Mutation proof: have the job pass an empty
-   `strippedBeerIds` and this test goes red while every note is unchanged.
+   `strippedVerdicts` would still be wrong. Mutation proof: have the job pass an empty
+   `strippedVerdicts` and this test goes red while every note is unchanged.
 8. The digest line shows neither `unprobed_absence` nor `saturated`, and shows `scope_violation` when
    non-zero.
 

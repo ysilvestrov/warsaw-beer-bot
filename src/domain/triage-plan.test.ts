@@ -35,10 +35,29 @@ test('splits quiet actionable verdicts into cause-stripped and no-target', () =>
     ],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [], rows(1, 2), noProbes, new Set([1]));
+  const plan = planTriageActions(a, [], rows(1, 2), noProbes, new Set([a.verdicts[0]]));
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([1, 2]);
   expect(plan.quietCauseStripped).toBe(1);
   expect(plan.quietNoTarget).toBe(1);
+});
+
+// #432 fix: the stripped set is keyed by VERDICT IDENTITY, not beer_id, because the
+// strip decision is per-verdict while duplicates are collapsed first-wins by beer_id
+// (seenBeerIds below). Here the model echoes a second verdict for beer 1 — a plain,
+// untouched matcher_bug with no target survives as the FIRST verdict, while a
+// DIFFERENT object for the same beer_id is the one the verification gate stripped.
+// planTriageActions keeps only the first (seenBeerIds), so the survivor must count as
+// a voluntary no-target, not as a stripped cause. An id-keyed set gets this wrong: it
+// would see beer_id 1 in the stripped set and misattribute the survivor.
+test('a duplicate stripped verdict for the same beer does not taint the surviving first verdict', () => {
+  const first = v({ beer_id: 1, review_note: 'voluntary decline' });
+  const second = v({ beer_id: 1, review_note: 'unverified: dropped cause' });
+  const a: Analysis = { verdicts: [first, second], new_issues: [] };
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([second]));
+  expect(plan.skipped).toBe(1); // the duplicate (second) is skipped by seenBeerIds
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
+  expect(plan.quietNoTarget).toBe(1);
+  expect(plan.quietCauseStripped).toBe(0);
 });
 
 test('a downgraded absence counts in neither quiet split', () => {
@@ -409,7 +428,7 @@ test('a not_a_beer verdict with no target is recorded quietly but counts in neit
     verdicts: [v({ beer_id: 1, review_class: 'not_a_beer', review_note: 'unverified: mystery box' })],
     new_issues: [],
   };
-  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([1]));
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([a.verdicts[0]]));
   expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
   expect(plan.quietCauseStripped).toBe(0);
   expect(plan.quietNoTarget).toBe(0);
