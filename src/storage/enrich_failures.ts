@@ -21,6 +21,16 @@ export interface EnrichFailureRow {
 // guard below): it may CREATE a row but never overwrites an existing one. The
 // row is cleared (clearEnrichFailure) when the beer eventually matches, and
 // CASCADE-deleted if the beer row is removed.
+//
+// #421 beat 2: a row carrying `unlocked_at` is spending the free retry granted when its
+// issue left the open set. Reaching this statement means that retry FAILED, which is the
+// evidence that the verdict outlived the fix it named — so the verdict is retired and the
+// row rejoins the triage pool with a fresh failure record. `unlocked_at` resets
+// unconditionally: the only way a row gets here with it set is that its bet just settled.
+// `issue_number` is deliberately kept — it is the residue that says WHICH fix was tested
+// and did not cover this row, and the daily audit counts exactly that.
+// Note the ordering with the blocked guard above: a blocked record returns before this
+// statement, so an Untappd outage can never settle a bet it did not test.
 export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   // #425: `outcome` records how the last attempt THAT LEARNED SOMETHING ended. A blocked
   // attempt learned nothing about the beer — it is a fact about us (throttled IP, open
@@ -80,13 +90,17 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
          last_at            = excluded.last_at,
          review_class       = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.review_class END,
          review_note        = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.review_note END,
          reviewed_at        = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
-           THEN NULL ELSE enrich_failures.reviewed_at END`,
+             OR enrich_failures.unlocked_at IS NOT NULL
+           THEN NULL ELSE enrich_failures.reviewed_at END,
+         unlocked_at        = NULL`,
     ).run(
       r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
       r.candidates_count, r.candidates_summary, r.at,

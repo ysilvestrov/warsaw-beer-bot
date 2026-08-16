@@ -535,6 +535,112 @@ describe('recordEnrichFailure: blocked never downgrades', () => {
   });
 });
 
+// #421 beat 2. The unlock is a BET that the shipped fix covers this row: beat 1 re-arms it
+// and keeps the verdict, because we still believe the verdict — we are testing it. This is
+// where the bet settles. A retry that fails again is the evidence the verdict outlived its
+// own fix, and only that evidence retires it.
+describe('recordEnrichFailure: an unlocked row settles its verdict', () => {
+  function unlock(db: ReturnType<typeof freshDb>, beerId: number): void {
+    db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?')
+      .run('2026-08-15T06:00:00.000Z', beerId);
+  }
+
+  function failAgain(db: ReturnType<typeof freshDb>, beerId: number, candidates = 3): void {
+    recordEnrichFailure(db, {
+      beer_id: beerId, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'not_found', candidates_count: candidates, candidates_summary: '',
+      at: '2026-08-16T10:00:00.000Z',
+    });
+  }
+
+  // Red if the `unlocked_at IS NOT NULL` arm is dropped from the CASE: the verdict would
+  // survive a retry that disproved it, and the row would sit classified and invisible to
+  // triage forever — sealed again by the very mechanism meant to unseal it.
+  it('clears the verdict when the post-unlock retry fails again', () => {
+    const db = freshDb();
+    seedFailure(db, 1);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3 WHERE beer_id = 1').run();
+    expect(setEnrichFailureReview(db, 1, 'matcher_bug', 'alias gap → #347', NOW, 347)).toBe('written');
+    unlock(db, 1);
+
+    failAgain(db, 1);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 1').get() as any;
+    expect(row.review_class).toBeNull();
+    expect(row.review_note).toBeNull();
+    expect(row.reviewed_at).toBeNull();
+    expect(row.unlocked_at).toBeNull();
+  });
+
+  // Red if the arm keys off the class instead of unlocked_at. An ordinary re-fail on a
+  // locked-but-not-yet-unlocked row must keep its verdict — wiping those wholesale would
+  // silently empty the triage record for every actionable row in the corpus.
+  it('keeps the verdict when a row that was never unlocked fails again', () => {
+    const db = freshDb();
+    seedFailure(db, 2);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3 WHERE beer_id = 2').run();
+    setEnrichFailureReview(db, 2, 'matcher_bug', 'alias gap → #347', NOW, 347);
+
+    failAgain(db, 2);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 2').get() as any;
+    expect(row.review_class).toBe('matcher_bug');
+    expect(row.reviewed_at).toBe(NOW);
+  });
+
+  // Red if issue_number is cleared along with the class. The link is the evidence trail of
+  // WHICH fix was tested and did not cover the row — the audit counter reads exactly that
+  // residue, since beat 2 erases every other trace that the row was ever unlocked.
+  it('leaves issue_number in place when beat 2 clears the verdict', () => {
+    const db = freshDb();
+    seedFailure(db, 3);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3 WHERE beer_id = 3').run();
+    setEnrichFailureReview(db, 3, 'parser_bug', 'split → #376', NOW, 376);
+    unlock(db, 3);
+
+    failAgain(db, 3);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 3').get() as any;
+    expect(row.review_class).toBeNull();
+    expect(row.issue_number).toBe(376);
+  });
+
+  // Red if the 0<->>0 arm is replaced rather than joined by the new one (#377 part B).
+  it('still clears the verdict when candidates_count crosses the 0<->>0 boundary', () => {
+    const db = freshDb();
+    seedFailure(db, 4);
+    setEnrichFailureReview(db, 4, 'unidentifiable', 'no candidates', NOW);
+
+    failAgain(db, 4, 4);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 4').get() as any;
+    expect(row.review_class).toBeNull();
+  });
+
+  // Red if beat 2 is moved ABOVE the blocked guard (#425), or if that guard is removed.
+  // A blocked record never reaches the upsert, so an Untappd outage cannot settle a bet it
+  // never tested: the free retry is still owed and the row keeps both its verdict and its
+  // unlocked_at. This is the interaction between the two changes, and it only works in one
+  // order.
+  it('does not settle the bet on a blocked record — the free retry is still owed', () => {
+    const db = freshDb();
+    seedFailure(db, 5);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3 WHERE beer_id = 5').run();
+    setEnrichFailureReview(db, 5, 'matcher_bug', 'alias gap → #347', NOW, 347);
+    unlock(db, 5);
+
+    recordEnrichFailure(db, {
+      beer_id: 5, brewery: 'b', name: 'n', search_url: '', source_url: '',
+      outcome: 'blocked', candidates_count: 0, candidates_summary: '',
+      at: '2026-08-16T10:00:00.000Z',
+    });
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 5').get() as any;
+    expect(row.review_class).toBe('matcher_bug');
+    expect(row.unlocked_at).toBe('2026-08-15T06:00:00.000Z');
+  });
+});
+
 describe('setEnrichFailureReview guards', () => {
   it('refuses a verdict on a row we could not ask about', () => {
     const db = freshDb();                       // existing helper in this file
