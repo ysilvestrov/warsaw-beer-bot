@@ -144,9 +144,27 @@ itself. This is enforced by GitHub, not by our logic, which is why it is worth m
 **Layer 3 — never `pull_request_target` over head code.** That trigger grants a *write* token to a
 fork PR's run; checking out the PR's code under it and executing anything (`npm ci` suffices —
 install scripts run) hands repository write access to the author. It is the standard way schemes
-like this are broken. Therefore: qualification runs on `pull_request` (read-only, no secrets), and
-the tag is pushed by a **separate** workflow triggered on `push: main` after the merge, whose code
-comes from `main` and is unreachable from any PR.
+like this are broken, and GitHub's own Dependabot troubleshooting page recommends it as one of
+three workarounds. **This design takes a different one of the three.**
+
+**Verified 2026-08-16 against GitHub's documentation:** runs triggered by Dependabot get "a
+read-only `GITHUB_TOKEN` and do not have access to any secrets that are normally available". A
+read-only token cannot apply a label or arm auto-merge, so qualification needs elevation — and the
+documented third option is to raise scope with the `permissions` key rather than to change trigger.
+Therefore:
+
+- the qualify workflow runs on `pull_request` and declares `permissions: { contents: read,
+  pull-requests: write }`. GitHub honours that elevation for Dependabot-triggered runs and still
+  caps **fork** PRs at read-only, so the fork case stays powerless without us reasoning about it;
+- the job is additionally gated on `user.login == 'dependabot[bot]'` **and**
+  `head.repo.full_name == github.repository` (§5 Layer 1);
+- **the workflow checks out `main`, not the pull request.** The PR's `package.json` and
+  `package-lock.json` are fetched as *data* (`git show <head-sha>:<path>`) into a scratch directory.
+  `npm audit` reads a lockfile without installing, so no package's install scripts run, and every
+  line of tooling that executes comes from `main`. Nothing the PR author controls is ever executed
+  by a job holding a write token;
+- the tag is pushed by a **separate** workflow on `push: main` after the merge, likewise from
+  `main`'s code and unreachable from any PR.
 
 **Layer 4 — the host re-verifies everything, independently.** This is the anchor, because it holds
 even if every layer above is wrong. Before deploying, `autodeploy.sh` checks:
@@ -275,8 +293,9 @@ anything, which is what "Dependabot is a proposal, not a constant" requires.
 
 - `.github/dependabot.yml` — new.
 - `.github/workflows/ci.yml` — new. Jobs `ci (root)`, `ci (extension)`; `ci` is the required check.
-- `.github/workflows/dependabot-qualify.yml` — new. `pull_request` + hourly `schedule`. Read-only
-  token on the PR path.
+- `.github/workflows/dependabot-qualify.yml` — new. `pull_request` + hourly `schedule`.
+  `permissions: { contents: read, pull-requests: write }`; checks out `main` and reads the PR's two
+  files as data (§5, Layer 3).
 - `.github/workflows/autodeploy-tag.yml` — new. `push: main`. Pushes `autodeploy-<utc-timestamp>`.
 - `.github/workflows/prod-audit.yml` — new. Daily schedule.
 - `scripts/autodeploy/qualify.ts` — new. Pure functions, no I/O, so they are unit-testable; the
@@ -301,6 +320,8 @@ anything, which is what "Dependabot is a proposal, not a constant" requires.
   `extension/**` — the extension is not deployed and cannot produce a runtime advisory, so an
   extension bump has no business restarting the server.
 - **No `pull_request_target` anywhere in this repository.**
+- **No job holding a write token may check out or execute pull-request code.** The qualify workflow
+  checks out `main` and consumes the PR's manifest and lockfile as data only.
 - **Branch protection must not require approving reviews** (§1).
 - **No change to `sudoers`.** If an implementation step appears to need one, the step is wrong.
 - **Autodeploy never reads the operator's working tree.**
