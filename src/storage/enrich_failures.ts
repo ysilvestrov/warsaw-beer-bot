@@ -116,6 +116,28 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // bundles and mystery boxes). The only class that excludes an orphan from the enrich
 // pools: every other verdict is a statement about our current resolving power and can
 // be overturned by a shipped fix, so those rows must stay reachable (#377 part B).
+// #421: rows held out of the pools by `lockedRowPredicate`, with the issue each is waiting
+// on. The predicate itself lives in beers.ts because it is a pool concern; this is its
+// read-side twin and the two must agree — a row listed here but not locked there would be
+// re-armed for nothing. They cannot share text: the predicate is a fragment that hard-codes
+// the `beers` alias `b`, exactly as orphanWithoutMatchLinkPredicate does.
+export function listLockedRows(db: DB): { beer_id: number; issue_number: number }[] {
+  return db
+    .prepare(
+      `SELECT beer_id, issue_number FROM enrich_failures
+        WHERE review_class IN ('matcher_bug', 'parser_bug')
+          AND issue_number IS NOT NULL
+          AND unlocked_at IS NULL`,
+    )
+    .all() as { beer_id: number; issue_number: number }[];
+}
+
+// #421 beat 1: the row is spending its post-fix free retry. The verdict is deliberately
+// KEPT — we still believe it, we are testing it. recordEnrichFailure settles the bet.
+export function markUnlocked(db: DB, beerId: number, atIso: string): void {
+  db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?').run(atIso, beerId);
+}
+
 // #421: the row's triage class, or null when it has never been triaged (or has no failure
 // row at all). The pool queries read this column inline; this is for the callers that hold
 // only a beer id — enrichOneOrphan's second eligibility gate and /enrich/candidates — and
