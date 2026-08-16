@@ -253,44 +253,50 @@ test('guardHits reaches the run outcome even when no guard fired', async () => {
   const d = db();
   seedOrphan(d, 1);
   const spy = vi.spyOn(log, 'info');
-  const theLlm = llm({
-    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
-      issue_number: null, new_issue_key: null }],
-    new_issues: [],
-  });
-  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
-  expect(spy).toHaveBeenCalledWith(
-    expect.objectContaining({
-      outcome: expect.objectContaining({
-        guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+  try {
+    const theLlm = llm({
+      verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
+        issue_number: null, new_issue_key: null }],
+      new_issues: [],
+    });
+    await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: expect.objectContaining({
+          guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+        }),
       }),
-    }),
-    'orphan-triage finished',
-  );
-  spy.mockRestore();
+      'orphan-triage finished',
+    );
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('guardHits reaches the outcome when a guard fired and every row got a verdict', async () => {
   const d = db();
   seedOrphan(d, 1);
   const spy = vi.spyOn(log, 'info');
-  // not_on_untappd with no probe evidence: guard 3 fires, covered === batch, so the old
-  // `verdict shortfall` condition is false — this is the 2026-08-16 shape exactly.
-  const theLlm = llm({
-    verdicts: [{ beer_id: 1, review_class: 'not_on_untappd', review_note: 'absent',
-      issue_number: null, new_issue_key: null }],
-    new_issues: [],
-  });
-  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
-  expect(spy).toHaveBeenCalledWith(
-    expect.objectContaining({
-      outcome: expect.objectContaining({
-        guardHits: expect.objectContaining({ unprobed_absence: 1 }),
+  try {
+    // not_on_untappd with no probe evidence: guard 3 fires, covered === batch, so the old
+    // `verdict shortfall` condition is false — this is the 2026-08-16 shape exactly.
+    const theLlm = llm({
+      verdicts: [{ beer_id: 1, review_class: 'not_on_untappd', review_note: 'absent',
+        issue_number: null, new_issue_key: null }],
+      new_issues: [],
+    });
+    await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+    expect(spy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: expect.objectContaining({
+          guardHits: expect.objectContaining({ unprobed_absence: 1 }),
+        }),
       }),
-    }),
-    'orphan-triage finished',
-  );
-  spy.mockRestore();
+      'orphan-triage finished',
+    );
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('verdict shortfall still warns and no longer carries guardHits', async () => {
@@ -298,15 +304,18 @@ test('verdict shortfall still warns and no longer carries guardHits', async () =
   seedOrphan(d, 1);
   seedOrphan(d, 2);
   const spy = vi.spyOn(log, 'warn');
-  const theLlm = llm({
-    verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
-      issue_number: null, new_issue_key: null }],
-    new_issues: [],
-  });
-  await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
-  // Exact object, not objectContaining: equality is what proves guardHits is gone.
-  expect(spy).toHaveBeenCalledWith({ covered: 1, batch: 2 }, 'orphan-triage: verdict shortfall');
-  spy.mockRestore();
+  try {
+    const theLlm = llm({
+      verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'x',
+        issue_number: null, new_issue_key: null }],
+      new_issues: [],
+    });
+    await orphanTriage({ db: d, log, llm: theLlm, github: gh(), now: inWindow });
+    // Exact object, not objectContaining: equality is what proves guardHits is gone.
+    expect(spy).toHaveBeenCalledWith({ covered: 1, batch: 2 }, 'orphan-triage: verdict shortfall');
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 test('empty verdicts: retries once; still empty → error line, run marked, nothing written', async () => {
@@ -518,6 +527,39 @@ test('an unverified cause is downgraded: no GitHub write, note prefixed', async 
   expect(row.review_note).not.toContain('#228');
 });
 
+// #432 IMPORTANT 3: no test previously drove causeStripped through a real orphanTriage
+// run — only buildTriageLine fixtures and planTriageActions unit tests (which pass
+// strippedBeerIds directly). This exercises the actual wiring: verifyCauses strips the
+// cause (search returns nothing), the job passes the resulting strippedBeerIds set into
+// planTriageActions, and the outcome logged on 'orphan-triage finished' must carry it.
+test('causeStripped on the outcome reflects a verdict the verification gate stripped', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const spy = vi.spyOn(log, 'info');
+  try {
+    const analysis: Analysis = {
+      verdicts: [{
+        beer_id: 1, review_class: 'matcher_bug', review_note: 'brewery alias gap',
+        issue_number: 228, new_issue_key: null,
+        proposed_query: 'ReCraft Hazy American Pale Ale',
+        expected_target: 'Browar Cornelius — Cornelius Hazy APA',
+      }],
+      new_issues: [],
+    };
+    const github = gh();
+    // probes return nothing; the verification query returns nothing either → stripped
+    await orphanTriage({ db: d, log, llm: llm(analysis), github, search: searchStub(), now: inWindow });
+
+    const call = spy.mock.calls.find(([, msg]) => msg === 'orphan-triage finished');
+    expect(call).toBeDefined();
+    const outcome = (call![0] as { outcome: { causeStripped: number; noTarget: number } }).outcome;
+    expect(outcome.causeStripped).toBe(1);
+    expect(outcome.noTarget).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
+});
+
 test('a verified cause is published as before', async () => {
   const d = db();
   seedOrphan(d, 1);
@@ -602,12 +644,15 @@ test('without a search dep the job behaves exactly as before', async () => {
 // set to DIFFERENT values here: if the implementation regressed to rendering
 // o.unverified, the digest would show "7 неперевірених" instead of the asserted
 // "2 неперевірених" and this test would go red. Equal values would prove nothing.
+// notABeer is also given a value distinct from noTarget/causeStripped (MINOR 5): a
+// fixture where notABeer is always 0 cannot catch not_a_beer being double-counted
+// into one of the quiet counters, which is exactly how CRITICAL 1 escaped review.
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
+  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених');
 });
 
 test('logs one evidence summary per run (input for the quality review)', async () => {
@@ -830,20 +875,23 @@ test('narrow warn stays silent for routine guard work', () => {
 // a regression to rendering o.unverified would show "8 неперевірених" in the first case
 // and a spurious "3 неперевірених" part (unverified: 3, causeStripped: 0 should render
 // nothing) in the second. Equal values would let a wrong field pass silently.
+// notABeer is also given its own distinct non-zero value in each fixture (MINOR 5): a
+// fixture where notABeer is always 0 cannot catch it being double-counted into one of
+// the quiet counters, which is exactly how CRITICAL 1 escaped review.
 test('buildTriageLine names each quiet mechanism and hides routine guards', () => {
   expect(buildTriageLine({
-    total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+    total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 7,
     causeStripped: 5, noTarget: 1, skipped: 0, unverified: 8,
     guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 4, unprobed_absence: 9 },
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 15 нових → 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
+  })).toBe('Тріаж: 15 нових → 7 not_a_beer, 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
   expect(buildTriageLine({
-    total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+    total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 4,
     causeStripped: 0, noTarget: 0, skipped: 2, unverified: 3,
     guardHits: { illegal_scope: 1, scope_violation: 2, saturated: 0, unprobed_absence: 0 },
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 3 нових → 1 нелегальний scope, 2 поза scope, 2 пропущено');
+  })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 нелегальний scope, 2 поза scope, 2 пропущено');
 });
 
 test('a throwing archive cannot cost the day: state is written before the archive', async () => {

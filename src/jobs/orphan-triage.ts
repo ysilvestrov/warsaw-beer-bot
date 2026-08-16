@@ -315,6 +315,16 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const covered = new Set(
       analysis.verdicts.map((v) => v.beer_id).filter((id) => byId.has(id)),
     ).size;
+    // #432 IMPORTANT 2: guard 1 (illegal_scope) is tallied over analysis.new_issues
+    // independently of any verdict, so it can fire even when covered === 0 (every
+    // verdict a foreign row, but a proposed issue still had an illegal scope). These
+    // three assignments and the anomaly warn must publish on EVERY run, so they sit
+    // ABOVE the covered === 0 early return, not after it.
+    outcome.guardHits = plan.guardHits;
+    reportGuardAnomalies(log, plan.guardHits);
+    outcome.causeStripped = plan.quietCauseStripped;
+    outcome.noTarget = plan.quietNoTarget;
+
     if (covered === 0) {
       log.error({ batch: orphans.length, stopReasons: exchanges.map((e) => e.raw.stopReason) },
         'orphan-triage: zero verdicts after retry');
@@ -326,10 +336,6 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // row, so that row recirculates tomorrow with nothing recorded about why.
       log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
     }
-    outcome.guardHits = plan.guardHits;
-    reportGuardAnomalies(log, plan.guardHits);
-    outcome.causeStripped = plan.quietCauseStripped;
-    outcome.noTarget = plan.quietNoTarget;
     outcome.skipped = plan.skipped;
     outcome.unverified = unverified;
 

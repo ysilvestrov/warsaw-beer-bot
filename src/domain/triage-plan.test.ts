@@ -400,6 +400,21 @@ test('routes not_a_beer to GitHub instead of writing it quietly', () => {
   expect(plan.newIssues[0].verdicts.map((x) => x.beer_id)).toEqual([1]);
 });
 
+// #432 CRITICAL 1: not_a_beer with no target must NOT land in either quiet counter —
+// it already owns outcome.notABeer / the "not_a_beer" digest part, incremented
+// separately in orphan-triage.ts from plan.quiet. Counting it here too was the
+// double-count bug (12 not_a_beer + 13 без цілі reading as 25 on a 13-row day).
+test('a not_a_beer verdict with no target is recorded quietly but counts in neither quiet split', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, review_class: 'not_a_beer', review_note: 'unverified: mystery box' })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set([1]));
+  expect(plan.quiet.map((x) => x.beer_id)).toEqual([1]);
+  expect(plan.quietCauseStripped).toBe(0);
+  expect(plan.quietNoTarget).toBe(0);
+});
+
 // The scope guard still binds not_a_beer: being actionable does not exempt it from
 // having to match the issue it attaches to.
 test('a not_a_beer verdict whose row contradicts the issue scope is refused', () => {

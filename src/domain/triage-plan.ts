@@ -184,8 +184,15 @@ export function planTriageActions(
     // row leaves the untriaged pool instead of regenerating the same unprovable
     // hypothesis every day; it stays findable via the issues' `Scope:` queries.
     if (!hasIssue && !hasKey) {
-      if (strippedBeerIds.has(verdict.beer_id)) quietCauseStripped += 1;
-      else quietNoTarget += 1;
+      // #432 CRITICAL 1: not_a_beer is deliberately excluded from both quiet counters.
+      // It already owns its own counter and digest part (outcome.notABeer, incremented
+      // in orphan-triage.ts from plan.quiet) — counting it again here would republish a
+      // number beside its own part, which is the exact double-count defect this branch
+      // exists to remove (12 not_a_beer + 13 без цілі reading as 25 on a 13-row day).
+      if (verdict.review_class === 'parser_bug' || verdict.review_class === 'matcher_bug') {
+        if (strippedBeerIds.has(verdict.beer_id)) quietCauseStripped += 1;
+        else quietNoTarget += 1;
+      }
       quiet.push(verdict);
       continue;
     }
