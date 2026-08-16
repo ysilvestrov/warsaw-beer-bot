@@ -403,6 +403,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // that a verdict cannot exist on a row we could not ask about.
     sql: V24_REBUILD_SQL,
   },
+  {
+    version: 25,
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN unlocked_at TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

@@ -56,6 +56,31 @@ When changing the browser extension:
 
 ---
 
+Orphan-Triage Issues
+
+Issues labelled `orphan-triage` are not ordinary tickets: each one owns a set of rows in the
+production database. `enrich_failures.issue_number` links every triaged orphan to the issue whose fix
+would rescue it, and closing that issue is read by the bot as "the fix shipped" — it re-arms those
+rows for one free retry (design: `docs/superpowers/specs/2026-08/2026-08-15-421-fix-keyed-lock-design.md`).
+
+So when you split an `orphan-triage` issue into sub-issues, or supersede it with a narrower one,
+remap its rows in the same change:
+
+```
+sudo -u warsaw-beer-bot bash -lc "sqlite3 /var/lib/warsaw-beer-bot/bot.db \
+  \"UPDATE enrich_failures SET issue_number = <sub> WHERE beer_id IN (<ids>)\""
+```
+
+Move only the rows the sub-issue actually covers, one row at a time in judgement — never a blanket
+`WHERE issue_number = <parent>` sweep onto a single child. A row whose sub-issue you cannot name
+stays on the parent and takes its retry; a wrong link is worse than no link, because it will unlock
+against an unrelated issue's close.
+
+Leave `review_class` alone while remapping. The class says what kind of defect this is; the issue
+number says who fixes it. Changing both at once is how a verdict loses its evidence.
+
+---
+
 Architecture
 
 Preserve the existing architecture.

@@ -491,7 +491,55 @@ describe('schema migrations', () => {
         .get(notABeer) as { r: string | null };
       expect(kept.r).not.toBeNull();
 
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(24);
+      // Updated 24 -> 25 by #421: this rewind starts from v23 and runs migrate() to
+      // completion, so the reachable head moves whenever a later migration is added.
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(25);
+    });
+  });
+
+  describe('migration v25 — enrich_failures.unlocked_at', () => {
+    // Red if migration 25 is removed or renamed (the column is the only local fact
+    // the pool queries may read about an unlock), OR if v25's entry is placed before
+    // v24's rebuild in MIGRATIONS: migrate() computes its starting version once,
+    // before iterating (schema.ts's `current`), so array position — not the
+    // `version` field — decides run order within a single migrate() call on a fresh
+    // DB. A misordered v25 would have its ALTER run first and then get silently
+    // erased by v24's rebuild, which copies a fixed column list. This assertion
+    // inspects the schema that survives the *whole* migrate() run, so it catches
+    // that regardless of which migration caused the drop.
+    it('v25 adds enrich_failures.unlocked_at, nullable and NULL for every existing row', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      const cols = db.prepare(`PRAGMA table_info(enrich_failures)`).all() as {
+        name: string; type: string; notnull: number; dflt_value: string | null;
+      }[];
+      const col = cols.find((c) => c.name === 'unlocked_at');
+      expect(col).toBeDefined();
+      expect(col!.type).toBe('TEXT');
+      expect(col!.notnull).toBe(0);
+      expect(col!.dflt_value).toBeNull();
+    });
+
+    // Red only if the v25 entry is never added to MIGRATIONS at all (migrate()
+    // would then stop recording at 24). This does NOT detect misordering within
+    // MIGRATIONS: migrate() compares each migration's `version` field against a
+    // `current` value computed once before the loop starts (schema.ts:416-417), so
+    // on a fresh DB every migration's `version > 0` regardless of array position —
+    // a v25 entry placed before v24's rebuild would still run, and schema_version
+    // would still end up with both 24 and 25, and MAX(version) would still be 25.
+    // The column-presence test above is what actually pins ordering.
+    //
+    // Deviation from the brief: uses this project's own schema_version table rather
+    // than PRAGMA user_version. migrate() (src/storage/schema.ts) never sets SQLite's
+    // user_version pragma — it tracks the applied version in schema_version instead
+    // (see the other "reaches at least version N" tests in this file) — so the
+    // pragma would read 0 regardless of migration state and could never go red/green
+    // on the thing this test is meant to check.
+    it('v25 is reachable and recorded in schema_version', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
+      expect(version.v).toBe(25);
     });
   });
 });

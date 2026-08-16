@@ -21,6 +21,16 @@ export interface EnrichFailureRow {
 // guard below): it may CREATE a row but never overwrites an existing one. The
 // row is cleared (clearEnrichFailure) when the beer eventually matches, and
 // CASCADE-deleted if the beer row is removed.
+//
+// #421 beat 2: a row carrying `unlocked_at` is spending the free retry granted when its
+// issue left the open set. Reaching this statement means that retry FAILED, which is the
+// evidence that the verdict outlived the fix it named — so the verdict is retired and the
+// row rejoins the triage pool with a fresh failure record. `unlocked_at` resets
+// unconditionally: the only way a row gets here with it set is that its bet just settled.
+// `issue_number` is deliberately kept — it is the residue that says WHICH fix was tested
+// and did not cover this row, and the daily audit counts exactly that.
+// Note the ordering with the blocked guard above: a blocked record returns before this
+// statement, so an Untappd outage can never settle a bet it did not test.
 export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
   // #425: `outcome` records how the last attempt THAT LEARNED SOMETHING ended. A blocked
   // attempt learned nothing about the beer — it is a fact about us (throttled IP, open
@@ -80,13 +90,17 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
          last_at            = excluded.last_at,
          review_class       = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.review_class END,
          review_note        = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.review_note END,
          reviewed_at        = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
-           THEN NULL ELSE enrich_failures.reviewed_at END`,
+             OR enrich_failures.unlocked_at IS NOT NULL
+           THEN NULL ELSE enrich_failures.reviewed_at END,
+         unlocked_at        = NULL`,
     ).run(
       r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
       r.candidates_count, r.candidates_summary, r.at,
@@ -96,6 +110,47 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
 
 export function clearEnrichFailure(db: DB, beerId: number): void {
   db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(beerId);
+}
+
+// #421: rows held out of the pools by `lockedRowPredicate`, with the issue each is waiting
+// on. The predicate itself lives in beers.ts because it is a pool concern; this is its
+// read-side twin and the two must agree — a row listed here but not locked there would be
+// re-armed for nothing. They cannot share text: the predicate is a fragment that hard-codes
+// the `beers` alias `b`, exactly as orphanWithoutMatchLinkPredicate does.
+//
+// `retired_at IS NULL` is not redundant with the class filter: retireEnrichFailure PRESERVES
+// review_class on purpose (for audit), so a retired row still looks actionable here. It is
+// held out of the pools by the retired clause, not by the lock — unlocking it would stamp
+// unlocked_at and reset the backoff for a retry that can never run, silently spending the
+// row's one bet and leaving it in-flight forever, since beat 2 needs a failure that never
+// comes. 3 such rows exist on prod today.
+export function listLockedRows(db: DB): { beer_id: number; issue_number: number }[] {
+  return db
+    .prepare(
+      `SELECT beer_id, issue_number FROM enrich_failures
+        WHERE review_class IN ('matcher_bug', 'parser_bug')
+          AND issue_number IS NOT NULL
+          AND unlocked_at IS NULL
+          AND retired_at IS NULL`,
+    )
+    .all() as { beer_id: number; issue_number: number }[];
+}
+
+// #421 beat 1: the row is spending its post-fix free retry. The verdict is deliberately
+// KEPT — we still believe it, we are testing it. recordEnrichFailure settles the bet.
+export function markUnlocked(db: DB, beerId: number, atIso: string): void {
+  db.prepare('UPDATE enrich_failures SET unlocked_at = ? WHERE beer_id = ?').run(atIso, beerId);
+}
+
+// #421: the row's triage class, or null when it has never been triaged (or has no failure
+// row at all). The pool queries read this column inline; this is for the callers that hold
+// only a beer id — enrichOneOrphan's second eligibility gate and /enrich/candidates — and
+// need it to pick the backoff schedule (RECURRING_CLASSES).
+export function reviewClassOf(db: DB, beerId: number): string | null {
+  const row = db
+    .prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { review_class: string | null } | undefined;
+  return row ? row.review_class : null;
 }
 
 // True when the row is not a beer product at all (merch, glassware, wine, kombucha,

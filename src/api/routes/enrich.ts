@@ -13,9 +13,9 @@ import {
   stampBidProvenance,
   type OrphanFacts,
 } from '../../storage/beers';
-import { isNotABeer } from '../../storage/enrich_failures';
+import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
-import { isEligible } from '../../domain/lookup-backoff';
+import { isEligible, RECURRING_CLASSES } from '../../domain/lookup-backoff';
 import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import {
   ALGOLIA_DEFAULTS,
@@ -170,7 +170,13 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           (row.untappd_id == null ||
             (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
           !isNotABeer(deps.db, row.id) &&
-          isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count);
+          isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count,
+            RECURRING_CLASSES.includes(reviewClassOf(deps.db, row.id) ?? ''));
+        // #421: the fix-keyed lock is deliberately ABSENT here. This search runs in the
+        // user's own Untappd session (#89), so it costs none of the quota the lock exists
+        // to protect, and a locked row may still be found by a client the matcher cannot
+        // reach. The recurring backoff tail, by contrast, DOES apply — it is a statement
+        // about the beer's chance of existing, not about whose quota pays.
         // #391: the #382 ladder, narrowest first. The LAST rung is by construction
         // cleanSearchQuery(brewery, name) — the query this endpoint has always sent — so
         // `algolia` keeps its meaning and a published 0.13.0 client is untouched. The

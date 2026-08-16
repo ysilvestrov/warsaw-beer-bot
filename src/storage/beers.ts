@@ -241,7 +241,7 @@ export function recordLookupTransient(
   ).run(at, beerId);
 }
 
-import { isEligible } from '../domain/lookup-backoff';
+import { isEligible, RECURRING_CLASSES } from '../domain/lookup-backoff';
 
 export interface LookupCandidate {
   id: number;
@@ -249,7 +249,39 @@ export interface LookupCandidate {
   name: string;
   untappd_lookup_at: string | null;
   untappd_lookup_count: number;
+  // #421: the backoff schedule differs by class — `not_on_untappd` waits on Untappd's
+  // catalogue growing and so repeats its last delay forever, while every other class
+  // keeps the terminal schedule. Selected here so the pool query stays the single place
+  // that reads enrich_failures for a candidate.
+  review_class: string | null;
 }
+
+// #421: a verdict that names an unfixed bug is a settled question — while the issue is
+// open the answer cannot move, so re-asking Untappd spends quota on nothing AND burns the
+// row's four backoff attempts before its fix ships. The row is held out of both pools
+// until `unlock-fixed-orphans` sees its issue leave the open set and stamps `unlocked_at`.
+//
+// Three conditions, each load-bearing: the class must name a fix owner (only matcher_bug
+// and parser_bug do), the row must name WHICH fix (`issue_number`, v23 — a verdict with no
+// issue could never be unlocked, so locking it would be a permanent seal, the very thing
+// #377 spent a design removing), and the free retry must not already be spent.
+//
+// Deliberately NOT applied in two places. `/enrich/candidates` searches in the user's own
+// Untappd session (#89), so the quota this saves is not ours to save and a locked row may
+// still be findable there. `orphansOffCron` in stats.ts counts the whole drain QUEUE, not
+// the slice eligible right now — which is why it already skips the backoff filter too;
+// hiding locked rows there would make the backlog look like it shrank when it only went
+// quiet. Hence this is appended at the two pool call sites rather than folded into
+// orphanWithoutMatchLinkPredicate, which stats.ts shares.
+//
+// Assumes the `beers` alias `b`, like orphanWithoutMatchLinkPredicate.
+export const lockedRowPredicate = `EXISTS (
+           SELECT 1 FROM enrich_failures ef
+           WHERE ef.beer_id = b.id
+             AND ef.review_class IN ('matcher_bug', 'parser_bug')
+             AND ef.issue_number IS NOT NULL
+             AND ef.unlocked_at IS NULL
+         )`;
 
 export function listLookupCandidates(
   db: DB,
@@ -268,7 +300,9 @@ export function listLookupCandidates(
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
-              b.untappd_lookup_at, b.untappd_lookup_count
+              b.untappd_lookup_at, b.untappd_lookup_count,
+              (SELECT ef.review_class FROM enrich_failures ef WHERE ef.beer_id = b.id)
+                AS review_class
        FROM beers b
        WHERE b.untappd_id IS NULL
          AND NOT EXISTS (
@@ -276,6 +310,7 @@ export function listLookupCandidates(
            WHERE ef.beer_id = b.id
              AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
+         AND NOT ${lockedRowPredicate}
          AND EXISTS (
            SELECT 1 FROM match_links ml
            JOIN taps t ON t.beer_ref = ml.ontap_ref
@@ -296,7 +331,8 @@ export function listLookupCandidates(
   // its math in SQLite julianday arithmetic would duplicate the schedule
   // and drift over time).
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);
@@ -338,9 +374,12 @@ export function listRelayLookupCandidates(
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
-              b.untappd_lookup_at, b.untappd_lookup_count
+              b.untappd_lookup_at, b.untappd_lookup_count,
+              (SELECT ef.review_class FROM enrich_failures ef WHERE ef.beer_id = b.id)
+                AS review_class
        FROM beers b
        WHERE ${orphanWithoutMatchLinkPredicate}
+         AND NOT ${lockedRowPredicate}
        ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
     )
     .all() as LookupCandidate[];
@@ -348,7 +387,8 @@ export function listRelayLookupCandidates(
   // Той самий JS-фільтр backoff, що й у listLookupCandidates: відтворювати його
   // математику в julianday-арифметиці SQLite означало б дублювати розклад.
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);
