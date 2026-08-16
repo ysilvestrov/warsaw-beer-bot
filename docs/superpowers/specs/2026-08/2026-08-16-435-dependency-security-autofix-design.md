@@ -240,19 +240,48 @@ more.
 ### 7. The host-side deployer
 
 A systemd timer (5 min, randomized delay) runs `deploy/autodeploy.sh` as `ysi` — the user the
-existing `sudoers` fragment is pinned to. Under `flock`, so it can neither overlap itself nor
-collide with a manual deploy.
+existing `sudoers` fragment is pinned to. Under `flock`, so it cannot overlap itself.
+
+**It does NOT exclude a manual `deploy.sh`**, and this document previously claimed it did. `deploy.sh`
+takes no lock, and it is out of scope to change (see Constraints), so an autodeploy firing mid-manual-deploy
+would give two concurrent `rsync --delete` into `/opt`. With a 5-minute timer and a deploy that takes
+one to three minutes this is not a remote coincidence. Accepted rather than fixed: a manual deploy
+means the operator is present, which is the case this whole mechanism defers to — but the operator
+should stop the timer before a long manual session, and the README says so.
 
 1. `git fetch --tags` in a dedicated checkout at `${XDG_DATA_HOME:-~/.local/share}/wbb-autodeploy/repo`.
-2. Newest `autodeploy-*` tag; exit if its commit already equals the deployed sha in the state file.
-3. Run the Layer-4 checks. Any failure → alert, deploy nothing, exit non-zero.
-4. `git checkout --detach <tag>` — clean by construction — then `./deploy/deploy.sh` from there.
-5. Health check: poll `http://127.0.0.1:${API_PORT}/health` (`src/api/index.ts:41`, `API_PORT`
-   default 3000) for `{"ok":true}`, with retries, up to 60 s.
-6. Success → record the new sha, notify. Failure → roll back.
+2. Newest `autodeploy-*` tag **by refname**, not by commit date: the tags are lightweight, so
+   `--sort=-creatordate` sorts by the tagged *commit's* committer date and a tag on a backdated commit
+   wins — selecting an OLDER tag, i.e. a downgrade the guard would happily accept because only the
+   lockfile differs. The names are ISO-8601 timestamps, so lexical order is chronological.
+3. Exit if the tag's commit equals the deployed sha, or if it equals `LAST_FAILED_SHA` (below).
+4. Run the Layer-4 checks. Any failure → alert, deploy nothing, exit non-zero.
+5. `git checkout --detach <tag>` **and `git clean -xdff`** — the guard bounds the *diff*, but `deploy.sh`
+   rsyncs the *tree*, and those are different statements. Then `./deploy/deploy.sh` from there.
+6. Health check: poll `http://127.0.0.1:${API_PORT}/health` (`src/api/index.ts:41`, `API_PORT`
+   default 3000) for `{"ok":true}` against a ~60 s **deadline** — a retry count multiplied by a
+   timeout plus a sleep is not a budget, and the first draft's 30 tries could run to 150 s.
+   The port is resolved ONCE, before deploying: `healthy()` reads it via `sudo`, and errexit is
+   suppressed inside an `if` condition, so a transient `.env` read failure would otherwise look
+   exactly like a dead service and roll back a perfectly good deploy.
+7. Success → record the new sha, notify. Failure → roll back.
 
-State lives in `${XDG_STATE_HOME:-~/.local/state}/wbb-autodeploy/state.json` and holds the deployed
-sha and the previous one.
+State lives in `${XDG_STATE_HOME:-~/.local/state}/wbb-autodeploy/state.env` — `key=value`, sourced by
+the script. JSON was the first choice, but reading it in bash means depending on `jq` being installed
+on the host, and this file is read on the path that patches production. It holds the deployed sha, the
+previous one, and `LAST_FAILED_SHA`.
+
+**`LAST_FAILED_SHA` is what stops one bad deploy becoming an outage.** Without it the timer re-runs the
+same failing tag every five minutes: roughly 288 forced restarts a day, two `npm ci` per cycle, and
+enough Telegram messages to pass the API's rate limit — after which `notify` fails silently and the
+flapping continues with nobody watching. So every non-success path records the tag it failed on, and a
+tag already recorded is skipped **quietly**: it has already been reported once, and a siren every five
+minutes is how alerting gets ignored.
+
+The cost of that quiet is real and is paid elsewhere: a security fix stuck behind a failed tag is
+invisible to this mechanism after its first message. **§10's independent daily audit is the observer
+that survives it** — it re-derives production's exposure from the lockfile alone, without reference to
+tags, timers or state files. That is why §10 is not optional bookkeeping, despite depending on nothing.
 
 **Rollback** re-checks-out the previous recorded sha and re-runs `deploy.sh`. It deliberately does
 exactly one thing and is not clever: if the rollback itself fails to come up healthy, the script
