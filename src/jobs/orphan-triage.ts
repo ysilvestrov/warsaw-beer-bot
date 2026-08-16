@@ -81,6 +81,19 @@ export interface TriageOutcome {
   disabledReason: string | null;
 }
 
+// #432: routine guard work and anomalous guard work must not share a path, in either
+// direction. `unprobed_absence` fires by construction for any beer whose name is an
+// ordinary word (#357) and `saturated` is really a STATE of an issue rather than an event
+// (#431) — both are routine and stay in the outcome payload. These two mean two components
+// disagree: the model broke a prompt rule, or a row contradicts the scope of the issue it
+// was routed to. Someone has to look. Deliberately a predicate on meaning, not a threshold
+// on count — the #419 checkpoint is already trying to retire one guessed constant.
+export function reportGuardAnomalies(log: pino.Logger, g: Record<GuardReason, number>): void {
+  if (g.illegal_scope === 0 && g.scope_violation === 0) return;
+  log.warn({ illegalScope: g.illegal_scope, scopeViolation: g.scope_violation },
+    'orphan-triage: guard anomaly');
+}
+
 export function buildTriageLine(o: TriageOutcome): string {
   if (o.disabledReason) return `Тріаж: вимкнено (${o.disabledReason})`;
   if (o.error) {
@@ -96,7 +109,11 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.notOnUntappd > 0) parts.push(`${o.notOnUntappd} not_on_untappd`);
   if (o.unidentifiable > 0) parts.push(`${o.unidentifiable} unidentifiable`);
   if (o.notABeer > 0) parts.push(`${o.notABeer} not_a_beer`);
-  if (o.unverified > 0) parts.push(`${o.unverified} неперевірених`);
+  if (o.guardHits.unprobed_absence > 0) parts.push(`${o.guardHits.unprobed_absence} без доказу відсутності`);
+  if (o.causeStripped > 0) parts.push(`${o.causeStripped} неперевірених`);
+  if (o.noTarget > 0) parts.push(`${o.noTarget} без цілі`);
+  if (o.guardHits.illegal_scope > 0) parts.push(`${o.guardHits.illegal_scope} нелегальний scope`);
+  if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }
@@ -310,6 +327,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       log.warn({ covered, batch: orphans.length }, 'orphan-triage: verdict shortfall');
     }
     outcome.guardHits = plan.guardHits;
+    reportGuardAnomalies(log, plan.guardHits);
     outcome.causeStripped = plan.quietCauseStripped;
     outcome.noTarget = plan.quietNoTarget;
     outcome.skipped = plan.skipped;

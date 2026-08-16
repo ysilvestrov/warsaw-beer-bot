@@ -8,7 +8,7 @@ import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import {
-  orphanTriage, shouldRunTriage, buildTriageLine,
+  orphanTriage, shouldRunTriage, buildTriageLine, reportGuardAnomalies,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
@@ -596,10 +596,15 @@ test('without a search dep the job behaves exactly as before', async () => {
   expect(row.review_note).toContain('#228');
 });
 
-test('buildTriageLine reports the unverified count', () => {
+// #432: the digest's "неперевірених" part now reads causeStripped (the disjoint,
+// row-counting field), not unverified — publishing both was the double-count bug
+// (see the TriageOutcome comment). unverified is set here too, as it would be in a
+// real run (verifyCauses and planTriageActions count the same stripped rows), to
+// prove the digest ignores it as a render source.
+test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 2,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 0, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 2,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 2 неперевірених');
 });
@@ -794,6 +799,46 @@ test('corrupted attempt counter is ignored instead of widening the budget', asyn
 
   expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+test('narrow warn fires for scope_violation with no shortfall', () => {
+  const warn = vi.fn();
+  reportGuardAnomalies({ warn } as never, {
+    illegal_scope: 0, scope_violation: 2, saturated: 0, unprobed_absence: 0,
+  });
+  expect(warn).toHaveBeenCalledTimes(1);
+});
+
+test('narrow warn fires for illegal_scope with no shortfall', () => {
+  const warn = vi.fn();
+  reportGuardAnomalies({ warn } as never, {
+    illegal_scope: 1, scope_violation: 0, saturated: 0, unprobed_absence: 0,
+  });
+  expect(warn).toHaveBeenCalledTimes(1);
+});
+
+test('narrow warn stays silent for routine guard work', () => {
+  const warn = vi.fn();
+  reportGuardAnomalies({ warn } as never, {
+    illegal_scope: 0, scope_violation: 0, saturated: 5, unprobed_absence: 9,
+  });
+  expect(warn).not.toHaveBeenCalled();
+});
+
+test('buildTriageLine names each quiet mechanism and hides routine guards', () => {
+  expect(buildTriageLine({
+    total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+    causeStripped: 5, noTarget: 1, skipped: 0, unverified: 5,
+    guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 4, unprobed_absence: 9 },
+    error: null, attempt: null, disabledReason: null,
+  })).toBe('Тріаж: 15 нових → 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
+
+  expect(buildTriageLine({
+    total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+    causeStripped: 0, noTarget: 0, skipped: 2, unverified: 0,
+    guardHits: { illegal_scope: 1, scope_violation: 2, saturated: 0, unprobed_absence: 0 },
+    error: null, attempt: null, disabledReason: null,
+  })).toBe('Тріаж: 3 нових → 1 нелегальний scope, 2 поза scope, 2 пропущено');
 });
 
 test('a throwing archive cannot cost the day: state is written before the archive', async () => {
