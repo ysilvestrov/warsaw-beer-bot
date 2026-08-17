@@ -1797,6 +1797,26 @@ Depends only on Part 1. May be done at any point after it.
 
 This exists because Dependabot **cannot always act**: when a transitive advisory needs a parent package bumped, it opens no pull request at all, and silence is indistinguishable from safety.
 
+**Do NOT label the issue `orphan-triage`.** An earlier draft of this plan did. In this project that
+label is not decorative: it **owns rows in the production database** — `enrich_failures.issue_number`
+binds triaged orphans to the issue whose fix will rescue them, and the bot reads the closing of such
+an issue as "the fix arrived", unsealing their retry lock (see CLAUDE.md and
+`2026-08-15-421-fix-keyed-lock-design.md`). Closing a dependency-audit issue would silently re-arm
+unrelated matcher lookups. This workflow's issue carries `prod-audit` and nothing else.
+
+**The issue must be identified by a dedicated label, not by its title.** A title search can match an
+issue a human opened, and this workflow *closes* what it finds. A body marker was the first choice
+(the mechanism `ai-pr-review` uses), but GitHub's search does not reliably index HTML comments, and a
+lookup that silently returns nothing would make the workflow file a duplicate issue every day. A
+label is exact. Create `prod-audit` once — it is unrelated to `orphan-triage` and owns no database
+rows. The marker stays in the body as provenance for a human reader; nothing branches on it.
+
+**"Vulnerable" and "the audit could not run" are different facts.** `npm audit` needs the registry.
+Exit 1 means findings; any other non-zero means the check itself failed. Both warrant an issue —
+staying silent about an audit that did not happen is the failure mode this workflow exists to
+prevent — but the issue must say which one happened rather than asserting a security conclusion it
+did not establish.
+
 ```yaml
 name: Production dependency audit
 
@@ -1809,12 +1829,17 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: prod-audit
+  cancel-in-progress: false
+
 jobs:
   audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 20
 
@@ -1823,38 +1848,59 @@ jobs:
         run: |
           set -uo pipefail
           # No install: `npm audit` reads the lockfile, so no install scripts run.
-          if npm audit --omit=dev --audit-level=high > audit.txt 2>&1; then
-            echo "vulnerable=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "vulnerable=true" >> "$GITHUB_OUTPUT"
-          fi
+          npm audit --omit=dev --audit-level=high > audit.txt 2>&1
+          code=$?
           cat audit.txt
+          case "$code" in
+            0) echo "state=clean"   >> "$GITHUB_OUTPUT" ;;
+            1) echo "state=vulnerable" >> "$GITHUB_OUTPUT" ;;
+            # Registry outage, EAUDITNOPJSON, anything else: we do NOT know whether
+            # production is exposed. Silence here is exactly the failure this
+            # workflow exists to prevent, so it is reported — but as what it is.
+            *) echo "state=unknown" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
 
       - name: Open or update the issue
-        if: steps.audit.outputs.vulnerable == 'true'
+        if: steps.audit.outputs.state != 'clean'
         env:
           GH_TOKEN: ${{ github.token }}
+          STATE: ${{ steps.audit.outputs.state }}
+          EXIT_CODE: ${{ steps.audit.outputs.exit_code }}
         run: |
           set -euo pipefail
-          title="Production dependency advisory"
-          body=$'`npm audit --omit=dev --audit-level=high` is failing on `main`.\n\n```\n'"$(cat audit.txt)"$'\n```\n\nIf no Dependabot pull request exists for this, the fix needs a parent package bumped by hand — see #435.'
-          existing=$(gh issue list --state open --search "$title in:title" --json number --jq '.[0].number // empty')
+          marker='<!-- prod-dependency-audit -->'
+          title='Production dependency advisory'
+
+          if [ "$STATE" = 'vulnerable' ]; then
+            headline='`npm audit --omit=dev --audit-level=high` reports a high or critical advisory in a **production** dependency on `main`.'
+            tail='If no Dependabot pull request exists for this, the fix needs a parent package bumped by hand — Dependabot opens nothing in that case, and its silence looks exactly like safety. See #435.'
+          else
+            headline="**The audit could not run** (exit ${EXIT_CODE}). This is not a finding about production — it means we currently do not know whether production is exposed."
+            tail='Re-run the workflow. If it keeps failing, the daily check is blind and #435 has lost its independent observer.'
+          fi
+
+          body="${marker}"$'\n\n'"${headline}"$'\n\n```\n'"$(cat audit.txt)"$'\n```\n\n'"${tail}"
+
+          # Find OUR issue by its own label, never by title — a title search can
+          # match an issue a human opened, and the clean branch below CLOSES what
+          # it finds.
+          existing=$(gh issue list --state open --label prod-audit --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$body"
           else
-            gh issue create --title "$title" --label orphan-triage --body "$body" || \
-              gh issue create --title "$title" --body "$body"
+            gh issue create --title "$title" --label prod-audit --body "$body"
           fi
 
       - name: Close the issue when production is clean
-        if: steps.audit.outputs.vulnerable == 'false'
+        if: steps.audit.outputs.state == 'clean'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          existing=$(gh issue list --state open --search "Production dependency advisory in:title" --json number --jq '.[0].number // empty')
+          existing=$(gh issue list --state open --label prod-audit --json number --jq '.[0].number // empty')
           if [ -n "$existing" ]; then
-            gh issue close "$existing" --comment "npm audit --omit=dev --audit-level=high is clean again."
+            gh issue close "$existing" --comment '`npm audit --omit=dev --audit-level=high` is clean again.'
           fi
 ```
 
