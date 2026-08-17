@@ -1,0 +1,15 @@
+[Unit]
+Description=#435 unattended deploy of qualified dependency security fixes
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ysi
+Environment=HOME=/home/ysi
+ExecStart=/usr/local/bin/wbb-autodeploy
+# 1 = guard refused, 2 = rolled back — both are reported to Telegram by the
+# script itself and are not systemd failures worth restarting.
+SuccessExitStatus=0 1 2
+StandardOutput=journal
+StandardError=journal
