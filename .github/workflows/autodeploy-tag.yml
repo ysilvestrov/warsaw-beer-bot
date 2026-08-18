@@ -1,0 +1,33 @@
+name: Tag an autodeploy merge
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Tag when the merged PR carried the autodeploy label
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Exact match only: `autodeploy-pending` must NOT qualify, or a held
+          # `high` would deploy the instant it merged.
+          match=$(gh api "repos/${{ github.repository }}/commits/${{ github.sha }}/pulls" \
+                    --jq '[.[] | .labels[] | select(.name == "autodeploy")] | length')
+          if [ "$match" -eq 0 ]; then
+            echo "not an autodeploy merge; nothing to tag"
+            exit 0
+          fi
+          tag="autodeploy-$(date -u +%Y%m%dT%H%M%SZ)"
+          git tag "$tag" "${{ github.sha }}"
+          git push origin "$tag"
+          echo "tagged ${{ github.sha }} as $tag" >> "$GITHUB_STEP_SUMMARY"

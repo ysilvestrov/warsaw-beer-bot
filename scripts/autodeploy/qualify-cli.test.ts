@@ -9,7 +9,7 @@ import {
   selectPublishedAt,
   type LockPackages,
 } from './qualify-cli';
-import type { AuditReport, Severity } from './qualify';
+import { qualify, type AuditReport, type Severity } from './qualify';
 
 /**
  * #435 — the I/O bridge.
@@ -128,7 +128,17 @@ describe('publishedAt — the registry lookup behind selectPublishedAt', () => {
   });
 });
 
-describe('selectPublishedAt — only the package this PR actually fixed sets the clock', () => {
+describe('selectPublishedAt — the hold rests on what this PR INTRODUCES, not on the package that was vulnerable', () => {
+  // #435 §4 amendment, measured 2026-08-18: the old scoping dated the
+  // VULNERABLE package's new version, restricted to names the base audit
+  // flagged as high/critical. That is wrong for the shape transitive fixes
+  // normally take — bumping the PARENT makes the vulnerable CHILD vanish
+  // from the head lockfile, there is no version of it to date, "unknown"
+  // forced the hold, and the hourly re-evaluation recomputed "now" every
+  // run: the pull request parked in `autodeploy-pending` permanently. The
+  // function no longer takes an audit report at all — it scans every
+  // package name in either lockfile and dates whatever version(s) this PR
+  // actually introduces (head \ base).
   const RECENT = new Date('2026-08-16T00:00:00Z');
   const ANCIENT = new Date('2024-01-01T00:00:00Z');
 
@@ -137,14 +147,11 @@ describe('selectPublishedAt — only the package this PR actually fixed sets the
     asked = [];
   });
 
-  it('ignores an untouched, older base-vulnerable package', async () => {
-    // THE C2 REGRESSION. base holds two advisories; the PR moves only nanoid.
-    // postcss is untouched and two years old. The old implementation walked
-    // every base vulnerability at every severity and took the max, so the
-    // ancient postcss date won whenever nanoid dropped out — bypassing the
-    // hold entirely, which is the one thing the hold exists to prevent.
+  it('an untouched package is never asked about and cannot set the clock', async () => {
+    // THE C2 REGRESSION, restated for the new scope: an untouched-but-old
+    // package sitting next to the one this PR actually moved must not leak
+    // its date in, whether or not it happens to be in an audit report.
     const when = await selectPublishedAt({
-      base: report({ nanoid: 'high', postcss: 'high' }),
       basePackages: lock({ 'node_modules/nanoid': '3.3.7', 'node_modules/postcss': '8.4.0' }),
       headPackages: lock({ 'node_modules/nanoid': '3.3.18', 'node_modules/postcss': '8.4.0' }),
       lookup: async (name, version) => {
@@ -157,35 +164,26 @@ describe('selectPublishedAt — only the package this PR actually fixed sets the
     expect(when).toEqual(RECENT);
   });
 
-  it('ignores a moderate-severity package even when this PR moved it', async () => {
+  it('takes the YOUNGEST across every package this PR moves — severity no longer scopes this function', async () => {
+    // Both packages move; the old code would have IGNORED postcss here if it
+    // were moderate severity or absent from the audit. This function reads
+    // no audit at all now, so both count.
     const when = await selectPublishedAt({
-      base: report({ nanoid: 'high', postcss: 'moderate' }),
       basePackages: lock({ 'node_modules/nanoid': '3.3.7', 'node_modules/postcss': '8.4.0' }),
       headPackages: lock({ 'node_modules/nanoid': '3.3.18', 'node_modules/postcss': '8.5.26' }),
       lookup: async (name, version) => {
         asked.push(`${name}@${version}`);
-        return name === 'nanoid' ? RECENT : ANCIENT;
+        return name === 'nanoid' ? ANCIENT : RECENT;
       },
     });
 
-    expect(asked).toEqual(['nanoid@3.3.18']);
+    expect(asked.sort()).toEqual(['nanoid@3.3.18', 'postcss@8.5.26']);
     expect(when).toEqual(RECENT);
   });
 
-  it('takes the YOUNGEST when several actionable packages moved', async () => {
-    const when = await selectPublishedAt({
-      base: report({ nanoid: 'high', undici: 'high' }),
-      basePackages: lock({ 'node_modules/nanoid': '3.3.7', 'node_modules/undici': '7.28.0' }),
-      headPackages: lock({ 'node_modules/nanoid': '3.3.18', 'node_modules/undici': '7.29.0' }),
-      lookup: async (name) => (name === 'nanoid' ? ANCIENT : RECENT),
-    });
-    expect(when).toEqual(RECENT);
-  });
-
-  it('forces the hold when an actionable package resolves to no timestamp', async () => {
+  it('forces the hold when an introduced version resolves to no timestamp', async () => {
     const before = Date.now();
     const when = await selectPublishedAt({
-      base: report({ nanoid: 'high' }),
       basePackages: lock({ 'node_modules/nanoid': '3.3.7' }),
       headPackages: lock({ 'node_modules/nanoid': '3.3.18' }),
       lookup: async () => null,
@@ -197,35 +195,60 @@ describe('selectPublishedAt — only the package this PR actually fixed sets the
   it('forces the hold when a known-good timestamp coexists with an unresolvable one', async () => {
     const before = Date.now();
     const when = await selectPublishedAt({
-      base: report({ nanoid: 'high', undici: 'high' }),
       basePackages: lock({ 'node_modules/nanoid': '3.3.7', 'node_modules/undici': '7.28.0' }),
       headPackages: lock({ 'node_modules/nanoid': '3.3.18', 'node_modules/undici': '7.29.0' }),
       lookup: async (name) => (name === 'nanoid' ? ANCIENT : null),
     });
-    // One unresolved actionable package poisons the whole answer — it must not
-    // fall back to the ancient date that did resolve.
+    // One unresolved introduced version poisons the whole answer — it must
+    // not fall back to the ancient date that did resolve.
     expect(when.getTime()).toBeGreaterThanOrEqual(before);
   });
 
-  it('forces the hold when an actionable package matches no lockfile entry at all', async () => {
+  it('the hold stands when nothing was introduced anywhere', async () => {
     const before = Date.now();
     const when = await selectPublishedAt({
-      base: report({ nanoid: 'high' }),
-      basePackages: lock({ 'node_modules/hono': '4.0.0' }),
-      headPackages: lock({ 'node_modules/hono': '4.0.1' }),
-      lookup: async () => ANCIENT,
-    });
-    expect(when.getTime()).toBeGreaterThanOrEqual(before);
-  });
-
-  it('forces the hold when nothing actionable moved', async () => {
-    const before = Date.now();
-    const when = await selectPublishedAt({
-      base: report({ nanoid: 'high' }),
       basePackages: lock({ 'node_modules/nanoid': '3.3.7' }),
       headPackages: lock({ 'node_modules/nanoid': '3.3.7' }),
       lookup: async () => ANCIENT,
     });
+    expect(asked).toEqual([]);
     expect(when.getTime()).toBeGreaterThanOrEqual(before);
+  });
+
+  it('a package that only DISAPPEARS contributes nothing — it must not force the hold', async () => {
+    // THE CASE THIS RESCOPING EXISTS FOR. base audit reports undici high;
+    // the fix bumps a PARENT package instead, so undici vanishes from the
+    // head lockfile entirely. Under the OLD scoping this was "unknown" and
+    // forced a hold that could never expire — the pull request parked in
+    // autodeploy-pending permanently, since the hourly re-run always saw
+    // "now". The parent's introduced version was published long ago, so the
+    // correct outcome is autodeploy, not a permanent hold.
+    const base = report({ undici: 'high' });
+    const head = report({}); // clean after the parent bump
+
+    const basePackages = lock({
+      'node_modules/undici': '7.28.0',
+      'node_modules/some-parent': '1.0.0',
+    });
+    const headPackages = lock({
+      // undici is GONE — no entry anywhere in the head lockfile.
+      'node_modules/some-parent': '2.0.0',
+    });
+
+    const publishedAtResult = await selectPublishedAt({
+      basePackages,
+      headPackages,
+      lookup: async (name, version) => {
+        asked.push(`${name}@${version}`);
+        return name === 'some-parent' ? ANCIENT : null;
+      },
+    });
+
+    // undici's disappearance must never even be asked about.
+    expect(asked).toEqual(['some-parent@2.0.0']);
+    expect(publishedAtResult).toEqual(ANCIENT);
+
+    const verdict = qualify({ base, head, publishedAt: publishedAtResult, now: new Date() });
+    expect(verdict.verdict).toBe('autodeploy');
   });
 });

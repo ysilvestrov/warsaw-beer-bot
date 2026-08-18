@@ -34,6 +34,23 @@ if ! git -C "$repo" merge-base --is-ancestor "$target" "$main_ref"; then
   exit 1
 fi
 
+# A tag pointing at or behind what is already deployed is a DOWNGRADE, not a
+# fix. It has to be refused by name: MEASURED 2026-08-18, on the first
+# unattended run, a stale tag left behind by --prune (which prunes branches,
+# not tags) pointed at an older commit, and the allowlist caught it only
+# incidentally — because rolling back happened to touch 20 unrelated files. A
+# downgrade whose diff HAPPENS to be lockfile-only would have sailed through
+# and quietly reinstalled the vulnerable versions this system exists to remove.
+# STRICT ancestor: `--is-ancestor` calls a commit its own ancestor, and
+# target == deployed is "nothing to do", not a downgrade — autodeploy.sh
+# already exits before reaching here in that case, but the guard is also run
+# on its own and must not disagree with itself.
+if [ "$(git -C "$repo" rev-parse "$target")" != "$(git -C "$repo" rev-parse "$deployed")" ] \
+   && git -C "$repo" merge-base --is-ancestor "$target" "$deployed"; then
+  echo "REFUSE: $target is already contained in the deployed commit $deployed — that is a downgrade, not a fix"
+  exit 1
+fi
+
 # The allowlist. NOT extension/** — the extension never ships to the server.
 # Captured into a variable rather than through a process substitution, so a
 # failing `git diff` is caught here instead of silently yielding zero lines

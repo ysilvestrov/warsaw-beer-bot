@@ -15,7 +15,7 @@
 - **The autodeploy allowlist is exactly `package.json` and `package-lock.json` at the repository root.** Not `extension/**`, not `docs/**`, not anything else. The extension is never deployed to the server.
 - **No `pull_request_target` anywhere in this repository.**
 - **No job holding a write token may check out or execute pull-request code.** The qualify workflow checks out `main` and reads the PR's two files as data via `git show <sha>:<path>`.
-- **No change to `deploy/deploy.sh`, `deploy/sudoers.d/warsaw-beer-bot`, or `deploy/warsaw-beer-bot.service`.** If a step appears to need one, the step is wrong — stop and report.
+- **No change to `deploy/sudoers.d/warsaw-beer-bot` or `deploy/warsaw-beer-bot.service`.** If a step appears to need one, the step is wrong — stop and report. `deploy/deploy.sh` was covered by this rule too, and the rule was **lifted on 2026-08-18** for exactly one addition: recording the deployed commit. See "The one constraint this design lifted" in the design doc — the guard diffs from the deployed commit, so a baseline written anywhere other than where the deploy happens is a step that can be forgotten silently, which is the defect it was supposed to prevent.
 - **Autodeploy never reads the operator's working tree** (`/home/ysi/warsaw-beer-bot`). It uses its own checkout under `${XDG_DATA_HOME:-$HOME/.local/share}/wbb-autodeploy/repo`.
 - **The bot process is never the notifier for deploy outcomes.** `curl` to the Telegram API directly, or the failure that matters most goes unreported.
 - **Never use `grep` in host-side scripts.** On this host `grep` is a ugrep shim that OOMs; use bash `case` matching instead.
