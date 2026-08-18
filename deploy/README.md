@@ -103,12 +103,13 @@ One-time install (as root):
 # uncommitted work at any moment.
 install -m 0755 deploy/autodeploy.sh       /usr/local/bin/wbb-autodeploy
 install -m 0755 deploy/autodeploy-guard.sh /usr/local/bin/wbb-autodeploy-guard
+install -m 0755 deploy/read-env.sh         /usr/local/bin/wbb-read-env
 install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
 install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
 systemctl daemon-reload
 ```
 
-Re-run the two `install` lines whenever either script changes — they are copies,
+Re-run the three script `install` lines whenever any of them changes — they are copies,
 not symlinks, deliberately: the running deployer must not change under a
 `git checkout`.
 
