@@ -422,7 +422,7 @@ describe('refreshAllUntappd', () => {
     const http: Http = {
       async get(url: string) {
         seenUrls.push(url);
-        const { CookieExpiredError: E } = await import('../sources/http');
+        const { CookieExpiredError: E } = await import('../sources/http.js');
         throw new E();
       },
     };
@@ -445,7 +445,7 @@ describe('refreshAllUntappd', () => {
       onTrip: () => events.push('trip'),
       onRecover: () => events.push('recover'),
     });
-    const { CookieExpiredError: E } = await import('../sources/http');
+    const { CookieExpiredError: E } = await import('../sources/http.js');
     const http: Http = { async get() { throw new E(); } };
 
     await refreshAllUntappd({ db, log: silentLog, http, breaker });
@@ -496,7 +496,7 @@ describe('refreshAllUntappd', () => {
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'alice');
 
-    const { CookieExpiredError: E } = await import('../sources/http');
+    const { CookieExpiredError: E } = await import('../sources/http.js');
     const http: Http = { async get() { throw new E(); } };
 
     // should resolve (not throw) regardless of the return value shape
