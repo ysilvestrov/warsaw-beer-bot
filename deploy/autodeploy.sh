@@ -160,7 +160,13 @@ write_state() {
 if [ ! -d "$REPO/.git" ]; then
   git clone -q "$REPO_URL" "$REPO" || { notify "⛔ autodeploy: git clone of $REPO_URL failed."; exit 1; }
 fi
-git -C "$REPO" fetch -q --tags --prune origin || { notify "⛔ autodeploy: git fetch failed."; exit 1; }
+# --prune-tags, not just --prune: `--prune` deletes stale BRANCHES only, so a
+# tag removed upstream survives in this clone forever and keeps being selected.
+# MEASURED 2026-08-18, on the first unattended run: a throwaway test tag deleted
+# from origin was still here, pointed at a commit OLDER than the deployed one,
+# and the guard had to catch it as a downgrade. The guard did its job; this is
+# the reason it was asked to.
+git -C "$REPO" fetch -q --tags --prune --prune-tags origin || { notify "⛔ autodeploy: git fetch failed."; exit 1; }
 
 # Minor: lightweight tags sort by the TAGGED COMMIT's committer date under
 # -creatordate, not by when the tag was made — a tag on a backdated commit
