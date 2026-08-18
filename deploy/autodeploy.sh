@@ -79,6 +79,19 @@ API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
 _audit_default() { ( cd "$REPO" && npm audit --omit=dev --audit-level=high ); }
 AUDIT_CMD="${WBB_AUDIT_CMD:-_audit_default}"
 
+# Unprivileged emergency stop (#435 §7 amendment): arming the timer costs a
+# password (sudoers pins systemctl to the warsaw-beer-bot and litestream
+# units, not to wbb-autodeploy), so stopping it must not — or the brake is
+# unavailable exactly when the operator is asleep. Any unprivileged process
+# can create this file; see deploy/README.md. Checked before `mkdir -p` and
+# well before `flock` does any real work, so a paused deployer does almost
+# nothing — a journal line, no Telegram message (notify() isn't even defined
+# yet at this point in the script).
+if [ -f "$STATE_DIR/PAUSED" ]; then
+  echo "wbb-autodeploy: paused ($STATE_DIR/PAUSED exists); exiting quietly"
+  exit 0
+fi
+
 mkdir -p "$DATA_DIR" "$STATE_DIR"
 
 # Prevents overlapping autodeploy runs. It does NOT exclude a manual

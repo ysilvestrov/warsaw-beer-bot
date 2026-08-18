@@ -11,7 +11,7 @@
 import { readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { qualify, type AuditReport, type Severity } from './qualify';
+import { qualify, needsHoldCheck, type AuditReport } from './qualify';
 import { manifestScope, type DepSections } from './manifest-scope';
 
 function readJson<T>(path: string): T {
@@ -76,12 +76,22 @@ function versionSetsEqual(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-const ACTIONABLE: Severity[] = ['high', 'critical'];
-
-function actionableNames(report: AuditReport): string[] {
-  return Object.entries(report.vulnerabilities)
-    .filter(([, v]) => ACTIONABLE.includes(v.severity))
-    .map(([name]) => name);
+/**
+ * Every package NAME appearing anywhere in a lockfile's `packages` map — the
+ * segment after the LAST `node_modules/` in each key, so a scoped name
+ * (`@scope/pkg`) and a hoisted-vs-nested path both resolve to the same name
+ * `resolvedVersions` already keys on. The lockfile's root entry (`""`) has no
+ * `node_modules/` and is not a package.
+ */
+function packageNamesIn(packages: LockPackages): Set<string> {
+  const marker = 'node_modules/';
+  const names = new Set<string>();
+  for (const path of Object.keys(packages)) {
+    const idx = path.lastIndexOf(marker);
+    if (idx === -1) continue;
+    names.add(path.slice(idx + marker.length));
+  }
+  return names;
 }
 
 /**
@@ -114,59 +124,70 @@ export async function publishedAt(
 /**
  * The publish time to gate the 48h hold on.
  *
- * Scoped to packages that are BOTH high/critical in the base audit AND whose
- * resolved lockfile version(s) actually changed between base and head — an
- * untouched base-vulnerable package (e.g. a stale, unrelated `postcss` entry)
- * is not what this PR fixed and must not set the clock. A package inside that
- * scope with no resolvable timestamp is UNKNOWN, which must force the hold —
- * never silently skipped — so an unresolved lookup makes the whole result
- * "just now" rather than falling back to whatever `youngest` happens to hold.
+ * The hold rests on what this pull request INTRODUCES, not on the package
+ * that was vulnerable (#435 §4 amendment, measured 2026-08-18). Scoping to
+ * the base audit's actionable names was wrong for the shape transitive
+ * fixes normally take: bumping the PARENT makes the vulnerable CHILD vanish
+ * from the head lockfile entirely, so there was no version of it to date —
+ * "unknown" forced the hold, the hourly re-evaluation recomputed "now"
+ * every run, and the pull request parked in `autodeploy-pending`
+ * permanently.
+ *
+ * So this scans every package name appearing in EITHER lockfile (not just
+ * the base audit's), and for each whose resolved version set changed,
+ * dates the versions in `head \ base` — the versions actually introduced.
+ * A package that only disappears (head set empty) contributes nothing: it
+ * did not bring anything new to distrust. A package that introduces a
+ * version with no resolvable timestamp is UNKNOWN, which must still force
+ * the hold — never silently skipped — so an unresolved lookup makes the
+ * whole result "just now" rather than falling back to whatever `youngest`
+ * happens to hold. If nothing new was introduced anywhere, there is nothing
+ * to have aged, so the hold stands too.
  */
 export async function selectPublishedAt(params: {
-  base: AuditReport;
   basePackages: LockPackages;
   headPackages: LockPackages;
   lookup?: (name: string, version: string) => Promise<Date | null>;
 }): Promise<Date> {
-  const { base, basePackages, headPackages, lookup = publishedAt } = params;
+  const { basePackages, headPackages, lookup = publishedAt } = params;
+
+  const names = new Set<string>([...packageNamesIn(basePackages), ...packageNamesIn(headPackages)]);
 
   let youngest: Date | null = null;
   let unknown = false;
 
-  for (const name of actionableNames(base)) {
+  for (const name of names) {
     const baseVersions = resolvedVersions(basePackages, name);
     const headVersions = resolvedVersions(headPackages, name);
 
-    if (baseVersions.size === 0 && headVersions.size === 0) {
-      console.error(`selectPublishedAt: ${name} is actionable in the base audit but matches no lockfile entry`);
-      unknown = true;
-      continue;
-    }
     if (versionSetsEqual(baseVersions, headVersions)) {
       // This PR did not move this package — it isn't the fix, so it doesn't
       // get a vote on the fix's age.
       continue;
     }
 
-    const fixingVersions = [...headVersions].filter((v) => !baseVersions.has(v));
-    let sawTimestamp = false;
-    for (const version of fixingVersions) {
+    const introducedVersions = [...headVersions].filter((v) => !baseVersions.has(v));
+    if (introducedVersions.length === 0) {
+      // The resolved version set changed but nothing NEW arrived — the
+      // normal shape being "package removed entirely" (headVersions empty)
+      // when a transitive advisory is fixed by bumping its parent. Nothing
+      // new arrived to distrust, so this must NOT force the hold — forcing
+      // it here is exactly the permanent-stall bug this rescoping fixes.
+      continue;
+    }
+
+    for (const version of introducedVersions) {
       const when = await lookup(name, version);
       if (when) {
-        sawTimestamp = true;
         if (youngest === null || when > youngest) youngest = when;
+      } else {
+        // A version this PR actually introduces, with no resolvable publish
+        // time. Fail closed, but SAY SO.
+        console.error(
+          `selectPublishedAt: ${name}@${version} was introduced by this PR but no publish time was resolvable — forcing the hold`,
+        );
+        unknown = true;
       }
-    }
-    if (!sawTimestamp) {
-      // Includes the "package removed entirely" shape, where there is no new
-      // version to date. Fail closed, but SAY SO: a hold with no signal is
-      // permanent, because the hourly re-evaluation recomputes "now" each run
-      // and the age is therefore always ~0.
-      console.error(
-        `selectPublishedAt: ${name} changed but no publish time was resolvable ` +
-          `(base=[${[...baseVersions]}] head=[${[...headVersions]}]) — forcing the hold`,
-      );
-      unknown = true;
     }
   }
 
@@ -223,11 +244,19 @@ async function main(): Promise<void> {
       const base = auditReport(baseDir);
       const head = auditReport(headDir);
 
-      const publishTime = await selectPublishedAt({
-        base,
-        basePackages: readLockPackages(baseDir),
-        headPackages: readLockPackages(headDir),
-      });
+      // needsHoldCheck(base, head) is the SAME determination qualify() makes
+      // internally (its shared `assessFix` helper) — computed once here so a PR whose
+      // verdict can never depend on the fix's age (base clean, or head still
+      // vulnerable, or a cleared critical) pays no npm registry lookups at
+      // all. Before this gate, a 13-package non-security bump fired 13
+      // registry requests every hourly re-evaluation, forever, for a
+      // decision none of them could change.
+      const publishTime = needsHoldCheck(base, head)
+        ? await selectPublishedAt({
+            basePackages: readLockPackages(baseDir),
+            headPackages: readLockPackages(headDir),
+          })
+        : null;
 
       const result = qualify({ base, head, publishedAt: publishTime, now: new Date() });
       verdict = result.verdict;

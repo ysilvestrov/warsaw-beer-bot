@@ -159,6 +159,39 @@ rm ~/.local/state/wbb-autodeploy/state.env
 The next timer tick then treats it as a fresh tag and goes through the
 guard/audit/deploy sequence again.
 
+### Emergency stop — no password required
+
+Arming the timer costs a password (`systemctl enable --now wbb-autodeploy.timer`,
+and `sudoers` pins `systemctl` to the `warsaw-beer-bot` and `litestream` units,
+not to `wbb-autodeploy`) — so stopping it must not, or the brake is
+unavailable exactly when the operator is asleep.
+
+To pause, any unprivileged process — the operator, a script, a future
+watchdog — creates a file:
+
+```bash
+mkdir -p ~/.local/state/wbb-autodeploy
+touch ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+Every run of `wbb-autodeploy` checks for this file first, before touching
+git, the lock, or anything else, and if it exists exits 0 with a single
+journal line — no Telegram message. The timer itself keeps ticking every 5
+minutes; each tick just does almost nothing while the file exists.
+
+To resume:
+
+```bash
+rm ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+**Stated plainly:** this brake lives *inside* the script it brakes, so it
+cannot help against a deployer that is broken before it reaches that check
+(e.g. a corrupted script, or a `set -e` bug earlier in the file). It is a
+first line of defense, not the only one — the privileged `sudo systemctl
+stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
+stop.
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2

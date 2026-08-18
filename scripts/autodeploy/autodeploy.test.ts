@@ -246,4 +246,35 @@ describe('autodeploy.sh', () => {
     expect(state.LAST_FAILED_SHA).toBeUndefined();
     expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
   });
+
+  it('a PAUSED file makes the run exit 0 quietly, deploying and notifying nothing', () => {
+    const h = setup();
+    seedState(h, base);
+    const pausedDir = join(h.stateDir, 'wbb-autodeploy');
+    mkdirSync(pausedDir, { recursive: true });
+    writeFileSync(join(pausedDir, 'PAUSED'), '');
+
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const audit = stub(h.bin, 'audit', 'exit 0');
+
+    const r = run(h, {
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_NOTIFY_CMD: notify,
+      WBB_AUDIT_CMD: audit,
+    });
+
+    expect(r.code).toBe(0);
+    expect(existsSync(guardMarker)).toBe(false);
+    expect(countLines(deployLog)).toBe(0);
+    expect(existsSync(notifyLog)).toBe(false);
+    // Untouched: a paused run must not even update DEPLOYED_SHA bookkeeping.
+    const state = readState(h.stateDir);
+    expect(state.DEPLOYED_SHA).toBe(base);
+  });
 });
