@@ -132,9 +132,24 @@ metadata or the alerts API. It is already in hand from the audit-diff, it needs 
 and it keeps the whole rule measured from one artifact. Where the base reports several severities,
 the highest governs.
 
-The publish time is that of the package version that both **changed in this PR's lockfile** and
-appears in the base report's vulnerability set. If more than one qualifies, the **most recently
-published** one governs — the hold is only as strong as its youngest component.
+**The hold is on what the pull request INTRODUCES, not on the package that was vulnerable.** The
+first draft said the opposite — the publish time of the vulnerable package's new version — and that
+is wrong for the shape transitive fixes normally take. When Dependabot fixes a transitive advisory by
+bumping its *parent*, the vulnerable child often disappears from the head lockfile entirely: there is
+no new version of it to date, so the rule produced "unknown", and unknown forces the hold. The hourly
+re-evaluation then recomputes "now" every run, so the age is always ~0 and the pull request parks in
+`autodeploy-pending` **permanently**, with §8's notification list carrying no entry for it. Fail
+closed, and unobserved — the same silent stall this issue was opened to end.
+
+So the publish time is the **youngest version this pull request introduces** — every package whose
+resolved lockfile version changed, restricted to versions present in the head and absent from the
+base. That is also the more principled rule: the hold exists because a *freshly published* version
+may be poisoned, and what a pull request can poison is what it brings in. A parent bump is therefore
+dated by the parent, which is the version actually being trusted.
+
+A package that only *disappears* contributes nothing and does **not** force the hold — nothing new
+arrived to distrust. If a pull request introduces no new version at all, the hold stands: there is
+nothing to have aged.
 
 **Un-stalling a qualified pull request.** After arming auto-merge, the workflow checks
 `mergeStateStatus`; on `BEHIND` it calls `gh pr update-branch` and stops there. It does not loop or
@@ -271,6 +286,22 @@ the script. JSON was the first choice, but reading it in bash means depending on
 on the host, and this file is read on the path that patches production. It holds the deployed sha, the
 previous one, and `LAST_FAILED_SHA`.
 
+**An emergency stop that needs no privilege.** Measured 2026-08-18, installing the units: the
+operator can arm the timer only with a password — `sudoers` pins `systemctl` to the
+`warsaw-beer-bot` and `litestream` units, not to `wbb-autodeploy` — and the same is therefore true
+of *stopping* it. Arming deliberately should cost a password. Stopping should not: an automation
+that can only be halted by the one person who may be asleep is an automation with no brake.
+
+So `autodeploy.sh` exits 0, quietly, if `${XDG_STATE_HOME:-~/.local/state}/wbb-autodeploy/PAUSED`
+exists. Any unprivileged process can create it — the operator, a script, a future watchdog — and the
+timer keeps ticking harmlessly until it is removed.
+
+The weakness is stated rather than hidden: the brake lives inside the thing it brakes, so it cannot
+help against a deployer that is broken before it reaches that check. It is a *first* line, not the
+only one; the privileged `systemctl stop` remains the real one. The alternative — widening `sudoers`
+for the timer's own unit — was rejected because this design has refused to touch `sudoers` from the
+outset, and a security feature that begins by loosening privilege is self-defeating.
+
 **`LAST_FAILED_SHA` is what stops one bad deploy becoming an outage.** Without it the timer re-runs the
 same failing tag every five minutes: roughly 288 forced restarts a day, two `npm ci` per cycle, and
 enough Telegram messages to pass the API's rate limit — after which `notify` fails silently and the
@@ -371,8 +402,39 @@ anything, which is what "Dependabot is a proposal, not a constant" requires.
 - `deploy/wbb-autodeploy.service` / `.timer` — new.
 - `deploy/README.md` — extended with the one-time timer install.
 - Labels: `autodeploy`, `autodeploy-pending`, `deps-manual`.
-- `deploy/deploy.sh`, `deploy/sudoers.d/warsaw-beer-bot`, `deploy/warsaw-beer-bot.service` —
-  **unchanged**.
+- `deploy/record-deployed.sh` — new. Writes `DEPLOYED_SHA` into the state file, preserving the keys
+  `autodeploy.sh` owns.
+- `deploy/deploy.sh` — **one addition**, see below.
+- `deploy/sudoers.d/warsaw-beer-bot`, `deploy/warsaw-beer-bot.service` — **unchanged**.
+
+## The one constraint this design lifted, and why
+
+`deploy.sh` was to stay untouched. It does not, and pretending otherwise would make this document
+useless the next time someone reads it to understand the system.
+
+**What forced it.** The guard computes its diff from the *deployed* commit. So every merge that is
+not deployed adds paths to that diff, and once the diff leaves the allowlist **every future security
+tag is refused** — invisibly, because a refusal is indistinguishable from the guard working
+correctly. Measured 2026-08-18, an hour after arming: three merged pull requests, twelve differing
+files, autodeploy dead with no error anywhere. The mechanism had an unstated prerequisite —
+production must not fall behind `main` — and nothing enforced or even reported it.
+
+**Why the constraint had to go rather than be worked around.** The alternative was a separate
+`record-deployed.sh` the operator runs after each manual deploy. That keeps `deploy.sh` pristine and
+reintroduces the same defect wearing a different name: a step that can be forgotten, whose being
+forgotten is silent. State must be written where reality changes, or it is not state, it is a
+convention.
+
+**What was added.** Four lines at the end of `deploy.sh`, after the restart: record `HEAD` as the
+deployed commit — or, if the working tree is dirty, **clear** the baseline. `rsync` ships a tree, not
+a commit, so a dirty tree corresponds to no commit at all, and recording `HEAD` there would be a lie
+the guard subsequently trusts. Clearing it makes autodeploy refuse until a human reseeds: fail closed.
+
+**And a second observer, because the first depends on a file being written.** `autodeploy.sh` reports
+drift on its idle path — production behind `main` with differing paths outside the allowlist — at most
+**once a day**. Not on the path where a tag is pending: there the guard already deploys it or refuses
+it with the paths listed, and a second message about the same condition is noise. Once a day because
+drift is a standing condition, not an event; this script has already had to un-learn one siren.
 
 ## Constraints
 

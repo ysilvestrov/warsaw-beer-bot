@@ -103,14 +103,36 @@ One-time install (as root):
 # uncommitted work at any moment.
 install -m 0755 deploy/autodeploy.sh       /usr/local/bin/wbb-autodeploy
 install -m 0755 deploy/autodeploy-guard.sh /usr/local/bin/wbb-autodeploy-guard
+install -m 0755 deploy/read-env.sh         /usr/local/bin/wbb-read-env
 install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
 install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
 systemctl daemon-reload
 ```
 
-Re-run the two `install` lines whenever either script changes — they are copies,
+Re-run the three script `install` lines whenever any of them changes — they are copies,
 not symlinks, deliberately: the running deployer must not change under a
 `git checkout`.
+
+### The deployed baseline
+
+`deploy.sh` records the commit it deployed into
+`~/.local/state/wbb-autodeploy/state.env`. This is not bookkeeping — the guard
+computes its diff **from that commit**, so a stale baseline does not merely
+mislead, it BLOCKS autodeploy: every undeployed merge adds paths to the diff
+until it leaves the allowlist, and then every security tag is refused. A
+refusal looks exactly like the guard working correctly, which is what makes it
+dangerous.
+
+If the working tree is dirty when you deploy, the baseline is **cleared**
+instead of recorded: `rsync` ships a tree, not a commit, so `HEAD` would be a
+lie. Autodeploy then refuses until you reseed it:
+
+```bash
+./deploy/record-deployed.sh "$(git rev-parse HEAD)"
+```
+
+`autodeploy.sh` also reports drift on its idle path — once a day, not once a
+tick — if production has fallen behind `main` in ways that would block it.
 
 The timer stays **disabled** until the mechanism has been exercised by hand:
 
@@ -157,6 +179,39 @@ rm ~/.local/state/wbb-autodeploy/state.env
 
 The next timer tick then treats it as a fresh tag and goes through the
 guard/audit/deploy sequence again.
+
+### Emergency stop — no password required
+
+Arming the timer costs a password (`systemctl enable --now wbb-autodeploy.timer`,
+and `sudoers` pins `systemctl` to the `warsaw-beer-bot` and `litestream` units,
+not to `wbb-autodeploy`) — so stopping it must not, or the brake is
+unavailable exactly when the operator is asleep.
+
+To pause, any unprivileged process — the operator, a script, a future
+watchdog — creates a file:
+
+```bash
+mkdir -p ~/.local/state/wbb-autodeploy
+touch ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+Every run of `wbb-autodeploy` checks for this file first, before touching
+git, the lock, or anything else, and if it exists exits 0 with a single
+journal line — no Telegram message. The timer itself keeps ticking every 5
+minutes; each tick just does almost nothing while the file exists.
+
+To resume:
+
+```bash
+rm ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+**Stated plainly:** this brake lives *inside* the script it brakes, so it
+cannot help against a deployer that is broken before it reaches that check
+(e.g. a corrupted script, or a `set -e` bug earlier in the file). It is a
+first line of defense, not the only one — the privileged `sudo systemctl
+stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
+stop.
 
 ## Backup: Litestream → Cloudflare R2
 

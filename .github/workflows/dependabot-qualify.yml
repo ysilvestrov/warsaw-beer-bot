@@ -132,6 +132,44 @@ jobs:
               --remove-label deps-manual >/dev/null 2>&1 || true
             gh pr edit "$pr" --add-label "$label" || return 1
 
+            # Auto-merge waits for the required `ci` check; it does not bypass it.
+            if [ "$verdict" = "autodeploy" ]; then
+              # `|| return 1`: this function runs without `set -e`, so a silent
+              # failure here would leave the PR wearing the `autodeploy` label
+              # with nothing armed — and the tag workflow fires on the LABEL at
+              # merge time, so the mismatch would not surface until someone
+              # wondered why a qualified critical fix never landed.
+              gh pr merge "$pr" --auto --squash || return 1
+              echo "  auto-merge armed"
+              echo "  auto-merge armed" >> "$GITHUB_STEP_SUMMARY"
+
+              # Branch protection sets strict=true, and auto-merge does NOT update a
+              # stale branch — it only waits. Every merge makes every other open PR
+              # stale, so a queue of them livelocks. MEASURED 2026-08-16: two green
+              # PRs with auto-merge armed sat in BEHIND and did not move until the
+              # branch was updated by hand. Without this, a qualified `critical` fix
+              # can wait forever inside a mechanism built so that it would not wait.
+              #
+              # No loop and no sleep: update-branch pushes a commit, which re-runs
+              # `ci`, which re-triggers this workflow. The hourly schedule is the
+              # backstop if that chain ever breaks.
+              if [ "$(gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus)" = "BEHIND" ]; then
+                # Best-effort by design — the hourly schedule retries — but say
+                # so either way, or a PR stuck BEHIND looks like one nobody armed.
+                if gh pr update-branch "$pr"; then
+                  echo "  branch was BEHIND — updated"
+                  echo "  branch was BEHIND — updated" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "::warning::PR #${pr} is BEHIND and update-branch failed; the hourly run will retry"
+                fi
+              fi
+            fi
+
+            # Also to stdout, not just the step summary: a step summary cannot be
+            # read with `gh run view --log`, so "why did this PR get this label"
+            # had no answer from a terminal. Tolerable while the verdict only
+            # moved a label; not once it can move production.
+            echo "PR #${pr}: ${label} — ${reason}"
             echo "PR #${pr}: ${label} — ${reason}" >> "$GITHUB_STEP_SUMMARY"
           }
 

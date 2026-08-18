@@ -35,6 +35,23 @@ sudo systemctl enable warsaw-beer-bot
 # `enable --now` is a no-op on an already-running unit, so a redeploy with new
 # code would leave the old process in memory. Always restart explicitly.
 sudo systemctl restart warsaw-beer-bot
+# #435 — record what is now live, so the autodeploy guard can diff from it.
+# A stale baseline does not just mislead, it BLOCKS autodeploy: every
+# undeployed merge adds paths to the guard's diff until it leaves the
+# allowlist, and then every security tag is refused — silently, because a
+# refusal looks exactly like the guard working.
+#
+# rsync ships the TREE, not a commit, so a dirty tree corresponds to no commit
+# at all. Recording HEAD in that case would be a lie the guard then trusts, so
+# the baseline is CLEARED instead and autodeploy refuses until a human reseeds
+# it. Fail closed.
+if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  echo "WARNING: working tree is dirty — clearing the autodeploy baseline"
+  "$(dirname "$0")/record-deployed.sh" ''
+else
+  "$(dirname "$0")/record-deployed.sh" "$(git rev-parse HEAD)"
+fi
+
 # journalctl works without sudo because the operator user is in the
 # systemd-journal group (see deploy/README.md → "One-time host setup").
 journalctl -u warsaw-beer-bot -n 30 --no-pager
