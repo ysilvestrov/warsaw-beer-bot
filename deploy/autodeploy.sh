@@ -40,20 +40,37 @@ _health_default() {
 }
 HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
 
+# Reads ONE key out of the operator env file. The parsing lives in
+# deploy/read-env.sh so the SAME code that runs in production can be exercised
+# by a test without sudo — see the header there for why `. file` is wrong.
+# Installed alongside the deployer, like the guard: this script is a COPY in
+# /usr/local/bin, so it cannot reach its sibling through its own path.
+READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
+_read_env_default() {
+  sudo -u warsaw-beer-bot bash -lc '"$0" /etc/warsaw-beer-bot/.env "$1"' "$READ_ENV_BIN" "$1"
+}
+READ_ENV_CMD="${WBB_READ_ENV_CMD:-_read_env_default}"
+
 _notify_default() {
   # Deliberately NOT via the bot: if the deploy took the bot down, the bot
   # cannot report that it is down.
-  sudo -u warsaw-beer-bot bash -lc '
-    set -a; . /etc/warsaw-beer-bot/.env; set +a
-    curl -fsS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
-      --data-urlencode "chat_id=${ADMIN_TELEGRAM_ID}" \
-      --data-urlencode "text=$1" >/dev/null
-  ' _ "$1"
+  local tok chat
+  tok=$("$READ_ENV_CMD" TELEGRAM_BOT_TOKEN)
+  chat=$("$READ_ENV_CMD" ADMIN_TELEGRAM_ID)
+  if [ -z "$tok" ] || [ -z "$chat" ]; then
+    echo "WARNING: notifier has no token or chat id; cannot report: $1" >&2
+    return 1
+  fi
+  curl -fsS -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
+    --data-urlencode "chat_id=${chat}" \
+    --data-urlencode "text=$1" >/dev/null
 }
 NOTIFY_CMD="${WBB_NOTIFY_CMD:-_notify_default}"
 
 _api_port_default() {
-  sudo -u warsaw-beer-bot bash -lc 'set -a; . /etc/warsaw-beer-bot/.env; set +a; echo "${API_PORT:-3000}"'
+  local p
+  p=$("$READ_ENV_CMD" API_PORT)
+  echo "${p:-3000}"
 }
 API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
 
