@@ -153,6 +153,11 @@ jobs:
               fi
             fi
 
+            # Also to stdout, not just the step summary: a step summary cannot be
+            # read with `gh run view --log`, so "why did this PR get this label"
+            # had no answer from a terminal. Tolerable while the verdict only
+            # moved a label; not once it can move production.
+            echo "PR #${pr}: ${label} — ${reason}"
             echo "PR #${pr}: ${label} — ${reason}" >> "$GITHUB_STEP_SUMMARY"
           }
 
