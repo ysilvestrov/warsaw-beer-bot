@@ -132,6 +132,27 @@ jobs:
               --remove-label deps-manual >/dev/null 2>&1 || true
             gh pr edit "$pr" --add-label "$label" || return 1
 
+            # Auto-merge waits for the required `ci` check; it does not bypass it.
+            if [ "$verdict" = "autodeploy" ]; then
+              gh pr merge "$pr" --auto --squash
+              echo "  auto-merge armed" >> "$GITHUB_STEP_SUMMARY"
+
+              # Branch protection sets strict=true, and auto-merge does NOT update a
+              # stale branch — it only waits. Every merge makes every other open PR
+              # stale, so a queue of them livelocks. MEASURED 2026-08-16: two green
+              # PRs with auto-merge armed sat in BEHIND and did not move until the
+              # branch was updated by hand. Without this, a qualified `critical` fix
+              # can wait forever inside a mechanism built so that it would not wait.
+              #
+              # No loop and no sleep: update-branch pushes a commit, which re-runs
+              # `ci`, which re-triggers this workflow. The hourly schedule is the
+              # backstop if that chain ever breaks.
+              if [ "$(gh pr view "$pr" --json mergeStateStatus --jq .mergeStateStatus)" = "BEHIND" ]; then
+                gh pr update-branch "$pr" || true
+                echo "  branch was BEHIND — updated" >> "$GITHUB_STEP_SUMMARY"
+              fi
+            fi
+
             echo "PR #${pr}: ${label} — ${reason}" >> "$GITHUB_STEP_SUMMARY"
           }
 
