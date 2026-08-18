@@ -13,6 +13,7 @@ STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
 REPO="$DATA_DIR/repo"
 STATE="$STATE_DIR/state.env"
 LOCK="$STATE_DIR/lock"
+LAST_DRIFT_NOTICE=""
 HEALTH_TIMEOUT_S=60
 NOTIFY_LIMIT=3500
 
@@ -137,7 +138,7 @@ deploy_commit() {
 # C3: writes the state file, preserving DEPLOYED_SHA/PREVIOUS_SHA and setting
 # (or clearing, if $3 is empty) LAST_FAILED_SHA.
 write_state() {
-  local deployed="$1" previous="$2" last_failed="${3:-}"
+  local deployed="$1" previous="$2" last_failed="${3:-}" drift_notice="${4:-$LAST_DRIFT_NOTICE}"
   {
     printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$deployed" "$previous"
     # `if`, not `[ -n ... ] &&` — the latter, as the group's last statement,
@@ -147,6 +148,11 @@ write_state() {
     if [ -n "$last_failed" ]; then
       printf 'LAST_FAILED_SHA=%s\n' "$last_failed"
     fi
+    # Carried by default so a deploy does not reset the once-a-day drift
+    # reminder and turn a standing condition back into a siren.
+    if [ -n "$drift_notice" ]; then
+      printf 'LAST_DRIFT_NOTICE=%s\n' "$drift_notice"
+    fi
   } > "$STATE" || {
     # I6: the state write used to abort silently under set -e. A failure
     # here means the file on disk may now disagree with what is actually
@@ -154,6 +160,44 @@ write_state() {
     notify "🔥 autodeploy: failed to write $STATE — its record of what is deployed may now disagree with production."
     exit 4
   }
+}
+
+# Drift: production behind main blocks autodeploy, and does so INVISIBLY.
+# The guard diffs from the deployed commit, so every merge that is not
+# deployed adds paths to that diff; once it leaves the allowlist every future
+# security tag is refused, and a refusal looks exactly like the guard working
+# correctly. MEASURED 2026-08-18: three merges, twelve files, autodeploy dead
+# with no error anywhere.
+#
+# deploy.sh now records the baseline itself, so this should not happen — but
+# "should not happen" is what the last two incidents had in common, and a
+# deploy that bypassed deploy.sh entirely would still produce it.
+#
+# Called ONLY on the idle path. If a tag is pending, the guard either deploys
+# it or refuses it with the offending paths listed, and a second message about
+# the same condition is noise. Reported at most ONCE A DAY: drift is a standing
+# condition, not an event, and a siren every five minutes is the failure mode
+# this script already had to fix once.
+report_drift_once() {
+  local main_sha today behind outside
+  main_sha=$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo '')
+  today=$(date -u +%Y-%m-%d)
+
+  [ -n "$DEPLOYED_SHA" ] || return 0
+  [ -n "$main_sha" ] || return 0
+  [ "$DEPLOYED_SHA" != "$main_sha" ] || return 0
+  [ "$LAST_DRIFT_NOTICE" != "$today" ] || return 0
+
+  behind=$(git -C "$REPO" rev-list --count "${DEPLOYED_SHA}..${main_sha}" 2>/dev/null || echo '?')
+  outside=$(git -C "$REPO" diff --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null |
+    { n=0; while read -r f; do case "$f" in package.json|package-lock.json) ;; *) n=$((n+1));; esac; done; echo "$n"; })
+
+  if [ "$outside" != "0" ]; then
+    notify "⚠️ autodeploy is BLOCKED: production is ${behind} commit(s) behind main, and ${outside} differing path(s) are outside the allowlist. Every security tag will be refused until production is deployed. Run ./deploy/deploy.sh."
+  else
+    notify "ℹ️ production is ${behind} commit(s) behind main, but only the manifest and lockfile differ — autodeploy still works."
+  fi
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$today"
 }
 
 # --- fetch -------------------------------------------------------------------
@@ -168,21 +212,23 @@ fi
 # the reason it was asked to.
 git -C "$REPO" fetch -q --tags --prune --prune-tags origin || { notify "⛔ autodeploy: git fetch failed."; exit 1; }
 
+# shellcheck disable=SC1090
+if [ -f "$STATE" ]; then . "$STATE"; fi
+DEPLOYED_SHA="${DEPLOYED_SHA:-}"
+PREVIOUS_SHA="${PREVIOUS_SHA:-}"
+LAST_FAILED_SHA="${LAST_FAILED_SHA:-}"
+LAST_DRIFT_NOTICE="${LAST_DRIFT_NOTICE:-}"
+
 # Minor: lightweight tags sort by the TAGGED COMMIT's committer date under
 # -creatordate, not by when the tag was made — a tag on a backdated commit
 # could then outrank a newer one, and the guard would accept a downgrade.
 # Tag names are ISO-8601 timestamps, so lexical order is chronological.
 tag=$(git -C "$REPO" for-each-ref --sort=-refname --format='%(refname:short)' \
         --count=1 'refs/tags/autodeploy-*')
-[ -n "$tag" ] || { echo "no autodeploy tag yet"; exit 0; }
+[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_drift_once; exit 0; }
 
 target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
 
-# shellcheck disable=SC1090
-[ -f "$STATE" ] && . "$STATE"
-DEPLOYED_SHA="${DEPLOYED_SHA:-}"
-PREVIOUS_SHA="${PREVIOUS_SHA:-}"
-LAST_FAILED_SHA="${LAST_FAILED_SHA:-}"
 
 # C3: a tag that already failed once is not retried automatically — design
 # §7 calls for one attempt, then a human, and without this the state file

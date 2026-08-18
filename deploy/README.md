@@ -113,6 +113,27 @@ Re-run the three script `install` lines whenever any of them changes — they ar
 not symlinks, deliberately: the running deployer must not change under a
 `git checkout`.
 
+### The deployed baseline
+
+`deploy.sh` records the commit it deployed into
+`~/.local/state/wbb-autodeploy/state.env`. This is not bookkeeping — the guard
+computes its diff **from that commit**, so a stale baseline does not merely
+mislead, it BLOCKS autodeploy: every undeployed merge adds paths to the diff
+until it leaves the allowlist, and then every security tag is refused. A
+refusal looks exactly like the guard working correctly, which is what makes it
+dangerous.
+
+If the working tree is dirty when you deploy, the baseline is **cleared**
+instead of recorded: `rsync` ships a tree, not a commit, so `HEAD` would be a
+lie. Autodeploy then refuses until you reseed it:
+
+```bash
+./deploy/record-deployed.sh "$(git rev-parse HEAD)"
+```
+
+`autodeploy.sh` also reports drift on its idle path — once a day, not once a
+tick — if production has fallen behind `main` in ways that would block it.
+
 The timer stays **disabled** until the mechanism has been exercised by hand:
 
 ```bash
