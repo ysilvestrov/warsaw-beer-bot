@@ -25,6 +25,20 @@ updates:
     groups:
       extension-dev:
         dependency-type: development
+    ignore:
+      # jsdom 30 makes `src/sites/conformance.test.ts` fail:
+      # "re-badges after the grid is replaced with fresh nodes" gets null where
+      # it expects a badge. The test asserts a MutationObserver has re-badged
+      # within 50 ms, i.e. it encodes a TIMING assumption, and jsdom 30 changed
+      # whatever that assumption rested on.
+      #
+      # Held rather than "fixed" by widening the wait: that is guessing dressed
+      # as a fix, and it could not be verified here anyway — jsdom 30 pulls
+      # undici 8, which needs Node >= 22.19, and this host runs Node 20, so the
+      # failure cannot even be reproduced locally. It reproduces only in CI,
+      # whose extension leg runs Node 22.
+      - dependency-name: jsdom
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: "/"

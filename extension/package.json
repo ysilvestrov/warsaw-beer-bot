@@ -21,7 +21,7 @@
     "@types/chrome": "^0.2.5",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.2.0",
-    "jsdom": "^30.0.1",
+    "jsdom": "^25.0.1",
     "playwright": "^1.62.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2",
