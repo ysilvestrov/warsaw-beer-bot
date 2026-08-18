@@ -94,6 +94,17 @@ describe('autodeploy-guard.sh', () => {
     expect(r.out).toMatch(/ancestor/i);
   });
 
+  it('REFUSES a tag behind the deployed commit — a downgrade, not a fix', () => {
+    // The shape that actually occurred on the first unattended run: a stale tag
+    // (git fetch --prune does NOT prune tags) pointed at an older commit. The
+    // allowlist caught it only because rolling back happened to touch unrelated
+    // files; a downgrade whose diff is lockfile-only must be refused on its own
+    // merit, since it would quietly reinstall the vulnerable versions.
+    const r = guard(repo, lockOnly, basec, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/downgrade/i);
+  });
+
   it('accepts an empty diff (nothing to deploy is not a violation)', () => {
     const r = guard(repo, lockOnly, lockOnly, 'main');
     expect(r.code).toBe(0);
