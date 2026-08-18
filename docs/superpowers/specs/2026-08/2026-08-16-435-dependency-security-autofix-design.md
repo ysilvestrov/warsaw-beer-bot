@@ -402,8 +402,39 @@ anything, which is what "Dependabot is a proposal, not a constant" requires.
 - `deploy/wbb-autodeploy.service` / `.timer` — new.
 - `deploy/README.md` — extended with the one-time timer install.
 - Labels: `autodeploy`, `autodeploy-pending`, `deps-manual`.
-- `deploy/deploy.sh`, `deploy/sudoers.d/warsaw-beer-bot`, `deploy/warsaw-beer-bot.service` —
-  **unchanged**.
+- `deploy/record-deployed.sh` — new. Writes `DEPLOYED_SHA` into the state file, preserving the keys
+  `autodeploy.sh` owns.
+- `deploy/deploy.sh` — **one addition**, see below.
+- `deploy/sudoers.d/warsaw-beer-bot`, `deploy/warsaw-beer-bot.service` — **unchanged**.
+
+## The one constraint this design lifted, and why
+
+`deploy.sh` was to stay untouched. It does not, and pretending otherwise would make this document
+useless the next time someone reads it to understand the system.
+
+**What forced it.** The guard computes its diff from the *deployed* commit. So every merge that is
+not deployed adds paths to that diff, and once the diff leaves the allowlist **every future security
+tag is refused** — invisibly, because a refusal is indistinguishable from the guard working
+correctly. Measured 2026-08-18, an hour after arming: three merged pull requests, twelve differing
+files, autodeploy dead with no error anywhere. The mechanism had an unstated prerequisite —
+production must not fall behind `main` — and nothing enforced or even reported it.
+
+**Why the constraint had to go rather than be worked around.** The alternative was a separate
+`record-deployed.sh` the operator runs after each manual deploy. That keeps `deploy.sh` pristine and
+reintroduces the same defect wearing a different name: a step that can be forgotten, whose being
+forgotten is silent. State must be written where reality changes, or it is not state, it is a
+convention.
+
+**What was added.** Four lines at the end of `deploy.sh`, after the restart: record `HEAD` as the
+deployed commit — or, if the working tree is dirty, **clear** the baseline. `rsync` ships a tree, not
+a commit, so a dirty tree corresponds to no commit at all, and recording `HEAD` there would be a lie
+the guard subsequently trusts. Clearing it makes autodeploy refuse until a human reseeds: fail closed.
+
+**And a second observer, because the first depends on a file being written.** `autodeploy.sh` reports
+drift on its idle path — production behind `main` with differing paths outside the allowlist — at most
+**once a day**. Not on the path where a tag is pending: there the guard already deploys it or refuses
+it with the paths listed, and a second message about the same condition is noise. Once a day because
+drift is a standing condition, not an event; this script has already had to un-learn one siren.
 
 ## Constraints
 
