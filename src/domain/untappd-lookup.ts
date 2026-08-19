@@ -92,6 +92,23 @@ function pickUniqueByAbv(results: SearchResult[], abv: number | null): SearchRes
   return abvHits.length === 1 ? abvHits[0] : null;
 }
 
+function hasExactBrandRemainder(
+  candidateName: string,
+  inputBreweryAliases: string[],
+  inputName: string,
+): boolean {
+  const candidateTokens = normalizeName(candidateName).split(' ').filter(Boolean);
+  const target = normalizeName(inputName);
+  if (target.length === 0) return false;
+
+  return inputBreweryAliases.some((alias) => {
+    const aliasTokens = alias.split(' ').filter(Boolean);
+    if (aliasTokens.length === 0 || candidateTokens.length <= aliasTokens.length) return false;
+    if (!aliasTokens.every((token, index) => candidateTokens[index] === token)) return false;
+    return candidateTokens.slice(aliasTokens.length).join(' ') === target;
+  });
+}
+
 function nameTokens(norm: string): string[] {
   return norm.split(' ').filter((t) => t.length >= 2);
 }
@@ -235,16 +252,18 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       // Check whether an input-brewery alias is a token-run within the beer NAME
       // (note the args are reversed vs the relaxed call above; tokenSublist is
       // symmetric, so that ordering is fine).
-      const brand =
-        !strict &&
-        !relaxed &&
-        breweryAliasContained(inputBreweryAliases, [normalizeName(r.beer_name)]);
-      return { r, strict, relaxed, native, brand };
+      const brandName = breweryAliasContained(
+        inputBreweryAliases,
+        [normalizeName(r.beer_name)],
+      );
+      const brand = !strict && !relaxed && brandName;
+      return { r, strict, relaxed, native, brand, brandName };
     });
     const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
     const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
     const nativePool = tagged.filter((t) => t.native).map((t) => t.r);
     const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
+    const brandRemainderPool = tagged.filter((t) => t.brandName).map((t) => t.r);
     if (
       strictPool.length === 0 &&
       relaxedPool.length === 0 &&
@@ -364,6 +383,17 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         abv,
       );
       return nativeHit ? { kind: 'matched', result: nativeHit } : null;
+    }
+
+    // A shop may put a leading beer brand in the brewery field and only the
+    // remainder in the name. Compare that complete remainder exactly; this also
+    // handles one-token names that nameKeys intentionally omits.
+    const brandRemainderHits = brandRemainderPool.filter((r) =>
+      hasExactBrandRemainder(r.beer_name, inputBreweryAliases, name),
+    );
+    if (brandRemainderHits.length > 0) {
+      const brandRemainderHit = pickUniqueByAbv(brandRemainderHits, abv);
+      return brandRemainderHit ? { kind: 'matched', result: brandRemainderHit } : null;
     }
 
     // #138B brand-as-beer-name: exact name-key intersection using the input name with

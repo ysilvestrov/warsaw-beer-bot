@@ -867,4 +867,52 @@ describe('#427 upstream identity evidence', () => {
 
     expect(out.kind).toBe('not_found');
   });
+
+  test.each([
+    ['Ruby', 'Leffe Ruby', 5944],
+    ['Blonde', 'Leffe Blonde', 5940],
+  ])('brand remainder: Leffe / %s matches the exact branded beer name', async (name, candidateName, bid) => {
+    const search = fakeSearch(() => [
+      { bid, beer_name: candidateName, brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Leffe', name, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(bid);
+  });
+
+  test('brand remainder: CRAFT is removed from the complete candidate beer name', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6518418, beer_name: 'Craft Star - Double Stout', brewery_name: 'Mad Brew', style: 'Stout', abv: 8.4, global_rating: 3.5 },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'CRAFT', name: 'STAR Double Stout', abv: 6, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6518418);
+  });
+
+  test('brand remainder: a fuzzy remainder is rejected', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Leffe Ruby Cherry', brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Leffe', name: 'Ruby', search });
+
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('brand remainder: two exact candidates without unique ABV evidence stay unresolved', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Leffe Ruby', brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
+      { bid: 2, beer_name: 'Leffe Ruby Lager', brewery_name: 'Abbaye de Leffe', style: 'Lager', abv: 5, global_rating: 3.1 },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Leffe', name: 'Ruby', search });
+
+    expect(out.kind).toBe('not_found');
+  });
 });
