@@ -929,6 +929,9 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 `nameTokensDiverge`) усе одно має пройти, тож FP-ризик низький. Жодного загального/fuzzy-матчингу
 пивоварень; список росте лише з підтверджених тріажем промахів (див. `docs/debug-orphan-matching.md`).
 Обидва місця використання (`matchPrepared`, `lookupBeer`) успадковують розширення через `breweryAliases()`.
+Перед нормалізацією brewery-label вузько прибирається Unicode-superscript число, приклеєне
+до кінця токена (`Nepomucen⁸` → `Nepomucen`): це footnote-артефакт крамниці, не числова
+частина бренду; ASCII-цифри на кшталт `Studio54` цим правилом не зачіпаються (#427).
 
 **Сила збігу пивоварні (enrich, `lookupBeer`).** Stage-1 розрізняє **strict** (провідний-префікс
 `breweryAliasesMatch` — повний шлях назви, включно з fuzzy ≥0.85) та **relaxed** збіг пивоварні:
@@ -936,6 +939,16 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 токен-підсписок аліаса кандидата (#120, `breweryAliasContained`).  Relaxed-збіг матчиться **лише на
 точну назву** — перетин name-keys АБО точна рівність нормалізованих назв — і **ніколи** на
 наближений fuzzy (≥0.85, але <1.0). Strict-шлях незмінний. (`/match`-каталог поки не зачеплено.)
+
+**Upstream identity evidence (#427).** Algolia `SearchResult` зберігає опційні масиви
+`brewery_alias` та `alias_alt`; legacy HTML search може їх не мати. `alias_alt` обходить
+brewery-гейт лише коли один його елемент дорівнює **повній** нормалізованій ідентичності
+`<вхідна brewery/brand форма> + <повна вхідна назва>`. Голий alias назви пива недостатній:
+`Magic Road Dżemer` доводить конкретну колаборацію, але не створює глобального alias
+`Magic Road` ↔ `Sadyba`. `brewery_alias` утворює окремий native-alias pool, не поповнює
+курований граф і не успадковує Algolia rank-1: exact/near-name кандидати мають дати один
+унікальний результат; при множині й відомому ABV виграє лише рівно один кандидат у
+`ABV_TOLERANCE`, інакше матчер відмовляється. Canonical/curated strict semantics незмінні.
 
 **Web-фолбек на 0 кандидатів (#139).** Коли Untappd/Algolia повертає **нуль** кандидатів (справжнє
 занулення запиту, а не відхилення реальних кандидатів матчером) — після наявного #271 head-retry —
@@ -982,6 +995,12 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 точний перетин name-keys, порахованих із вхідної назви **без зрізання пивоварні** (`nameKeys(name, '')` — бренд
 лишається в ключі). Бренд-в-назві гейт обовʼязковий: без нього дві неповʼязані пивоварні зі спільною назвою
 пива матчились би лише за назвою. Ніколи fuzzy; оцінюється після strict/relaxed (реальний збіг пивоварні завжди виграє).
+Додатковий exact-remainder шлях (#427) покриває shelf-brand навіть коли relaxed-гейт уже
+пройшов: якщо нормалізована назва кандидата починається повним вхідним brand alias, залишок
+після цього **провідного** токен-рану мусить точно дорівнювати повній нормалізованій вхідній
+назві (`Leffe / Ruby` ↔ `Leffe Ruby`, `CRAFT / STAR Double Stout` ↔
+`Craft Star - Double Stout`). Жодного fuzzy/token-overlap; множина exact-remainder кандидатів
+приймається лише за тим самим unique/ABV правилом native-alias pool.
 
 #### `POST /enrich/candidates` / `POST /enrich/result` — client-relay Untappd enrichment
 
@@ -1205,6 +1224,9 @@ interface BeerSearch {
   hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer>>;
 }
 ```
+`SearchResult` додатково несе опційні `brewery_alias?: string[]` і
+`alias_alt?: string[]`; `createAlgoliaSearch` зберігає лише непорожні рядкові елементи.
+Порожні/відсутні масиви не змінюють matching-поведінку, тому `htmlSearch` лишається сумісним.
 Реалізації: `createAlgoliaSearch` (серверний path, `src/sources/untappd/algolia.ts`) і
 `htmlSearch` (relay-адаптер, `src/sources/untappd/search.ts`). `lookupBeer` приймає
 `BeerSearch` ін'єктовано — транспорт відокремлено від matching-логіки.

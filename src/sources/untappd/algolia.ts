@@ -9,6 +9,8 @@ interface AlgoliaHit {
   type_name?: unknown;
   beer_abv?: unknown;
   rating_score?: unknown;
+  brewery_alias?: unknown;
+  alias_alt?: unknown;
 }
 export interface AlgoliaResponse { hits?: AlgoliaHit[]; nbHits?: number }
 export interface AlgoliaQuery {
@@ -48,13 +50,16 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
       style: style.length > 0 ? style : null,
       abv: num(h.beer_abv),
       global_rating: num(h.rating_score),
+      brewery_alias: strList(h.brewery_alias),
+      alias_alt: strList(h.alias_alt),
     });
   }
   return out;
 }
 
 function strList(v: unknown): string[] {
-  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+  if (!Array.isArray(v)) return [];
+  return v.map(str).filter((x) => x.length > 0);
 }
 
 export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBeer | null {

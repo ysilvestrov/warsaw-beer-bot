@@ -9,13 +9,15 @@ const HIT = {
   type_name: 'Wild Ale - Other',
   beer_abv: 5.7,
   rating_score: 3.89,
+  brewery_alias: [' Carlsberg Polska ', 17, ''],
+  alias_alt: [' Magic Road Dżemer ', null],
 };
 
 describe('parseAlgoliaResponse', () => {
   it('maps hits to SearchResult fields', () => {
     const out = parseAlgoliaResponse({ hits: [HIT], nbHits: 1 });
     expect(out).toEqual([
-      { bid: 5469263, beer_name: 'After Hours: Rose Wild Ale', brewery_name: 'PINTA Barrel Brewing', style: 'Wild Ale - Other', abv: 5.7, global_rating: 3.89 },
+      { bid: 5469263, beer_name: 'After Hours: Rose Wild Ale', brewery_name: 'PINTA Barrel Brewing', style: 'Wild Ale - Other', abv: 5.7, global_rating: 3.89, brewery_alias: ['Carlsberg Polska'], alias_alt: ['Magic Road Dżemer'] },
     ]);
   });
 
@@ -25,7 +27,7 @@ describe('parseAlgoliaResponse', () => {
 
   it('coerces missing/invalid numeric fields to null', () => {
     const out = parseAlgoliaResponse({ hits: [{ bid: 1, beer_name: 'X', brewery_name: 'Y' }], nbHits: 1 });
-    expect(out[0]).toEqual({ bid: 1, beer_name: 'X', brewery_name: 'Y', style: null, abv: null, global_rating: null });
+    expect(out[0]).toEqual({ bid: 1, beer_name: 'X', brewery_name: 'Y', style: null, abv: null, global_rating: null, brewery_alias: [], alias_alt: [] });
   });
 
   it('skips hits without a numeric bid', () => {
@@ -62,7 +64,7 @@ describe('createAlgoliaSearch (direct)', () => {
     }) as unknown as typeof fetch;
     const s = createAlgoliaSearch({ appId: 'APP', searchKey: 'KEY', fetchImpl });
     const out = await s.search('hazy ipa');
-    expect(out).toEqual([{ bid: 7, beer_name: 'B', brewery_name: 'Br', style: null, abv: null, global_rating: null }]);
+    expect(out).toEqual([{ bid: 7, beer_name: 'B', brewery_name: 'Br', style: null, abv: null, global_rating: null, brewery_alias: [], alias_alt: [] }]);
     expect(calls[0].url).toBe('https://APP-dsn.algolia.net/1/indexes/beer/query');
     expect((calls[0].init.headers as Record<string, string>)['X-Algolia-Application-Id']).toBe('APP');
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ query: 'hazy ipa', hitsPerPage: 5 });
