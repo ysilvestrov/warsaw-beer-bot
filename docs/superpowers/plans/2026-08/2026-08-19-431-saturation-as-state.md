@@ -267,44 +267,31 @@ belongs."
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `src/infra/github-issues.test.ts`, matching the `fetchImpl` stub style already used there:
+`src/infra/github-issues.test.ts` already defines `stubFetch(status, body)` and
+`client(fetchImpl)`. Use them; do not invent parallel fixtures. Append:
 
 ```ts
 test('#431 addLabel POSTs one label and never replaces the set', async () => {
-  const calls: { url: string; init: RequestInit }[] = [];
-  const fetchImpl = (async (url: string, init: RequestInit) => {
-    calls.push({ url, init });
-    return new Response(JSON.stringify([{ name: 'saturated' }]), { status: 200 });
-  }) as unknown as typeof fetch;
-  const c = createGithubIssuesClient({ token: 't', repo: 'o/r', fetchImpl });
-
-  await c.addLabel(405, 'saturated');
-
-  expect(calls).toHaveLength(1);
-  expect(calls[0].url).toBe('https://api.github.com/repos/o/r/issues/405/labels');
-  expect(calls[0].init.method).toBe('POST');
+  const fn = stubFetch(200, [{ name: 'saturated' }]);
+  await client(fn).addLabel(405, 'saturated');
+  const [url, init] = fn.mock.calls[0];
+  expect(String(url)).toBe('https://api.github.com/repos/o/r/issues/405/labels');
+  expect(init.method).toBe('POST');
   // A PUT with the full set would erase human labels; assert the additive shape.
-  expect(JSON.parse(calls[0].init.body as string)).toEqual({ labels: ['saturated'] });
+  expect(JSON.parse(init.body as string)).toEqual({ labels: ['saturated'] });
 });
 
 test('#431 removeLabel DELETEs the single named label, url-encoded', async () => {
-  const calls: { url: string; init: RequestInit }[] = [];
-  const fetchImpl = (async (url: string, init: RequestInit) => {
-    calls.push({ url, init });
-    return new Response(JSON.stringify([]), { status: 200 });
-  }) as unknown as typeof fetch;
-  const c = createGithubIssuesClient({ token: 't', repo: 'o/r', fetchImpl });
-
-  await c.removeLabel(405, 'needs triage');
-
-  expect(calls[0].url).toBe('https://api.github.com/repos/o/r/issues/405/labels/needs%20triage');
-  expect(calls[0].init.method).toBe('DELETE');
+  const fn = stubFetch(200, []);
+  await client(fn).removeLabel(405, 'needs triage');
+  const [url, init] = fn.mock.calls[0];
+  expect(String(url)).toBe('https://api.github.com/repos/o/r/issues/405/labels/needs%20triage');
+  expect(init.method).toBe('DELETE');
 });
 
-test('#431 a failing label call throws HttpStatusError like every other call', async () => {
-  const fetchImpl = (async () => new Response('nope', { status: 403 })) as unknown as typeof fetch;
-  const c = createGithubIssuesClient({ token: 't', repo: 'o/r', fetchImpl });
-  await expect(c.addLabel(405, 'saturated')).rejects.toMatchObject({ status: 403 });
+test('#431 a failing label call throws the same typed error as every other call', async () => {
+  const fn = stubFetch(403, { message: 'nope' });
+  await expect(client(fn).addLabel(405, 'saturated')).rejects.toMatchObject({ status: 403 });
 });
 ```
 
