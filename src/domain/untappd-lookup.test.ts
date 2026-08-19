@@ -883,6 +883,19 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('native brewery alias: structured evidence still applies when the canonical label is only relaxed-contained', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Okocim Jasne Pełne', brewery_name: 'Group Carlsberg Holdings', style: 'Lager', abv: 5, global_rating: 3,
+        brewery_alias: ['Carlsberg Polska'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Carlsberg Brewery', name: 'Okocim Jasne', abv: 5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1);
+  });
+
   test.each([false, true])('native brewery alias: ambiguous PLATAN stays unresolved (reversed=%s)', async (reversed) => {
     const candidates: SearchResult[] = [
       { bid: 1, beer_name: 'Platan Jedenáctka', brewery_name: 'Pivovar Protivín', style: 'Pilsner', abv: 4.6, global_rating: 3.2,

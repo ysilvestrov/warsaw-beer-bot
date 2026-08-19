@@ -272,7 +272,6 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           breweryAliasContained(cand, inputBreweryAliases));
       const native =
         !strict &&
-        !relaxed &&
         (r.brewery_alias ?? []).some((alias) =>
           breweryAliasesMatch(breweryAliases(alias), inputBreweryAliases),
         );
