@@ -5,6 +5,11 @@ export interface GithubIssuesClient {
   listOpenIssues(label: string): Promise<OpenIssue[]>;
   createIssue(i: { title: string; body: string; labels: string[] }): Promise<number>;
   commentOnIssue(issueNumber: number, body: string): Promise<void>;
+  // #431: additive label mutation only. GitHub also offers PUT .../labels, which
+  // REPLACES the whole set — that would silently erase labels a human applied
+  // (priority/tier-2, extension-bug) every time the triage job reconciled.
+  addLabel(issueNumber: number, label: string): Promise<void>;
+  removeLabel(issueNumber: number, label: string): Promise<void>;
 }
 
 // Minimal GitHub REST client (plain fetch, same style as scripts/ai-pr-review.ts).
@@ -71,6 +76,20 @@ export function createGithubIssuesClient(cfg: {
       await call(`${base}/issues/${issueNumber}/comments`, {
         method: 'POST',
         body: JSON.stringify({ body }),
+      });
+    },
+    async addLabel(issueNumber, label) {
+      await call(`${base}/issues/${issueNumber}/labels`, {
+        method: 'POST',
+        body: JSON.stringify({ labels: [label] }),
+      });
+    },
+    async removeLabel(issueNumber, label) {
+      // 404 when the label is already gone. The caller only removes a label it just
+      // read as present, and reconciliation is per-issue try/catch, so a lost race
+      // logs and self-corrects on the next run.
+      await call(`${base}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`, {
+        method: 'DELETE',
       });
     },
   };
