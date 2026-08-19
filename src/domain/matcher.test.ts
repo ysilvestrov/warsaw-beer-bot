@@ -502,6 +502,7 @@ describe('curated brewery-alias gate (#202)', () => {
     expect(passes('Weihenstephaner Brewery', 'Bayerische Staatsbrauerei Weihenstephan')).toBe(true);
     expect(passes('Hopbrook Brewery', 'Hop Brook')).toBe(true);
     expect(passes('Starkaft Brewery', 'Starkraft')).toBe(true);
+    expect(passes('Stern Scheubel Brewery', 'Stern-Bräu Günter Scheubel')).toBe(true);
   });
 
   test('non-transitive: van honsebrouck does not gate-match a bacchus brewery', () => {
@@ -511,6 +512,7 @@ describe('curated brewery-alias gate (#202)', () => {
   test('unrelated breweries still rejected', () => {
     expect(passes('Pinta', 'Harpagan')).toBe(false);
     expect(passes('Nepomucen Brewery', 'Pinta')).toBe(false);
+    expect(passes('Stern Scheubel Brewery', 'Scheubel Family Brewing')).toBe(false);
   });
 });
 

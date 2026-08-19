@@ -9,6 +9,8 @@ export interface SearchResult {
   style: string | null;
   abv: number | null;
   global_rating: number | null;
+  brewery_alias?: string[];
+  alias_alt?: string[];
 }
 
 export interface HydratedBeer extends SearchResult {

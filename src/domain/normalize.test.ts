@@ -14,6 +14,11 @@ test('normalizes brewery the same way, no style stripping', () => {
   expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
 });
 
+test('strips a superscript brewery footnote without touching glued ASCII digits', () => {
+  expect(normalizeBrewery('Nepomucen⁸ Brewery')).toBe('nepomucen');
+  expect(normalizeBrewery('Studio54 Brewery')).toBe('studio54');
+});
+
 test('strips Měšťanský (burgher-brewery descriptor) so only the place remains', () => {
   expect(normalizeBrewery('Měšťanský pivovar Kutná Hora')).toBe('kutna hora');
   expect(normalizeBrewery('Měšťanský pivovar Kojetín')).toBe('kojetin');
@@ -181,6 +186,15 @@ describe('normalizeBrewery with legal forms', () => {
 });
 
 describe('cleanSearchQuery', () => {
+  test('removes a superscript footnote from the brewery search token', () => {
+    expect(cleanSearchQuery('Nepomucen⁸ Brewery', 'Forest')).toBe('Nepomucen Forest');
+  });
+
+  test('removes a superscript footnote before a collaboration separator', () => {
+    expect(cleanSearchQuery('Nepomucen⁸/Trillium Brewery', 'Forest'))
+      .toBe('Nepomucen Trillium Forest');
+  });
+
   test('dedups brewery repeated in the name and drops noise incl. "Co." (#126 Track)', () => {
     expect(cleanSearchQuery('TRACK BREWING CO.', 'Track Brewing Company Taking Shape')).toBe(
       'TRACK Taking Shape',

@@ -140,6 +140,11 @@ export function baseNormalize(s: string): string {
 // ("Pinta 555") collapse too — acceptable for now.
 const isNumericNoise = (t: string): boolean => /^\d+$/.test(t);
 
+// Some shop labels append a Unicode superscript footnote directly to the brewery
+// token (for example `Nepomucen⁸`). Remove only that marker shape; ordinary
+// ASCII digits remain part of a glued brand token such as `Studio54`.
+const SUPERSCRIPT_FOOTNOTE = /[⁰¹²³⁴⁵⁶⁷⁸⁹]+(?=\s|\/|$)/gu;
+
 // Legal-entity suffixes carry no brand meaning. Stripped from the RAW brewery
 // string before tokenization so we never denylist the bare letters they
 // decompose into (z, o, a). Finite, conservative set; dots are required for the
@@ -163,7 +168,9 @@ export function normalizeName(s: string): string {
 }
 
 export function normalizeBrewery(s: string): string {
-  const tokens = baseNormalize(stripLegalForm(canonicalizeBreweryBrand(s)))
+  const tokens = baseNormalize(
+    stripLegalForm(canonicalizeBreweryBrand(s)).replace(SUPERSCRIPT_FOOTNOTE, ''),
+  )
     .split(' ')
     .filter((t) => t && !BREWERY_NOISE.has(t) && !isNumericNoise(t));
   return tokens.join(' ');
@@ -266,7 +273,10 @@ function buildSearchQuery(
 ): string {
   const brewery = repairHomoglyphs(breweryRaw);
   const name = repairHomoglyphs(nameRaw);
-  const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery))));
+  const cleanBrewery = stripQueryTokenNoise(
+    stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery)))
+      .replace(SUPERSCRIPT_FOOTNOTE, ''),
+  );
   const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
 
   // Brewery brand tokens: split collab separators (defensive — detaches glued junk like
