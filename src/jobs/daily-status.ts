@@ -7,7 +7,10 @@ import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
-export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: string | null): string {
+export function buildStatusMessage(
+  m: StatusMetrics, date: string,
+  triageLine?: string | null, saturatedLine?: string | null,
+): string {
   const matchPct = m.beersTotal > 0 ? Math.round((m.beersMatched / m.beersTotal) * 100) : 0;
   const scrapeLine = m.lastScrapeHoursAgo === null
     ? 'немає даних ⚠️'
@@ -22,6 +25,7 @@ export function buildStatusMessage(m: StatusMetrics, date: string, triageLine?: 
     `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
     `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
     ...(triageLine ? [`• ${triageLine}`] : []),
+    ...(saturatedLine ? [`• ${saturatedLine}`] : []),
     // Standing state, read after today's run: #377 part B's audit. The first two
     // numbers can refute the design — see the StatusMetrics comment in stats.ts.
     `• Печатки: ${group(m.sealUnidentifiable)} unidentifiable (${group(m.sealUnidentifiableReobserved)} переспостережено) · ${group(m.sealNotABeer)} not_a_beer (+${group(m.sealNotABeer7d)}/7д) · ${group(m.sealRetiredFalsified)} спростованих retire`,
@@ -95,14 +99,19 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
   // Triage line: written by the orphan-triage job (earlier Warsaw window) into
   // job_state; only shown when it belongs to today's digest date.
   let triageLine: string | null = null;
+  let saturatedLine: string | null = null;
   const rawTriage = getJobState(db, TRIAGE_LAST_RESULT_KEY);
   if (rawTriage) {
     try {
-      const parsed = JSON.parse(rawTriage) as { date: string; line: string };
-      if (parsed.date === dateKey) triageLine = parsed.line;
+      const parsed = JSON.parse(rawTriage) as { date: string; line: string; saturated?: string | null };
+      if (parsed.date === dateKey) {
+        triageLine = parsed.line;
+        // `?? null`: a payload written before #431 has no such key.
+        saturatedLine = parsed.saturated ?? null;
+      }
     } catch { /* malformed state — ignore */ }
   }
-  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine);
+  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine);
   try {
     await notifyAdmin(text);
     setJobState(db, DAILY_STATUS_KEY, dateKey);

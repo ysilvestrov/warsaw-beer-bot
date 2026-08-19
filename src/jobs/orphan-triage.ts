@@ -149,6 +149,21 @@ export function buildTriageLine(o: TriageOutcome): string {
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }
 
+// #431: deliberately its own line rather than another comma in buildTriageLine — it
+// answers a different question (what should be FIXED, not what this run DID). Ordered
+// descending, so the first entry is the answer to "what next": the line is a report and
+// a work queue at once.
+export const SATURATED_LINE_LIMIT = 5;
+
+export function buildSaturatedLine(o: TriageOutcome): string | null {
+  if (o.saturated.length === 0) return null;
+  const top = o.saturated
+    .slice(0, SATURATED_LINE_LIMIT)
+    .map((s) => `#${s.issueNumber} (${s.rows})`)
+    .join(', ');
+  return `Насичені: ${top} — усього ${o.saturated.length}`;
+}
+
 function exampleTable(verdicts: Verdict[], orphans: Map<number, UntriagedFailure>): string {
   const rows = verdicts.map((v) => {
     const o = orphans.get(v.beer_id);
@@ -190,8 +205,11 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     // whether the Warsaw day is done. A transient failure publishes without
     // closing the day, so the next in-window tick retries.
     const publish = (outcome: TriageOutcome): void => {
-      setJobState(db, TRIAGE_LAST_RESULT_KEY,
-        JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
+      setJobState(db, TRIAGE_LAST_RESULT_KEY, JSON.stringify({
+        date: dateKey,
+        line: buildTriageLine(outcome),
+        saturated: buildSaturatedLine(outcome),
+      }));
     };
     const finish = (outcome: TriageOutcome): void => {
       setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);

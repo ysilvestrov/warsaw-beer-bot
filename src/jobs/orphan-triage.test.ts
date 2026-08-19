@@ -8,8 +8,9 @@ import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
 import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 import {
-  orphanTriage, shouldRunTriage, buildTriageLine, reportGuardAnomalies,
+  orphanTriage, shouldRunTriage, buildTriageLine, buildSaturatedLine, reportGuardAnomalies,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
+  type TriageOutcome,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
 import { HttpStatusError } from '../domain/transient-error';
@@ -1016,4 +1017,30 @@ test('#431: a label failure neither aborts the run nor loses the DB write', asyn
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
   const row = d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1').get() as { review_class: string };
   expect(row.review_class).toBe('unidentifiable');
+});
+
+// --- #431 the saturated digest line ---------------------------------------------
+const outcomeWith = (saturated: { issueNumber: number; rows: number }[]): TriageOutcome => ({
+  total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+  causeStripped: 0, noTarget: 0,
+  guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
+  saturated, skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
+});
+
+test('#431 line: nothing saturated → no line at all', () => {
+  expect(buildSaturatedLine(outcomeWith([]))).toBeNull();
+});
+
+test('#431 line: three saturated → all three, descending', () => {
+  expect(buildSaturatedLine(outcomeWith([
+    { issueNumber: 405, rows: 21 }, { issueNumber: 427, rows: 15 }, { issueNumber: 334, rows: 12 },
+  ]))).toBe('Насичені: #405 (21), #427 (15), #334 (12) — усього 3');
+});
+
+test('#431 line: seven saturated → top five plus the total', () => {
+  const line = buildSaturatedLine(outcomeWith(
+    [21, 15, 12, 11, 8, 7, 6].map((rows, i) => ({ issueNumber: 400 + i, rows })),
+  ));
+  expect(line).toBe('Насичені: #400 (21), #401 (15), #402 (12), #403 (11), #404 (8) — усього 7');
+  expect(line).not.toContain('#405');
 });
