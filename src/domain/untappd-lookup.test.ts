@@ -802,3 +802,69 @@ describe('#347 curated alias batch', () => {
     expect(out.result.bid).toBe(6648348);
   });
 });
+
+describe('#427 upstream identity evidence', () => {
+  test('identity alias: a complete collaboration label admits Dżemer', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6603979, beer_name: 'Dżemer', brewery_name: 'Sadyba', style: 'Fruit Beer', abv: 5, global_rating: 3.7,
+        alias_alt: ['Sadyba Dżemer', 'Magic Road Dżemer'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Dżemer', abv: 5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6603979);
+  });
+
+  test('identity alias: a bare beer alias cannot bypass the brewery gate', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6603979, beer_name: 'Dżemer', brewery_name: 'Sadyba', style: 'Fruit Beer', abv: 5, global_rating: 3.7,
+        alias_alt: ['Dżemer'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Dżemer', abv: 5, search });
+
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
+    const search = fakeSearch(() => [
+      { bid: 9055, beer_name: 'Okocim Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
+        brewery_alias: ['Carlsberg Polska'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Carlsberg Brewery', name: 'okocim jasne', abv: 5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(9055);
+  });
+
+  test('native brewery alias: Stu Mostów admits the unique WRCLW beer', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1741395, beer_name: 'WRCLW Schöps', brewery_name: 'WRCLW', style: 'Wheat Beer', abv: 5, global_rating: 3.4,
+        brewery_alias: ['Browar Stu Mostów', 'Stu Mostów'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Stu Mostów Brewery', name: 'WRCLW Schöps', abv: 4.8, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1741395);
+  });
+
+  test.each([false, true])('native brewery alias: ambiguous PLATAN stays unresolved (reversed=%s)', async (reversed) => {
+    const candidates: SearchResult[] = [
+      { bid: 1, beer_name: 'Platan Jedenáctka', brewery_name: 'Pivovar Protivín', style: 'Pilsner', abv: 4.6, global_rating: 3.2,
+        brewery_alias: ['Pivovary Lobkowicz'] },
+      { bid: 2, beer_name: 'Platan Granát', brewery_name: 'Pivovar Protivín', style: 'Lager', abv: 4.6, global_rating: 3.2,
+        brewery_alias: ['Pivovary Lobkowicz'] },
+    ];
+    const search = fakeSearch(() => reversed ? [...candidates].reverse() : candidates);
+
+    const out = await lookupBeer({ brewery: 'Lobkowicz Brewery', name: 'PLATAN', abv: 4.6, search });
+
+    expect(out.kind).toBe('not_found');
+  });
+});
