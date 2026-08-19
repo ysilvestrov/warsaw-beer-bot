@@ -1,12 +1,13 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
-import { isEligible } from '../domain/lookup-backoff';
+import { isEligible, RECURRING_CLASSES } from '../domain/lookup-backoff';
 import { lookupBeer } from '../domain/untappd-lookup';
 import { lookupWithFallback } from '../domain/web-fallback';
 import { applyLookupOutcome } from '../domain/lookup-outcome';
 import type { EnrichOutcomeKind } from '../domain/lookup-outcome';
 import { getBeer } from '../storage/beers';
+import { reviewClassOf } from '../storage/enrich_failures';
 
 export type { EnrichOutcomeKind } from '../domain/lookup-outcome';
 
@@ -27,7 +28,11 @@ export async function enrichOneOrphan(
   if (!beer || beer.untappd_id !== null) return 'skipped';
 
   const now = (deps.now ?? (() => new Date()))();
-  if (!isEligible(now, beer.untappd_lookup_at, beer.untappd_lookup_count)) {
+  // #421: the SECOND eligibility gate (the pools apply the first). Both must read the row's
+  // verdict, or the recurring `not_on_untappd` tail dies silently — the pool hands the row
+  // over and this gate drops it, with nothing in the logs to say why.
+  const recurring = RECURRING_CLASSES.includes(reviewClassOf(deps.db, beerId) ?? '');
+  if (!isEligible(now, beer.untappd_lookup_at, beer.untappd_lookup_count, recurring)) {
     return 'skipped';
   }
 

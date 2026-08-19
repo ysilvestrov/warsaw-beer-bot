@@ -135,7 +135,7 @@ export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): Fil
 
 // #369: a row that just gained an ABV deserves an immediate retry — the previous
 // lookup ran blind, which is the whole bug. Resets the backoff so isEligible()
-// returns true at once. isWontfix still gates eligibility separately.
+// returns true at once. isNotABeer still gates eligibility separately.
 export function rearmLookup(db: DB, beerId: number): void {
   db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
     .run(beerId);
@@ -241,7 +241,7 @@ export function recordLookupTransient(
   ).run(at, beerId);
 }
 
-import { isEligible } from '../domain/lookup-backoff';
+import { isEligible, RECURRING_CLASSES } from '../domain/lookup-backoff';
 
 export interface LookupCandidate {
   id: number;
@@ -249,7 +249,39 @@ export interface LookupCandidate {
   name: string;
   untappd_lookup_at: string | null;
   untappd_lookup_count: number;
+  // #421: the backoff schedule differs by class — `not_on_untappd` waits on Untappd's
+  // catalogue growing and so repeats its last delay forever, while every other class
+  // keeps the terminal schedule. Selected here so the pool query stays the single place
+  // that reads enrich_failures for a candidate.
+  review_class: string | null;
 }
+
+// #421: a verdict that names an unfixed bug is a settled question — while the issue is
+// open the answer cannot move, so re-asking Untappd spends quota on nothing AND burns the
+// row's four backoff attempts before its fix ships. The row is held out of both pools
+// until `unlock-fixed-orphans` sees its issue leave the open set and stamps `unlocked_at`.
+//
+// Three conditions, each load-bearing: the class must name a fix owner (only matcher_bug
+// and parser_bug do), the row must name WHICH fix (`issue_number`, v23 — a verdict with no
+// issue could never be unlocked, so locking it would be a permanent seal, the very thing
+// #377 spent a design removing), and the free retry must not already be spent.
+//
+// Deliberately NOT applied in two places. `/enrich/candidates` searches in the user's own
+// Untappd session (#89), so the quota this saves is not ours to save and a locked row may
+// still be findable there. `orphansOffCron` in stats.ts counts the whole drain QUEUE, not
+// the slice eligible right now — which is why it already skips the backoff filter too;
+// hiding locked rows there would make the backlog look like it shrank when it only went
+// quiet. Hence this is appended at the two pool call sites rather than folded into
+// orphanWithoutMatchLinkPredicate, which stats.ts shares.
+//
+// Assumes the `beers` alias `b`, like orphanWithoutMatchLinkPredicate.
+export const lockedRowPredicate = `EXISTS (
+           SELECT 1 FROM enrich_failures ef
+           WHERE ef.beer_id = b.id
+             AND ef.review_class IN ('matcher_bug', 'parser_bug')
+             AND ef.issue_number IS NOT NULL
+             AND ef.unlocked_at IS NULL
+         )`;
 
 export function listLookupCandidates(
   db: DB,
@@ -257,20 +289,28 @@ export function listLookupCandidates(
   now: Date,
 ): LookupCandidate[] {
   // SQL pre-filter: orphan beers (untappd_id NULL) whose beer_id is on the
-  // latest snapshot of at least one pub, excluding ones triaged as `wontfix`
-  // (intentionally never matched — re-querying them just wastes Untappd calls)
-  // or retired (provably resolved by a shipped fix — re-querying is dead work).
+  // latest snapshot of at least one pub, excluding ones triaged as `not_a_beer`
+  // (merch, bundles, wine — re-querying a T-shirt can never match) or retired
+  // (provably resolved by a shipped fix — re-querying is dead work).
+  // #377 part B: `not_a_beer` is the ONLY verdict that removes a row from a pool.
+  // Every other class is a statement about what we can resolve TODAY and is
+  // overturned by shipped fixes, so those rows must stay reachable — otherwise the
+  // 0<->>0 auto-unseal in recordEnrichFailure can never fire, because the seal is
+  // what keeps the row away from the lookup that would lift it.
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
-              b.untappd_lookup_at, b.untappd_lookup_count
+              b.untappd_lookup_at, b.untappd_lookup_count,
+              (SELECT ef.review_class FROM enrich_failures ef WHERE ef.beer_id = b.id)
+                AS review_class
        FROM beers b
        WHERE b.untappd_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
-             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+             AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
+         AND NOT ${lockedRowPredicate}
          AND EXISTS (
            SELECT 1 FROM match_links ml
            JOIN taps t ON t.beer_ref = ml.ontap_ref
@@ -291,14 +331,15 @@ export function listLookupCandidates(
   // its math in SQLite julianday arithmetic would duplicate the schedule
   // and drift over time).
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);
 }
 
 // #368: shared WHERE predicate — "orphan with no match_links row" (untappd_id
-// IS NULL, minus wontfix/retired, minus anything already linked). Used by
+// IS NULL, minus not_a_beer/retired, minus anything already linked). Used by
 // listRelayLookupCandidates below (the drain query) AND by orphansOffCron in
 // stats.ts (the digest metric), so the two can't silently diverge if one is
 // edited later. Bakes in `b` as the `beers` table alias — every call site
@@ -311,7 +352,7 @@ export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
-             AND (ef.review_class = 'wontfix' OR ef.retired_at IS NOT NULL)
+             AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
          AND NOT EXISTS (
            SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
@@ -321,7 +362,7 @@ export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
 // `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
 // отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
 // EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
-// структурно, а не тому, що вони зійшли з кранів. Виключення wontfix/retired, backoff
+// структурно, а не тому, що вони зійшли з кранів. Виключення not_a_beer/retired, backoff
 // і сортування — ті самі; інвертований предикат робить пули диз'юнктними за
 // побудовою (дедуп не потрібен), але НЕ покриває orphan'а з рядком у match_links,
 // чий кран зійшов з останнього снапшоту — той не потрапляє в жоден пул.
@@ -333,9 +374,12 @@ export function listRelayLookupCandidates(
   const rows = db
     .prepare(
       `SELECT b.id, b.brewery, b.name,
-              b.untappd_lookup_at, b.untappd_lookup_count
+              b.untappd_lookup_at, b.untappd_lookup_count,
+              (SELECT ef.review_class FROM enrich_failures ef WHERE ef.beer_id = b.id)
+                AS review_class
        FROM beers b
        WHERE ${orphanWithoutMatchLinkPredicate}
+         AND NOT ${lockedRowPredicate}
        ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
     )
     .all() as LookupCandidate[];
@@ -343,7 +387,8 @@ export function listRelayLookupCandidates(
   // Той самий JS-фільтр backoff, що й у listLookupCandidates: відтворювати його
   // математику в julianday-арифметиці SQLite означало б дублювати розклад.
   const eligible = rows.filter((r) =>
-    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count),
+    isEligible(now, r.untappd_lookup_at, r.untappd_lookup_count,
+      RECURRING_CLASSES.includes(r.review_class ?? '')),
   );
 
   return eligible.slice(0, limit);

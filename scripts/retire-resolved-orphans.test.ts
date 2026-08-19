@@ -3,6 +3,7 @@ import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import { migrate } from '../src/storage/schema';
 import { normalizeBrewery, normalizeName } from '../src/domain/normalize';
+import type { ReviewClass } from '../src/storage/enrich_failures';
 import { selectAutoRetireTargets, selectIdTargets, applyRetire } from './retire-resolved-orphans';
 
 interface Seed {
@@ -10,7 +11,7 @@ interface Seed {
   brewery: string;
   style?: string | null;
   untappd_id?: number | null;
-  review_class?: 'parser_bug' | 'matcher_bug' | 'not_on_untappd' | 'wontfix' | null;
+  review_class?: ReviewClass | null;
   retired_at?: string | null;
 }
 
@@ -51,7 +52,7 @@ describe('selectAutoRetireTargets', () => {
     const db = fresh();
     seed(db, { name: 'Wino A', brewery: 'WINO A', review_class: 'parser_bug', untappd_id: 555 });
     seed(db, { name: 'Wino B', brewery: 'WINO B', review_class: null });
-    seed(db, { name: 'Wino C', brewery: 'WINO C', review_class: 'wontfix', retired_at: '2026-07-01T00:00:00Z' });
+    seed(db, { name: 'Wino C', brewery: 'WINO C', review_class: 'not_a_beer', retired_at: '2026-07-01T00:00:00Z' });
     expect(selectAutoRetireTargets(db)).toEqual([]);
   });
 });

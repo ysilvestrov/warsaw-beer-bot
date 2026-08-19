@@ -9,8 +9,13 @@ export interface VerifyCausesArgs {
   onError?: (query: string, error: unknown) => void;
 }
 
-// A verdict makes a causal claim when it routes the orphan to an issue.
+// A verdict makes a causal claim when it routes the orphan to an issue — EXCEPT
+// not_a_beer, whose claim is about the product, not about a query. The gate below
+// re-runs `proposed_query` and checks that `expected_target` comes back; a T-shirt has
+// no beer to find, so demanding a query would force the model to invent one and the
+// gate would then strip every correct not_a_beer attachment (#377 part B).
 export function isCausal(v: Verdict): boolean {
+  if (v.review_class === 'not_a_beer') return false;
   return v.issue_number !== null || v.new_issue_key !== null;
 }
 

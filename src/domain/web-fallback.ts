@@ -132,7 +132,7 @@ export async function runWebFallback(
   // free: no quota, and deliberately NO web_tried_at stamp, so a beer unblocked
   // by a later parser fix is retried on the next cron tick rather than 30 days
   // later (#351). Covers the relay path too, which never passes through
-  // listLookupCandidates and was previously unfiltered even for `wontfix`.
+  // listLookupCandidates and was previously unfiltered even for terminal verdicts.
   if (isWebFallbackBlocked(deps.db, input.beerId)) {
     deps.log.debug({ beerId: input.beerId, reason: 'review-class' }, 'web-fallback skipped');
     return null;

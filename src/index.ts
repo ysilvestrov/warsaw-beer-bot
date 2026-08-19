@@ -38,6 +38,7 @@ import { refreshTapRatings } from './jobs/refresh-tap-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
+import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
 import { createTriageLlm } from './infra/triage-llm';
 import { createTriageArchive } from './infra/triage-archive';
 import { createGithubIssuesClient } from './infra/github-issues';
@@ -288,6 +289,15 @@ async function main(): Promise<void> {
         db, log, llm: triageLlm, github: triageGithub, archive: triageArchive,
         search: algoliaSearch, probeLimit: env.TRIAGE_PROBE_LIMIT,
       }).catch((e) => log.error({ err: e }, 'orphan-triage cron'));
+    }),
+    // #421: re-arm rows whose issue left the open set. Hourly tick, once per Warsaw day via
+    // job_state inside the job — same UTC-tick pattern as triage, since node-cron's timezone
+    // pin is unreliable on this host. Hourly rather than daily is deliberate: a GitHub
+    // failure returns WITHOUT closing the day, so the next tick retries within the hour
+    // instead of costing every locked row a day of reachability.
+    cron.schedule('20 * * * *', () => {
+      unlockFixedOrphans({ db, log, github: triageGithub })
+        .catch((e) => log.error({ err: e }, 'unlock-fixed-orphans cron'));
     }),
   ];
 

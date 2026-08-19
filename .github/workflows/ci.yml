@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: root
+            dir: .
+            node: 20
+          - name: extension
+            dir: extension
+            node: 22
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: ${{ matrix.dir }}/package-lock.json
+
+      - name: Install
+        run: npm ci
+        working-directory: ${{ matrix.dir }}
+
+      - name: Typecheck
+        run: npm run typecheck
+        working-directory: ${{ matrix.dir }}
+
+      - name: Test
+        run: npm test
+        working-directory: ${{ matrix.dir }}
+
+  # Single stable name for branch protection and auto-merge to depend on.
+  # `if: always()` so this job runs even when `build` failed — otherwise a
+  # failed matrix leg would leave the required check *pending* forever and
+  # every PR would hang instead of going red.
+  ci:
+    name: ci
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: always()
+    steps:
+      - name: Report matrix result
+        run: |
+          echo "build result: ${{ needs.build.result }}"
+          [ "${{ needs.build.result }}" = "success" ]

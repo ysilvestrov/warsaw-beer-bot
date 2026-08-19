@@ -1,5 +1,5 @@
 import { test, expect, vi } from 'vitest';
-import { collectTriageProbes, PROBE_SEARCHES_PER_ORPHAN } from './triage-probes';
+import { absenceProvedBy, collectTriageProbes, PROBE_SEARCHES_PER_ORPHAN } from './triage-probes';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { SearchResult } from '../sources/untappd/search';
 
@@ -58,4 +58,16 @@ test('a failing probe is swallowed and leaves the other probe intact', async () 
 
   expect(probes.get(1)?.brewery).toBeUndefined();
   expect(probes.get(1)?.name).toContain('Browar Artezan');
+});
+
+// absenceProvedBy is the single answer to "may this row be called absent?", shared by
+// the routing guard and the write chokepoint. Replacing the `=== ''` comparisons with
+// `probe !== undefined` turns every case below red except the first.
+test('absence is proved only by a probe that ran and came back empty', () => {
+  expect(absenceProvedBy(undefined)).toBe(false);                        // never ran
+  expect(absenceProvedBy({})).toBe(false);                               // ran neither side
+  expect(absenceProvedBy({ brewery: 'Mad Elf, MadTree' })).toBe(false);  // ran, found things
+  expect(absenceProvedBy({ brewery: '' })).toBe(true);                   // ran, empty
+  expect(absenceProvedBy({ name: '' })).toBe(true);
+  expect(absenceProvedBy({ brewery: 'Mad Elf', name: '' })).toBe(true);  // either side suffices
 });

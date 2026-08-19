@@ -196,7 +196,7 @@ describe('enrichOrphans', () => {
 
     expect(result).toEqual({
       processed: 0, matched: 0, merged: 0, not_found: 0, transient: 0,
-      skipped: 0, blocked: 0, on_tap_selected: 0, relay_selected: 0,
+      skipped: 0, blocked: 0, errors: 0, on_tap_selected: 0, relay_selected: 0,
     });
     expect(calls).toBe(0);
   });
@@ -335,6 +335,54 @@ describe('enrichOrphans', () => {
     });
     expect(res.processed).toBeGreaterThan(0);
     expect(JSON.parse(getJobState(db, CANARY_STATE_KEY)!).ok).toBe(true);
+  });
+
+  // --- #425: per-beer containment ---
+
+  // Red if the try/catch around enrichOneOrphan is removed: one throwing beer ends the whole
+  // run and every candidate after it is silently never attempted. The loop is 20 network-and-DB
+  // operations; it must not end on the first surprise.
+  test('a beer that throws does not end the run', async () => {
+    const db = fresh();
+    const a = seedOrphanOnTap(db, 'Alpha Brew', 'Alpha');
+    const b = seedOrphanOnTap(db, 'Beta Brew', 'Beta');
+    const c = seedOrphanOnTap(db, 'Gamma Brew', 'Gamma');
+
+    const search = { search: vi.fn(async (q: string): Promise<SearchResult[]> =>
+      q === CANARY_QUERY ? [GUINNESS_HIT] : []) };
+
+    const result = await enrichOrphans({
+      db, log: silentLog, search, sleepMs: 0,
+      webFallback: async (beerId: number) => {
+        if (beerId === b) throw new Error('brave fallback exploded');
+        return null;
+      },
+    });
+
+    expect(result.errors).toBe(1);
+    expect(result.processed).toBe(3);
+    // The beers on either side of the thrower were both attempted.
+    expect(getBeer(db, a)!.untappd_lookup_count).toBe(1);
+    expect(getBeer(db, c)!.untappd_lookup_count).toBe(1);
+  });
+
+  // Red if the catch feeds the breaker. onResult(true) means "Untappd blocked us"; a storage or
+  // fallback exception is not evidence about Untappd, and letting it in would let a local bug
+  // open the circuit and stop all enrichment for the backoff window.
+  test('a thrown error is never reported to the circuit breaker', async () => {
+    const db = fresh();
+    seedOrphanOnTap(db, 'Beta Brew', 'Beta');
+    const breaker = { canAttempt: () => true, onResult: vi.fn(), state: 'closed' as const };
+
+    const search = { search: vi.fn(async (q: string): Promise<SearchResult[]> =>
+      q === CANARY_QUERY ? [GUINNESS_HIT] : []) };
+
+    await enrichOrphans({
+      db, log: silentLog, search, sleepMs: 0, breaker,
+      webFallback: async () => { throw new Error('brave fallback exploded'); },
+    });
+
+    expect(breaker.onResult).not.toHaveBeenCalledWith(true, expect.anything());
   });
 });
 

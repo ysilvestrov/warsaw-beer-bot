@@ -89,6 +89,135 @@ sudo -n -u warsaw-beer-bot bash -lc \
   'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans -- --apply'
 ```
 
+## Unattended security autodeploy (#435)
+
+A timer checks for an `autodeploy-*` tag and deploys it only if the change
+touches nothing but the root `package.json` and `package-lock.json`. See
+`docs/superpowers/specs/2026-08/2026-08-16-435-dependency-security-autofix-design.md`.
+
+One-time install (as root):
+
+```bash
+sudo bash deploy/install-autodeploy.sh
+```
+
+It installs the scripts to fixed paths rather than running them from the
+operator's working tree — that tree is rsynced wholesale by `deploy.sh` and may
+hold uncommitted work at any moment. They are **copies, not symlinks**, so the
+running deployer cannot change under a `git checkout`.
+
+**Re-run it after every merge that touches `deploy/*.sh`.** The same property
+that protects the running deployer means a merged fix is not a live fix until
+it is installed. You no longer have to remember this on your own: the deployer
+compares its installed copies against `origin/main` and says so once a day
+while idle — and **refuses to deploy at all** while it is stale, because
+deploying production on safety logic known to be out of date is the risk the
+whole mechanism exists to manage.
+
+Re-run the three script `install` lines whenever any of them changes — they are copies,
+not symlinks, deliberately: the running deployer must not change under a
+`git checkout`.
+
+### The deployed baseline
+
+`deploy.sh` records the commit it deployed into
+`~/.local/state/wbb-autodeploy/state.env`. This is not bookkeeping — the guard
+computes its diff **from that commit**, so a stale baseline does not merely
+mislead, it BLOCKS autodeploy: every undeployed merge adds paths to the diff
+until it leaves the allowlist, and then every security tag is refused. A
+refusal looks exactly like the guard working correctly, which is what makes it
+dangerous.
+
+If the working tree is dirty when you deploy, the baseline is **cleared**
+instead of recorded: `rsync` ships a tree, not a commit, so `HEAD` would be a
+lie. Autodeploy then refuses until you reseed it:
+
+```bash
+./deploy/record-deployed.sh "$(git rev-parse HEAD)"
+```
+
+`autodeploy.sh` also reports drift on its idle path — once a day, not once a
+tick — if production has fallen behind `main` in ways that would block it.
+
+The timer stays **disabled** until the mechanism has been exercised by hand:
+
+```bash
+# dry run — the guard refuses anything that is not a lockfile-only change
+/usr/local/bin/wbb-autodeploy
+
+# arm it
+systemctl enable --now wbb-autodeploy.timer
+systemctl list-timers wbb-autodeploy.timer
+```
+
+The first run refuses with "no recorded baseline". Seed it with the commit
+currently deployed:
+
+```bash
+mkdir -p ~/.local/state/wbb-autodeploy
+printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=\n' "$(git -C /home/ysi/warsaw-beer-bot rev-parse origin/main)" \
+  > ~/.local/state/wbb-autodeploy/state.env
+```
+
+### A failed tag is remembered, not retried
+
+If a tag fails — the guard refuses it, `npm audit` still reports an advisory,
+the deploy comes up unhealthy, or the rollback itself fails — the run writes
+`LAST_FAILED_SHA=<that commit>` into `~/.local/state/wbb-autodeploy/state.env`
+alongside the existing `DEPLOYED_SHA`/`PREVIOUS_SHA` lines. On every later
+tick, a tag whose commit matches `LAST_FAILED_SHA` is skipped immediately —
+exit 0, one journal line, **no Telegram message**. This is deliberate: the
+operator was already paged when the failure was first recorded, and design
+§7 calls for one attempt, then a human, not a message every 5 minutes
+forever.
+
+To retry a tag by hand (after fixing whatever made it fail, or if the
+failure was a known-transient blip), clear the memory:
+
+```bash
+# delete the whole line …
+sed -i '/^LAST_FAILED_SHA=/d' ~/.local/state/wbb-autodeploy/state.env
+# … or just delete the file (loses DEPLOYED_SHA/PREVIOUS_SHA too — see
+# "seed it" above to restore the baseline afterward)
+rm ~/.local/state/wbb-autodeploy/state.env
+```
+
+The next timer tick then treats it as a fresh tag and goes through the
+guard/audit/deploy sequence again.
+
+### Emergency stop — no password required
+
+Arming the timer costs a password (`systemctl enable --now wbb-autodeploy.timer`,
+and `sudoers` pins `systemctl` to the `warsaw-beer-bot` and `litestream` units,
+not to `wbb-autodeploy`) — so stopping it must not, or the brake is
+unavailable exactly when the operator is asleep.
+
+To pause, any unprivileged process — the operator, a script, a future
+watchdog — creates a file:
+
+```bash
+mkdir -p ~/.local/state/wbb-autodeploy
+touch ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+Every run of `wbb-autodeploy` checks for this file first, before touching
+git, the lock, or anything else, and if it exists exits 0 with a single
+journal line — no Telegram message. The timer itself keeps ticking every 5
+minutes; each tick just does almost nothing while the file exists.
+
+To resume:
+
+```bash
+rm ~/.local/state/wbb-autodeploy/PAUSED
+```
+
+**Stated plainly:** this brake lives *inside* the script it brakes, so it
+cannot help against a deployer that is broken before it reaches that check
+(e.g. a corrupted script, or a `set -e` bug earlier in the file). It is a
+first line of defense, not the only one — the privileged `sudo systemctl
+stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
+stop.
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2

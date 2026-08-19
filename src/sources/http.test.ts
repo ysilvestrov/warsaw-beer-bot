@@ -42,7 +42,7 @@ test('throws generic Error (not CookieExpiredError) on 4xx', async () => {
 });
 
 test('throws HttpError carrying the status on a non-ok response', async () => {
-  const { HttpError } = await import('./http');
+  const { HttpError } = await import('./http.js');
   const fetchImpl: typeof fetch = async () => new Response('', { status: 403 });
   const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl });
   await expect(http.get('https://untappd.com/search?q=x')).rejects.toMatchObject({
