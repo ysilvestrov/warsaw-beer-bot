@@ -98,16 +98,21 @@ touches nothing but the root `package.json` and `package-lock.json`. See
 One-time install (as root):
 
 ```bash
-# The scripts are installed to a fixed path rather than run from the operator's
-# working tree: that tree is rsynced wholesale by deploy.sh and may hold
-# uncommitted work at any moment.
-install -m 0755 deploy/autodeploy.sh       /usr/local/bin/wbb-autodeploy
-install -m 0755 deploy/autodeploy-guard.sh /usr/local/bin/wbb-autodeploy-guard
-install -m 0755 deploy/read-env.sh         /usr/local/bin/wbb-read-env
-install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
-install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
-systemctl daemon-reload
+sudo bash deploy/install-autodeploy.sh
 ```
+
+It installs the scripts to fixed paths rather than running them from the
+operator's working tree — that tree is rsynced wholesale by `deploy.sh` and may
+hold uncommitted work at any moment. They are **copies, not symlinks**, so the
+running deployer cannot change under a `git checkout`.
+
+**Re-run it after every merge that touches `deploy/*.sh`.** The same property
+that protects the running deployer means a merged fix is not a live fix until
+it is installed. You no longer have to remember this on your own: the deployer
+compares its installed copies against `origin/main` and says so once a day
+while idle — and **refuses to deploy at all** while it is stale, because
+deploying production on safety logic known to be out of date is the risk the
+whole mechanism exists to manage.
 
 Re-run the three script `install` lines whenever any of them changes — they are copies,
 not symlinks, deliberately: the running deployer must not change under a
