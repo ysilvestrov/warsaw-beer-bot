@@ -830,7 +830,11 @@ describe('#427 upstream identity evidence', () => {
 
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
-      { bid: 9055, beer_name: 'Okocim Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
+      { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
+        brewery_alias: ['Carlsberg Polska'], alias_alt: ['Okocim Jasne Pełne'] },
+      { bid: 1768290, beer_name: 'Okocim Jasne Pełne 3,4%', brewery_name: 'Browar Okocim', style: 'Lager', abv: 3.4, global_rating: 2.7,
+        brewery_alias: ['Carlsberg Polska'] },
+      { bid: 4555473, beer_name: 'Okocim Jasne Lekkie', brewery_name: 'Browar Okocim', style: 'Lager', abv: 3.5, global_rating: 0,
         brewery_alias: ['Carlsberg Polska'] },
     ]);
 
@@ -869,12 +873,19 @@ describe('#427 upstream identity evidence', () => {
   });
 
   test.each([
-    ['Ruby', 'Leffe Ruby', 5944],
-    ['Blonde', 'Leffe Blonde', 5940],
-  ])('brand remainder: Leffe / %s matches the exact branded beer name', async (name, candidateName, bid) => {
-    const search = fakeSearch(() => [
-      { bid, beer_name: candidateName, brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
-    ]);
+    ['Ruby', 5944, [
+      { bid: 5944, beer_name: 'Leffe Ruby', brewery_name: 'Abbaye de Leffe', style: 'Fruit Beer', abv: 5, global_rating: 3.3 },
+      { bid: 4264020, beer_name: 'Leffe Ruby 0,0%', brewery_name: 'Abbaye de Leffe', style: 'Non-Alcoholic', abv: 0, global_rating: 2.8,
+        alias_alt: ['Leffe Ruby 0% Alc.'] },
+    ]],
+    ['Blonde', 5940, [
+      { bid: 5940, beer_name: 'Leffe Blonde / Blond', brewery_name: 'Abbaye de Leffe', style: 'Belgian Blonde', abv: 6.6, global_rating: 3.5 },
+      { bid: 5943, beer_name: 'Leffe Triple / Tripel', brewery_name: 'Abbaye de Leffe', style: 'Belgian Tripel', abv: 8.5, global_rating: 3.6,
+        alias_alt: ['leffe triple blonde'] },
+      { bid: 2948556, beer_name: 'Leffe Blonde / Blond 0,0%', brewery_name: 'Abbaye de Leffe', style: 'Non-Alcoholic', abv: 0, global_rating: 2.8 },
+    ]],
+  ] satisfies Array<[string, number, SearchResult[]]>)('brand remainder: Leffe / %s matches the exact branded beer name', async (name, bid, candidates) => {
+    const search = fakeSearch(() => candidates);
 
     const out = await lookupBeer({ brewery: 'Leffe', name, search });
 
@@ -908,7 +919,7 @@ describe('#427 upstream identity evidence', () => {
   test('brand remainder: two exact candidates without unique ABV evidence stay unresolved', async () => {
     const search = fakeSearch(() => [
       { bid: 1, beer_name: 'Leffe Ruby', brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
-      { bid: 2, beer_name: 'Leffe Ruby Lager', brewery_name: 'Abbaye de Leffe', style: 'Lager', abv: 5, global_rating: 3.1 },
+      { bid: 2, beer_name: 'Leffe Ruby', brewery_name: 'Abbaye de Leffe', style: 'Fruit Beer', abv: 5, global_rating: 3.1 },
     ]);
 
     const out = await lookupBeer({ brewery: 'Leffe', name: 'Ruby', search });
