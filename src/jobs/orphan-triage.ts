@@ -8,7 +8,7 @@ import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
 import {
-  planTriageActions, type ScopedIssue, type GuardReason, type SaturatedIssue,
+  planTriageActions, computeSaturated, type ScopedIssue, type GuardReason, type SaturatedIssue,
 } from '../domain/triage-plan';
 import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
@@ -101,10 +101,12 @@ export function reportGuardAnomalies(log: pino.Logger, g: Record<GuardReason, nu
     'orphan-triage: guard anomaly');
 }
 
-// #431: the label mirrors plan.saturated, and nothing else. Issued only on a
-// difference, so a steady state costs zero requests. Best-effort by design: it runs
-// after every comment and every DB write, so a GitHub failure here can no longer cost
-// a verdict that was already earned — it logs and the next run reconciles.
+// #431: the label mirrors what actually landed (outcome.saturated, computed from
+// outcome.commented — the comments that really posted — never from the plan), and
+// nothing else. Issued only on a difference, so a steady state costs zero requests.
+// Best-effort by design: it runs after every comment and every DB write, so a GitHub
+// failure here can no longer cost a verdict that was already earned — it logs and the
+// next run reconciles.
 async function reconcileSaturatedLabels(
   github: GithubIssuesClient,
   log: pino.Logger,
@@ -260,6 +262,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     // loops) needs the SAME open issues the guards judged against, not a second
     // GitHub call.
     let openIssues: OpenIssue[] = [];
+    // Hoisted alongside openIssues for the same reason: computeSaturated (both the
+    // pre-write default below and the post-write recompute after the write loops)
+    // needs the SAME postCreationRows counts the guards judged against.
+    let scopedIssues: ScopedIssue[] = [];
     let unverified = 0;
     let probeFailures = 0;
     let verifyFailures = 0;
@@ -343,7 +349,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // #408: the guards judge a routing decision, so they need the evidence it was
       // made about — the issues' parsed scopes and the batch rows, not just their ids.
       // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
-      const scopedIssues: ScopedIssue[] = openIssues.map((i) => ({
+      scopedIssues = openIssues.map((i) => ({
         number: i.number,
         scope: parseScopeBlock(i.body),
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
@@ -381,7 +387,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     // three assignments and the anomaly warn must publish on EVERY run, so they sit
     // ABOVE the covered === 0 early return, not after it.
     outcome.guardHits = plan.guardHits;
-    outcome.saturated = plan.saturated;
+    // #431: the pre-write default — nothing has been attached yet, so this is the
+    // standing state from postCreationRows alone. It is what publishes if the
+    // covered === 0 return below fires: still meaningful (an issue sitting at 21 rows
+    // is saturated even on a run that attaches nothing), and it must NOT be an empty
+    // list on that path. Overwritten below, after the write loops, with what actually
+    // landed.
+    outcome.saturated = computeSaturated(scopedIssues, new Map());
     reportGuardAnomalies(log, plan.guardHits);
     outcome.causeStripped = plan.quietCauseStripped;
     outcome.noTarget = plan.quietNoTarget;
@@ -469,7 +481,16 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // actionable classes are counted by planTriageActions as causeStripped / noTarget
     }
 
-    await reconcileSaturatedLabels(github, log, openIssues, plan.saturated);
+    // #431: recomputed from outcome.commented — the comments that actually POSTED —
+    // not from the plan. A planned comment whose commentOnIssue call threw never
+    // reached this map (the catch above only grows outcome.skipped), so a row that
+    // was never really attached can no longer saturate its issue's label or digest
+    // line. New issues created this run are correctly absent from attachedThisRun:
+    // they aren't in scopedIssues either (see computeSaturated's own comment).
+    const attachedThisRun = new Map(outcome.commented.map((c) => [c.issueNumber, c.count]));
+    outcome.saturated = computeSaturated(scopedIssues, attachedThisRun);
+
+    await reconcileSaturatedLabels(github, log, openIssues, outcome.saturated);
 
     finish(outcome);
   } finally {

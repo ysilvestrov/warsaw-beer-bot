@@ -1,4 +1,6 @@
-import { planTriageActions, SATURATION_ALERT_ROWS, type ScopedIssue } from './triage-plan';
+import {
+  planTriageActions, computeSaturated, SATURATION_ALERT_ROWS, type ScopedIssue,
+} from './triage-plan';
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
@@ -26,6 +28,13 @@ const issue = (key: string) => ({
 });
 
 const noProbes = new Map<number, TriageProbe>();
+
+// #431: computeSaturated takes what actually landed as a plain map, not a plan — the
+// job builds that map from outcome.commented (real GitHub writes), never from the
+// plan's routing decisions. In these tests "what landed" is exactly what the plan
+// just routed, since there is no GitHub call standing between planning and landing.
+const attachedFrom = (p: { comments: { issueNumber: number; verdicts: unknown[] }[] }) =>
+  new Map(p.comments.map((c) => [c.issueNumber, c.verdicts.length]));
 
 test('splits quiet actionable verdicts into cause-stripped and no-target', () => {
   const a: Analysis = {
@@ -300,7 +309,7 @@ test('an issue born with a large cohort but no post-creation rows still accepts'
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 405 })], new_issues: [] };
   const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(1);
-  expect(plan.saturated).toEqual([]);
+  expect(computeSaturated(issues, attachedFrom(plan))).toEqual([]);
 });
 
 // A batch must not walk an issue past the limit three rows at a time: without counting
@@ -313,7 +322,7 @@ test('rows accepted earlier in the same run count toward saturation', () => {
   };
   const plan = planTriageActions(a, issues, rows(1, 2, 3), noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(3);
-  expect(plan.saturated).toEqual([{ issueNumber: 347, rows: 14 }]);
+  expect(computeSaturated(issues, attachedFrom(plan))).toEqual([{ issueNumber: 347, rows: 14 }]);
 });
 
 // Guard 2 must apply to a PROPOSED issue as well, or a model could file one whose scope
@@ -475,8 +484,7 @@ test('#431: not_a_beer on a saturated issue gets its comment (no exception exist
 
 test('#431: saturated is a STATE — an issue this run never touched is listed', () => {
   const issues = [open(900, { postCreationRows: 21 }), open(901, { postCreationRows: 3 })];
-  const plan = planTriageActions({ verdicts: [], new_issues: [] }, issues, [], noProbes, new Set());
-  expect(plan.saturated).toEqual([{ issueNumber: 900, rows: 21 }]);
+  expect(computeSaturated(issues, new Map())).toEqual([{ issueNumber: 900, rows: 21 }]);
 });
 
 test('#431: ties break by issue number ascending, so output is deterministic', () => {
@@ -485,6 +493,5 @@ test('#431: ties break by issue number ascending, so output is deterministic', (
     open(900, { postCreationRows: 12 }),
     open(901, { postCreationRows: 30 }),
   ];
-  const plan = planTriageActions({ verdicts: [], new_issues: [] }, issues, [], noProbes, new Set());
-  expect(plan.saturated.map((s) => s.issueNumber)).toEqual([901, 900, 902]);
+  expect(computeSaturated(issues, new Map()).map((s) => s.issueNumber)).toEqual([901, 900, 902]);
 });

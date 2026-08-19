@@ -13,6 +13,7 @@ import {
   type TriageOutcome,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
+import { SATURATION_ALERT_ROWS } from '../domain/triage-plan';
 import { HttpStatusError } from '../domain/transient-error';
 
 const log = pino({ level: 'silent' });
@@ -1017,6 +1018,29 @@ test('#431: a label failure neither aborts the run nor loses the DB write', asyn
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
   const row = d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1').get() as { review_class: string };
   expect(row.review_class).toBe('unidentifiable');
+});
+
+// #431 P1 fix: a planned attachment is not a landed one. Issue 228 sits one row below
+// the threshold; the plan accepts one more row for it, but commentOnIssue rejects, so
+// the row never actually attaches. If saturation were still read from the PLAN (what
+// this run intended), 11 + 1 = 12 would cross SATURATION_ALERT_ROWS and both the label
+// and the digest would report #228 as saturated on a day it really still sits at 11.
+test('#431: a failed comment must not saturate its issue — nothing landed', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  seedReviewedRows(d, 228, SATURATION_ALERT_ROWS - 1); // 11 rows already landed
+  const github = gh({ commentOnIssue: vi.fn().mockRejectedValue(new Error('boom')) });
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({
+      verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'x', issue_number: 228, new_issue_key: null }],
+      new_issues: [],
+    }),
+  });
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1); // the attempt was made…
+  expect(github.addLabel).not.toHaveBeenCalled();          // …but it never landed
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.saturated).toBeNull(); // #228 never crossed the threshold, so no line names it
 });
 
 // --- #431 the saturated digest line ---------------------------------------------

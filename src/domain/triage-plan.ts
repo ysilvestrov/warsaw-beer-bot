@@ -41,10 +41,6 @@ export interface TriagePlan {
   quiet: Verdict[];               // not_on_untappd / unidentifiable — DB write only
   skipped: number;                // invalid verdicts left untriaged for tomorrow
   guardHits: Record<GuardReason, number>;
-  // #431: a STATE computed over every open issue, not an event counted for the ones
-  // this run touched — an issue sitting at 21 rows is saturated on a day it receives
-  // nothing, and that is exactly the day someone needs to be told.
-  saturated: SaturatedIssue[];
   // #432: the three ways an actionable class ends up with no issue are counted where
   // each is decided, never as a sum. The third is guardHits.unprobed_absence. Deriving
   // any of them by subtraction can go negative — a stripped verdict may still be dropped
@@ -69,6 +65,32 @@ export const SATURATION_ALERT_ROWS = 12;
 export interface SaturatedIssue {
   issueNumber: number;
   rows: number;
+}
+
+// Computed over ALL open issues passed in, including those this run never touched:
+// saturation is a property of the issue's accumulated evidence, not of today's batch.
+// An issue CREATED by this run never appears here: postCreationRows counts rows
+// attached after creation, and a new issue's founding rows land at creation.
+//
+// #431: `attachedThisRun` must count only rows that actually landed — a comment
+// planned but never posted (github.commentOnIssue threw) attaches nothing, and the
+// caller must not pass a count for it. This is why the count is a parameter rather
+// than something this function derives from a plan: a pure planner can only describe
+// what it INTENDS to attach, and intent is not evidence until the write that makes it
+// real (the GitHub call, then the DB row) has actually succeeded. Feeding this
+// function planned-but-unwritten counts is exactly the bug #431 fixes — the label,
+// the digest and the database would each tell a different story for a day.
+export function computeSaturated(
+  issues: readonly { number: number; postCreationRows: number }[],
+  attachedThisRun: ReadonlyMap<number, number>,
+): SaturatedIssue[] {
+  return issues
+    .map((i) => ({
+      issueNumber: i.number,
+      rows: i.postCreationRows + (attachedThisRun.get(i.number) ?? 0),
+    }))
+    .filter((i) => i.rows >= SATURATION_ALERT_ROWS)
+    .sort((a, b) => b.rows - a.rows || a.issueNumber - b.issueNumber);
 }
 
 // Single source of truth for which classes go to GitHub and which label each
@@ -256,19 +278,5 @@ export function planTriageActions(
   const comments: PlannedComment[] = [...byIssue.entries()]
     .map(([issueNumber, verdicts]) => ({ issueNumber, verdicts }));
 
-  // Computed over ALL open issues, including those this run never touched: saturation
-  // is a property of the issue's accumulated evidence, not of today's batch. Rows
-  // accepted in this run are added because they are about to be attached — the label
-  // and the digest must describe the world after this run, not before it.
-  // An issue CREATED by this run never appears here: postCreationRows counts rows
-  // attached after creation, and a new issue's founding rows land at creation.
-  const saturated: SaturatedIssue[] = openIssues
-    .map((i) => ({
-      issueNumber: i.number,
-      rows: i.postCreationRows + (byIssue.get(i.number)?.length ?? 0),
-    }))
-    .filter((i) => i.rows >= SATURATION_ALERT_ROWS)
-    .sort((a, b) => b.rows - a.rows || a.issueNumber - b.issueNumber);
-
-  return { newIssues, comments, quiet, skipped, guardHits, saturated, quietCauseStripped, quietNoTarget };
+  return { newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget };
 }
