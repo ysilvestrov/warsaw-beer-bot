@@ -14,6 +14,11 @@ test('normalizes brewery the same way, no style stripping', () => {
   expect(normalizeBrewery('Browar Stu Mostów')).toBe('stu mostow');
 });
 
+test('strips a superscript brewery footnote without touching glued ASCII digits', () => {
+  expect(normalizeBrewery('Nepomucen⁸ Brewery')).toBe('nepomucen');
+  expect(normalizeBrewery('Studio54 Brewery')).toBe('studio54');
+});
+
 test('strips Měšťanský (burgher-brewery descriptor) so only the place remains', () => {
   expect(normalizeBrewery('Měšťanský pivovar Kutná Hora')).toBe('kutna hora');
   expect(normalizeBrewery('Měšťanský pivovar Kojetín')).toBe('kojetin');
