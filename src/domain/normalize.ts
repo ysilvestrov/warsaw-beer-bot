@@ -273,7 +273,10 @@ function buildSearchQuery(
 ): string {
   const brewery = repairHomoglyphs(breweryRaw);
   const name = repairHomoglyphs(nameRaw);
-  const cleanBrewery = stripQueryTokenNoise(stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery))));
+  const cleanBrewery = stripQueryTokenNoise(
+    stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery)))
+      .replace(SUPERSCRIPT_FOOTNOTE, ''),
+  );
   const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
 
   // Brewery brand tokens: split collab separators (defensive — detaches glued junk like

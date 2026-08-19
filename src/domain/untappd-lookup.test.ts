@@ -817,6 +817,19 @@ describe('#427 upstream identity evidence', () => {
     expect(out.result.bid).toBe(6603979);
   });
 
+  test('identity alias: a brewery repeated in the shop name is not duplicated', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6603979, beer_name: 'Dżemer', brewery_name: 'Sadyba', style: 'Fruit Beer', abv: 5, global_rating: 3.7,
+        alias_alt: ['Sadyba Dżemer', 'Magic Road Dżemer'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Magic Road Dżemer', abv: 5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6603979);
+  });
+
   test('identity alias: a bare beer alias cannot bypass the brewery gate', async () => {
     const search = fakeSearch(() => [
       { bid: 6603979, beer_name: 'Dżemer', brewery_name: 'Sadyba', style: 'Fruit Beer', abv: 5, global_rating: 3.7,

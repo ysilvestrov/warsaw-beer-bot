@@ -241,8 +241,14 @@ function swappedBrandNameScore(
 export async function lookupBeer(args: LookupArgs, headRetried = false): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
+  const normalizedInputName = baseNormalize(name);
   const inputIdentityAliases = new Set(
-    inputBreweryAliases.map((alias) => baseNormalize(`${alias} ${name}`)),
+    inputBreweryAliases.flatMap((alias) => {
+      const strippedName = stripBreweryFromName(normalizedInputName, alias);
+      return [normalizedInputName, strippedName].map((candidateName) =>
+        baseNormalize(`${alias} ${candidateName}`),
+      );
+    }),
   );
   const targetNames = fuzzyTargets(name, brewery);
   const parts = brewerySearchParts(brewery);

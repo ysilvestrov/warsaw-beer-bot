@@ -186,6 +186,10 @@ describe('normalizeBrewery with legal forms', () => {
 });
 
 describe('cleanSearchQuery', () => {
+  test('removes a superscript footnote from the brewery search token', () => {
+    expect(cleanSearchQuery('Nepomucen⁸ Brewery', 'Forest')).toBe('Nepomucen Forest');
+  });
+
   test('dedups brewery repeated in the name and drops noise incl. "Co." (#126 Track)', () => {
     expect(cleanSearchQuery('TRACK BREWING CO.', 'Track Brewing Company Taking Shape')).toBe(
       'TRACK Taking Shape',
