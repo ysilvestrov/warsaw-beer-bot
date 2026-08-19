@@ -14,6 +14,7 @@ REPO="$DATA_DIR/repo"
 STATE="$STATE_DIR/state.env"
 LOCK="$STATE_DIR/lock"
 LAST_DRIFT_NOTICE=""
+LAST_STALE_NOTICE=""
 HEALTH_TIMEOUT_S=60
 NOTIFY_LIMIT=3500
 
@@ -47,6 +48,8 @@ HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
 # Installed alongside the deployer, like the guard: this script is a COPY in
 # /usr/local/bin, so it cannot reach its sibling through its own path.
 READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
+# Same install-path pattern as the guard.
+INSTALLED_CHECK_BIN="${WBB_INSTALLED_CHECK:-/usr/local/bin/wbb-installed-current}"
 _read_env_default() {
   sudo -u warsaw-beer-bot bash -lc '"$0" /etc/warsaw-beer-bot/.env "$1"' "$READ_ENV_BIN" "$1"
 }
@@ -138,7 +141,7 @@ deploy_commit() {
 # C3: writes the state file, preserving DEPLOYED_SHA/PREVIOUS_SHA and setting
 # (or clearing, if $3 is empty) LAST_FAILED_SHA.
 write_state() {
-  local deployed="$1" previous="$2" last_failed="${3:-}" drift_notice="${4:-$LAST_DRIFT_NOTICE}"
+  local deployed="$1" previous="$2" last_failed="${3:-}" drift_notice="${4:-$LAST_DRIFT_NOTICE}" stale_notice="${5:-$LAST_STALE_NOTICE}"
   {
     printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$deployed" "$previous"
     # `if`, not `[ -n ... ] &&` — the latter, as the group's last statement,
@@ -152,6 +155,9 @@ write_state() {
     # reminder and turn a standing condition back into a siren.
     if [ -n "$drift_notice" ]; then
       printf 'LAST_DRIFT_NOTICE=%s\n' "$drift_notice"
+    fi
+    if [ -n "$stale_notice" ]; then
+      printf 'LAST_STALE_NOTICE=%s\n' "$stale_notice"
     fi
   } > "$STATE" || {
     # I6: the state write used to abort silently under set -e. A failure
@@ -178,6 +184,40 @@ write_state() {
 # the same condition is noise. Reported at most ONCE A DAY: drift is a standing
 # condition, not an event, and a siren every five minutes is the failure mode
 # this script already had to fix once.
+# Is the deployer running the code that was merged? /usr/local/bin holds
+# COPIES on purpose — the running deployer must not change under a
+# `git checkout` — and the same property means a merged fix is not a live fix
+# until someone installs it. MEASURED 2026-08-18: a guard fix was merged while
+# the timer kept running the old copy, and only memory caught it.
+#
+# Idle: report once a day. Tag pending: REFUSE. Deploying production with
+# safety logic we know is out of date is the exact risk this whole mechanism
+# exists to manage — the stale copy that day was missing `--prune-tags` and
+# the downgrade check.
+#
+# The honest limit, same as the PAUSED brake: this check lives in the very
+# file it checks, so it cannot catch a copy so old it predates the check.
+installed_is_stale() {
+  [ -n "$INSTALLED_CHECK_BIN" ] || return 1
+  [ -x "$INSTALLED_CHECK_BIN" ] || return 1
+  ! STALE_REPORT=$("$INSTALLED_CHECK_BIN" "$REPO" origin/main \
+      "deploy/autodeploy.sh=$0" \
+      "deploy/autodeploy-guard.sh=$GUARD_BIN" \
+      "deploy/read-env.sh=$READ_ENV_BIN" \
+      "deploy/installed-current.sh=$INSTALLED_CHECK_BIN" 2>&1)
+}
+
+report_stale_once() {
+  local today
+  today=$(date -u +%Y-%m-%d)
+  installed_is_stale || return 0
+  [ "$LAST_STALE_NOTICE" != "$today" ] || return 0
+  notify "⚠️ the installed deployer is out of date — a merged fix is not live until it is installed.
+${STALE_REPORT}
+Run: sudo bash deploy/install-autodeploy.sh"
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$LAST_DRIFT_NOTICE" "$today"
+}
+
 report_drift_once() {
   local main_sha today behind outside
   main_sha=$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo '')
@@ -218,6 +258,7 @@ DEPLOYED_SHA="${DEPLOYED_SHA:-}"
 PREVIOUS_SHA="${PREVIOUS_SHA:-}"
 LAST_FAILED_SHA="${LAST_FAILED_SHA:-}"
 LAST_DRIFT_NOTICE="${LAST_DRIFT_NOTICE:-}"
+LAST_STALE_NOTICE="${LAST_STALE_NOTICE:-}"
 
 # Minor: lightweight tags sort by the TAGGED COMMIT's committer date under
 # -creatordate, not by when the tag was made — a tag on a backdated commit
@@ -225,7 +266,7 @@ LAST_DRIFT_NOTICE="${LAST_DRIFT_NOTICE:-}"
 # Tag names are ISO-8601 timestamps, so lexical order is chronological.
 tag=$(git -C "$REPO" for-each-ref --sort=-refname --format='%(refname:short)' \
         --count=1 'refs/tags/autodeploy-*')
-[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_drift_once; exit 0; }
+[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_stale_once; report_drift_once; exit 0; }
 
 target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
 
@@ -258,6 +299,23 @@ if [ -z "$DEPLOYED_SHA" ]; then
 fi
 
 # --- verify ------------------------------------------------------------------
+# Before anything else: are we the deployer that was merged? Refusing here is
+# deliberate. On the idle path staleness is a once-a-day reminder, because
+# nothing is at risk; with a tag pending, the safety logic about to run is
+# KNOWN to be out of date, and deploying production on logic we know is stale
+# is the risk this whole mechanism exists to manage. The stale copy on
+# 2026-08-18 was missing `--prune-tags` and the downgrade check — exactly the
+# two things that would have mattered.
+if installed_is_stale; then
+  echo "$STALE_REPORT"
+  notify "⛔ autodeploy REFUSED for ${tag}: the installed deployer is out of date.
+${STALE_REPORT}
+Run: sudo bash deploy/install-autodeploy.sh — then this tag will be retried."
+  # NOT recorded as LAST_FAILED_SHA: the tag is fine, we are not. Recording it
+  # would make the tag un-retryable after the install that fixes the cause.
+  exit 1
+fi
+
 if ! guard_out=$("$GUARD_BIN" "$REPO" "$DEPLOYED_SHA" "$target" origin/main); then
   echo "$guard_out"
   notify "⛔ autodeploy REFUSED for ${tag}:
