@@ -1,6 +1,6 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripBreweryFromName } from './matcher';
-import { normalizeBrewery, normalizeName, searchQueryLadder } from './normalize';
+import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
@@ -80,6 +80,53 @@ function pickByAbv(results: SearchResult[], abv: number | null): SearchResult {
   return results[0];
 }
 
+// Evidence-only pools (native aliases and complete identity aliases) must never
+// inherit Algolia's rank-1 ordering when more than one beer remains plausible.
+function pickUniqueByAbv(
+  results: SearchResult[],
+  abv: number | null,
+  rejectAbvContradiction = false,
+): SearchResult | null {
+  const unique = Array.from(new Map(results.map((result) => [result.bid, result])).values());
+  if (unique.length === 1) {
+    const [only] = unique;
+    if (
+      rejectAbvContradiction &&
+      abv != null &&
+      only.abv != null &&
+      Math.abs(only.abv - abv) > ABV_TOLERANCE
+    ) return null;
+    return only;
+  }
+  if (abv == null) return null;
+  const abvHits = unique.filter(
+    (result) => result.abv != null && Math.abs(result.abv - abv) <= ABV_TOLERANCE,
+  );
+  return abvHits.length === 1 ? abvHits[0] : null;
+}
+
+function hasExactBrandRemainder(
+  candidateName: string,
+  inputBreweryAliases: string[],
+  inputName: string,
+): boolean {
+  const target = baseNormalize(inputName);
+  if (target.length === 0) return false;
+  const numericTokens = (value: string) =>
+    baseNormalize(value).split(' ').filter((token) => /\p{N}/u.test(token));
+  if (numericTokens(candidateName).join(' ') !== numericTokens(inputName).join(' ')) return false;
+
+  return candidateName.split(/\s*\/\s*/).some((part) => {
+    const candidateTokens = baseNormalize(part).split(' ').filter(Boolean);
+    return inputBreweryAliases.some((alias) => {
+      const aliasTokens = alias.split(' ').filter(Boolean);
+      if (aliasTokens.length === 0 || candidateTokens.length <= aliasTokens.length) return false;
+      if (!aliasTokens.every((token, index) => candidateTokens[index] === token)) return false;
+      return candidateTokens.slice(aliasTokens.length).join(' ') === target;
+    });
+  });
+}
+
 function nameTokens(norm: string): string[] {
   return norm.split(' ').filter((t) => t.length >= 2);
 }
@@ -148,6 +195,23 @@ function nearNameScore(targetValue: string, candidate: SearchResult, singletonSt
   return best;
 }
 
+function nativeNameKeyMatches(candidate: SearchResult, inputKeys: Set<string>): boolean {
+  return [candidate.beer_name, ...(candidate.alias_alt ?? [])].some((name) =>
+    intersects(nameKeys(name, candidate.brewery_name), inputKeys),
+  );
+}
+
+function nativeNearNameScore(
+  targetValue: string,
+  candidate: SearchResult,
+  singletonNativePool: boolean,
+): number | null {
+  const scores = [candidate.beer_name, ...(candidate.alias_alt ?? [])]
+    .map((beer_name) => nearNameScore(targetValue, { ...candidate, beer_name }, singletonNativePool))
+    .filter((score): score is number => score != null);
+  return scores.length > 0 ? Math.max(...scores) : null;
+}
+
 function aliasTokensCoveredBy(tokens: string[], aliases: string[]): boolean {
   return aliases.some((alias) => {
     const aliasTokens = nameTokens(alias);
@@ -177,6 +241,15 @@ function swappedBrandNameScore(
 export async function lookupBeer(args: LookupArgs, headRetried = false): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
+  const normalizedInputName = baseNormalize(name);
+  const inputIdentityAliases = new Set(
+    inputBreweryAliases.flatMap((alias) => {
+      const strippedName = stripBreweryFromName(normalizedInputName, alias);
+      return [normalizedInputName, strippedName].map((candidateName) =>
+        baseNormalize(`${alias} ${candidateName}`),
+      );
+    }),
+  );
   const targetNames = fuzzyTargets(name, brewery);
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
@@ -188,6 +261,10 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   // so "no match" is a return value rather than a `continue` whose meaning depends on how
   // many loops happen to enclose it.
   function matchAgainst(results: SearchResult[]): LookupOutcome | null {
+    const identityHits = results.filter((result) =>
+      (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
+    );
+
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
     // #120 contained non-leading brewery token — EXACT name only, never approximate
@@ -199,6 +276,11 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         !strict &&
         (inputBreweryAliases.length === 0 ||
           breweryAliasContained(cand, inputBreweryAliases));
+      const native =
+        !strict &&
+        (r.brewery_alias ?? []).some((alias) =>
+          breweryAliasesMatch(breweryAliases(alias), inputBreweryAliases),
+        );
       // #138B brand-as-beer-name: the brewery gate fails entirely, but the input
       // brewery (the shelf brand) appears as a token-run inside the candidate beer
       // name — Untappd files the beer under a parent company (Heineken Ireland —
@@ -206,16 +288,25 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       // Check whether an input-brewery alias is a token-run within the beer NAME
       // (note the args are reversed vs the relaxed call above; tokenSublist is
       // symmetric, so that ordering is fine).
-      const brand =
-        !strict &&
-        !relaxed &&
-        breweryAliasContained(inputBreweryAliases, [normalizeName(r.beer_name)]);
-      return { r, strict, relaxed, brand };
+      const brandName = breweryAliasContained(
+        inputBreweryAliases,
+        [normalizeName(r.beer_name)],
+      );
+      const brand = !strict && !relaxed && brandName;
+      return { r, strict, relaxed, native, brand, brandName };
     });
     const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
     const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
+    const nativePool = tagged.filter((t) => t.native).map((t) => t.r);
     const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
-    if (strictPool.length === 0 && relaxedPool.length === 0 && brandPool.length === 0) return null;
+    const brandRemainderPool = tagged.filter((t) => t.brandName).map((t) => t.r);
+    if (
+      strictPool.length === 0 &&
+      relaxedPool.length === 0 &&
+      nativePool.length === 0 &&
+      brandPool.length === 0 &&
+      identityHits.length === 0
+    ) return null;
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
     // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
@@ -301,6 +392,52 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       relaxedTargetValues.has(normalizeName(r.beer_name)),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
+
+    // Complete identity aliases are a rescue path, not a replacement for the
+    // canonical/curated brewery stages above.
+    if (identityHits.length > 0) {
+      const identityHit = pickUniqueByAbv(identityHits, abv);
+      return identityHit ? { kind: 'matched', result: identityHit } : null;
+    }
+
+    // Candidate-native brewery aliases are structured identity evidence, but unlike
+    // the curated/canonical gate they never inherit search ordering. Exact keys win
+    // first; otherwise only equally top-scored near-name candidates are considered.
+    const nativeKeyHits = nativePool.filter((r) => nativeNameKeyMatches(r, inputKeys));
+    if (nativeKeyHits.length > 0) {
+      const nativeHit = pickUniqueByAbv(nativeKeyHits, abv, true);
+      return nativeHit ? { kind: 'matched', result: nativeHit } : null;
+    }
+
+    const nativeNearMatches = nativePool
+      .flatMap((result) =>
+        targetNames.flatMap((targetName) => {
+          if (targetName.exactOnly) return [];
+          const score = nativeNearNameScore(targetName.value, result, nativePool.length === 1);
+          return score == null ? [] : [{ result, score }];
+        }),
+      )
+      .sort((a, b) => b.score - a.score);
+    if (nativeNearMatches.length > 0) {
+      const topScore = nativeNearMatches[0].score;
+      const nativeHit = pickUniqueByAbv(
+        nativeNearMatches.filter((match) => match.score === topScore).map((match) => match.result),
+        abv,
+        true,
+      );
+      return nativeHit ? { kind: 'matched', result: nativeHit } : null;
+    }
+
+    // A shop may put a leading beer brand in the brewery field and only the
+    // remainder in the name. Compare that complete remainder exactly; this also
+    // handles one-token names that nameKeys intentionally omits.
+    const brandRemainderHits = brandRemainderPool.filter((r) =>
+      hasExactBrandRemainder(r.beer_name, inputBreweryAliases, name),
+    );
+    if (brandRemainderHits.length > 0) {
+      const brandRemainderHit = pickUniqueByAbv(brandRemainderHits, abv);
+      return brandRemainderHit ? { kind: 'matched', result: brandRemainderHit } : null;
+    }
 
     // #138B brand-as-beer-name: exact name-key intersection using the input name with
     // the brewery NOT stripped (so the brand stays in the key), against candidates whose

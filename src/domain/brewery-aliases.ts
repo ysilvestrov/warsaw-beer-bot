@@ -91,6 +91,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Necessary but not sufficient for 34642: after the gate opens, WEIZENBIER vs
   // Weizen still fails the name stage (#322 / #334).
   ['nachod', 'primator'],            // 34642 Weizenbier -> bid 30947, abv 4.7 vs 4.8
+  ['stern scheubel', 'stern brau gunter scheubel'], // 30142 Vollbier Hell -> bid 1181659, abv 5.0 = 5.0
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
