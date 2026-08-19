@@ -828,6 +828,20 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('identity alias: a canonical brewery match keeps precedence over rescue evidence', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Dżemer', brewery_name: 'Magic Road', style: 'Fruit Beer', abv: 5, global_rating: 3.8 },
+      { bid: 2, beer_name: 'Dżemer', brewery_name: 'Sadyba', style: 'Fruit Beer', abv: 5, global_rating: 3.7,
+        alias_alt: ['Magic Road Dżemer'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Dżemer', abv: 5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1);
+  });
+
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
       { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
@@ -856,6 +870,17 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(1741395);
+  });
+
+  test('native brewery alias: a sole candidate with contradictory ABV is rejected', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Okocim Jasne', brewery_name: 'Browar Okocim', style: 'Lager', abv: 9, global_rating: 3,
+        brewery_alias: ['Carlsberg Polska'] },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Carlsberg Brewery', name: 'Okocim Jasne', abv: 5, search });
+
+    expect(out.kind).toBe('not_found');
   });
 
   test.each([false, true])('native brewery alias: ambiguous PLATAN stays unresolved (reversed=%s)', async (reversed) => {
@@ -909,6 +934,16 @@ describe('#427 upstream identity evidence', () => {
   test('brand remainder: a fuzzy remainder is rejected', async () => {
     const search = fakeSearch(() => [
       { bid: 1, beer_name: 'Leffe Ruby Cherry', brewery_name: 'Abbaye de Leffe', style: 'Belgian Ale', abv: 5, global_rating: 3.3 },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Leffe', name: 'Ruby', search });
+
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('brand remainder: an ampersand flavour suffix is part of the name, not an alternate label', async () => {
+    const search = fakeSearch(() => [
+      { bid: 1, beer_name: 'Leffe Ruby & Cherry', brewery_name: 'Abbaye de Leffe', style: 'Fruit Beer', abv: 5, global_rating: 3.3 },
     ]);
 
     const out = await lookupBeer({ brewery: 'Leffe', name: 'Ruby', search });

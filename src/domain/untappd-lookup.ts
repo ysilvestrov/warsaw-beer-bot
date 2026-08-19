@@ -82,9 +82,22 @@ function pickByAbv(results: SearchResult[], abv: number | null): SearchResult {
 
 // Evidence-only pools (native aliases and complete identity aliases) must never
 // inherit Algolia's rank-1 ordering when more than one beer remains plausible.
-function pickUniqueByAbv(results: SearchResult[], abv: number | null): SearchResult | null {
+function pickUniqueByAbv(
+  results: SearchResult[],
+  abv: number | null,
+  rejectAbvContradiction = false,
+): SearchResult | null {
   const unique = Array.from(new Map(results.map((result) => [result.bid, result])).values());
-  if (unique.length === 1) return unique[0];
+  if (unique.length === 1) {
+    const [only] = unique;
+    if (
+      rejectAbvContradiction &&
+      abv != null &&
+      only.abv != null &&
+      Math.abs(only.abv - abv) > ABV_TOLERANCE
+    ) return null;
+    return only;
+  }
   if (abv == null) return null;
   const abvHits = unique.filter(
     (result) => result.abv != null && Math.abs(result.abv - abv) <= ABV_TOLERANCE,
@@ -103,7 +116,7 @@ function hasExactBrandRemainder(
     baseNormalize(value).split(' ').filter((token) => /\p{N}/u.test(token));
   if (numericTokens(candidateName).join(' ') !== numericTokens(inputName).join(' ')) return false;
 
-  return candidateName.split(COLLAB_SEP).some((part) => {
+  return candidateName.split(/\s*\/\s*/).some((part) => {
     const candidateTokens = baseNormalize(part).split(' ').filter(Boolean);
     return inputBreweryAliases.some((alias) => {
       const aliasTokens = alias.split(' ').filter(Boolean);
@@ -245,10 +258,6 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     const identityHits = results.filter((result) =>
       (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
     );
-    if (identityHits.length > 0) {
-      const identityHit = pickUniqueByAbv(identityHits, abv);
-      return identityHit ? { kind: 'matched', result: identityHit } : null;
-    }
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
@@ -290,7 +299,8 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       strictPool.length === 0 &&
       relaxedPool.length === 0 &&
       nativePool.length === 0 &&
-      brandPool.length === 0
+      brandPool.length === 0 &&
+      identityHits.length === 0
     ) return null;
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
@@ -378,12 +388,19 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 
+    // Complete identity aliases are a rescue path, not a replacement for the
+    // canonical/curated brewery stages above.
+    if (identityHits.length > 0) {
+      const identityHit = pickUniqueByAbv(identityHits, abv);
+      return identityHit ? { kind: 'matched', result: identityHit } : null;
+    }
+
     // Candidate-native brewery aliases are structured identity evidence, but unlike
     // the curated/canonical gate they never inherit search ordering. Exact keys win
     // first; otherwise only equally top-scored near-name candidates are considered.
     const nativeKeyHits = nativePool.filter((r) => nativeNameKeyMatches(r, inputKeys));
     if (nativeKeyHits.length > 0) {
-      const nativeHit = pickUniqueByAbv(nativeKeyHits, abv);
+      const nativeHit = pickUniqueByAbv(nativeKeyHits, abv, true);
       return nativeHit ? { kind: 'matched', result: nativeHit } : null;
     }
 
@@ -401,6 +418,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       const nativeHit = pickUniqueByAbv(
         nativeNearMatches.filter((match) => match.score === topScore).map((match) => match.result),
         abv,
+        true,
       );
       return nativeHit ? { kind: 'matched', result: nativeHit } : null;
     }
