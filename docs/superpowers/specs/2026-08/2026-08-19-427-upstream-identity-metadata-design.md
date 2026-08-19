@@ -94,7 +94,15 @@ This admits cases such as:
 As with native aliases, multiple exact candidates require a unique ABV-supported
 choice. Without a unique result, lookup declines the match.
 
-### Curated factual alias
+### Narrow brewery-label cleanup and factual alias
+
+Treat Unicode superscript digits attached to a brewery token as a shop footnote
+marker and remove them before brewery normalization. The rule is limited to a
+superscript-number suffix; ordinary digits remain untouched. This turns
+`Nepomucen⁸ Brewery` into the already curated `Nepomucen` identity and lets the
+unique exact-name `Forest` candidate pass through the existing matcher. The
+shop's 5.5% and Untappd's 6.0% are recorded as a data discrepancy, not described
+as an exact ABV match.
 
 Add the narrow, verified brewery spelling relationship needed for
 `Stern Scheubel Brewery / Vollbier Hell` to the existing curated brewery alias
@@ -112,10 +120,26 @@ collaboration, and therefore belongs in that table.
 - Results without the new optional metadata behave as before.
 - The legacy HTML search fallback remains supported.
 
-## Examples intentionally left unresolved
+## Complete issue-example disposition
 
-Issue examples are treated as diagnostic leads, not expected outputs. The
-following cases must not be forced through this change:
+Issue examples are treated as diagnostic leads, not expected outputs. Every
+example attached to #427 has an explicit disposition:
+
+| beer_id | disposition | reason |
+|---|---|---|
+| 25659 | fix in #427 | complete collaboration `alias_alt` proves Dżemer identity |
+| 25966, 29659 | fix in #427 | exact Leffe brand remainder |
+| 29929 | fix in #427 | exact CRAFT brand remainder; reported ABV discrepancy is retained |
+| 30031 | fix in #427 | native Carlsberg/Okocim brewery identity metadata |
+| 30142 | fix in #427 | factual Stern Scheubel spelling relationship |
+| 31984 | fix in #427 | superscript footnote cleanup plus existing Nepomucen/Nepo alias |
+| 32654 | fix in #427 | native Stu Mostów/WRCLW brewery identity metadata |
+| 30101 | `wontfix` | `Gui / Guinnes` is too corrupted and the actual query does not retrieve Guinness |
+| 31166 | move to #407 | brewery typo `Kessman`/`Keesmann` |
+| 29556 | move to #407 and #334 | brewery typo plus unresolved product ambiguity |
+| 29709, 30059, 30149, 34642 | move to #334 | more than one plausible product remains |
+
+The transferred cases must not be forced through this change:
 
 - `Lobkowicz Brewery / PLATAN`: true ownership relationship, but multiple
   products fit the label and ABV; this belongs to #334's ambiguity work.
@@ -123,12 +147,8 @@ following cases must not be forced through this change:
   multiple candidates expose the same alternative name and ABV.
 - `Kessman Brewery / Hell`: brewery typo handling belongs to #407.
 - `Kamenica Brewery / Desitka`: typo and product ambiguity remain.
-- `Gui Brewery / Guinnes`: the current query does not retrieve a Guinness
-  candidate, so this is a retrieval problem rather than an identity-gate fix.
 - `Italio Brewery / Menabrea`: the generic brand label and several same-ABV
   results do not establish one beer identity.
-- `Nepomucen⁸ Brewery / Forest`: the reported ABV does not agree with the
-  candidate, and the superscript label is not sufficient evidence by itself.
 
 ## Tests
 
@@ -143,6 +163,8 @@ Write focused regression tests before implementation for:
 - accepting exact Leffe and CRAFT brand remainders;
 - rejecting fuzzy or ambiguous brand remainders;
 - accepting the curated Stern Scheubel spelling;
+- normalizing the `Nepomucen⁸` footnote marker without stripping ordinary
+  brewery-name digits;
 - retaining behavior when metadata is absent.
 
 Run the focused Algolia, alias, and lookup tests, then the full project test
@@ -160,6 +182,7 @@ collaboration-specific constraint.
 - General brewery edit-distance matching or typo correction.
 - Query expansion and retrieval changes.
 - Choosing among genuinely ambiguous beer variants.
-- Broadening the curated brewery alias list beyond Stern Scheubel.
+- Broadening the curated brewery alias list beyond Stern Scheubel or treating
+  arbitrary numeric brewery suffixes as footnotes.
 - Correcting upstream ABV or catalog data.
 - Browser extension behavior or presentation.
