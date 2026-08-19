@@ -190,6 +190,11 @@ describe('cleanSearchQuery', () => {
     expect(cleanSearchQuery('Nepomucen⁸ Brewery', 'Forest')).toBe('Nepomucen Forest');
   });
 
+  test('removes a superscript footnote before a collaboration separator', () => {
+    expect(cleanSearchQuery('Nepomucen⁸/Trillium Brewery', 'Forest'))
+      .toBe('Nepomucen Trillium Forest');
+  });
+
   test('dedups brewery repeated in the name and drops noise incl. "Co." (#126 Track)', () => {
     expect(cleanSearchQuery('TRACK BREWING CO.', 'Track Brewing Company Taking Shape')).toBe(
       'TRACK Taking Shape',
