@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="uk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ideation: наступний orphan-triage баг</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f4f1ea;
+      --paper: #fffdf8;
+      --text: #20231f;
+      --muted: #5d655d;
+      --line: #d8d2c5;
+      --accent: #145c4a;
+      --accent-soft: #dcefe8;
+      --accent-text: #0c4738;
+      --warn-soft: #f7e9c9;
+      --warn-text: #6b4700;
+      --reject-soft: #f1e6e3;
+      --reject-text: #733c32;
+      --shadow: 0 18px 55px rgba(54, 49, 38, .10);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #151916;
+        --paper: #1d231f;
+        --text: #edf2ed;
+        --muted: #b6c0b7;
+        --line: #3a463d;
+        --accent: #8bd5bb;
+        --accent-soft: #173e32;
+        --accent-text: #bdebd9;
+        --warn-soft: #49391d;
+        --warn-text: #f3d58d;
+        --reject-soft: #472c28;
+        --reject-text: #f0bdb4;
+        --shadow: none;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15.5px/1.62 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      width: min(940px, calc(100% - 32px));
+      margin: 32px auto;
+      padding: clamp(24px, 5vw, 64px);
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+    }
+    h1, h2, h3 { line-height: 1.18; letter-spacing: -.02em; }
+    h1 { margin: .25rem 0 1rem; font-size: clamp(2rem, 5vw, 3.25rem); max-width: 18ch; }
+    h2 { margin: 3rem 0 1rem; font-size: 1.55rem; }
+    h3 { margin: 0 0 .75rem; font-size: 1.25rem; }
+    p, li { max-width: 74ch; }
+    a { color: var(--accent); text-underline-offset: 3px; }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; }
+    .eyebrow { margin: 0; color: var(--accent); font-size: .76rem; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .lead { color: var(--muted); font-size: 1.06rem; max-width: 68ch; }
+    .meta, .stats, .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 1.25rem 0; }
+    .pill {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      padding: 6px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent-text);
+      font-size: .82rem;
+    }
+    .pill b { color: inherit; }
+    .stats { margin-top: 2rem; }
+    .stat { flex: 1 1 150px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 14px; }
+    .stat strong { display: block; font-size: 1.65rem; line-height: 1; }
+    .stat span { color: var(--muted); font-size: .8rem; }
+    .callout, article.idea { padding: 20px; border: 1px solid var(--line); border-radius: 16px; }
+    .callout { background: var(--warn-soft); color: var(--warn-text); }
+    article.idea { background: var(--accent-soft); color: var(--accent-text); }
+    .label { font-size: .74rem; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+    dl { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 1rem 0 0; }
+    dt { color: var(--muted); font-weight: 700; }
+    dd { margin: 0; }
+    .idea dt { color: var(--accent-text); opacity: .76; }
+    .flow { margin: 1.25rem 0 0; overflow-x: auto; }
+    svg { width: 100%; min-width: 650px; height: auto; display: block; }
+    .flow-box { fill: var(--paper); stroke: var(--accent); stroke-width: 1.5; }
+    .flow-stop { fill: var(--warn-soft); stroke: var(--warn-text); stroke-width: 1.5; }
+    .flow-text { fill: var(--text); font: 600 13px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; }
+    .flow-sub { fill: var(--muted); font: 11px ui-sans-serif, system-ui, sans-serif; text-anchor: middle; }
+    .flow-line { stroke: var(--accent); stroke-width: 2; fill: none; }
+    .comparison, .rejections { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 10px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    th { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .06em; }
+    .rejections td:first-child { white-space: nowrap; font-weight: 750; }
+    .rejections tr { background: color-mix(in srgb, var(--reject-soft) 35%, transparent); }
+    .gap { margin-top: 1rem; color: var(--muted); font-size: .9rem; }
+    footer { margin-top: 3.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .78rem; }
+    @media (max-width: 640px) {
+      main { width: 100%; margin: 0; border: 0; border-radius: 0; padding: 24px 18px; }
+      dl { grid-template-columns: 1fr; gap: 2px; }
+      dd { margin-bottom: 8px; }
+      th, td { padding: 8px; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">Ideation · bug selection</p>
+    <h1>Наступний <code>orphan-triage</code> баг</h1>
+    <p class="lead">Одна рекомендація після оновлення <code>main</code>, читання нового ранбука, аналізу всієї відкритої черги та adversarial-перевірки кандидатів.</p>
+    <div class="meta" aria-label="Metadata">
+      <span class="pill"><b>Date</b> <time datetime="2026-08-20">2026-08-20</time></span>
+      <span class="pill"><b>Topic</b> orphan-triage-next-bug</span>
+      <span class="pill"><b>Focus</b> запропонувати один баг для фіксу</span>
+      <span class="pill"><b>Mode</b> repo-grounded</span>
+    </div>
+    <div class="stats" aria-label="Analysis summary">
+      <div class="stat"><strong>17</strong><span>open issues analyzed</span></div>
+      <div class="stat"><strong>30 → 13</strong><span>raw outputs → unique candidates</span></div>
+      <div class="stat"><strong>1</strong><span>recommended survivor</span></div>
+      <div class="stat"><strong>9</strong><span>live rows linked to #407</span></div>
+    </div>
+  </header>
+
+  <section id="grounding-context">
+    <h2>Grounding Context</h2>
+    <p>Новий ранбук задає порядок: спочатку лідер рядка <code>Насичені:</code>, потім відкриті issues з міткою <code>saturated</code>, далі lifetime-count у <code>enrich_failures</code> як окрема sanity-метрика. Відкритих saturated issues зараз немає. Read-only production-зріз показав ненульові когорти для всіх основних кандидатів.</p>
+    <p>Найбільша lifetime-когорта — #417 із 13 рядками, але issue накопичила щонайменше 12 нових прикладів різних механізмів: portfolio owner, бренд як brewery, транслітерація, alias gaps і name translation. Її загальний scope приймає будь-який рядок із кандидатами, тому це черга для декомпозиції, а не один безпечний фікс.</p>
+    <div class="callout">
+      <span class="label">Runbook gate</span>
+      <p>Рекомендація ще не є дозволом писати код. Спершу треба replay усієї живої когорти #407 проти поточного Untappd; stale або неоднорідні рядки мають бути закриті чи перемаплені, а не підігнані під фікс.</p>
+    </div>
+  </section>
+
+  <section id="topic-axes">
+    <h2>Topic Axes</h2>
+    <ul>
+      <li>Brewery-identity tolerance</li>
+      <li>Search-query noise</li>
+      <li>Source adapters and brewery/name structure</li>
+      <li>Name semantics and ambiguity</li>
+    </ul>
+  </section>
+
+  <section id="ranked-ideas">
+    <h2>Ranked Ideas</h2>
+    <article class="idea" id="idea-1">
+      <p class="label">1. Recommended</p>
+      <h3>#407 — bounded brewery-typo rescue with exact-name + ABV corroboration</h3>
+      <p><strong>Description:</strong> Взяти лише existing-candidate частину #407: правильне пиво вже повернулося, normalized name точний, ABV однозначно підтверджує його, але brewery gate відкинув результат через помилку в один-два символи. Query-zero рядки та name-ambiguity випадки лишаються поза scope у своїх issues.</p>
+      <dl>
+        <dt>Axis</dt><dd>Brewery-identity tolerance</dd>
+        <dt>Basis</dt><dd><code>direct:</code> issue містить live replay прикладів; production read-only count підтверджує 9 живих рядків; current matcher має exact token-prefix brewery gate без edit-distance rescue, тоді як downstream exact-name та ABV guards уже існують.</dd>
+        <dt>Rationale</dt><dd>Це найкращий баланс когорти, причинної ясності та безпеки. На відміну від #417, механізм один; на відміну від #406, фікс не має вгадувати, який довільний query-token викинути.</dd>
+        <dt>Downsides</dt><dd>Будь-яке fuzzy brewery matching може створити false positive. Тому rescue має бути підтверджувальним, а не самостійним сигналом, і потребує негативних collision/ABV-contradiction тестів. Частина нинішніх рядків #407 уже позначена як name-ambiguous та може вимагати точкового remap до #334.</dd>
+        <dt>Confidence</dt><dd>90%</dd>
+        <dt>Complexity</dt><dd>Medium</dd>
+      </dl>
+
+      <div class="flow" aria-label="Conceptual decision flow">
+        <svg viewBox="0 0 820 150" role="img" aria-labelledby="flow-title flow-desc">
+          <title id="flow-title">Bounded #407 rescue flow</title>
+          <desc id="flow-desc">A candidate must already exist, have an exact normalized name, and have uniquely compatible ABV before a small brewery typo can be rescued. Otherwise matching stops unresolved.</desc>
+          <defs>
+            <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"></path>
+            </marker>
+          </defs>
+          <rect class="flow-box" x="15" y="35" rx="10" width="150" height="64"></rect>
+          <text class="flow-text" x="90" y="61">Candidate exists</text>
+          <text class="flow-sub" x="90" y="80">not query-zero</text>
+          <path class="flow-line" marker-end="url(#arrow)" d="M165 67 H220"></path>
+          <rect class="flow-box" x="220" y="35" rx="10" width="150" height="64"></rect>
+          <text class="flow-text" x="295" y="61">Exact beer name</text>
+          <text class="flow-sub" x="295" y="80">normalized equality</text>
+          <path class="flow-line" marker-end="url(#arrow)" d="M370 67 H425"></path>
+          <rect class="flow-box" x="425" y="35" rx="10" width="150" height="64"></rect>
+          <text class="flow-text" x="500" y="61">Unique ABV fit</text>
+          <text class="flow-sub" x="500" y="80">no sibling ambiguity</text>
+          <path class="flow-line" marker-end="url(#arrow)" d="M575 67 H630"></path>
+          <rect class="flow-box" x="630" y="35" rx="10" width="175" height="64"></rect>
+          <text class="flow-text" x="717" y="61">Tiny brewery typo</text>
+          <text class="flow-sub" x="717" y="80">confirmation-only rescue</text>
+          <text class="flow-sub" x="410" y="132">Any failed guard → remain unresolved; never widen on typo similarity alone.</text>
+        </svg>
+      </div>
+    </article>
+  </section>
+
+  <section id="comparison">
+    <h2>Why #407, not the largest cohort?</h2>
+    <table class="comparison">
+      <thead><tr><th>Candidate</th><th>Live rows</th><th>Mechanism</th><th>Selection verdict</th></tr></thead>
+      <tbody>
+        <tr><td><strong>#417</strong></td><td>13</td><td>Many unrelated aliases, parent brands, translations, and name gaps</td><td>Decompose and remap first; not one fix</td></tr>
+        <tr><td><strong>#334</strong></td><td>12</td><td>Ambiguity / false-positive prevention</td><td>High impact, but cited PLATAN guard already exists; find current uncovered path first</td></tr>
+        <tr><td><strong>#376</strong></td><td>11</td><td>Multiple source-parser split failures</td><td>Replay and partition first</td></tr>
+        <tr><td><strong>#407</strong></td><td>9</td><td>Rank-1 exact candidate rejected by small brewery typo</td><td>Coherent, guarded, replay-ready</td></tr>
+        <tr><td><strong>#406</strong></td><td>8</td><td>Several unrelated one-token query poison forms</td><td>Replay and partition before generalizing</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section id="rejection-summary">
+    <h2>Rejection Summary</h2>
+    <table class="rejections">
+      <thead><tr><th>#</th><th>Idea</th><th>Reason Rejected</th></tr></thead>
+      <tbody>
+        <tr><td>#452</td><td>Wrong-brewery name-only recovery</td><td>Two rows and an overbroad zero-candidate scope; weaker next-fix evidence.</td></tr>
+        <tr><td>#417</td><td>Parent/portfolio brewery mapping</td><td>Largest live cohort, but the issue now owns heterogeneous mechanisms; requires decomposition and explicit row remapping.</td></tr>
+        <tr><td>#406</td><td>One poison-token query rescue</td><td>Eight live rows, but examples span unrelated token classes; replay and partition before one rule.</td></tr>
+        <tr><td>#404</td><td>Generic descriptor-tail cleanup</td><td>Only two rows and meaningful-token collision risk.</td></tr>
+        <tr><td>#462</td><td>Five Lamps spec-tail repair</td><td>Current normalization already strips the alleged degree tail; causal mechanism remains unproven.</td></tr>
+        <tr><td>#388</td><td>Packaging-token cleanup</td><td>Six rows, but no current representative replay or demonstrated safe boundary.</td></tr>
+        <tr><td>#416</td><td>WineTime descriptor-only fallback</td><td>Three-row cohort plus extension fixture, changelog, and release burden.</td></tr>
+        <tr><td>#376</td><td>Flasker title splitting</td><td>Heterogeneous parser mechanisms rather than one bounded defect.</td></tr>
+        <tr><td>#307</td><td>Flasker missing brewery identity</td><td>May already be resolved by detail hydration; verify/close before treating as a bug.</td></tr>
+        <tr><td>#334</td><td>Base-name ambiguity fail-closed</td><td>False-positive class matters, but the cited PLATAN path already has a regression guard and no current uncovered path was established.</td></tr>
+        <tr><td>#322</td><td>PSZENICA/Pšenice semantic mapping</td><td>Two rows with broad semantic-collision risk.</td></tr>
+        <tr><td>#302</td><td>Dash-first flavour-tail retry</td><td>One row and no current replay proving a distinct safe grammar.</td></tr>
+      </tbody>
+    </table>
+    <p class="gap"><strong>Deliberate axis gaps:</strong> Search-query noise, Source adapters and brewery/name structure, and Name semantics and ambiguity have no survivor because the requested output is one recommendation.</p>
+  </section>
+
+  <section id="references">
+    <h2>References</h2>
+    <ul>
+      <li><a href="https://github.com/ysilvestrov/warsaw-beer-bot/issues/407">GitHub issue #407</a> — live examples, scope, and subsequent cohort comments.</li>
+      <li><a href="https://github.com/ysilvestrov/warsaw-beer-bot/blob/main/docs/orphan-triage-issues-runbook.md">Orphan-triage issues runbook</a> — queue selection, replay, decomposition, and closure rules.</li>
+      <li><a href="https://github.com/ysilvestrov/warsaw-beer-bot/blob/main/spec.md">Project specification</a> — matcher and keyed-lock invariants.</li>
+      <li><a href="https://github.com/ysilvestrov/warsaw-beer-bot/blob/main/src/domain/matcher.ts">Matcher brewery gate</a> and <a href="https://github.com/ysilvestrov/warsaw-beer-bot/blob/main/src/domain/untappd-lookup.ts">Untappd lookup safeguards</a>.</li>
+    </ul>
+  </section>
+
+  <footer class="composition-signal">Composed <time datetime="2026-08-20T10:55:02Z">2026-08-20T10:55:02Z</time> by ce-ideate from the user request and current repository/GitHub/production read-only evidence.</footer>
+</main>
+</body>
+</html>
