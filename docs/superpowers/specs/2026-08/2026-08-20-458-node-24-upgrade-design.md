@@ -44,7 +44,7 @@ The rest of the host, measured the same day:
 | fact | consequence |
 |---|---|
 | `/usr/bin/node` is a system-wide NodeSource apt package | one runtime serves every consumer on the host |
-| `48-hours-trip.service` is a **second live service** on `/usr/bin/node`, separate unix user, `active` 23 days | it is inside the blast radius and must be handled explicitly, not left to discover the new runtime at its next unattended restart |
+| `48-hours-trip.service` is a **second live service** on `/usr/bin/node`, separate unix user, `active` 23 days | it is inside the blast radius and must be handled explicitly, not left to discover the new runtime at its next unattended restart — though it turns out to need no rebuild (§1.3) |
 | `better-sqlite3` in `/opt/warsaw-beer-bot/node_modules` is **compiled from source** (`obj.target/`, `sqlite3.a`) | the host has a toolchain; `npm ci` rebuilds it against the new ABI with no upstream prebuild to wait for |
 | NodeSource publishes `24.19.0-1nodesource1` for the same `nodistro` suite | the switch is one URI in `/etc/apt/sources.list.d/nodesource.sources` |
 | `nodejs_20.20.2-1nodesource1_amd64.deb` is fetchable now; `/var/cache/apt/archives` holds no copy | the rollback anchor must be downloaded **before** the sources file changes, or it leaves the index with it |
@@ -111,10 +111,22 @@ In a scratch clone of the repo at `HEAD`, with that prefix first on `PATH`:
 
 The rehearsal's output is evidence and goes into the pull request.
 
-**1.3 The sibling service.** `48-hours-trip` is inspected under root — dependencies, `engines`, and
-whether any `.node` binaries exist in its `node_modules`. Decision rule: native modules present →
-it needs its own `npm ci` rebuild inside the cutover window; pure JS → a restart is enough. It is
-not this repository's code, so the design states the rule rather than the outcome.
+**1.3 The sibling service — measured 2026-08-20, not assumed.** `48-hours-trip` was inspected under
+root:
+
+```
+engines : {'node': '>=20'}
+deps    : dotenv, pino, telegraf, zod
+find node_modules -name '*.node'  → (nothing)
+```
+
+**Pure JavaScript, no compiled addon, and its declared floor is satisfied by 24.** So it needs no
+rebuild — only the deliberate stop and start of §2, which exists to deny it an unattended restart
+into a half-changed host rather than to fix anything in it. It is also not a git checkout (deployed
+as a directory), so nothing about it belongs in this repository's pull request.
+
+This is the one place where the ABI hazard does *not* apply, and knowing that is what keeps the
+cutover window short: exactly one service needs `npm ci`.
 
 ### 2. Cutover — one sitting, both services down
 
