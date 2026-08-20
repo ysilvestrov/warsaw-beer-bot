@@ -202,3 +202,34 @@ test('dailyStatus: stale (yesterday) triage result is ignored', async () => {
   await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
   expect(sent[0]).not.toContain('Тріаж');
 });
+
+test('#431: the saturated line rides beside the triage line', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const now = () => new Date('2026-07-05T07:30:00Z'); // 09:30 Warsaw
+  setJobState(db, TRIAGE_LAST_RESULT_KEY, JSON.stringify({
+    date: '2026-07-05', line: 'Тріаж: 50 нових',
+    saturated: 'Насичені: #405 (21) — усього 1',
+  }));
+  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  expect(sent[0]).toContain('• Тріаж: 50 нових');
+  expect(sent[0]).toContain('• Насичені: #405 (21) — усього 1');
+});
+
+// Forward compatibility is not theoretical here: the payload written by the run on the
+// morning of the deploy has no `saturated` key, and the digest reads it that same day.
+test('#431: a payload written before this change reads as no saturated line', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const now = () => new Date('2026-07-05T07:30:00Z');
+  setJobState(db, TRIAGE_LAST_RESULT_KEY,
+    JSON.stringify({ date: '2026-07-05', line: 'Тріаж: 50 нових' }));
+  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  expect(sent[0]).toContain('• Тріаж: 50 нових');
+  expect(sent[0]).not.toContain('Насичені');
+});
+
+test('#431: buildStatusMessage omits the bullet when the saturated line is null', () => {
+  expect(buildStatusMessage(base, '2026-07-05 09:00', 'Тріаж: 1 нових', null))
+    .not.toContain('Насичені');
+});

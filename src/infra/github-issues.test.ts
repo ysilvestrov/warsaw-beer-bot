@@ -70,3 +70,26 @@ test('defaults to global fetch when fetchImpl is omitted', async () => {
     vi.unstubAllGlobals();
   }
 });
+
+test('#431 addLabel POSTs one label and never replaces the set', async () => {
+  const fn = stubFetch(200, [{ name: 'saturated' }]);
+  await client(fn).addLabel(405, 'saturated');
+  const [url, init] = fn.mock.calls[0];
+  expect(String(url)).toBe('https://api.github.com/repos/o/r/issues/405/labels');
+  expect(init.method).toBe('POST');
+  // A PUT with the full set would erase human labels; assert the additive shape.
+  expect(JSON.parse(init.body as string)).toEqual({ labels: ['saturated'] });
+});
+
+test('#431 removeLabel DELETEs the single named label, url-encoded', async () => {
+  const fn = stubFetch(200, []);
+  await client(fn).removeLabel(405, 'needs triage');
+  const [url, init] = fn.mock.calls[0];
+  expect(String(url)).toBe('https://api.github.com/repos/o/r/issues/405/labels/needs%20triage');
+  expect(init.method).toBe('DELETE');
+});
+
+test('#431 a failing label call throws the same typed error as every other call', async () => {
+  const fn = stubFetch(403, { message: 'nope' });
+  await expect(client(fn).addLabel(405, 'saturated')).rejects.toMatchObject({ status: 403 });
+});

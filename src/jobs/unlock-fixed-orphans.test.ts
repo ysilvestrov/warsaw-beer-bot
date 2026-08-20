@@ -26,6 +26,8 @@ function stubGithub(open: { number: number }[]): GithubIssuesClient {
     })),
     createIssue: async () => { throw new Error('unexpected createIssue'); },
     commentOnIssue: async () => { throw new Error('unexpected commentOnIssue'); },
+    addLabel: async () => { throw new Error('unexpected addLabel'); },
+    removeLabel: async () => { throw new Error('unexpected removeLabel'); },
   };
 }
 
@@ -112,6 +114,8 @@ describe('unlockFixedOrphans', () => {
       listOpenIssues: async () => { throw new Error('GitHub GET: 502'); },
       createIssue: async () => { throw new Error('unexpected'); },
       commentOnIssue: async () => { throw new Error('unexpected'); },
+      addLabel: async () => { throw new Error('unexpected addLabel'); },
+      removeLabel: async () => { throw new Error('unexpected removeLabel'); },
     } as GithubIssuesClient;
 
     const first = await unlockFixedOrphans({ db, log, github: failing, now: NOW });

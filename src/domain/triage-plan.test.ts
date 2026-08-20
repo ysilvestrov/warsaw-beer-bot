@@ -1,4 +1,6 @@
-import { planTriageActions, type ScopedIssue } from './triage-plan';
+import {
+  planTriageActions, computeSaturated, SATURATION_ALERT_ROWS, type ScopedIssue,
+} from './triage-plan';
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
@@ -26,6 +28,13 @@ const issue = (key: string) => ({
 });
 
 const noProbes = new Map<number, TriageProbe>();
+
+// #431: computeSaturated takes what actually landed as a plain map, not a plan — the
+// job builds that map from outcome.commented (real GitHub writes), never from the
+// plan's routing decisions. In these tests "what landed" is exactly what the plan
+// just routed, since there is no GitHub call standing between planning and landing.
+const attachedFrom = (p: { comments: { issueNumber: number; verdicts: unknown[] }[] }) =>
+  new Map(p.comments.map((c) => [c.issueNumber, c.verdicts.length]));
 
 test('splits quiet actionable verdicts into cause-stripped and no-target', () => {
   const a: Analysis = {
@@ -288,16 +297,7 @@ test('a proposed issue scoped by class AND another column survives', () => {
   expect(plan.guardHits.illegal_scope).toBe(0);
 });
 
-// --- #408 guard 4: a saturated issue stops accepting rows ------------------------
-
-test('a saturated issue refuses further attachment', () => {
-  const issues = [open(347, { postCreationRows: 12 })];
-  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
-  const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
-  expect(plan.comments).toHaveLength(0);
-  expect(plan.skipped).toBe(1);
-  expect(plan.guardHits.saturated).toBe(1);
-});
+// --- #431 saturation as a reported state ---
 
 // #405 was opened carrying 15 enumerated rows — exactly the sort of number a lifetime
 // count would trip over on day one. Only rows added AFTER creation count.
@@ -309,7 +309,7 @@ test('an issue born with a large cohort but no post-creation rows still accepts'
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 405 })], new_issues: [] };
   const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
   expect(plan.comments[0].verdicts).toHaveLength(1);
-  expect(plan.guardHits.saturated).toBe(0);
+  expect(computeSaturated(issues, attachedFrom(plan))).toEqual([]);
 });
 
 // A batch must not walk an issue past the limit three rows at a time: without counting
@@ -321,8 +321,8 @@ test('rows accepted earlier in the same run count toward saturation', () => {
     new_issues: [],
   };
   const plan = planTriageActions(a, issues, rows(1, 2, 3), noProbes, new Set());
-  expect(plan.comments[0].verdicts).toHaveLength(1);
-  expect(plan.guardHits.saturated).toBe(2);
+  expect(plan.comments[0].verdicts).toHaveLength(3);
+  expect(computeSaturated(issues, attachedFrom(plan))).toEqual([{ issueNumber: 347, rows: 14 }]);
 });
 
 // Guard 2 must apply to a PROPOSED issue as well, or a model could file one whose scope
@@ -448,4 +448,50 @@ test('a not_a_beer verdict whose row contradicts the issue scope is refused', ()
 
   expect(plan.comments).toEqual([]);
   expect(plan.guardHits.scope_violation).toBe(1);
+});
+
+// --- #431: saturation reports, it does not refuse -------------------------------
+
+test('#431: an in-scope row for a saturated issue is commented, not skipped', () => {
+  const issues = [open(900, { postCreationRows: SATURATION_ALERT_ROWS + 5 })];
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 900 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, rows(1), noProbes, new Set());
+  expect(plan.skipped).toBe(0);
+  expect(plan.comments[0].verdicts).toHaveLength(1);
+});
+
+// The regression test for the deletion: guard 2 is now the ONLY check on this path.
+test('#431 REGRESSION: scope still refuses, even far under the threshold', () => {
+  const issues = [open(900, { scope: { beer_ids: [1, 2], where: [] }, postCreationRows: 1 })];
+  const a: Analysis = { verdicts: [v({ beer_id: 3, issue_number: 900 })], new_issues: [] };
+  const plan = planTriageActions(a, issues, rows(3), noProbes, new Set());
+  expect(plan.comments).toHaveLength(0);
+  expect(plan.guardHits.scope_violation).toBe(1);
+  expect(plan.skipped).toBe(1);
+});
+
+// not_a_beer needed a carve-out only while a gate existed. Pinned as behaviour so a
+// future reader does not "restore" one.
+test('#431: not_a_beer on a saturated issue gets its comment (no exception exists)', () => {
+  const issues = [open(900, { postCreationRows: SATURATION_ALERT_ROWS })];
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 2, review_class: 'not_a_beer', issue_number: 900 })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(a, issues, rows(2), noProbes, new Set());
+  expect(plan.comments[0].verdicts[0].review_class).toBe('not_a_beer');
+});
+
+test('#431: saturated is a STATE — an issue this run never touched is listed', () => {
+  const issues = [open(900, { postCreationRows: 21 }), open(901, { postCreationRows: 3 })];
+  expect(computeSaturated(issues, new Map())).toEqual([{ issueNumber: 900, rows: 21 }]);
+});
+
+test('#431: ties break by issue number ascending, so output is deterministic', () => {
+  const issues = [
+    open(902, { postCreationRows: 12 }),
+    open(900, { postCreationRows: 12 }),
+    open(901, { postCreationRows: 30 }),
+  ];
+  expect(computeSaturated(issues, new Map()).map((s) => s.issueNumber)).toEqual([901, 900, 902]);
 });

@@ -6,12 +6,14 @@ import { upsertBeer } from '../storage/beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
-import { recordEnrichFailure } from '../storage/enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 import {
-  orphanTriage, shouldRunTriage, buildTriageLine, reportGuardAnomalies,
+  orphanTriage, shouldRunTriage, buildTriageLine, buildSaturatedLine, reportGuardAnomalies,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
+  type TriageOutcome,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
+import { SATURATION_ALERT_ROWS } from '../domain/triage-plan';
 import { HttpStatusError } from '../domain/transient-error';
 
 const log = pino({ level: 'silent' });
@@ -62,6 +64,8 @@ const gh = (over = {}) => ({
   ]),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
+  addLabel: vi.fn().mockResolvedValue(undefined),
+  removeLabel: vi.fn().mockResolvedValue(undefined),
   ...over,
 });
 const exchange = (analysis: Analysis, stopReason: string | null = 'tool_use') => ({
@@ -237,14 +241,14 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
+    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
@@ -263,7 +267,7 @@ test('guardHits reaches the run outcome even when no guard fired', async () => {
     expect(spy).toHaveBeenCalledWith(
       expect.objectContaining({
         outcome: expect.objectContaining({
-          guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+          guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
         }),
       }),
       'orphan-triage finished',
@@ -650,7 +654,7 @@ test('without a search dep the job behaves exactly as before', async () => {
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 }, skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених');
 });
@@ -677,7 +681,7 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
 test('buildTriageLine: transient attempts vs final failure', () => {
   const base = {
-    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
     attempt: null as number | null,
   };
@@ -850,7 +854,7 @@ test('corrupted attempt counter is ignored instead of widening the budget', asyn
 test('narrow warn fires for scope_violation with no shortfall', () => {
   const warn = vi.fn();
   reportGuardAnomalies({ warn } as never, {
-    illegal_scope: 0, scope_violation: 2, saturated: 0, unprobed_absence: 0,
+    illegal_scope: 0, scope_violation: 2, unprobed_absence: 0,
   });
   expect(warn).toHaveBeenCalledTimes(1);
 });
@@ -858,7 +862,7 @@ test('narrow warn fires for scope_violation with no shortfall', () => {
 test('narrow warn fires for illegal_scope with no shortfall', () => {
   const warn = vi.fn();
   reportGuardAnomalies({ warn } as never, {
-    illegal_scope: 1, scope_violation: 0, saturated: 0, unprobed_absence: 0,
+    illegal_scope: 1, scope_violation: 0, unprobed_absence: 0,
   });
   expect(warn).toHaveBeenCalledTimes(1);
 });
@@ -866,7 +870,7 @@ test('narrow warn fires for illegal_scope with no shortfall', () => {
 test('narrow warn stays silent for routine guard work', () => {
   const warn = vi.fn();
   reportGuardAnomalies({ warn } as never, {
-    illegal_scope: 0, scope_violation: 0, saturated: 5, unprobed_absence: 9,
+    illegal_scope: 0, scope_violation: 0, unprobed_absence: 9,
   });
   expect(warn).not.toHaveBeenCalled();
 });
@@ -882,14 +886,14 @@ test('buildTriageLine names each quiet mechanism and hides routine guards', () =
   expect(buildTriageLine({
     total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 7,
     causeStripped: 5, noTarget: 1, skipped: 0, unverified: 8,
-    guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 4, unprobed_absence: 9 },
+    guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 9 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 15 нових → 7 not_a_beer, 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
   expect(buildTriageLine({
     total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 4,
     causeStripped: 0, noTarget: 0, skipped: 2, unverified: 3,
-    guardHits: { illegal_scope: 1, scope_violation: 2, saturated: 0, unprobed_absence: 0 },
+    guardHits: { illegal_scope: 1, scope_violation: 2, unprobed_absence: 0 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 нелегальний scope, 2 поза scope, 2 пропущено');
 });
@@ -907,4 +911,160 @@ test('a throwing archive cannot cost the day: state is written before the archiv
   expect(getJobState(d, TRIAGE_ATTEMPTS_KEY)).toBe('2026-07-05:1');
   expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBeNull();
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('спроба 1/3');
+});
+
+// --- #431 label reconciliation --------------------------------------------------
+// countRowsForIssue counts enrich_failures rows whose reviewed_at is later than the
+// issue's createdAt, so pushing issue 228 over the line means seeding that many
+// REVIEWED rows.
+//
+// The names must be word-distinct. `insertBeer`/`BEER_WORDS` in this file only covers
+// six, and normalization strips numeric suffixes — so `Beer 7`..`Beer 18` would all
+// normalize identically and upsertBeer would collapse twelve seeds into ONE row. The
+// count would then sit at 1, the threshold would never be crossed, and the test would
+// be asserting nothing. Hence a separate word list, and a non-vacuity assertion at the
+// end that is the real point of this helper.
+const LABEL_WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf',
+  'hotel', 'india', 'juliet', 'kilo', 'lima', 'mike', 'november'];
+
+function seedReviewedRows(d: ReturnType<typeof db>, issueNumber: number, count: number) {
+  expect(count).toBeLessThanOrEqual(LABEL_WORDS.length);
+  for (let i = 0; i < count; i++) {
+    const word = LABEL_WORDS[i];
+    const name = `Beer ${word}`;
+    const brewery = `Craft ${word}`;
+    // Use the id upsertBeer RETURNS — never a guessed sequential id, which silently
+    // aliases onto whatever the other seeds already inserted.
+    const beerId = upsertBeer(d, {
+      untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+    });
+    recordEnrichFailure(d, {
+      beer_id: beerId, brewery, name, search_url: 'u', source_url: '',
+      outcome: 'not_found', candidates_count: 0, candidates_summary: '',
+      at: '2026-07-04T00:00:00.000Z',
+    });
+    const written = setEnrichFailureReview(
+      d, beerId, 'matcher_bug', 'seed', '2026-07-04T12:00:00.000Z', issueNumber,
+      { absenceProved: false },
+    );
+    // A guarded write that silently no-ops leaves a green test asserting nothing.
+    expect(written).toBe('written');
+  }
+  // The seed is only meaningful if it produced `count` DISTINCT rows.
+  const seeded = d.prepare(
+    'SELECT COUNT(*) AS c FROM enrich_failures WHERE issue_number = ?',
+  ).get(issueNumber) as { c: number };
+  expect(seeded.c).toBe(count);
+}
+
+test('#431: label added when an issue crosses the threshold', async () => {
+  const d = db();
+  [1].forEach((n) => seedOrphan(d, n));
+  seedReviewedRows(d, 228, 12);
+  const github = gh();
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.addLabel).toHaveBeenCalledWith(228, 'saturated');
+  expect(github.removeLabel).not.toHaveBeenCalled();
+});
+
+test('#431: label removed when an issue drops below the threshold', async () => {
+  const d = db();
+  [1].forEach((n) => seedOrphan(d, n));
+  seedReviewedRows(d, 228, 2);
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 228, title: 't', body: SCOPED_BODY, labels: ['saturated'], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.removeLabel).toHaveBeenCalledWith(228, 'saturated');
+  expect(github.addLabel).not.toHaveBeenCalled();
+});
+
+test('#431: no label request at all when the state already matches', async () => {
+  const d = db();
+  [1].forEach((n) => seedOrphan(d, n));
+  seedReviewedRows(d, 228, 12);
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 228, title: 't', body: SCOPED_BODY, labels: ['saturated'], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.addLabel).not.toHaveBeenCalled();
+  expect(github.removeLabel).not.toHaveBeenCalled();
+});
+
+test('#431: a label failure neither aborts the run nor loses the DB write', async () => {
+  const d = db();
+  [1].forEach((n) => seedOrphan(d, n));
+  seedReviewedRows(d, 228, 12);
+  const github = gh({ addLabel: vi.fn().mockRejectedValue(new Error('403')) });
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  // The day still closed, and beer 1's verdict still landed.
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
+  const row = d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1').get() as { review_class: string };
+  expect(row.review_class).toBe('unidentifiable');
+});
+
+// #431 P1 fix: a planned attachment is not a landed one. Issue 228 sits one row below
+// the threshold; the plan accepts one more row for it, but commentOnIssue rejects, so
+// the row never actually attaches. If saturation were still read from the PLAN (what
+// this run intended), 11 + 1 = 12 would cross SATURATION_ALERT_ROWS and both the label
+// and the digest would report #228 as saturated on a day it really still sits at 11.
+test('#431: a failed comment must not saturate its issue — nothing landed', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  seedReviewedRows(d, 228, SATURATION_ALERT_ROWS - 1); // 11 rows already landed
+  const github = gh({ commentOnIssue: vi.fn().mockRejectedValue(new Error('boom')) });
+  await orphanTriage({
+    db: d, log, now: inWindow, github,
+    llm: llm({
+      verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'x', issue_number: 228, new_issue_key: null }],
+      new_issues: [],
+    }),
+  });
+  expect(github.commentOnIssue).toHaveBeenCalledTimes(1); // the attempt was made…
+  expect(github.addLabel).not.toHaveBeenCalled();          // …but it never landed
+  const result = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!);
+  expect(result.saturated).toBeNull(); // #228 never crossed the threshold, so no line names it
+});
+
+// --- #431 the saturated digest line ---------------------------------------------
+const outcomeWith = (saturated: { issueNumber: number; rows: number }[]): TriageOutcome => ({
+  total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
+  causeStripped: 0, noTarget: 0,
+  guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
+  saturated, skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
+});
+
+test('#431 line: nothing saturated → no line at all', () => {
+  expect(buildSaturatedLine(outcomeWith([]))).toBeNull();
+});
+
+test('#431 line: three saturated → all three, descending', () => {
+  expect(buildSaturatedLine(outcomeWith([
+    { issueNumber: 405, rows: 21 }, { issueNumber: 427, rows: 15 }, { issueNumber: 334, rows: 12 },
+  ]))).toBe('Насичені: #405 (21), #427 (15), #334 (12) — усього 3');
+});
+
+test('#431 line: seven saturated → top five plus the total', () => {
+  const line = buildSaturatedLine(outcomeWith(
+    [21, 15, 12, 11, 8, 7, 6].map((rows, i) => ({ issueNumber: 400 + i, rows })),
+  ));
+  expect(line).toBe('Насичені: #400 (21), #401 (15), #402 (12), #403 (11), #404 (8) — усього 7');
+  expect(line).not.toContain('#405');
 });

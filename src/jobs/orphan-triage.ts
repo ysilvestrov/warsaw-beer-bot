@@ -7,18 +7,23 @@ import {
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import type { TriageArchive } from '../infra/triage-archive';
-import { planTriageActions, type ScopedIssue, type GuardReason } from '../domain/triage-plan';
+import {
+  planTriageActions, computeSaturated, type ScopedIssue, type GuardReason, type SaturatedIssue,
+} from '../domain/triage-plan';
 import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
 import type { BeerSearch } from '../sources/untappd/search';
-import type { Analysis, Verdict } from '../domain/triage-analysis';
+import type { Analysis, Verdict, OpenIssue } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
+// #431: applied and removed by this job. An issue wearing it has enough evidence that
+// the next move is a fix, not more triage.
+export const SATURATED_LABEL = 'saturated';
 export const TRIAGE_ATTEMPTS_KEY = 'orphan_triage_attempts';
 // Transient upstream failures (5xx/429/network) do not consume the Warsaw day —
 // the next 15-min tick inside [06:00,09:00) retries. Bounded at 3 because each
@@ -72,6 +77,8 @@ export interface TriageOutcome {
   // shortfall` warn, whose condition is counted BEFORE the guards run — so a refused row
   // still counts as covered and the guards could fire any number of times in silence.
   guardHits: Record<GuardReason, number>;
+  // #431: standing state of every open triage issue, not a tally of this run.
+  saturated: SaturatedIssue[];
   skipped: number;
   unverified: number;   // causal verdicts whose proposed query did not reproduce the target
   error: string | null;
@@ -92,6 +99,32 @@ export function reportGuardAnomalies(log: pino.Logger, g: Record<GuardReason, nu
   if (g.illegal_scope === 0 && g.scope_violation === 0) return;
   log.warn({ illegalScope: g.illegal_scope, scopeViolation: g.scope_violation },
     'orphan-triage: guard anomaly');
+}
+
+// #431: the label mirrors what actually landed (outcome.saturated, computed from
+// outcome.commented — the comments that really posted — never from the plan), and
+// nothing else. Issued only on a difference, so a steady state costs zero requests.
+// Best-effort by design: it runs after every comment and every DB write, so a GitHub
+// failure here can no longer cost a verdict that was already earned — it logs and the
+// next run reconciles.
+async function reconcileSaturatedLabels(
+  github: GithubIssuesClient,
+  log: pino.Logger,
+  openIssues: OpenIssue[],
+  saturated: SaturatedIssue[],
+): Promise<void> {
+  const isSaturated = new Set(saturated.map((s) => s.issueNumber));
+  for (const issue of openIssues) {
+    const has = issue.labels.includes(SATURATED_LABEL);
+    const should = isSaturated.has(issue.number);
+    if (has === should) continue;
+    try {
+      if (should) await github.addLabel(issue.number, SATURATED_LABEL);
+      else await github.removeLabel(issue.number, SATURATED_LABEL);
+    } catch (e) {
+      log.error({ err: e, issue: issue.number, should }, 'orphan-triage: label reconcile failed');
+    }
+  }
 }
 
 export function buildTriageLine(o: TriageOutcome): string {
@@ -116,6 +149,21 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
+}
+
+// #431: deliberately its own line rather than another comma in buildTriageLine — it
+// answers a different question (what should be FIXED, not what this run DID). Ordered
+// descending, so the first entry is the answer to "what next": the line is a report and
+// a work queue at once.
+export const SATURATED_LINE_LIMIT = 5;
+
+export function buildSaturatedLine(o: TriageOutcome): string | null {
+  if (o.saturated.length === 0) return null;
+  const top = o.saturated
+    .slice(0, SATURATED_LINE_LIMIT)
+    .map((s) => `#${s.issueNumber} (${s.rows})`)
+    .join(', ');
+  return `Насичені: ${top} — усього ${o.saturated.length}`;
 }
 
 function exampleTable(verdicts: Verdict[], orphans: Map<number, UntriagedFailure>): string {
@@ -159,8 +207,11 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     // whether the Warsaw day is done. A transient failure publishes without
     // closing the day, so the next in-window tick retries.
     const publish = (outcome: TriageOutcome): void => {
-      setJobState(db, TRIAGE_LAST_RESULT_KEY,
-        JSON.stringify({ date: dateKey, line: buildTriageLine(outcome) }));
+      setJobState(db, TRIAGE_LAST_RESULT_KEY, JSON.stringify({
+        date: dateKey,
+        line: buildTriageLine(outcome),
+        saturated: buildSaturatedLine(outcome),
+      }));
     };
     const finish = (outcome: TriageOutcome): void => {
       setJobState(db, TRIAGE_LAST_RUN_KEY, dateKey);
@@ -186,7 +237,8 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0,
       notABeer: 0,
       causeStripped: 0, noTarget: 0,
-      guardHits: { illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0 },
+      guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
+      saturated: [],
       skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
     };
 
@@ -206,6 +258,14 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     let plan;
     let analysis: Analysis;
+    // Hoisted out of the try block below: reconcileSaturatedLabels (after the write
+    // loops) needs the SAME open issues the guards judged against, not a second
+    // GitHub call.
+    let openIssues: OpenIssue[] = [];
+    // Hoisted alongside openIssues for the same reason: computeSaturated (both the
+    // pre-write default below and the post-write recompute after the write loops)
+    // needs the SAME postCreationRows counts the guards judged against.
+    let scopedIssues: ScopedIssue[] = [];
     let unverified = 0;
     let probeFailures = 0;
     let verifyFailures = 0;
@@ -217,7 +277,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const exchanges: TriageExchange[] = [];
     const probeLimit = deps.probeLimit ?? TRIAGE_PROBE_LIMIT_DEFAULT;
     try {
-      const openIssues = await github.listOpenIssues(TRIAGE_LABEL);
+      openIssues = await github.listOpenIssues(TRIAGE_LABEL);
       // Deterministic evidence first: without it the model is asked to explain a
       // zero-candidate search with nothing but the query string, which is where its
       // wrong hypotheses come from (2026-07-28 review).
@@ -289,7 +349,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // #408: the guards judge a routing decision, so they need the evidence it was
       // made about — the issues' parsed scopes and the batch rows, not just their ids.
       // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
-      const scopedIssues: ScopedIssue[] = openIssues.map((i) => ({
+      scopedIssues = openIssues.map((i) => ({
         number: i.number,
         scope: parseScopeBlock(i.body),
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
@@ -327,6 +387,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     // three assignments and the anomaly warn must publish on EVERY run, so they sit
     // ABOVE the covered === 0 early return, not after it.
     outcome.guardHits = plan.guardHits;
+    // #431: the pre-write default — nothing has been attached yet, so this is the
+    // standing state from postCreationRows alone. It is what publishes if the
+    // covered === 0 return below fires: still meaningful (an issue sitting at 21 rows
+    // is saturated even on a run that attaches nothing), and it must NOT be an empty
+    // list on that path. Overwritten below, after the write loops, with what actually
+    // landed.
+    outcome.saturated = computeSaturated(scopedIssues, new Map());
     reportGuardAnomalies(log, plan.guardHits);
     outcome.causeStripped = plan.quietCauseStripped;
     outcome.noTarget = plan.quietNoTarget;
@@ -413,6 +480,17 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       else if (v.review_class === 'not_a_beer') outcome.notABeer++;
       // actionable classes are counted by planTriageActions as causeStripped / noTarget
     }
+
+    // #431: recomputed from outcome.commented — the comments that actually POSTED —
+    // not from the plan. A planned comment whose commentOnIssue call threw never
+    // reached this map (the catch above only grows outcome.skipped), so a row that
+    // was never really attached can no longer saturate its issue's label or digest
+    // line. New issues created this run are correctly absent from attachedThisRun:
+    // they aren't in scopedIssues either (see computeSaturated's own comment).
+    const attachedThisRun = new Map(outcome.commented.map((c) => [c.issueNumber, c.count]));
+    outcome.saturated = computeSaturated(scopedIssues, attachedThisRun);
+
+    await reconcileSaturatedLabels(github, log, openIssues, outcome.saturated);
 
     finish(outcome);
   } finally {

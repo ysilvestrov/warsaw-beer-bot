@@ -28,11 +28,12 @@ export interface ScopedIssue {
 }
 
 // Why a verdict was refused. Counted rather than logged here (this is a pure function),
-// so the job can surface them in one line — three of the guards end in `skipped`, and a
-// skipped row keeps review_class NULL and returns tomorrow. A model that keeps making
-// the same illegal proposal would recirculate the same rows forever while the batch
-// silently fills with repeat offenders, so the reason has to be visible.
-export type GuardReason = 'illegal_scope' | 'scope_violation' | 'saturated' | 'unprobed_absence';
+// so the job can surface them in one line. Every reason here is a fact about the ROW —
+// a hallucinated scope, a row that contradicts its target, an absence nobody probed —
+// which is what makes retrying it tomorrow worthwhile: a different model call can give a
+// different answer. Saturation was once in this list and is not a fact about the row
+// (#431), so it no longer refuses anything.
+export type GuardReason = 'illegal_scope' | 'scope_violation' | 'unprobed_absence';
 
 export interface TriagePlan {
   newIssues: PlannedNewIssue[];   // deduped + capped, labels forced, only keys actually referenced
@@ -51,13 +52,46 @@ export interface TriagePlan {
 export const MAX_NEW_ISSUES_PER_RUN = 3;
 
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
-// enumerated rows, so a lifetime count would reject the very shape (a narrow issue
-// split out of a magnet) this whole change exists to encourage. Measured on prod
-// 2026-08-14: the issues nobody complains about sit at <= 7 rows, while the magnets ran
-// to 36 (#347) and 90 (#254), so any threshold in 10-15 separates them. A judgement
-// call on measured data, not a derived constant — revisit once issue_number (v23) has
-// produced a real post-creation distribution.
-export const MAX_ROWS_PER_ISSUE = 12;
+// enumerated rows, so a lifetime count would misread the very shape (a narrow issue
+// split out of a magnet) this whole area exists to encourage. Measured on prod
+// 2026-08-14: issues nobody complains about sit at <= 7 rows, while the magnets ran to
+// 36 (#347) and 90 (#254), so any threshold in 10-15 separates them.
+//
+// #431: this used to be a GATE. It is now purely a reporting threshold — being wrong
+// about it costs a mislabelled issue, never a discarded row.
+export const SATURATION_ALERT_ROWS = 12;
+
+// An issue carrying enough evidence that the next move is a fix, not more triage.
+export interface SaturatedIssue {
+  issueNumber: number;
+  rows: number;
+}
+
+// Computed over ALL open issues passed in, including those this run never touched:
+// saturation is a property of the issue's accumulated evidence, not of today's batch.
+// An issue CREATED by this run never appears here: postCreationRows counts rows
+// attached after creation, and a new issue's founding rows land at creation.
+//
+// #431: `attachedThisRun` must count only rows that actually landed — a comment
+// planned but never posted (github.commentOnIssue threw) attaches nothing, and the
+// caller must not pass a count for it. This is why the count is a parameter rather
+// than something this function derives from a plan: a pure planner can only describe
+// what it INTENDS to attach, and intent is not evidence until the write that makes it
+// real (the GitHub call, then the DB row) has actually succeeded. Feeding this
+// function planned-but-unwritten counts is exactly the bug #431 fixes — the label,
+// the digest and the database would each tell a different story for a day.
+export function computeSaturated(
+  issues: readonly { number: number; postCreationRows: number }[],
+  attachedThisRun: ReadonlyMap<number, number>,
+): SaturatedIssue[] {
+  return issues
+    .map((i) => ({
+      issueNumber: i.number,
+      rows: i.postCreationRows + (attachedThisRun.get(i.number) ?? 0),
+    }))
+    .filter((i) => i.rows >= SATURATION_ALERT_ROWS)
+    .sort((a, b) => b.rows - a.rows || a.issueNumber - b.issueNumber);
+}
 
 // Single source of truth for which classes go to GitHub and which label each
 // maps to — the actionable check derives from these keys.
@@ -116,7 +150,7 @@ export function planTriageActions(
   const byNumber = new Map(openIssues.map((i) => [i.number, i]));
   const rowById = new Map(batchRows.map((r) => [r.beer_id, r]));
   const guardHits: Record<GuardReason, number> = {
-    illegal_scope: 0, scope_violation: 0, saturated: 0, unprobed_absence: 0,
+    illegal_scope: 0, scope_violation: 0, unprobed_absence: 0,
   };
 
   // Guard 1: an illegal scope kills the proposed issue before it can claim a class.
@@ -205,18 +239,6 @@ export function planTriageActions(
     if (hasIssue) {
       const target = byNumber.get(verdict.issue_number!);
       if (!target) { skipped++; continue; }
-      // Guard 4: a saturated issue stops accepting rows. #347 took 36 rows across 18
-      // comment batches in 19 days and shipped nothing — the pile itself was the
-      // signal, and nothing was watching it.
-      // Rows already accepted for this issue in THIS run count too, or a batch could
-      // walk an issue sitting at 11 straight past the limit: each verdict would see
-      // 11 >= 12 as false and all of them would land in one comment.
-      const accepted = byIssue.get(verdict.issue_number!)?.length ?? 0;
-      if (target.postCreationRows + accepted >= MAX_ROWS_PER_ISSUE) {
-        guardHits.saturated += 1;
-        skipped++;
-        continue;
-      }
       // Guard 2: the row must not contradict what the issue claims to be about. An
       // unscoped issue (no `triage-scope` block in its body) accepts nothing — that is
       // what makes the one-time backfill of existing issues load-bearing rather than
