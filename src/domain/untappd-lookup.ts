@@ -13,6 +13,11 @@ import { isBlockStatus } from '../sources/untappd/block';
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
 const LONG_TOKEN_LENGTH = 7;
+const GENERIC_TYPO_RESCUE_NAMES = new Set([
+  'ipa', 'apa', 'neipa', 'dipa', 'tipa', 'pils', 'pilsner', 'lager', 'hell', 'helles',
+  'stout', 'porter', 'weizen', 'wheat', 'saison', 'sour', 'gose', 'lambic',
+  'barleywine', 'bock',
+]);
 interface FuzzyTarget {
   value: string;
   exactOnly: boolean;
@@ -103,6 +108,51 @@ function pickUniqueByAbv(
     (result) => result.abv != null && Math.abs(result.abv - abv) <= ABV_TOLERANCE,
   );
   return abvHits.length === 1 ? abvHits[0] : null;
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let aIndex = 1; aIndex <= a.length; aIndex += 1) {
+    const current = [aIndex];
+    for (let bIndex = 1; bIndex <= b.length; bIndex += 1) {
+      current[bIndex] = Math.min(
+        current[bIndex - 1] + 1,
+        previous[bIndex] + 1,
+        previous[bIndex - 1] + (a[aIndex - 1] === b[bIndex - 1] ? 0 : 1),
+      );
+    }
+    previous = current;
+  }
+  return previous[b.length];
+}
+
+function hasBoundedBreweryTypo(input: string, candidate: string): boolean {
+  const inputTokens = normalizeBrewery(input).split(' ').filter(Boolean);
+  const candidateTokens = normalizeBrewery(candidate).split(' ').filter(Boolean);
+  if (inputTokens.length === 0 || candidateTokens.length === 0) return false;
+
+  const [shorter, longer] = inputTokens.length <= candidateTokens.length
+    ? [inputTokens, candidateTokens]
+    : [candidateTokens, inputTokens];
+
+  if (
+    longer.length > shorter.length &&
+    longer.slice(0, shorter.length).some((_, index) =>
+      longer.filter((__, longerIndex) => longerIndex !== index)
+        .slice(0, shorter.length)
+        .every((token, tokenIndex) => token === shorter[tokenIndex]),
+    )
+  ) return false;
+
+  const changed = shorter
+    .map((token, index) => [token, longer[index]] as const)
+    .filter(([left, right]) => left !== right);
+  if (changed.length !== 1) return false;
+
+  const [left, right] = changed[0];
+  if (left.length < 5 || right.length < 5) return false;
+  const distance = editDistance(left, right);
+  return distance >= 1 && distance <= 2;
 }
 
 function hasExactBrandRemainder(
@@ -300,13 +350,51 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     const nativePool = tagged.filter((t) => t.native).map((t) => t.r);
     const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
     const brandRemainderPool = tagged.filter((t) => t.brandName).map((t) => t.r);
+    const identityBids = new Set(identityHits.map((result) => result.bid));
+    const typoRescue = (): LookupOutcome | null => {
+      const exactTarget = baseNormalize(name);
+      if (!exactTarget) return null;
+
+      const unique = Array.from(
+        new Map(
+          results
+            .filter((result) => baseNormalize(result.beer_name) === exactTarget)
+            .map((result) => [result.bid, result]),
+        ).values(),
+      );
+      if (unique.length !== 1) return null;
+
+      const [candidate] = unique;
+      const evidence = tagged.filter(({ r }) => r.bid === candidate.bid);
+      if (
+        identityBids.has(candidate.bid) ||
+        evidence.some(({ strict, relaxed, native, brand, brandName }) =>
+          strict || relaxed || native || brand || brandName,
+        )
+      ) return null;
+      if (!hasBoundedBreweryTypo(brewery, candidate.brewery_name)) return null;
+      if (
+        abv != null &&
+        candidate.abv != null &&
+        Math.abs(candidate.abv - abv) > ABV_TOLERANCE
+      ) return null;
+
+      const nameTokens = exactTarget.split(' ').filter(Boolean);
+      if (
+        nameTokens.length === 1 &&
+        GENERIC_TYPO_RESCUE_NAMES.has(nameTokens[0]) &&
+        (abv == null || candidate.abv == null)
+      ) return null;
+
+      return { kind: 'matched', result: candidate };
+    };
     if (
       strictPool.length === 0 &&
       relaxedPool.length === 0 &&
       nativePool.length === 0 &&
       brandPool.length === 0 &&
       identityHits.length === 0
-    ) return null;
+    ) return typoRescue();
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
     // aware) on strict ∪ relaxed. Strict candidates come first, so the no-ABV
@@ -397,7 +485,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // canonical/curated brewery stages above.
     if (identityHits.length > 0) {
       const identityHit = pickUniqueByAbv(identityHits, abv);
-      return identityHit ? { kind: 'matched', result: identityHit } : null;
+      return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
     }
 
     // Candidate-native brewery aliases are structured identity evidence, but unlike
@@ -406,7 +494,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     const nativeKeyHits = nativePool.filter((r) => nativeNameKeyMatches(r, inputKeys));
     if (nativeKeyHits.length > 0) {
       const nativeHit = pickUniqueByAbv(nativeKeyHits, abv, true);
-      return nativeHit ? { kind: 'matched', result: nativeHit } : null;
+      return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
     }
 
     const nativeNearMatches = nativePool
@@ -425,7 +513,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         abv,
         true,
       );
-      return nativeHit ? { kind: 'matched', result: nativeHit } : null;
+      return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
     }
 
     // A shop may put a leading beer brand in the brewery field and only the
@@ -436,7 +524,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     );
     if (brandRemainderHits.length > 0) {
       const brandRemainderHit = pickUniqueByAbv(brandRemainderHits, abv);
-      return brandRemainderHit ? { kind: 'matched', result: brandRemainderHit } : null;
+      return brandRemainderHit ? { kind: 'matched', result: brandRemainderHit } : typoRescue();
     }
 
     // #138B brand-as-beer-name: exact name-key intersection using the input name with
@@ -476,7 +564,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
-    return null;
+    return typoRescue();
   }
 
   for (const part of parts) {
