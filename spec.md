@@ -940,6 +940,18 @@ Untappd-канон (хаб) на одному боці, тож спиця маг
 точну назву** — перетин name-keys АБО точна рівність нормалізованих назв — і **ніколи** на
 наближений fuzzy (≥0.85, але <1.0). Strict-шлях незмінний. (`/match`-каталог поки не зачеплено.)
 
+**Confirmation-only typo rescue (#407, лише enrich `lookupBeer`).** Якщо один конкретний
+непорожній список результатів уже пройшов усі звичайні стадії без матчу, lookup може прийняти
+рівно один distinct `bid` із **буквально рівною `baseNormalize`-назвою**, якщо прямі
+`normalizeBrewery`-ярлики відрізняються рівно одним вирівняним токеном довжиною ≥5 на
+Levenshtein 1–2. Коротший brewery-label мусить бути провідним токен-префіксом довшого;
+дозволені лише хвостові дескриптори, не внутрішні вставки. Кандидат не повинен мати strict,
+relaxed, native/identity-alias чи brand evidence. Два exact-name `bid` завжди лишаються
+невизначеними незалежно від rank або ABV; відомий несумісний ABV блокує rescue, а generic
+однотокенні назви (`IPA`, `Pils`, `Hell` тощо) вимагають двох відомих сумісних ABV.
+Це підтвердження вже повернутого кандидата: воно не розширює query, не запускається на
+нульових результатах, не додає fuzzy name matching і не змінює canonical/curated brewery gate.
+
 **Upstream identity evidence (#427).** Algolia `SearchResult` зберігає опційні масиви
 `brewery_alias` та `alias_alt`; legacy HTML search може їх не мати. `alias_alt` обходить
 brewery-гейт лише коли один його елемент дорівнює **повній** нормалізованій ідентичності
@@ -2178,7 +2190,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   окремий випадок. Порівняння по цілих токенах: `harp` ≠ `harpagan`; спільний
   НЕ-провідний токен не рахується (`[project]` ⋢ `[side, project]`). Далі —
   name-fuzzy ≥ 0.85 як захист від хибних збігів. Той самий gate в
-  `untappd-lookup.ts` (Stage 1). **Обмеження (#120, deferred):** gate ловить лише
+  `untappd-lookup.ts` (Stage 1). Вузький enrich-only fallback #407 після повної відмови
+  звичайних стадій не змінює цей gate та first-token індекс `/match`: він лише підтверджує
+  єдиний уже повернутий literal exact-name кандидат через один bounded typo-токен і ABV-guard.
+  **Обмеження (#120, deferred):** gate ловить лише
   **провідний** префікс, тож хвостовий ярлик магазину (`Staropolski` ⋢
   `Kultowy Browar Staropolski`) не матчиться — окремий issue.
 - **name-keys (#117).** `nameKeys(name, brewery)` (`matcher.ts`) — множина ключів:
