@@ -17,14 +17,25 @@ The `-m` flag on `useradd` is important — npm needs a writable `$HOME`
 for its cache and logs. `deploy.sh` also creates the home dir defensively
 in case the user already exists without one.
 
-### Node 20
+### Node 24
 
 Install system-wide (the systemd unit calls `/usr/bin/node`):
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 apt-get install -y nodejs build-essential python3
 ```
+
+Before changing the NodeSource major, download the current `.deb` first — rewriting
+`/etc/apt/sources.list.d/nodesource.sources` removes the old major from the apt index, and there is
+no local cache to fall back on:
+
+    mkdir -p ~/nodejs-rollback && cd ~/nodejs-rollback && apt-get download nodejs=<current version>
+
+`better-sqlite3` is a native addon compiled from source on this host, so it must be rebuilt against
+the new ABI in the same sitting: stop `warsaw-beer-bot` (and `48-hours-trip`, which shares
+`/usr/bin/node`), install the new major, then run `deploy/deploy.sh`, whose `npm ci` does the rebuild.
+A restart in between comes up on the new interpreter with the old `.node` and fails to start.
 
 `build-essential` + `python3` are needed for the `better-sqlite3` native build.
 
