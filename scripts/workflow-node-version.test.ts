@@ -6,7 +6,7 @@ import path from 'node:path';
 // and nothing in the suite noticed. package.json's engines.node is the declaration;
 // this test makes every workflow agree with it.
 //
-// The anti-vacuity check has moved five times, each time because the previous shape
+// The anti-vacuity check has moved six times, each time because the previous shape
 // could be satisfied while covering less:
 //   1. a global floor (found.length >= 5) — didn't notice one workflow losing its
 //      only pin as long as the file-wide total stayed up;
@@ -24,9 +24,24 @@ import path from 'node:path';
 //      notice a `with:` block written ABOVE `uses:` in the same step. YAML mapping
 //      key order carries no semantics, so that is ordinary valid YAML, not a
 //      contrived shape, and the guard blocked a correctly-pinned step while
-//      reporting something false. Coverage is now a property of the step's whole
+//      reporting something false. Coverage became a property of the step's whole
 //      BLOCK (boundaries found first, content searched anywhere inside), not of a
-//      scan direction from one line within it.
+//      scan direction from one line within it;
+//   5. matrix resolution treated "at least one numeric value for the matrix key" as
+//      coverage. A matrix with `include` entries `- node: 24` and `- node: lts/*`
+//      yields one numeric value, so the `lts/*` leg — a real job that runs
+//      `setup-node` on an unpinned version — passed unnoticed, and `pinsIn` never
+//      caught it either, because `lts/*` is not numeric and never becomes a pin. A
+//      matrix-resolved step is now covered only when EVERY value of that matrix key
+//      is numeric; a key with any non-numeric leg — `lts/*`, `latest`, an
+//      expression, an empty value — makes the step uncovered, and the failure names
+//      the offending value.
+//
+// Known limitation, shared by every version of this guard above: it is a line-based
+// scan, not a YAML parser. A `run: |` literal block whose text happens to contain a
+// line reading like `uses: actions/setup-node@v7` or `node-version: N` is scanned
+// as if it were real YAML and can produce a spurious finding. Parsing block scalars
+// correctly would need an actual YAML parser, which is out of proportion here.
 const root = path.join(__dirname, '..');
 
 function declaredMajor(): number {
@@ -108,14 +123,15 @@ function jobRangeFor(lines: string[], idx: number): { start: number; end: number
   return ranges.find((r) => idx >= r.start && idx < r.end) ?? { start: 0, end: lines.length };
 }
 
-// A numeric value for `key:` (matrix legs use the bare key, e.g. `node: 24`) found
-// anywhere within [start, end) — the caller passes a single job's range.
-function numericValuesFor(lines: string[], key: string, start: number, end: number): number[] {
-  const re = new RegExp(`^\\s*(?:-\\s*)?${key}:\\s*['"]?(\\d+)`);
-  const values: number[] = [];
+// EVERY value assigned to `key:` within [start, end) — matrix legs use the bare key
+// (e.g. `node: 24`, `node: lts/*`) — not just the numeric ones. Coverage below
+// needs to see a non-numeric leg to reject it, not silently skip past it.
+function allValuesFor(lines: string[], key: string, start: number, end: number): string[] {
+  const re = new RegExp(`^\\s*(?:-\\s*)?${key}:\\s*(.+?)\\s*$`);
+  const values: string[] = [];
   for (let i = start; i < end; i++) {
     const m = re.exec(lines[i]);
-    if (m) values.push(Number(m[1]));
+    if (m) values.push(m[1].replace(/^['"]|['"]$/g, ''));
   }
   return values;
 }
@@ -123,7 +139,7 @@ function numericValuesFor(lines: string[], key: string, start: number, end: numb
 // Coverage is decided from the step's whole block — every line between its
 // boundaries — not from a position relative to the `uses:` line found within it.
 // That is what makes `with:` written above `uses:` behave the same as below it.
-function stepCoverage(lines: string[], block: Block): { covered: boolean } {
+function stepCoverage(lines: string[], block: Block): { covered: boolean; badValue?: string } {
   const versionLine = /^\s*(node-version(-file)?):\s*(.+?)\s*$/;
   for (let i = block.startIdx; i < block.endIdx; i++) {
     const m = versionLine.exec(lines[i]);
@@ -134,8 +150,16 @@ function stepCoverage(lines: string[], block: Block): { covered: boolean } {
     const matrixRef = /^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$/.exec(value);
     if (matrixRef) {
       const { start, end } = jobRangeFor(lines, block.startIdx);
-      const values = numericValuesFor(lines, matrixRef[1], start, end);
-      return { covered: values.length > 0 };
+      const values = allValuesFor(lines, matrixRef[1], start, end);
+      if (values.length === 0) return { covered: false }; // matrix key never found.
+      // Covered only when EVERY leg of the matrix key is numeric — one non-numeric
+      // leg (lts/*, latest, an expression, empty) is a real job that will run
+      // setup-node unpinned, not a value the mismatch check below can ever see:
+      // pinsIn only matches digits, so a non-numeric leg never becomes a pin and
+      // silently passing "at least one numeric value" would miss it entirely.
+      const bad = values.find((v) => !/^\d+$/.test(v));
+      if (bad !== undefined) return { covered: false, badValue: bad };
+      return { covered: true }; // every leg numeric; each one is caught by pinsIn.
     }
     return { covered: false }; // e.g. a flow list `[20, 24]`, or any other expression.
   }
@@ -173,11 +197,18 @@ test('every workflow pins the Node major that package.json declares', () => {
   // from the file's own content, not a hand-maintained list that would rot.
   expect(nodeWorkflows.length).toBeGreaterThanOrEqual(5);
 
-  const uncovered: { file: string; line: number }[] = [];
+  const uncovered: { file: string; line: number; value?: string }[] = [];
   for (const file of nodeWorkflows) {
     const lines = fileLines(file);
     for (const step of setupNodeSteps(lines)) {
-      if (!stepCoverage(lines, step.block).covered) uncovered.push({ file, line: step.line });
+      const result = stepCoverage(lines, step.block);
+      if (!result.covered) {
+        uncovered.push(
+          result.badValue !== undefined
+            ? { file, line: step.line, value: result.badValue }
+            : { file, line: step.line },
+        );
+      }
     }
   }
 
@@ -189,9 +220,10 @@ test('every workflow pins the Node major that package.json declares', () => {
   }
 
   // A step whose own block carries no numeric pin — `node-version-file:`, a
-  // flow-list matrix, or no version key at all — is a coverage gap, not a pass, no
-  // matter how many pins exist elsewhere in the file, and no matter where inside
-  // the step's own block the version key was written.
+  // flow-list matrix, a matrix key with any non-numeric leg, or no version key at
+  // all — is a coverage gap, not a pass, no matter how many pins exist elsewhere in
+  // the file, and no matter where inside the step's own block the version key was
+  // written.
   expect(uncovered).toEqual([]);
   expect(mismatched).toEqual([]);
 });
