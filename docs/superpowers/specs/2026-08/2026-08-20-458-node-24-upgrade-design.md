@@ -90,9 +90,19 @@ Node 26 is not a candidate: it becomes LTS on 2026-10-28, two months out.
 ### 1. Preflight — nothing system-wide changes
 
 **1.1 The rollback anchor, first.** `apt-get download nodejs=20.20.2-1nodesource1`, stored under
-`/var/backups/`. Ordering is load-bearing: rewriting the sources file to `node_24.x` removes 20.x
-from the apt index, and there is no `.deb` in the local cache. Fetch it while the old repo is still
-configured, or the rollback path becomes "find a `.deb` on the internet during an incident".
+`~/nodejs-rollback/` — the operator's own home, so the download needs no root. Ordering is
+load-bearing: rewriting the sources file to `node_24.x` removes 20.x from the apt index, and there is
+no `.deb` in the local cache. Fetch it while the old repo is still configured, or the rollback path
+becomes "find a `.deb` on the internet during an incident".
+
+**Corrected during Task 3 review**: an earlier draft of this section said the anchor lands directly
+under `/var/backups/` at preflight. It does not — the cutover script (Task 2 §2 step 3) copies it
+there from `~/nodejs-rollback/` once the ABI window has already opened, while `sudo` is already live
+for stopping the services. Two locations, two reasons: the home copy needs no root and can be made
+during the unprivileged preflight; the `/var/backups/` copy is made while already elevated, so it
+costs nothing extra to put the anchor somewhere root-owned and durable before the risky part starts.
+The rollback script prefers `/var/backups/` and falls back to `~/nodejs-rollback/` if the cutover
+never reached that copy step.
 
 **1.2 The rehearsal.** The official `node-v24.19.0-linux-x64` tarball is unpacked into a throwaway
 prefix under `./tmp/`. `/usr/bin/node` is untouched, no apt transaction runs, no service is stopped.
@@ -147,9 +157,19 @@ cutover window short: exactly one service needs `npm ci`.
 
 Trigger: step 4 fails, or the bot does not come up healthy.
 
-`dpkg -i /var/backups/nodejs_20.20.2-1nodesource1_amd64.deb`, restore the sources URI to `node_20.x`,
-re-run `deploy.sh` (the same `npm ci` rebuilds the native module back to the Node 20 ABI), start both
-services. The repo pull request has not merged at this point, so nothing needs reverting in git.
+`dpkg -i /var/backups/nodejs_20.20.2-1nodesource1_amd64.deb` (falling back to
+`~/nodejs-rollback/nodejs_20.20.2-1nodesource1_amd64.deb` if the cutover never reached its
+copy-to-`/var/backups/` step — see §1.1), restore the sources URI to `node_20.x`, re-run `deploy.sh`
+(the same `npm ci` rebuilds the native module back to the Node 20 ABI), start both services. The repo
+pull request has not merged at this point, so nothing needs reverting in git.
+
+`apt-mark hold nodejs` is set immediately after `dpkg -i`: it stops an unattended `apt upgrade` from
+quietly re-attempting the exact move this rollback just backed out of. That hold is durable apt state
+— it survives the process and outlives `./tmp/`, which is uncommitted scratch that gets wiped when
+this task closes out. So a *re*-cutover must clear it first, or `apt-get install` exits 0 having
+installed nothing, and the version gate fails with both services already stopped and no on-host
+record of why the hold exists. (Task 2's cutover script clears it as its own step 0, with a comment
+pointing back here.)
 
 ### 4. The repository change — a pull request that merges *after* the host is on 24
 
@@ -180,7 +200,9 @@ workflow back to 20 and the test must fail.
 | touched | by whom | when |
 |---|---|---|
 | `/etc/apt/sources.list.d/nodesource.sources` | operator, once | cutover step 3 |
-| `/var/backups/nodejs_20.20.2-1nodesource1_amd64.deb` | operator, once | preflight 1.1 |
+| `~/nodejs-rollback/nodejs_20.20.2-1nodesource1_amd64.deb` | operator, once, no root | preflight 1.1 |
+| `/var/backups/nodejs_20.20.2-1nodesource1_amd64.deb` | operator, once, root (copied from the above) | cutover step 3 |
+| `nodejs` apt-mark hold | operator, set on rollback, cleared at the next cutover's step 0 | §3 |
 | `~/.local/state/wbb-autodeploy/PAUSED` | operator | held for the whole cutover |
 | `deploy/deploy.sh` | **unchanged** — it is invoked, not modified | cutover step 4 |
 | `package.json` → `engines.node` | pull request | after the host is on 24 |

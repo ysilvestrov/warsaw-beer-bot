@@ -6,12 +6,16 @@ import path from 'node:path';
 // and nothing in the suite noticed. package.json's engines.node is the declaration;
 // this test makes every workflow agree with it.
 //
-// The anti-vacuity check used to be a global floor (found.length >= 5), but a global
-// count cannot notice coverage shrinking as long as the total stays above it: if one
-// workflow switched from a bare-digit pin to `node-version-file: .nvmrc`, the count
-// would drop by one and the floor would still pass — that workflow would silently
-// stop being checked. So the check is per file instead: every workflow that sets up
-// Node at all must contribute a numeric pin, or the test fails naming that file.
+// The anti-vacuity check used to be a global floor (found.length >= 5), then a
+// per-file "at least one pin" rule — both drifted into passing while covering
+// less: a global count doesn't notice one workflow losing its only pin as long as
+// the total stays up, and "at least one pin per file" doesn't notice a SECOND
+// `actions/setup-node` step in the same file going unpinned once the first step
+// already satisfies it. So the unit is the step, counted per file: a file's total
+// numeric pins must be at least its total `actions/setup-node` occurrences, or the
+// test fails naming the file with both counts. `.yaml` is accepted alongside
+// `.yml` — GitHub Actions reads both, and a workflow the guard can't see is a
+// workflow it isn't checking.
 const root = path.join(__dirname, '..');
 
 function declaredMajor(): number {
@@ -23,22 +27,30 @@ function declaredMajor(): number {
 
 function workflowFiles(): string[] {
   const dir = path.join(root, '.github/workflows');
-  return readdirSync(dir).filter((f) => f.endsWith('.yml'));
+  return readdirSync(dir).filter((f) => f.endsWith('.yml') || f.endsWith('.yaml'));
 }
 
 function pinsIn(file: string): number[] {
   const text = readFileSync(path.join(root, '.github/workflows', file), 'utf8');
   // Matches `node-version: 20` and matrix legs `- node: 20`. An expression such
   // as `node-version: ${{ matrix.node }}` carries no digit and is skipped — the
-  // matrix entry it resolves to is caught by the same regex.
+  // matrix entry it resolves to is caught by the same regex. A flow-list matrix
+  // (`node-version: [20, 24]`) also carries no digit directly after the colon and
+  // is deliberately NOT parsed as a pin — its step still counts against the file
+  // via setupNodeCount below, so an unpinned flow-list leg shows up as a shortfall
+  // rather than silently passing.
   return [...text.matchAll(/^\s*(?:-\s*)?node(?:-version)?:\s*['"]?(\d+)/gm)].map((m) =>
     Number(m[1]),
   );
 }
 
 function setsUpNode(file: string): boolean {
+  return setupNodeCount(file) > 0;
+}
+
+function setupNodeCount(file: string): number {
   const text = readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-  return text.includes('actions/setup-node');
+  return (text.match(/actions\/setup-node/g) ?? []).length;
 }
 
 test('every workflow pins the Node major that package.json declares', () => {
@@ -51,21 +63,23 @@ test('every workflow pins the Node major that package.json declares', () => {
   const nodeWorkflows = files.filter(setsUpNode);
   expect(nodeWorkflows.length).toBeGreaterThanOrEqual(5);
 
-  const badFiles: string[] = [];
+  const shortfalls: { file: string; pins: number; steps: number }[] = [];
   const mismatched: { file: string; major: number }[] = [];
   for (const file of nodeWorkflows) {
     const majors = pinsIn(file);
-    if (majors.length === 0) {
-      badFiles.push(file);
-      continue;
+    const steps = setupNodeCount(file);
+    if (majors.length < steps) {
+      shortfalls.push({ file, pins: majors.length, steps });
     }
     for (const major of majors) {
       if (major !== expected) mismatched.push({ file, major });
     }
   }
 
-  // A file that sets up Node but yields no numeric pin (e.g. `node-version-file:
-  // .nvmrc`) is a coverage gap, not a pass.
-  expect(badFiles).toEqual([]);
+  // A file with fewer numeric pins than `actions/setup-node` steps has at least
+  // one unpinned (or unparseable-pin) step — e.g. a second job using
+  // `node-version-file: .nvmrc` or a flow-list matrix — and that is a coverage
+  // gap, not a pass.
+  expect(shortfalls).toEqual([]);
   expect(mismatched).toEqual([]);
 });
