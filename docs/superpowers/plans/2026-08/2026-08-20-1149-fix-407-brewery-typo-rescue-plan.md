@@ -253,7 +253,7 @@ The ordinary lookup order and its current stop boundaries remain authoritative. 
 **Files:**
 
 - `src/domain/untappd-lookup.ts`
-- `src/domain/untappd-lookup.test.ts`
+- `src/domain/untappd-lookup.brewery-typo.test.ts`
 
 **Approach:**
 
@@ -330,7 +330,7 @@ The ordinary lookup order and its current stop boundaries remain authoritative. 
 
 ## Verification Contract
 
-- Run the focused `src/domain/untappd-lookup.test.ts` suite first and confirm the new cases fail before implementation and pass afterward.
+- Run the focused `src/domain/untappd-lookup.brewery-typo.test.ts` suite first and confirm the new cases fail before implementation and pass afterward.
 - Run TypeScript typechecking for application and scripts.
 - Run the complete Vitest suite after focused coverage passes.
 - Run `git diff --check` and inspect the final diff for changes outside U1-U3.

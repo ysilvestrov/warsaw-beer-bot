@@ -355,16 +355,12 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       const exactTarget = baseNormalize(name);
       if (!exactTarget) return null;
 
-      const unique = Array.from(
-        new Map(
-          results
-            .filter((result) => baseNormalize(result.beer_name) === exactTarget)
-            .map((result) => [result.bid, result]),
-        ).values(),
+      const exactCandidates = results.filter(
+        (result) => baseNormalize(result.beer_name) === exactTarget,
       );
-      if (unique.length !== 1) return null;
+      if (new Set(exactCandidates.map((result) => result.bid)).size !== 1) return null;
 
-      const [candidate] = unique;
+      const [candidate] = exactCandidates;
       const evidence = tagged.filter(({ r }) => r.bid === candidate.bid);
       if (
         identityBids.has(candidate.bid) ||
@@ -372,18 +368,21 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           strict || relaxed || native || brand || brandName,
         )
       ) return null;
-      if (!hasBoundedBreweryTypo(brewery, candidate.brewery_name)) return null;
+      if (!exactCandidates.every((result) =>
+        hasBoundedBreweryTypo(brewery, result.brewery_name),
+      )) return null;
       if (
         abv != null &&
-        candidate.abv != null &&
-        Math.abs(candidate.abv - abv) > ABV_TOLERANCE
+        exactCandidates.some((result) =>
+          result.abv != null && Math.abs(result.abv - abv) > ABV_TOLERANCE,
+        )
       ) return null;
 
       const nameTokens = exactTarget.split(' ').filter(Boolean);
       if (
         nameTokens.length === 1 &&
         GENERIC_TYPO_RESCUE_NAMES.has(nameTokens[0]) &&
-        (abv == null || candidate.abv == null)
+        (abv == null || exactCandidates.some((result) => result.abv == null))
       ) return null;
 
       return { kind: 'matched', result: candidate };
