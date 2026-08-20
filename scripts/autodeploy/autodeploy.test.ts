@@ -136,6 +136,7 @@ describe('autodeploy.sh', () => {
   it('a guard refusal exits 1, deploys nothing, and records LAST_FAILED_SHA', () => {
     const h = setup();
     seedState(h, base);
+    const installedCheck = stub(h.bin, 'installed-check', 'echo "CURRENT: stub"; exit 0');
     const guard = stub(h.bin, 'guard', 'echo "REFUSE: stub refusal"; exit 1');
     const deployLog = join(h.bin, 'deploy.log');
     const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
@@ -144,6 +145,7 @@ describe('autodeploy.sh', () => {
     const audit = stub(h.bin, 'audit', 'exit 0');
 
     const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
       WBB_GUARD: guard,
       WBB_DEPLOY_CMD: deploy,
       WBB_NOTIFY_CMD: notify,
@@ -182,6 +184,7 @@ describe('autodeploy.sh', () => {
   it('the health check failing causes the previous sha to be redeployed and exit code 2', () => {
     const h = setup();
     seedState(h, base);
+    const installedCheck = stub(h.bin, 'installed-check', 'echo "CURRENT: stub"; exit 0');
     const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
     const deployLog = join(h.bin, 'deploy.log');
     const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
@@ -200,6 +203,7 @@ describe('autodeploy.sh', () => {
     const apiPort = stub(h.bin, 'api-port', 'echo 3000');
 
     const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
       WBB_GUARD: guard,
       WBB_DEPLOY_CMD: deploy,
       WBB_HEALTH_CMD: health,
@@ -220,6 +224,7 @@ describe('autodeploy.sh', () => {
   it('a healthy deploy updates DEPLOYED_SHA/PREVIOUS_SHA, clears LAST_FAILED_SHA, and exits 0', () => {
     const h = setup();
     seedState(h, base);
+    const installedCheck = stub(h.bin, 'installed-check', 'echo "CURRENT: stub"; exit 0');
     const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
     const deployLog = join(h.bin, 'deploy.log');
     const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
@@ -230,6 +235,7 @@ describe('autodeploy.sh', () => {
     const apiPort = stub(h.bin, 'api-port', 'echo 3000');
 
     const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
       WBB_GUARD: guard,
       WBB_DEPLOY_CMD: deploy,
       WBB_HEALTH_CMD: health,
@@ -244,6 +250,78 @@ describe('autodeploy.sh', () => {
     expect(state.DEPLOYED_SHA).toBe(target);
     expect(state.PREVIOUS_SHA).toBe(base);
     expect(state.LAST_FAILED_SHA).toBeUndefined();
+    expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
+  });
+
+  // #461 added installed_is_stale(): a pending tag must be REFUSED while the
+  // installed deployer copy is out of date, because the safety logic about
+  // to run (guard, downgrade check, ...) is known-stale. #470: this claim
+  // had zero coverage — the WBB_INSTALLED_CHECK seam wasn't even stubbed, so
+  // these two tests are the first to exercise installed_is_stale() at all.
+  it('a checker reporting STALE refuses a pending tag: no deploy, exit 1, tag stays retryable', () => {
+    const h = setup();
+    seedState(h, base);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const audit = stub(h.bin, 'audit', 'exit 0');
+
+    const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_NOTIFY_CMD: notify,
+      WBB_AUDIT_CMD: audit,
+    });
+
+    expect(r.code).toBe(1);
+    expect(existsSync(guardMarker)).toBe(false); // refused before the guard even runs
+    expect(countLines(deployLog)).toBe(0);
+    const state = readState(h.stateDir);
+    expect(state.DEPLOYED_SHA).toBe(base); // unchanged
+    // Deliberately NOT recorded as LAST_FAILED_SHA (autodeploy.sh comment on
+    // this branch): the tag itself is fine, so it must stay retryable once
+    // the installed copy is fixed.
+    expect(state.LAST_FAILED_SHA).toBeUndefined();
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/installed deployer is out of date/);
+  });
+
+  it('a checker reporting CURRENT lets the deploy proceed exactly as today', () => {
+    const h = setup();
+    seedState(h, base);
+    const installedCheck = stub(h.bin, 'installed-check', 'echo "CURRENT: installed copies match origin/main"; exit 0');
+    const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    const health = stub(h.bin, 'health', 'exit 0');
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const audit = stub(h.bin, 'audit', 'exit 0');
+    const apiPort = stub(h.bin, 'api-port', 'echo 3000');
+
+    const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_HEALTH_CMD: health,
+      WBB_NOTIFY_CMD: notify,
+      WBB_AUDIT_CMD: audit,
+      WBB_API_PORT_CMD: apiPort,
+    });
+
+    expect(r.code).toBe(0);
+    expect(countLines(deployLog)).toBe(1);
+    const state = readState(h.stateDir);
+    expect(state.DEPLOYED_SHA).toBe(target);
+    expect(state.PREVIOUS_SHA).toBe(base);
     expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
   });
 
