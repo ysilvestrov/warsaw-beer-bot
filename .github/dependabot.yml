@@ -14,22 +14,13 @@ updates:
       root-prod:
         dependency-type: production
 
-    # Held back until the host moves to Node 22 — see the Node 22 issue.
-    # MEASURED 2026-08-18 on Node 20.20.2, which is what production runs:
-    #   better-sqlite3 13  engines node>=22  → SEGFAULT on require(), not an error
-    #   undici 8           engines node>=22.19 → webidl.util.markAsUncloneable is not a function
-    # npm does not enforce `engines` by default, so both installed happily and
-    # only running them revealed it. better-sqlite3 is the dangerous one: a
-    # segfault takes the bot down hard, and `npm ci` and `npm run build` both
-    # succeed first.
+    # `stream-json` 3 replaced `withParserAsStream` with a composable API, so it
+    # needs a code migration and Node has nothing to do with it — #467.
     #
-    # stream-json 3 is a different reason: it replaced `withParserAsStream`
-    # with a composable API, so it needs a code migration rather than a Node.
+    # The `better-sqlite3` 13 and `undici` 8 holds are GONE: they required Node
+    # >= 22 / >= 22.19 and the host now runs 24 (#458). Dependabot will re-propose
+    # both majors; `ci` decides, on 24.
     ignore:
-      - dependency-name: better-sqlite3
-        update-types: ["version-update:semver-major"]
-      - dependency-name: undici
-        update-types: ["version-update:semver-major"]
       - dependency-name: stream-json
         update-types: ["version-update:semver-major"]
 
@@ -45,17 +36,15 @@ updates:
       extension-dev:
         dependency-type: development
     ignore:
-      # jsdom 30 makes `src/sites/conformance.test.ts` fail:
-      # "re-badges after the grid is replaced with fresh nodes" gets null where
-      # it expects a badge. The test asserts a MutationObserver has re-badged
-      # within 50 ms, i.e. it encodes a TIMING assumption, and jsdom 30 changed
-      # whatever that assumption rested on.
+      # jsdom 30 makes `src/sites/conformance.test.ts` fail: "re-badges after the
+      # grid is replaced with fresh nodes" gets null where it expects a badge. The
+      # test asserts a MutationObserver re-badged within 50 ms — a timing
+      # assumption jsdom 30 invalidated.
       #
-      # Held rather than "fixed" by widening the wait: that is guessing dressed
-      # as a fix, and it could not be verified here anyway — jsdom 30 pulls
-      # undici 8, which needs Node >= 22.19, and this host runs Node 20, so the
-      # failure cannot even be reproduced locally. It reproduces only in CI,
-      # whose extension leg runs Node 22.
+      # It was ALSO held because it could not be reproduced on a Node 20 host
+      # (jsdom 30 pulls undici 8, which needs Node >= 22.19). That excuse died with
+      # #458 — the host runs 24 — but the defect did not. Tracked as #468; the hold
+      # stays until it is fixed rather than waited-out.
       - dependency-name: jsdom
         update-types: ["version-update:semver-major"]
 
