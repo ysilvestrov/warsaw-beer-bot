@@ -42,6 +42,13 @@ import path from 'node:path';
 // line reading like `uses: actions/setup-node@v7` or `node-version: N` is scanned
 // as if it were real YAML and can produce a spurious finding. Parsing block scalars
 // correctly would need an actual YAML parser, which is out of proportion here.
+//
+// Same category, measured 2026-08-20 and left alone deliberately: a matrix key that
+// appears ONLY inside an `exclude:` entry is read as if it defined the key, so a step
+// referencing it passes while `${{ matrix.node }}` would be empty at runtime. Proven
+// pre-existing by running the probe against the parent commit, and no workflow in this
+// repository uses `exclude:` — fixing it means understanding matrix semantics, not just
+// finding the key, and that is the YAML-parser line above.
 const root = path.join(__dirname, '..');
 
 function declaredMajor(): number {
