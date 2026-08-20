@@ -116,11 +116,20 @@ function seedState(h: Harness, deployedSha: string, lastFailedSha?: string) {
 }
 
 function run(h: Harness, extraEnv: Record<string, string>): { code: number; out: string } {
+  // Baseline default for the WBB_INSTALLED_CHECK seam: CURRENT, so a test
+  // that never mentions this seam still cannot reach the real
+  // /usr/local/bin/wbb-installed-current if installed_is_stale() is ever
+  // reordered ahead of the early exits (LAST_FAILED_SHA skip, PAUSED) that
+  // currently keep those tests from touching it at all (#470). Placed
+  // before the ...extraEnv spread so a test that DOES care about this seam
+  // can still override it.
+  const defaultInstalledCheck = stub(h.bin, 'installed-check-default', 'echo "CURRENT: default stub"; exit 0');
   const env = {
     ...process.env,
     HOME: h.home,
     XDG_DATA_HOME: h.dataDir,
     XDG_STATE_HOME: h.stateDir,
+    WBB_INSTALLED_CHECK: defaultInstalledCheck,
     ...extraEnv,
   };
   try {
@@ -244,6 +253,104 @@ describe('autodeploy.sh', () => {
     expect(state.DEPLOYED_SHA).toBe(target);
     expect(state.PREVIOUS_SHA).toBe(base);
     expect(state.LAST_FAILED_SHA).toBeUndefined();
+    expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
+  });
+
+  // #461 added installed_is_stale(): a pending tag must be REFUSED while the
+  // installed deployer copy is out of date, because the safety logic about
+  // to run (guard, downgrade check, ...) is known-stale. #470: this claim
+  // had zero coverage — the WBB_INSTALLED_CHECK seam wasn't even stubbed, so
+  // these two tests are the first to exercise installed_is_stale() at all.
+  it('a checker reporting STALE refuses a pending tag: no deploy, exit 1, tag stays retryable', () => {
+    const h = setup();
+    seedState(h, base);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const audit = stub(h.bin, 'audit', 'exit 0');
+    // #470 round 1: a checker that never actually refuses (a mutant, or a
+    // future reordering of the checks) would let the script fall through
+    // past this point into api_port()/healthy() — which, unstubbed, run the
+    // real `sudo -u warsaw-beer-bot wbb-read-env` and curl live production
+    // /health. Stub both so this test cannot reach either even on that path.
+    const health = stub(h.bin, 'health', 'exit 0');
+    const apiPort = stub(h.bin, 'api-port', 'echo 3000');
+
+    const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_NOTIFY_CMD: notify,
+      WBB_AUDIT_CMD: audit,
+      WBB_HEALTH_CMD: health,
+      WBB_API_PORT_CMD: apiPort,
+    });
+
+    expect(r.code).toBe(1);
+    expect(existsSync(guardMarker)).toBe(false); // refused before the guard even runs
+    expect(countLines(deployLog)).toBe(0);
+    const state = readState(h.stateDir);
+    expect(state.DEPLOYED_SHA).toBe(base); // unchanged
+    // Deliberately NOT recorded as LAST_FAILED_SHA (autodeploy.sh comment on
+    // this branch): the tag itself is fine, so it must stay retryable once
+    // the installed copy is fixed.
+    expect(state.LAST_FAILED_SHA).toBeUndefined();
+    // Named to the REFUSED-for-a-pending-tag path specifically — the idle
+    // report_stale_once() path shares the "installed deployer is out of
+    // date" wording but is unreachable here (a tag IS pending).
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/REFUSED for .*out of date/);
+  });
+
+  it('a checker reporting CURRENT lets the deploy proceed exactly as today', () => {
+    const h = setup();
+    seedState(h, base);
+    // #470 round 1: a marker, not just the CURRENT verdict, because a stub
+    // that is simply never consulted also produces exit 0 and a successful
+    // deploy — that's not evidence the seam was exercised. Proved by the
+    // reviewer: this test stayed green both when installed_is_stale() was
+    // mutated out entirely and when the stub was repointed at a
+    // /nonexistent path (installed_is_stale's own early-return at
+    // deploy/autodeploy.sh:202 swallows a missing/non-executable checker as
+    // "not stale"). The marker fails unless the checker binary actually ran.
+    const installedCheckMarker = join(h.bin, 'installed-check-invoked');
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      `touch "${installedCheckMarker}"; echo "CURRENT: installed copies match origin/main"; exit 0`,
+    );
+    const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    const health = stub(h.bin, 'health', 'exit 0');
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const audit = stub(h.bin, 'audit', 'exit 0');
+    const apiPort = stub(h.bin, 'api-port', 'echo 3000');
+
+    const r = run(h, {
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_HEALTH_CMD: health,
+      WBB_NOTIFY_CMD: notify,
+      WBB_AUDIT_CMD: audit,
+      WBB_API_PORT_CMD: apiPort,
+    });
+
+    expect(existsSync(installedCheckMarker)).toBe(true); // the seam was actually consulted
+    expect(r.code).toBe(0);
+    expect(countLines(deployLog)).toBe(1);
+    const state = readState(h.stateDir);
+    expect(state.DEPLOYED_SHA).toBe(target);
+    expect(state.PREVIOUS_SHA).toBe(base);
     expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
   });
 
