@@ -6,7 +6,7 @@ import path from 'node:path';
 // and nothing in the suite noticed. package.json's engines.node is the declaration;
 // this test makes every workflow agree with it.
 //
-// The anti-vacuity check has moved four times, each time because the previous shape
+// The anti-vacuity check has moved five times, each time because the previous shape
 // could be satisfied while covering less:
 //   1. a global floor (found.length >= 5) — didn't notice one workflow losing its
 //      only pin as long as the file-wide total stayed up;
@@ -17,17 +17,16 @@ import path from 'node:path';
 //   3. "pins >= actions/setup-node occurrences, per file" — still a pair of file-wide
 //      totals, not an association, so it broke two more ways at once: a SURPLUS pin
 //      elsewhere in the file (ci.yml's two matrix legs) could cover an unrelated
-//      unpinned step (a false negative — the dangerous direction), and a plain-text
-//      occurrence of the substring "actions/setup-node" in a YAML *comment* inflated
-//      the step count against an unchanged pin count (a false positive).
-// The unit that is actually honest is the STEP: each `actions/setup-node` step is
-// found individually and its OWN `with:` block is checked for a version key. A
-// comment can never match, because the step-detection regex anchors on `uses:`
-// being the line's first token (after an optional `- `) — a `#`-prefixed line never
-// starts with `uses:`. A step's pin is never "covered" by a pin that lives in a
-// different step or a different job, because coverage is decided from that step's
-// own block (and, for a matrix expression, from a matrix key resolved within that
-// step's own job) rather than from a file-wide count.
+//      unpinned step (a false negative), and a plain-text occurrence of the
+//      substring "actions/setup-node" in a YAML *comment* inflated the step count
+//      against an unchanged pin count (a false positive);
+//   4. per-step association, but scanning only FORWARD from the `uses:` line — didn't
+//      notice a `with:` block written ABOVE `uses:` in the same step. YAML mapping
+//      key order carries no semantics, so that is ordinary valid YAML, not a
+//      contrived shape, and the guard blocked a correctly-pinned step while
+//      reporting something false. Coverage is now a property of the step's whole
+//      BLOCK (boundaries found first, content searched anywhere inside), not of a
+//      scan direction from one line within it.
 const root = path.join(__dirname, '..');
 
 function declaredMajor(): number {
@@ -46,43 +45,44 @@ function fileLines(file: string): string[] {
   return readFileSync(path.join(root, '.github/workflows', file), 'utf8').split('\n');
 }
 
-// A step is a YAML sequence item; only its FIRST key carries the `- `. `uses:
-// actions/setup-node@v7` is either that first key (`- uses: ...`) or a later
-// sibling key of the same step (`- name: ...` then a plain `uses: ...` below it, as
-// codex-review.yml writes it) — both are matched, a comment mentioning the action
-// name never is, because the regex requires `uses:` as the line's own first token.
-const STEP_LINE = /^(\s*)(-\s+)?uses:\s*actions\/setup-node(?:@|\s|$)/;
+type Block = { startIdx: number; endIdx: number };
 
-function setupNodeSteps(lines: string[]): { line: number; startIdx: number; column: number }[] {
-  const steps: { line: number; startIdx: number; column: number }[] = [];
-  lines.forEach((raw, idx) => {
-    const m = STEP_LINE.exec(raw);
-    if (!m) return;
-    // `column` is where this step's key TEXT begins — the same column whether this
-    // line carries the leading `- ` or is a dash-less sibling of a key that did,
-    // since `- ` occupies exactly the width it indents past. That is what lets the
-    // block scan below treat both step shapes identically.
-    const column = m[1].length + (m[2]?.length ?? 0);
-    steps.push({ line: idx + 1, startIdx: idx, column });
-  });
-  return steps;
+// Every YAML sequence item (`- ...`) is a candidate step. A step's boundaries are
+// its own `- ` line through the line before the next one indented at or below it —
+// which is exactly where the next sibling item (or the end of the list) starts.
+// Blank lines don't decide anything and are skipped rather than treated as a dedent.
+function listItemBlocks(lines: string[]): Block[] {
+  const blocks: Block[] = [];
+  const dashLine = /^(\s*)-\s/;
+  for (let i = 0; i < lines.length; i++) {
+    const m = dashLine.exec(lines[i]);
+    if (!m) continue;
+    const dashIndent = m[1].length;
+    let end = lines.length;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() === '') continue;
+      const indent = lines[j].length - lines[j].trimStart().length;
+      if (indent <= dashIndent) {
+        end = j;
+        break;
+      }
+    }
+    blocks.push({ startIdx: i, endIdx: end });
+  }
+  return blocks;
 }
 
-// The lines belonging to a step: everything after it indented at or past the
-// step's own column (sibling keys land exactly on it, nested map/list content past
-// it), stopping at the first line that dedents below that column — which is either
-// the next step's `- ` or the end of the `steps:` list. Blank lines don't decide
-// anything either way and are skipped rather than treated as a dedent.
-function stepBlock(lines: string[], startIdx: number, column: number): string[] {
-  const block: string[] = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const raw = lines[i];
-    if (raw.trim() === '') continue;
-    const indent = raw.length - raw.trimStart().length;
-    if (indent < column) break;
-    block.push(raw);
+// `uses:` is either the block's own first key (`- uses: ...`) or a later sibling
+// key of the same step (`- name: ...` then a plain `uses: ...` below it, as
+// codex-review.yml writes it) — both match. A YAML comment never does: the regex
+// requires `uses:` as the line's own first token, which a `#`-prefixed line isn't.
+const USES_LINE = /^(?:-\s+)?uses:\s*actions\/setup-node(?:@|\s|$)/;
+
+function usesLineIn(lines: string[], block: Block): number | null {
+  for (let i = block.startIdx; i < block.endIdx; i++) {
+    if (USES_LINE.test(lines[i].trimStart())) return i;
   }
-  return block;
+  return null;
 }
 
 // Job boundaries (top-level keys directly under `jobs:`), so a matrix expression is
@@ -120,21 +120,20 @@ function numericValuesFor(lines: string[], key: string, start: number, end: numb
   return values;
 }
 
-function stepCoverage(
-  lines: string[],
-  step: { startIdx: number; column: number },
-): { covered: boolean } {
-  const block = stepBlock(lines, step.startIdx, step.column);
+// Coverage is decided from the step's whole block — every line between its
+// boundaries — not from a position relative to the `uses:` line found within it.
+// That is what makes `with:` written above `uses:` behave the same as below it.
+function stepCoverage(lines: string[], block: Block): { covered: boolean } {
   const versionLine = /^\s*(node-version(-file)?):\s*(.+?)\s*$/;
-  for (const raw of block) {
-    const m = versionLine.exec(raw);
+  for (let i = block.startIdx; i < block.endIdx; i++) {
+    const m = versionLine.exec(lines[i]);
     if (!m) continue;
     if (m[2]) return { covered: false }; // node-version-file: — no numeric pin, ever.
     const value = m[3].replace(/^['"]|['"]$/g, '');
     if (/^\d+$/.test(value)) return { covered: true }; // literal number.
     const matrixRef = /^\$\{\{\s*matrix\.([\w-]+)\s*\}\}$/.exec(value);
     if (matrixRef) {
-      const { start, end } = jobRangeFor(lines, step.startIdx);
+      const { start, end } = jobRangeFor(lines, block.startIdx);
       const values = numericValuesFor(lines, matrixRef[1], start, end);
       return { covered: values.length > 0 };
     }
@@ -143,13 +142,22 @@ function stepCoverage(
   return { covered: false }; // no version key in this step's block at all.
 }
 
+function setupNodeSteps(lines: string[]): { line: number; block: Block }[] {
+  const steps: { line: number; block: Block }[] = [];
+  for (const block of listItemBlocks(lines)) {
+    const usesIdx = usesLineIn(lines, block);
+    if (usesIdx !== null) steps.push({ line: usesIdx + 1, block });
+  }
+  return steps;
+}
+
 function pinsIn(file: string): number[] {
   const text = readFileSync(path.join(root, '.github/workflows', file), 'utf8');
   // Matches `node-version: 20` and matrix legs `- node: 20`. An expression such
   // as `node-version: ${{ matrix.node }}` carries no digit and is skipped — the
   // matrix entry it resolves to is caught by the same regex. This is the file-wide
   // "does every pin equal engines.node's major" check, unchanged since it introduced
-  // no false pass/fail of its own — only the per-step coverage check above did.
+  // no false pass/fail of its own — only the step-coverage check above did.
   return [...text.matchAll(/^\s*(?:-\s*)?node(?:-version)?:\s*['"]?(\d+)/gm)].map((m) =>
     Number(m[1]),
   );
@@ -169,7 +177,7 @@ test('every workflow pins the Node major that package.json declares', () => {
   for (const file of nodeWorkflows) {
     const lines = fileLines(file);
     for (const step of setupNodeSteps(lines)) {
-      if (!stepCoverage(lines, step).covered) uncovered.push({ file, line: step.line });
+      if (!stepCoverage(lines, step.block).covered) uncovered.push({ file, line: step.line });
     }
   }
 
@@ -180,9 +188,10 @@ test('every workflow pins the Node major that package.json declares', () => {
     }
   }
 
-  // A step whose own `with:` block carries no numeric pin — `node-version-file:`,
-  // a flow-list matrix, or no version key at all — is a coverage gap, not a pass,
-  // no matter how many pins exist elsewhere in the file.
+  // A step whose own block carries no numeric pin — `node-version-file:`, a
+  // flow-list matrix, or no version key at all — is a coverage gap, not a pass, no
+  // matter how many pins exist elsewhere in the file, and no matter where inside
+  // the step's own block the version key was written.
   expect(uncovered).toEqual([]);
   expect(mismatched).toEqual([]);
 });
