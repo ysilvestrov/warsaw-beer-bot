@@ -215,6 +215,34 @@ There is no unit test for "the host runs the right runtime", so the evidence is 
 4. **Post-cutover verification**: both journals clean, the bot answers, and #435's timer resumes with
    `DEPLOYED_SHA` equal to `main`.
 
+## Discovered during execution — #470
+
+The rehearsal (§1.2) tripped on its own gate: `npm test` was red on this host, identically on Node
+24, Node 22 **and** production's Node 20. Not a runtime finding at all.
+
+`scripts/autodeploy/autodeploy.test.ts` stubs `WBB_GUARD`, `WBB_DEPLOY_CMD`, `WBB_NOTIFY_CMD` and
+`WBB_AUDIT_CMD`, but not `WBB_INSTALLED_CHECK`. So `installed_is_stale()` — added by #461 — invoked
+the **real** `/usr/local/bin/wbb-installed-current` against the test's throwaway repository, judged
+it stale, and refused to deploy. Measured both ways:
+
+| condition | result |
+|---|---|
+| `/usr/local/bin/wbb-installed-current` present | `Tests 3 failed \| 2 passed (5)` |
+| `WBB_INSTALLED_CHECK=/nonexistent/…` | `Tests 5 passed (5)` |
+
+The suite was green because a host file was **missing**, and went red the moment this host was
+configured the way production is configured — which happened on 2026-08-20, when
+`install-autodeploy.sh` first ran after #461. The machine where the deployer actually runs was the
+one machine that could not run its tests.
+
+The larger half: `installed_is_stale()` had no test. `installed-current.sh` has six of its own, but
+#461's claim — *a pending tag is refused while the installed deployer is out of date* — was asserted
+by nothing, and the three failures were that untested path firing by accident.
+
+Fixed as #470 (test hermeticity plus the missing coverage) ahead of this upgrade, because the
+rehearsal's gate is a green suite on this host and routing around it would have left the defect
+living on production.
+
 ## Out of scope
 
 Each has its own issue, so that none of them survives as a comment in a YAML file:
