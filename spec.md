@@ -1569,7 +1569,8 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 ### 5.9 Інфраструктура / деплой
 - Runtime: **Node ≥ 20** під systemd (`warsaw-beer-bot.service`).
 - SQLite у `/var/lib/warsaw-beer-bot/bot.db` (WAL).
-- Деплой: rsync working tree → `/opt` → `npm ci` → `npm run build` →
+- Деплой: rsync allowlist build/runtime-файлів із working tree → `/opt` →
+  `npm ci` → `npm run build` →
   `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**
   (`enable --now` на запущеному unit'і не перезапускає).
 - Бекап: **Litestream** → Cloudflare R2 (стрім WAL), креденшели лише з env/конфіга.
