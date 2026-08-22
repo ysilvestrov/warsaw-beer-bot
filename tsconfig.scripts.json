@@ -24,6 +24,7 @@
     "scripts/cws-auth-bootstrap.ts",
     "scripts/cws-auth-bootstrap.test.ts",
     "scripts/publish-store-release.ts",
-    "scripts/publish-store-release.test.ts"
+    "scripts/publish-store-release.test.ts",
+    "scripts/rearm-eligible-drinks.ts"
   ]
 }
