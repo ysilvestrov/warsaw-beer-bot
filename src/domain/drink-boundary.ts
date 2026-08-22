@@ -1,4 +1,4 @@
-import { breweryCore } from './identity';
+import { breweryCore } from '../sources/ontap/identity';
 
 export interface OntapNonBeerInput {
   style: string | null;

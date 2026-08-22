@@ -2,7 +2,7 @@ import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 import { loadEnv } from '../src/config/env';
 import { retireEnrichFailure } from '../src/storage/enrich_failures';
-import { isOntapNonBeerTap } from '../src/sources/ontap/non-beer';
+import { isOntapNonBeerTap } from '../src/domain/drink-boundary';
 import { loadOperatorEnv } from './operator-env';
 
 loadOperatorEnv();

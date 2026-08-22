@@ -1,5 +1,5 @@
-import { isOntapNonBeerTap } from './non-beer';
-import { ontapTapExclusion } from './non-beer';
+import { isOntapNonBeerTap } from './drink-boundary';
+import { ontapTapExclusion } from './drink-boundary';
 
 describe('isOntapNonBeerTap', () => {
   test.each([

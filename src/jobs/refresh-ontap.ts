@@ -4,7 +4,7 @@ import type { Http } from '../sources/http';
 import type { Geocoder } from '../sources/geocoder';
 import { parseOntapCityIndex, type IndexPub } from '../sources/ontap/index';
 import { CITIES, type City } from '../domain/cities';
-import { ontapTapExclusion } from '../sources/ontap/non-beer';
+import { ontapTapExclusion } from '../domain/drink-boundary';
 import { isOntapEmptyTapRef, parsePubPage } from '../sources/ontap/pub';
 import { resolveTapIdentity } from '../sources/ontap/identity';
 import { upsertPub } from '../storage/pubs';
