@@ -6,9 +6,10 @@ import {
   recordLookupSuccess,
   recordLookupTransient,
 } from '../storage/beers';
-import { recordEnrichFailure, clearEnrichFailure } from '../storage/enrich_failures';
+import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 import type { LookupOutcome } from './untappd-lookup';
 import { summarizeCandidates } from './candidate-format';
+import { classifyOrphanAsNonBeer, SHADOW_ONLY } from './drink-boundary';
 
 export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient' | 'skipped' | 'blocked';
 
@@ -60,6 +61,27 @@ export function applyLookupOutcome(
         at: nowIso,
       });
       recordLookupNotFound(deps.db, beerId, nowIso);
+      const boundary = classifyOrphanAsNonBeer({
+        brewery: input.brewery,
+        name: input.name,
+        style: null,
+        candidates_count: outcome.candidates.length,
+      });
+      if (boundary) {
+        if (SHADOW_ONLY) {
+          deps.log.warn(
+            { beerId, token: boundary.token, name: input.name, shadow: true },
+            'drink-boundary: would classify as not_a_beer',
+          );
+        } else {
+          const result = setEnrichFailureReview(
+            deps.db, beerId, 'not_a_beer', `auto: ${boundary.token}`, nowIso, null,
+          );
+          if (result !== 'written') {
+            deps.log.warn({ beerId, result }, 'drink-boundary: auto-classify refused');
+          }
+        }
+      }
       return 'not_found';
     case 'transient':
       deps.log.warn({ err: outcome.error, beerId }, 'untappd-lookup transient failure');

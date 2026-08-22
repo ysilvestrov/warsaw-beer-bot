@@ -1,5 +1,11 @@
 import { breweryCore } from '../sources/ontap/identity';
 
+// #430: the enforcer writes nothing until a week of shadow logs has been compared with
+// what the model decided for the same rows. Flipping this to false is the whole change.
+// The reason this is not shipped live: the defect that motivated it was a rule that ran
+// unattended for six days and destroyed rows nobody was watching.
+export const SHADOW_ONLY = true;
+
 export interface OntapNonBeerInput {
   style: string | null;
   brewery_ref: string | null;

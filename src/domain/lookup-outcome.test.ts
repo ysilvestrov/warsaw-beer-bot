@@ -6,6 +6,7 @@ import { normalizeName, normalizeBrewery } from './normalize';
 import { applyLookupOutcome } from './lookup-outcome';
 import type { LookupOutcome } from './untappd-lookup';
 import type { SearchResult } from '../sources/untappd/search';
+import { SHADOW_ONLY } from './drink-boundary';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -113,5 +114,36 @@ describe('applyLookupOutcome merge', () => {
       { untappd_beer_id: number };
     expect(link.untappd_beer_id).toBe(canonicalId);  // match_links redirected to the canonical row
     db.close();
+  });
+});
+
+describe('#430 post-search non-beer enforcer', () => {
+  test('logs what it would classify and writes NO review_class while shadowed', () => {
+    expect(SHADOW_ONLY).toBe(true); // the flip is a deliberate, separate change
+    const { db, id } = fresh();
+    const warns: unknown[] = [];
+    const log = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['https://x/?q=aperol+spritz'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Culaccino', name: 'Aperol Spritz' });
+
+    const row = db.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { review_class: string | null };
+    expect(row.review_class).toBeNull();          // the DB write, not just the log
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toMatchObject({ beerId: id, token: 'aperol', shadow: true });
+  });
+
+  test('says nothing at all about a row it would not classify', () => {
+    const { db, id } = fresh();
+    const warns: unknown[] = [];
+    const log = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['https://x/?q=hazy+ipa'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Pinta', name: 'Hazy IPA' });
+
+    expect(warns).toHaveLength(0);
   });
 });
