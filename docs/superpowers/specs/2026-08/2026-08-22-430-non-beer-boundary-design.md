@@ -80,6 +80,28 @@ WINE BOYZ BAND        Spoko Cydr Zweigelt   Cider - Dry
 beers matched, so none of them is ever in the orphan population. The false-positive set is not
 reduced by the condition — it is very nearly *constructed away* by it.
 
+> **CORRECTED after measurement (see the post-search enforcer work below).** This premise is
+> wrong, and the wrongness is not academic — it is the reason `NON_BEER_NAME_TOKENS` shipped with
+> five tokens instead of the dozen originally proposed. "Already an orphan" does not remove the
+> 554-beer population from risk: a beer that normally matches can land in the orphan pool for an
+> UNRELATED reason (a brewery-alias gap, query noise) and then, if a name-side token fires on it,
+> get sealed as `not_a_beer` permanently. Word-boundary-testing every original candidate token
+> against all 31224 matched beers (name + style) found real, non-hypothetical casualties:
+>
+> ```
+> spritz 9   mojito 8   vodka 4   aperitivo 3   sangria 3   prosecco 1   frizzante 1
+> aperol 0   nalewka 0  szprycer 0  wódka 0     wodka 0
+> ```
+>
+> Real casualties included `Aperitivo Stout`, `Emerald Mojito Gose`, `Bean & Citrus Spritz`,
+> `Tatanka Vodka Edition` — all real, already-matched beers that a "safe because already orphaned"
+> rule would have sealed away the moment they next failed a search for any unrelated reason.
+> Consequence: `NON_BEER_NAME_TOKENS` ships as only the five zero-collision tokens (`aperol`,
+> `nalewka`, `szprycer`, `wódka`, `wodka`), and `Hugo Spritz` — one of the three
+> deliberately-deferred ingest leaks (below) — is now not caught by anything at all. That is the
+> accepted cheap direction: a missed leak stays a visible, reversible orphan; a wrongly-sealed
+> match does not.
+
 ### 3. The ingest filter exists, is wired, and leaks for one structural reason
 
 `ontapTapExclusion` is called at `src/jobs/refresh-ontap.ts:83`, with history back to #156, and
