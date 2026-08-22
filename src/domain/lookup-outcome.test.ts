@@ -170,12 +170,15 @@ describe('#430 auto-classify must not overwrite an existing verdict (Critical A)
       kind: 'not_found', searchUrls: ['u'], candidates: [],
     } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Nalewka gruszkowa' });
 
-    // Meaningful under either flag state. While SHADOW_ONLY is true (committed state)
-    // nothing writes at all, so this can't fail from the guard. Once SHADOW_ONLY
-    // flips to false, the ONLY thing stopping the classifier from overwriting
-    // 'matcher_bug' with the irreversible 'not_a_beer' is the reviewClassOf(...) !==
-    // null guard added in lookup-outcome.ts — proved with the flag temporarily
-    // flipped for this exact test; see task-final-fix-report.md for that run's output.
+    // This test only proves the SHADOW_ONLY=true wiring: with the committed flag,
+    // applyLookupOutcome never reaches the guard branch at all (autoClassifyAction
+    // short-circuits to 'log' before currentReviewClass is even read), so nothing
+    // here can fail from the guard being wrong. That is exactly the gap #430 closed:
+    // the guard itself — matched + not shadow + existing review_class → 'none' — is
+    // proved exhaustively and directly, with no flag to flip, by autoClassifyAction's
+    // own tests in drink-boundary.test.ts ("the guard: an existing review_class
+    // always wins"). This test's job is narrower: confirm review_class is still
+    // 'matcher_bug' after a retry under the real committed flag state.
     expect(failRow(db, id).review_class).toBe('matcher_bug');
   });
 });

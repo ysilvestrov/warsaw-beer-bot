@@ -1,6 +1,7 @@
 import {
   isOntapNonBeerTap, ontapTapExclusion, ELIGIBLE_TOKENS,
   classifyOrphanAsNonBeer, NON_BEER_NAME_TOKENS, type OrphanBoundaryInput,
+  autoClassifyAction,
 } from './drink-boundary';
 
 describe('isOntapNonBeerTap', () => {
@@ -311,5 +312,37 @@ describe('NON_BEER_NAME_TOKENS is narrower than the ingest lists on purpose', ()
     for (const proven of ['spritz', 'mojito', 'vodka', 'aperitivo', 'sangria', 'prosecco', 'frizzante']) {
       expect(NON_BEER_NAME_TOKENS).not.toContain(proven);
     }
+  });
+});
+
+// #430: this is the ONLY place the auto-classify guard is proved. It is a pure
+// function of three explicit inputs, so every case runs in CI on every commit — no
+// module-level SHADOW_ONLY flag to flip, unlike lookup-outcome.test.ts's integration
+// test, which only exercises the committed shadow=true wiring and can never reach
+// the guard branch at all.
+describe('autoClassifyAction', () => {
+  it('does nothing when the predicate did not match', () => {
+    expect(autoClassifyAction(false, null, true)).toBe('none');
+    expect(autoClassifyAction(false, null, false)).toBe('none');
+    expect(autoClassifyAction(false, 'matcher_bug', false)).toBe('none');
+  });
+
+  it('logs only, never writes, while shadowed', () => {
+    expect(autoClassifyAction(true, null, true)).toBe('log');
+    expect(autoClassifyAction(true, 'matcher_bug', true)).toBe('log');
+  });
+
+  it('writes when matched, live, and no existing verdict', () => {
+    expect(autoClassifyAction(true, null, false)).toBe('write');
+  });
+
+  // the guard: an existing review_class always wins, live, over the irreversible
+  // not_a_beer verdict — this is the case #430 exists to protect.
+  it('the guard: refuses to overwrite an existing matcher_bug verdict', () => {
+    expect(autoClassifyAction(true, 'matcher_bug', false)).toBe('none');
+  });
+
+  it('the guard: refuses to overwrite an existing not_on_untappd verdict', () => {
+    expect(autoClassifyAction(true, 'not_on_untappd', false)).toBe('none');
   });
 });

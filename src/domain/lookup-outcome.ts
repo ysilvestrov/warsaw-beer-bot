@@ -9,7 +9,7 @@ import {
 import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, reviewClassOf } from '../storage/enrich_failures';
 import type { LookupOutcome } from './untappd-lookup';
 import { summarizeCandidates } from './candidate-format';
-import { classifyOrphanAsNonBeer, SHADOW_ONLY } from './drink-boundary';
+import { classifyOrphanAsNonBeer, autoClassifyAction, SHADOW_ONLY } from './drink-boundary';
 
 export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient' | 'skipped' | 'blocked';
 
@@ -68,27 +68,39 @@ export function applyLookupOutcome(
         candidates_count: outcome.candidates.length,
       });
       if (boundary) {
-        if (SHADOW_ONLY) {
-          deps.log.warn(
-            { beerId, token: boundary.token, name: input.name, shadow: true },
-            'drink-boundary: would classify as not_a_beer',
-          );
-        } else if (reviewClassOf(deps.db, beerId) !== null) {
-          // A row already carrying a verdict (matcher_bug, not_on_untappd, ...) keeps
-          // that class across retries — recordEnrichFailure only nulls it on a
-          // candidates-count crossing or an unlocked_at settle. Auto-classify must
-          // never overwrite a real verdict with the one irreversible one: a row a
-          // human/model already triaged is not this function's to reclassify (#430).
-          deps.log.warn(
-            { beerId, token: boundary.token, name: input.name },
-            'drink-boundary: auto-classify skipped, row already has a review_class',
-          );
-        } else {
-          const result = setEnrichFailureReview(
-            deps.db, beerId, 'not_a_beer', `auto: ${boundary.token}`, nowIso, null,
-          );
-          if (result !== 'written') {
-            deps.log.warn({ beerId, result }, 'drink-boundary: auto-classify refused');
+        // reviewClassOf is a DB read; only worth doing once there's something to
+        // decide, and never needed under the committed SHADOW_ONLY=true path — this
+        // runs on every failed enrichment, so no read is added to that hot path (#430).
+        const currentReviewClass = SHADOW_ONLY ? null : reviewClassOf(deps.db, beerId);
+        switch (autoClassifyAction(true, currentReviewClass, SHADOW_ONLY)) {
+          case 'log':
+            deps.log.warn(
+              { beerId, token: boundary.token, name: input.name, shadow: true },
+              'drink-boundary: would classify as not_a_beer',
+            );
+            break;
+          case 'none':
+            // Only reachable here via the guard (matched is always true in this
+            // branch): a row already carrying a verdict (matcher_bug,
+            // not_on_untappd, ...) keeps it — recordEnrichFailure only nulls
+            // review_class on a candidates-count crossing or an unlocked_at settle.
+            // Auto-classify must never overwrite a real verdict with the one
+            // irreversible one. This guard is proved exhaustively by
+            // autoClassifyAction's own tests in drink-boundary.test.ts, not here —
+            // this file's #430 test only proves the shadow-path wiring (#430).
+            deps.log.warn(
+              { beerId, token: boundary.token, name: input.name },
+              'drink-boundary: auto-classify skipped, row already has a review_class',
+            );
+            break;
+          case 'write': {
+            const result = setEnrichFailureReview(
+              deps.db, beerId, 'not_a_beer', `auto: ${boundary.token}`, nowIso, null,
+            );
+            if (result !== 'written') {
+              deps.log.warn({ beerId, result }, 'drink-boundary: auto-classify refused');
+            }
+            break;
           }
         }
       }

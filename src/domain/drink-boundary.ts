@@ -240,3 +240,25 @@ export function classifyOrphanAsNonBeer(
   const hit = NON_BEER_NAME_TOKENS.find((token) => bag.has(token));
   return hit ? { nonBeer: true, token: hit } : null;
 }
+
+export type AutoClassifyAction = 'none' | 'log' | 'write';
+
+// Pure decision the caller (lookup-outcome.ts) switches on. Extracted so the guard
+// that stops auto-classify from overwriting an existing review_class can be tested
+// directly, without flipping the module-level SHADOW_ONLY flag: that flag being true
+// in committed code means a test exercising the real call site never reaches the
+// guard branch at all, so the guard had no CI coverage before this function existed
+// (#430). See drink-boundary.test.ts for the exhaustive cases this owns.
+export function autoClassifyAction(
+  matched: boolean,
+  currentReviewClass: string | null,
+  shadow: boolean,
+): AutoClassifyAction {
+  if (!matched) return 'none';
+  if (shadow) return 'log';
+  // A row already carrying a verdict (matcher_bug, not_on_untappd, ...) keeps that
+  // class: auto-classify must never overwrite a real verdict with the one
+  // irreversible one, since not_a_beer can never be re-triaged back out (#430).
+  if (currentReviewClass !== null) return 'none';
+  return 'write';
+}
