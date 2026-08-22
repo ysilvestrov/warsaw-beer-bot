@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
 import { ScopeSchema, SCOPE_COLS, SCOPE_OPS } from './triage-scope';
+import { eligibleFamiliesForPrompt } from './drink-boundary';
 
 // REVIEW_CLASSES lives in its own leaf module and is re-exported here so existing
 // importers of it from this file keep working. It used to be defined in this file
@@ -201,10 +202,10 @@ export function buildTriagePrompt(input: TriageInput): string {
     'first NO. The classes are the NO branches, so exactly one always applies:',
     '',
     '1. Is the row a beer product at all? NO -> not_a_beer.',
-    '   Merch, glassware, wine/cider/cocktail/food, kombucha, and bundles: mystery',
-    '   boxes, multipacks, gift sets, "Brewery Pack". A bundle is not a beer even when',
-    '   every bottle inside it is. This is the ONE verdict that is never revisited, so',
-    '   apply it only to the product itself, never to a beer you merely cannot find.',
+    '   Merch, glassware, wine/cocktail/food, and bundles: mystery boxes, multipacks,',
+    '   gift sets, "Brewery Pack". A bundle is not a beer even when every bottle inside',
+    '   it is. This is the ONE verdict that is never revisited, so apply it only to the',
+    '   product itself, never to a beer you merely cannot find.',
     '2. Is OUR row faithful to the shop page? NO -> parser_bug.',
     '   Wrong brewery/name split, truncation, HTML noise, a shop or ingredient token in',
     '   the brewery field. The fix is in our adapter. If the SHOP\'s own listing is',
@@ -227,6 +228,10 @@ export function buildTriagePrompt(input: TriageInput): string {
     'The difference between 3 and 4 is whether you can NAME the beer. "I know it is',
     'Guinness but our rules cannot reach it" is matcher_bug, not unidentifiable —',
     'difficulty of the fix is never a classification input.',
+    '',
+    `Eligible drink families — ${eligibleFamiliesForPrompt()} — ARE beer-adjacent and`,
+    'Untappd lists them; our catalogue already holds 1339 matched rows across them. NEVER',
+    'class one as not_a_beer merely because it is not literally beer.',
     '',
     'Pivot on candidates_count before you blame query noise:',
     '- candidates_count > 0: the search WORKS and returned candidates, so the miss is on the',

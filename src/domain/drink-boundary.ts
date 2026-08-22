@@ -34,6 +34,13 @@ export const ELIGIBLE_TOKENS = [
   'cydr', 'cider', 'kwas chlebowy', 'kvass', 'квас', 'mead', 'melomel', 'kombucha',
 ] as const;
 
+// The triage prompt must not restate the boundary in prose — two independent
+// statements of one rule is exactly what let the prompt bury cider for six days
+// while this module was keeping it eligible. #430.
+export function eligibleFamiliesForPrompt(): string {
+  return ELIGIBLE_TOKENS.join(', ');
+}
+
 const EXACT_STYLE_PHRASES = new Set([
   'aperitivo',
   'aperitivo spritz',
