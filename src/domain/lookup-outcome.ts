@@ -6,7 +6,7 @@ import {
   recordLookupSuccess,
   recordLookupTransient,
 } from '../storage/beers';
-import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
+import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, reviewClassOf } from '../storage/enrich_failures';
 import type { LookupOutcome } from './untappd-lookup';
 import { summarizeCandidates } from './candidate-format';
 import { classifyOrphanAsNonBeer, SHADOW_ONLY } from './drink-boundary';
@@ -72,6 +72,16 @@ export function applyLookupOutcome(
           deps.log.warn(
             { beerId, token: boundary.token, name: input.name, shadow: true },
             'drink-boundary: would classify as not_a_beer',
+          );
+        } else if (reviewClassOf(deps.db, beerId) !== null) {
+          // A row already carrying a verdict (matcher_bug, not_on_untappd, ...) keeps
+          // that class across retries — recordEnrichFailure only nulls it on a
+          // candidates-count crossing or an unlocked_at settle. Auto-classify must
+          // never overwrite a real verdict with the one irreversible one: a row a
+          // human/model already triaged is not this function's to reclassify (#430).
+          deps.log.warn(
+            { beerId, token: boundary.token, name: input.name },
+            'drink-boundary: auto-classify skipped, row already has a review_class',
           );
         } else {
           const result = setEnrichFailureReview(

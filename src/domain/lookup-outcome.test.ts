@@ -7,6 +7,7 @@ import { applyLookupOutcome } from './lookup-outcome';
 import type { LookupOutcome } from './untappd-lookup';
 import type { SearchResult } from '../sources/untappd/search';
 import { SHADOW_ONLY } from './drink-boundary';
+import { setEnrichFailureReview } from '../storage/enrich_failures';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -145,5 +146,36 @@ describe('#430 post-search non-beer enforcer', () => {
     } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Pinta', name: 'Hazy IPA' });
 
     expect(warns).toHaveLength(0);
+  });
+});
+
+describe('#430 auto-classify must not overwrite an existing verdict (Critical A)', () => {
+  test('a row already triaged keeps its review_class across a not_found retry that would otherwise trip the classifier', () => {
+    const { db, id, log } = fresh();
+
+    // Seed: a prior not_found failure, then a real triage verdict on it — exactly the
+    // shape of a row `enrichOneOrphan` retries every day (matcher_bug stays in the
+    // retry pool, unlike not_a_beer).
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-20T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Some Real Beer' });
+    const seeded = setEnrichFailureReview(db, id, 'matcher_bug', 'seed', '2026-08-20T00:00:01.000Z');
+    expect(seeded).toBe('written'); // fails loud if the seed itself didn't take
+    expect(failRow(db, id).review_class).toBe('matcher_bug');
+
+    // Retry: zero candidates again (0<->0, no crossing, so recordEnrichFailure
+    // preserves review_class) with a name carrying a surviving NON_BEER_NAME_TOKENS
+    // token ('nalewka') — exactly what trips classifyOrphanAsNonBeer.
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Nalewka gruszkowa' });
+
+    // Meaningful under either flag state. While SHADOW_ONLY is true (committed state)
+    // nothing writes at all, so this can't fail from the guard. Once SHADOW_ONLY
+    // flips to false, the ONLY thing stopping the classifier from overwriting
+    // 'matcher_bug' with the irreversible 'not_a_beer' is the reviewClassOf(...) !==
+    // null guard added in lookup-outcome.ts — proved with the flag temporarily
+    // flipped for this exact test; see task-final-fix-report.md for that run's output.
+    expect(failRow(db, id).review_class).toBe('matcher_bug');
   });
 });

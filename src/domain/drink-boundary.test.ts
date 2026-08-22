@@ -163,6 +163,41 @@ describe('#430 narrowing: vodka is an exact-phrase style match, not a substring'
   });
 });
 
+// Critical B (final whole-branch review, 2026-08-22): real rows from our OWN matched
+// catalogue, replayed through isOntapNonBeerTap with style=null (the measured common
+// case — 64/83 rows). Before the fix all three came back 'non-beer': the eligible
+// short-circuit tested `style` alone, so a cider/mead named only in brewery_ref/
+// beer_ref was invisible to it, and the producer's name happens to trip the brewery
+// wine-family checks. A real drink was being dropped at ingest — permanently, since a
+// dropped tap never reaches the post-search enforcer at all.
+describe('#430 Critical B: the eligible short-circuit must see brewery_ref/beer_ref, not just style', () => {
+  const CATALOGUE_LEAKS: { brewery_ref: string; beer_ref: string; trueStyle: string }[] = [
+    { brewery_ref: 'WINE BOYZ BAND & SPOKO', beer_ref: 'Spoko Cydr Zweigelt Edition', trueStyle: 'Cider - Dry' },
+    { brewery_ref: 'Hidden Legend Winery', beer_ref: 'Wild Elderberry Mead', trueStyle: 'Mead - Melomel' },
+    { brewery_ref: 'Gut Wine', beer_ref: 'Nekyvana Kachka', trueStyle: 'Cider - Dry' },
+  ];
+  for (const row of CATALOGUE_LEAKS) {
+    it(`keeps ${row.brewery_ref} / ${row.beer_ref} (really ${row.trueStyle}) eligible with style=null`, () => {
+      expect(isOntapNonBeerTap({ style: null, brewery_ref: row.brewery_ref, beer_ref: row.beer_ref })).toBe(false);
+      expect(ontapTapExclusion({ style: null, brewery_ref: row.brewery_ref, beer_ref: row.beer_ref })).toBeNull();
+    });
+  }
+
+  // Isolates the eligible-broadening change from the BREWERY_TOKENS narrowing next to
+  // it: 'vino' stays a brewery trigger (VINO KARPATIA above needs it), so this row
+  // would still be wrongly flagged today if the eligible check only looked at style —
+  // it is rescued ONLY because the check now also reads beer_ref.
+  it('rescues a real cider sold by a brewery whose name still trips a kept brewery token', () => {
+    expect(isOntapNonBeerTap({ style: null, brewery_ref: 'VINO KARPATIA', beer_ref: 'Cydr wiśniowy' })).toBe(false);
+  });
+
+  it('still flags the same brewery when the name gives no eligible signal (unchanged verdict)', () => {
+    // Companion to the row above: proves the rescue is about the NAME, not about
+    // VINO KARPATIA having stopped being a brewery-side trigger.
+    expect(isOntapNonBeerTap({ style: null, brewery_ref: 'VINO KARPATIA', beer_ref: 'Biały bez' })).toBe(true);
+  });
+});
+
 const orphan = (over: Partial<OrphanBoundaryInput> = {}): OrphanBoundaryInput => ({
   brewery: '', name: '', style: null, candidates_count: 0, ...over,
 });

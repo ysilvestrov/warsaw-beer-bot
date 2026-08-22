@@ -62,9 +62,16 @@ const EXACT_STYLE_PHRASES = new Set([
   'własny koktajl z kija',
 ]);
 
+// Bare 'wine' (English) is deliberately absent: measured 2026-08-22 against our own
+// matched catalogue, it collides with real cider/mead producers whose BRAND merely
+// contains the word — 'WINE BOYZ BAND & SPOKO' (Cider - Dry), 'Hidden Legend Winery'
+// (Mead - Melomel), 'Gut Wine' (Cider - Dry). Same asymmetry as NON_BEER_NAME_TOKENS
+// below: a bare wine-family word is never safe as a brewery substring. 'wino'/'vino'/
+// 'vini' stay — WINO KARPATIA / VINO KARPATIA are measured leaks this list must still
+// catch (scripts/retire-resolved-orphans.test.ts depends on the Polish spelling too) —
+// but bare English 'wine' buys nothing no other token here already covers. #430.
 const BREWERY_TOKENS = [
   'wino',
-  'wine',
   'winiarska',
   'maccari',
   'frizzanti',
@@ -103,9 +110,18 @@ function looksLikeScheduleOrNav(brewery: string): boolean {
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   const style = norm(tap.style);
-  if (style && ELIGIBLE_TOKENS.some((token) => style.includes(token))) {
+
+  // #430: the eligible short-circuit must see the same three fields
+  // classifyOrphanAsNonBeer does — style alone misses it on the 64/83 measured rows
+  // where style is NULL and the drink family is only visible in the name (a cider
+  // sold by a "Winery"-named producer, a mead, a kvass). Substring, deliberately
+  // generous: a false "eligible" costs one Untappd search, a false exclusion here is
+  // silent and never revisited (#306).
+  const eligibleHaystack = norm(`${tap.style ?? ''} ${tap.brewery_ref ?? ''} ${tap.beer_ref ?? ''}`);
+  if (ELIGIBLE_TOKENS.some((token) => eligibleHaystack.includes(token))) {
     return false;
   }
+
   if (style && (EXACT_STYLE_PHRASES.has(style) || STYLE_TOKENS.some((token) => style.includes(token)))) {
     return true;
   }
