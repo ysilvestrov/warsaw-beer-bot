@@ -24,10 +24,6 @@ const STYLE_TOKENS = [
   'półwytrawne',
   'słodkie',
   'soft drink',
-  'wódka',
-  'wodka',
-  'vodka',
-  'sangria',
 ];
 
 // Drinks Untappd lists and our matcher resolves every day: 1339 rows in our own
@@ -49,6 +45,7 @@ const EXACT_STYLE_PHRASES = new Set([
   'mojito drink',
   'orange bitter',
   'primitivo',
+  'wódka ziemniaczana',
   'własny koktajl z kija',
 ]);
 

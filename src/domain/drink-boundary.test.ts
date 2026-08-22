@@ -151,3 +151,11 @@ describe('kombucha is an eligible drink family', () => {
     })).toBeNull();
   });
 });
+
+describe('#430 narrowing: vodka is an exact-phrase style match, not a substring', () => {
+  it('keeps a vodka-barrel-aged beer whose style merely mentions vodka', () => {
+    expect(ontapTapExclusion({
+      style: 'Imperial Stout (Vodka BA)', brewery_ref: 'Some Brewery', beer_ref: 'BA Stout',
+    })).toBeNull();
+  });
+});
