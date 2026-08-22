@@ -1,0 +1,9 @@
+# Production build inputs and operational scripts. Everything else at the
+# repository root is local, test, documentation, or release-only material.
++ /package.json
++ /package-lock.json
++ /tsconfig.json
++ /src/***
++ /scripts/***
++ /deploy/***
+- *
