@@ -255,10 +255,15 @@ export function autoClassifyAction(
   shadow: boolean,
 ): AutoClassifyAction {
   if (!matched) return 'none';
-  if (shadow) return 'log';
   // A row already carrying a verdict (matcher_bug, not_on_untappd, ...) keeps that
   // class: auto-classify must never overwrite a real verdict with the one
   // irreversible one, since not_a_beer can never be re-triaged back out (#430).
+  // This guard runs BEFORE the shadow branch on purpose (AI review finding F3):
+  // shadow mode exists to measure what live mode would do, so it must log exactly
+  // the set live would write, not a superset that includes rows live would have
+  // skipped. Putting the guard first here means the review_class read at the call
+  // site can no longer be skipped under SHADOW_ONLY=true — see lookup-outcome.ts.
   if (currentReviewClass !== null) return 'none';
+  if (shadow) return 'log';
   return 'write';
 }

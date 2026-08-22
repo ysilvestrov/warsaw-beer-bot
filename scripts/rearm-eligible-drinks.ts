@@ -4,7 +4,7 @@
 import type { DB } from '../src/storage/db';
 import { openDb } from '../src/storage/db';
 
-const IDS = [
+export const IDS = [
   258, 298, 366, 391, 11966, 11989, 12272, 29906,
   29931, 29940, 30122, 30134, 30135, 31246, 31299, 33659,
 ];
@@ -15,7 +15,7 @@ interface Target {
   name: string;
 }
 
-function main(argv: string[]): void {
+export function main(argv: string[]): void {
   const path = argv[0];
   if (!path) throw new Error('usage: rearm-eligible-drinks <db-path> [--apply]');
   const apply = argv.includes('--apply');
@@ -30,16 +30,31 @@ function main(argv: string[]): void {
           WHERE review_class IS NULL AND outcome = 'not_found' AND retired_at IS NULL`,
       )
       .get() as { n: number };
+    // #430 F2: retired_at excluded from BOTH the SELECT and the UPDATE below. A
+    // retired row already carries a settled, PRESERVED-for-audit verdict
+    // (retireEnrichFailure keeps review_class on purpose) and is invisible to the
+    // untriaged pool via retired_at, not via its class — clearing its review fields
+    // here would corrupt that audit trail for a row this repair cannot even put back
+    // in front of the model.
     const targets = db
       .prepare(
         `SELECT beer_id, brewery, name FROM enrich_failures
-          WHERE beer_id IN (${IDS.join(',')}) AND review_class = 'not_a_beer'`,
+          WHERE beer_id IN (${IDS.join(',')}) AND review_class = 'not_a_beer' AND retired_at IS NULL`,
+      )
+      .all() as Target[];
+    const retiredSkipped = db
+      .prepare(
+        `SELECT beer_id, brewery, name FROM enrich_failures
+          WHERE beer_id IN (${IDS.join(',')}) AND review_class = 'not_a_beer' AND retired_at IS NOT NULL`,
       )
       .all() as Target[];
 
     console.log(`not_a_beer before: ${before.n}   untriaged before: ${untriagedBefore.n}`);
     console.log(`rows matching the id list AND still not_a_beer: ${targets.length} of ${IDS.length}`);
     for (const t of targets) console.log(' ', t);
+    for (const t of retiredSkipped) {
+      console.log(`  SKIPPED (retired_at is set — would corrupt a retired audit row): beer_id=${t.beer_id} ${t.brewery} — ${t.name}`);
+    }
 
     if (!apply) {
       console.log('\nDRY RUN — pass --apply to write');
@@ -50,7 +65,7 @@ function main(argv: string[]): void {
       .prepare(
         `UPDATE enrich_failures
             SET review_class = NULL, review_note = NULL, reviewed_at = NULL, issue_number = NULL
-          WHERE beer_id IN (${IDS.join(',')}) AND review_class = 'not_a_beer'`,
+          WHERE beer_id IN (${IDS.join(',')}) AND review_class = 'not_a_beer' AND retired_at IS NULL`,
       )
       .run();
     const after = db

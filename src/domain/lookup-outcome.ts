@@ -7,6 +7,7 @@ import {
   recordLookupTransient,
 } from '../storage/beers';
 import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, reviewClassOf } from '../storage/enrich_failures';
+import { getBeer } from '../storage/beers';
 import type { LookupOutcome } from './untappd-lookup';
 import { summarizeCandidates } from './candidate-format';
 import { classifyOrphanAsNonBeer, autoClassifyAction, SHADOW_ONLY } from './drink-boundary';
@@ -48,7 +49,18 @@ export function applyLookupOutcome(
         }
         return 'not_found';
       }
-    case 'not_found':
+    case 'not_found': {
+      // #430 F4: captured BEFORE recordEnrichFailure runs. recordEnrichFailure
+      // intentionally NULLs review_class on a 0<->>0 candidates crossing, to hand the
+      // row back to the model for re-triage. If the guard read this column after that
+      // call, it would see the row as never-triaged and could seal it not_a_beer
+      // before the model ever got the re-triage it was just handed — the opposite of
+      // what the clearing is for. Capturing it first means the guard judges the row
+      // as it stood coming INTO this call, which is the state auto-classify must
+      // respect. The WRITE (setEnrichFailureReview) still has to run after
+      // recordEnrichFailure, because it refuses unless the row already exists with
+      // outcome='not_found'.
+      const currentReviewClass = reviewClassOf(deps.db, beerId);
       recordEnrichFailure(deps.db, {
         beer_id: beerId,
         brewery: input.brewery,
@@ -61,17 +73,19 @@ export function applyLookupOutcome(
         at: nowIso,
       });
       recordLookupNotFound(deps.db, beerId, nowIso);
+      // #430 F1: read the beer's own stored style rather than discarding it. 329 of
+      // 724 orphan rows carry a stored style, and 44 of those name an eligible family
+      // (cider/mead/kvass/kombucha) only in the style column — the eligible check is
+      // the side this module must be maximally generous on, so a hard-coded null here
+      // was silently throwing away a real signal.
+      const beerRow = getBeer(deps.db, beerId);
       const boundary = classifyOrphanAsNonBeer({
         brewery: input.brewery,
         name: input.name,
-        style: null,
+        style: beerRow?.style ?? null,
         candidates_count: outcome.candidates.length,
       });
       if (boundary) {
-        // reviewClassOf is a DB read; only worth doing once there's something to
-        // decide, and never needed under the committed SHADOW_ONLY=true path — this
-        // runs on every failed enrichment, so no read is added to that hot path (#430).
-        const currentReviewClass = SHADOW_ONLY ? null : reviewClassOf(deps.db, beerId);
         switch (autoClassifyAction(true, currentReviewClass, SHADOW_ONLY)) {
           case 'log':
             deps.log.warn(
@@ -81,13 +95,15 @@ export function applyLookupOutcome(
             break;
           case 'none':
             // Only reachable here via the guard (matched is always true in this
-            // branch): a row already carrying a verdict (matcher_bug,
-            // not_on_untappd, ...) keeps it — recordEnrichFailure only nulls
-            // review_class on a candidates-count crossing or an unlocked_at settle.
-            // Auto-classify must never overwrite a real verdict with the one
-            // irreversible one. This guard is proved exhaustively by
+            // branch): a row already carrying the PRE-mutation verdict (matcher_bug,
+            // not_on_untappd, ...) keeps it — captured above, before
+            // recordEnrichFailure could have nulled it on a candidates-count crossing
+            // or an unlocked_at settle. Auto-classify must never overwrite a real
+            // verdict with the one irreversible one, live OR shadowed: F3 moved this
+            // guard ahead of the shadow branch so shadow logs exactly the set live
+            // would write, not a superset. This guard is proved exhaustively by
             // autoClassifyAction's own tests in drink-boundary.test.ts, not here —
-            // this file's #430 test only proves the shadow-path wiring (#430).
+            // this file's #430 test only proves the wiring (#430).
             deps.log.warn(
               { beerId, token: boundary.token, name: input.name },
               'drink-boundary: auto-classify skipped, row already has a review_class',
@@ -105,6 +121,7 @@ export function applyLookupOutcome(
         }
       }
       return 'not_found';
+    }
     case 'transient':
       deps.log.warn({ err: outcome.error, beerId }, 'untappd-lookup transient failure');
       recordLookupTransient(deps.db, beerId, nowIso);

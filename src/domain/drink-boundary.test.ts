@@ -327,22 +327,31 @@ describe('autoClassifyAction', () => {
     expect(autoClassifyAction(false, 'matcher_bug', false)).toBe('none');
   });
 
-  it('logs only, never writes, while shadowed', () => {
+  it('logs only, never writes, while shadowed and no existing verdict', () => {
     expect(autoClassifyAction(true, null, true)).toBe('log');
-    expect(autoClassifyAction(true, 'matcher_bug', true)).toBe('log');
   });
 
   it('writes when matched, live, and no existing verdict', () => {
     expect(autoClassifyAction(true, null, false)).toBe('write');
   });
 
-  // the guard: an existing review_class always wins, live, over the irreversible
-  // not_a_beer verdict — this is the case #430 exists to protect.
-  it('the guard: refuses to overwrite an existing matcher_bug verdict', () => {
+  // the guard: an existing review_class always wins over the irreversible not_a_beer
+  // verdict — this is the case #430 exists to protect. It must win LIVE...
+  it('the guard: refuses to overwrite an existing matcher_bug verdict, live', () => {
     expect(autoClassifyAction(true, 'matcher_bug', false)).toBe('none');
   });
 
-  it('the guard: refuses to overwrite an existing not_on_untappd verdict', () => {
+  it('the guard: refuses to overwrite an existing not_on_untappd verdict, live', () => {
     expect(autoClassifyAction(true, 'not_on_untappd', false)).toBe('none');
+  });
+
+  // ...and it must win SHADOWED too (AI review finding F3, behaviour change from the
+  // originally committed test: this case used to assert 'log'). Shadow mode exists
+  // to measure what live mode would do, so a row live would skip must not be logged
+  // as a proposal either — logging it would inflate the shadow-vs-live comparison
+  // that decides whether SHADOW_ONLY is ever flipped to false.
+  it('the guard wins under shadow too: a row with an existing verdict is "none", not "log"', () => {
+    expect(autoClassifyAction(true, 'matcher_bug', true)).toBe('none');
+    expect(autoClassifyAction(true, 'not_on_untappd', true)).toBe('none');
   });
 });
