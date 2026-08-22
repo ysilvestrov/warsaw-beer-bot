@@ -1,4 +1,7 @@
-import { isOntapNonBeerTap, ontapTapExclusion, ELIGIBLE_TOKENS } from './drink-boundary';
+import {
+  isOntapNonBeerTap, ontapTapExclusion, ELIGIBLE_TOKENS,
+  classifyOrphanAsNonBeer, NON_BEER_NAME_TOKENS, type OrphanBoundaryInput,
+} from './drink-boundary';
 
 describe('isOntapNonBeerTap', () => {
   test.each([
@@ -157,5 +160,69 @@ describe('#430 narrowing: vodka is an exact-phrase style match, not a substring'
     expect(ontapTapExclusion({
       style: 'Imperial Stout (Vodka BA)', brewery_ref: 'Some Brewery', beer_ref: 'BA Stout',
     })).toBeNull();
+  });
+});
+
+const orphan = (over: Partial<OrphanBoundaryInput> = {}): OrphanBoundaryInput => ({
+  brewery: '', name: '', style: null, candidates_count: 0, ...over,
+});
+
+describe('classifyOrphanAsNonBeer catches the rows the ingest filter must not guess at', () => {
+  it('catches a bare Spritz name', () => {
+    expect(classifyOrphanAsNonBeer(orphan({ brewery: 'Culaccino', name: 'Aperol Spritz' })))
+      .toEqual({ nonBeer: true, token: 'spritz' });
+  });
+
+  it('catches a Hugo Spritz', () => {
+    expect(classifyOrphanAsNonBeer(orphan({ brewery: 'Monte Santi', name: 'Hugo Spritz' })))
+      .toEqual({ nonBeer: true, token: 'spritz' });
+  });
+});
+
+describe('the three necessary conditions', () => {
+  it('declines when Untappd returned candidates — the model decides those', () => {
+    expect(classifyOrphanAsNonBeer(
+      orphan({ brewery: 'Culaccino', name: 'Aperol Spritz', candidates_count: 3 }),
+    )).toBeNull();
+  });
+
+  it('declines when an eligible family is named anywhere on the row', () => {
+    expect(classifyOrphanAsNonBeer(
+      orphan({ brewery: 'Cydr Dzik', name: 'Spritz Cydr', style: 'Cydr' }),
+    )).toBeNull();
+  });
+
+  it('matches on a word boundary, never a substring', () => {
+    // "spritzer" is not "spritz"; if this passes as a substring the rule is unsafe.
+    expect(classifyOrphanAsNonBeer(orphan({ brewery: 'X', name: 'Spritzered Ale' }))).toBeNull();
+  });
+});
+
+describe('false positives drawn from beers we have ALREADY matched', () => {
+  // Every one of these is a real style/name family from our own catalogue: 268 matched
+  // beers carry wine/wino/vino, 257 carry a food word. If any of them classifies, the
+  // rule is destroying live beers.
+  const realBeers = [
+    { brewery: 'Dwinell Country Ales', name: 'Field Guide' },
+    { brewery: 'Vinohradský pivovar', name: 'Vinohradská 12' },
+    { brewery: 'Anonymous', name: 'Barley Wine 2021' },
+    { brewery: 'Anonymous', name: 'Bourbon Barrel Aged Wine Cask Stout' },
+    { brewery: 'Anonymous', name: 'Sausage Fingers' },
+    { brewery: 'Anonymous', name: 'Birthday Cake Pastry Stout' },
+    { brewery: 'LOBSTER Brewery', name: 'Kombucha Calamansi' },
+    { brewery: 'Hidden Legend Winery', name: 'Wild Elderberry Mead' },
+  ];
+  for (const b of realBeers) {
+    it(`keeps ${b.brewery} / ${b.name}`, () => {
+      expect(classifyOrphanAsNonBeer(orphan(b))).toBeNull();
+    });
+  }
+});
+
+describe('NON_BEER_NAME_TOKENS is narrower than the ingest lists on purpose', () => {
+  it('never contains a bare wine token', () => {
+    for (const unsafe of ['wine', 'wino', 'vino']) {
+      expect(NON_BEER_NAME_TOKENS).not.toContain(unsafe);
+    }
   });
 });

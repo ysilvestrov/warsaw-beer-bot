@@ -151,3 +151,44 @@ export function ontapTapExclusion(tap: OntapNonBeerInput): TapExclusion | null {
   }
   return isOntapNonBeerTap(tap) ? 'non-beer' : null;
 }
+
+// Deliberately NARROWER than STYLE_TOKENS: only unambiguous drink-category words, and
+// never a bare wine token — 268 matched beers carry wine/wino/vino (barleywine, barrel
+// ageing) and 257 carry a food word. #430.
+export const NON_BEER_NAME_TOKENS = [
+  'spritz', 'sangria', 'mojito', 'prosecco', 'frizzante', 'aperol', 'aperitivo',
+  'nalewka', 'szprycer', 'wódka', 'wodka', 'vodka',
+] as const;
+
+export interface OrphanBoundaryInput {
+  brewery: string;
+  name: string;
+  style: string | null;
+  candidates_count: number;
+}
+
+// Word set, not substring search: `\b` in JS is ASCII-only and would break on `wódka`,
+// and a substring test puts `wine` inside `Dwinell` and `spritz` inside `spritzered`.
+function words(value: string): Set<string> {
+  return new Set(value.toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+}
+
+// Runs ONLY on a row that has already failed an Untappd search. That condition is what
+// makes a name-side test safe: every dangerous beer above matched, so it is never here.
+export function classifyOrphanAsNonBeer(
+  row: OrphanBoundaryInput,
+): { nonBeer: true; token: string } | null {
+  // 1. Untappd returned something — let the model judge it.
+  if (row.candidates_count !== 0) return null;
+
+  const haystack = `${row.brewery} ${row.name} ${row.style ?? ''}`.toLowerCase();
+
+  // 2. An eligible family named anywhere wins, and wins as a SUBSTRING: the asymmetry
+  //    says a false "eligible" costs one search while a false not_a_beer is forever.
+  if (ELIGIBLE_TOKENS.some((token) => haystack.includes(token))) return null;
+
+  // 3. A non-beer category word, on a word boundary.
+  const bag = words(haystack);
+  const hit = NON_BEER_NAME_TOKENS.find((token) => bag.has(token));
+  return hit ? { nonBeer: true, token: hit } : null;
+}
