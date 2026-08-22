@@ -3,6 +3,7 @@ import {
 } from './triage-analysis';
 import { ScopeSchema, SCOPE_COLS } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
+import { ELIGIBLE_TOKENS } from './drink-boundary';
 
 const orphan: UntriagedFailure = {
   beer_id: 7, brewery: 'Nepomucen', name: 'Hazy Disco', search_url: 'https://s',
@@ -307,4 +308,27 @@ test('non-beer rows have exactly one home in the prompt', () => {
 test('the retired vocabulary is gone from the prompt', () => {
   const p = buildTriagePrompt({ orphans: [orphan], openIssues: [] });
   expect(p).not.toContain('wontfix');
+});
+
+const emptyInput = { orphans: [], openIssues: [] };
+
+describe('the triage prompt states the drink boundary from the shared constant', () => {
+  it('never lists an eligible family as not_a_beer', () => {
+    const prompt = buildTriagePrompt(emptyInput);
+    const notABeerClause = prompt.slice(
+      prompt.indexOf('NO -> not_a_beer'),
+      prompt.indexOf('2. Is OUR row faithful'),
+    );
+    expect(notABeerClause).not.toBe('');
+    for (const token of ELIGIBLE_TOKENS) {
+      expect(notABeerClause.toLowerCase()).not.toContain(token);
+    }
+  });
+
+  it('names every eligible family so the model is told what to keep', () => {
+    const prompt = buildTriagePrompt(emptyInput).toLowerCase();
+    for (const token of ELIGIBLE_TOKENS) {
+      expect(prompt).toContain(token);
+    }
+  });
 });
