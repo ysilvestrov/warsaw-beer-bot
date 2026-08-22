@@ -22,13 +22,15 @@ jobs:
         include:
           - name: root
             dir: .
-            node: 20
+            node: 24
           - name: extension
             dir: extension
-            node: 22
+            node: 24
     steps:
       - uses: actions/checkout@v7
 
+      # Both legs run the version production runs. This is not a convention: it is
+      # asserted by scripts/workflow-node-version.test.ts against engines.node.
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}

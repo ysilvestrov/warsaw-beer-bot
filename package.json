@@ -24,13 +24,13 @@
   "license": "ISC",
   "type": "commonjs",
   "engines": {
-    "node": ">=20"
+    "node": ">=24"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",
     "@hono/node-server": "^2.1.1",
     "@hono/zod-validator": "^0.9.0",
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.3",
     "cheerio": "^1.2.0",
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
@@ -42,7 +42,7 @@
     "stream-json": "^2.1.0",
     "telegraf": "^4.16.3",
     "tsx": "^4.23.12",
-    "undici": "^7.29.0",
+    "undici": "^8.10.0",
     "yauzl": "^3.4.0",
     "zod": "^4.4.3"
   },
