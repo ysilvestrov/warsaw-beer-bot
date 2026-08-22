@@ -70,24 +70,44 @@ const EXACT_STYLE_PHRASES = new Set([
 // 'vini' stay — WINO KARPATIA / VINO KARPATIA are measured leaks this list must still
 // catch (scripts/retire-resolved-orphans.test.ts depends on the Polish spelling too) —
 // but bare English 'wine' buys nothing no other token here already covers. #430.
-const BREWERY_TOKENS = [
+//
+// 2026-08-22 second measurement: validated all 18 tokens below against all 3465
+// distinct matched breweries in the production catalogue. 'cantina' hit Cantina
+// Errante — 9 matched BEERS (Grape Ale - Italian, Wild Ale - Other, Sour - Flanders
+// Oud Bruin, Farmhouse Ale - Bière de Coupage) — removed outright; 'cantine' stayed
+// clean against the whole corpus and is kept. 'vino' hit Vinohradský pivovar — 6
+// matched BEERS (Pilsner - Czech / Bohemian, IPA - Session NE) — but ONLY as a
+// substring inside the Czech name, so it is kept and moved below to word-boundary
+// matching instead of being dropped; VINO/WINO KARPATIA still trip it as a whole
+// word. The other 13 single-word tokens hit zero matched breweries either way.
+//
+// Split in two, not one list with a substring test: a single word (e.g. 'vino')
+// must match on a WORD BOUNDARY, via the same Unicode-safe word-splitting
+// NON_BEER_NAME_TOKENS uses below (`words()`) — `\b` is ASCII-only and would silently
+// do nothing useful on these Polish/Czech names, and a naive substring test is
+// exactly the Vinohradský bug. A multi-word phrase (contains a space) is specific
+// enough that substring matching is safe and a word-set test cannot express it
+// anyway (`words()` returns a Set of tokens, not phrases).
+const BREWERY_WORD_TOKENS = [
   'wino',
   'winiarska',
   'maccari',
   'frizzanti',
   'frizzante',
   'cantine',
-  'cantina',
   'aperitivo',
-  'san martino',
   'conegliano',
   'puglia',
   'vini',
   'vino',
-  'dolium vini',
-  'stacja winiarska',
   'kofola',
   'sangria',
+];
+
+const BREWERY_PHRASE_TOKENS = [
+  'san martino',
+  'dolium vini',
+  'stacja winiarska',
 ];
 
 const EXACT_BREWERY_SENTINELS = new Set([
@@ -127,11 +147,13 @@ export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   }
 
   const brewery = norm(tap.brewery_ref);
+  const breweryWords = words(brewery);
   if (
     brewery &&
     (EXACT_BREWERY_SENTINELS.has(brewery) ||
       EXACT_BREWERY_SENTINELS.has(norm(breweryCore(brewery))) ||
-      BREWERY_TOKENS.some((token) => brewery.includes(token)) ||
+      BREWERY_WORD_TOKENS.some((token) => breweryWords.has(token)) ||
+      BREWERY_PHRASE_TOKENS.some((token) => brewery.includes(token)) ||
       looksLikeScheduleOrNav(brewery))
   ) {
     return true;

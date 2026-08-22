@@ -21,11 +21,25 @@ describe('isOntapNonBeerTap', () => {
     ['style szprycer', { style: 'Szprycer', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Big Diva' }],
     ['style wine grapes glera', { style: 'Chardonnay, Glera and Garganega', brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['brewery aperitivo with suffix', { style: null, brewery_ref: 'Aperitivo Spritz Brewery', beer_ref: 'Aperol Spritz' }],
-    ['brewery cantina singular', { style: null, brewery_ref: 'Cantina della Valle Brewery', beer_ref: 'Glera Trevenezie' }],
-    ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
+  });
+
+  // 2026-08-22: 'brewery cantina singular'/'brewery cantina no suffix' (asserting
+  // 'Cantina della Valle' is flagged via the 'cantina' token) deleted here, not
+  // renamed to a different fictional cantina. A producer's NAME cannot distinguish an
+  // Italian wine cellar from an Italian brewery that calls itself one: 'Cantina
+  // Errante' makes Grape Ale, Wild Ale and Flanders Oud Bruin (9 matched beers) and
+  // nothing in the string tells it apart from a wine-only 'Cantina della Valle'. So
+  // 'cantina' was not a badly-written token — it was an unanswerable one, and the
+  // module's governing asymmetry decides unanswerable cases toward eligible: a false
+  // "eligible" costs one Untappd search, a false drop at ingest is silent and
+  // permanent (#306). This test documents the accepted leak instead of quietly
+  // dropping coverage: a wine-cellar-named brewery now surfaces as a visible orphan
+  // (for the model or a human to judge) rather than vanishing at ingest.
+  it('leaks a wine-cellar-named brewery like Cantina della Valle — no token distinguishes it from Cantina Errante (9 matched beers)', () => {
+    expect(isOntapNonBeerTap({ style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Glera Trevenezie' })).toBe(false);
   });
 
   test.each([
@@ -159,6 +173,24 @@ describe('#430 narrowing: vodka is an exact-phrase style match, not a substring'
   it('keeps a vodka-barrel-aged beer whose style merely mentions vodka', () => {
     expect(ontapTapExclusion({
       style: 'Imperial Stout (Vodka BA)', brewery_ref: 'Some Brewery', beer_ref: 'BA Stout',
+    })).toBeNull();
+  });
+});
+
+// 2026-08-22: BREWERY_TOKENS validated against all 3465 distinct matched breweries in
+// the production catalogue. Both real breweries below were being dropped at ingest —
+// silently and permanently, since a dropped tap never reaches the post-search
+// enforcer (#306). Regression fixtures so neither collision is reintroduced.
+describe('#430 Critical: BREWERY_TOKENS must not collide with real matched breweries', () => {
+  it('keeps Vinohradský pivovar — 6 matched beers (Pilsner - Czech / Bohemian, IPA - Session NE); "vino" only collided as a substring inside the name', () => {
+    expect(ontapTapExclusion({
+      brewery_ref: 'Vinohradský pivovar', beer_ref: 'Hazy Galaxy', style: null,
+    })).toBeNull();
+  });
+
+  it('keeps Cantina Errante — 9 matched beers (Grape Ale - Italian, Wild Ale - Other, Sour - Flanders Oud Bruin, Farmhouse Ale - Bière de Coupage); "cantina" is removed from BREWERY_TOKENS entirely', () => {
+    expect(ontapTapExclusion({
+      brewery_ref: 'Cantina Errante', beer_ref: 'Nifunifa 2023', style: null,
     })).toBeNull();
   });
 });
