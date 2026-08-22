@@ -1,5 +1,4 @@
-import { isOntapNonBeerTap } from './drink-boundary';
-import { ontapTapExclusion } from './drink-boundary';
+import { isOntapNonBeerTap, ontapTapExclusion, ELIGIBLE_TOKENS } from './drink-boundary';
 
 describe('isOntapNonBeerTap', () => {
   test.each([
@@ -17,12 +16,10 @@ describe('isOntapNonBeerTap', () => {
     ['style cocktail english 2', { style: 'Cocktail', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Bramble' }],
     ['style nalewka', { style: 'Nalewka', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Nalewka gruszkowa' }],
     ['style szprycer', { style: 'Szprycer', brewery_ref: 'Nalej Se Brewery', beer_ref: 'Big Diva' }],
-    ['style kombucha', { style: 'Kombucha', brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['style wine grapes glera', { style: 'Chardonnay, Glera and Garganega', brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
     ['brewery aperitivo with suffix', { style: null, brewery_ref: 'Aperitivo Spritz Brewery', beer_ref: 'Aperol Spritz' }],
     ['brewery cantina singular', { style: null, brewery_ref: 'Cantina della Valle Brewery', beer_ref: 'Glera Trevenezie' }],
     ['brewery cantina no suffix', { style: null, brewery_ref: 'Cantina della Valle', beer_ref: 'Vino Bianco Frizzante' }],
-    ['brewery kombucha null style', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['schedule pollution brewery', { style: null, brewery_ref: 'Basement -> Czwartek-Sobota od 18.00 Brewery', beer_ref: 'Bar' }],
   ])('flags %s', (_label, tap) => {
     expect(isOntapNonBeerTap(tap)).toBe(true);
@@ -42,6 +39,8 @@ describe('isOntapNonBeerTap', () => {
     ['mead', { style: 'Mead - Melomel', brewery_ref: 'Berryland' }],
     ['mead Polish sweet descriptor', { style: 'Mead półsłodkie', brewery_ref: 'Berryland' }],
     ['melomel sweet descriptor', { style: 'Melomel słodkie', brewery_ref: 'Berryland' }],
+    ['kombucha style (#430 moved from flagged to eligible)', { style: 'Kombucha', brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
+    ['kombucha brewery null style (#430 moved from flagged to eligible)', { style: null, brewery_ref: 'Koko Kombucha Brewery', beer_ref: 'Imbir' }],
     ['normal beer', { style: 'West Coast IPA', brewery_ref: 'PINTA Brewery' }],
     ['similar service-themed beer name', { style: 'IPA', brewery_ref: 'PINTA Brewery', beer_ref: 'Kran w serwisie najlepszych piw' }],
     ['normal brewery with dash but no arrow/time', { style: 'IPA', brewery_ref: 'Browar Stu Mostow - Wroclaw' }],
@@ -105,5 +104,50 @@ describe('ontapTapExclusion', () => {
       .toBe('placeholder');
     expect(ontapTapExclusion({ style: 'Sour Ale', brewery_ref: 'Piwne Podziemie Brewery', beer_ref: 'Wypite Marzenia' }))
       .toBeNull();
+  });
+});
+
+// The 14 real tap rows behind the not_a_beer orphans, replayed 2026-08-22.
+// `expected` is the verdict this task must produce.
+const LEAKED_TAPS: { brewery_ref: string | null; beer_ref: string; style: string | null;
+                     expected: 'non-beer' | 'placeholder' | null }[] = [
+  // Eligible drinks the filter already keeps, and MUST keep.
+  { brewery_ref: 'Cydr Smykan', beer_ref: 'Kwaśny Zdzichu', style: 'Cydr wytrawny z czarną porzeczką', expected: null },
+  { brewery_ref: 'Dzik', beer_ref: 'Cydr Perry', style: 'Polslodki Gruszkowy', expected: null },
+  { brewery_ref: 'Jabłecznik Trzebnicki', beer_ref: 'Cydr tradycyjny', style: 'Cydr półwytrawny', expected: null },
+  { brewery_ref: 'Chyliczki', beer_ref: 'Cydr Chyliczki - Japoński Sad', style: 'Wytrawny i naturalnie musujący', expected: null },
+  { brewery_ref: 'Flirt', beer_ref: 'BLOOD ORANGE', style: 'Cydr', expected: null },
+  { brewery_ref: 'Tradycinis', beer_ref: 'Borówka z miętą', style: 'Cydr', expected: null },
+  // The five gaps this task closes.
+  { brewery_ref: 'VINO KARPATIA', beer_ref: 'Biały bez', style: null, expected: 'non-beer' },
+  { brewery_ref: 'Sangria', beer_ref: 'Sangria Czerwona', style: null, expected: 'non-beer' },
+  { brewery_ref: 'Bianco Frizzante', beer_ref: 'Frizzante Bianco', style: null, expected: 'non-beer' },
+  { brewery_ref: 'Ima Distillery Brewery', beer_ref: 'Stefanówka z Pyrów', style: 'Wódka ziemniaczana', expected: 'non-beer' },
+  { brewery_ref: 'takie zero. takie nic. Brewery', beer_ref: 'KRAN PUSTY. dużo°·21,37%', style: '67 VEGETARIAN PROGRESSIVE IMPERIAL BASS BOOSTED PORTER LEWOSKRETNY', expected: 'placeholder' },
+  // Deliberately still leaking — a name-side test at ingest is forbidden (see Global
+  // Constraints). Task 4's post-search enforcer is what covers these. Asserted so that a
+  // later change which catches them here is a visible decision, not a silent drift.
+  { brewery_ref: 'Culaccino', beer_ref: 'Aperol Spritz', style: null, expected: null },
+  { brewery_ref: 'Monte Santi', beer_ref: 'Hugo Spritz', style: null, expected: null },
+  { brewery_ref: null, beer_ref: 'N/A', style: null, expected: null },
+];
+
+describe('ontapTapExclusion against the measured leak set', () => {
+  for (const t of LEAKED_TAPS) {
+    it(`${t.brewery_ref ?? '(null)'} / ${t.beer_ref} -> ${t.expected ?? 'kept'}`, () => {
+      expect(ontapTapExclusion(t)).toBe(t.expected);
+    });
+  }
+});
+
+describe('kombucha is an eligible drink family', () => {
+  it('is listed as eligible', () => {
+    expect(ELIGIBLE_TOKENS).toContain('kombucha');
+  });
+
+  it('keeps a hard kombucha tap — Untappd carries Hard Kombucha / Jun', () => {
+    expect(ontapTapExclusion({
+      brewery_ref: 'LOBSTER Brewery', beer_ref: 'Kombucha Calamansi', style: 'Kombucha',
+    })).toBeNull();
   });
 });

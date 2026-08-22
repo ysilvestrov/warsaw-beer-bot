@@ -18,24 +18,25 @@ const STYLE_TOKENS = [
   'cocktail',
   'nalewka',
   'szprycer',
-  'kombucha',
   'glera',
   'musujące',
   'wytrawne',
   'półwytrawne',
   'słodkie',
   'soft drink',
+  'wódka',
+  'wodka',
+  'vodka',
+  'sangria',
 ];
 
-const ELIGIBLE_STYLE_TOKENS = [
-  'cydr',
-  'cider',
-  'kwas chlebowy',
-  'kvass',
-  'квас',
-  'mead',
-  'melomel',
-];
+// Drinks Untappd lists and our matcher resolves every day: 1339 rows in our own
+// catalogue carry a Cider/Mead/Kvass style, and 10 more carry a Kombucha style
+// (Hard Kombucha / Jun, Non-Alcoholic - Kombucha). Being wrong toward eligible costs
+// one search; being wrong toward not_a_beer is irreversible. #430.
+export const ELIGIBLE_TOKENS = [
+  'cydr', 'cider', 'kwas chlebowy', 'kvass', 'квас', 'mead', 'melomel', 'kombucha',
+] as const;
 
 const EXACT_STYLE_PHRASES = new Set([
   'aperitivo',
@@ -57,17 +58,19 @@ const BREWERY_TOKENS = [
   'winiarska',
   'maccari',
   'frizzanti',
+  'frizzante',
   'cantine',
   'cantina',
   'aperitivo',
-  'kombucha',
   'san martino',
   'conegliano',
   'puglia',
   'vini',
+  'vino',
   'dolium vini',
   'stacja winiarska',
   'kofola',
+  'sangria',
 ];
 
 const EXACT_BREWERY_SENTINELS = new Set([
@@ -90,7 +93,7 @@ function looksLikeScheduleOrNav(brewery: string): boolean {
 
 export function isOntapNonBeerTap(tap: OntapNonBeerInput): boolean {
   const style = norm(tap.style);
-  if (style && ELIGIBLE_STYLE_TOKENS.some((token) => style.includes(token))) {
+  if (style && ELIGIBLE_TOKENS.some((token) => style.includes(token))) {
     return false;
   }
   if (style && (EXACT_STYLE_PHRASES.has(style) || STYLE_TOKENS.some((token) => style.includes(token)))) {
@@ -120,6 +123,7 @@ const PLACEHOLDER_PHRASES = [
   'chwilowy brak',
   'kran w serwisie',
   'czeka na lepsze czasy',
+  'kran pusty',
 ];
 
 // Single common words are risky as a substring match (e.g. "wypite" inside a longer beer
