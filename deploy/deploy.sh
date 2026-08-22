@@ -13,14 +13,8 @@ sudo install -d -o warsaw-beer-bot -g warsaw-beer-bot -m 750 "$HOMEDIR"
 # setup, must be owned by warsaw-beer-bot so refresh-cookie.sh can edit them.
 sudo chown -R warsaw-beer-bot:warsaw-beer-bot "$ENVDIR"
 
-sudo rsync -a --delete \
-  --exclude node_modules \
-  --exclude tests \
-  --exclude docs \
-  --exclude .git \
-  --exclude .worktrees \
-  --exclude dist \
-  --exclude '*.png' \
+sudo rsync -a --delete --delete-excluded \
+  --filter='merge deploy/rsync-filter' \
   ./ "$APP"/
 
 # rsync -a preserves source ownership (root); reset before npm runs as warsaw-beer-bot.

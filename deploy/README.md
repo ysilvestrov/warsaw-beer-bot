@@ -63,6 +63,19 @@ From a dev checkout:
 ./deploy/deploy.sh
 ```
 
+`deploy.sh` copies only the build and runtime paths listed in
+`deploy/rsync-filter`; `--delete-excluded` also removes anything outside that
+allowlist from `/opt/warsaw-beer-bot`. The rsync command is pinned verbatim in
+the sudoers fragment. When either the command or filter mechanism changes,
+install the matching sudoers fragment **before** running the updated script:
+
+```bash
+sudo visudo -cf deploy/sudoers.d/warsaw-beer-bot
+sudo install -m 0440 -o root -g root \
+  deploy/sudoers.d/warsaw-beer-bot /etc/sudoers.d/warsaw-beer-bot
+./deploy/deploy.sh
+```
+
 Subsequent deploys:
 
 ```bash
