@@ -152,13 +152,17 @@ export function ontapTapExclusion(tap: OntapNonBeerInput): TapExclusion | null {
   return isOntapNonBeerTap(tap) ? 'non-beer' : null;
 }
 
-// Deliberately NARROWER than STYLE_TOKENS: only unambiguous drink-category words, and
-// never a bare wine token — 268 matched beers carry wine/wino/vino (barleywine, barrel
-// ageing) and 257 carry a food word. #430.
-export const NON_BEER_NAME_TOKENS = [
-  'spritz', 'sangria', 'mojito', 'prosecco', 'frizzante', 'aperol', 'aperitivo',
-  'nalewka', 'szprycer', 'wódka', 'wodka', 'vodka',
-] as const;
+// Every surviving token was measured word-boundary against all 31224 matched beers in
+// production (name + style) and hits ZERO real beers as a whole word. The seven tokens
+// removed after that measurement hit 29 real beers between them: spritz 9 (e.g. "Bean &
+// Citrus Spritz", "Sicilian Spritz"), mojito 8 ("Emerald Mojito Gose"), vodka 4 ("Tatanka
+// Vodka Edition"), aperitivo 3 ("Aperitivo Stout"), sangria 3 ("Mystic Sangria"),
+// prosecco 1, frizzante 1. "Already an orphan" does not remove that population — a beer
+// that normally matches can orphan for an unrelated reason (alias gap, query noise) and
+// then get sealed permanently, so only zero-collision tokens are safe here. Also never a
+// bare wine token — 268 matched beers carry wine/wino/vino (barleywine, barrel ageing)
+// and 257 carry a food word. #430.
+export const NON_BEER_NAME_TOKENS = ['aperol', 'nalewka', 'szprycer', 'wódka', 'wodka'] as const;
 
 export interface OrphanBoundaryInput {
   brewery: string;

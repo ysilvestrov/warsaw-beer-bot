@@ -169,13 +169,18 @@ const orphan = (over: Partial<OrphanBoundaryInput> = {}): OrphanBoundaryInput =>
 
 describe('classifyOrphanAsNonBeer catches the rows the ingest filter must not guess at', () => {
   it('catches a bare Spritz name', () => {
+    // "spritz" itself was removed by the collision measurement (9 real beers); this row
+    // is still caught because "Aperol" survives as a zero-collision token.
     expect(classifyOrphanAsNonBeer(orphan({ brewery: 'Culaccino', name: 'Aperol Spritz' })))
-      .toEqual({ nonBeer: true, token: 'spritz' });
+      .toEqual({ nonBeer: true, token: 'aperol' });
   });
 
-  it('catches a Hugo Spritz', () => {
+  // Deliberately the cheap-direction leak: no surviving token appears in "Hugo Spritz",
+  // so this row is NOT caught post-search. Missing an orphan costs one un-triaged row;
+  // wrongly sealing a real beer is permanent — the asymmetry the whole module is built on.
+  it('leaks a bare Hugo Spritz — no token survives the collision measurement', () => {
     expect(classifyOrphanAsNonBeer(orphan({ brewery: 'Monte Santi', name: 'Hugo Spritz' })))
-      .toEqual({ nonBeer: true, token: 'spritz' });
+      .toBeNull();
   });
 });
 
@@ -187,14 +192,18 @@ describe('the three necessary conditions', () => {
   });
 
   it('declines when an eligible family is named anywhere on the row', () => {
+    // Uses a surviving token ("nalewka") alongside an eligible one ("cydr") so this test
+    // still proves condition 2: with "spritz" gone, a row built on "spritz" would return
+    // null regardless of the ELIGIBLE_TOKENS guard and the mutation proof would be vacuous.
     expect(classifyOrphanAsNonBeer(
-      orphan({ brewery: 'Cydr Dzik', name: 'Spritz Cydr', style: 'Cydr' }),
+      orphan({ brewery: 'Cydr Smykan', name: 'Nalewka Cydr', style: 'Cydr' }),
     )).toBeNull();
   });
 
   it('matches on a word boundary, never a substring', () => {
-    // "spritzer" is not "spritz"; if this passes as a substring the rule is unsafe.
-    expect(classifyOrphanAsNonBeer(orphan({ brewery: 'X', name: 'Spritzered Ale' }))).toBeNull();
+    // "nalewkarnia" is not "nalewka"; if this passes as a substring the rule is unsafe.
+    // Uses a surviving token so the assertion still exercises the word-set check.
+    expect(classifyOrphanAsNonBeer(orphan({ brewery: 'X', name: 'Nalewkarnia Ale' }))).toBeNull();
   });
 });
 
@@ -223,6 +232,17 @@ describe('NON_BEER_NAME_TOKENS is narrower than the ingest lists on purpose', ()
   it('never contains a bare wine token', () => {
     for (const unsafe of ['wine', 'wino', 'vino']) {
       expect(NON_BEER_NAME_TOKENS).not.toContain(unsafe);
+    }
+  });
+
+  // Measured word-boundary against all 31224 matched beers in production (name + style):
+  // spritz 9 (e.g. "Sicilian Spritz"), mojito 8 ("Emerald Mojito Gose"), vodka 4 ("Tatanka
+  // Vodka Edition"), aperitivo 3 ("Aperitivo Stout"), sangria 3 ("Mystic Sangria"),
+  // prosecco 1, frizzante 1. Re-adding any of these without a fresh zero-collision
+  // measurement re-opens that leak. #430.
+  it('never re-adds a token proven to collide with a real matched beer', () => {
+    for (const proven of ['spritz', 'mojito', 'vodka', 'aperitivo', 'sangria', 'prosecco', 'frizzante']) {
+      expect(NON_BEER_NAME_TOKENS).not.toContain(proven);
     }
   });
 });
