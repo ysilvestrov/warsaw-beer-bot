@@ -148,13 +148,21 @@ Then update the one reference inside `listRelayLookupCandidates` (line 381): `WH
 
 Also fix the two stale references to the old name in the comment above `lookupCandidates`/`lockedRowPredicate` (lines 273-277 mention `orphanWithoutMatchLinkPredicate` twice) — rename them to `orphanNotOnTapPredicate` so no comment names a symbol that no longer exists.
 
-- [ ] **Step 5: Run the new test and the whole storage suite**
+- [ ] **Step 5: Keep the build green — rename the import in the one other consumer**
 
-Run: `npx vitest run src/storage/beers.test.ts`
+`src/storage/stats.ts` imports `orphanWithoutMatchLinkPredicate`; that name no longer exists. Change the import and its single use site (`orphansOffCron`'s query, line ~103) to `orphanNotOnTapPredicate`. **Change nothing else in stats.ts** — the metric keeps its old field name and comment until Task 3, which owns the rename. Do not leave an alias export behind in `beers.ts`; the old name must be gone.
 
-Expected: the `#486` test PASSES and every pre-existing test in the file still passes. `src/storage/stats.ts` still imports `orphanWithoutMatchLinkPredicate` at this point, so **the typecheck and the stats suite will fail until Task 3** — that is expected and is fixed there. Do not "fix" it by leaving an alias export behind; the old name must be gone.
+This is the mechanical fallout of a rename, not the metric change, and it belongs here so this task ends with a green build.
 
-- [ ] **Step 6: Mutation-prove the test**
+- [ ] **Step 6: Run the full suite and the typecheck**
+
+Run: `npm test`
+Expected: the `#486` test PASSES and everything else still passes — including `stats.test.ts`, whose `orphansOffCron` assertions now read the wider predicate. **If a stats test fails here, do not edit it: stop and report.** A stats assertion that moves is a behaviour change in the digest, which is Task 3's subject and needs its own review. (The known one is `stats.test.ts:140` case 3 — a beer with a link and no tap. Under the old predicate it was excluded; under the new one it is in the relay pool and counted.)
+
+Run: `npm run typecheck`
+Expected: clean.
+
+- [ ] **Step 7: Mutation-prove the test**
 
 Temporarily change the third clause of `orphanNotOnTapPredicate` back to:
 
@@ -167,10 +175,10 @@ Temporarily change the third clause of `orphanNotOnTapPredicate` back to:
 Run: `npx vitest run src/storage/beers.test.ts -t "#486"`
 Expected: FAIL. Then restore the negation and confirm it passes again. If it passed with the old clause, the test is not testing the fix — fix the test before continuing.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/storage/beers.ts src/storage/beers.test.ts
+git add src/storage/beers.ts src/storage/beers.test.ts src/storage/stats.ts
 git commit -m "fix(#486): the relay pool becomes the complement of the on-tap pool"
 ```
 
@@ -236,14 +244,17 @@ describe('#486 pool partition', () => {
     const onTap = listLookupCandidates(db, 100, now).map((c) => c.id);
     const relay = listRelayLookupCandidates(db, 100, now).map((c) => c.id);
 
-    for (const id of [current, rotatedOff, deadLink, noLink]) {
-      const inOnTap = onTap.includes(id);
-      const inRelay = relay.includes(id);
-      expect(
-        `${id}: onTap=${inOnTap} relay=${inRelay}`,
-      ).toBe(`${id}: onTap=${inOnTap !== inRelay ? inOnTap : 'BOTH-OR-NEITHER'} relay=${inRelay}`);
-      expect(inOnTap !== inRelay).toBe(true);
-    }
+    // Exactly one, for every arrangement. The membership pair is asserted as a labelled
+    // tuple so a failure names the beer and which side it fell on, instead of "false !== true".
+    const membership = [current, rotatedOff, deadLink, noLink].map((id) => ({
+      id, onTap: onTap.includes(id), relay: relay.includes(id),
+    }));
+    expect(membership).toEqual([
+      { id: current,    onTap: true,  relay: false },
+      { id: rotatedOff, onTap: false, relay: true  },
+      { id: deadLink,   onTap: false, relay: true  },
+      { id: noLink,     onTap: false, relay: true  },
+    ]);
     // and the split is the one we intend, not merely disjoint
     expect(onTap).toEqual([current]);
     expect(relay.sort()).toEqual([rotatedOff, deadLink, noLink].sort());
@@ -284,7 +295,7 @@ git commit -m "test(#486): assert the pool partition instead of documenting it"
 
 - [ ] **Step 1: Update the metric and its comment**
 
-In `src/storage/stats.ts`, change the import of `orphanWithoutMatchLinkPredicate` to `orphanNotOnTapPredicate`, and replace the field declaration and its comment (lines 14-17):
+Task 1 already renamed the import in `src/storage/stats.ts`. Replace the field declaration and its comment (lines 14-17):
 
 ```typescript
   // #368/#486: розмір черги relay-дренажу — orphan'и, яких enrich-крон бачить ЛИШЕ через
