@@ -10,9 +10,9 @@ Measured from: the prod database, 2026-08-23
 
 ## The model
 
-> The two pools were written as two independent conditions that were *believed* to partition the
-> orphans. They do not. The gap between them is not an edge case — it holds half the population,
-> and it is invisible because nothing counts it.
+> The two pools were written as two independent conditions that do not partition the orphans. The
+> gap between them was found, measured, and declared deliberate. That decision is what this design
+> reverses, on evidence the decision did not have.
 
 `listLookupCandidates` takes orphans whose `match_links` row joins a tap on some pub's **latest**
 snapshot. `listRelayLookupCandidates` takes orphans with **no `match_links` row at all**. These are
@@ -22,6 +22,37 @@ and no cron will ever look at it again.
 The fix is to stop writing the second condition. There is one predicate — *is this beer on a tap
 right now* — used positively by the on-tap pool and negated by the relay pool. Partition becomes a
 property of the construction rather than a coincidence between two hand-written queries.
+
+## What the spec says today, and why it is wrong
+
+`spec.md` (the "Два пули кандидатів, один бюджет (#368)" section) already documents this exact gap:
+
+> «…вони не покривають усіх orphan'ів: orphan із рядком у `match_links`, чий кран зійшов з
+> останнього снапшоту, не потрапляє в жоден пул (387 рядків станом на 2026-08-08) і лишається
+> cron-недосяжним, поки не повернеться на кран. Це **навмисне виключення** — on-tap gate свідомо
+> ігнорує пиво, яке зараз ніхто не наливає, — **а не дефект**.»
+
+So this is not an oversight being corrected; it is a decision being reversed. Three measurements
+the decision did not have:
+
+1. **The rationale belongs to the on-tap pool, not to the relay pool.** "The on-tap gate ignores
+   beer nobody is pouring" is a correct description of `listLookupCandidates`. But the relay pool
+   (#368) exists precisely to spend idle capacity on orphans that are *not* on tap. A beer dropped
+   by the on-tap gate is exactly what relay was built to catch; the gap is relay failing at its own
+   job, not the on-tap gate succeeding at its.
+2. **"Until it returns to a tap" is doing work the data does not support.** 376 of the 462 have
+   **never been queried once**. The exclusion did not stop us spending on these rows — we never
+   spent anything on them, so there was never a saving to book.
+3. **The population is not what the rationale assumes.** It is dominated by rotating standards
+   (`Weihenstephaner — Dunkelweizen`, `Pivovar Lobkowicz — Rychtář Premium 12°`,
+   `W Brzesku — Žatecký Světlý Ležák`), and 824 of the 2,682 beers ever linked to a tap (31%) carry
+   both a live and a dead link — they demonstrably come back. A beer resolved once stays resolved
+   across every return; a beer left unqueried is re-paid for on each one.
+
+The old text is also candid that `orphansOffCron` "міряє саме чергу relay-дренажу, а не сумарну
+cron-недосяжність" — the blind spot was known and accepted. What changed is the size and the
+composition, both measured below. `spec.md` must be rewritten in the same PR: the paragraph that
+calls this deliberate becomes the paragraph that defines the partition.
 
 ## Measured 2026-08-23 (production)
 
@@ -152,6 +183,14 @@ silently no-op, so each test asserts its fixture landed before asserting behavio
   the wrong beer, #487).
 - **`SNAPSHOT_RETENTION_DAYS`.** It is unset in prod and running on the 14-day default. That is a
   separate decision; this design deliberately makes reachability independent of it.
+
+### Documentation
+
+`spec.md` is not optional here and not a footnote: it currently asserts the opposite of what this
+change makes true. The "Два пули кандидатів, один бюджет (#368)" section must lose the "навмисне
+виключення … а не дефект" claim and the `orphanWithoutMatchLinkPredicate` name, and gain the
+partition statement: one predicate, used positively and negated, so that every orphan outside the
+`not_a_beer`/retired/locked exclusions is in exactly one pool.
 
 ## Checkpoint
 
