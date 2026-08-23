@@ -131,7 +131,10 @@ Alongside it:
 - a beer with no link at all appears in relay (the case that already worked, protected);
 - an exhaustiveness property over a seeded catalogue: every orphan that is not
   `not_a_beer`/retired/locked appears in exactly one of the two lists — the invariant stated
-  as an assertion rather than as a comment;
+  as an assertion rather than as a comment. The property is about **membership**, so the seed must
+  keep the two later filters out of the way: every seeded row eligible under `isEligible`
+  (`untappd_lookup_count = 0`), and a `limit` above the seed size, or the test would measure
+  slicing instead of partitioning;
 - `stats.test.ts` updated for the renamed metric, asserting it equals the relay list's length on the
   same seed, which is what "cannot drift" means operationally.
 
