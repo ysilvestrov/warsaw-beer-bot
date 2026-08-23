@@ -2,7 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
-import { orphanWithoutMatchLinkPredicate } from './beers';
+import { orphanNotOnTapPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
@@ -100,7 +100,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
           )`,
     ),
     orphansOffCron: count(
-      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanWithoutMatchLinkPredicate}`,
+      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanNotOnTapPredicate}`,
     ),
     sealUnidentifiable: count(
       `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id

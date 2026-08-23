@@ -155,12 +155,21 @@ it('orphansOffCron counts orphans with no match_links row, minus not_a_beer/reti
     candidates_count: 0, candidates_summary: '', at: '2026-06-04T11:00:00Z',
   });
   setEnrichFailureReview(db, notABeer, 'not_a_beer', null, '2026-06-04T11:30:00Z');
-  // 3) orphan із лінком (on-tap шлях) → НЕ рахується, крон його й так бачить
+  // 3) orphan on a latest-snapshot tap (on-tap пул) → НЕ рахується в relay-пулі:
+  // #486 зробив relay-предикат буквальним запереченням on-tap предиката, тож
+  // рядок з лінком, що досягає крана на ОСТАННЬОМУ снапшоті паба, тепер належить
+  // on-tap пулу, а не «нікому» — крон його й так бачить.
   const linked = upsertBeer(db, {
     name: 'Clementine', brewery: 'Magic Road', style: null, abv: null, rating_global: null,
     normalized_name: 'clementine', normalized_brewery: 'magic road',
   });
-  upsertMatch(db, 'Magic Road Clementine', linked, 1.0);
+  const ref = 'Magic Road Clementine';
+  upsertMatch(db, ref, linked, 1.0);
+  const linkedPub = upsertPub(db, {
+    slug: 'linked-pub', name: 'Linked Pub', address: null, lat: null, lon: null, city: 'warszawa',
+  });
+  const linkedSnap = createSnapshot(db, linkedPub, '2026-06-04T10:00:00Z');
+  insertTaps(db, linkedSnap, [tap(ref)]);
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
   expect(m.orphansOffCron).toBe(1);
