@@ -238,8 +238,18 @@ report_drift_once() {
   [ -n "$DEPLOYED_SHA" ] || return 0
   [ -n "$main_sha" ] || return 0
 
-  # No drift. The closing half of the episode lands in Task 3.
+  # No drift. Two cases: an episode was open, or there never was one.
   if [ "$DEPLOYED_SHA" = "$main_sha" ]; then
+    [ -n "$DRIFT_SINCE" ] || return 0
+    # Only close out loud if we spoke. An all-clear for an alarm that never
+    # sounded is noise, and it would arrive on exactly the path this change
+    # exists to keep quiet: merge, deploy, done, nobody disturbed.
+    if [ -n "$LAST_DRIFT_NOTICE" ]; then
+      notify "✅ production has caught up with main — unattended deploys work again."
+    fi
+    DRIFT_SINCE=""
+    LAST_DRIFT_NOTICE=""
+    write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
     return 0
   fi
 

@@ -506,4 +506,74 @@ describe('#490 drift episode', () => {
 
     expect(countLines(notifyLog)).toBe(1);
   });
+
+  it('closes an announced episode with one recovery message and clears both fields', () => {
+    const r = driftRemote();
+    // production has caught up: DEPLOYED_SHA === origin/main
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: '2026-08-23',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/caught up|in sync/i);
+    const state = readState(h.stateDir);
+    expect(state.DRIFT_SINCE ?? '').toBe('');
+    expect(state.LAST_DRIFT_NOTICE ?? '').toBe('');
+  });
+
+  it('says nothing at all when an unannounced episode closes inside the grace window', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000',           // started, never announced
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 60) });
+
+    // An all-clear for an alarm that never sounded is pure noise, and it would
+    // land on exactly the happy path this change exists to keep quiet.
+    expect(existsSync(notifyLog)).toBe(false);
+    expect(readState(h.stateDir).DRIFT_SINCE ?? '').toBe('');
+  });
+
+  it('#490 regression: a second merge the same day is announced, not swallowed', () => {
+    const r = driftRemote();
+    // The state the OLD code left behind after merge → BLOCKED → deploy:
+    // caught up, but LAST_DRIFT_NOTICE still holds today, so the old code
+    // would stay silent for the rest of the day however far production fell
+    // behind. Here the episode closes first, clearing the marker.
+    const today = new Date().toISOString().slice(0, 10);
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: today,
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // tick 1: production is level → the episode closes and the marker clears
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '2000000' });
+    expect(readState(h.stateDir).LAST_DRIFT_NOTICE ?? '').toBe('');
+
+    // a second merge lands: roll production back to the older commit
+    writeFileSync(
+      join(h.stateDir, 'wbb-autodeploy', 'state.env'),
+      `DEPLOYED_SHA=${r.oldSha}\nPREVIOUS_SHA=\n`,
+    );
+
+    // tick 2 starts a fresh episode silently; tick 3, past the grace, announces
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '3000000' });
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(3000000 + 900) });
+
+    // one recovery + one fresh announcement — under the old code the second
+    // merge produced nothing at all.
+    expect(countLines(notifyLog)).toBe(2);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+  });
 });
