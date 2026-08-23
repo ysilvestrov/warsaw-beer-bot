@@ -18,6 +18,7 @@
 - **No all-clear for an alarm that never sounded.** The recovery message fires only when the episode was announced — i.e. `LAST_DRIFT_NOTICE` is non-empty. A merge followed by a deploy inside the grace window must produce **no notify call at all**, at either end.
 - **`report_drift_once` is only reachable on the idle path** — `autodeploy.sh` calls it only when no `autodeploy-*` tag exists (`[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_stale_once; report_drift_once; exit 0; }`). Every test in this plan therefore needs a remote with **no** `autodeploy-*` tag. The file's shared `remoteDir` fixture HAS one, so drift tests build their own.
 - **The allowlist is `package.json` and `package-lock.json` only.** A drift that touches only those produces the "ℹ️ … autodeploy still works" message; anything else produces the blocking one. The shared fixture's two commits differ only in `package.json`, so drift tests must commit a path outside the allowlist (e.g. `src/x.ts`) to exercise the blocking branch.
+- **The blocking message's text does not change.** The spec's wording section resolves to this: the claim it makes (production is N behind, differing paths are outside the allowlist, security tags are refused until a deploy) is accurate, and what was wrong was asserting it 99 seconds after a merge. Once the grace period holds it back 15 minutes, the alarm is earned and its text stands. Only the new closing message is new copy. Do not rewrite the existing strings.
 - Every new test must be **mutation-proven**: revert the production change, watch the test go red, restore.
 - Shell style follows the file: `local` declarations, `[ ]` tests, comments explaining *why*.
 - Full suite: `npm test`. The autodeploy tests alone: `npx vitest run scripts/autodeploy/autodeploy.test.ts`.
@@ -32,7 +33,7 @@
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
-- Produces: `DRIFT_SINCE` (state field, epoch seconds, empty when no episode is open); `DRIFT_GRACE_S` (constant); `WBB_NOW_S` (test seam); and the test helpers `driftRemote()` and `seedDriftState()` described below, which Tasks 2 and 3 reuse verbatim.
+- Produces: `DRIFT_SINCE` (state field, epoch seconds, empty when no episode is open); `DRIFT_GRACE_S` (constant); `WBB_NOW_S` (test seam); and the test helpers `driftRemote()` and `driftHarness(remote, state)` defined below, which Tasks 2 and 3 reuse verbatim.
 
 - [ ] **Step 1: Write the test fixture and the first failing test**
 
@@ -240,6 +241,8 @@ git commit -m "fix(#490): a drift episode starts silently and waits out its grac
 - Produces: nothing later tasks depend on.
 
 Task 1 already implements the announcement (it is the tail of `report_drift_once`). This task proves it, and proves the two things about it that were never tested: that it happens **once**, and that it comes back **the next day**.
+
+**These tests pass on arrival, and that is deliberate** — they are characterization tests over behaviour Task 1 built, not a red-green cycle. Splitting them into Task 1 would have made one task carry six tests and two commits; leaving them untested would have left the announcement's *frequency* — the half of this bug that silenced the second merge — unpinned. Their proof is the mutation step, not a red first run: Step 3 deletes the suppressor and requires the "no repeat" test to fail. A test that stays green through its mutation is not evidence and must be fixed before the task is done.
 
 - [ ] **Step 1: Write the tests**
 
