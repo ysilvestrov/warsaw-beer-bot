@@ -385,3 +385,74 @@ describe('autodeploy.sh', () => {
     expect(state.DEPLOYED_SHA).toBe(base);
   });
 });
+
+/**
+ * #490. `report_drift_once` runs only on the idle path — when no autodeploy-*
+ * tag exists — so these tests need their own remote, not the shared one, which
+ * carries a tag. The two commits differ in `src/x.ts`, outside the
+ * package.json/package-lock.json allowlist, so drift here is the blocking kind.
+ */
+function driftRemote(): { dir: string; oldSha: string; newSha: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-remote-'));
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
+  const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-seed-'));
+  git(seed, 'init', '-q', '-b', 'main');
+  git(seed, 'config', 'user.email', 't@example.com');
+  git(seed, 'config', 'user.name', 'T');
+  git(seed, 'remote', 'add', 'origin', dir);
+  const oldSha = commit(seed, { 'src/x.ts': 'export const x = 1;\n' }, 'old');
+  git(seed, 'push', '-q', 'origin', 'main');
+  const newSha = commit(seed, { 'src/x.ts': 'export const x = 2;\n' }, 'new');
+  git(seed, 'push', '-q', 'origin', 'main');
+  return { dir, oldSha, newSha };
+}
+
+/** A harness cloned from a drift remote, plus arbitrary state fields. */
+function driftHarness(remote: string, state: Record<string, string>): Harness {
+  const home = mkdtempSync(join(tmpdir(), 'wbb-ad-home-'));
+  const dataDir = join(home, 'data');
+  const stateDir = join(home, 'state');
+  const repoParent = join(dataDir, 'wbb-autodeploy');
+  mkdirSync(repoParent, { recursive: true });
+  mkdirSync(stateDir, { recursive: true });
+  execFileSync('git', ['clone', '-q', remote, join(repoParent, 'repo')]);
+  const dir = join(stateDir, 'wbb-autodeploy');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'state.env'),
+    Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
+  );
+  return { home, dataDir, stateDir, repo: join(repoParent, 'repo'), bin: mkdtempSync(join(tmpdir(), 'wbb-ad-bin-')) };
+}
+
+describe('#490 drift episode', () => {
+  it('records the episode start and says nothing inside the grace window', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, { DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '' });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    const out = run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '1000000' });
+
+    expect(out.code).toBe(0);
+    // The episode is recorded...
+    expect(readState(h.stateDir).DRIFT_SINCE).toBe('1000000');
+    // ...and nobody is told yet. A merge is not an incident.
+    expect(existsSync(notifyLog)).toBe(false);
+  });
+
+  it('still says nothing one second before the grace period expires', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 899) });
+
+    expect(existsSync(notifyLog)).toBe(false);
+    // ...and the start is not moved forward by a tick that stayed silent.
+    expect(readState(h.stateDir).DRIFT_SINCE).toBe('1000000');
+  });
+});
