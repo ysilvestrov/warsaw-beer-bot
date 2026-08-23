@@ -116,7 +116,7 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // on. The predicate itself lives in beers.ts because it is a pool concern; this is its
 // read-side twin and the two must agree — a row listed here but not locked there would be
 // re-armed for nothing. They cannot share text: the predicate is a fragment that hard-codes
-// the `beers` alias `b`, exactly as orphanWithoutMatchLinkPredicate does.
+// the `beers` alias `b`, exactly as orphanNotOnTapPredicate does.
 //
 // `retired_at IS NULL` is not redundant with the class filter: retireEnrichFailure PRESERVES
 // review_class on purpose (for audit), so a retired row still looks actionable here. It is

@@ -16,7 +16,7 @@ function emptyDb() {
 
 const base: StatusMetrics = {
   lastScrapeHoursAgo: 9.3, pubsScraped24h: 42,
-  beersTotal: 12840, beersMatched: 10000, orphansPending: 287, orphansOffCron: 751, ratingsMissing: 134,
+  beersTotal: 12840, beersMatched: 10000, orphansPending: 287, orphansRelayQueue: 751, ratingsMissing: 134,
   snapshots: 1976, taps: 29459, dbSizeMb: 13.2,
   usersTotal: 31, usersLinked: 24,
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
@@ -35,7 +35,7 @@ test('buildStatusMessage: full message exact string', () => {
       '',
       'Стан',
       '• Останній скрейп: 9 год тому ✅ (42 паби за 24 год)',
-      "• Каталог: 12 840 пив · 78% зматчено · 287 orphan'ів у черзі · 751 поза cron",
+      "• Каталог: 12 840 пив · 78% зматчено · 287 orphan'ів у черзі · 751 у relay-черзі",
       '• Рейтинги: 134 зматчених пив без рейтингу',
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
