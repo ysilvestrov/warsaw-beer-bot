@@ -1233,3 +1233,64 @@ describe('#384 provenance', () => {
     expect(row).toEqual({ untappd_id_source: 'checkin' });
   });
 });
+
+describe('#486 pool partition', () => {
+  // The invariant stated as an assertion instead of a comment: with one predicate and its
+  // negation, an orphan cannot fall between the pools however its taps and links are arranged.
+  // Every case below is a shape that exists in production.
+  test('every eligible orphan is in exactly one pool, across every tap/link arrangement', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, {
+      slug: 'partition', name: 'Partition', address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const oldSnap = createSnapshot(db, pubId, '2026-05-01T12:00:00Z');
+    const newSnap = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+
+    const mk = (name: string): number => upsertBeer(db, {
+      untappd_id: null, name, brewery: 'Br', style: null, abv: null, rating_global: null,
+      normalized_name: name.toLowerCase(), normalized_brewery: 'br',
+    });
+
+    // 1. on a tap on the latest snapshot
+    const current = mk('Current');
+    upsertMatch(db, 'ref-current', current, 1.0);
+    insertTaps(db, newSnap, [{
+      tap_number: 1, beer_ref: 'ref-current', brewery_ref: 'Br',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    // 2. link + tap, but only on the OLDER snapshot (the #486 gap)
+    const rotatedOff = mk('RotatedOff');
+    upsertMatch(db, 'ref-rotated', rotatedOff, 1.0);
+    insertTaps(db, oldSnap, [{
+      tap_number: 2, beer_ref: 'ref-rotated', brewery_ref: 'Br',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    // 3. link whose ref matches no tap at all (retention deleted them)
+    const deadLink = mk('DeadLink');
+    upsertMatch(db, 'ref-dead-no-tap-anywhere', deadLink, 1.0);
+
+    // 4. no link at all (shop-sourced relay orphan)
+    const noLink = mk('NoLink');
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const onTap = listLookupCandidates(db, 100, now).map((c) => c.id);
+    const relay = listRelayLookupCandidates(db, 100, now).map((c) => c.id);
+
+    // Exactly one, for every arrangement. The membership pair is asserted as a labelled
+    // tuple so a failure names the beer and which side it fell on, instead of "false !== true".
+    const membership = [current, rotatedOff, deadLink, noLink].map((id) => ({
+      id, onTap: onTap.includes(id), relay: relay.includes(id),
+    }));
+    expect(membership).toEqual([
+      { id: current,    onTap: true,  relay: false },
+      { id: rotatedOff, onTap: false, relay: true  },
+      { id: deadLink,   onTap: false, relay: true  },
+      { id: noLink,     onTap: false, relay: true  },
+    ]);
+    // and the split is the one we intend, not merely disjoint
+    expect(onTap).toEqual([current]);
+    expect(relay.sort()).toEqual([rotatedOff, deadLink, noLink].sort());
+  });
+});
