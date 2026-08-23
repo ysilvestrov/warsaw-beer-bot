@@ -455,4 +455,50 @@ describe('#490 drift episode', () => {
     // ...and the start is not moved forward by a tick that stayed silent.
     expect(readState(h.stateDir).DRIFT_SINCE).toBe('1000000');
   });
+
+  it('announces once the drift has outlived the grace period', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) });
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+    // The reminder marker is what stops the repeat, and what Task 3 reads to
+    // decide whether a closing message is owed.
+    expect(readState(h.stateDir).LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('does not repeat on the next tick of the same day', () => {
+    const r = driftRemote();
+    const today = new Date().toISOString().slice(0, 10);
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: today,
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+
+    expect(existsSync(notifyLog)).toBe(false);
+  });
+
+  it('reminds again on a later day while the episode is still open', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: '2000-01-01',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+
+    expect(countLines(notifyLog)).toBe(1);
+  });
 });
