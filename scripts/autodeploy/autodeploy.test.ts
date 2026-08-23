@@ -488,7 +488,12 @@ describe('#490 drift episode', () => {
     expect(existsSync(notifyLog)).toBe(false);
   });
 
-  it('reminds again on a later day while the episode is still open', () => {
+  it('a stale marker does not suppress — the warning returns on a later day', () => {
+    // This test is not redundant with the other two. The second test proves that
+    // TODAY suppresses. This one proves that STALE does not suppress. Together
+    // they would catch a mutant suppressor of `[ -z "$LAST_DRIFT_NOTICE" ] ||
+    // return 0` (suppress whenever the marker is non-empty) — the second test
+    // cannot; only this one can.
     const r = driftRemote();
     const h = driftHarness(r.dir, {
       DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
