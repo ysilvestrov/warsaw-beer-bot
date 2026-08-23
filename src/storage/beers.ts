@@ -368,14 +368,15 @@ export const orphanNotOnTapPredicate = `b.untappd_id IS NULL
          )
          AND NOT ${onLatestTapPredicate}`;
 
-// #368: relay-пул — orphan'и, яких on-tap пул не побачить НІКОЛИ. Рядки, намінчені
-// `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
-// отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
-// EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
-// структурно, а не тому, що вони зійшли з кранів. Виключення not_a_beer/retired, backoff
-// і сортування — ті самі; інвертований предикат робить пули диз'юнктними за
-// побудовою (дедуп не потрібен), але НЕ покриває orphan'а з рядком у match_links,
-// чий кран зійшов з останнього снапшоту — той не потрапляє в жоден пул.
+// #368/#486: relay-пул — його вміст тепер визначає ЗАПЕРЕЧЕННЯ onLatestTapPredicate.
+// Рядки, намінчені `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки
+// крамниці), не отримують рядка в `match_links`, бо лінки пише лише on-tap ingest — їх
+// onLatestTapPredicate виключає структурно, а не тому, що вони зійшли з кранів.
+// Виключення not_a_beer/retired, backoff і сортування — ті самі. Оскільки
+// orphanNotOnTapPredicate — буквальне заперечення onLatestTapPredicate, пули диз'юнктні
+// за побудовою (дедуп не потрібен) і разом покривають усіх orphan'ів: включно з тим, у
+// кого є рядок у `match_links`, але кран зійшов з останнього снапшоту паба — такий тепер
+// потрапляє саме сюди, в relay-пул, а не в жоден.
 export function listRelayLookupCandidates(
   db: DB,
   limit: number,
