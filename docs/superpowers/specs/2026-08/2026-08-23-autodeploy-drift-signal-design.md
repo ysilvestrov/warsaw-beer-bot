@@ -77,7 +77,8 @@ the episode closes.
 | drift? | `DRIFT_SINCE` | action |
 |---|---|---|
 | no | empty | nothing |
-| no | set | **notify recovery once**, clear `DRIFT_SINCE` and `LAST_DRIFT_NOTICE` |
+| no | set, never announced (`LAST_DRIFT_NOTICE` empty) | clear both, **say nothing** — nobody was told the episode began |
+| no | set, announced | **notify recovery once**, clear `DRIFT_SINCE` and `LAST_DRIFT_NOTICE` |
 | yes | empty | record `DRIFT_SINCE=now`; **say nothing** — the grace window opens |
 | yes | set, age < `DRIFT_GRACE_S` | nothing |
 | yes | set, age ≥ `DRIFT_GRACE_S`, not yet reminded today | notify, set `LAST_DRIFT_NOTICE=today` |
@@ -87,7 +88,10 @@ the episode closes.
 Consequences worth stating because they are the point:
 
 - A merge followed by a deploy inside 15 minutes produces **no traffic at all** — not a warning, not
-  a recovery. Nothing happened that a human needs to know about.
+  a recovery. This is why the recovery transition is conditioned on the episode having been
+  announced: an "all clear" for an alarm that never sounded is pure noise, and it would arrive on
+  exactly the happy path we are trying to make quiet. `LAST_DRIFT_NOTICE` being non-empty is the
+  record that we spoke, so it is also the test for whether we owe a closing message.
 - Further merges while an episode is open stay silent. The gap's *size* is a standing property; it
   belongs in the daily digest, not in the alarm channel. (Deliberately out of scope here — see below.)
 - A forgotten merge still resurfaces once a day, which is what `LAST_DRIFT_NOTICE` was always
@@ -135,7 +139,9 @@ repos, stubbed `WBB_*`), with `WBB_NOW_S` driving the clock:
 - drift older than the grace period → exactly one notify, and `LAST_DRIFT_NOTICE` written;
 - a second tick in the same day, still drifted → no second notify;
 - the next day, still drifted → one reminder;
-- `DEPLOYED_SHA` catches up → **one recovery notify**, and both fields cleared;
+- `DEPLOYED_SHA` catches up after an announced episode → **one recovery notify**, both fields cleared;
+- `DEPLOYED_SHA` catches up *within* the grace window, never announced → **no notify at all**, both
+  fields cleared — the happy path stays silent at both ends;
 - **the regression this issue is named for**: merge → notify → deploy → merge again the same day →
   a second notify must arrive. Under today's code this is silence.
 
