@@ -228,7 +228,15 @@ describe('autodeploy.sh', () => {
 
   it('a healthy deploy updates DEPLOYED_SHA/PREVIOUS_SHA, clears LAST_FAILED_SHA, and exits 0', () => {
     const h = setup();
-    seedState(h, base);
+    // #490: seed a drift episode as if it had been open BEFORE this deploy —
+    // a successful deploy must close it out (clear both fields), not carry it
+    // forward for a later idle tick to misread as seconds-old drift.
+    const stateDir = join(h.stateDir, 'wbb-autodeploy');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'state.env'),
+      `DEPLOYED_SHA=${base}\nPREVIOUS_SHA=\nDRIFT_SINCE=1000000\nLAST_DRIFT_NOTICE=2026-08-20\n`,
+    );
     const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
     const deployLog = join(h.bin, 'deploy.log');
     const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
@@ -254,6 +262,10 @@ describe('autodeploy.sh', () => {
     expect(state.PREVIOUS_SHA).toBe(base);
     expect(state.LAST_FAILED_SHA).toBeUndefined();
     expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
+    // #490: a successful deploy must close any drift episode it was carrying,
+    // not hand it forward for a later idle tick to misread as fresh drift.
+    expect(state.DRIFT_SINCE).toBeUndefined();
+    expect(state.LAST_DRIFT_NOTICE).toBeUndefined();
   });
 
   // #461 added installed_is_stale(): a pending tag must be REFUSED while the
@@ -575,5 +587,6 @@ describe('#490 drift episode', () => {
     // merge produced nothing at all.
     expect(countLines(notifyLog)).toBe(2);
     expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+    expect(readFileSync(notifyLog, 'utf8').split('\n')[0]).toMatch(/caught up/);
   });
 });

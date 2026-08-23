@@ -408,6 +408,15 @@ fi
 
 echo "deploying $target ($tag)"
 if deploy_commit "$target" && healthy "$PORT"; then
+  # #490: production just moved. Whatever episode the idle path was tracking
+  # measured a gap that no longer exists, and the ticks after this one exit at
+  # "already deployed" without ever reaching report_drift_once to close it —
+  # so a stale DRIFT_SINCE would survive to fire instantly once the idle path
+  # resumes (e.g. after the tag is pruned), and a stale LAST_DRIFT_NOTICE
+  # would go on suppressing the daily reminder for an episode that no longer
+  # exists. Clear both, not just the start time.
+  DRIFT_SINCE=""
+  LAST_DRIFT_NOTICE=""
   write_state "$target" "$DEPLOYED_SHA" ""
   bumped=$(git -C "$REPO" diff --stat "$DEPLOYED_SHA" "$target" -- package.json | tail -1)
   notify "✅ autodeploy ${tag} — production patched and healthy.
