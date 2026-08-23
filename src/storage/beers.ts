@@ -453,7 +453,8 @@ export function listRatingRefreshCandidates(
   now: Date,
 ): RatingRefreshCandidate[] {
   // SQL pre-filter: beers WITH untappd_id but NO rating, currently on tap.
-  // Same on-tap join as listLookupCandidates.
+  // #486: uses onLatestTapPredicate, the same on-tap definition listLookupCandidates
+  // interpolates positively — not a hand-kept copy of its join.
   const rows = db
     .prepare(
       `SELECT b.id, b.untappd_id,
@@ -461,18 +462,7 @@ export function listRatingRefreshCandidates(
        FROM beers b
        WHERE b.untappd_id IS NOT NULL
          AND b.rating_global IS NULL
-         AND EXISTS (
-           SELECT 1 FROM match_links ml
-           JOIN taps t ON t.beer_ref = ml.ontap_ref
-           JOIN tap_snapshots ts ON ts.id = t.snapshot_id
-           JOIN (
-             SELECT pub_id, MAX(snapshot_at) AS m
-             FROM tap_snapshots
-             GROUP BY pub_id
-           ) latest ON latest.pub_id = ts.pub_id
-                  AND latest.m = ts.snapshot_at
-           WHERE ml.untappd_beer_id = b.id
-         )
+         AND ${onLatestTapPredicate}
        ORDER BY b.rating_refresh_count ASC, b.id ASC`,
     )
     .all() as RatingRefreshCandidate[];

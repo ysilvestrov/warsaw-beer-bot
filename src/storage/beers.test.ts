@@ -1274,6 +1274,18 @@ describe('#486 pool partition', () => {
     // 4. no link at all (shop-sourced relay orphan)
     const noLink = mk('NoLink');
 
+    // Pin cases 2 and 3 apart from each other: without this, a typo'd `ref` would silently
+    // collapse rotatedOff into the deadLink shape (no tap reachable at all) and the pool
+    // assertions below would still pass, but for the wrong reason.
+    const joinsSomeTap = (beerRef: string): boolean => !!db
+      .prepare(
+        `SELECT 1 FROM match_links ml JOIN taps t ON t.beer_ref = ml.ontap_ref
+         WHERE ml.ontap_ref = ?`,
+      )
+      .get(beerRef);
+    expect(joinsSomeTap('ref-rotated')).toBe(true);
+    expect(joinsSomeTap('ref-dead-no-tap-anywhere')).toBe(false);
+
     const now = new Date('2026-05-26T12:00:00Z');
     const onTap = listLookupCandidates(db, 100, now).map((c) => c.id);
     const relay = listRelayLookupCandidates(db, 100, now).map((c) => c.id);

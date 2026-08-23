@@ -137,13 +137,22 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   expect(m.extMatchBeers).toBe(5);
 });
 
-it('orphansRelayQueue counts orphans not on a tap right now, minus not_a_beer/retired', () => {
+it('orphansRelayQueue includes orphans not on a tap right now (with or without a match_links row), minus not_a_beer/retired', () => {
   const db = fresh();
   // 1) relay-orphan без лінка → рахується
   upsertBeer(db, {
     name: 'Barrel Pie', brewery: 'The Bruery', style: null, abv: null, rating_global: null,
     normalized_name: 'barrel pie', normalized_brewery: 'the bruery',
   });
+  // 1b) relay-orphan З лінком у match_links, який не досягає жодного крана ніде (retention
+  // прибрала їх, або кран так і не з'явився) → теж рахується. Це саме та відмінність, яка
+  // на проді підняла лічильник з 285 до 713 — без цього case тест лишається зеленим, навіть
+  // якщо цей включний шлях зламано.
+  const danglingLink = upsertBeer(db, {
+    name: 'Old Growler', brewery: 'Departed', style: null, abv: null, rating_global: null,
+    normalized_name: 'old growler', normalized_brewery: 'departed',
+  });
+  upsertMatch(db, 'ref-no-tap-anywhere', danglingLink, 1.0);
   // 2) relay-orphan, протриажений як not_a_beer → НЕ рахується
   const notABeer = upsertBeer(db, {
     name: 'Kelih Fino 545', brewery: 'Stoelzle', style: null, abv: null, rating_global: null,
@@ -172,7 +181,7 @@ it('orphansRelayQueue counts orphans not on a tap right now, minus not_a_beer/re
   insertTaps(db, linkedSnap, [tap(ref)]);
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
-  expect(m.orphansRelayQueue).toBe(1);
+  expect(m.orphansRelayQueue).toBe(2);
 });
 
 // #421. Red if the lock clause is folded into `orphanNotOnTapPredicate` itself

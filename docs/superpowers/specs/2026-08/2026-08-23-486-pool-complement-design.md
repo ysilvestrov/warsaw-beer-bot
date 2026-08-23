@@ -91,8 +91,8 @@ has just parsed — so every link was a real tap once. `SNAPSHOT_RETENTION_DAYS`
 | the existing on-tap query, run on every cron tick today | 1.59 s | 101 |
 
 The plan drives from the latest-snapshot co-routine and reaches `match_links` through its UNIQUE
-index; `taps` is never scanned. Four cron ticks a day pay ~1.2 s more in total. The cost objection
-does not survive measurement.
+index; `taps` is never scanned. Eight cron ticks a day (`30 */3 * * *`) pay ~1.2 s more each,
+~10 s more in total. The cost objection does not survive measurement.
 
 ### 4. No re-arm is needed
 

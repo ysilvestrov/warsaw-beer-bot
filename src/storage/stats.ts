@@ -14,7 +14,8 @@ export interface StatusMetrics {
   // #368/#486: розмір черги relay-дренажу — orphan'и, яких enrich-крон бачить ЛИШЕ через
   // relay-пул (не на крані зараз), за винятком not_a_beer/retired. Той самий предикат, що
   // й у listRelayLookupCandidates, мінус backoff. Назва «offCron» була неправдою: цей
-  // лічильник ніколи не міряв cron-недосяжність — після #486 недосяжних немає за побудовою.
+  // лічильник ніколи не міряв cron-недосяжність — недосяжних за побудовою партиції немає
+  // (замок і вичерпаний backoff — окремі, свідомі фільтри поверх неї).
   orphansRelayQueue: number;
   ratingsMissing: number;
   snapshots: number;
