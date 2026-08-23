@@ -50,7 +50,7 @@ test('collectStatus computes all metrics', () => {
     beersTotal: 3,
     beersMatched: 2,
     orphansPending: 1,
-    orphansOffCron: 1,   // orphan 'C' із seed() не має рядка в match_links
+    orphansRelayQueue: 1,   // orphan 'C' із seed() не має рядка в match_links
     // #421: seed() has no locked or unlocked rows, so all three read 0 here. The audit's
     // own behaviour is pinned by the dedicated test below, not by this shape assertion.
     lockedRows: 0,
@@ -137,7 +137,7 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   expect(m.extMatchBeers).toBe(5);
 });
 
-it('orphansOffCron counts orphans with no match_links row, minus not_a_beer/retired', () => {
+it('orphansRelayQueue counts orphans not on a tap right now, minus not_a_beer/retired', () => {
   const db = fresh();
   // 1) relay-orphan без лінка → рахується
   upsertBeer(db, {
@@ -172,15 +172,15 @@ it('orphansOffCron counts orphans with no match_links row, minus not_a_beer/reti
   insertTaps(db, linkedSnap, [tap(ref)]);
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
-  expect(m.orphansOffCron).toBe(1);
+  expect(m.orphansRelayQueue).toBe(1);
 });
 
-// #421. Red if the lock clause is folded into `orphanWithoutMatchLinkPredicate` itself
+// #421. Red if the lock clause is folded into `orphanNotOnTapPredicate` itself
 // instead of being appended at the two pool call sites. This metric counts the whole drain
 // QUEUE, not the slice eligible to run right now — which is exactly why it already skips
 // the backoff filter. Hiding locked rows here would make the backlog look like it shrank
 // when it only went quiet, and the lock's own audit counter is what reports that number.
-it('orphansOffCron still counts a row that is locked out of the pools', () => {
+it('orphansRelayQueue still counts a row that is locked out of the pools', () => {
   const db = fresh();
   const locked = upsertBeer(db, {
     name: 'Bitter Cost', brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
@@ -194,7 +194,7 @@ it('orphansOffCron still counts a row that is locked out of the pools', () => {
   setEnrichFailureReview(db, locked, 'matcher_bug', 'alias gap', '2026-06-04T11:30:00Z', 347);
 
   const m = collectStatus(db, new Date('2026-06-04T12:00:00Z'));
-  expect(m.orphansOffCron).toBe(1);
+  expect(m.orphansRelayQueue).toBe(1);
 });
 
 // #377 part B: the seal audit. Each number falsifies a different premise — see the

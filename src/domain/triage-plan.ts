@@ -198,7 +198,7 @@ export function planTriageActions(
         guardHits.unprobed_absence += 1;
         // matcher_bug with no target falls into the `quiet` branch below: the class is
         // recorded so the row leaves the UNTRIAGED pool, but it stays in the
-        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only not_a_beer and
+        // ENRICHMENT pool (orphanNotOnTapPredicate excludes only not_a_beer and
         // retired_at), so the cron keeps retrying it under BACKOFF_HOURS.
         // Wrong-but-recoverable replaces wrong-and-terminal.
         quiet.push({

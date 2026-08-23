@@ -11,10 +11,11 @@ export interface StatusMetrics {
   beersTotal: number;
   beersMatched: number;
   orphansPending: number;
-  // #368: orphan'и, яких enrich-крон не бачив би без relay-пулу (немає рядка в
-  // `match_links`), за винятком not_a_beer/retired. Той самий предикат, що і в
-  // listRelayLookupCandidates, мінус backoff — тобто розмір черги дренажу.
-  orphansOffCron: number;
+  // #368/#486: розмір черги relay-дренажу — orphan'и, яких enrich-крон бачить ЛИШЕ через
+  // relay-пул (не на крані зараз), за винятком not_a_beer/retired. Той самий предикат, що
+  // й у listRelayLookupCandidates, мінус backoff. Назва «offCron» була неправдою: цей
+  // лічильник ніколи не міряв cron-недосяжність — після #486 недосяжних немає за побудовою.
+  orphansRelayQueue: number;
   ratingsMissing: number;
   snapshots: number;
   taps: number;
@@ -99,7 +100,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
             WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
           )`,
     ),
-    orphansOffCron: count(
+    orphansRelayQueue: count(
       `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanNotOnTapPredicate}`,
     ),
     sealUnidentifiable: count(

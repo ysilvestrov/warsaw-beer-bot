@@ -606,7 +606,7 @@ describe('listRelayLookupCandidates', () => {
 
   // The relay pool is where 51 of the 75 sealed rows actually sit, so this is the
   // clause that does the work in production. Restoring 'unidentifiable' to the
-  // exclusion in orphanWithoutMatchLinkPredicate turns this red.
+  // exclusion in orphanNotOnTapPredicate turns this red.
   test('excludes only not_a_beer; an unidentifiable orphan stays in the relay pool', () => {
     const db = fresh();
     const notABeer = seedRelayOrphan(db, { brewery: 'Stoelzle', name: 'Kelih Fino 545' });

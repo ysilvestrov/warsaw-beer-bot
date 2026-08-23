@@ -268,7 +268,7 @@ export interface LookupCandidate {
 //
 // Deliberately NOT applied in two places. `/enrich/candidates` searches in the user's own
 // Untappd session (#89), so the quota this saves is not ours to save and a locked row may
-// still be findable there. `orphansOffCron` in stats.ts counts the whole drain QUEUE, not
+// still be findable there. `orphansRelayQueue` in stats.ts counts the whole drain QUEUE, not
 // the slice eligible right now — which is why it already skips the backoff filter too;
 // hiding locked rows there would make the backlog look like it shrank when it only went
 // quiet. Hence this is appended at the two pool call sites rather than folded into
