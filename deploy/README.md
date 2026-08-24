@@ -182,8 +182,15 @@ lie. Autodeploy then refuses until you reseed it:
 ./deploy/record-deployed.sh "$(git rev-parse HEAD)"
 ```
 
-`autodeploy.sh` also reports drift on its idle path — once a day, not once a
-tick — if production has fallen behind `main` in ways that would block it.
+`autodeploy.sh` also watches for drift on its idle path — production falling
+behind `main` in ways that would block it. Drift is treated as an **episode**,
+not a per-tick condition: nothing is reported for the first 15 minutes
+(`DRIFT_GRACE_S`), because a merge followed by a deploy is ordinary work and
+needs no message at either end. Past that, one message goes out, repeated at
+most once a day while the episode stays open, and one closing message when
+production catches up — the closing message only if the episode was announced.
+`DRIFT_SINCE` in the state file holds the episode's start; both it and
+`LAST_DRIFT_NOTICE` clear when it ends.
 
 The timer stays **disabled** until the mechanism has been exercised by hand:
 
