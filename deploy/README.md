@@ -183,14 +183,21 @@ lie. Autodeploy then refuses until you reseed it:
 ```
 
 `autodeploy.sh` also watches for drift on its idle path — production falling
-behind `main` in ways that would block it. Drift is treated as an **episode**,
-not a per-tick condition: nothing is reported for the first 15 minutes
-(`DRIFT_GRACE_S`), because a merge followed by a deploy is ordinary work and
-needs no message at either end. Past that, one message goes out, repeated at
-most once a day while the episode stays open, and one closing message when
-production catches up — the closing message only if the episode was announced.
-`DRIFT_SINCE` in the state file holds the episode's start; both it and
-`LAST_DRIFT_NOTICE` clear when it ends.
+behind `main` in ways that would block it. **Idle means it has no work**: no
+`autodeploy-*` tag exists, or the newest one is already deployed, or the newest
+one is recorded as `LAST_FAILED_SHA`. It does NOT mean "no tag has ever been
+pushed", which is what the condition said until #491 — and since tags are never
+pruned, that turned both this report and the stale-deployer reminder off
+permanently the first time one was pushed. A tag that is genuine work still
+reaches neither report: it is deployed, or refused with its offending paths
+listed. Drift is treated as an **episode**, not a per-tick condition: nothing is
+reported for the first 15 minutes (`DRIFT_GRACE_S`), because a merge followed by
+a deploy is ordinary work and needs no message at either end. Past that, one
+message goes out, repeated at most once a day while the episode stays open, and
+one closing message when production catches up — the closing message only if the
+episode was announced. `DRIFT_SINCE` in the state file holds the episode's
+start; both it and `LAST_DRIFT_NOTICE` clear when it ends. `LAST_STALE_NOTICE`
+does the same job for the stale-deployer reminder.
 
 The timer stays **disabled** until the mechanism has been exercised by hand:
 
