@@ -45,9 +45,14 @@ function stub(dir: string, name: string, body: string): string {
  * `countLines` counts lines, and the stale-deployer and guard-refusal
  * messages are multi-line — a plain `cat` stub would make "how many
  * notifications" unmeasurable.
+ *
+ * The recorded line is prefixed with a fixed `NOTIFY ` marker so it is
+ * never empty, even for a (currently hypothetical) message whose first
+ * line is blank: `countLines` trims the log before splitting, so a
+ * trailing blank line would vanish and silently undercount that call.
  */
 function countingNotify(dir: string, log: string): string {
-  return stub(dir, 'notify', `head -n1 <<< "$1" >> "${log}"`);
+  return stub(dir, 'notify', `printf 'NOTIFY %s\\n' "$(head -n1 <<< "$1")" >> "${log}"`);
 }
 
 function readState(stateDir: string): Record<string, string> {
@@ -666,15 +671,27 @@ describe('write_state has three parameters (source guard)', () => {
     const src = readFileSync(SCRIPT, 'utf8').split('\n');
     const offenders: string[] = [];
     src.forEach((line, i) => {
+      // Skip comment lines — a comment mentioning `write_state` in prose
+      // (e.g. explaining the #497 history) is not a call site, and counting
+      // its words would false-positive.
+      if (/^\s*#/.test(line)) return;
       // Skip the function definition itself (`write_state() {`) — only CALL
       // sites are in scope.
       if (/write_state\s*\(\)/.test(line)) return;
       const m = line.match(/\bwrite_state\s+(.*)$/);
       if (!m) return;
-      // Every call in this file quotes each argument as a separate "..."
-      // token (e.g. `write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"`)
-      // — counting quoted tokens after the call name counts the arguments.
-      const args = m[1].match(/"[^"]*"/g) ?? [];
+      // Count shell WORDS, not quoted tokens: an unquoted argument (e.g.
+      // `write_state "$a" "$b" "$c" $extra`) is a real fourth parameter and
+      // must be caught even though it carries no quotes. Stop at an inline
+      // trailing `#` comment token, since a bare `#` starts a comment that
+      // is not part of the argument list.
+      const tokenRe = /"[^"]*"|'[^']*'|\S+/g;
+      const args: string[] = [];
+      let tok: RegExpExecArray | null;
+      while ((tok = tokenRe.exec(m[1]))) {
+        if (tok[0].startsWith('#')) break;
+        args.push(tok[0]);
+      }
       if (args.length > 3) {
         offenders.push(
           `line ${i + 1}: \`${line.trim()}\` passes ${args.length} arguments — ` +
