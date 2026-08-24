@@ -667,7 +667,7 @@ describe('#490 drift episode', () => {
  * enforces D1's "three parameters" invariant.
  */
 describe('write_state has three parameters (source guard)', () => {
-  it('every call site is two or three quoted arguments and nothing else', () => {
+  it('every call site is exactly three quoted arguments and nothing else', () => {
     const src = readFileSync(SCRIPT, 'utf8').split('\n');
     const offenders: string[] = [];
     src.forEach((line, i) => {
@@ -693,10 +693,16 @@ describe('write_state has three parameters (source guard)', () => {
       // exactly the kind of cleverness at a call site that nobody re-read.
       // If a call genuinely needs a different shape, that is a decision to
       // make deliberately, not one to sneak past a regex.
-      if (!/^\s*write_state(?: "[^"]*"){2,3}\s*$/.test(line)) {
+      // EXACTLY three, not two-or-three. `last_failed` is `${3:-}` in the
+      // function, so omitting it and passing "" are identical to bash — and
+      // that is the problem: two spellings for "clear the failed-tag marker",
+      // one of which is invisible at the call site. Requiring the explicit ""
+      // is the same lesson as #497 one argument over: a field whose value is
+      // decided by ABSENCE is a field nobody notices changing.
+      if (!/^\s*write_state(?: "[^"]*"){3}\s*$/.test(line)) {
         offenders.push(
           `line ${i + 1}: \`${line.trim()}\` — a write_state call must be exactly ` +
-            `two or three double-quoted arguments and nothing else on the line ` +
+            `three double-quoted arguments and nothing else on the line ` +
             `(deployed, previous, last_failed). LAST_DRIFT_NOTICE / ` +
             `LAST_STALE_NOTICE / DRIFT_SINCE are NOT parameters: assign the shell ` +
             `variable before calling, per #497. This guard refuses any other ` +
