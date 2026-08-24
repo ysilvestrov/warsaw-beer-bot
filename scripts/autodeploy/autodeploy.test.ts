@@ -461,7 +461,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 899) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 899) }).code).toBe(0);
 
     expect(existsSync(notifyLog)).toBe(false);
     // ...and the start is not moved forward by a tick that stayed silent.
@@ -476,7 +480,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
 
     expect(countLines(notifyLog)).toBe(1);
     expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
@@ -495,7 +503,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
 
     expect(existsSync(notifyLog)).toBe(false);
   });
@@ -514,7 +526,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
 
     expect(countLines(notifyLog)).toBe(1);
   });
@@ -529,7 +545,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
 
     expect(countLines(notifyLog)).toBe(1);
     expect(readFileSync(notifyLog, 'utf8')).toMatch(/caught up|in sync/i);
@@ -547,7 +567,11 @@ describe('#490 drift episode', () => {
     const notifyLog = join(h.bin, 'notify.log');
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 60) });
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 60) }).code).toBe(0);
 
     // An all-clear for an alarm that never sounded is pure noise, and it would
     // land on exactly the happy path this change exists to keep quiet.
@@ -570,7 +594,9 @@ describe('#490 drift episode', () => {
     const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
 
     // tick 1: production is level → the episode closes and the marker clears
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '2000000' });
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '2000000' }).code).toBe(0);
     expect(readState(h.stateDir).LAST_DRIFT_NOTICE ?? '').toBe('');
 
     // a second merge lands: roll production back to the older commit
@@ -580,8 +606,12 @@ describe('#490 drift episode', () => {
     );
 
     // tick 2 starts a fresh episode silently; tick 3, past the grace, announces
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '3000000' });
-    run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(3000000 + 900) });
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '3000000' }).code).toBe(0);
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(3000000 + 900) }).code).toBe(0);
 
     // one recovery + one fresh announcement — under the old code the second
     // merge produced nothing at all.
