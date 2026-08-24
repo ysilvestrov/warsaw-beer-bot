@@ -6,6 +6,7 @@ Issues: #491 (the idle reports go dark once any `autodeploy-*` tag exists), #497
 marker is erased by the drift write in the same tick)
 Related: `2026-08-23-autodeploy-drift-signal-design.md` (#490 — the episode this signal lives in),
 `2026-08-16-435-dependency-security-autofix-design.md` (the deployer both defects live in)
+Spawned: #498 (a deployed tag becomes pending again once production moves past it)
 Measured from: production state on 2026-08-24, `DEPLOYED_SHA=2c4b1bb`, no `autodeploy-*` tag in origin
 
 ## The model
@@ -176,7 +177,7 @@ A tempting single predicate would fix all three at once: *work is a tag strictly
 the 2026-08-18 incident in which a throwaway tag on an older commit was caught precisely as a
 downgrade — and it would move the guard's threat model, not merely the reachability of a report. A
 tag is a signal, never a permission; deciding that some tags are beneath the guard's notice is a
-security argument and deserves its own spec. Filed separately.
+security argument and deserves its own spec. Filed as **#498**.
 
 ## Verification in production
 
