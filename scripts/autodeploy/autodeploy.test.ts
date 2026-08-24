@@ -667,45 +667,41 @@ describe('#490 drift episode', () => {
  * enforces D1's "three parameters" invariant.
  */
 describe('write_state has three parameters (source guard)', () => {
-  it('no call site passes write_state a fourth argument', () => {
+  it('every call site is two or three quoted arguments and nothing else', () => {
     const src = readFileSync(SCRIPT, 'utf8').split('\n');
     const offenders: string[] = [];
     src.forEach((line, i) => {
       // Skip comment lines — a comment mentioning `write_state` in prose
-      // (e.g. explaining the #497 history) is not a call site, and counting
-      // its words would false-positive.
+      // (e.g. explaining the #497 history) is not a call site.
       if (/^\s*#/.test(line)) return;
       // Skip the function definition itself (`write_state() {`) — only CALL
       // sites are in scope.
       if (/write_state\s*\(\)/.test(line)) return;
-      const m = line.match(/\bwrite_state\s+(.*)$/);
-      if (!m) return;
-      // Count shell WORDS, not quoted tokens: an unquoted argument (e.g.
-      // `write_state "$a" "$b" "$c" $extra`) is a real fourth parameter and
-      // must be caught even though it carries no quotes.
+      if (!/\bwrite_state\s/.test(line)) return;
+      // ALLOWLIST, not a counter. Counting arguments means parsing bash, and
+      // bash does not reward part-time parsers: `>/dev/null "$extra"` hides a
+      // fourth argument *behind* a redirection, `2>/dev/null` is a redirection
+      // that does not start with `>`, and every rule added to handle one form
+      // opens another. A tripwire that guesses is worse than no tripwire.
       //
-      // The argument list ends where the COMMAND ends. A guard that counted
-      // past that would fail CI on `write_state "$a" "$b" "$c" || exit 1` —
-      // ordinary error handling, three arguments — and a guard that cries
-      // wolf on correct code is one the next author deletes rather than
-      // reads. So stop at the first token that is not an argument: an
-      // inline `#` comment, or any shell operator that terminates the
-      // command (`||`, `&&`, `;`, `|`, `&`, a redirection, or a closing
-      // `)` / `}` from an enclosing group).
-      const tokenRe = /"[^"]*"|'[^']*'|\S+/g;
-      const ENDS_COMMAND = /^(#|\|\||&&|;;?|\||&|>>?|<|\)|\})/;
-      const args: string[] = [];
-      let tok: RegExpExecArray | null;
-      while ((tok = tokenRe.exec(m[1]))) {
-        if (ENDS_COMMAND.test(tok[0])) break;
-        args.push(tok[0]);
-      }
-      if (args.length > 3) {
+      // So the rule is the opposite: a `write_state` call must be written as
+      // two or three double-quoted arguments and NOTHING ELSE on the line.
+      // That shape cannot hide a fourth argument in any form. Anything more
+      // exotic — a redirection, `|| exit 1`, an unquoted word, a line
+      // continuation — fails LOUDLY and says so, which is the correct
+      // outcome: this guard protects an invariant (#497) that was broken by
+      // exactly the kind of cleverness at a call site that nobody re-read.
+      // If a call genuinely needs a different shape, that is a decision to
+      // make deliberately, not one to sneak past a regex.
+      if (!/^\s*write_state(?: "[^"]*"){2,3}\s*$/.test(line)) {
         offenders.push(
-          `line ${i + 1}: \`${line.trim()}\` passes ${args.length} arguments — ` +
-            `write_state takes exactly three (deployed, previous, last_failed). ` +
-            `LAST_DRIFT_NOTICE/LAST_STALE_NOTICE/DRIFT_SINCE are not parameters: ` +
-            `assign the shell variable before calling, per #497.`,
+          `line ${i + 1}: \`${line.trim()}\` — a write_state call must be exactly ` +
+            `two or three double-quoted arguments and nothing else on the line ` +
+            `(deployed, previous, last_failed). LAST_DRIFT_NOTICE / ` +
+            `LAST_STALE_NOTICE / DRIFT_SINCE are NOT parameters: assign the shell ` +
+            `variable before calling, per #497. This guard refuses any other ` +
+            `shape on purpose — a redirection or operator on the same line can ` +
+            `hide a fourth argument from any counter short of a real bash parser.`,
         );
       }
     });
