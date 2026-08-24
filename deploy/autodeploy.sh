@@ -319,29 +319,45 @@ DRIFT_SINCE="${DRIFT_SINCE:-}"
 # Tag names are ISO-8601 timestamps, so lexical order is chronological.
 tag=$(git -C "$REPO" for-each-ref --sort=-refname --format='%(refname:short)' \
         --count=1 'refs/tags/autodeploy-*')
-[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_stale_once; report_drift_once; exit 0; }
 
-target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
-
-
-# C3: a tag that already failed once is not retried automatically — design
-# §7 calls for one attempt, then a human, and without this the state file
-# was written only on success, so the next tick saw the same tag and the
-# same DEPLOYED_SHA and did it all again — ~288 forced restarts a day.
-# Quiet on purpose: the operator was already paged when this was first
-# recorded (guard refusal / audit refusal / deploy failure / rollback
-# failure all notify before writing LAST_FAILED_SHA); a repeat every 5
-# minutes forever is the outage this fixes, not a second alert of it.
-# Clear LAST_FAILED_SHA in the state file (or delete the file) to retry.
-if [ -n "$LAST_FAILED_SHA" ] && [ "$target" = "$LAST_FAILED_SHA" ]; then
-  echo "tag $tag ($target) is recorded as LAST_FAILED_SHA in $STATE; skipping quietly"
-  exit 0
+# #491: what makes the deployer idle is having no WORK, not having no TAG.
+# The old gate was `[ -n "$tag" ] || { ...report...; exit 0; }` — literally
+# "no autodeploy-* tag has ever been pushed". Tags are permanent, so the first
+# qualified merge turned the drift AND stale-deployer reports off forever, and
+# they worked at all only because none had ever been pushed. The three
+# diagnostic lines below are kept verbatim: they say different things and are
+# read in the journal.
+pending=""
+target=""
+if [ -z "$tag" ]; then
+  echo "no autodeploy tag yet"
+else
+  target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
+  # C3: a tag that already failed once is not retried automatically — design
+  # §7 calls for one attempt, then a human, and without this the state file
+  # was written only on success, so the next tick saw the same tag and the
+  # same DEPLOYED_SHA and did it all again — ~288 forced restarts a day.
+  # Quiet on purpose ABOUT THE TAG: the operator was already paged when this
+  # was first recorded (guard refusal / audit refusal / deploy failure /
+  # rollback failure all notify before writing LAST_FAILED_SHA); a repeat
+  # every 5 minutes forever is the outage this fixes. Drift is a different
+  # statement about a different object, on a once-a-day cadence, and a stuck
+  # tag WITH production behind main is autodeploy dead twice over.
+  # Clear LAST_FAILED_SHA in the state file (or delete the file) to retry.
+  if [ -n "$LAST_FAILED_SHA" ] && [ "$target" = "$LAST_FAILED_SHA" ]; then
+    echo "tag $tag ($target) is recorded as LAST_FAILED_SHA in $STATE; skipping quietly"
+  elif [ "$target" = "$DEPLOYED_SHA" ]; then
+    echo "already deployed $target"
+  else
+    pending="$target"
+  fi
 fi
 
-if [ "$target" = "$DEPLOYED_SHA" ]; then
-  echo "already deployed $target"
-  exit 0
-fi
+# Idle: nothing to deploy, so the two standing conditions get their once-a-day
+# say. A PENDING tag deliberately reaches neither — it is about to be deployed
+# or refused with its offending paths listed, and a second message about the
+# same condition is noise.
+[ -n "$pending" ] || { report_stale_once; report_drift_once; exit 0; }
 
 # On a first run we have nothing to diff against, so compare with what is
 # actually installed rather than deploying an unbounded diff blind.
