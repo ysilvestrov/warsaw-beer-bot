@@ -85,8 +85,10 @@ first.
 This is not tidiness. While the positional form exists, a *later* call in the same tick silently
 decides what an *earlier* one persisted — a defect that is invisible at both call sites and only
 appears when you read them together, in order, knowing the default. Deleting the parameters does not
-fix #497; it makes #497 **unwriteable**. #490 already chose assign-then-carry for `DRIFT_SINCE` for
-this reason; this finishes the choice.
+fix #497; it removes the mechanism that caused it — bash still accepts and silently discards a fourth
+argument at a call site, so the shape stays possible, but nothing in the file can any longer *reach*
+it through the positional-carry path, and a source-guard test pins that no call site tries. #490
+already chose assign-then-carry for `DRIFT_SINCE` for this reason; this finishes the choice.
 
 **This overturns a decision #490 made three weeks earlier, on purpose.** That design considered
 converting `write_state` to read shell variables and rejected it: *"it would touch all eleven call
@@ -232,7 +234,7 @@ tag* pays it identically. Paying it now, watched, is better than at 03:00.
 4. A pending tag produces exactly one message — the guard's verdict — and no idle report.
 5. A tick in which both reporters speak leaves **both** markers in the state file, and the next tick
    the same day is silent.
-6. `write_state` has three parameters; `LAST_DRIFT_NOTICE`, `LAST_STALE_NOTICE` and `DRIFT_SINCE`
-   cannot be passed to it.
+6. `write_state` has three parameters; a source-guard test fails the suite if any call site in
+   `deploy/autodeploy.sh` passes it a fourth.
 7. `deploy/README.md` states what "idle" now means.
 8. Every new test is mutation-proven: delete the line it defends, show it fail.

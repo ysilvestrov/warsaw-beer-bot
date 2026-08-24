@@ -226,10 +226,12 @@ the deploy comes up unhealthy, or the rollback itself fails — the run writes
 `LAST_FAILED_SHA=<that commit>` into `~/.local/state/wbb-autodeploy/state.env`
 alongside the existing `DEPLOYED_SHA`/`PREVIOUS_SHA` lines. On every later
 tick, a tag whose commit matches `LAST_FAILED_SHA` is skipped immediately —
-exit 0, one journal line, **no Telegram message**. This is deliberate: the
-operator was already paged when the failure was first recorded, and design
-§7 calls for one attempt, then a human, not a message every 5 minutes
-forever.
+exit 0, one journal line, and **no message about the tag**. The tag is idle,
+so the two standing idle reports (drift, stale deployer) can still speak on
+their once-a-day cadence; a stuck tag *with* production behind `main` is
+autodeploy dead twice over. This is deliberate: the operator was already
+paged when the failure was first recorded, and design §7 calls for one
+attempt, then a human, not a message every 5 minutes forever.
 
 To retry a tag by hand (after fixing whatever made it fail, or if the
 failure was a known-transient blip), clear the memory:
