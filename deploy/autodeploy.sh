@@ -149,8 +149,17 @@ deploy_commit() {
 
 # C3: writes the state file, preserving DEPLOYED_SHA/PREVIOUS_SHA and setting
 # (or clearing, if $3 is empty) LAST_FAILED_SHA.
+#
+# #497: the three daily/episode markers are NOT parameters. They used to be
+# positions 4-6, carried by default (`${4:-$LAST_DRIFT_NOTICE}`), and that form
+# let a LATER call in the same tick silently decide what an EARLIER one had
+# persisted: report_stale_once passed its marker as argument 5 without assigning
+# the variable, and report_drift_once's four-argument write moments later fell
+# back to the still-empty variable and dropped the line. Reading the shell
+# variables directly does not merely fix that — it makes it unwriteable. A
+# caller that wants to change one of these ASSIGNS it, then calls.
 write_state() {
-  local deployed="$1" previous="$2" last_failed="${3:-}" drift_notice="${4:-$LAST_DRIFT_NOTICE}" stale_notice="${5:-$LAST_STALE_NOTICE}" drift_since="${6:-$DRIFT_SINCE}"
+  local deployed="$1" previous="$2" last_failed="${3:-}"
   {
     printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$deployed" "$previous"
     # `if`, not `[ -n ... ] &&` — the latter, as the group's last statement,
@@ -160,16 +169,16 @@ write_state() {
     if [ -n "$last_failed" ]; then
       printf 'LAST_FAILED_SHA=%s\n' "$last_failed"
     fi
-    # Carried by default so a deploy does not reset the once-a-day drift
+    # Carried on every write so a deploy does not reset the once-a-day drift
     # reminder and turn a standing condition back into a siren.
-    if [ -n "$drift_notice" ]; then
-      printf 'LAST_DRIFT_NOTICE=%s\n' "$drift_notice"
+    if [ -n "$LAST_DRIFT_NOTICE" ]; then
+      printf 'LAST_DRIFT_NOTICE=%s\n' "$LAST_DRIFT_NOTICE"
     fi
-    if [ -n "$stale_notice" ]; then
-      printf 'LAST_STALE_NOTICE=%s\n' "$stale_notice"
+    if [ -n "$LAST_STALE_NOTICE" ]; then
+      printf 'LAST_STALE_NOTICE=%s\n' "$LAST_STALE_NOTICE"
     fi
-    if [ -n "$drift_since" ]; then
-      printf 'DRIFT_SINCE=%s\n' "$drift_since"
+    if [ -n "$DRIFT_SINCE" ]; then
+      printf 'DRIFT_SINCE=%s\n' "$DRIFT_SINCE"
     fi
   } > "$STATE" || {
     # I6: the state write used to abort silently under set -e. A failure
@@ -227,7 +236,11 @@ report_stale_once() {
   notify "⚠️ the installed deployer is out of date — a merged fix is not live until it is installed.
 ${STALE_REPORT}
 Run: sudo bash deploy/install-autodeploy.sh"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$LAST_DRIFT_NOTICE" "$today"
+  # #497: assign, then let write_state carry it. Passing "$today" positionally
+  # left LAST_STALE_NOTICE empty, and report_drift_once's write in the same
+  # tick then persisted that emptiness over the marker just written.
+  LAST_STALE_NOTICE="$today"
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
 report_drift_once() {
@@ -275,7 +288,8 @@ report_drift_once() {
   else
     notify "ℹ️ production is ${behind} commit(s) behind main, but only the manifest and lockfile differ — autodeploy still works."
   fi
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$today"
+  LAST_DRIFT_NOTICE="$today"
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
 # --- fetch -------------------------------------------------------------------

@@ -620,3 +620,72 @@ describe('#490 drift episode', () => {
     expect(readFileSync(notifyLog, 'utf8').split('\n')[0]).toMatch(/caught up/);
   });
 });
+
+describe('#497 the daily markers survive each other', () => {
+  it('a tick where both reporters speak leaves BOTH markers in the state file', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    // One line per CALL, not per line of message. `countLines` counts lines,
+    // and the stale-deployer and guard-refusal messages are multi-line — a
+    // plain `cat` stub would make "how many notifications" unmeasurable.
+    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    // A non-zero exit before the notify point would leave the log absent and
+    // the state untouched — indistinguishable from the silence being tested.
+    expect(out.code).toBe(0);
+    // Two distinct messages, one from each reporter.
+    expect(countLines(notifyLog)).toBe(2);
+    const log = readFileSync(notifyLog, 'utf8');
+    expect(log).toMatch(/out of date/);
+    expect(log).toMatch(/BLOCKED/);
+
+    // The defect: report_drift_once's write dropped the marker
+    // report_stale_once had just persisted.
+    const state = readState(h.stateDir);
+    expect(state.LAST_STALE_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(state.LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('the same day is silent on the next tick — neither warning repeats', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    // One line per CALL, not per line of message. `countLines` counts lines,
+    // and the stale-deployer and guard-refusal messages are multi-line — a
+    // plain `cat` stub would make "how many notifications" unmeasurable.
+    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+    const env = {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    };
+
+    expect(run(h, env).code).toBe(0);
+    expect(countLines(notifyLog)).toBe(2);
+
+    // Second tick, same day: both markers must still be suppressing.
+    expect(run(h, env).code).toBe(0);
+    expect(countLines(notifyLog)).toBe(2); // unchanged — the siren #497 describes
+  });
+});
