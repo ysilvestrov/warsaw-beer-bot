@@ -682,14 +682,22 @@ describe('write_state has three parameters (source guard)', () => {
       if (!m) return;
       // Count shell WORDS, not quoted tokens: an unquoted argument (e.g.
       // `write_state "$a" "$b" "$c" $extra`) is a real fourth parameter and
-      // must be caught even though it carries no quotes. Stop at an inline
-      // trailing `#` comment token, since a bare `#` starts a comment that
-      // is not part of the argument list.
+      // must be caught even though it carries no quotes.
+      //
+      // The argument list ends where the COMMAND ends. A guard that counted
+      // past that would fail CI on `write_state "$a" "$b" "$c" || exit 1` —
+      // ordinary error handling, three arguments — and a guard that cries
+      // wolf on correct code is one the next author deletes rather than
+      // reads. So stop at the first token that is not an argument: an
+      // inline `#` comment, or any shell operator that terminates the
+      // command (`||`, `&&`, `;`, `|`, `&`, a redirection, or a closing
+      // `)` / `}` from an enclosing group).
       const tokenRe = /"[^"]*"|'[^']*'|\S+/g;
+      const ENDS_COMMAND = /^(#|\|\||&&|;;?|\||&|>>?|<|\)|\})/;
       const args: string[] = [];
       let tok: RegExpExecArray | null;
       while ((tok = tokenRe.exec(m[1]))) {
-        if (tok[0].startsWith('#')) break;
+        if (ENDS_COMMAND.test(tok[0])) break;
         args.push(tok[0]);
       }
       if (args.length > 3) {
