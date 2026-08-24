@@ -349,6 +349,8 @@ else
   elif [ "$target" = "$DEPLOYED_SHA" ]; then
     echo "already deployed $target"
   else
+    # target is what everything below the gate uses (guard, audit, deploy);
+    # pending only decides *whether* we get there — keep them the same value.
     pending="$target"
   fi
 fi
@@ -439,12 +441,17 @@ fi
 echo "deploying $target ($tag)"
 if deploy_commit "$target" && healthy "$PORT"; then
   # #490: production just moved. Whatever episode the idle path was tracking
-  # measured a gap that no longer exists, and the ticks after this one exit at
-  # "already deployed" without ever reaching report_drift_once to close it —
-  # so a stale DRIFT_SINCE would survive to fire instantly once the idle path
-  # resumes (e.g. after the tag is pruned), and a stale LAST_DRIFT_NOTICE
-  # would go on suppressing the daily reminder for an episode that no longer
-  # exists. Clear both, not just the start time.
+  # measured a gap that no longer exists. Since #491, the very next tick
+  # reaches report_drift_once instead of exiting at "already deployed" — and
+  # if main has not moved further in the meantime, DEPLOYED_SHA now equals
+  # main, so that tick takes the "no drift" branch, which speaks only if
+  # DRIFT_SINCE is still set (and announces "caught up" only if a prior
+  # message was ever sent). A stale DRIFT_SINCE left behind here would
+  # already be past the grace window, so it would siren "caught up" within
+  # five minutes of a successful deploy — not eventually, immediately. A
+  # stale LAST_DRIFT_NOTICE would then go on suppressing the daily reminder
+  # for an episode that no longer exists. Clear both, not just the start
+  # time.
   DRIFT_SINCE=""
   LAST_DRIFT_NOTICE=""
   write_state "$target" "$DEPLOYED_SHA" ""

@@ -40,6 +40,16 @@ function stub(dir: string, name: string, body: string): string {
   return p;
 }
 
+/**
+ * A notify stub that records ONE LINE PER CALL, not per line of message.
+ * `countLines` counts lines, and the stale-deployer and guard-refusal
+ * messages are multi-line — a plain `cat` stub would make "how many
+ * notifications" unmeasurable.
+ */
+function countingNotify(dir: string, log: string): string {
+  return stub(dir, 'notify', `head -n1 <<< "$1" >> "${log}"`);
+}
+
 function readState(stateDir: string): Record<string, string> {
   // Mirrors autodeploy.sh: STATE_DIR="$XDG_STATE_HOME/wbb-autodeploy".
   const p = join(stateDir, 'wbb-autodeploy', 'state.env');
@@ -185,6 +195,14 @@ describe('autodeploy.sh', () => {
     expect(r.code).toBe(0);
     expect(existsSync(guardMarker)).toBe(false);
     expect(countLines(deployLog)).toBe(0);
+    // Post-#491 this path now reaches report_drift_once every time (base,
+    // the seeded DEPLOYED_SHA, is behind origin/main here). The silence is
+    // no longer structural — this path used to exit before any reporter
+    // ran — it survives only because DRIFT_GRACE_S (15 min) has not
+    // elapsed: DRIFT_SINCE is unset, so report_drift_once starts the
+    // episode clock and returns without notifying. A future change to
+    // DRIFT_GRACE_S or the episode-start branch could break this silently,
+    // in a test whose name mentions neither.
     expect(existsSync(notifyLog)).toBe(false);
   });
 
@@ -632,6 +650,44 @@ describe('#490 drift episode', () => {
   });
 });
 
+/**
+ * D1 (#491/#497 design): `write_state` takes exactly three parameters, and
+ * the three daily/episode markers (`LAST_DRIFT_NOTICE`, `LAST_STALE_NOTICE`,
+ * `DRIFT_SINCE`) are no longer parameters at all — a caller that wants to
+ * change one assigns the shell variable, then calls. Nothing about bash
+ * *enforces* this: `write_state "$a" "$b" "$c" "$extra"` runs, exits 0, and
+ * silently drops "$extra" on the floor — the same shape of invisible defect
+ * as #497, by a different mechanism, and no unit test above ever inspects a
+ * `write_state` call site directly. This source guard is what actually
+ * enforces D1's "three parameters" invariant.
+ */
+describe('write_state has three parameters (source guard)', () => {
+  it('no call site passes write_state a fourth argument', () => {
+    const src = readFileSync(SCRIPT, 'utf8').split('\n');
+    const offenders: string[] = [];
+    src.forEach((line, i) => {
+      // Skip the function definition itself (`write_state() {`) — only CALL
+      // sites are in scope.
+      if (/write_state\s*\(\)/.test(line)) return;
+      const m = line.match(/\bwrite_state\s+(.*)$/);
+      if (!m) return;
+      // Every call in this file quotes each argument as a separate "..."
+      // token (e.g. `write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"`)
+      // — counting quoted tokens after the call name counts the arguments.
+      const args = m[1].match(/"[^"]*"/g) ?? [];
+      if (args.length > 3) {
+        offenders.push(
+          `line ${i + 1}: \`${line.trim()}\` passes ${args.length} arguments — ` +
+            `write_state takes exactly three (deployed, previous, last_failed). ` +
+            `LAST_DRIFT_NOTICE/LAST_STALE_NOTICE/DRIFT_SINCE are not parameters: ` +
+            `assign the shell variable before calling, per #497.`,
+        );
+      }
+    });
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe('#497 the daily markers survive each other', () => {
   it('a tick where both reporters speak leaves BOTH markers in the state file', () => {
     const r = driftRemote();
@@ -639,10 +695,7 @@ describe('#497 the daily markers survive each other', () => {
       DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
     });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     const installedCheck = stub(
       h.bin,
       'installed-check',
@@ -671,16 +724,49 @@ describe('#497 the daily markers survive each other', () => {
     expect(state.LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 
+  it('both markers survive each other with a tag present too — the "already deployed" branch', () => {
+    // The test above only exercises the `no autodeploy tag yet` branch —
+    // which, by this branch's own argument (#491), becomes permanently
+    // unreachable the first time a qualified merge pushes a tag. This
+    // reaches the same two reporters via the branch that replaces it: a tag
+    // present and already deployed.
+    const r = driftRemote('old');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    expect(out.code).toBe(0);
+    expect(out.out).toMatch(/already deployed/); // confirms the tag-present branch, not the no-tag one
+    expect(countLines(notifyLog)).toBe(2);
+    const log = readFileSync(notifyLog, 'utf8');
+    expect(log).toMatch(/out of date/);
+    expect(log).toMatch(/BLOCKED/);
+
+    const state = readState(h.stateDir);
+    expect(state.LAST_STALE_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(state.LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
   it('the same day is silent on the next tick — neither warning repeats', () => {
     const r = driftRemote();
     const h = driftHarness(r.dir, {
       DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
     });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     const installedCheck = stub(
       h.bin,
       'installed-check',
@@ -711,10 +797,7 @@ describe('#491 the idle reports survive the existence of a tag', () => {
       DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
     });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     // The guard must never be consulted on this path; a marker proves it.
     const guardMarker = join(h.bin, 'guard-invoked');
     const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
@@ -742,10 +825,7 @@ describe('#491 the idle reports survive the existence of a tag', () => {
       LAST_FAILED_SHA: r.newSha, DRIFT_SINCE: '1000000',
     });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     const guardMarker = join(h.bin, 'guard-invoked');
     const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
 
@@ -768,10 +848,7 @@ describe('#491 the idle reports survive the existence of a tag', () => {
     const r = driftRemote('new');
     const h = driftHarness(r.dir, { DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     const installedCheck = stub(
       h.bin,
       'installed-check',
@@ -799,10 +876,7 @@ describe('#491 the idle reports survive the existence of a tag', () => {
       DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
     });
     const notifyLog = join(h.bin, 'notify.log');
-    // One line per CALL, not per line of message. `countLines` counts lines,
-    // and the stale-deployer and guard-refusal messages are multi-line — a
-    // plain `cat` stub would make "how many notifications" unmeasurable.
-    const notify = stub(h.bin, 'notify', `head -n1 <<< "$1" >> "${notifyLog}"`);
+    const notify = countingNotify(h.bin, notifyLog);
     const guardMarker = join(h.bin, 'guard-invoked');
     const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo "REFUSE: stub refusal"; exit 1`);
     const deployLog = join(h.bin, 'deploy.log');
