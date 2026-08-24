@@ -88,6 +88,22 @@ appears when you read them together, in order, knowing the default. Deleting the
 fix #497; it makes #497 **unwriteable**. #490 already chose assign-then-carry for `DRIFT_SINCE` for
 this reason; this finishes the choice.
 
+**This overturns a decision #490 made three weeks earlier, on purpose.** That design considered
+converting `write_state` to read shell variables and rejected it: *"it would touch all eleven call
+sites in the highest-blast-radius file in the repository, and its failure mode — a call site that
+silently stops persisting a field — corrupts the deployer's record of what production is running."*
+Two things have changed.
+
+First, the risk it named has now **happened** — via the pattern it kept. #497 is precisely "a call
+site that silently stops persisting a field", and the positional carry is the mechanism. The argument
+was not wrong about the danger; it was wrong about which form carried it.
+
+Second, the blast radius was overstated. `deploy/autodeploy.sh` has **twelve** `write_state` call
+sites, and exactly **two** of them (`:230`, `:278`) pass anything beyond the third argument. Deleting
+parameters 4-6 leaves the other ten byte-identical — a `git diff` that shows two changed call sites,
+not twelve. The 2026-08-23 estimate counted call sites rather than call sites *that pass the
+arguments being removed*.
+
 The three-argument callers (`write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"` on the refusal
 paths, `write_state "$target" "$DEPLOYED_SHA" ""` on success) are unchanged. `last_failed` stays
 positional because it is genuinely an argument: each caller passes a different value, and clearing it
