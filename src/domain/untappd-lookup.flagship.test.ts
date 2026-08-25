@@ -171,6 +171,18 @@ const NO_FLAGSHIP: SearchResult[] = [
   { bid: 901, beer_name: 'Erl Hell', brewery_name: 'Erl-Bräu', style: 'Lager - Helles', abv: 5, global_rating: 3.3, rating_count: 16157, brewery_alias: [], alias_alt: [] },
 ];
 
+// A strict-pool flagship (50000 vs 900) alongside a far more popular brand-pool
+// interloper from a different brewery. Flattening the pools would hand the match to
+// the interloper purely on rating count.
+const POOL_PRECEDENCE: SearchResult[] = [
+  { bid: 100, beer_name: 'Sesja', brewery_name: 'Brewmen', style: 'Pale Ale', abv: 4.5, global_rating: 3.4, rating_count: 50000,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 101, beer_name: 'Porter Baltycki', brewery_name: 'Brewmen', style: 'Porter', abv: 9, global_rating: 3.6, rating_count: 900,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 102, beer_name: 'Brewmen Tribute Lager', brewery_name: 'Totally Other Brewery', style: 'Lager', abv: 4.5, global_rating: 3.1, rating_count: 900000,
+    brewery_alias: [], alias_alt: [] },
+];
+
 describe('#487 terminal flagship stage', () => {
   test('a bare-brand target matches its flagship from the brand pool', async () => {
     const out = await lookupBeer({
@@ -233,5 +245,26 @@ describe('#487 terminal flagship stage', () => {
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(1695486);
+  });
+
+  test('a non-bare target reaches the terminal stage and is still refused', async () => {
+    // `Blue Moon Mango Wheat` cannot witness this guard: stage 2a.5 resolves it first.
+    // `Elderflower` matches no candidate at all, so every earlier stage misses and the
+    // terminal stage IS reached — with a target that carries a distinguishing token.
+    // Without the bare-brand guard the stage would hand back `Belgian White` (5.89x
+    // dominance, ABV 5.4 = 5.4) for a beer the brewery may not even make.
+    const out = await lookupBeer({
+      brewery: 'Blue Moon Brewery', name: 'Blue Moon Elderflower', abv: 5.4, search: fakeSearch(BLUE_MOON),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('the strongest pool decides alone — a popular brand-pool interloper cannot win', async () => {
+    const out = await lookupBeer({
+      brewery: 'Brewmen', name: 'Brewmen', abv: 4.5, search: fakeSearch(POOL_PRECEDENCE),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(100);
   });
 });
