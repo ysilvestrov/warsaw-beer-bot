@@ -11,6 +11,9 @@ export interface SearchResult {
   global_rating: number | null;
   brewery_alias?: string[];
   alias_alt?: string[];
+  /** #487: how many users rated the beer. Optional — the legacy HTML relay has no such
+   *  field, and absent must never be read as zero. */
+  rating_count?: number;
 }
 
 export interface HydratedBeer extends SearchResult {
