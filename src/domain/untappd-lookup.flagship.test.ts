@@ -268,3 +268,73 @@ describe('#487 terminal flagship stage', () => {
     expect(out.result.bid).toBe(100);
   });
 });
+
+// beer_id — reviewer repro for the ordering bug. The name is the BREWERY's own brand,
+// swapped in order ("Zamkowy Nepomucen" vs brewery "Nepomucen Zamkowy"), so it strips to
+// nothing and bareBrandTarget fires. bid 700 carries a bounded one-character brewery typo
+// ("Zamkovy" vs "Zamkowy") on an EXACT name match — exactly what typoRescue exists for. The
+// other two candidates sit in the brewery's real strict pool with a 500x rating gap, so the
+// flagship stage would confidently — and wrongly — pick the 500000-rated one if it ever ran
+// before the rescue got a chance.
+const NEPOMUCEN_TYPO_VS_FLAGSHIP: SearchResult[] = [
+  { bid: 700, beer_name: 'Zamkowy Nepomucen', brewery_name: 'Nepomucen Zamkovy', style: 'Lager', abv: 4.4, global_rating: 3.2,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 900001, beer_name: 'Sztandarowe', brewery_name: 'Nepomucen Zamkowy', style: 'Lager', abv: 4.4, global_rating: 3.3, rating_count: 500000,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 900002, beer_name: 'Zimowe', brewery_name: 'Nepomucen Zamkowy', style: 'Lager', abv: 5.8, global_rating: 3.1, rating_count: 1000,
+    brewery_alias: [], alias_alt: [] },
+];
+
+describe('#487 finding 1: the exact-name typo rescue outranks the flagship guess', () => {
+  test('the exact-name typo rescue outranks the flagship guess', async () => {
+    const out = await lookupBeer({
+      brewery: 'Nepomucen Zamkowy', name: 'Zamkowy Nepomucen', abv: 4.4, search: fakeSearch(NEPOMUCEN_TYPO_VS_FLAGSHIP),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(700);
+  });
+});
+
+// beer_id — finding 2 repro. `1664` is pure digits, so normalizeName strips it to nothing
+// and fuzzyTargets discards the resulting empty value entirely: targetNames is [], not a
+// single empty-string target. `[].every()` is vacuously true, so without the
+// `targetNames.length > 0` clause a nameless target would still satisfy bareBrandTarget and
+// hand back the brewery's most popular beer for a name that named nothing.
+const KRONENBOURG_BARE_DIGIT: SearchResult[] = [
+  { bid: 6001, beer_name: '1664', brewery_name: 'Brasseries Kronenbourg', style: 'Lager - Pale', abv: 5.5, global_rating: 3.13, rating_count: 292835,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 6002, beer_name: '1664 Blanc', brewery_name: 'Brasseries Kronenbourg', style: 'Wheat Beer - Witbier / Blanche', abv: 5, global_rating: 3.48, rating_count: 1000,
+    brewery_alias: [], alias_alt: [] },
+];
+
+describe('#487 finding 2: a nameless target must not reach the flagship stage', () => {
+  test('a name that normalizes away entirely stays an orphan', async () => {
+    const out = await lookupBeer({
+      brewery: 'Kronenbourg Brewery', name: '1664', abv: null, search: fakeSearch(KRONENBOURG_BARE_DIGIT),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+});
+
+// beer_id — finding 3 repro. Both candidates tie at the top near-name score (identical
+// beer_name), so the site must fall through to `hasPopularity`. One candidate carries an
+// EXPLICIT `rating_count: 0`, the other omits the field entirely (`undefined`). The two are
+// different facts — 0 is a measured absence, undefined is a transport that never reports
+// ratings at all — and only `!== undefined` tells them apart: `.some(r => r.rating_count)`
+// would call both "no popularity" and fall back to ABV, silently matching the wrong beer.
+const ZUBR_TIED_ZERO_VS_UNDEFINED: SearchResult[] = [
+  { bid: 8001, beer_name: 'Zubr Premium Lager', brewery_name: 'Different Legal Entity', style: 'Lager', abv: 5.0, global_rating: 3.1, rating_count: 0,
+    brewery_alias: ['zubr'], alias_alt: [] },
+  { bid: 8002, beer_name: 'Zubr Premium Lager', brewery_name: 'Different Legal Entity', style: 'Lager', abv: 9.0, global_rating: 3.0, rating_count: undefined,
+    brewery_alias: ['zubr'], alias_alt: [] },
+];
+
+describe('#487 finding 3: an explicit zero rating_count is not the same as absent', () => {
+  test('a tied native near-name pool with one explicit zero and one undefined count stays unmatched', async () => {
+    const out = await lookupBeer({
+      brewery: 'Zubr Brewery', name: 'Zubr', abv: 5.0, search: fakeSearch(ZUBR_TIED_ZERO_VS_UNDEFINED),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+});

@@ -169,9 +169,11 @@ reason Stage 2a does.
 
 ### B. A terminal flagship stage for bare-brand targets
 
-Reached only after every existing stage has missed, immediately before the final `typoRescue()`
-(`untappd-lookup.ts:566`). Because it is terminal, **it cannot change any match that exists today** —
-it can only convert an orphan into a match. That is a structural property, not a measurement.
+Reached only after every existing stage has missed — including the exact-name typo rescue
+`typoRescue()` (`untappd-lookup.ts:582`), which is tried first precisely so this stage cannot preempt
+it. Because it runs strictly after every other stage, including that rescue, **it cannot change any
+match that exists today** — it can only convert an orphan into a match. That is a structural
+property, not a measurement.
 
 It fires when the normalized target carries nothing beyond the input brewery's brand — the condition
 stated on the *target the stages compare*, not on the raw name, because the raw-name form does not

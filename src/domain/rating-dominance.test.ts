@@ -42,8 +42,10 @@ describe('dominantCandidate', () => {
     expect(dominantCandidate([beer(1, undefined), beer(2, 10)], null)).toBeNull();
   });
 
-  test('a runner-up with no rating_count does not count as zero', () => {
-    // Absent evidence must not manufacture an infinite ratio.
+  test('a runner-up with no rating_count skips the ratio check, same as an explicit zero', () => {
+    // Absent evidence must not manufacture an infinite ratio. Note this coincides with an
+    // explicit `0` only FOR THE RUNNER-UP (both skip the ratio check below); the leader's
+    // undefined-vs-zero distinction still matters — see the floor checks lower in this file.
     expect(dominantCandidate([beer(1, 5000), beer(2, undefined)], null)?.bid).toBe(1);
     expect(dominantCandidate([beer(1, 5000), beer(2, 4000)], null)).toBeNull();
   });

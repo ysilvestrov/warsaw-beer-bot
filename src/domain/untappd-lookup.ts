@@ -572,11 +572,19 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
-    // #487 flagship stage. Terminal on purpose: every name stage above has missed, so this
-    // can only turn an orphan into a match and never revisit one. It fires when the target
-    // carries nothing beyond the brewery brand — the condition is on the target the stages
-    // actually compare, because the raw-name form (#306's isBareBrandName) does not even
-    // describe this case: for `Kronenbourg 1664` the digits survive baseNormalize.
+    // The typo rescue is a matching stage in its own right and is based on an EXACT
+    // name, so it must be tried before the flagship stage — otherwise a popularity
+    // guess would preempt a real name match. Only once it has declined is the input
+    // genuinely unmatched, which is the precondition the flagship stage assumes.
+    const rescued = typoRescue();
+    if (rescued) return rescued;
+
+    // #487 flagship stage. Runs after every other stage — INCLUDING the exact-name typo
+    // rescue above — so this can only turn an orphan into a match and never revisit one
+    // that already worked. It fires when the target carries nothing beyond the brewery
+    // brand — the condition is on the target the stages actually compare, because the
+    // raw-name form (#306's isBareBrandName) does not even describe this case: for
+    // `Kronenbourg 1664` the digits survive baseNormalize.
     const brandTokens = new Set(inputBreweryAliases.flatMap((a) => a.split(' ')).filter(Boolean));
     const bareBrandTarget =
       brandTokens.size > 0 &&
@@ -592,11 +600,11 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         strictPool.length ? strictPool :
         relaxedPool.length ? relaxedPool :
         nativePool.length ? nativePool : brandPool;
-      const flagship = flagshipPool.length > 0 ? dominantCandidate(flagshipPool, abv) : null;
+      const flagship = dominantCandidate(flagshipPool, abv);
       if (flagship) return { kind: 'matched', result: flagship };
     }
 
-    return typoRescue();
+    return null;
   }
 
   for (const part of parts) {
