@@ -9,6 +9,7 @@ import {
 } from '../sources/untappd/search';
 import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
+import { dominantCandidate } from './rating-dominance';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -507,11 +508,16 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       .sort((a, b) => b.score - a.score);
     if (nativeNearMatches.length > 0) {
       const topScore = nativeNearMatches[0].score;
-      const nativeHit = pickUniqueByAbv(
-        nativeNearMatches.filter((match) => match.score === topScore).map((match) => match.result),
-        abv,
-        true,
-      );
+      const topScored = nativeNearMatches
+        .filter((match) => match.score === topScore)
+        .map((match) => match.result);
+      const uniqueTop = Array.from(new Map(topScored.map((r) => [r.bid, r])).values());
+      // #487: this pool is scored APPROXIMATELY, so a tie here is not an equivalence class —
+      // it is an absence of evidence, and ABV must not select across it. (A single candidate
+      // still takes the old path: there is nothing to select between.)
+      const nativeHit = uniqueTop.length === 1
+        ? pickUniqueByAbv(uniqueTop, abv, true)
+        : dominantCandidate(uniqueTop, abv);
       return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
     }
 
