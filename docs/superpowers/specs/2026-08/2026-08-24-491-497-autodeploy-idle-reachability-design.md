@@ -202,13 +202,30 @@ security argument and deserves its own spec. Filed as **#498**.
 Tests pin the logic. These three steps establish that the fix is live and that the defect was real,
 using the open Dependabot PRs as the moving parts.
 
-**V1 — #497 observed before the fix.** Merging this PR makes the installed deployer stale *and* puts
-production behind `main`, while the **old** copy in `/usr/local/bin` is still the one running. That
-is exactly the pair of conditions under which #497 sirens. Expect ⚠️ "the installed deployer is out
-of date" repeating on every 5-minute tick until `deploy.sh` and `install-autodeploy.sh` run — roughly
-three or four messages. This converts the issue's "proven by code reading" into an observation, and it
-is the only opportunity: after installation the deployer is no longer stale, so the condition cannot
-be reproduced honestly again.
+**V1 — #497 observed before the fix. RUN 2026-08-25, and it corrected the design.** Merging this PR
+made the installed deployer stale *and* put production behind `main`, while the **old** copy in
+`/usr/local/bin` was still the one running — the pair of conditions under which #497 misbehaves.
+Three identical ⚠️ "the installed deployer is out of date" messages arrived between 07:20 and 07:30
+UTC, where the once-a-day suppression owed exactly one.
+
+The count matched this section's prediction of "roughly three or four". **The mechanism it gave for
+that count did not.** This section said the messages would repeat "on every 5-minute tick until
+`deploy.sh` and `install-autodeploy.sh` run", and #497 itself said the warning "can re-fire on
+**every** 5-minute tick". Both are wrong. The siren stopped **on its own**, before installation,
+because `report_drift_once` erases the marker only on the ticks where it actually WRITES state — and
+three of its five paths return first (inside the grace window; after the daily announcement; no drift
+with no open episode). Only starting, announcing, and closing an episode write. So the daily
+suppression is lost for **one to three ticks per drift episode**, then restores itself.
+
+The defect is unchanged and so is the fix: a warning designed for once a day arriving three times in
+twelve minutes is exactly what the suppression exists to prevent. Only the claimed magnitude was
+wrong — and it was right in front of us: the V2 rehearsal below produced **one** extra line under the
+old code, not a stream, and nobody read that as contradicting "every five minutes". A number carried
+from an issue into a spec without being re-derived is a number nobody has checked.
+
+V1 was the only opportunity, and it is spent: after installation the deployer is no longer stale, so
+the condition cannot be reproduced honestly again. Full tick-by-tick evidence is in the #497 comment
+thread.
 
 **V2 — #497 after the fix, rehearsed on a throwaway prefix.** The post-fix state cannot be observed
 live for the reason just given, and manufacturing a fault in production to watch it is not acceptable.
