@@ -36,7 +36,9 @@ describe('dominantCandidate', () => {
     expect(dominantCandidate([beer(1, 73)], null)).toBeNull();
   });
 
-  test('a leader with no rating_count is never a flagship', () => {
+  test('a candidate with no rating_count does not become the leader', () => {
+    // The sort demotes undefined below any defined count, so beer(2) becomes the leader
+    // and fails the floor check (10 < 1000).
     expect(dominantCandidate([beer(1, undefined), beer(2, 10)], null)).toBeNull();
   });
 
@@ -75,5 +77,12 @@ describe('dominantCandidate', () => {
     expect(dominantCandidate([beer(1, 0), beer(2, 0)], null)).toBeNull();
     // ...but a runner-up with a real 0 does not hold the leader back.
     expect(dominantCandidate([beer(1, 5000), beer(2, 0)], null)?.bid).toBe(1);
+  });
+
+  test('an undefined-only candidate list has no flagship', () => {
+    // Reaches the `leaderCount === undefined` guard: with no real count anywhere,
+    // the leader itself is absent evidence and must not be promoted.
+    expect(dominantCandidate([beer(1, undefined)], null)).toBeNull();
+    expect(dominantCandidate([beer(1, undefined), beer(2, undefined)], null)).toBeNull();
   });
 });
