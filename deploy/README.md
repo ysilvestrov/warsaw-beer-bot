@@ -183,14 +183,21 @@ lie. Autodeploy then refuses until you reseed it:
 ```
 
 `autodeploy.sh` also watches for drift on its idle path — production falling
-behind `main` in ways that would block it. Drift is treated as an **episode**,
-not a per-tick condition: nothing is reported for the first 15 minutes
-(`DRIFT_GRACE_S`), because a merge followed by a deploy is ordinary work and
-needs no message at either end. Past that, one message goes out, repeated at
-most once a day while the episode stays open, and one closing message when
-production catches up — the closing message only if the episode was announced.
-`DRIFT_SINCE` in the state file holds the episode's start; both it and
-`LAST_DRIFT_NOTICE` clear when it ends.
+behind `main` in ways that would block it. **Idle means it has no work**: no
+`autodeploy-*` tag exists, or the newest one is already deployed, or the newest
+one is recorded as `LAST_FAILED_SHA`. It does NOT mean "no tag has ever been
+pushed", which is what the condition said until #491 — and since tags are never
+pruned, that turned both this report and the stale-deployer reminder off
+permanently the first time one was pushed. A tag that is genuine work still
+reaches neither report: it is deployed, or refused with its offending paths
+listed. Drift is treated as an **episode**, not a per-tick condition: nothing is
+reported for the first 15 minutes (`DRIFT_GRACE_S`), because a merge followed by
+a deploy is ordinary work and needs no message at either end. Past that, one
+message goes out, repeated at most once a day while the episode stays open, and
+one closing message when production catches up — the closing message only if the
+episode was announced. `DRIFT_SINCE` in the state file holds the episode's
+start; both it and `LAST_DRIFT_NOTICE` clear when it ends. `LAST_STALE_NOTICE`
+does the same job for the stale-deployer reminder.
 
 The timer stays **disabled** until the mechanism has been exercised by hand:
 
@@ -219,10 +226,12 @@ the deploy comes up unhealthy, or the rollback itself fails — the run writes
 `LAST_FAILED_SHA=<that commit>` into `~/.local/state/wbb-autodeploy/state.env`
 alongside the existing `DEPLOYED_SHA`/`PREVIOUS_SHA` lines. On every later
 tick, a tag whose commit matches `LAST_FAILED_SHA` is skipped immediately —
-exit 0, one journal line, **no Telegram message**. This is deliberate: the
-operator was already paged when the failure was first recorded, and design
-§7 calls for one attempt, then a human, not a message every 5 minutes
-forever.
+exit 0, one journal line, and **no message about the tag**. The tag is idle,
+so the two standing idle reports (drift, stale deployer) can still speak on
+their once-a-day cadence; a stuck tag *with* production behind `main` is
+autodeploy dead twice over. This is deliberate: the operator was already
+paged when the failure was first recorded, and design §7 calls for one
+attempt, then a human, not a message every 5 minutes forever.
 
 To retry a tag by hand (after fixing whatever made it fail, or if the
 failure was a known-transient blip), clear the memory:
