@@ -106,3 +106,132 @@ describe('#487 near-name pick: dominance decides, ABV vetoes', () => {
     expect(out.result.bid).toBe(9055);
   });
 });
+
+// beer_id 1 — Untappd files it under `Plzeňský Prazdroj`, so only the brand pool survives.
+const PILSNER_URQUELL: SearchResult[] = [
+  { bid: 37936, beer_name: 'Pilsner Urquell', brewery_name: 'Plzeňský Prazdroj', style: 'Pilsner - Czech / Bohemian', abv: 4.4, global_rating: 3.38, rating_count: 458401,
+    brewery_alias: ['pivovar'], alias_alt: ['pilsener urquell', 'pu 1842', 'the original pilsner'] },
+  { bid: 481334, beer_name: 'Pilsner Urquell Nefiltrovaný / Unfiltered', brewery_name: 'Plzeňský Prazdroj', style: 'Pilsner - Czech / Bohemian', abv: 4.4, global_rating: 3.71, rating_count: 22704,
+    brewery_alias: ['pivovar'], alias_alt: ['pilsner urquell unfiltered unpasteurized'] },
+  { bid: 88241, beer_name: 'Pilsner Urquell Nepasterizovaný / Tank Beer', brewery_name: 'Plzeňský Prazdroj', style: 'Pilsner - Czech / Bohemian', abv: 4.4, global_rating: 3.73, rating_count: 13569,
+    brewery_alias: ['pivovar'], alias_alt: ['tankova', 'unpasteurized'] },
+  { bid: 122973, beer_name: 'Pilsner Urquell 3.5%', brewery_name: 'Plzeňský Prazdroj', style: 'Pilsner - Czech / Bohemian', abv: 3.5, global_rating: 2.9, rating_count: 3345,
+    brewery_alias: ['pivovar'], alias_alt: [] },
+];
+
+// beer_id 11933 — strict pool. The flagship's name shares nothing with the brand, which is
+// exactly why a "flagship name must resemble the brewery" rule would have been wrong.
+const BLUE_MOON: SearchResult[] = [
+  { bid: 3839, beer_name: 'Belgian White', brewery_name: 'Blue Moon Brewing Company', style: 'Wheat Beer - Witbier / Blanche', abv: 5.4, global_rating: 3.5, rating_count: 625400,
+    brewery_alias: ['bluemoon'], alias_alt: ['blue moon belgian style white', 'belgian white ale', 'blue moon'] },
+  { bid: 3837, beer_name: 'Harvest Pumpkin Ale', brewery_name: 'Blue Moon Brewing Company', style: 'Pumpkin / Yam Beer', abv: 5.7, global_rating: 3.32, rating_count: 106143,
+    brewery_alias: ['bluemoon'], alias_alt: ['harvest moon'] },
+  { bid: 39740, beer_name: 'Summer Honey Wheat', brewery_name: 'Blue Moon Brewing Company', style: 'Wheat Beer - American Pale Wheat', abv: 5.2, global_rating: 3.32, rating_count: 81325,
+    brewery_alias: ['bluemoon'], alias_alt: ['honeymoon summer ale'] },
+  { bid: 1695486, beer_name: 'Mango Wheat', brewery_name: 'Blue Moon Brewing Company', style: 'Wheat Beer - Fruited', abv: 5.4, global_rating: 3.54, rating_count: 84491,
+    brewery_alias: ['bluemoon'], alias_alt: [] },
+];
+
+// beer_ids 32 and 73 — the style word `Weizen` is stripped by normalizeName, so the target
+// collapses to the brand even though the shop named the product.
+const PRIMATOR: SearchResult[] = [
+  { bid: 30947, beer_name: 'Weizen', brewery_name: 'Primátor', style: 'Wheat Beer - Hefeweizen', abv: 4.8, global_rating: 3.48, rating_count: 36240,
+    brewery_alias: ['pivovar nachod'], alias_alt: ['premium hefeweissbier', 'hefeweizen', 'Weizenbier'] },
+  { bid: 552690, beer_name: 'Hron Weizen', brewery_name: 'Primátor', style: 'Wheat Beer - Hefeweizen', abv: 5, global_rating: 3.31, rating_count: 111,
+    brewery_alias: ['pivovar nachod'], alias_alt: [] },
+  { bid: 642221, beer_name: 'Diver Hefe', brewery_name: 'Primátor', style: 'Wheat Beer - Hefeweizen', abv: 4.8, global_rating: 3.29, rating_count: 41,
+    brewery_alias: ['pivovar nachod'], alias_alt: ['Weizenbier'] },
+];
+
+// beer_id 1391 — a bare-brand TARGET that already matches on its own at the near-name stage.
+// The terminal stage must never get the chance to second-guess it. (Brewmen Stout, beer_id
+// 23207, is the same shape with 19 ratings — far below the floor — so if the terminal stage
+// were ever reached for it, it would answer null and the match would be lost.)
+const GOOSE: SearchResult[] = [
+  { bid: 1353, beer_name: 'Goose IPA', brewery_name: 'Goose Island Beer Co.', style: 'IPA - American', abv: 5.9, global_rating: 3.51, rating_count: 664549,
+    brewery_alias: ['goose island brewery', 'goose island brewing co'], alias_alt: ['goose island ipa'] },
+  { bid: 12943, beer_name: 'Green Line Pale Ale', brewery_name: 'Goose Island Beer Co.', style: 'Pale Ale - American', abv: 5.4, global_rating: 3.48, rating_count: 129062,
+    brewery_alias: ['goose island brewery', 'goose island brewing co'], alias_alt: ['greenline'] },
+  { bid: 2036410, beer_name: 'Midway IPA', brewery_name: 'Goose Island Beer Co.', style: 'IPA - Session', abv: 4.1, global_rating: 3.43, rating_count: 110235,
+    brewery_alias: ['goose island brewery', 'goose island brewing co'], alias_alt: ['midway session ipa'] },
+];
+
+const BREWMEN: SearchResult[] = [
+  { bid: 2697316, beer_name: 'Oatmeal Stout', brewery_name: 'Brewmen', style: 'Stout - Oatmeal', abv: 6.2, global_rating: 3.84, rating_count: 25,
+    brewery_alias: ['bryumen'], alias_alt: [] },
+  { bid: 4472578, beer_name: 'Brewmen Stout', brewery_name: 'Brewmen', style: 'Stout - Coffee', abv: 5.5, global_rating: 3.57, rating_count: 19,
+    brewery_alias: [], alias_alt: [] },
+  { bid: 5336905, beer_name: 'Karjalan Milk Stout', brewery_name: 'Brewmen', style: 'Stout - Milk / Sweet', abv: 6.5, global_rating: 3.6, rating_count: 24,
+    brewery_alias: ['bryumen'], alias_alt: [] },
+];
+
+// A brewery whose products are evenly popular has no flagship, whatever the shop typed.
+const NO_FLAGSHIP: SearchResult[] = [
+  { bid: 900, beer_name: 'Erlkönig Hell', brewery_name: 'Erl-Bräu', style: 'Lager - Helles', abv: 5, global_rating: 3.4, rating_count: 18744, brewery_alias: [], alias_alt: [] },
+  { bid: 901, beer_name: 'Erl Hell', brewery_name: 'Erl-Bräu', style: 'Lager - Helles', abv: 5, global_rating: 3.3, rating_count: 16157, brewery_alias: [], alias_alt: [] },
+];
+
+describe('#487 terminal flagship stage', () => {
+  test('a bare-brand target matches its flagship from the brand pool', async () => {
+    const out = await lookupBeer({
+      brewery: 'Pilsner Urquell Brewery', name: 'Pilsner Urquell', abv: 4.4, search: fakeSearch(PILSNER_URQUELL),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(37936);
+  });
+
+  test('a flagship whose name shares nothing with the brand still wins', async () => {
+    const out = await lookupBeer({
+      brewery: 'Blue Moon Brewery', name: 'Blue Moon', abv: 5.4, search: fakeSearch(BLUE_MOON),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(3839);
+  });
+
+  test('a target left bare by style-word stripping reaches its flagship', async () => {
+    const out = await lookupBeer({
+      brewery: 'Primator Brewery', name: 'Primator Weizen', abv: 4.8, search: fakeSearch(PRIMATOR),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(30947);
+  });
+
+  test('an evenly popular brewery yields no flagship', async () => {
+    const out = await lookupBeer({
+      brewery: 'Erl Brau Brewery', name: 'Erl Brau', abv: 5, search: fakeSearch(NO_FLAGSHIP),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('a stage that already matches is never reconsidered', async () => {
+    const out = await lookupBeer({
+      brewery: 'Goose Island Beer Co.', name: 'Goose IPA', abv: 5.9, search: fakeSearch(GOOSE),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1353);
+  });
+
+  test('a small brewery keeps its near-name match despite a tiny rating count', async () => {
+    const out = await lookupBeer({
+      brewery: 'Brewmen', name: 'Brewmen Stout', abv: 5.5, search: fakeSearch(BREWMEN),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(4472578);
+  });
+
+  test('a distinguishing token in the target keeps the stage out of it', async () => {
+    // `Mango Wheat` is not bare-brand, so the flagship stage must not fire and hand back
+    // `Belgian White` just because it is the most popular beer of the brewery.
+    const out = await lookupBeer({
+      brewery: 'Blue Moon Brewery', name: 'Blue Moon Mango Wheat', abv: 5.4, search: fakeSearch(BLUE_MOON),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(1695486);
+  });
+});

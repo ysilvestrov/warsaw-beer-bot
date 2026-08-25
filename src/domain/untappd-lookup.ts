@@ -572,6 +572,30 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
+    // #487 flagship stage. Terminal on purpose: every name stage above has missed, so this
+    // can only turn an orphan into a match and never revisit one. It fires when the target
+    // carries nothing beyond the brewery brand — the condition is on the target the stages
+    // actually compare, because the raw-name form (#306's isBareBrandName) does not even
+    // describe this case: for `Kronenbourg 1664` the digits survive baseNormalize.
+    const brandTokens = new Set(inputBreweryAliases.flatMap((a) => a.split(' ')).filter(Boolean));
+    const bareBrandTarget =
+      brandTokens.size > 0 &&
+      targetNames.length > 0 &&
+      targetNames.every((target) => {
+        const tokens = target.value.split(' ').filter(Boolean);
+        return tokens.length > 0 && tokens.every((token) => brandTokens.has(token));
+      });
+    if (bareBrandTarget) {
+      // Strongest evidence only, never mixed: a weak brand hit must not compete with a
+      // strict one for the same brewery.
+      const flagshipPool =
+        strictPool.length ? strictPool :
+        relaxedPool.length ? relaxedPool :
+        nativePool.length ? nativePool : brandPool;
+      const flagship = flagshipPool.length > 0 ? dominantCandidate(flagshipPool, abv) : null;
+      if (flagship) return { kind: 'matched', result: flagship };
+    }
+
     return typoRescue();
   }
 
