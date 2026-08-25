@@ -36,6 +36,18 @@ const BREZNAK: SearchResult[] = [
     brewery_alias: ['pivovar', 'starbrno', 'starobrno brewery'], alias_alt: ['starobrno easter beer', 'breznak zelene 13'] },
 ];
 
+// beer_id 427 (Okocim) — legacy HTML relay shape: near-name-tied candidates that carry
+// NO rating_count at all (the legacy HTML relay and the web fallback never supply it).
+// Dominance must not fire here; ABV stays the only signal, exactly as before #487.
+const OKOCIM_NO_RATINGS: SearchResult[] = [
+  { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
+    brewery_alias: ['Carlsberg Polska'], alias_alt: ['Okocim Jasne Pełne'] },
+  { bid: 1768290, beer_name: 'Okocim Jasne Pełne 3,4%', brewery_name: 'Browar Okocim', style: 'Lager', abv: 3.4, global_rating: 2.7,
+    brewery_alias: ['Carlsberg Polska'] },
+  { bid: 4555473, beer_name: 'Okocim Jasne Lekkie', brewery_name: 'Browar Okocim', style: 'Lager', abv: 3.5, global_rating: 0,
+    brewery_alias: ['Carlsberg Polska'] },
+];
+
 // beer_id 32117 — reaches the same site but with ONE candidate at the top score, so it
 // takes the unchanged single-candidate path. Pinned as a documented limitation, not a win.
 const MENABREA: SearchResult[] = [
@@ -80,5 +92,17 @@ describe('#487 near-name pick: dominance decides, ABV vetoes', () => {
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(7482);
+  });
+
+  test('a rating-less transport keeps its ABV disambiguation', async () => {
+    // The legacy HTML relay supplies no rating_count on any candidate; with no popularity
+    // evidence at all, the site must fall back to ABV rather than let dominance's null
+    // refusal swallow the only signal this pool has (see #427).
+    const out = await lookupBeer({
+      brewery: 'Carlsberg Brewery', name: 'okocim jasne', abv: 5, search: fakeSearch(OKOCIM_NO_RATINGS),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(9055);
   });
 });

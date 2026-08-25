@@ -513,9 +513,12 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         .map((match) => match.result);
       const uniqueTop = Array.from(new Map(topScored.map((r) => [r.bid, r])).values());
       // #487: this pool is scored APPROXIMATELY, so a tie here is not an equivalence class —
-      // it is an absence of evidence, and ABV must not select across it. (A single candidate
-      // still takes the old path: there is nothing to select between.)
-      const nativeHit = uniqueTop.length === 1
+      // it is an absence of evidence, and ABV must not select across it. Two exceptions keep
+      // their old behaviour: a single candidate (nothing to select between), and a candidate
+      // set with no popularity data at all (the legacy HTML relay and the web fallback supply
+      // no rating_count — there this rule must not fire, and ABV stays the only signal).
+      const hasPopularity = uniqueTop.some((r) => r.rating_count !== undefined);
+      const nativeHit = uniqueTop.length === 1 || !hasPopularity
         ? pickUniqueByAbv(uniqueTop, abv, true)
         : dominantCandidate(uniqueTop, abv);
       return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
