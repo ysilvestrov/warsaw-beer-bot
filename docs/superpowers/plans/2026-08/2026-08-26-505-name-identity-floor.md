@@ -314,6 +314,8 @@ git commit -m "feat(#505): restored identity is second-class evidence"
 **Files:**
 - Modify: `src/domain/untappd-lookup.ts` (five sites, listed below)
 - Test: `src/domain/untappd-lookup.test.ts`
+- Test: `src/domain/name-identity.test.ts` (Step 4 adds the vintage-premise guard here — it pins
+  `normalizeName`, which is a `name-identity` concern, not a lookup one)
 
 **Interfaces:**
 - Consumes: `nameIdentity`, `candidateIdentity`, `identityAllowsApprox`, `NameIdentity` from `./name-identity`.
@@ -606,7 +608,16 @@ git commit -m "fix(#505): the identity-alias rescue inherits the restored-eviden
 
 - [ ] **Step 1: Point the replay harness at the real module**
 
-The harness imports a prototype copy. Edit `./tmp/replay.ts` so both sides import the real implementation, i.e. replace the `./lookup-proto.js` import with `../src/domain/untappd-lookup.js` — the "base" side then needs a checkout of the pre-change file. Simplest: `git stash` the working tree, copy `src/domain/untappd-lookup.ts` to `./tmp/lookup-base.ts` with its imports rewritten to `../src/domain/…`, `git stash pop`, and import that as the baseline.
+The harness compares two implementations. The "after" side is the real
+`../src/domain/untappd-lookup.js`. The "before" side is the pre-change file, which is addressable in
+git history — **do not stash anything**:
+
+```bash
+git show c397cb5:src/domain/untappd-lookup.ts   | sed -e "s#from './matcher'#from '../src/domain/matcher'#"         -e "s#from './normalize'#from '../src/domain/normalize'#"         -e "s#from './czech-grade'#from '../src/domain/czech-grade'#"         -e "s#from '../sources/untappd/search'#from '../src/sources/untappd/search'#"         -e "s#from '../sources/http'#from '../src/sources/http'#"         -e "s#from '../sources/untappd/block'#from '../src/sources/untappd/block'#"         -e "s#from './rating-dominance'#from '../src/domain/rating-dominance'#"   > ./tmp/lookup-base.ts
+```
+
+Then edit `./tmp/replay.ts` so the baseline import is `./lookup-base.js` and the other is
+`../src/domain/untappd-lookup.js`.
 
 - [ ] **Step 2: Re-run both populations**
 
