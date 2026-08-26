@@ -60,20 +60,29 @@ const MENABREA: SearchResult[] = [
 ];
 
 describe('#487 near-name pick: dominance decides, ABV vetoes', () => {
-  test('row 196 no longer links Kronenbourg 1664 to 1664 Blanc', async () => {
+  test('row 196 links Kronenbourg 1664 to 1664, never to 1664 Blanc', async () => {
+    // #487's real protection was never "refuse this row" — it was "don't let an ABV
+    // coincidence pick the Blanc". #505 restores the digit identity, so this now resolves
+    // to the correct beer directly; the Blanc exclusion is what stays load-bearing here.
     const out = await lookupBeer({
       brewery: 'Kronenbourg Brewery', name: 'Kronenbourg 1664', abv: 5.0, search: fakeSearch(KRONENBOURG),
     });
-    expect(out.kind).toBe('not_found');
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5939);
+    expect(out.result.bid).not.toBe(5999);
   });
 
   test('row 196 does not silently flip to the other sibling either', async () => {
-    // The honest outcome is an orphan. Matching 1664 here would be luck, not evidence:
-    // restoring that identity is the separate digit-identity issue.
+    // Matching 1664 here is no longer luck: #505 restores "1664" as the name's own
+    // identity (the filter would otherwise erase it down to the bare brand), so this is
+    // evidence, not a coincidence of ABV or ordering.
     const out = await lookupBeer({
       brewery: 'Kronenbourg Brewery', name: 'Kronenbourg 1664', abv: 5.5, search: fakeSearch(KRONENBOURG),
     });
-    expect(out.kind).toBe('not_found');
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5939);
   });
 
   test('a dominant native near-name candidate is matched', async () => {
@@ -296,11 +305,16 @@ describe('#487 finding 1: the exact-name typo rescue outranks the flagship guess
   });
 });
 
-// beer_id — finding 2 repro. `1664` is pure digits, so normalizeName strips it to nothing
-// and fuzzyTargets discards the resulting empty value entirely: targetNames is [], not a
-// single empty-string target. `[].every()` is vacuously true, so without the
+// beer_id — finding 2 repro. Originally `1664`: pure digits, so normalizeName stripped it to
+// nothing and fuzzyTargets discarded the resulting empty value entirely, leaving targetNames
+// as [], not a single empty-string target. `[].every()` is vacuously true, so without the
 // `targetNames.length > 0` clause a nameless target would still satisfy bareBrandTarget and
 // hand back the brewery's most popular beer for a name that named nothing.
+// #505 restores digit identity, so `1664` is no longer nameless here (see the test below this
+// describe block) and stops exercising this guard. `???` takes over as the witness: it is not
+// contrived — the production catalogue carries `Marlobobo / ??? (Question Marks)` — and
+// `baseNormalize('???')` is still `''`, so targetNames is still `[]` under #505 exactly as
+// `1664` used to be.
 const KRONENBOURG_BARE_DIGIT: SearchResult[] = [
   { bid: 6001, beer_name: '1664', brewery_name: 'Brasseries Kronenbourg', style: 'Lager - Pale', abv: 5.5, global_rating: 3.13, rating_count: 292835,
     brewery_alias: [], alias_alt: [] },
@@ -311,9 +325,22 @@ const KRONENBOURG_BARE_DIGIT: SearchResult[] = [
 describe('#487 finding 2: a nameless target must not reach the flagship stage', () => {
   test('a name that normalizes away entirely stays an orphan', async () => {
     const out = await lookupBeer({
-      brewery: 'Kronenbourg Brewery', name: '1664', abv: null, search: fakeSearch(KRONENBOURG_BARE_DIGIT),
+      brewery: 'Kronenbourg Brewery', name: '???', abv: null, search: fakeSearch(KRONENBOURG_BARE_DIGIT),
     });
     expect(out.kind).toBe('not_found');
+  });
+
+  test('#505: a name that used to be nameless now carries its own identity', async () => {
+    // Before #505, `1664` normalized to nothing and this fixture was the nameless witness
+    // above. Now the digit itself is restored as identity, and it uniquely picks the
+    // candidate whose own name is exactly `1664` — evidence, not the dominance guess that
+    // `???` above still guards against.
+    const out = await lookupBeer({
+      brewery: 'Kronenbourg Brewery', name: '1664', abv: null, search: fakeSearch(KRONENBOURG_BARE_DIGIT),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6001);
   });
 });
 

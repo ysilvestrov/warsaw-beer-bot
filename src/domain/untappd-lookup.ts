@@ -10,6 +10,7 @@ import {
 import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
+import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -22,6 +23,7 @@ const GENERIC_TYPO_RESCUE_NAMES = new Set([
 interface FuzzyTarget {
   value: string;
   exactOnly: boolean;
+  restored: boolean;
 }
 
 export type LookupOutcome =
@@ -64,15 +66,24 @@ function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   const breweryNorm = normalizeBrewery(brewery);
   const targets = new Map<string, FuzzyTarget>();
   for (const [index, raw] of [name, ...name.split(COLLAB_SEP)].entries()) {
-    const value = stripBreweryFromName(normalizeName(raw), breweryNorm);
+    const ident = nameIdentity(raw, breweryNorm);
+    const value = ident.value;
     if (!value) continue;
     const tokenCount = value.split(' ').filter(Boolean).length;
     const exactOnly = index > 0 && tokenCount < 2;
     const existing = targets.get(value);
-    targets.set(value, { value, exactOnly: (existing?.exactOnly ?? true) && exactOnly });
+    targets.set(value, {
+      value,
+      exactOnly: (existing?.exactOnly ?? true) && exactOnly,
+      restored: ident.restored,
+    });
   }
   return Array.from(targets.values());
 }
+
+// Candidates are re-read at several stages, so give the candidate-side identity one name.
+const candIdent = (c: SearchResult): NameIdentity => candidateIdentity(c.beer_name, c.brewery_name);
+const candIdentValue = (c: SearchResult): string => candIdent(c).value;
 
 // Among equally-valid name matches, prefer one whose ABV is within tolerance of the
 // input's; otherwise the first (results are latest-first from the search page).
@@ -214,6 +225,7 @@ function nearNameScore(targetValue: string, candidate: SearchResult, singletonSt
   const candidateVariants = new Set([
     candidateNameNorm,
     stripBreweryFromName(candidateNameNorm, candidateBreweryNorm),
+    candIdentValue(candidate),
   ]);
 
   let best: number | null = null;
@@ -416,7 +428,9 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           targetNames.flatMap((targetName) => {
             if (targetName.exactOnly) return [];
             const score =
-              nearNameScore(targetName.value, result, strictPool.length === 1) ??
+              (identityAllowsApprox(targetName, candIdent(result), abv, result.abv)
+                ? nearNameScore(targetName.value, result, strictPool.length === 1)
+                : null) ??
               swappedBrandNameScore(targetName.value, inputBreweryAliases, result);
             return score == null ? [] : [{ result, score }];
           }),
@@ -441,7 +455,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // matches via approximate fuzzy).
     if (strictPool.length > 0) {
       const searcher = new Searcher(strictPool, {
-        keySelector: (r) => normalizeName(r.beer_name),
+        keySelector: (r) => candIdentValue(r),
         threshold: NAME_FUZZY_THRESHOLD,
         returnMatchData: true,
       });
@@ -450,7 +464,9 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           searcher
             .search(targetName.value)
             .filter(
-              (m) => !targetName.exactOnly || normalizeName(m.item.beer_name) === targetName.value,
+              (m) =>
+                (!targetName.exactOnly || candIdentValue(m.item) === targetName.value) &&
+                identityAllowsApprox(targetName, candIdent(m.item), abv, m.item.abv),
             ),
         )
         .sort((a, b) => b.score - a.score);
@@ -476,8 +492,10 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // Recovers names that collapse below the key path — e.g. `KULTOWE PILS` → `kultowe`
     // (style-word dropped), `St-Feuillien Blonde` (candidate strips its embedded brewery).
     const relaxedTargetValues = new Set(targetNames.map((t) => t.value));
-    const relaxedExact = relaxedPool.filter((r) =>
-      relaxedTargetValues.has(normalizeName(r.beer_name)),
+    const relaxedExact = relaxedPool.filter(
+      (r) =>
+        relaxedTargetValues.has(normalizeName(r.beer_name)) ||
+        relaxedTargetValues.has(candIdentValue(r)),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 

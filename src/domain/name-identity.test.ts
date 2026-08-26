@@ -1,5 +1,6 @@
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
-import { normalizeBrewery } from './normalize';
+import { normalizeBrewery, normalizeName } from './normalize';
+import { extractYear } from './matcher';
 
 const ident = (name: string, brewery: string) => nameIdentity(name, normalizeBrewery(brewery));
 
@@ -93,5 +94,15 @@ describe('identityAllowsApprox', () => {
   test('a number outside the grade range is an ordinary restored token', () => {
     // 1664 is not a grade, so ABV corroboration applies as usual.
     expect(identityAllowsApprox(back('1664'), plain('1664 blanc'), 5, 5)).toBe(true);
+  });
+});
+
+describe('the vintage partition still sees what it always saw (#505 / #504)', () => {
+  test('normalizeName still strips the year, and extractYear still reads the raw name', () => {
+    // This test fails the moment someone "simplifies" the identity floor into
+    // normalizeName itself — which would re-poison queries (#295) and move the
+    // input extractYear partitions on (matcher.ts).
+    expect(normalizeName('Funky Fluid Tribute To Billie 2024')).toBe('funky fluid tribute to billie');
+    expect(extractYear('Funky Fluid Tribute To Billie 2024')).toBe(2024);
   });
 });
