@@ -104,10 +104,14 @@ quiet.push({
   ...verdict,
   issue_number: null,
   new_issue_key: null,
-  review_note: `off-scope #${n}: ${explainScopeRejection(row, verdict.review_class, scope)}`,
+  review_note: `off-scope ${target}: ${explainScopeRejection(row, verdict.review_class, scope)}`,
 });
 continue;
 ```
+
+`target` is `#405` at the existing-issue site and the model's `new_issue_key` at the proposed-issue
+site, where no number exists yet. Both sites refuse for the same reason and must leave the same
+kind of trace; a note that can only name a number would silently degrade at one of them.
 
 The shape is copied deliberately from the `unprobed_absence` branch twenty lines above, which
 already performs exactly this manoeuvre. This design adds no mechanism; it extends an existing one
@@ -128,7 +132,7 @@ Consequences, each checked against the code:
   it apart from `causeStripped`, which is a different reason for the same ownerless state.
 
 `explainScopeRejection(row, cls, scope)` is new and small: the first term that failed
-(`candidates_count = 0`), or `поза когортою` for a cohort-only scope. It lives beside
+(`candidates_count = 0`), or `outside the cohort` for a cohort-only scope. It lives beside
 `rowSatisfiesScope` because it is the same logic with an explanation attached. The note is capped
 at 500 characters like every other note.
 
@@ -253,8 +257,10 @@ is not a test.
 ## Predictions, recorded before deploy
 
 - `skipped` falls to ~0. If it does not, a fourth loss path exists that this investigation missed.
-- `scope_violation` falls by roughly two thirds — 54 of 85 mis-routings went to targets the model
-  will no longer be shown.
+- `scope_violation` falls substantially, but **not** necessarily by the 54/85 the filter removes:
+  a row denied its dead target does not disappear, it gets routed somewhere else, and that target
+  may contradict it too. The honest floor is the next line, which holds no matter where the model
+  routes.
 - **No row leaves a triage run without a class.** This is the number that matters.
 - The chronic captives take a class in one run: 29667, 32476, 29512, 288, 192, 64.
 
