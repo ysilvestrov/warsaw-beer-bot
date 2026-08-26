@@ -1082,6 +1082,18 @@ describe('lookupBeer — name identity floor (#505)', () => {
     expect(out.result.bid).toBe(756972);
   });
 
+  test('not_found: an empty input brewery must not let a restored identity win on no evidence', async () => {
+    // brewery="" puts every candidate in the #149 relaxed pool. "IPA" restores to
+    // "ipa" with no brewery evidence at all — accepting it here would match an
+    // arbitrary brewery's IPA, exactly the wrong-link family this branch exists
+    // to prevent (measured live on PR #507's review).
+    const search = fakeSearch(() => [
+      { bid: 111, beer_name: 'IPA', brewery_name: 'Some Brewery', style: 'IPA', abv: 6, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: '', name: 'IPA', abv: 6, search });
+    expect(out.kind).toBe('not_found');
+  });
+
   test('matched: candidate-side identity strips the candidate\'s own embedded brewery', async () => {
     // Unknown-brewery input (#149 relaxed path) against a candidate that bakes its
     // own brewery into the title. A single-token name keeps nameKeys() too weak to

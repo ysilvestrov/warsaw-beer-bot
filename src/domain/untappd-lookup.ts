@@ -496,10 +496,22 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // Recovers names that collapse below the key path — e.g. `KULTOWE PILS` → `kultowe`
     // (style-word dropped), `St-Feuillien Blonde` (candidate strips its embedded brewery).
     const relaxedTargetValues = new Set(targetNames.map((t) => t.value));
+    // #505: a restored identity is a style word, a spec label or a bare grade — no
+    // identifying signal on its own. In the relaxed pool it may only win via the
+    // identity disjunct when the input carries brewery evidence at all: with an
+    // empty input brewery (#149) every candidate lands in relaxedPool, so a bare
+    // `IPA` would otherwise match an arbitrary brewery's IPA on no evidence. The
+    // literal-name disjunct above is untouched — matching the beer name verbatim is
+    // real evidence regardless of restoration.
+    const relaxedIdentityValues = new Set(
+      targetNames
+        .filter((t) => !t.restored || inputBreweryAliases.length > 0)
+        .map((t) => t.value),
+    );
     const relaxedExact = relaxedPool.filter(
       (r) =>
         relaxedTargetValues.has(normalizeName(r.beer_name)) ||
-        relaxedTargetValues.has(candIdentValue(r)),
+        relaxedIdentityValues.has(candIdentValue(r)),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 
