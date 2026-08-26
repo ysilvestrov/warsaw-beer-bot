@@ -140,9 +140,39 @@ export function rowSatisfiesScope(
   return scope.where.every((t) => termMatches(row, verdictClass, t));
 }
 
+// #509: a target the guard will refuse by construction must not be offered to the model as
+// one. `where.length === 0` is the whole test: rowSatisfiesScope returns false for every row
+// outside an enumerated cohort when there is no `where` to fall back on, so a cohort-only
+// scope — and a missing block — can accept nothing that is not already listed. A type
+// predicate rather than a boolean so the prompt input cannot be built from unfiltered issues.
+//
+// Deliberately NOT also checking isLegalScope: legality is a rule about issue CREATION (a
+// `where` of review_class alone is a dumping ground), while this is a rule about whether an
+// existing target can accept anything at all. Conflating them would silently hide legacy
+// issues from the model instead of letting the guard judge them.
+export function isRoutableTarget<T extends { scope: Scope | null }>(
+  i: T,
+): i is T & { scope: Scope } {
+  return i.scope !== null && i.scope.where.length > 0;
+}
+
+// #509: the same decision rowSatisfiesScope makes, with the reason attached, so a refused
+// routing can leave a trace a human can act on. Returns the FIRST failing term rather than
+// all of them: the note is capped at 500 chars and shares that budget with the model's own
+// sentence, and one contradicted term is already enough to explain the refusal.
+export function explainScopeRejection(
+  row: UntriagedFailure,
+  verdictClass: (typeof REVIEW_CLASSES)[number],
+  scope: Scope,
+): string {
+  if (scope.where.length === 0) return 'outside the cohort';
+  const failing = scope.where.find((t) => !termMatches(row, verdictClass, t));
+  return failing ? describeTerm(failing) : 'outside the cohort';
+}
+
 const BLOCK_RE = /```triage-scope\s*\n([\s\S]*?)\n?```/;
 
-function describeTerm(t: ScopeTerm): string {
+export function describeTerm(t: ScopeTerm): string {
   return 'value' in t ? `${t.col} ${t.op} ${t.value}` : `${t.col} ${t.op}`;
 }
 
