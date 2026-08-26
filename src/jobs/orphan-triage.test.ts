@@ -66,6 +66,7 @@ const gh = (over = {}) => ({
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   addLabel: vi.fn().mockResolvedValue(undefined),
   removeLabel: vi.fn().mockResolvedValue(undefined),
+  setIssueBody: vi.fn().mockResolvedValue(undefined),
   ...over,
 });
 const exchange = (analysis: Analysis, stopReason: string | null = 'tool_use') => ({

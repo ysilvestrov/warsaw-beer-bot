@@ -10,6 +10,10 @@ export interface GithubIssuesClient {
   // (priority/tier-2, extension-bug) every time the triage job reconciled.
   addLabel(issueNumber: number, label: string): Promise<void>;
   removeLabel(issueNumber: number, label: string): Promise<void>;
+  // #509: PATCH with ONLY `body`. The issues endpoint replaces every field it is given, so
+  // sending title or labels here would overwrite whatever a human has since set — the same
+  // hazard the addLabel/removeLabel comment above describes for PUT .../labels.
+  setIssueBody(issueNumber: number, body: string): Promise<void>;
 }
 
 // Minimal GitHub REST client (plain fetch, same style as scripts/ai-pr-review.ts).
@@ -90,6 +94,12 @@ export function createGithubIssuesClient(cfg: {
       // logs and self-corrects on the next run.
       await call(`${base}/issues/${issueNumber}/labels/${encodeURIComponent(label)}`, {
         method: 'DELETE',
+      });
+    },
+    async setIssueBody(issueNumber, body) {
+      await call(`${base}/issues/${issueNumber}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ body }),
       });
     },
   };
