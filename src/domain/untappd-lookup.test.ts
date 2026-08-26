@@ -1081,4 +1081,19 @@ describe('lookupBeer — name identity floor (#505)', () => {
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(756972);
   });
+
+  test('matched: candidate-side identity strips the candidate\'s own embedded brewery', async () => {
+    // Unknown-brewery input (#149 relaxed path) against a candidate that bakes its
+    // own brewery into the title. A single-token name keeps nameKeys() too weak to
+    // resolve this at Stage 2a, so the match can only land via the identity-aware
+    // relaxedExact branch that reads the candidate through candIdentValue (brewery
+    // stripped), not raw normalizeName(r.beer_name) (brewery still attached).
+    const search = fakeSearch(() => [
+      { bid: 42001, beer_name: 'Pinta Atak', brewery_name: 'Pinta', style: 'IPA', abv: 6.2, global_rating: 3.6 },
+    ]);
+    const out = await lookupBeer({ brewery: '', name: 'Atak', abv: 6.2, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(42001);
+  });
 });

@@ -75,7 +75,11 @@ function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
     targets.set(value, {
       value,
       exactOnly: (existing?.exactOnly ?? true) && exactOnly,
-      restored: ident.restored,
+      // Conservative in the same direction as exactOnly: once any raw contributing
+      // to this collision needed restoration, treat the merged target as restored
+      // rather than last-writer-wins (no reachable collision exercises this today,
+      // but the unsafe direction — silently dropping restored — is free to close).
+      restored: (existing?.restored ?? false) || ident.restored,
     });
   }
   return Array.from(targets.values());
