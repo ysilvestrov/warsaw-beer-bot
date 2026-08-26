@@ -179,18 +179,29 @@ export function planTriageActions(
   const seenBeerIds = new Set<number>();
 
   // #509: a scope violation refutes the TARGET, not the class. The verdict goes quiet with
-  // its class intact and a trace of what refused it, exactly as the unprobed_absence branch
-  // above does. It is deliberately NOT re-routed to another issue: choosing a different
-  // target by title similarity is what built #347, and the guard exists to stop it.
+  // its class intact and a trace of what refused it — the model's own note survives too
+  // (appended after the machine reason), the same thing the unprobed_absence branch above
+  // does for its own note; before this the machine reason replaced it outright. It is
+  // deliberately NOT re-routed to another issue: choosing a different target by title
+  // similarity is what built #347, and the guard exists to stop it.
   const refuseRoute = (verdict: ActionableVerdict, row: UntriagedFailure, target: string, scope: Scope | null): void => {
     guardHits.scope_violation += 1;
-    quietOffScope += 1;
+    // #432: not_a_beer already owns its own counter/digest part (outcome.notABeer); adding
+    // it here too would double-count it, the exact defect the guard fifteen lines below
+    // this one exists to prevent. Mirrored, not shared, because the two sites decide for
+    // different reasons (target with no target at all vs. target that contradicts the row).
+    if (verdict.review_class === 'parser_bug' || verdict.review_class === 'matcher_bug') {
+      quietOffScope += 1;
+    }
+    // A missing scope block and a contradicted term are different facts about the issue,
+    // not two spellings of the same one: the row never claimed cohort membership and lost,
+    // so explainScopeRejection's "outside the cohort" would misreport WHY nothing matched.
     const reason = scope === null ? 'no scope block' : explainScopeRejection(row, verdict.review_class, scope);
     quiet.push({
       ...verdict,
       issue_number: null,
       new_issue_key: null,
-      review_note: `off-scope ${target}: ${reason}`.slice(0, 500),
+      review_note: `off-scope ${target}: ${reason} | ${verdict.review_note}`.slice(0, 500),
     });
   };
 

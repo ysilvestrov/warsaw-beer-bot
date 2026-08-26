@@ -713,12 +713,16 @@ test('without a search dep the job behaves exactly as before', async () => {
 // notABeer is also given a value distinct from noTarget/causeStripped (MINOR 5): a
 // fixture where notABeer is always 0 cannot catch not_a_beer being double-counted
 // into one of the quiet counters, which is exactly how CRITICAL 1 escaped review.
+// offScope is also given its own non-zero value here, alongside a non-zero notABeer:
+// #509's quietOffScope must exclude not_a_beer the same way causeStripped/noTarget do
+// (triage-plan.ts), and a fixture where offScope is always 0 cannot catch that guard
+// double-counting a scope-refused not_a_beer into this part.
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 1, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених');
+  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених, 1 без власника (поза scope)');
 });
 
 test('logs one evidence summary per run (input for the quality review)', async () => {

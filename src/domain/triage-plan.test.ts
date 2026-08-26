@@ -453,6 +453,10 @@ test('a not_a_beer verdict whose row contradicts the issue scope is refused', ()
 
   expect(plan.comments).toEqual([]);
   expect(plan.guardHits.scope_violation).toBe(1);
+  // #509 fix round 1: not_a_beer already owns outcome.notABeer/its own digest part —
+  // quietOffScope must exclude it exactly as quietCauseStripped/quietNoTarget do above,
+  // or a scope-refused not_a_beer would be counted twice (the #432 defect, reintroduced).
+  expect(plan.quietOffScope).toBe(0);
 });
 
 // --- #431: saturation reports, it does not refuse -------------------------------
@@ -505,6 +509,9 @@ test('#431: ties break by issue number ascending, so output is deterministic', (
 
 // --- #509: a refused route keeps its class -----------------------------------------
 
+// The note keeps the model's own diagnosis after the machine reason: for a row whose
+// whole remaining purpose is to sit ownerless until a human reads it, that sentence is
+// the only statement of what the defect actually is.
 test('a verdict refused by scope keeps its class, loses its target, and records the reason', () => {
   const scope = { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 } as const] };
   const a: Analysis = {
@@ -521,7 +528,7 @@ test('a verdict refused by scope keeps its class, loses its target, and records 
   expect(plan.quiet).toHaveLength(1);
   expect(plan.quiet[0].review_class).toBe('matcher_bug');
   expect(plan.quiet[0].issue_number).toBeNull();
-  expect(plan.quiet[0].review_note).toBe('off-scope #300: candidates_count = 0');
+  expect(plan.quiet[0].review_note).toBe('off-scope #300: candidates_count = 0 | shop brand in brewery field');
 });
 
 test('a founding verdict refused by its own proposed scope names the key, not a number', () => {
@@ -534,19 +541,27 @@ test('a founding verdict refused by its own proposed scope names the key, not a 
   };
   const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
   expect(plan.newIssues).toEqual([]);
-  expect(plan.quiet[0].review_note).toBe('off-scope cider-brand-line: candidates_count = 0');
+  // v()'s default review_note is 'note'.
+  expect(plan.quiet[0].review_note).toBe('off-scope cider-brand-line: candidates_count = 0 | note');
   expect(plan.quiet[0].new_issue_key).toBeNull();
 });
 
-// Red if the note is built by concatenation without a cap: VerdictSchema caps review_note
-// at 500 and setEnrichFailureReview writes whatever it is handed.
+// The cap must be driven by an input the model actually controls without a length limit
+// on it: review_note itself is already capped at 500 by VerdictSchema, so feeding it a
+// long string proves nothing (refuseRoute could drop the model's note entirely and this
+// would stay green). new_issue_key (z.string().nullable(), no max) and a `contains`
+// term's value (z.string().min(1), no max) both reach the note unbounded — this drives
+// the length from new_issue_key, taking the proposed-issue site where target IS the key.
 test('the off-scope note is capped at 500 characters', () => {
+  const longKey = 'k'.repeat(600);
   const a: Analysis = {
-    verdicts: [v({ beer_id: 1, issue_number: 300, review_note: 'z'.repeat(600) })],
-    new_issues: [],
+    verdicts: [v({ beer_id: 1, new_issue_key: longKey })],
+    new_issues: [{
+      key: longKey, title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
   };
-  const scope = { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 } as const] };
-  const plan = planTriageActions(a, [open(300, { scope })], [row(1, { candidates_count: 3 })], noProbes, new Set());
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
   expect(plan.quiet[0].review_note.length).toBeLessThanOrEqual(500);
 });
 
@@ -560,5 +575,6 @@ test('a refusal against an unscoped issue names the missing scope, not a cohort 
   expect(plan.quietOffScope).toBe(1);
   expect(plan.quiet[0].review_class).toBe('matcher_bug');
   expect(plan.quiet[0].issue_number).toBeNull();
-  expect(plan.quiet[0].review_note).toBe('off-scope #300: no scope block');
+  // v()'s default review_note is 'note'.
+  expect(plan.quiet[0].review_note).toBe('off-scope #300: no scope block | note');
 });
