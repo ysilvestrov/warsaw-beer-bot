@@ -3,7 +3,8 @@
 Date: 2026-08-26
 Status: agreed
 Issues: #505 (supersedes #482 — bare style-word names; and #504 — digit names)
-Related: #487 / `docs/superpowers/specs/2026-08/2026-08-25-487-flagship-dominance-design.md` (the
+Related: #506 (a Cyrillic brewery collapsing to the generic word «броварня» — surfaced by this
+work, filed separately, owns row 31180), #487 / `docs/superpowers/specs/2026-08/2026-08-25-487-flagship-dominance-design.md` (the
 same failure family one stage over: when the name signal is gone, some other property is promoted
 to identity), #306 (`isBareBrandName` — the local matcher already refuses to attach an arbitrary
 product of a brewery), #321 (Czech grade: `10`/`12` is a style marker, not a name), #295 (query
@@ -94,6 +95,14 @@ exists to remove. Treating it as full identity is unsafe (measured below: 6 bad 
 > When either side's identity was restored, an **exact** match between the two identities is
 > accepted as-is; an **approximate** match must be corroborated by ABV within `ABV_TOLERANCE`.
 
+Two exceptions, both measured (see Decisions 1 and 3):
+
+- **A bare grade is exact-only.** If either side's restored identity is a single token that
+  `extractGrade` recognises, ABV corroboration is *not* a substitute for exact equality — otherwise
+  `11` @4.5 picks `Session IPA 11%` @4.7 over `Ležák 11%` @4.5.
+- **The identity-alias rescue inherits the gate.** When the input's own identity was restored,
+  `pickUniqueByAbv(identityHits, abv)` must reject an ABV contradiction.
+
 This is the whole of the safety story, and it is why the naive form of this fix must not ship.
 
 ### The change must land on both sides at once
@@ -148,11 +157,10 @@ The 18 unchanged rows are blocked by **named** defects that are not this one: th
 **Risk population — the 326 of 31 371 matched beers (1.04 %) where the fallback fires at all:**
 
 ```
-192 land on the stored bid
-  6 baseline WRONG links refused   (improvement)
-  4 bad
-  1 vintage risk (row 3018)
-  1 benign (row 4760 — see below)
+191 land on the stored bid
+  8 baseline WRONG links refused   (improvement)
+  2 bad     (30272 accepted below; 31180 belongs to #506)
+  2 benign  (3018, 4760 — both explained below)
 ```
 
 The 6 refusals are a bonus this design did not set out to buy: today's matcher links non-alcoholic
@@ -165,29 +173,56 @@ Without the second-class-evidence refinement the same population produced **6 ba
 switches to a worse ABV. That number is the reason the refinement is part of the design and not an
 optimisation.
 
-## Open decisions — to be resolved in the plan, not deferred
+## Decisions — all resolved by measurement, 2026-08-26
 
-These are the 4 bad rows and the vintage risk above. Each is named, with the direction it should
-take. A sixth candidate was raised and **resolved during review** — it is kept here rather than
-deleted, so nobody re-derives it.
+Every one of these was measured, several by trying the obvious answer and watching it fail. Stage
+attribution came from a traced build of the prototype, so each row's verdict names the stage that
+produced it.
 
-1. **12007 — `Nachmelená Opice / 11` @4.5 picks `Session IPA 11%` @4.7 over `Ležák 11%` @4.5.**
-   A bare Czech grade is not identity. `extractGrade` (#321) already recognises this shape;
-   a restored identity that is *only* a grade must not be treated as identity at all.
-2. **31180 — `Броварня #8 / Weizen` matches `Броварня Кружак — Weizen`, a different brewery.**
-   Restored identity must require a **strict** brewery. Note this was attempted and NOT measured
-   during design: the trial threaded no pool tag and only removed `relaxedExact`, which cost one
-   win. The plan must thread the strict/relaxed pool tag properly and re-measure.
-3. **32598 — `Lambic Boon` @4 matches `Unblended Oude Lambiek` @7.**
-   The ABV corroboration did not reach the stage that accepted this. Find which stage and extend the
-   gate; a 3 % ABV gap must never survive on restored evidence.
-4. **30272 — `Tyskie Lager` @4.6 becomes a refusal instead of the correct `Tyskie Sport Lager`.**
-   The one genuine loss among 326. Decide explicitly whether it is acceptable collateral or needs a
-   carve-out; do not let it pass unremarked.
-5. **3018 — `CRAK Brewery / NEIPA (2020)` matches the year-less `NEIPA`.**
-   The vintage risk #504 predicted. `extractYear` reads the *un-normalized* name precisely because
-   digits are stripped; once a digit can be restored, the vintage partition sees a different world.
-   The plan must state what the partition does with a restored token.
+1. **12007 — `Nachmelená Opice / 11` picks `Session IPA 11%` @4.7 over `Ležák 11%` @4.5. RESOLVED:
+   a bare grade may support an EXACT identity match only.**
+   The obvious rule — "a restored identity that is only a Czech grade is not identity" — was
+   implemented and **measured wrong**. It cost three correct matches whose beers are *named* after
+   the number: `Nepo Brewing / 15` → `Nepo Brewing — 15` (which baseline mismatched to
+   `Meet Our Friends: Episode 15 Forest Grodziskie` @3.2), `Browar Artezan / 11` → `Browar Artezan
+   — 11`, and `Kamenice / 10` → `APA 10`. The same token `11` is a grade in one row and a name in
+   another; what separates them is whether the candidate carries the *same bare token*. So: when
+   either side's restored identity is a single token that `extractGrade` recognises (7–20 or a
+   Czech grade word), only exact equality is accepted — ABV corroboration is not a substitute.
+   Measured: 12007 becomes a refusal, 10522 and 6842 keep their correct matches.
+2. **31180 — `Броварня #8 / Weizen` matches a different brewery. RESOLVED: not this issue's defect
+   → #506.**
+   Two candidate fixes were measured and both failed here. (a) *Restored identity requires a strict
+   brewery*: rejected — row 196 arrives via `relaxedExact` on a **relaxed-pool** brewery
+   (`Kronenbourg` is a sublist of `Brasseries Kronenbourg`, not a leading prefix), so this rule
+   costs the flagship win. (b) *Restored evidence at an approximate stage always needs ABV, with no
+   exact-equality shortcut*: rejected — it cost **11** correct matches (191 → 181 on the stored bid,
+   incl. `Książęce IPA` → `Książęce Tropical IPA`) and did not even fix 31180, which simply moved to
+   `Богданівська Броварня — Weizen`. The real cause is that `normalizeBrewery('Броварня #8')` is
+   `'броварня'`, the generic Ukrainian word for brewery, which is a leading run of every
+   `Броварня X`. Filed as #506; adding the Cyrillic words to `BREWERY_NOISE` touches 155 beers
+   across 21 labels and empties this brewery entirely, so it needs its own measurement.
+3. **32598 — `Lambic Boon` @4 matches `Unblended Oude Lambiek` @7. RESOLVED: gate the identity-alias
+   rescue.**
+   The traced build shows the accepting stage is `identityHits` — the complete-identity-alias rescue,
+   which our change never touched, reached because the changed target made an earlier stage miss.
+   `pickUniqueByAbv` already takes a `rejectAbvContradiction` flag (used by `nativeKeyHits`); pass it
+   when the input's own identity was restored. Measured: the row becomes a refusal rather than a
+   3 %-off wrong link.
+4. **30272 — `Tyskie Lager` @4.6 becomes a refusal instead of `Tyskie Sport Lager`. RESOLVED:
+   accepted, no carve-out.**
+   `Tyskie Lager` is bare brand plus a style word: the restored identity is `lager`, and no candidate
+   has `lager` as identity. Refusing is the honest outcome and is exactly what #306's bare-brand
+   guard already does one layer down. The baseline's link is a guess that happened to agree with the
+   stored value — a tap labelled "Tyskie Lager" is at least as likely to be plain `Tyskie`. This is
+   the single genuine loss among 326 and it is accepted deliberately.
+5. **3018 — `CRAK Brewery / NEIPA (2020)` matches the year-less `NEIPA`. RESOLVED: no year guard.**
+   The vintage risk #504 predicted does not materialise, for a structural reason: **`normalizeName`
+   is not changed**, and `extractYear` reads the *un-normalized* name, so `matcher.ts`'s vintage
+   partition sees precisely what it saw before. In this row the live search returns no `NEIPA 2020`
+   at all — the five candidates are the plain `NEIPA` @6.5 and four `TapCrak` variants — and the ABV
+   matches exactly. Matching the base beer is the best available answer, not a vintage error. A
+   regression test pins `extractYear`'s inputs so a future change cannot quietly move them.
 6. **4760 — `Imperial Porter` @10 picks bid 2576506 where 2576509 is stored. RESOLVED: not a
    defect.** The two bids are genuinely different beers, but they differ only by the spice mix named
    in the description — same brewery, same name, same ABV, and nothing our matcher reads can
