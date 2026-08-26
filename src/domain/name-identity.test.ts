@@ -1,4 +1,4 @@
-import { nameIdentity, candidateIdentity } from './name-identity';
+import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
 import { normalizeBrewery } from './normalize';
 
 const ident = (name: string, brewery: string) => nameIdentity(name, normalizeBrewery(brewery));
@@ -54,5 +54,44 @@ describe('nameIdentity', () => {
   test('candidateIdentity keys on the candidate own brewery', () => {
     const out = candidateIdentity('1664', 'Brasseries Kronenbourg');
     expect(out).toEqual({ value: '1664', restored: true });
+  });
+});
+
+const plain = (value: string): NameIdentity => ({ value, restored: false });
+const back = (value: string): NameIdentity => ({ value, restored: true });
+
+describe('identityAllowsApprox', () => {
+  test('untouched identities on both sides are never gated', () => {
+    expect(identityAllowsApprox(plain('rozkoszy'), plain('rozkoszyy'), null, null)).toBe(true);
+  });
+
+  test('restored evidence with an exact match needs no ABV', () => {
+    expect(identityAllowsApprox(back('weizen'), back('weizen'), null, null)).toBe(true);
+  });
+
+  test('restored evidence approximating needs ABV agreement', () => {
+    // "IPA" must not reach "IPALIT" at 7.0 vs 7.5.
+    expect(identityAllowsApprox(back('ipa'), plain('ipalit'), 7, 7.5)).toBe(false);
+    expect(identityAllowsApprox(back('weizen'), plain('weizenbier'), 4.8, 4.8)).toBe(true);
+  });
+
+  test('restored evidence approximating with no ABV at all is refused', () => {
+    expect(identityAllowsApprox(back('wheat'), plain('wheatly'), null, 4.3)).toBe(false);
+  });
+
+  test('a bare grade is exact-only — ABV is not a substitute', () => {
+    // "11" @4.5 must not reach "Session IPA 11%" @4.7 even though 0.2 is inside tolerance.
+    expect(identityAllowsApprox(back('11'), back('session 11'), 4.5, 4.7)).toBe(false);
+  });
+
+  test('but a beer literally NAMED after the number still matches', () => {
+    // Browar Artezan — 11; Nepo Brewing — 15. The number is the name, not the grade.
+    expect(identityAllowsApprox(back('11'), back('11'), 6.5, 6.5)).toBe(true);
+    expect(identityAllowsApprox(back('15'), back('15'), 6.8, 6.8)).toBe(true);
+  });
+
+  test('a number outside the grade range is an ordinary restored token', () => {
+    // 1664 is not a grade, so ABV corroboration applies as usual.
+    expect(identityAllowsApprox(back('1664'), plain('1664 blanc'), 5, 5)).toBe(true);
   });
 });

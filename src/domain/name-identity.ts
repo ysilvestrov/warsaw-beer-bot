@@ -1,5 +1,6 @@
 import { baseNormalize, normalizeBrewery, normalizeName } from './normalize';
-import { stripBreweryFromName } from './matcher';
+import { ABV_TOLERANCE, stripBreweryFromName } from './matcher';
+import { extractGrade } from './czech-grade';
 
 /**
  * #505 — a beer name's identity, and whether we had to dig it back out.
@@ -54,4 +55,36 @@ export function nameIdentity(rawName: string, breweryNorm: string): NameIdentity
 /** A search candidate's identity, keyed on the candidate's OWN brewery. */
 export function candidateIdentity(beerName: string, breweryName: string): NameIdentity {
   return nameIdentity(beerName, normalizeBrewery(breweryName));
+}
+
+/**
+ * A restored token is a style word, a spec label or a bare grade — exactly the noise
+ * the filter exists to remove. Handing it to an approximate stage as full identity
+ * turns "IPA" into "IPALIT" and "Wheat" into "We're Wheatly Sorry" (measured: 6 wrong
+ * matches over the 326 at-risk rows). So restored evidence buys an EXACT match
+ * outright, and an approximate one only with ABV agreement.
+ */
+function isBareGrade(ident: NameIdentity): boolean {
+  if (!ident.restored) return false;
+  const tokens = ident.value.split(' ').filter(Boolean);
+  return tokens.length === 1 && extractGrade(tokens[0]) !== null;
+}
+
+export function identityAllowsApprox(
+  target: NameIdentity,
+  candidate: NameIdentity,
+  inputAbv: number | null,
+  candidateAbv: number | null,
+): boolean {
+  if (!target.restored && !candidate.restored) return true;
+  const exact = target.value === candidate.value;
+  // A bare grade ("11", "desítka") is a strength marker, not a name — UNLESS the other
+  // side is the same bare token, in which case the number really is the beer's name
+  // (Browar Artezan — 11, Nepo Brewing — 15). Measured: forbidding grades outright cost
+  // three correct matches; exact-only keeps them and still refuses `11` -> `Session IPA 11%`.
+  if (isBareGrade(target) || isBareGrade(candidate)) return exact;
+  if (exact) return true;
+  return (
+    inputAbv != null && candidateAbv != null && Math.abs(candidateAbv - inputAbv) <= ABV_TOLERANCE
+  );
 }
