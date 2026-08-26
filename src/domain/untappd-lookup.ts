@@ -502,7 +502,11 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // Complete identity aliases are a rescue path, not a replacement for the
     // canonical/curated brewery stages above.
     if (identityHits.length > 0) {
-      const identityHit = pickUniqueByAbv(identityHits, abv);
+      // #505: when the input's own identity had to be restored, this rescue must not
+      // accept a candidate whose ABV contradicts the input — restored evidence is too
+      // weak to carry a 3% gap on its own.
+      const inputRestored = targetNames.some((t) => t.restored);
+      const identityHit = pickUniqueByAbv(identityHits, abv, inputRestored);
       return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
     }
 

@@ -1052,4 +1052,15 @@ describe('lookupBeer — name identity floor (#505)', () => {
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(6620595);
   });
+
+  test('not_found: the identity-alias rescue refuses an ABV contradiction on restored evidence', async () => {
+    // "Lambic Boon" restores to "lambic"; the rescue must not hand back a 7% beer for a 4% tap.
+    // Use a different brewery so it only reaches the identity-alias stage, not the approximate match gate.
+    const search = fakeSearch(() => [
+      { bid: 756972, beer_name: 'Unblended Oude Lambiek', brewery_name: 'Sadyba', style: 'Lambic', abv: 7, global_rating: 3.9,
+        alias_alt: ['Brouwerij Boon Lambic'] },
+    ]);
+    const out = await lookupBeer({ brewery: 'Brouwerij Boon Brewery', name: 'Lambic Boon', abv: 4, search });
+    expect(out.kind).toBe('not_found');
+  });
 });
