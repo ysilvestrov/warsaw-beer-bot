@@ -173,6 +173,21 @@ Without the second-class-evidence refinement the same population produced **6 ba
 switches to a worse ABV. That number is the reason the refinement is part of the design and not an
 optimisation.
 
+**Control population — `tmp/rows-control.json`, 150 ordinary matched beers the identity floor never
+touches (added by the final review):**
+
+```
+150 rows | gained 0 | lost 0 | switched 0
+```
+
+150 live Algolia queries, baseline vs. branch. This is the population that actually validates the
+candidate-side substitution (stage 2b's `keySelector`, its `exactOnly` comparison, `relaxedExact`):
+the other two populations both select rows on the *input* name (orphans that need restoration, or
+matched beers where the fallback fires on the input side), so neither can exhaust an edit that fires
+on every *candidate* the search returns, including candidates for rows where the input side never
+restores at all. Zero movement over 150 untouched rows is the evidence that the candidate-side
+change is inert exactly where it should be.
+
 ## Decisions — all resolved by measurement, 2026-08-26
 
 Every one of these was measured, several by trying the obvious answer and watching it fail. Stage
@@ -190,6 +205,17 @@ produced it.
    either side's restored identity is a single token that `extractGrade` recognises (7–20 or a
    Czech grade word), only exact equality is accepted — ABV corroboration is not a substitute.
    Measured: 12007 becomes a refusal, 10522 and 6842 keep their correct matches.
+
+   **Consequence, not written down elsewhere: an exact restored identity now outranks #321's
+   Czech-grade style exclusion, ABV contradiction included.** Verified case: brewery `Nachmelená
+   Opice`, name `11`, candidates `Ležák 11%` (Czech Pale Lager @4.6) and `11` (Session IPA @6.5).
+   The pre-#505 code returns the lager via #321's ale-style exclusion (a bare grade may only match
+   a non-ale style). This branch returns the Session IPA instead — and still does when the input
+   ABV is 4.6, a 1.9 % gap, six times `ABV_TOLERANCE`. This is the design working as specified, the
+   same rule that wins row 196 over a 0.5 % gap: an exact bare-grade match is accepted "as-is" (see
+   "Restored identity is second-class evidence" above), and that acceptance was never scoped to
+   only fire when #321's exclusion is silent. Not a bug; recorded so a future reader does not
+   mistake it for one when #321 and #505 disagree on a row.
 2. **31180 — `Броварня #8 / Weizen` matches a different brewery. RESOLVED: not this issue's defect
    → #506.**
    Two candidate fixes were measured and both failed here. (a) *Restored identity requires a strict
@@ -250,7 +276,10 @@ actively worse: it reverted the non-alcoholic `0,0%` fixes, because `0` is one c
 - **A both-sides test.** Because input-only is a measured regression, there must be a test that
   fails when only one side applies the rule — rows 32/73 are the witness.
 - **A restored-evidence safety test** per bad outcome above: `IPA` must not reach `IPALIT`,
-  `Wheat` must not reach `We're Wheatly Sorry`, `Weizen` must not cross a brewery.
+  `Wheat` must not reach `We're Wheatly Sorry`.
+  ~~`Weizen` must not cross a brewery.~~ No such test exists, correctly: Decision 2 reassigns
+  that exact row (31180) to #506 as knowingly unfixed by this issue. Do not score its absence
+  as a missed requirement.
 - **The self-limiting property**: `Buzdygan Rozkoszy IPA` → `Buzdygan Rozkoszy` and
   `1664 Blanc` ≠ `1664` must both stay green; they are what proves the fallback never fires where
   something survives.

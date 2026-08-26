@@ -11,6 +11,17 @@ import { extractGrade } from './czech-grade';
  * ("Weizen") or the bare brewery brand ("Kronenbourg 1664" -> "kronenbourg").
  * A name in that state cannot discriminate, and the matcher then decides on some
  * other property — which is how a 0.5% ABV typo picked a different product (#487).
+ *
+ * The fallback below reads from `baseNormalize(rawName)`, deliberately BYPASSING
+ * `stripSearchNoise` (unlike `normalizeName`, which is `baseNormalize(preserveDecimalIdentifiers
+ * (stripSearchNoise(s)))` plus the token filter). Routing the fallback through
+ * `stripSearchNoise` too would strip the "0,0%" out of "Żywiec 0,0%" before restoration
+ * ever sees it, collapsing it back to the bare brand "żywiec" — destroying the six
+ * non-alcoholic wrong-link refusals this design counts as a bonus (an NA beer no longer
+ * falls back to its boozy sibling of the same brand). The re-admitted noise
+ * (`ipa chmiel citra mosaic`, `pils bba`, `alc 5 0 ipa`, `weizen 5 2`) is accepted
+ * collateral: it only ever reaches this path when the filtered form has already lost
+ * everything, so there is no cleaner signal being discarded in its favour.
  */
 export interface NameIdentity {
   /** The identity tokens, brewery echo removed. */
