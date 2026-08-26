@@ -988,3 +988,124 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 });
+
+describe('lookupBeer — name identity floor (#505)', () => {
+  test('matched: a bare style-word candidate is reachable', async () => {
+    const search = fakeSearch(() => [
+      { bid: 30947, beer_name: 'Weizen', brewery_name: 'Primátor', style: 'Hefeweizen', abv: 4.8, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Primator Brewery', name: 'Weizenbier', abv: 4.8, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(30947);
+  });
+
+  test('matched: the digit that IS the name beats the ABV coincidence', async () => {
+    // The shop says 5.0, which points at 1664 Blanc. The name says 1664.
+    const search = fakeSearch(() => [
+      { bid: 5939, beer_name: '1664', brewery_name: 'Brasseries Kronenbourg', style: 'Lager', abv: 5.5, global_rating: 3.4 },
+      { bid: 5999, beer_name: '1664 Blanc', brewery_name: 'Brasseries Kronenbourg', style: 'Witbier', abv: 5, global_rating: 3.6 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Kronenbourg Brewery', name: 'Kronenbourg 1664', abv: 5, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5939);
+  });
+
+  test('BOTH sides must apply the rule: input-only would break this row', async () => {
+    // Guards the measured regression: with the rule on the input side only, the target
+    // becomes "weizen" while the candidate stays "", and this row stops matching.
+    const search = fakeSearch(() => [
+      { bid: 30947, beer_name: 'Weizen', brewery_name: 'Primátor', style: 'Hefeweizen', abv: 4.8, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Primator Brewery', name: 'Primator Weizen', abv: 4.8, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(30947);
+  });
+
+  test('not_found: restored evidence never fuzzy-reaches a different beer', async () => {
+    // "IPA" must not become "IPALIT".
+    const search = fakeSearch(() => [
+      { bid: 4463769, beer_name: 'IPALIT (ИПАЛИТ)', brewery_name: 'Augustine (Августин)', style: 'IPA', abv: 7.5, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Августин', name: 'IPA', abv: 7, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('not_found: a bare brand plus a style word stays an honest orphan', async () => {
+    // "Tyskie Lager" carries no identity beyond the brand; guessing is worse than refusing.
+    const search = fakeSearch(() => [
+      { bid: 5334255, beer_name: 'Tyskie Sport Lager', brewery_name: 'Tyskie Browary Książęce', style: 'Lager', abv: 4.6, global_rating: 3.2 },
+      { bid: 5099975, beer_name: 'Książęce Lager', brewery_name: 'Tyskie Browary Książęce', style: 'Lager', abv: 5, global_rating: 3.3 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Tyskie Brewery', name: 'Tyskie Lager', abv: 4.6, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('unchanged: a name the filter leaves intact still matches as before', async () => {
+    const search = fakeSearch(() => [
+      { bid: 6620595, beer_name: 'Buzdygan Rozkoszy', brewery_name: 'Harpagan Craft Beer', style: 'IPA', abv: 5, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Harpagan', name: 'Buzdygan Rozkoszy IPA', abv: 5, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6620595);
+  });
+
+  test('not_found: the identity-alias rescue refuses an ABV contradiction on restored evidence', async () => {
+    // "Lambic Boon" restores to "lambic"; the rescue must not hand back a 7% beer for a 4% tap.
+    // The alias "boon lambic" (brewery + name) is the identity path that opens the identityHits pool.
+    const search = fakeSearch(() => [
+      { bid: 756972, beer_name: 'Unblended Oude Lambiek', brewery_name: 'Brouwerij Boon',
+        style: 'Lambic - Traditional', abv: 7, global_rating: 3.7,
+        brewery_alias: ['boon brewery', 'frank boon'],
+        alias_alt: ['lambic', 'lambik', 'boon lambic', 'unblended lambic'],
+        rating_count: 5000 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Brouwerij Boon Brewery', name: 'Lambic Boon', abv: 4, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('matched: the identity-alias rescue accepts when ABV agrees on restored evidence', async () => {
+    // When ABV matches, the identity-alias rescue correctly accepts the candidate.
+    const search = fakeSearch(() => [
+      { bid: 756972, beer_name: 'Unblended Oude Lambiek', brewery_name: 'Brouwerij Boon',
+        style: 'Lambic - Traditional', abv: 7, global_rating: 3.7,
+        brewery_alias: ['boon brewery', 'frank boon'],
+        alias_alt: ['lambic', 'lambik', 'boon lambic', 'unblended lambic'],
+        rating_count: 5000 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Brouwerij Boon Brewery', name: 'Lambic Boon', abv: 7, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(756972);
+  });
+
+  test('not_found: an empty input brewery must not let a restored identity win on no evidence', async () => {
+    // brewery="" puts every candidate in the #149 relaxed pool. "IPA" restores to
+    // "ipa" with no brewery evidence at all — accepting it here would match an
+    // arbitrary brewery's IPA, exactly the wrong-link family this branch exists
+    // to prevent (measured live on PR #507's review).
+    const search = fakeSearch(() => [
+      { bid: 111, beer_name: 'IPA', brewery_name: 'Some Brewery', style: 'IPA', abv: 6, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: '', name: 'IPA', abv: 6, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('matched: candidate-side identity strips the candidate\'s own embedded brewery', async () => {
+    // Unknown-brewery input (#149 relaxed path) against a candidate that bakes its
+    // own brewery into the title. A single-token name keeps nameKeys() too weak to
+    // resolve this at Stage 2a, so the match can only land via the identity-aware
+    // relaxedExact branch that reads the candidate through candIdentValue (brewery
+    // stripped), not raw normalizeName(r.beer_name) (brewery still attached).
+    const search = fakeSearch(() => [
+      { bid: 42001, beer_name: 'Pinta Atak', brewery_name: 'Pinta', style: 'IPA', abv: 6.2, global_rating: 3.6 },
+    ]);
+    const out = await lookupBeer({ brewery: '', name: 'Atak', abv: 6.2, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(42001);
+  });
+});
