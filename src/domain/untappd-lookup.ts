@@ -9,6 +9,7 @@ import {
 } from '../sources/untappd/search';
 import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
+import { dominantCandidate } from './rating-dominance';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -507,11 +508,19 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       .sort((a, b) => b.score - a.score);
     if (nativeNearMatches.length > 0) {
       const topScore = nativeNearMatches[0].score;
-      const nativeHit = pickUniqueByAbv(
-        nativeNearMatches.filter((match) => match.score === topScore).map((match) => match.result),
-        abv,
-        true,
-      );
+      const topScored = nativeNearMatches
+        .filter((match) => match.score === topScore)
+        .map((match) => match.result);
+      const uniqueTop = Array.from(new Map(topScored.map((r) => [r.bid, r])).values());
+      // #487: this pool is scored APPROXIMATELY, so a tie here is not an equivalence class —
+      // it is an absence of evidence, and ABV must not select across it. Two exceptions keep
+      // their old behaviour: a single candidate (nothing to select between), and a candidate
+      // set with no popularity data at all (the legacy HTML relay and the web fallback supply
+      // no rating_count — there this rule must not fire, and ABV stays the only signal).
+      const hasPopularity = uniqueTop.some((r) => r.rating_count !== undefined);
+      const nativeHit = uniqueTop.length === 1 || !hasPopularity
+        ? pickUniqueByAbv(uniqueTop, abv, true)
+        : dominantCandidate(uniqueTop, abv);
       return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
     }
 
@@ -563,7 +572,39 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
-    return typoRescue();
+    // The typo rescue is a matching stage in its own right and is based on an EXACT
+    // name, so it must be tried before the flagship stage — otherwise a popularity
+    // guess would preempt a real name match. Only once it has declined is the input
+    // genuinely unmatched, which is the precondition the flagship stage assumes.
+    const rescued = typoRescue();
+    if (rescued) return rescued;
+
+    // #487 flagship stage. Runs after every other stage — INCLUDING the exact-name typo
+    // rescue above — so this can only turn an orphan into a match and never revisit one
+    // that already worked. It fires when the target carries nothing beyond the brewery
+    // brand — the condition is on the target the stages actually compare, because the
+    // raw-name form (#306's isBareBrandName) does not even describe this case: for
+    // `Kronenbourg 1664` the digits survive baseNormalize.
+    const brandTokens = new Set(inputBreweryAliases.flatMap((a) => a.split(' ')).filter(Boolean));
+    const bareBrandTarget =
+      brandTokens.size > 0 &&
+      targetNames.length > 0 &&
+      targetNames.every((target) => {
+        const tokens = target.value.split(' ').filter(Boolean);
+        return tokens.length > 0 && tokens.every((token) => brandTokens.has(token));
+      });
+    if (bareBrandTarget) {
+      // Strongest evidence only, never mixed: a weak brand hit must not compete with a
+      // strict one for the same brewery.
+      const flagshipPool =
+        strictPool.length ? strictPool :
+        relaxedPool.length ? relaxedPool :
+        nativePool.length ? nativePool : brandPool;
+      const flagship = dominantCandidate(flagshipPool, abv);
+      if (flagship) return { kind: 'matched', result: flagship };
+    }
+
+    return null;
   }
 
   for (const part of parts) {
