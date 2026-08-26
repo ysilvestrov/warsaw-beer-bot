@@ -151,7 +151,8 @@ The 18 unchanged rows are blocked by **named** defects that are not this one: th
 192 land on the stored bid
   6 baseline WRONG links refused   (improvement)
   4 bad
-  2 ambiguous
+  1 vintage risk (row 3018)
+  1 benign (row 4760 — see below)
 ```
 
 The 6 refusals are a bonus this design did not set out to buy: today's matcher links non-alcoholic
@@ -166,7 +167,9 @@ optimisation.
 
 ## Open decisions — to be resolved in the plan, not deferred
 
-These are the 4 bad and 2 ambiguous rows above. Each is named, with the direction it should take.
+These are the 4 bad rows and the vintage risk above. Each is named, with the direction it should
+take. A sixth candidate was raised and **resolved during review** — it is kept here rather than
+deleted, so nobody re-derives it.
 
 1. **12007 — `Nachmelená Opice / 11` @4.5 picks `Session IPA 11%` @4.7 over `Ležák 11%` @4.5.**
    A bare Czech grade is not identity. `extractGrade` (#321) already recognises this shape;
@@ -185,8 +188,11 @@ These are the 4 bad and 2 ambiguous rows above. Each is named, with the directio
    The vintage risk #504 predicted. `extractYear` reads the *un-normalized* name precisely because
    digits are stripped; once a digit can be restored, the vintage partition sees a different world.
    The plan must state what the partition does with a restored token.
-6. **4760 — `Imperial Porter` @10 picks bid 2576506 where 2576509 is stored.** Adjacent sibling
-   entries, same name, same ABV. Establish whether this is a real error or catalogue duplication.
+6. **4760 — `Imperial Porter` @10 picks bid 2576506 where 2576509 is stored. RESOLVED: not a
+   defect.** The two bids are genuinely different beers, but they differ only by the spice mix named
+   in the description — same brewery, same name, same ABV, and nothing our matcher reads can
+   separate them. In this paradigm they are one object, so which one the algorithm picks cannot be
+   wrong. Both have long been out of production. No test, no carve-out, no work.
 
 ## Rejected, with the measurement
 
