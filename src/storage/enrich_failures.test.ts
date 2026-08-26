@@ -10,6 +10,8 @@ import {
   retireEnrichFailure,
   isWebFallbackBlocked,
   countRowsForIssue,
+  listOwnerlessRows,
+  countOwnerlessRows,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -665,5 +667,31 @@ describe('setEnrichFailureReview guards', () => {
     seedFailure(db, 44, { outcome: 'not_found' });
     expect(setEnrichFailureReview(db, 44, 'not_a_beer', 'merch', NOW)).toBe('written');
     expect(setEnrichFailureReview(db, 45, 'matcher_bug', 'n', NOW)).toBe('no_row');
+  });
+});
+
+describe('listOwnerlessRows / countOwnerlessRows', () => {
+  it('returns only actionable classes with no issue and a machine-readable reason', () => {
+    const d = testDb();
+    const seed = (id: number, note: string | null, cls: string, issue: number | null) => {
+      // recordEnrichFailure's FK requires the beer row to already exist.
+      d.prepare(
+        'INSERT INTO beers (id, brewery, name, normalized_name, normalized_brewery) VALUES (?, ?, ?, ?, ?)',
+      ).run(id, `B${id}`, `N${id}`, `n${id}`, `b${id}`);
+      recordEnrichFailure(d, {
+        beer_id: id, brewery: `B${id}`, name: `N${id}`, search_url: 'u', source_url: '',
+        outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: '2026-08-26T00:00:00Z',
+      });
+      d.prepare('UPDATE enrich_failures SET review_class=?, review_note=?, issue_number=? WHERE beer_id=?')
+        .run(cls, note, issue, id);
+    };
+    seed(1, 'off-scope #300: candidates_count = 0', 'matcher_bug', null);   // in
+    seed(2, 'no absence evidence: probably absent', 'matcher_bug', null);   // in
+    seed(3, 'free prose from the model', 'matcher_bug', null);              // out — #508
+    seed(4, 'off-scope #300: candidates_count = 0', 'matcher_bug', 300);    // out — has an owner
+    seed(5, 'off-scope #300: candidates_count = 0', 'not_on_untappd', null);// out — not actionable
+
+    expect(listOwnerlessRows(d).map((r) => r.beer_id)).toEqual([1, 2]);
+    expect(countOwnerlessRows(d)).toBe(3);  // every actionable ownerless row, prose included
   });
 });

@@ -312,3 +312,35 @@ export function listUntriagedFailures(db: DB, limit: number): UntriagedFailure[]
     )
     .all(limit) as UntriagedFailure[];
 }
+
+export interface OwnerlessRow {
+  beer_id: number; brewery: string; name: string;
+  review_class: string; review_note: string | null;
+}
+
+// #509: rows the triage inbox can group — an actionable class, no owning issue, and a note
+// whose prefix a query can key on. The prose-note rows are deliberately excluded: 218 of
+// them exist and none can be grouped, so listing them would rebuild the #347 dump in report
+// form. They are #508's population, and countOwnerlessRows below still reports their total.
+export function listOwnerlessRows(db: DB): OwnerlessRow[] {
+  return db.prepare(
+    `SELECT beer_id, brewery, name, review_class, review_note
+       FROM enrich_failures
+      WHERE review_class IN ('matcher_bug', 'parser_bug')
+        AND issue_number IS NULL
+        AND retired_at IS NULL
+        AND (review_note LIKE 'off-scope %' OR review_note LIKE 'no absence evidence:%')
+      ORDER BY beer_id`,
+  ).all() as OwnerlessRow[];
+}
+
+// Every actionable ownerless row, groupable or not — the header number that says how big
+// the pile really is.
+export function countOwnerlessRows(db: DB): number {
+  const r = db.prepare(
+    `SELECT COUNT(*) AS n FROM enrich_failures
+      WHERE review_class IN ('matcher_bug', 'parser_bug')
+        AND issue_number IS NULL AND retired_at IS NULL`,
+  ).get() as { n: number };
+  return r.n;
+}
