@@ -484,6 +484,38 @@ test('guardHits on the finished outcome carries per-guard counts', async () => {
   expect(outcome.guardHits.scope_violation).toBe(1);
 });
 
+test('a target the guard would always refuse is not offered to the model, but the guard still sees it', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  // beer_ids deliberately excludes 2: rowSatisfiesScope treats cohort membership as an
+  // unconditional match (OR'd with `where`), so if beer 2 were listed here its routing
+  // to #300 would legitimately succeed and never exercise the guard this test targets.
+  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[1],"where":[]}\n```';
+  const WHERE_SCOPED = 'b\n\n```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":"=","value":0}]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 'cohort only', body: COHORT_ONLY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+      { number: 301, title: 'unscoped', body: 'no block here', labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+      { number: 302, title: 'where scoped', body: WHERE_SCOPED, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  // The model routes beer 2 to the cohort-only issue anyway — it can only do that if the
+  // guard is still judging against the full set, which is what the second assertion checks.
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 302, new_issue_key: null },
+      { beer_id: 2, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null },
+    ],
+    new_issues: [],
+  };
+  const model = llm(analysis);
+  await orphanTriage({ db: d, log, llm: model, github, now: inWindow });
+
+  expect(model.analyze.mock.calls[0][0].openIssues.map((i: { number: number }) => i.number)).toEqual([302]);
+  const outcome = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(outcome).toContain('поза scope');
+});
+
 // The other side of #408 guard 3: with a search dep the probes actually run, and an
 // empty result IS evidence of absence, so the terminal class survives end to end. This
 // is what stops the guard from collapsing into "always degrade".

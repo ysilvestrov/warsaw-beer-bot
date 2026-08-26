@@ -10,7 +10,9 @@ import type { TriageArchive } from '../infra/triage-archive';
 import {
   planTriageActions, computeSaturated, type ScopedIssue, type GuardReason, type SaturatedIssue,
 } from '../domain/triage-plan';
-import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
+import {
+  parseScopeBlock, renderScopeBlock, stripScopeBlocks, isRoutableTarget,
+} from '../domain/triage-scope';
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
@@ -290,7 +292,15 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
             },
           })
         : new Map();
-      const ex1 = await llm.analyze({ orphans, openIssues, probes });
+      // #509: parse ONCE, above the call. This is the whole structural fix — scope used to
+      // be parsed at line ~352, after the model had already answered, which is why the two
+      // could never agree. `routable` is what the model may choose from; `scopedIssues`
+      // below keeps the FULL set, because the guard must stay able to refuse an invented
+      // number and reconcileSaturatedLabels must still clear a label off an issue the
+      // prompt no longer shows.
+      const parsed = openIssues.map((i) => ({ ...i, scope: parseScopeBlock(i.body) }));
+      const routable = parsed.filter(isRoutableTarget);
+      const ex1 = await llm.analyze({ orphans, openIssues: routable, probes });
       exchanges.push(ex1);
       // An empty verdict set on a non-empty batch is anomalous (the prompt asks
       // for a verdict per orphan). Retry once against the same open-issues set.
@@ -299,7 +309,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (ex1.analysis.verdicts.length === 0) {
         log.warn({ batch: orphans.length, stopReason: ex1.raw.stopReason },
           'orphan-triage: empty verdicts, retrying once');
-        const ex2 = await llm.analyze({ orphans, openIssues, probes });
+        const ex2 = await llm.analyze({ orphans, openIssues: routable, probes });
         exchanges.push(ex2);
       }
       analysis = exchanges[exchanges.length - 1].analysis;
@@ -348,10 +358,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       }
       // #408: the guards judge a routing decision, so they need the evidence it was
       // made about — the issues' parsed scopes and the batch rows, not just their ids.
-      // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
-      scopedIssues = openIssues.map((i) => ({
+      // #509: reuse `parsed` rather than re-parsing — it is the FULL set (not `routable`),
+      // because the guard must stay able to refuse an invented number and
+      // reconcileSaturatedLabels must still clear a label off an issue the prompt no
+      // longer shows.
+      scopedIssues = parsed.map((i) => ({
         number: i.number,
-        scope: parseScopeBlock(i.body),
+        scope: i.scope,
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
       }));
       plan = planTriageActions(analysis, scopedIssues, orphans, probes, strippedVerdicts);
