@@ -75,6 +75,7 @@ export interface TriageOutcome {
   // parts — the digest read as 20 rows on a day that had 15.
   causeStripped: number;   // the #358 gate stripped the cause
   noTarget: number;        // the model named neither an issue nor a key
+  offScope: number;        // #509: the scope guard refused the row's target, class kept
   // Guard tallies, logged every run. Previously reachable only through the `verdict
   // shortfall` warn, whose condition is counted BEFORE the guards run — so a refused row
   // still counts as covered and the guards could fire any number of times in silence.
@@ -146,6 +147,7 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.notABeer > 0) parts.push(`${o.notABeer} not_a_beer`);
   if (o.guardHits.unprobed_absence > 0) parts.push(`${o.guardHits.unprobed_absence} без доказу відсутності`);
   if (o.causeStripped > 0) parts.push(`${o.causeStripped} неперевірених`);
+  if (o.offScope > 0) parts.push(`${o.offScope} без власника (поза scope)`);
   if (o.noTarget > 0) parts.push(`${o.noTarget} без цілі`);
   if (o.guardHits.illegal_scope > 0) parts.push(`${o.guardHits.illegal_scope} нелегальний scope`);
   if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
@@ -238,7 +240,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0,
       notABeer: 0,
-      causeStripped: 0, noTarget: 0,
+      causeStripped: 0, noTarget: 0, offScope: 0,
       guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
       saturated: [],
       skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
@@ -410,6 +412,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     reportGuardAnomalies(log, plan.guardHits);
     outcome.causeStripped = plan.quietCauseStripped;
     outcome.noTarget = plan.quietNoTarget;
+    outcome.offScope = plan.quietOffScope;
 
     if (covered === 0) {
       log.error({ batch: orphans.length, stopReasons: exchanges.map((e) => e.raw.stopReason) },
@@ -491,7 +494,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
       else if (v.review_class === 'unidentifiable') outcome.unidentifiable++;
       else if (v.review_class === 'not_a_beer') outcome.notABeer++;
-      // actionable classes are counted by planTriageActions as causeStripped / noTarget
+      // actionable classes are counted by planTriageActions as causeStripped / noTarget / offScope
     }
 
     // #431: recomputed from outcome.commented — the comments that actually POSTED —

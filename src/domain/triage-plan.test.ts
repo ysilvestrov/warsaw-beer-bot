@@ -241,7 +241,10 @@ test('a zero-candidate row cannot attach to an issue scoped candidates_count > 0
   const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 347 })], new_issues: [] };
   const plan = planTriageActions(a, issues, [row(1, { candidates_count: 0 })], noProbes, new Set());
   expect(plan.comments).toHaveLength(0);
-  expect(plan.skipped).toBe(1);
+  // #509: a scope violation refuses the TARGET, not the class — the row is recorded
+  // quietly (quietOffScope), not thrown away as skipped.
+  expect(plan.skipped).toBe(0);
+  expect(plan.quietOffScope).toBe(1);
   expect(plan.guardHits.scope_violation).toBe(1);
 });
 
@@ -337,7 +340,9 @@ test('a verdict whose row contradicts its proposed issue scope is refused', () =
   };
   const plan = planTriageActions(a, [], [row(1, { candidates_count: 0 })], noProbes, new Set());
   expect(plan.newIssues).toHaveLength(0);
-  expect(plan.skipped).toBe(1);
+  // #509: refused, not skipped — the row is recorded with its class and no target.
+  expect(plan.skipped).toBe(0);
+  expect(plan.quietOffScope).toBe(1);
   expect(plan.guardHits.scope_violation).toBe(1);
 });
 
@@ -467,7 +472,9 @@ test('#431 REGRESSION: scope still refuses, even far under the threshold', () =>
   const plan = planTriageActions(a, issues, rows(3), noProbes, new Set());
   expect(plan.comments).toHaveLength(0);
   expect(plan.guardHits.scope_violation).toBe(1);
-  expect(plan.skipped).toBe(1);
+  // #509: refused, not skipped.
+  expect(plan.skipped).toBe(0);
+  expect(plan.quietOffScope).toBe(1);
 });
 
 // not_a_beer needed a carve-out only while a gate existed. Pinned as behaviour so a
@@ -494,4 +501,64 @@ test('#431: ties break by issue number ascending, so output is deterministic', (
     open(901, { postCreationRows: 30 }),
   ];
   expect(computeSaturated(issues, new Map()).map((s) => s.issueNumber)).toEqual([901, 900, 902]);
+});
+
+// --- #509: a refused route keeps its class -----------------------------------------
+
+test('a verdict refused by scope keeps its class, loses its target, and records the reason', () => {
+  const scope = { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 } as const] };
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, issue_number: 300, review_note: 'shop brand in brewery field' })],
+    new_issues: [],
+  };
+  const plan = planTriageActions(
+    a, [open(300, { scope })], [row(1, { candidates_count: 3 })], noProbes, new Set(),
+  );
+  expect(plan.comments).toEqual([]);
+  expect(plan.skipped).toBe(0);
+  expect(plan.guardHits.scope_violation).toBe(1);
+  expect(plan.quietOffScope).toBe(1);
+  expect(plan.quiet).toHaveLength(1);
+  expect(plan.quiet[0].review_class).toBe('matcher_bug');
+  expect(plan.quiet[0].issue_number).toBeNull();
+  expect(plan.quiet[0].review_note).toBe('off-scope #300: candidates_count = 0');
+});
+
+test('a founding verdict refused by its own proposed scope names the key, not a number', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: 'cider-brand-line' })],
+    new_issues: [{
+      key: 'cider-brand-line', title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
+  };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
+  expect(plan.newIssues).toEqual([]);
+  expect(plan.quiet[0].review_note).toBe('off-scope cider-brand-line: candidates_count = 0');
+  expect(plan.quiet[0].new_issue_key).toBeNull();
+});
+
+// Red if the note is built by concatenation without a cap: VerdictSchema caps review_note
+// at 500 and setEnrichFailureReview writes whatever it is handed.
+test('the off-scope note is capped at 500 characters', () => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, issue_number: 300, review_note: 'z'.repeat(600) })],
+    new_issues: [],
+  };
+  const scope = { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 } as const] };
+  const plan = planTriageActions(a, [open(300, { scope })], [row(1, { candidates_count: 3 })], noProbes, new Set());
+  expect(plan.quiet[0].review_note.length).toBeLessThanOrEqual(500);
+});
+
+// Coordinator's ruling: an issue with NO scope block at all must not be explained via
+// explainScopeRejection, which would answer "outside the cohort" — a claim about cohort
+// membership the row never made. A missing scope block is a different fact than a
+// contradicted term, and the note must say so literally.
+test('a refusal against an unscoped issue names the missing scope, not a cohort miss', () => {
+  const a: Analysis = { verdicts: [v({ beer_id: 1, issue_number: 300 })], new_issues: [] };
+  const plan = planTriageActions(a, [open(300, { scope: null })], rows(1), noProbes, new Set());
+  expect(plan.quietOffScope).toBe(1);
+  expect(plan.quiet[0].review_class).toBe('matcher_bug');
+  expect(plan.quiet[0].issue_number).toBeNull();
+  expect(plan.quiet[0].review_note).toBe('off-scope #300: no scope block');
 });

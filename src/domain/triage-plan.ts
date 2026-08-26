@@ -1,7 +1,7 @@
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import { absenceProvedBy, type TriageProbe } from './triage-probes';
-import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
+import { explainScopeRejection, isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
 
 export interface PlannedNewIssue {
   key: string;
@@ -47,6 +47,9 @@ export interface TriagePlan {
   // as a foreign row — and a report that can print a negative number is not a report.
   quietCauseStripped: number;     // #358 gate stripped the cause, row went quiet
   quietNoTarget: number;          // the model named neither an issue nor a key
+  // #509: refused routing, class kept — a fourth way an actionable class ends with no
+  // issue, counted where it is decided like the other three.
+  quietOffScope: number;
 }
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
@@ -172,7 +175,24 @@ export function planTriageActions(
   let skipped = 0;
   let quietCauseStripped = 0;
   let quietNoTarget = 0;
+  let quietOffScope = 0;
   const seenBeerIds = new Set<number>();
+
+  // #509: a scope violation refutes the TARGET, not the class. The verdict goes quiet with
+  // its class intact and a trace of what refused it, exactly as the unprobed_absence branch
+  // above does. It is deliberately NOT re-routed to another issue: choosing a different
+  // target by title similarity is what built #347, and the guard exists to stop it.
+  const refuseRoute = (verdict: ActionableVerdict, row: UntriagedFailure, target: string, scope: Scope | null): void => {
+    guardHits.scope_violation += 1;
+    quietOffScope += 1;
+    const reason = scope === null ? 'no scope block' : explainScopeRejection(row, verdict.review_class, scope);
+    quiet.push({
+      ...verdict,
+      issue_number: null,
+      new_issue_key: null,
+      review_note: `off-scope ${target}: ${reason}`.slice(0, 500),
+    });
+  };
 
   for (const verdict of analysis.verdicts) {
     const row = rowById.get(verdict.beer_id);
@@ -245,8 +265,7 @@ export function planTriageActions(
       // cosmetic. We deliberately do NOT re-route on failure: choosing a different
       // issue is exactly the title-similarity judgement that produced the pile.
       if (target.scope === null || !rowSatisfiesScope(row, verdict.review_class, target.scope)) {
-        guardHits.scope_violation += 1;
-        skipped++;
+        refuseRoute(verdict, row, `#${verdict.issue_number}`, target.scope);
         continue;
       }
       pushInto(byIssue, verdict.issue_number!, verdict);
@@ -259,8 +278,7 @@ export function planTriageActions(
       // to enforce, and the issue would be born unable to accept the very row that
       // created it.
       if (!rowSatisfiesScope(row, verdict.review_class, proposed.scope)) {
-        guardHits.scope_violation += 1;
-        skipped++;
+        refuseRoute(verdict, row, verdict.new_issue_key!, proposed.scope);
         continue;
       }
       pushInto(byKey, verdict.new_issue_key!, verdict);
@@ -278,5 +296,7 @@ export function planTriageActions(
   const comments: PlannedComment[] = [...byIssue.entries()]
     .map(([issueNumber, verdicts]) => ({ issueNumber, verdicts }));
 
-  return { newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget };
+  return {
+    newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget, quietOffScope,
+  };
 }

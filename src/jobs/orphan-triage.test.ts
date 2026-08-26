@@ -241,14 +241,14 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
+    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
@@ -516,6 +516,36 @@ test('a target the guard would always refuse is not offered to the model, but th
   expect(outcome).toContain('поза scope');
 });
 
+// #509: a row refused by the scope guard used to be left untouched (review_class NULL),
+// so it came back in tomorrow's batch and the model made the identical routing choice —
+// measured on prod as the same row hitting the same issue nine days running. It must
+// leave the run with a class recorded and no issue_number, so it is neither re-offered
+// to the model as untriaged nor locked out of both enrichment pools by the #421 keyed
+// lock (which reads issue_number, not review_class, as "a fix is coming").
+test('a scope-refused row leaves the run with a class and no issue, so it is not locked', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const WHERE_SCOPED = 'b\n\n```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":">","value":0}]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 't', body: WHERE_SCOPED, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  // seedOrphan writes candidates_count 0, so the row contradicts `candidates_count > 0`.
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null }],
+    new_issues: [],
+  };
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  const r = d.prepare('SELECT review_class, issue_number, review_note FROM enrich_failures WHERE beer_id = 1').get() as
+    { review_class: string; issue_number: number | null; review_note: string };
+  expect(r.review_class).toBe('matcher_bug');
+  expect(r.issue_number).toBeNull();
+  expect(r.review_note).toContain('off-scope #300:');
+  expect(github.commentOnIssue).not.toHaveBeenCalled();
+});
+
 // The other side of #408 guard 3: with a search dep the probes actually run, and an
 // empty result IS evidence of absence, so the terminal class survives end to end. This
 // is what stops the guard from collapsing into "always degrade".
@@ -686,7 +716,7 @@ test('without a search dep the job behaves exactly as before', async () => {
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених');
 });
@@ -713,7 +743,7 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
 test('buildTriageLine: transient attempts vs final failure', () => {
   const base = {
-    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
     attempt: null as number | null,
   };
@@ -917,14 +947,14 @@ test('narrow warn stays silent for routine guard work', () => {
 test('buildTriageLine names each quiet mechanism and hides routine guards', () => {
   expect(buildTriageLine({
     total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 7,
-    causeStripped: 5, noTarget: 1, skipped: 0, unverified: 8,
+    causeStripped: 5, noTarget: 1, offScope: 0, skipped: 0, unverified: 8,
     guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 9 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 15 нових → 7 not_a_beer, 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
   expect(buildTriageLine({
     total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 4,
-    causeStripped: 0, noTarget: 0, skipped: 2, unverified: 3,
+    causeStripped: 0, noTarget: 0, offScope: 0, skipped: 2, unverified: 3,
     guardHits: { illegal_scope: 1, scope_violation: 2, unprobed_absence: 0 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 нелегальний scope, 2 поза scope, 2 пропущено');
@@ -1078,7 +1108,7 @@ test('#431: a failed comment must not saturate its issue — nothing landed', as
 // --- #431 the saturated digest line ---------------------------------------------
 const outcomeWith = (saturated: { issueNumber: number; rows: number }[]): TriageOutcome => ({
   total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
-  causeStripped: 0, noTarget: 0,
+  causeStripped: 0, noTarget: 0, offScope: 0,
   guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
   saturated, skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
 });
