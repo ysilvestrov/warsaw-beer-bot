@@ -40,6 +40,21 @@ function stub(dir: string, name: string, body: string): string {
   return p;
 }
 
+/**
+ * A notify stub that records ONE LINE PER CALL, not per line of message.
+ * `countLines` counts lines, and the stale-deployer and guard-refusal
+ * messages are multi-line — a plain `cat` stub would make "how many
+ * notifications" unmeasurable.
+ *
+ * The recorded line is prefixed with a fixed `NOTIFY ` marker so it is
+ * never empty, even for a (currently hypothetical) message whose first
+ * line is blank: `countLines` trims the log before splitting, so a
+ * trailing blank line would vanish and silently undercount that call.
+ */
+function countingNotify(dir: string, log: string): string {
+  return stub(dir, 'notify', `printf 'NOTIFY %s\\n' "$(head -n1 <<< "$1")" >> "${log}"`);
+}
+
 function readState(stateDir: string): Record<string, string> {
   // Mirrors autodeploy.sh: STATE_DIR="$XDG_STATE_HOME/wbb-autodeploy".
   const p = join(stateDir, 'wbb-autodeploy', 'state.env');
@@ -185,6 +200,14 @@ describe('autodeploy.sh', () => {
     expect(r.code).toBe(0);
     expect(existsSync(guardMarker)).toBe(false);
     expect(countLines(deployLog)).toBe(0);
+    // Post-#491 this path now reaches report_drift_once every time (base,
+    // the seeded DEPLOYED_SHA, is behind origin/main here). The silence is
+    // no longer structural — this path used to exit before any reporter
+    // ran — it survives only because DRIFT_GRACE_S (15 min) has not
+    // elapsed: DRIFT_SINCE is unset, so report_drift_once starts the
+    // episode clock and returns without notifying. A future change to
+    // DRIFT_GRACE_S or the episode-start branch could break this silently,
+    // in a test whose name mentions neither.
     expect(existsSync(notifyLog)).toBe(false);
   });
 
@@ -228,7 +251,15 @@ describe('autodeploy.sh', () => {
 
   it('a healthy deploy updates DEPLOYED_SHA/PREVIOUS_SHA, clears LAST_FAILED_SHA, and exits 0', () => {
     const h = setup();
-    seedState(h, base);
+    // #490: seed a drift episode as if it had been open BEFORE this deploy —
+    // a successful deploy must close it out (clear both fields), not carry it
+    // forward for a later idle tick to misread as seconds-old drift.
+    const stateDir = join(h.stateDir, 'wbb-autodeploy');
+    mkdirSync(stateDir, { recursive: true });
+    writeFileSync(
+      join(stateDir, 'state.env'),
+      `DEPLOYED_SHA=${base}\nPREVIOUS_SHA=\nDRIFT_SINCE=1000000\nLAST_DRIFT_NOTICE=2026-08-20\n`,
+    );
     const guard = stub(h.bin, 'guard', 'echo "ACCEPT: stub"; exit 0');
     const deployLog = join(h.bin, 'deploy.log');
     const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
@@ -254,6 +285,10 @@ describe('autodeploy.sh', () => {
     expect(state.PREVIOUS_SHA).toBe(base);
     expect(state.LAST_FAILED_SHA).toBeUndefined();
     expect(readFileSync(notifyLog, 'utf8')).toContain('production patched and healthy');
+    // #490: a successful deploy must close any drift episode it was carrying,
+    // not hand it forward for a later idle tick to misread as fresh drift.
+    expect(state.DRIFT_SINCE).toBeUndefined();
+    expect(state.LAST_DRIFT_NOTICE).toBeUndefined();
   });
 
   // #461 added installed_is_stale(): a pending tag must be REFUSED while the
@@ -383,5 +418,526 @@ describe('autodeploy.sh', () => {
     // Untouched: a paused run must not even update DEPLOYED_SHA bookkeeping.
     const state = readState(h.stateDir);
     expect(state.DEPLOYED_SHA).toBe(base);
+  });
+});
+
+/**
+ * #490. `report_drift_once` runs only on the idle path, so these tests need
+ * their own remote rather than the shared one. The two commits differ in
+ * `src/x.ts`, outside the package.json/package-lock.json allowlist, so drift
+ * here is the blocking kind.
+ *
+ * #491. `tagAt` places an `autodeploy-*` tag on one of the two commits. The
+ * idle path used to be reachable ONLY when no such tag existed anywhere, which
+ * is why every #490 test above leaves this argument off.
+ */
+function driftRemote(tagAt?: 'old' | 'new'): {
+  dir: string; oldSha: string; newSha: string; tag: string;
+} {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-remote-'));
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
+  const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-seed-'));
+  git(seed, 'init', '-q', '-b', 'main');
+  git(seed, 'config', 'user.email', 't@example.com');
+  git(seed, 'config', 'user.name', 'T');
+  git(seed, 'remote', 'add', 'origin', dir);
+  const oldSha = commit(seed, { 'src/x.ts': 'export const x = 1;\n' }, 'old');
+  git(seed, 'push', '-q', 'origin', 'main');
+  const newSha = commit(seed, { 'src/x.ts': 'export const x = 2;\n' }, 'new');
+  git(seed, 'push', '-q', 'origin', 'main');
+  const tag = 'autodeploy-20260824T120000Z';
+  if (tagAt) {
+    git(seed, 'tag', tag, tagAt === 'old' ? oldSha : newSha);
+    git(seed, 'push', '-q', 'origin', tag);
+  }
+  return { dir, oldSha, newSha, tag };
+}
+
+/** A harness cloned from a drift remote, plus arbitrary state fields. */
+function driftHarness(remote: string, state: Record<string, string>): Harness {
+  const home = mkdtempSync(join(tmpdir(), 'wbb-ad-home-'));
+  const dataDir = join(home, 'data');
+  const stateDir = join(home, 'state');
+  const repoParent = join(dataDir, 'wbb-autodeploy');
+  mkdirSync(repoParent, { recursive: true });
+  mkdirSync(stateDir, { recursive: true });
+  execFileSync('git', ['clone', '-q', remote, join(repoParent, 'repo')]);
+  const dir = join(stateDir, 'wbb-autodeploy');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'state.env'),
+    Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
+  );
+  return { home, dataDir, stateDir, repo: join(repoParent, 'repo'), bin: mkdtempSync(join(tmpdir(), 'wbb-ad-bin-')) };
+}
+
+describe('#490 drift episode', () => {
+  it('records the episode start and says nothing inside the grace window', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, { DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '' });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    const out = run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '1000000' });
+
+    expect(out.code).toBe(0);
+    // The episode is recorded...
+    expect(readState(h.stateDir).DRIFT_SINCE).toBe('1000000');
+    // ...and nobody is told yet. A merge is not an incident.
+    expect(existsSync(notifyLog)).toBe(false);
+  });
+
+  it('still says nothing one second before the grace period expires', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 899) }).code).toBe(0);
+
+    expect(existsSync(notifyLog)).toBe(false);
+    // ...and the start is not moved forward by a tick that stayed silent.
+    expect(readState(h.stateDir).DRIFT_SINCE).toBe('1000000');
+  });
+
+  it('announces once the drift has outlived the grace period', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+    // The reminder marker is what stops the repeat, and what Task 3 reads to
+    // decide whether a closing message is owed.
+    expect(readState(h.stateDir).LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('does not repeat on the next tick of the same day', () => {
+    const r = driftRemote();
+    const today = new Date().toISOString().slice(0, 10);
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: today,
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
+
+    expect(existsSync(notifyLog)).toBe(false);
+  });
+
+  it('a stale marker does not suppress — the warning returns on a later day', () => {
+    // This test is not redundant with the other two. The second test proves that
+    // TODAY suppresses. This one proves that STALE does not suppress. Together
+    // they would catch a mutant suppressor of `[ -z "$LAST_DRIFT_NOTICE" ] ||
+    // return 0` (suppress whenever the marker is non-empty) — the second test
+    // cannot; only this one can.
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: '2000-01-01',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+  });
+
+  it('closes an announced episode with one recovery message and clears both fields', () => {
+    const r = driftRemote();
+    // production has caught up: DEPLOYED_SHA === origin/main
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: '2026-08-23',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 100000) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/caught up|in sync/i);
+    const state = readState(h.stateDir);
+    expect(state.DRIFT_SINCE ?? '').toBe('');
+    expect(state.LAST_DRIFT_NOTICE ?? '').toBe('');
+  });
+
+  it('says nothing at all when an unannounced episode closes inside the grace window', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000',           // started, never announced
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // A non-zero exit before the notify point would leave the log absent and the
+
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 60) }).code).toBe(0);
+
+    // An all-clear for an alarm that never sounded is pure noise, and it would
+    // land on exactly the happy path this change exists to keep quiet.
+    expect(existsSync(notifyLog)).toBe(false);
+    expect(readState(h.stateDir).DRIFT_SINCE ?? '').toBe('');
+  });
+
+  it('#490 regression: a second merge the same day is announced, not swallowed', () => {
+    const r = driftRemote();
+    // The state the OLD code left behind after merge → BLOCKED → deploy:
+    // caught up, but LAST_DRIFT_NOTICE still holds today, so the old code
+    // would stay silent for the rest of the day however far production fell
+    // behind. Here the episode closes first, clearing the marker.
+    const today = new Date().toISOString().slice(0, 10);
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha,
+      DRIFT_SINCE: '1000000', LAST_DRIFT_NOTICE: today,
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    // tick 1: production is level → the episode closes and the marker clears
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '2000000' }).code).toBe(0);
+    expect(readState(h.stateDir).LAST_DRIFT_NOTICE ?? '').toBe('');
+
+    // a second merge lands: roll production back to the older commit
+    writeFileSync(
+      join(h.stateDir, 'wbb-autodeploy', 'state.env'),
+      `DEPLOYED_SHA=${r.oldSha}\nPREVIOUS_SHA=\n`,
+    );
+
+    // tick 2 starts a fresh episode silently; tick 3, past the grace, announces
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '3000000' }).code).toBe(0);
+    // A non-zero exit before the notify point would leave the log absent and the
+    // state untouched — i.e. indistinguishable from the silence this asserts.
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(3000000 + 900) }).code).toBe(0);
+
+    // one recovery + one fresh announcement — under the old code the second
+    // merge produced nothing at all.
+    expect(countLines(notifyLog)).toBe(2);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+    expect(readFileSync(notifyLog, 'utf8').split('\n')[0]).toMatch(/caught up/);
+  });
+});
+
+/**
+ * D1 (#491/#497 design): `write_state` takes exactly three parameters, and
+ * the three daily/episode markers (`LAST_DRIFT_NOTICE`, `LAST_STALE_NOTICE`,
+ * `DRIFT_SINCE`) are no longer parameters at all — a caller that wants to
+ * change one assigns the shell variable, then calls. Nothing about bash
+ * *enforces* this: `write_state "$a" "$b" "$c" "$extra"` runs, exits 0, and
+ * silently drops "$extra" on the floor — the same shape of invisible defect
+ * as #497, by a different mechanism, and no unit test above ever inspects a
+ * `write_state` call site directly. This source guard is what actually
+ * enforces D1's "three parameters" invariant.
+ */
+describe('write_state has three parameters (source guard)', () => {
+  it('every call site is exactly three quoted arguments and nothing else', () => {
+    const src = readFileSync(SCRIPT, 'utf8').split('\n');
+    const offenders: string[] = [];
+    src.forEach((line, i) => {
+      // Skip comment lines — a comment mentioning `write_state` in prose
+      // (e.g. explaining the #497 history) is not a call site.
+      if (/^\s*#/.test(line)) return;
+      // Skip the function definition itself (`write_state() {`) — only CALL
+      // sites are in scope.
+      if (/write_state\s*\(\)/.test(line)) return;
+      if (!/\bwrite_state\s/.test(line)) return;
+      // ALLOWLIST, not a counter. Counting arguments means parsing bash, and
+      // bash does not reward part-time parsers: `>/dev/null "$extra"` hides a
+      // fourth argument *behind* a redirection, `2>/dev/null` is a redirection
+      // that does not start with `>`, and every rule added to handle one form
+      // opens another. A tripwire that guesses is worse than no tripwire.
+      //
+      // So the rule is the opposite: a `write_state` call must be written as
+      // two or three double-quoted arguments and NOTHING ELSE on the line.
+      // That shape cannot hide a fourth argument in any form. Anything more
+      // exotic — a redirection, `|| exit 1`, an unquoted word, a line
+      // continuation — fails LOUDLY and says so, which is the correct
+      // outcome: this guard protects an invariant (#497) that was broken by
+      // exactly the kind of cleverness at a call site that nobody re-read.
+      // If a call genuinely needs a different shape, that is a decision to
+      // make deliberately, not one to sneak past a regex.
+      // EXACTLY three, not two-or-three. `last_failed` is `${3:-}` in the
+      // function, so omitting it and passing "" are identical to bash — and
+      // that is the problem: two spellings for "clear the failed-tag marker",
+      // one of which is invisible at the call site. Requiring the explicit ""
+      // is the same lesson as #497 one argument over: a field whose value is
+      // decided by ABSENCE is a field nobody notices changing.
+      if (!/^\s*write_state(?: "[^"]*"){3}\s*$/.test(line)) {
+        offenders.push(
+          `line ${i + 1}: \`${line.trim()}\` — a write_state call must be exactly ` +
+            `three double-quoted arguments and nothing else on the line ` +
+            `(deployed, previous, last_failed). LAST_DRIFT_NOTICE / ` +
+            `LAST_STALE_NOTICE / DRIFT_SINCE are NOT parameters: assign the shell ` +
+            `variable before calling, per #497. This guard refuses any other ` +
+            `shape on purpose — a redirection or operator on the same line can ` +
+            `hide a fourth argument from any counter short of a real bash parser.`,
+        );
+      }
+    });
+    expect(offenders).toEqual([]);
+  });
+});
+
+describe('#497 the daily markers survive each other', () => {
+  it('a tick where both reporters speak leaves BOTH markers in the state file', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    // A non-zero exit before the notify point would leave the log absent and
+    // the state untouched — indistinguishable from the silence being tested.
+    expect(out.code).toBe(0);
+    // Two distinct messages, one from each reporter.
+    expect(countLines(notifyLog)).toBe(2);
+    const log = readFileSync(notifyLog, 'utf8');
+    expect(log).toMatch(/out of date/);
+    expect(log).toMatch(/BLOCKED/);
+
+    // The defect: report_drift_once's write dropped the marker
+    // report_stale_once had just persisted.
+    const state = readState(h.stateDir);
+    expect(state.LAST_STALE_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(state.LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('both markers survive each other with a tag present too — the "already deployed" branch', () => {
+    // The test above only exercises the `no autodeploy tag yet` branch —
+    // which, by this branch's own argument (#491), becomes permanently
+    // unreachable the first time a qualified merge pushes a tag. This
+    // reaches the same two reporters via the branch that replaces it: a tag
+    // present and already deployed.
+    const r = driftRemote('old');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    expect(out.code).toBe(0);
+    expect(out.out).toMatch(/already deployed/); // confirms the tag-present branch, not the no-tag one
+    expect(countLines(notifyLog)).toBe(2);
+    const log = readFileSync(notifyLog, 'utf8');
+    expect(log).toMatch(/out of date/);
+    expect(log).toMatch(/BLOCKED/);
+
+    const state = readState(h.stateDir);
+    expect(state.LAST_STALE_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(state.LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('the same day is silent on the next tick — neither warning repeats', () => {
+    const r = driftRemote();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+    const env = {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    };
+
+    expect(run(h, env).code).toBe(0);
+    expect(countLines(notifyLog)).toBe(2);
+
+    // Second tick, same day: both markers must still be suppressing.
+    expect(run(h, env).code).toBe(0);
+    expect(countLines(notifyLog)).toBe(2); // unchanged — the siren #497 describes
+  });
+});
+
+describe('#491 the idle reports survive the existence of a tag', () => {
+  it('drift is announced when the newest tag is already deployed', () => {
+    // The tag sits on the deployed commit, so there is nothing to do — but
+    // `main` has moved on. Under the old gate ("has a tag ever existed?") this
+    // tick exited at "already deployed" and said nothing, forever.
+    const r = driftRemote('old');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    // The guard must never be consulted on this path; a marker proves it.
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_GUARD: guard,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    expect(out.code).toBe(0);
+    expect(out.out).toMatch(/already deployed/); // the diagnostic line is kept
+    expect(existsSync(guardMarker)).toBe(false);
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+    expect(readState(h.stateDir).LAST_DRIFT_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('drift is announced when the newest tag is recorded as LAST_FAILED_SHA', () => {
+    // The tag failed once and is not retried — that is idle, and it is the
+    // state in which drift matters most: autodeploy is dead twice over.
+    const r = driftRemote('new');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '',
+      LAST_FAILED_SHA: r.newSha, DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo ACCEPT; exit 0`);
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_GUARD: guard,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    expect(out.code).toBe(0);
+    expect(out.out).toMatch(/LAST_FAILED_SHA/); // the diagnostic line is kept
+    expect(existsSync(guardMarker)).toBe(false);
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+  });
+
+  it('the stale-deployer reminder is reachable with a tag present', () => {
+    // Same dark branch, the other reporter. Production is level with main, so
+    // report_drift_once has nothing to say and the ONLY message can be this one.
+    const r = driftRemote('new');
+    const h = driftHarness(r.dir, { DEPLOYED_SHA: r.newSha, PREVIOUS_SHA: r.oldSha });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const installedCheck = stub(
+      h.bin,
+      'installed-check',
+      'echo "STALE: 1 installed file(s) differ from origin/main:"; echo "  deploy/autodeploy.sh"; exit 1',
+    );
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: '2000000',
+    });
+
+    expect(out.code).toBe(0);
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/out of date/);
+    expect(readState(h.stateDir).LAST_STALE_NOTICE).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it('a PENDING tag still produces the guard verdict and NO idle report', () => {
+    // The tiredness this whole gate was protecting. A tag that is real work
+    // gets deployed or refused with its paths listed; a second message about
+    // the same condition is noise. Without this test, "always report" passes.
+    const r = driftRemote('new');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = countingNotify(h.bin, notifyLog);
+    const guardMarker = join(h.bin, 'guard-invoked');
+    const guard = stub(h.bin, 'guard', `touch "${guardMarker}"; echo "REFUSE: stub refusal"; exit 1`);
+    const deployLog = join(h.bin, 'deploy.log');
+    const deploy = stub(h.bin, 'deploy', `echo called >> "${deployLog}"`);
+    // Reachable only if the refusal is skipped; stubbed so this test can never
+    // touch real production even then.
+    const health = stub(h.bin, 'health', 'exit 0');
+    const apiPort = stub(h.bin, 'api-port', 'echo 3000');
+    const audit = stub(h.bin, 'audit', 'exit 0');
+    // CURRENT, and it must be: a STALE verdict on the pending path is its own
+    // REFUSAL (autodeploy.sh:348), which exits before the guard is consulted —
+    // a different branch from the one under test. With CURRENT, any second
+    // message in the log can only be an idle report that leaked onto the
+    // pending path, which is exactly what this test forbids.
+    const installedCheck = stub(h.bin, 'ic', 'echo "CURRENT: ok"; exit 0');
+
+    const out = run(h, {
+      WBB_NOTIFY_CMD: notify,
+      WBB_GUARD: guard,
+      WBB_DEPLOY_CMD: deploy,
+      WBB_HEALTH_CMD: health,
+      WBB_API_PORT_CMD: apiPort,
+      WBB_AUDIT_CMD: audit,
+      WBB_INSTALLED_CHECK: installedCheck,
+      WBB_NOW_S: String(1000000 + 100000),
+    });
+
+    expect(out.code).toBe(1);
+    expect(existsSync(guardMarker)).toBe(true);   // it WAS treated as work
+    expect(countLines(deployLog)).toBe(0);
+    // Exactly one message: the guard's verdict. No drift report, though the
+    // episode is well past its grace window and would otherwise announce.
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/REFUSED/);
+    expect(readFileSync(notifyLog, 'utf8')).not.toMatch(/BLOCKED/);
   });
 });

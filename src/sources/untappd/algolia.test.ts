@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parseAlgoliaResponse, extractAlgoliaKeys, createAlgoliaSearch } from './algolia';
+import { parseAlgoliaResponse, extractAlgoliaKeys, createAlgoliaSearch, parseHydratedBeer } from './algolia';
 import { HttpError } from '../http';
 
 const HIT = {
@@ -203,5 +203,41 @@ describe('hydrateByBid (#384)', () => {
     const fetchImpl = (async () => new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
     const search = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl, minGapMs: 0 });
     await expect(search.hydrateByBid([1])).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+  });
+});
+
+describe('rating_count (#487)', () => {
+  it('parseAlgoliaResponse carries rating_count from the hit', () => {
+    const out = parseAlgoliaResponse({
+      hits: [
+        { bid: 4473, beer_name: 'Guinness Draught', brewery_name: 'Guinness', type_name: 'Stout - Irish Dry', beer_abv: 4.2, rating_score: 3.77, rating_count: 992660 },
+      ],
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].rating_count).toBe(992660);
+  });
+
+  it('parseAlgoliaResponse leaves rating_count undefined when the hit has none', () => {
+    const out = parseAlgoliaResponse({
+      hits: [{ bid: 1, beer_name: 'X', brewery_name: 'Y', type_name: 'IPA', beer_abv: 5, rating_score: 3 }],
+    });
+    // Absent must stay absent: a 0 here would make every other candidate
+    // trivially "dominant" over this one.
+    expect(out[0].rating_count).toBeUndefined();
+  });
+
+  it('parseAlgoliaResponse ignores a non-numeric rating_count', () => {
+    const out = parseAlgoliaResponse({
+      hits: [{ bid: 1, beer_name: 'X', brewery_name: 'Y', type_name: 'IPA', beer_abv: 5, rating_score: 3, rating_count: 'lots' }],
+    });
+    expect(out[0].rating_count).toBeUndefined();
+  });
+
+  it('parseHydratedBeer carries rating_count', () => {
+    const out = parseHydratedBeer({
+      bid: 4473, beer_name: 'Guinness Draught', brewery_name: 'Guinness', type_name: 'Stout - Irish Dry',
+      beer_abv: 4.2, rating_score: 3.77, rating_count: 992660, beer_slug: 'guinness-guinness-draught', brewery_alias: [],
+    });
+    expect(out?.rating_count).toBe(992660);
   });
 });

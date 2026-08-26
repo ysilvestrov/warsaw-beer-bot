@@ -15,8 +15,17 @@ STATE="$STATE_DIR/state.env"
 LOCK="$STATE_DIR/lock"
 LAST_DRIFT_NOTICE=""
 LAST_STALE_NOTICE=""
+DRIFT_SINCE=""
 HEALTH_TIMEOUT_S=60
 NOTIFY_LIMIT=3500
+# #490: drift is the normal state of the minutes between a merge and the deploy
+# that follows it. What makes it worth a message is DURATION, not existence —
+# so the episode has to have a beginning, and the beginning has to be storable.
+DRIFT_GRACE_S=900
+# The clock is a seam like every other external contact in this file: 15 minutes
+# cannot be tested against the wall clock, and an untestable grace period is how
+# the drift branch ended up with no tests at all.
+NOW_S="${WBB_NOW_S:-$(date +%s)}"
 
 # The guard comes from the INSTALLED copy, never from the checkout we just
 # fetched into: a guard that ships with the commit it is judging is not a guard.
@@ -140,8 +149,17 @@ deploy_commit() {
 
 # C3: writes the state file, preserving DEPLOYED_SHA/PREVIOUS_SHA and setting
 # (or clearing, if $3 is empty) LAST_FAILED_SHA.
+#
+# #497: the three daily/episode markers are NOT parameters. They used to be
+# positions 4-6, carried by default (`${4:-$LAST_DRIFT_NOTICE}`), and that form
+# let a LATER call in the same tick silently decide what an EARLIER one had
+# persisted: report_stale_once passed its marker as argument 5 without assigning
+# the variable, and report_drift_once's four-argument write moments later fell
+# back to the still-empty variable and dropped the line. Reading the shell
+# variables directly does not merely fix that — it makes it unwriteable. A
+# caller that wants to change one of these ASSIGNS it, then calls.
 write_state() {
-  local deployed="$1" previous="$2" last_failed="${3:-}" drift_notice="${4:-$LAST_DRIFT_NOTICE}" stale_notice="${5:-$LAST_STALE_NOTICE}"
+  local deployed="$1" previous="$2" last_failed="${3:-}"
   {
     printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$deployed" "$previous"
     # `if`, not `[ -n ... ] &&` — the latter, as the group's last statement,
@@ -151,13 +169,16 @@ write_state() {
     if [ -n "$last_failed" ]; then
       printf 'LAST_FAILED_SHA=%s\n' "$last_failed"
     fi
-    # Carried by default so a deploy does not reset the once-a-day drift
+    # Carried on every write so a deploy does not reset the once-a-day drift
     # reminder and turn a standing condition back into a siren.
-    if [ -n "$drift_notice" ]; then
-      printf 'LAST_DRIFT_NOTICE=%s\n' "$drift_notice"
+    if [ -n "$LAST_DRIFT_NOTICE" ]; then
+      printf 'LAST_DRIFT_NOTICE=%s\n' "$LAST_DRIFT_NOTICE"
     fi
-    if [ -n "$stale_notice" ]; then
-      printf 'LAST_STALE_NOTICE=%s\n' "$stale_notice"
+    if [ -n "$LAST_STALE_NOTICE" ]; then
+      printf 'LAST_STALE_NOTICE=%s\n' "$LAST_STALE_NOTICE"
+    fi
+    if [ -n "$DRIFT_SINCE" ]; then
+      printf 'DRIFT_SINCE=%s\n' "$DRIFT_SINCE"
     fi
   } > "$STATE" || {
     # I6: the state write used to abort silently under set -e. A failure
@@ -215,7 +236,11 @@ report_stale_once() {
   notify "⚠️ the installed deployer is out of date — a merged fix is not live until it is installed.
 ${STALE_REPORT}
 Run: sudo bash deploy/install-autodeploy.sh"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$LAST_DRIFT_NOTICE" "$today"
+  # #497: assign, then let write_state carry it. Passing "$today" positionally
+  # left LAST_STALE_NOTICE empty, and report_drift_once's write in the same
+  # tick then persisted that emptiness over the marker just written.
+  LAST_STALE_NOTICE="$today"
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
 report_drift_once() {
@@ -225,7 +250,33 @@ report_drift_once() {
 
   [ -n "$DEPLOYED_SHA" ] || return 0
   [ -n "$main_sha" ] || return 0
-  [ "$DEPLOYED_SHA" != "$main_sha" ] || return 0
+
+  # No drift. Two cases: an episode was open, or there never was one.
+  if [ "$DEPLOYED_SHA" = "$main_sha" ]; then
+    [ -n "$DRIFT_SINCE" ] || return 0
+    # Only close out loud if we spoke. An all-clear for an alarm that never
+    # sounded is noise, and it would arrive on exactly the path this change
+    # exists to keep quiet: merge, deploy, done, nobody disturbed.
+    if [ -n "$LAST_DRIFT_NOTICE" ]; then
+      notify "✅ production has caught up with main — unattended deploys work again."
+    fi
+    DRIFT_SINCE=""
+    LAST_DRIFT_NOTICE=""
+    write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
+    return 0
+  fi
+
+  # Drift, and no episode open yet: start the clock, say nothing. This is the
+  # merge that just happened; the person who made it is probably deploying.
+  if [ -z "$DRIFT_SINCE" ]; then
+    DRIFT_SINCE="$NOW_S"
+    write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
+    return 0
+  fi
+
+  # Inside the grace window: still nothing.
+  [ $((NOW_S - DRIFT_SINCE)) -ge "$DRIFT_GRACE_S" ] || return 0
+
   [ "$LAST_DRIFT_NOTICE" != "$today" ] || return 0
 
   behind=$(git -C "$REPO" rev-list --count "${DEPLOYED_SHA}..${main_sha}" 2>/dev/null || echo '?')
@@ -237,7 +288,8 @@ report_drift_once() {
   else
     notify "ℹ️ production is ${behind} commit(s) behind main, but only the manifest and lockfile differ — autodeploy still works."
   fi
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA" "$today"
+  LAST_DRIFT_NOTICE="$today"
+  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
 # --- fetch -------------------------------------------------------------------
@@ -259,6 +311,7 @@ PREVIOUS_SHA="${PREVIOUS_SHA:-}"
 LAST_FAILED_SHA="${LAST_FAILED_SHA:-}"
 LAST_DRIFT_NOTICE="${LAST_DRIFT_NOTICE:-}"
 LAST_STALE_NOTICE="${LAST_STALE_NOTICE:-}"
+DRIFT_SINCE="${DRIFT_SINCE:-}"
 
 # Minor: lightweight tags sort by the TAGGED COMMIT's committer date under
 # -creatordate, not by when the tag was made — a tag on a backdated commit
@@ -266,29 +319,47 @@ LAST_STALE_NOTICE="${LAST_STALE_NOTICE:-}"
 # Tag names are ISO-8601 timestamps, so lexical order is chronological.
 tag=$(git -C "$REPO" for-each-ref --sort=-refname --format='%(refname:short)' \
         --count=1 'refs/tags/autodeploy-*')
-[ -n "$tag" ] || { echo "no autodeploy tag yet"; report_stale_once; report_drift_once; exit 0; }
 
-target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
-
-
-# C3: a tag that already failed once is not retried automatically — design
-# §7 calls for one attempt, then a human, and without this the state file
-# was written only on success, so the next tick saw the same tag and the
-# same DEPLOYED_SHA and did it all again — ~288 forced restarts a day.
-# Quiet on purpose: the operator was already paged when this was first
-# recorded (guard refusal / audit refusal / deploy failure / rollback
-# failure all notify before writing LAST_FAILED_SHA); a repeat every 5
-# minutes forever is the outage this fixes, not a second alert of it.
-# Clear LAST_FAILED_SHA in the state file (or delete the file) to retry.
-if [ -n "$LAST_FAILED_SHA" ] && [ "$target" = "$LAST_FAILED_SHA" ]; then
-  echo "tag $tag ($target) is recorded as LAST_FAILED_SHA in $STATE; skipping quietly"
-  exit 0
+# #491: what makes the deployer idle is having no WORK, not having no TAG.
+# The old gate was `[ -n "$tag" ] || { ...report...; exit 0; }` — literally
+# "no autodeploy-* tag has ever been pushed". Tags are permanent, so the first
+# qualified merge turned the drift AND stale-deployer reports off forever, and
+# they worked at all only because none had ever been pushed. The three
+# diagnostic lines below are kept verbatim: they say different things and are
+# read in the journal.
+pending=""
+target=""
+if [ -z "$tag" ]; then
+  echo "no autodeploy tag yet"
+else
+  target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
+  # C3: a tag that already failed once is not retried automatically — design
+  # §7 calls for one attempt, then a human, and without this the state file
+  # was written only on success, so the next tick saw the same tag and the
+  # same DEPLOYED_SHA and did it all again — ~288 forced restarts a day.
+  # Quiet on purpose ABOUT THE TAG: the operator was already paged when this
+  # was first recorded (guard refusal / audit refusal / deploy failure /
+  # rollback failure all notify before writing LAST_FAILED_SHA); a repeat
+  # every 5 minutes forever is the outage this fixes. Drift is a different
+  # statement about a different object, on a once-a-day cadence, and a stuck
+  # tag WITH production behind main is autodeploy dead twice over.
+  # Clear LAST_FAILED_SHA in the state file (or delete the file) to retry.
+  if [ -n "$LAST_FAILED_SHA" ] && [ "$target" = "$LAST_FAILED_SHA" ]; then
+    echo "tag $tag ($target) is recorded as LAST_FAILED_SHA in $STATE; skipping quietly"
+  elif [ "$target" = "$DEPLOYED_SHA" ]; then
+    echo "already deployed $target"
+  else
+    # target is what everything below the gate uses (guard, audit, deploy);
+    # pending only decides *whether* we get there — keep them the same value.
+    pending="$target"
+  fi
 fi
 
-if [ "$target" = "$DEPLOYED_SHA" ]; then
-  echo "already deployed $target"
-  exit 0
-fi
+# Idle: nothing to deploy, so the two standing conditions get their once-a-day
+# say. A PENDING tag deliberately reaches neither — it is about to be deployed
+# or refused with its offending paths listed, and a second message about the
+# same condition is noise.
+[ -n "$pending" ] || { report_stale_once; report_drift_once; exit 0; }
 
 # On a first run we have nothing to diff against, so compare with what is
 # actually installed rather than deploying an unbounded diff blind.
@@ -369,6 +440,20 @@ fi
 
 echo "deploying $target ($tag)"
 if deploy_commit "$target" && healthy "$PORT"; then
+  # #490: production just moved. Whatever episode the idle path was tracking
+  # measured a gap that no longer exists. Since #491, the very next tick
+  # reaches report_drift_once instead of exiting at "already deployed" — and
+  # if main has not moved further in the meantime, DEPLOYED_SHA now equals
+  # main, so that tick takes the "no drift" branch, which speaks only if
+  # DRIFT_SINCE is still set (and announces "caught up" only if a prior
+  # message was ever sent). A stale DRIFT_SINCE left behind here would
+  # already be past the grace window, so it would siren "caught up" within
+  # five minutes of a successful deploy — not eventually, immediately. A
+  # stale LAST_DRIFT_NOTICE would then go on suppressing the daily reminder
+  # for an episode that no longer exists. Clear both, not just the start
+  # time.
+  DRIFT_SINCE=""
+  LAST_DRIFT_NOTICE=""
   write_state "$target" "$DEPLOYED_SHA" ""
   bumped=$(git -C "$REPO" diff --stat "$DEPLOYED_SHA" "$target" -- package.json | tail -1)
   notify "✅ autodeploy ${tag} — production patched and healthy.

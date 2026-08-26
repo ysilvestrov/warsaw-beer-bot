@@ -11,6 +11,7 @@ interface AlgoliaHit {
   rating_score?: unknown;
   brewery_alias?: unknown;
   alias_alt?: unknown;
+  rating_count?: unknown;
 }
 export interface AlgoliaResponse { hits?: AlgoliaHit[]; nbHits?: number }
 export interface AlgoliaQuery {
@@ -36,6 +37,13 @@ function str(v: unknown): string {
   return typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
 }
 
+// #487: only a finite number counts. An absent or malformed value stays absent,
+// so a candidate without evidence can never be dominated into a flagship decision.
+function ratingCount(v: unknown): number | undefined {
+  const n = num(v);
+  return n === null ? undefined : n;
+}
+
 export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
   const hits = Array.isArray(json.hits) ? json.hits : [];
   const out: SearchResult[] = [];
@@ -52,6 +60,7 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
       global_rating: num(h.rating_score),
       brewery_alias: strList(h.brewery_alias),
       alias_alt: strList(h.alias_alt),
+      rating_count: ratingCount(h.rating_count),
     });
   }
   return out;
@@ -77,6 +86,7 @@ export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBe
     global_rating: num(h.rating_score),
     beer_slug: slug.length > 0 ? slug : null,
     brewery_alias: strList(h.brewery_alias),
+    rating_count: ratingCount(h.rating_count),
   };
 }
 
