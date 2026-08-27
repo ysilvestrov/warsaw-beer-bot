@@ -43,6 +43,19 @@ export interface InboxGroup { key: string; reason: string; rows: OwnerlessRow[];
 // `|` out of the two fields before they are ever encoded into a note. This regex is
 // therefore unchanged from round 2 and needs no further widening: its input is now
 // guaranteed clean, not the pattern made cleverer.
+//
+// #509 review round 4: the paragraph above this one (round 2) still claims a newline
+// makes this regex fail and the row falls to UNRECOGNISED_KEY below — that was true
+// then and is STILL true of this regex today (`.` still does not span `\n`, unchanged,
+// on purpose, same as round 3 left it). What changed in round 4 is the input, not the
+// pattern: triage-plan.ts's sanitizers now collapse whitespace (newlines and tabs
+// included) out of all three model-authored fields — target, reason, AND review_note —
+// before they are encoded, the same write-site move round 3 made for `: ` and `|`. So a
+// note THIS pipeline writes can no longer carry a newline, and can no longer land in
+// UNRECOGNISED_KEY for that reason. The bucket, and this regex's inability to span
+// `\n`, both stay exactly as they are — they still catch a newline in a note this code
+// did NOT write (a hand-edited row, a future write site nobody sanitized), which is
+// the honest job UNRECOGNISED_KEY has always had.
 const OFF_SCOPE = /^off-scope (.+?): (.*?)(?: \| .*)?$/;
 // #509 fix round 3: `no absence evidence:` and `unverified:` are both prefixes THIS
 // pipeline writes (triage-plan.ts's guard 3, and orphan-triage.ts's verification gate

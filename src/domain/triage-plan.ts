@@ -91,8 +91,37 @@ const MAX_TARGET_CHARS = 60;
 // lossy-but-visible: a human reading the inbox still sees what the model meant, just with
 // the two structural sequences defanged. Once these are sanitized, OFF_SCOPE needs no
 // further widening — its job was never wrong, its input was.
-const sanitizeTarget = (s: string): string => s.replace(/: /g, '; ').replace(/\|/g, '/');
-const sanitizeReason = (s: string): string => s.replace(/\|/g, '/');
+//
+// #509 review round 4: three more findings, all newlines — in the target, in the reason,
+// and in the model's own `review_note` (which round 3 left unsanitized entirely, since it
+// is appended raw after the note's second `|`). OFF_SCOPE's `.` groups never span `\n`
+// (JS regex, no `s` flag), so a newline ANYWHERE in the note — not just in the field that
+// carries it — makes the whole `^...$` fail to match, and the row falls to
+// UNRECOGNISED_KEY. Same fix as round 3, same reasoning: sanitize at the write site,
+// where the structural characters are known.
+//
+// Order matters, and it is not arbitrary: collapse whitespace runs (newlines and tabs
+// included) to a single space FIRST, and only THEN do the `: `/`|` substitutions. A key
+// of `"cider:\nbrand"` collapses to `"cider: brand"` — now containing the literal `: `
+// trigger — so the substitution below correctly catches it and produces `"cider; brand"`.
+// Reverse the order and that case escapes: substituting first tests the ORIGINAL string
+// for the literal two-character sequence `: ` (colon immediately followed by a space),
+// finds none (a `\n` sits between them, not a space), leaves it untouched, and only
+// THEN collapses the untouched `:\n` down to `: ` — which still contains the very
+// delimiter OFF_SCOPE splits on, now smuggled in by whitespace instead of by the model
+// typing it directly. Collapse-then-substitute is the only order that closes both the
+// literal-delimiter case and the delimiter-hiding-behind-whitespace case in one pass.
+const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ');
+const sanitizeTarget = (s: string): string =>
+  collapseWhitespace(s).replace(/: /g, '; ').replace(/\|/g, '/');
+const sanitizeReason = (s: string): string =>
+  collapseWhitespace(s).replace(/\|/g, '/');
+// `review_note` is appended raw after the note's final `|` and is never parsed back out
+// into a captured field (OFF_SCOPE's tail, `(?: \| .*)?`, is non-capturing) — so it needs
+// no delimiter substitution, `|` and `: ` inside it are harmless. But it can still break
+// the WHOLE match if it carries a newline (see round 4 above), so it gets the same
+// whitespace collapse the other two fields get.
+const sanitizeReviewNote = (s: string): string => collapseWhitespace(s);
 
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
 // enumerated rows, so a lifetime count would misread the very shape (a narrow issue
@@ -259,9 +288,9 @@ export function planTriageActions(
     // free-text tail (reason + the model's own review_note).
     //
     // #509 review round 3: sanitize BEFORE bounding, not instead of it — sanitizeTarget
-    // is length-preserving (each substitution is one character for one or two), so the
-    // 60-char budget still lands on the same content either way, but sanitizing first
-    // means the slice can never land mid-substitution.
+    // never GROWS its input (each delimiter substitution is one character for one or
+    // two, and round 4's whitespace collapse can only shrink a run down to one space),
+    // so the 60-char budget always lands on sanitized content, never mid-substitution.
     const sanitizedTarget = sanitizeTarget(target);
     const boundedTarget = sanitizedTarget.length > MAX_TARGET_CHARS
       ? sanitizedTarget.slice(0, MAX_TARGET_CHARS) : sanitizedTarget;
@@ -269,7 +298,7 @@ export function planTriageActions(
       ...verdict,
       issue_number: null,
       new_issue_key: null,
-      review_note: `off-scope ${boundedTarget}: ${sanitizeReason(reason)} | ${verdict.review_note}`.slice(0, 500),
+      review_note: `off-scope ${boundedTarget}: ${sanitizeReason(reason)} | ${sanitizeReviewNote(verdict.review_note)}`.slice(0, 500),
     });
   };
 

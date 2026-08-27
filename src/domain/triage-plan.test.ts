@@ -659,3 +659,96 @@ test('a contains value containing " | " round-trips with the reason intact', () 
   // Sanitized, not truncated: the whole reason survives, just with `|` defanged to `/`.
   expect(group.reason).toBe('source_url contains foo / bar');
 });
+
+// #509 review round 4: three more findings, all newlines — one in each of the target,
+// the reason, and the model's own review_note. The lesson generalizes past newlines: ANY
+// whitespace run can either break OFF_SCOPE's `.` (which never spans `\n`) or hide a
+// delimiter from a substitution that ran before the whitespace was collapsed. Rather
+// than bolting on three more single-purpose tests like the two above, this is the one
+// durable test the round-4 fix is FOR: table-driven, and any future finding of this
+// shape should be answerable by adding one row here, not writing a new test.
+//
+// The property being pinned: a note this code writes is always parseable by the code
+// that reads it. Every row proves that by round-tripping through the REAL
+// groupOwnerless (imported at the top of this file from ./triage-inbox, never
+// reimplemented) — the only way to prove the writer and the reader actually agree,
+// rather than that each independently does what this file assumes the other does.
+test.each([
+  {
+    name: 'a newline in the target (new_issue_key)',
+    key: 'cider\nbrand', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider brand', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: 'a newline in the reason (a contains term value)',
+    key: 'plain-key', containsValue: 'foo\nbar', reviewNote: 'note',
+    expectedKey: 'plain-key', expectedReason: 'source_url contains foo bar',
+  },
+  {
+    name: "a newline in the model's own review_note",
+    key: 'plain-key-2', containsValue: 'baseline', reviewNote: 'shop brand\nin brewery field',
+    expectedKey: 'plain-key-2', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: '": " inside the target',
+    key: 'cider: brand', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider; brand', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: '"|" inside the target',
+    key: 'cider|brand', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider/brand', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: '"|" inside the reason (a contains term value)',
+    key: 'plain-key-3', containsValue: 'foo | bar', reviewNote: 'note',
+    expectedKey: 'plain-key-3', expectedReason: 'source_url contains foo / bar',
+  },
+  {
+    name: 'a tab inside the target',
+    key: 'cider\tbrand', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider brand', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: 'an over-long target (600 chars), truncated AFTER sanitizing',
+    key: 'k'.repeat(600), containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'k'.repeat(60), expectedReason: 'source_url contains baseline',
+  },
+  {
+    // The order-sensitive case named by the round-4 review directly: collapsing
+    // whitespace BEFORE substituting delimiters is what turns "cider:\nbrand" into
+    // "cider: brand" and gets it caught by the `: ` -> `; ` substitution below. Doing
+    // the substitution first would test the RAW string for the literal two-character
+    // sequence "`: `", find none (a `\n` sits between the colon and "brand", not a
+    // space), leave it untouched, and only THEN collapse the untouched `:\n` down to
+    // `: ` — reintroducing, after substitution, the very delimiter OFF_SCOPE splits on.
+    name: 'combination: a colon immediately followed by a newline in the target',
+    key: 'cider:\nbrand', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider; brand', expectedReason: 'source_url contains baseline',
+  },
+  {
+    name: 'combination: an over-long target with a tab, a tab in the reason, a newline+"|" in review_note',
+    key: `${'k'.repeat(30)}\t${'z'.repeat(600)}`, containsValue: 'foo\tbar',
+    reviewNote: 'alpha | beta\ngamma',
+    expectedKey: `${'k'.repeat(30)} ${'z'.repeat(29)}`,
+    expectedReason: 'source_url contains foo bar',
+  },
+])('off-scope note round-trips through the real groupOwnerless: $name', ({
+  key, containsValue, reviewNote, expectedKey, expectedReason,
+}) => {
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: key, review_note: reviewNote })],
+    new_issues: [{
+      key, title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'source_url', op: 'contains', value: containsValue }] },
+    }],
+  };
+  // row(1)'s default source_url is '', which never contains a non-empty containsValue —
+  // the term always contradicts the row, so refuseRoute always fires.
+  const plan = planTriageActions(a, [], rows(1), noProbes, new Set());
+  const note = plan.quiet[0].review_note;
+  const ownerless = { beer_id: 1, brewery: 'B', name: 'N', review_class: 'matcher_bug' as const, review_note: note };
+  const [group] = groupOwnerless([ownerless]);
+  expect(group.key).toBe(expectedKey);
+  expect(group.reason).toBe(expectedReason);
+});
