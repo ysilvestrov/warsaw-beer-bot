@@ -453,9 +453,15 @@ test('a not_a_beer verdict whose row contradicts the issue scope is refused', ()
 
   expect(plan.comments).toEqual([]);
   expect(plan.guardHits.scope_violation).toBe(1);
-  // #509 fix round 1: not_a_beer already owns outcome.notABeer/its own digest part —
-  // quietOffScope must exclude it exactly as quietCauseStripped/quietNoTarget do above,
-  // or a scope-refused not_a_beer would be counted twice (the #432 defect, reintroduced).
+  // #509 CRITICAL (final review): not_a_beer's write is IRREVERSIBLE —
+  // orphanNotOnTapPredicate excludes it from both enrichment pools unconditionally, and
+  // listOwnerlessRows only covers matcher_bug/parser_bug — so a refused not_a_beer must
+  // not reach `quiet` at all. It falls back to the pre-#509 behaviour for this one class:
+  // skipped, untouched, retried tomorrow under a fresh (possibly different) model call.
+  expect(plan.quiet).toEqual([]);
+  expect(plan.skipped).toBe(1);
+  // quietOffScope stays 0 too — it was already excluded from the double-count (#432),
+  // and now the row never reaches the branch that would increment it anyway.
   expect(plan.quietOffScope).toBe(0);
 });
 

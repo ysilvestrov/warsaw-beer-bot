@@ -690,8 +690,9 @@ describe('listOwnerlessRows / countOwnerlessRows', () => {
     seed(3, 'free prose from the model', 'matcher_bug', null);              // out — #508
     seed(4, 'off-scope #300: candidates_count = 0', 'matcher_bug', 300);    // out — has an owner
     seed(5, 'off-scope #300: candidates_count = 0', 'not_on_untappd', null);// out — not actionable
+    seed(6, 'unverified: brewery alias gap', 'matcher_bug', null);          // in — #509 round 3
 
-    expect(listOwnerlessRows(d).map((r) => r.beer_id)).toEqual([1, 2]);
-    expect(countOwnerlessRows(d)).toBe(3);  // every actionable ownerless row, prose included
+    expect(listOwnerlessRows(d).map((r) => r.beer_id)).toEqual([1, 2, 6]);
+    expect(countOwnerlessRows(d)).toBe(4);  // every actionable ownerless row, prose included
   });
 });

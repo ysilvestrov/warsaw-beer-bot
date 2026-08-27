@@ -322,6 +322,12 @@ export interface OwnerlessRow {
 // whose prefix a query can key on. The prose-note rows are deliberately excluded: 218 of
 // them exist and none can be grouped, so listing them would rebuild the #347 dump in report
 // form. They are #508's population, and countOwnerlessRows below still reports their total.
+//
+// `unverified:%` (#509 fix round 3): the #358 verification gate writes this prefix
+// (orphan-triage.ts, stripping a cause whose re-run didn't reproduce the target) — it is
+// this pipeline's own daily output, not model free prose, and was wrongly falling into the
+// #508 remainder before this. Measured 2026-08-26: the gate stripped 6 of 11 routings that
+// day alone.
 export function listOwnerlessRows(db: DB): OwnerlessRow[] {
   return db.prepare(
     `SELECT beer_id, brewery, name, review_class, review_note
@@ -329,7 +335,8 @@ export function listOwnerlessRows(db: DB): OwnerlessRow[] {
       WHERE review_class IN ('matcher_bug', 'parser_bug')
         AND issue_number IS NULL
         AND retired_at IS NULL
-        AND (review_note LIKE 'off-scope %' OR review_note LIKE 'no absence evidence:%')
+        AND (review_note LIKE 'off-scope %' OR review_note LIKE 'no absence evidence:%'
+             OR review_note LIKE 'unverified:%')
       ORDER BY beer_id`,
   ).all() as OwnerlessRow[];
 }

@@ -147,12 +147,22 @@ async function publishTriageInbox(
   db: DB, log: pino.Logger, github: GithubIssuesClient, dateKey: string,
 ): Promise<void> {
   try {
-    const groups = groupOwnerless(listOwnerlessRows(db));
-    const body = buildInboxBody(groups, countOwnerlessRows(db), dateKey);
+    const total = countOwnerlessRows(db);
     const open = await github.listOpenIssues(INBOX_LABEL);
+    // #509 fix round 3 (MINOR 6): closing the inbox is how a human says "I ground this
+    // pile" (see the design's Change 4). Filing a fresh issue back the next morning with
+    // nothing in it would make that gesture pointless forever — an empty inbox filed on a
+    // day with zero ownerless rows and nobody already watching one serves no one. An
+    // ALREADY-OPEN inbox is the one exception: it still gets rewritten down to empty and
+    // honest, because a stale "N rows" body left open after the pile actually cleared is
+    // its own kind of lie, and the whole point of "rewritten, never appended to" is that
+    // the body always reflects the CURRENT state of the DB.
+    if (total === 0 && open.length === 0) return;
     if (open.length > 1) {
       log.warn({ numbers: open.map((i) => i.number) }, 'orphan-triage: more than one open triage inbox');
     }
+    const groups = groupOwnerless(listOwnerlessRows(db));
+    const body = buildInboxBody(groups, total, dateKey);
     // Newest wins: a duplicate means a human opened one, and the newest is the one they are
     // most likely looking at.
     const target = open.length > 0 ? open.reduce((a, b) => (a.number > b.number ? a : b)) : null;
@@ -185,7 +195,16 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.offScope > 0) parts.push(`${o.offScope} без власника (поза scope)`);
   if (o.noTarget > 0) parts.push(`${o.noTarget} без цілі`);
   if (o.guardHits.illegal_scope > 0) parts.push(`${o.guardHits.illegal_scope} нелегальний scope`);
-  if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
+  // #509 final review: guardHits.scope_violation is NOT its own digest part — it is always
+  // >= offScope (offScope is the matcher_bug/parser_bug subset of it; the not_a_beer
+  // remainder, after the CRITICAL fix above, contributes to `skipped` instead), so printing
+  // both republishes the same rows under two labels. A normal day with 5 matcher_bug
+  // refusals used to read "5 без власника (поза scope), 5 поза scope" — the exact "12
+  // not_a_beer + 13 без цілі = 25 on a 13-row day" shape #432 already has a design for
+  // (see the comment above quietOffScope in triage-plan.ts). `guardHits` itself is NOT
+  // dropped — it stays on the logged outcome payload (`orphan-triage finished`), which is
+  // where the post-deploy checkpoint reads it from, so nothing observable is lost, only
+  // the double-printed digest text.
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }

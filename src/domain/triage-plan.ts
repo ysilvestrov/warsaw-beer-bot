@@ -186,13 +186,27 @@ export function planTriageActions(
   // similarity is what built #347, and the guard exists to stop it.
   const refuseRoute = (verdict: ActionableVerdict, row: UntriagedFailure, target: string, scope: Scope | null): void => {
     guardHits.scope_violation += 1;
-    // #432: not_a_beer already owns its own counter/digest part (outcome.notABeer); adding
-    // it here too would double-count it, the exact defect the guard fifteen lines below
-    // this one exists to prevent. Mirrored, not shared, because the two sites decide for
-    // different reasons (target with no target at all vs. target that contradicts the row).
-    if (verdict.review_class === 'parser_bug' || verdict.review_class === 'matcher_bug') {
-      quietOffScope += 1;
-    }
+    // CRITICAL (#509 review): not_a_beer must NOT fall through to `quiet` here. Every
+    // other class's refusal is recoverable — the row keeps its issue_number NULL, stays
+    // in the enrichment pool, and a later run (different scope, different model call)
+    // can route it correctly. not_a_beer is the one class whose write is IRREVERSIBLE:
+    // orphanNotOnTapPredicate (src/storage/beers.ts) excludes it from BOTH enrichment
+    // pools unconditionally — not on backoff, not ever — and listOwnerlessRows only
+    // covers matcher_bug/parser_bug, so a quiet not_a_beer with no issue would leave the
+    // pipeline for good with no issue trail and nothing in the inbox either. CLASS_LABELS
+    // above already states the rule this violates: an irreversible verdict is safe only
+    // when it leaves a scoped issue trail, and a refused routing leaves none. So this one
+    // class falls back to the pre-#509 shape — skipped, retried tomorrow — instead of
+    // being recorded quietly. Measured by replaying all 28 archived production runs: 0 of
+    // 62 not_a_beer verdicts EVER named an issue at all (matcher_bug: 302/369 do;
+    // parser_bug: 15/98), so this costs at most one extra LLM verdict on a day that has
+    // never yet happened.
+    if (verdict.review_class === 'not_a_beer') { skipped++; return; }
+    // Every ActionableClass reaching this line is now parser_bug or matcher_bug — the
+    // not_a_beer branch above already returned. #432: their own no-target site fifteen
+    // lines below counts the same way, for the same reason (outcome.notABeer already
+    // owns not_a_beer's digest part, so counting it twice would double it).
+    quietOffScope += 1;
     // A missing scope block and a contradicted term are different facts about the issue,
     // not two spellings of the same one: the row never claimed cohort membership and lost,
     // so explainScopeRejection's "outside the cohort" would misreport WHY nothing matched.

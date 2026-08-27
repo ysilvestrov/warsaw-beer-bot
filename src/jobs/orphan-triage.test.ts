@@ -728,10 +728,14 @@ test('without a search dep the job behaves exactly as before', async () => {
 // #509's quietOffScope must exclude not_a_beer the same way causeStripped/noTarget do
 // (triage-plan.ts), and a fixture where offScope is always 0 cannot catch that guard
 // double-counting a scope-refused not_a_beer into this part.
+// scope_violation is set to 1, not 0 (#509 final review): offScope is a strict SUBSET of
+// scope_violation (every matcher_bug/parser_bug refusal that bumps offScope also bumps
+// scope_violation in the same call), so offScope:1 with scope_violation:0 could never
+// happen in production — this fixture used to assert exactly that impossible pairing.
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 1, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 1, guardHits: { illegal_scope: 0, scope_violation: 1, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених, 1 без власника (поза scope)');
 });
@@ -973,12 +977,18 @@ test('buildTriageLine names each quiet mechanism and hides routine guards', () =
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 15 нових → 7 not_a_beer, 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
+  // #509 final review: offScope:1/scope_violation:2 is the production-realistic pairing —
+  // of 2 scope refusals, 1 was matcher_bug/parser_bug (counted in offScope) and 1 was
+  // not_a_beer (counted only in scope_violation, and in `skipped` after the CRITICAL fix
+  // above). The old fixture paired offScope:0 with scope_violation:2 and asserted a
+  // rendered "2 поза scope" part that no longer exists — guardHits.scope_violation is not
+  // its own digest text, see the comment above `skipped` in buildTriageLine.
   expect(buildTriageLine({
     total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 4,
-    causeStripped: 0, noTarget: 0, offScope: 0, skipped: 2, unverified: 3,
+    causeStripped: 0, noTarget: 0, offScope: 1, skipped: 2, unverified: 3,
     guardHits: { illegal_scope: 1, scope_violation: 2, unprobed_absence: 0 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 нелегальний scope, 2 поза scope, 2 пропущено');
+  })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 без власника (поза scope), 1 нелегальний scope, 2 пропущено');
 });
 
 test('a throwing archive cannot cost the day: state is written before the archive', async () => {
@@ -1201,6 +1211,44 @@ test('an existing open inbox is rewritten, not duplicated', async () => {
   });
   expect(github.createIssue).not.toHaveBeenCalled();
   expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('#300'));
+});
+
+// #509 fix round 3 (MINOR 6): zero ownerless rows and no open inbox to rewrite ⇒ nothing
+// filed. Without this guard the job would create a fresh empty inbox issue every single
+// day forever, contradicting the design's own "closing it means I ground this pile"
+// semantics. beer 1's only verdict here is `unidentifiable` — quiet, no routing, no
+// matcher_bug/parser_bug row — so the ownerless pile stays at 0 for the whole run.
+test('an empty ownerless pile with no open inbox files nothing', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({ listOpenIssues: vi.fn().mockResolvedValue([]) });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).not.toHaveBeenCalled();
+});
+
+// The one exception the guard above carves out: an ALREADY-OPEN inbox still gets
+// rewritten down to empty and honest rather than left standing with a stale "5 rows"
+// body from a pile that has since cleared — "rewritten, never appended to" only means
+// something if the rewrite happens even when the news is good.
+test('an empty ownerless pile still rewrites an existing open inbox to empty and honest', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 600, title: 'inbox', body: 'old: 5 rows', labels: [INBOX_LABEL], createdAt: '2026-08-01T00:00:00.000Z' }]
+      : [])),
+    setIssueBody: vi.fn().mockResolvedValue(undefined),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('**0**'));
 });
 
 test('an inbox failure does not cost the run its verdicts', async () => {
