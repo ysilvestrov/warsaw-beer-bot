@@ -2,7 +2,8 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
-  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue, type UntriagedFailure,
+  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue,
+  listOwnerlessRows, countOwnerlessRows, type UntriagedFailure,
 } from '../storage/enrich_failures';
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
@@ -16,6 +17,7 @@ import {
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
+import { groupOwnerless, buildInboxBody } from '../domain/triage-inbox';
 import type { BeerSearch } from '../sources/untappd/search';
 import type { Analysis, Verdict, OpenIssue } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
@@ -23,6 +25,9 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
+// #509: the standing report issue for rows a scope guard refused. Never `orphan-triage` —
+// see publishTriageInbox below for why that would be a correctness bug, not a style choice.
+export const INBOX_LABEL = 'triage-inbox';
 // #431: applied and removed by this job. An issue wearing it has enough evidence that
 // the next move is a fix, not more triage.
 export const SATURATED_LABEL = 'saturated';
@@ -127,6 +132,36 @@ async function reconcileSaturatedLabels(
     } catch (e) {
       log.error({ err: e, issue: issue.number, should }, 'orphan-triage: label reconcile failed');
     }
+  }
+}
+
+// #509: the inbox is a REPORT, not an owner. `enrich_failures.issue_number` is the key of
+// the #421 lock, so linking these rows to a standing issue would seal them out of both
+// pools forever (June 2026 sealed 157 rows exactly that way). The link is one-directional,
+// DB → issue body, and the rows keep issue_number NULL.
+//
+// Best-effort by design, and called AFTER every DB write and every GitHub write the run
+// owes: a failure here must never cost a verdict that was already earned. Same contract as
+// reconcileSaturatedLabels directly above.
+async function publishTriageInbox(
+  db: DB, log: pino.Logger, github: GithubIssuesClient, dateKey: string,
+): Promise<void> {
+  try {
+    const groups = groupOwnerless(listOwnerlessRows(db));
+    const body = buildInboxBody(groups, countOwnerlessRows(db), dateKey);
+    const open = await github.listOpenIssues(INBOX_LABEL);
+    if (open.length > 1) {
+      log.warn({ numbers: open.map((i) => i.number) }, 'orphan-triage: more than one open triage inbox');
+    }
+    // Newest wins: a duplicate means a human opened one, and the newest is the one they are
+    // most likely looking at.
+    const target = open.length > 0 ? open.reduce((a, b) => (a.number > b.number ? a : b)) : null;
+    if (target) await github.setIssueBody(target.number, body);
+    // The routing label is deliberately absent: an inbox wearing `orphan-triage` would join
+    // listOpenIssues(TRIAGE_LABEL) and become a target the model can route rows into.
+    else await github.createIssue({ title: 'Тріаж-інбокс: рядки без власника', body, labels: [INBOX_LABEL] });
+  } catch (err) {
+    log.warn({ err }, 'orphan-triage: inbox publish failed');
   }
 }
 
@@ -253,6 +288,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     const orphans = listUntriagedFailures(db, TRIAGE_BATCH_LIMIT);
     if (orphans.length === 0) {
+      // #509: the inbox reports the STANDING ownerless total, not today's activity, so it
+      // still refreshes on a day with nothing new to triage — rows off-scoped on an earlier
+      // day must not wait for tomorrow's batch to show up in the report.
+      await publishTriageInbox(db, log, github, dateKey);
       finish(empty);
       return;
     }
@@ -507,6 +546,8 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     outcome.saturated = computeSaturated(scopedIssues, attachedThisRun);
 
     await reconcileSaturatedLabels(github, log, openIssues, outcome.saturated);
+
+    await publishTriageInbox(db, log, github, dateKey);
 
     finish(outcome);
   } finally {

@@ -10,6 +10,7 @@ import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_f
 import {
   orphanTriage, shouldRunTriage, buildTriageLine, buildSaturatedLine, reportGuardAnomalies,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
+  TRIAGE_LABEL, INBOX_LABEL,
   type TriageOutcome,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
@@ -59,9 +60,14 @@ const gh = (over = {}) => ({
   // type-checked, and a missing value does NOT throw — better-sqlite3 binds undefined,
   // the comparison goes NULL, and countRowsForIssue quietly returns 0, which would
   // disable the guard while every test still passed. So it is set deliberately.
-  listOpenIssues: vi.fn().mockResolvedValue([
+  //
+  // Label-aware: #509's publishTriageInbox queries INBOX_LABEL separately from the
+  // TRIAGE_LABEL call above it. Without this split every test here would hand the
+  // inbox publish the same triage issue as its "existing inbox" and rewrite it —
+  // while every existing assertion, none of which looks at setIssueBody, kept passing.
+  listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL ? [] : [
     { number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
-  ]),
+  ])),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   addLabel: vi.fn().mockResolvedValue(undefined),
@@ -208,7 +214,11 @@ test('no untriaged orphans: nothing-to-do line, no LLM call', async () => {
   const github = gh();
   await orphanTriage({ db: d, log, llm: theLlm, github, now: inWindow });
   expect(theLlm.analyze).not.toHaveBeenCalled();
-  expect(github.listOpenIssues).not.toHaveBeenCalled();
+  // #509: the inbox reports the STANDING ownerless total, not today's routing activity, so
+  // it still refreshes on a day with nothing new to triage — no TRIAGE_LABEL lookup (no
+  // routing happens), but the INBOX_LABEL lookup fires.
+  expect(github.listOpenIssues).not.toHaveBeenCalledWith(TRIAGE_LABEL);
+  expect(github.listOpenIssues).toHaveBeenCalledWith(INBOX_LABEL);
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('0 нових');
 });
 
@@ -814,8 +824,14 @@ test('no duplicate GitHub side effects across a transient retry', async () => {
       key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
     }],
   };
-  // One github stub shared across both ticks, so call counts accumulate.
-  const github = gh();
+  // One github stub shared across both ticks, so call counts accumulate. An existing inbox
+  // is pre-seeded so the #509 daily inbox refresh calls setIssueBody, not createIssue — this
+  // test's createIssue count is about routing (the ONE new triage issue), not the inbox.
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 900, title: 'inbox', body: 'old', labels: [INBOX_LABEL], createdAt: '2026-01-01T00:00:00.000Z' }]
+      : [{ number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' }])),
+  });
   await orphanTriage({ db: d, log, llm: transientLlm(), github, now: inWindow });
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
 
@@ -1134,4 +1150,60 @@ test('#431 line: seven saturated → top five plus the total', () => {
   ));
   expect(line).toBe('Насичені: #400 (21), #401 (15), #402 (12), #403 (11), #404 (8) — усього 7');
   expect(line).not.toContain('#405');
+});
+
+// --- #509 the triage inbox --------------------------------------------------------
+
+test('the inbox issue is created without the routing label, so it can never become a target', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([]),
+    createIssue: vi.fn().mockResolvedValue(600),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  const created = github.createIssue.mock.calls.at(-1)![0];
+  expect(created.labels).toEqual([INBOX_LABEL]);
+  expect(created.labels).not.toContain(TRIAGE_LABEL);
+  expect(created.body).toContain('#300');
+});
+
+test('an existing open inbox is rewritten, not duplicated', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 600, title: 'inbox', body: 'old', labels: [INBOX_LABEL], createdAt: '2026-08-01T00:00:00.000Z' }]
+      : [])),
+    setIssueBody: vi.fn().mockResolvedValue(undefined),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('#300'));
+});
+
+test('an inbox failure does not cost the run its verdicts', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => {
+      if (label === INBOX_LABEL) throw new Error('github down');
+      return [];
+    }),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  const r = d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1').get() as { review_class: string };
+  expect(r.review_class).toBe('unidentifiable');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
 });
