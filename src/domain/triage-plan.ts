@@ -165,6 +165,28 @@ const sanitizeReason = (s: string): string =>
 // whitespace collapse the other two fields get.
 const sanitizeReviewNote = (s: string): string => collapseWhitespace(s);
 
+// #509 review round 6 (hole 3): round 5's `.trim()` closed the padding gap but opened a
+// sharper one — a target that is WHITESPACE ONLY (`"   "`, `"\n\t "`) now collapses and
+// trims to the EMPTY string. This is reachable in production, not a theoretical shape:
+// `new_issue_key` is `z.string().min(1)`, and `.min(1)` bounds LENGTH, not content — a
+// three-space string satisfies it exactly as well as `"cider"` does. An empty target
+// makes the assembled note read `off-scope : <reason> | <note>`, and OFF_SCOPE's target
+// group is `(.+?)` — one-or-more characters, deliberately non-greedy but never
+// zero-width — so it cannot match an empty capture and the whole regex fails. The row
+// then falls to UNRECOGNISED_KEY in triage-inbox.ts, which is honest about "not parsed"
+// but loses the one fact this note exists to carry: WHICH target refused the row. The
+// fix follows the same rule every prior round in this file has: sanitize at the write
+// site, where the structural characters (here, "empty" is the structural failure) are
+// known. UNNAMED_TARGET is substituted only when sanitizing collapses the target to
+// nothing — a real target, however short, is never touched — and it deliberately reads
+// as a placeholder (parens, prose) rather than as a target a model could plausibly have
+// typed, so a human scanning the inbox sees it for what it is: not a mechanism name, a
+// gap where one belongs. It also groups every such row under one heading instead of
+// each silently becoming its own `unrecognised` entry, which is the same "cluster what
+// can be clustered" reasoning `groupOwnerless`'s own header comment gives for keying on
+// the target at all.
+const UNNAMED_TARGET = '(target not named)';
+
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
 // enumerated rows, so a lifetime count would misread the very shape (a narrow issue
 // split out of a magnet) this whole area exists to encourage. Measured on prod
@@ -338,7 +360,12 @@ export function planTriageActions(
     // character for one or two, and round 4's whitespace collapse can only shrink a run
     // down to one space), so the char budgets always land on sanitized content, never
     // mid-substitution.
-    const sanitizedTarget = sanitizeTarget(target);
+    // #509 review round 6 (hole 3): a whitespace-only target sanitizes to the empty
+    // string — see UNNAMED_TARGET above for why this is reachable and why the
+    // substitution happens here rather than in OFF_SCOPE. `#<number>` targets (the
+    // hasIssue branch above) can never be empty, so this only ever fires for a
+    // model-authored `new_issue_key`.
+    const sanitizedTarget = sanitizeTarget(target) || UNNAMED_TARGET;
     const boundedTarget = sanitizedTarget.length > MAX_TARGET_CHARS
       ? sanitizedTarget.slice(0, MAX_TARGET_CHARS) : sanitizedTarget;
     const sanitizedReason = sanitizeReason(reason);

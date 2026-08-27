@@ -764,6 +764,17 @@ test.each([
     key: '  cider  ', containsValue: 'baseline', reviewNote: 'note',
     expectedKey: 'cider', expectedReason: 'source_url contains baseline',
   },
+  // #509 review round 6 (hole 3): `new_issue_key` is `z.string().min(1)` — a bound on
+  // LENGTH, not content — so a whitespace-only key like `"   "` passes validation and
+  // collapses+trims to the empty string. Pre-fix, that assembled `off-scope : <reason>`,
+  // which OFF_SCOPE's `(.+?)` (one-or-more, never zero-width) cannot match, so the row
+  // fell to `unrecognised` and lost which target refused it. UNNAMED_TARGET substitutes
+  // a visible placeholder whenever sanitizing collapses the target to nothing.
+  {
+    name: 'a whitespace-only target (new_issue_key passes z.string().min(1) but sanitizes to empty)',
+    key: '   ', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: '(target not named)', expectedReason: 'source_url contains baseline',
+  },
 ])('off-scope note round-trips through the real groupOwnerless: $name', ({
   key, containsValue, reviewNote, expectedKey, expectedReason,
 }) => {
