@@ -31,6 +31,18 @@ export interface InboxGroup { key: string; reason: string; rows: OwnerlessRow[];
 // separate, narrower fix than the mislabelling this round of review addressed, and was
 // deliberately left undone: measured, 0 model review_notes across the archives contain a
 // newline.
+//
+// #509 review round 3: rounds 2 and 3-of-writing (above) both widened this regex to
+// survive one more shape of model text, and each widening promptly failed on the next
+// one — a `new_issue_key` containing `: ` still split in the wrong place, and a
+// `contains` term's `value` containing ` | ` still truncated the reason. Both fields are
+// model-authored and unconstrained by their zod schema, so no regex here can be made
+// safe against them: there is always a string that reproduces whatever literal this
+// pattern looks for. The fix landed at the WRITE site instead (triage-plan.ts's
+// `sanitizeTarget`/`sanitizeReason`, called from `refuseRoute`), which strips `: ` and
+// `|` out of the two fields before they are ever encoded into a note. This regex is
+// therefore unchanged from round 2 and needs no further widening: its input is now
+// guaranteed clean, not the pattern made cleverer.
 const OFF_SCOPE = /^off-scope (.+?): (.*?)(?: \| .*)?$/;
 // #509 fix round 3: `no absence evidence:` and `unverified:` are both prefixes THIS
 // pipeline writes (triage-plan.ts's guard 3, and orphan-triage.ts's verification gate

@@ -608,3 +608,54 @@ test('a refusal against an unscoped issue names the missing scope, not a cohort 
   // v()'s default review_note is 'note'.
   expect(plan.quiet[0].review_note).toBe('off-scope #300: no scope block | note');
 });
+
+// #509 review round 3 (finding A): `new_issue_key` carries no character restriction in
+// VerdictSchema (z.string().nullable()), so a key like "cider: brand" used to split at
+// the FIRST `: ` — the one INSIDE the key — leaving groupOwnerless with key "cider" and
+// reason "brand: candidates_count = 0" instead of the whole key and the real reason. The
+// fix sanitizes `: ` out of the target at the write site (refuseRoute's sanitizeTarget),
+// not by widening OFF_SCOPE again. Driven through the real consumer, like the existing
+// 600-character-key test above, rather than reimplementing the parse here.
+test('a new_issue_key containing ": " round-trips through groupOwnerless into the intended key and reason', () => {
+  const key = 'cider: brand';
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: key, review_note: 'shop brand in brewery field' })],
+    new_issues: [{
+      key, title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
+  };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
+  const note = plan.quiet[0].review_note;
+  const ownerless = { beer_id: 1, brewery: 'B', name: 'N', review_class: 'matcher_bug' as const, review_note: note };
+  const [group] = groupOwnerless([ownerless]);
+  // Sanitized, not truncated: the whole key survives, just with `: ` defanged to `; `.
+  expect(group.key).toBe('cider; brand');
+  expect(group.reason).toBe('candidates_count = 0');
+});
+
+// #509 review round 3 (finding B): a `contains` term's `value` carries no character
+// restriction either (z.string().min(1), no max, no charset), so describeTerm can
+// interpolate a ` | ` straight into the reason. OFF_SCOPE's reason group stops at the
+// first ` | ` (it has to, to leave room for the model's own review_note tail), so a
+// value of "foo | bar" used to truncate the reason to "source_url contains foo" and
+// silently drop " bar | note". The fix sanitizes `|` out of the reason at the write site
+// (refuseRoute's sanitizeReason), not by widening OFF_SCOPE again.
+test('a contains value containing " | " round-trips with the reason intact', () => {
+  const scope: ScopedIssue['scope'] = {
+    beer_ids: [], where: [{ col: 'source_url', op: 'contains', value: 'foo | bar' }],
+  };
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, issue_number: 300, review_note: 'shop brand in brewery field' })],
+    new_issues: [],
+  };
+  // row(1)'s default source_url is '', which does not contain "foo | bar" — the term
+  // contradicts the row, so refuseRoute fires with this term as the failing one.
+  const plan = planTriageActions(a, [open(300, { scope })], rows(1), noProbes, new Set());
+  const note = plan.quiet[0].review_note;
+  const ownerless = { beer_id: 1, brewery: 'B', name: 'N', review_class: 'matcher_bug' as const, review_note: note };
+  const [group] = groupOwnerless([ownerless]);
+  expect(group.key).toBe('#300');
+  // Sanitized, not truncated: the whole reason survives, just with `|` defanged to `/`.
+  expect(group.reason).toBe('source_url contains foo / bar');
+});

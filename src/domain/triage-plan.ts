@@ -65,7 +65,34 @@ export const MAX_NEW_ISSUES_PER_RUN = 3;
 // `lobster_brewery_suffix`); 60 is a generous multiple of that, chosen so nothing
 // legitimate is ever truncated while nothing pathological can consume the budget the
 // structured prefix needs to survive.
+//
+// #509 review round 3 (rejected finding): two DISTINCT model-authored targets that both
+// exceed 60 characters AND agree on their first 60 would collide under one inbox group
+// heading. Accepted as-is — it needs two keys past the measured 15-30 char range that
+// also share a 60-char prefix, has never occurred, and the failure mode (two mechanisms
+// sharing one heading) is visible to the human reading the report, not silent data loss.
 const MAX_TARGET_CHARS = 60;
+
+// #509 review round 3 (findings A & B — see MAX_TARGET_CHARS above for the rejected
+// finding C): the prior two rounds each patched OFF_SCOPE's regex (triage-inbox.ts) to
+// survive one more shape of model text, and each patch immediately produced a new failure
+// of the same kind, because the two fields the note encodes alongside the fixed literal
+// text — `target` (verdict.new_issue_key, `z.string().nullable()`, no max, no charset) and
+// `reason` (built from explainScopeRejection, which for a `contains` term interpolates the
+// model-authored `value`, `z.string().min(1)`, no max, no charset either) — are
+// UNCONSTRAINED. A regex is a fixed pattern; it cannot be made safe against text it does
+// not control, because for any delimiter it looks for there is always a model string that
+// reproduces it (`cider: brand` reproduces `: `, a `contains` value of `foo | bar`
+// reproduces ` | `). The fix is therefore at the WRITE site, not the parse site: sanitize
+// the two model-authored fields before they are encoded, so neither can contain a
+// delimiter OFF_SCOPE depends on. This is the one place that KNOWS which characters are
+// structural — the writer built the format — whereas the parser can only ever react to
+// text already committed to the column. Substitution (not deletion) keeps the note
+// lossy-but-visible: a human reading the inbox still sees what the model meant, just with
+// the two structural sequences defanged. Once these are sanitized, OFF_SCOPE needs no
+// further widening — its job was never wrong, its input was.
+const sanitizeTarget = (s: string): string => s.replace(/: /g, '; ').replace(/\|/g, '/');
+const sanitizeReason = (s: string): string => s.replace(/\|/g, '/');
 
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
 // enumerated rows, so a lifetime count would misread the very shape (a narrow issue
@@ -230,12 +257,19 @@ export function planTriageActions(
     // separator. Bounding the target first guarantees the structured prefix always
     // survives; the outer `.slice(0, 500)` remains as the belt-and-braces bound on the
     // free-text tail (reason + the model's own review_note).
-    const boundedTarget = target.length > MAX_TARGET_CHARS ? target.slice(0, MAX_TARGET_CHARS) : target;
+    //
+    // #509 review round 3: sanitize BEFORE bounding, not instead of it — sanitizeTarget
+    // is length-preserving (each substitution is one character for one or two), so the
+    // 60-char budget still lands on the same content either way, but sanitizing first
+    // means the slice can never land mid-substitution.
+    const sanitizedTarget = sanitizeTarget(target);
+    const boundedTarget = sanitizedTarget.length > MAX_TARGET_CHARS
+      ? sanitizedTarget.slice(0, MAX_TARGET_CHARS) : sanitizedTarget;
     quiet.push({
       ...verdict,
       issue_number: null,
       new_issue_key: null,
-      review_note: `off-scope ${boundedTarget}: ${reason} | ${verdict.review_note}`.slice(0, 500),
+      review_note: `off-scope ${boundedTarget}: ${sanitizeReason(reason)} | ${verdict.review_note}`.slice(0, 500),
     });
   };
 
