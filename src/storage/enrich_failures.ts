@@ -312,3 +312,42 @@ export function listUntriagedFailures(db: DB, limit: number): UntriagedFailure[]
     )
     .all(limit) as UntriagedFailure[];
 }
+
+export interface OwnerlessRow {
+  beer_id: number; brewery: string; name: string;
+  review_class: string; review_note: string | null;
+}
+
+// #509: rows the triage inbox can group — an actionable class, no owning issue, and a note
+// whose prefix a query can key on. The prose-note rows are deliberately excluded: 218 of
+// them exist and none can be grouped, so listing them would rebuild the #347 dump in report
+// form. They are #508's population, and countOwnerlessRows below still reports their total.
+//
+// `unverified:%` (#509 fix round 3): the #358 verification gate writes this prefix
+// (orphan-triage.ts, stripping a cause whose re-run didn't reproduce the target) — it is
+// this pipeline's own daily output, not model free prose, and was wrongly falling into the
+// #508 remainder before this. Measured 2026-08-26: the gate stripped 6 of 11 routings that
+// day alone.
+export function listOwnerlessRows(db: DB): OwnerlessRow[] {
+  return db.prepare(
+    `SELECT beer_id, brewery, name, review_class, review_note
+       FROM enrich_failures
+      WHERE review_class IN ('matcher_bug', 'parser_bug')
+        AND issue_number IS NULL
+        AND retired_at IS NULL
+        AND (review_note LIKE 'off-scope %' OR review_note LIKE 'no absence evidence:%'
+             OR review_note LIKE 'unverified:%')
+      ORDER BY beer_id`,
+  ).all() as OwnerlessRow[];
+}
+
+// Every actionable ownerless row, groupable or not — the header number that says how big
+// the pile really is.
+export function countOwnerlessRows(db: DB): number {
+  const r = db.prepare(
+    `SELECT COUNT(*) AS n FROM enrich_failures
+      WHERE review_class IN ('matcher_bug', 'parser_bug')
+        AND issue_number IS NULL AND retired_at IS NULL`,
+  ).get() as { n: number };
+  return r.n;
+}

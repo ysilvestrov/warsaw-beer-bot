@@ -1,9 +1,18 @@
 import {
-  AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA,
+  AnalysisSchema, VerdictSchema, buildTriagePrompt, ANALYSIS_TOOL_SCHEMA, type ScopedOpenIssue,
 } from './triage-analysis';
-import { ScopeSchema, SCOPE_COLS } from './triage-scope';
+import { ScopeSchema, SCOPE_COLS, parseScopeBlock } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import { ELIGIBLE_TOKENS } from './drink-boundary';
+
+// Minimal routable scope for fixtures that don't care about scope content — only that
+// buildTriagePrompt's input type-checks as ScopedOpenIssue.
+const scopedIssue = (over: Partial<ScopedOpenIssue> = {}): ScopedOpenIssue => ({
+  number: 405, title: 'Shop brewery field is not a brewery', body: 'body',
+  labels: ['orphan-triage'], createdAt: '2026-01-01T00:00:00.000Z',
+  scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+  ...over,
+});
 
 const orphan: UntriagedFailure = {
   beer_id: 7, brewery: 'Nepomucen', name: 'Hazy Disco', search_url: 'https://s',
@@ -51,10 +60,36 @@ test('AnalysisSchema: rejects unknown review_class', () => {
   })).toThrow();
 });
 
+test('the scope the model is shown parses back into the scope the guard enforces', () => {
+  const issue = scopedIssue();
+  const prompt = buildTriagePrompt({ orphans: [], openIssues: [issue] });
+  expect(parseScopeBlock(prompt)).toEqual(issue.scope);
+});
+
+// The regression this whole change exists to stop: renderScopeBlock appends the block at
+// the END of the body, so a long body used to push it past ISSUE_BODY_CAP and the model
+// saw no constraint at all. Binds the BEHAVIOUR, not the constant — raising the cap must
+// not be a way to make this pass.
+test('an issue with a body far longer than the prompt cap still shows its scope', () => {
+  const long = 'x'.repeat(5000);
+  const issue = scopedIssue({ body: long });
+  const prompt = buildTriagePrompt({ orphans: [], openIssues: [issue] });
+  expect(parseScopeBlock(prompt)).toEqual(issue.scope);
+});
+
+test('a scope fence inside the model-authored body is stripped, so exactly one scope is shown', () => {
+  const issue = scopedIssue({
+    body: 'prose\n\n```triage-scope\n{"beer_ids":[999],"where":[]}\n```\nmore prose',
+  });
+  const prompt = buildTriagePrompt({ orphans: [], openIssues: [issue] });
+  expect(prompt).not.toContain('999');
+  expect(parseScopeBlock(prompt)).toEqual(issue.scope);
+});
+
 test('buildTriagePrompt: contains orphans, issues and class definitions', () => {
   const p = buildTriagePrompt({
     orphans: [orphan],
-    openIssues: [{ number: 228, title: 'nano-noise tokens', body: 'strip nano', labels: ['orphan-triage'], createdAt: '2026-01-01T00:00:00Z' }],
+    openIssues: [scopedIssue({ number: 228, title: 'nano-noise tokens', body: 'strip nano' })],
   });
   expect(p).toContain('"beer_id": 7');
   expect(p).toContain('#228');
@@ -78,7 +113,7 @@ test('buildTriagePrompt: contains orphans, issues and class definitions', () => 
 test('buildTriagePrompt: truncates over-long issue bodies', () => {
   const p = buildTriagePrompt({
     orphans: [],
-    openIssues: [{ number: 1, title: 't', body: 'x'.repeat(2500), labels: [], createdAt: '2026-01-01T00:00:00Z' }],
+    openIssues: [scopedIssue({ number: 1, title: 't', body: 'x'.repeat(2500), labels: [] })],
   });
   expect(p).toContain('x'.repeat(2000));
   expect(p).not.toContain('x'.repeat(2001));
@@ -107,8 +142,8 @@ test('buildTriagePrompt: bounds scraped orphan fields', () => {
 });
 
 test('buildTriagePrompt: caps rendered open issues at 30', () => {
-  const openIssues = Array.from({ length: 40 }, (_, i) => ({
-    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [], createdAt: '2026-01-01T00:00:00Z',
+  const openIssues = Array.from({ length: 40 }, (_, i) => scopedIssue({
+    number: i + 1, title: `issue ${i + 1}`, body: 'b', labels: [],
   }));
   const p = buildTriagePrompt({ orphans: [], openIssues });
   expect(p).toContain('#30 ');
