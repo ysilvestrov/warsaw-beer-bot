@@ -73,6 +73,36 @@ export const MAX_NEW_ISSUES_PER_RUN = 3;
 // sharing one heading) is visible to the human reading the report, not silent data loss.
 const MAX_TARGET_CHARS = 60;
 
+// #509 review round 5 (hole 1): `reason` has no bound of its own either. It comes from
+// `explainScopeRejection` (triage-scope.ts), which for a `contains` term is
+// `describeTerm(failing)` = `${col} ${op} ${value}` — `value` is the model-authored
+// `contains` term's free-text value, `z.string().min(1)`, no max, no charset. Bounding
+// `target` alone (above) is not enough: a long enough `reason` can, on its own, push the
+// note's structured part (`off-scope <target>: <reason>`) right up against the outer
+// `.slice(0, 500)` cut, so the cut lands inside the ` | ` delimiter itself instead of past
+// it — not truncating the tail cleanly, but leaving a note that ends in a bare `" |"`
+// with no trailing space. `OFF_SCOPE`'s tail group requires the full three-character
+// literal ` | ` to match at all, so it fails, and the non-greedy reason group backtracks
+// to swallow the stray `" |"` into the reason text: the note still matches (this is why
+// it is a display bug, not a parse failure), but a dangling pipe leaks into what the
+// inbox shows as the reason, and the model's own review_note is silently dropped instead
+// of merely truncated. Same fix as the target: bound the piece BEFORE assembly. With
+// target capped at 60 and reason capped here at 200, the structured prefix plus the full
+// delimiter is at most `"off-scope ".length (10) + 60 + ": ".length (2) + 200 + " | ".length (3)` =
+// 275 characters — nowhere near 500 — so the delimiter is always assembled whole before
+// the outer slice ever runs, and the only thing that slice can still cut is the model's
+// own trailing sentence. That is the degenerate case this cap accepts on purpose: a
+// reason long enough to want the ENTIRE 500-character budget for itself still only ever
+// gets truncated to 200 well-formed characters, producing a note with no tail sentence at
+// all (`review_note` dropped) rather than a note with half a delimiter. A note missing its
+// tail is a smaller loss than one whose reason field is corrupted — the tail is optional
+// context, the reason is the fact a human is meant to act on. 200 is picked the same way
+// 60 is for the target: production reasons are `<col> <op> <value>` over a handful of
+// short column names and operators (`source_url contains ...`, `brewery = ...`), so 200
+// leaves generous headroom over anything measured while still leaving most of the
+// 500-character budget for the tail in the common case.
+const MAX_REASON_CHARS = 200;
+
 // #509 review round 3 (findings A & B — see MAX_TARGET_CHARS above for the rejected
 // finding C): the prior two rounds each patched OFF_SCOPE's regex (triage-inbox.ts) to
 // survive one more shape of model text, and each patch immediately produced a new failure
@@ -111,7 +141,19 @@ const MAX_TARGET_CHARS = 60;
 // delimiter OFF_SCOPE splits on, now smuggled in by whitespace instead of by the model
 // typing it directly. Collapse-then-substitute is the only order that closes both the
 // literal-delimiter case and the delimiter-hiding-behind-whitespace case in one pass.
-const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ');
+//
+// #509 review round 5 (hole 2): `\s+` collapses an INTERIOR run to one space but leaves a
+// single LEADING or TRAILING space untouched — collapsing a run of length 1 is a no-op.
+// A target of `" cider "` therefore survived as `" cider "`, not `"cider"`: an invisible
+// padding difference that made `groupOwnerless` file it under its own heading instead of
+// joining the `"cider"` group, and rendered as a heading with leading/trailing blank
+// space in the inbox. `.trim()` after the collapse removes exactly that padding. Order
+// between collapse and trim does not matter here (trim only ever touches the edges,
+// collapse only ever touches interior runs, and neither can reintroduce work for the
+// other), unlike the `: `/`|` substitutions below, which genuinely do depend on running
+// after the collapse — so this is placed after collapse simply to read as one pipeline,
+// not because reversing it would break anything.
+const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ').trim();
 const sanitizeTarget = (s: string): string =>
   collapseWhitespace(s).replace(/: /g, '; ').replace(/\|/g, '/');
 const sanitizeReason = (s: string): string =>
@@ -280,25 +322,33 @@ export function planTriageActions(
     // not two spellings of the same one: the row never claimed cohort membership and lost,
     // so explainScopeRejection's "outside the cohort" would misreport WHY nothing matched.
     const reason = scope === null ? 'no scope block' : explainScopeRejection(row, verdict.review_class, scope);
-    // Bound TARGET before the outer cap, not instead of it: capping only the whole string
-    // (the pre-review shape) truncates wherever the 500-char limit happens to fall, which
-    // for a long enough target lands inside "off-scope <target>" itself and eats the ": "
-    // separator. Bounding the target first guarantees the structured prefix always
-    // survives; the outer `.slice(0, 500)` remains as the belt-and-braces bound on the
-    // free-text tail (reason + the model's own review_note).
+    // Bound TARGET and REASON before the outer cap, not instead of it: capping only the
+    // whole string (the pre-review shape) truncates wherever the 500-char limit happens
+    // to fall, which for a long enough target OR reason lands inside the structured
+    // prefix itself and eats a delimiter the parser depends on ("off-scope <target>"
+    // losing its ": " separator, or "<reason>" losing the " | " tail delimiter — see
+    // MAX_REASON_CHARS above for the full failure mode of the second one). Bounding both
+    // pieces first guarantees the structured prefix `off-scope <target>: <reason>` always
+    // survives whole, delimiters included; the outer `.slice(0, 500)` remains as the
+    // belt-and-braces bound on the one piece that is genuinely free-text tail now: the
+    // model's own review_note.
     //
     // #509 review round 3: sanitize BEFORE bounding, not instead of it — sanitizeTarget
-    // never GROWS its input (each delimiter substitution is one character for one or
-    // two, and round 4's whitespace collapse can only shrink a run down to one space),
-    // so the 60-char budget always lands on sanitized content, never mid-substitution.
+    // and sanitizeReason never GROW their input (each delimiter substitution is one
+    // character for one or two, and round 4's whitespace collapse can only shrink a run
+    // down to one space), so the char budgets always land on sanitized content, never
+    // mid-substitution.
     const sanitizedTarget = sanitizeTarget(target);
     const boundedTarget = sanitizedTarget.length > MAX_TARGET_CHARS
       ? sanitizedTarget.slice(0, MAX_TARGET_CHARS) : sanitizedTarget;
+    const sanitizedReason = sanitizeReason(reason);
+    const boundedReason = sanitizedReason.length > MAX_REASON_CHARS
+      ? sanitizedReason.slice(0, MAX_REASON_CHARS) : sanitizedReason;
     quiet.push({
       ...verdict,
       issue_number: null,
       new_issue_key: null,
-      review_note: `off-scope ${boundedTarget}: ${sanitizeReason(reason)} | ${sanitizeReviewNote(verdict.review_note)}`.slice(0, 500),
+      review_note: `off-scope ${boundedTarget}: ${boundedReason} | ${sanitizeReviewNote(verdict.review_note)}`.slice(0, 500),
     });
   };
 

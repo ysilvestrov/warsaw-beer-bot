@@ -733,6 +733,37 @@ test.each([
     expectedKey: `${'k'.repeat(30)} ${'z'.repeat(29)}`,
     expectedReason: 'source_url contains foo bar',
   },
+  // #509 review round 5 (hole 1): a `contains` value long enough that "source_url
+  // contains <value>" alone pushes the note's structured part right up to the 500-char
+  // boundary — with the pre-fix code this is exactly the shape that lands the outer
+  // `.slice(0, 500)` cut inside the ` | ` delimiter (a bare trailing " |", no space
+  // after it), which the OLD regex still technically matched by letting the reason
+  // group swallow the stray "|". MAX_REASON_CHARS bounds the reason to 200 chars BEFORE
+  // assembly, so the full delimiter always survives and this round-trips cleanly.
+  {
+    name: 'a contains value (465 chars) long enough to push the delimiter onto the 500-char boundary',
+    key: 'plain-key-4', containsValue: 'x'.repeat(465), reviewNote: 'note',
+    expectedKey: 'plain-key-4', expectedReason: `source_url contains ${'x'.repeat(180)}`,
+  },
+  // The degenerate case named in the review: a reason so long it could consume the
+  // ENTIRE 500-character budget by itself (10,000 chars, nowhere near boundary
+  // arithmetic — this is not "almost 500", it dwarfs it). MAX_REASON_CHARS truncates it
+  // to the same 200 characters regardless of how far past the cap it started, producing
+  // a note with no tail (review_note dropped) rather than a note with a corrupted
+  // delimiter.
+  {
+    name: 'a contains value (10,000 chars) long enough to consume the whole note budget by itself',
+    key: 'plain-key-5', containsValue: 'y'.repeat(10000), reviewNote: 'note',
+    expectedKey: 'plain-key-5', expectedReason: `source_url contains ${'y'.repeat(180)}`,
+  },
+  // #509 review round 5 (hole 2): `collapseWhitespace`'s `\s+` regex collapses an
+  // INTERIOR run to one space but leaves a single LEADING/TRAILING space untouched
+  // (collapsing a run of length 1 is a no-op) — the added `.trim()` closes that.
+  {
+    name: 'a target with leading and trailing whitespace',
+    key: '  cider  ', containsValue: 'baseline', reviewNote: 'note',
+    expectedKey: 'cider', expectedReason: 'source_url contains baseline',
+  },
 ])('off-scope note round-trips through the real groupOwnerless: $name', ({
   key, containsValue, reviewNote, expectedKey, expectedReason,
 }) => {
@@ -751,4 +782,44 @@ test.each([
   const [group] = groupOwnerless([ownerless]);
   expect(group.key).toBe(expectedKey);
   expect(group.reason).toBe(expectedReason);
+});
+
+// #509 review round 5 (hole 2, second half): trimming a single target proves the target
+// itself comes out clean, but the actual failure mode was two rows that should share ONE
+// inbox heading splitting into two — the whitespace was invisible, so nobody noticed two
+// groups where there should have been one. This is a distinct shape from every row in the
+// table above (which each check one note's round-trip) and doesn't fit that table's
+// single-verdict per-row structure, so it stands alone: two verdicts, two model-authored
+// targets differing only by surrounding whitespace, one combined call to the real
+// groupOwnerless, asserting they land in the SAME group rather than checking either
+// note in isolation.
+test('two targets differing only by surrounding whitespace land in the same inbox group', () => {
+  const a: Analysis = {
+    verdicts: [
+      v({ beer_id: 1, new_issue_key: ' cider', review_note: 'note' }),
+      v({ beer_id: 2, new_issue_key: 'cider ', review_note: 'note' }),
+    ],
+    new_issues: [
+      {
+        key: ' cider', title: 't1', body: 'b', labels: [],
+        scope: { beer_ids: [], where: [{ col: 'source_url', op: 'contains', value: 'baseline' }] },
+      },
+      {
+        key: 'cider ', title: 't2', body: 'b', labels: [],
+        scope: { beer_ids: [], where: [{ col: 'source_url', op: 'contains', value: 'baseline' }] },
+      },
+    ],
+  };
+  // row(1) and row(2) both default to source_url: '', which never contains 'baseline' —
+  // both proposed issues' scope contradicts their own founding row, so refuseRoute fires
+  // for both (guard 2 applies to a proposed issue too, same as the rest of this file).
+  const plan = planTriageActions(a, [], rows(1, 2), noProbes, new Set());
+  expect(plan.quiet).toHaveLength(2);
+  const ownerless = plan.quiet.map((q) => ({
+    beer_id: q.beer_id, brewery: 'B', name: 'N', review_class: q.review_class, review_note: q.review_note,
+  }));
+  const groups = groupOwnerless(ownerless);
+  expect(groups).toHaveLength(1);
+  expect(groups[0].key).toBe('cider');
+  expect(groups[0].rows.map((r) => r.beer_id).sort()).toEqual([1, 2]);
 });
