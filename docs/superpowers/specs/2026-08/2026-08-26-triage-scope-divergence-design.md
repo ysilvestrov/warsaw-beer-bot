@@ -127,9 +127,33 @@ Consequences, each checked against the code:
 - **`skipped` regains its meaning.** Today `skipped == scope_violation` exactly, every day since
   08-21 — "skipped" is almost entirely our own guard. Afterwards only real anomalies remain:
   duplicate verdict, contradictory routing, invented issue number.
+  **[Superseded during implementation]** `skipped` also carries scope-refused `not_a_beer`
+  verdicts — see the carve-out below.
 - **The digest keeps `N поза scope`** (the guard counter still fires) but it now means *recorded
   without an owner* rather than *lost*. A separate counter is added so the checkpoint can measure
   it apart from `causeStripped`, which is a different reason for the same ownerless state.
+  **[Superseded during implementation]** The `N поза scope` part was REMOVED from the digest: it
+  and `N без власника (поза scope)` name the same rows, and publishing both is the #432
+  double-count shape. `guardHits.scope_violation` stays in the logged outcome payload, which is
+  where the checkpoint reads it.
+
+### Superseded by the final review: `not_a_beer` is carved out of the refusal path
+
+The rule above — "a scope violation refutes the target, not the class" — holds for every class
+whose verdict is recoverable. `not_a_beer` is not one of them: `orphanNotOnTapPredicate` excludes
+it from **both** enrichment pools unconditionally, so applying it removes the row from the
+pipeline permanently, and `listOwnerlessRows` does not cover it, so the inbox would not show it
+either. Recording it on the strength of a routing claim the guard just rejected would create
+exactly the unsafe half of what `CLASS_LABELS` already warns about: *an irreversible verdict that
+leaves no scoped issue trail*.
+
+So `refuseRoute` raises `guardHits.scope_violation`, raises `skipped`, and leaves a refused
+`not_a_beer` untriaged for tomorrow — the pre-change behaviour, for that one class.
+
+Measured before deciding, by replaying all 28 archived runs: **0 of 62 `not_a_beer` verdicts ever
+named an issue at all** (matcher_bug: 302 of 369 do; parser_bug: 15 of 98). The carve-out has
+therefore never yet fired in production, and costs at most one extra LLM verdict on the day it
+first does. Found by the final whole-branch review; six per-task reviews passed it.
 
 `explainScopeRejection(row, cls, scope)` is new and small: the first term that failed
 (`candidates_count = 0`), or `outside the cohort` for a cohort-only scope. It lives beside
