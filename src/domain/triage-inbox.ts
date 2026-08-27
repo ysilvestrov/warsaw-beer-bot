@@ -41,7 +41,12 @@ export function buildInboxBody(
   const head = [
     `Оновлено автоматично: ${dateKey}. Не редагуй тіло — воно перезаписується щодня.`,
     '',
-    `Рядків з класом і без issue: **${totalOwnerless}** (з них ${groupable} з машинною причиною; `
+    // #509 fix round 1: this counts only matcher_bug/parser_bug — the two actionable
+    // classes that ever carry an issue link in the first place. unidentifiable/
+    // not_on_untappd are quiet by design and never own an issue, so they were never
+    // candidates for "ownerless" and saying "з класом" without naming which classes
+    // overstated what totalOwnerless actually measures.
+    `Рядків matcher_bug/parser_bug без issue: **${totalOwnerless}** (з них ${groupable} з машинною причиною; `
     + `решта — вільні нотатки моделі, вони належать #508).`,
     '',
   ];

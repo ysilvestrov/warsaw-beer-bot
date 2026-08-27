@@ -1154,28 +1154,41 @@ test('#431 line: seven saturated → top five plus the total', () => {
 
 // --- #509 the triage inbox --------------------------------------------------------
 
+// #509 fix round 1: the row with the off-scope note (beer 1) is ALREADY reviewed before
+// this run starts — that is what makes it an ownerless row the inbox has to report. A
+// second, UNREVIEWED orphan (beer 2) is seeded so this run is a real one: listUntriagedFailures
+// returns beer 2, the model gives it a (quiet) verdict, the write loop runs, and the inbox is
+// published from the NORMAL-path call site (after reconcileSaturatedLabels) — not the
+// no-new-orphans early return. createIssue is otherwise uncalled in this scenario (beer 2's
+// verdict is a quiet class, no routing), so the single call captured below IS the inbox create.
 test('the inbox issue is created without the routing label, so it can never become a target', async () => {
   const d = db();
   seedOrphan(d, 1);
   setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  seedOrphan(d, 2);
   const github = gh({
     listOpenIssues: vi.fn().mockResolvedValue([]),
     createIssue: vi.fn().mockResolvedValue(600),
   });
   await orphanTriage({
     db: d, log, github, now: inWindow,
-    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+    llm: llm({ verdicts: [{ beer_id: 2, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
   });
+  expect(github.createIssue).toHaveBeenCalledTimes(1);
   const created = github.createIssue.mock.calls.at(-1)![0];
   expect(created.labels).toEqual([INBOX_LABEL]);
   expect(created.labels).not.toContain(TRIAGE_LABEL);
   expect(created.body).toContain('#300');
 });
 
+// Same reasoning as the test above: beer 1 is already reviewed (the ownerless row the
+// inbox must report), beer 2 is a fresh untriaged orphan so a real run happens and this
+// exercises the normal-path publishTriageInbox call, not the no-new-orphans one.
 test('an existing open inbox is rewritten, not duplicated', async () => {
   const d = db();
   seedOrphan(d, 1);
   setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  seedOrphan(d, 2);
   const github = gh({
     listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
       ? [{ number: 600, title: 'inbox', body: 'old', labels: [INBOX_LABEL], createdAt: '2026-08-01T00:00:00.000Z' }]
@@ -1184,7 +1197,7 @@ test('an existing open inbox is rewritten, not duplicated', async () => {
   });
   await orphanTriage({
     db: d, log, github, now: inWindow,
-    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+    llm: llm({ verdicts: [{ beer_id: 2, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
   });
   expect(github.createIssue).not.toHaveBeenCalled();
   expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('#300'));
