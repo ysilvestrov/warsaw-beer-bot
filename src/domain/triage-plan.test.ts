@@ -1,6 +1,7 @@
 import {
   planTriageActions, computeSaturated, SATURATION_ALERT_ROWS, type ScopedIssue,
 } from './triage-plan';
+import { groupOwnerless } from './triage-inbox';
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
@@ -569,6 +570,29 @@ test('the off-scope note is capped at 500 characters', () => {
   };
   const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
   expect(plan.quiet[0].review_note.length).toBeLessThanOrEqual(500);
+});
+
+// #509 review (finding 1): the 500-char cap test above proves only the LENGTH — it never
+// proves the note stays PARSEABLE, and it wasn't: with the pre-review code, slicing the
+// whole string to 500 truncated the ": <reason>" separator away entirely for a 600-char
+// key (no `: ` survives the slice), so `groupOwnerless` could not recover the target and
+// the row landed in `unrecognised` instead of grouped under the key that refused it. This
+// test closes that gap by round-tripping the note through the real consumer.
+test('a 600-character key still yields a note groupOwnerless parses into the right key and reason', () => {
+  const longKey = 'k'.repeat(600);
+  const a: Analysis = {
+    verdicts: [v({ beer_id: 1, new_issue_key: longKey, review_note: 'shop brand in brewery field' })],
+    new_issues: [{
+      key: longKey, title: 't', body: 'b', labels: [],
+      scope: { beer_ids: [], where: [{ col: 'candidates_count', op: '=', value: 0 }] },
+    }],
+  };
+  const plan = planTriageActions(a, [], [row(1, { candidates_count: 3 })], noProbes, new Set());
+  const note = plan.quiet[0].review_note;
+  const ownerless = { beer_id: 1, brewery: 'B', name: 'N', review_class: 'matcher_bug' as const, review_note: note };
+  const [group] = groupOwnerless([ownerless]);
+  expect(group.key).toBe('k'.repeat(60)); // truncated to MAX_TARGET_CHARS, not to 500 total
+  expect(group.reason).toBe('candidates_count = 0');
 });
 
 // Coordinator's ruling: an issue with NO scope block at all must not be explained via

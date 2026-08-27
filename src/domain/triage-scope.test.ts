@@ -162,18 +162,29 @@ test('a contains value that looks like a scope block cannot hijack the parse', (
   expect(parseScopeBlock(renderScopeBlock(scope))).toEqual(scope);
 });
 
-test('a cohort-only scope can never accept a new row, so it is not a routable target', () => {
-  expect(isRoutableTarget({ scope: { beer_ids: [1, 2], where: [] } })).toBe(false);
+// #509 review (finding 3): rowSatisfiesScope accepts a row by COHORT MEMBERSHIP before it
+// ever looks at `where`, so a cohort-only issue is routable exactly when today's batch
+// intersects its cohort — never unconditionally, and never unconditionally not.
+test('a cohort-only scope IS routable when the batch intersects its cohort', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([2, 5]));
+  expect(isRoutable({ scope: { beer_ids: [1, 2], where: [] } })).toBe(true);
 });
 
-test('a missing scope block is not a routable target', () => {
-  expect(isRoutableTarget({ scope: null })).toBe(false);
+test('a cohort-only scope is NOT routable when the batch does not intersect its cohort', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([9, 10]));
+  expect(isRoutable({ scope: { beer_ids: [1, 2], where: [] } })).toBe(false);
 });
 
-test('a where-scope is routable, cohort or not', () => {
+test('a missing scope block is never a routable target, batch or not', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([1, 2]));
+  expect(isRoutable({ scope: null })).toBe(false);
+});
+
+test('a where-scope is routable regardless of the batch, cohort or not', () => {
   const where = [{ col: 'candidates_count', op: '=', value: 0 } as const];
-  expect(isRoutableTarget({ scope: { beer_ids: [], where } })).toBe(true);
-  expect(isRoutableTarget({ scope: { beer_ids: [7], where } })).toBe(true);
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set());
+  expect(isRoutable({ scope: { beer_ids: [], where } })).toBe(true);
+  expect(isRoutable({ scope: { beer_ids: [7], where } })).toBe(true);
 });
 
 test('the rejection reason names the first term the row contradicts', () => {

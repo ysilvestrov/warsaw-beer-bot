@@ -92,6 +92,14 @@ test('an unverified cause gets its own group, distinct from an unprobed absence'
 // an absence note — a newline-bearing off-scope note would then be displayed with the
 // reason "absence was never probed", which is simply false for a row that was never about
 // absence at all.
+// #509 review round 2 (finding 2): `new_issue_key` carries no whitespace restriction in the
+// schema, so a target like `cider brand line` (spaced, unlike the hyphenated keys the model
+// usually picks) must still group under its own key rather than fail to parse.
+test('a target containing whitespace still groups correctly', () => {
+  const groups = groupOwnerless([r(1, 'off-scope cider brand line: candidates_count = 0')]);
+  expect(groups.map((g) => [g.key, g.reason])).toEqual([['cider brand line', 'candidates_count = 0']]);
+});
+
 test('a note that fails to parse (e.g. a newline inside an off-scope note) reads as unrecognised, not as an absence note', () => {
   const groups = groupOwnerless([
     r(1, 'off-scope #300: candidates_count = 0\nextra line the regex cannot span'),

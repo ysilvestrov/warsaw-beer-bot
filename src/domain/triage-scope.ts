@@ -141,19 +141,39 @@ export function rowSatisfiesScope(
 }
 
 // #509: a target the guard will refuse by construction must not be offered to the model as
-// one. `where.length === 0` is the whole test: rowSatisfiesScope returns false for every row
-// outside an enumerated cohort when there is no `where` to fall back on, so a cohort-only
-// scope — and a missing block — can accept nothing that is not already listed. A type
-// predicate rather than a boolean so the prompt input cannot be built from unfiltered issues.
+// one. A type predicate rather than a boolean so the prompt input cannot be built from
+// unfiltered issues.
+//
+// #509 review (finding 3): the first version of this predicate tested `where.length > 0`
+// alone and ignored `beer_ids` entirely — but `rowSatisfiesScope` accepts a row by COHORT
+// MEMBERSHIP (`scope.beer_ids.includes(row.beer_id)`) BEFORE it ever looks at `where`. A
+// cohort-only issue is therefore not "can accept nothing" — it can accept exactly the rows
+// its cohort enumerates. Hiding it from the model regardless of whether today's batch falls
+// inside that cohort made the prompt filter STRICTER than the guard, removing a routing the
+// guard would have accepted. Measured over 26 archived production runs: on 4 of them (#322
+// with row 34642, twice; #320 with 31816; #320 with 30667) a cohort-only issue's `beer_ids`
+// overlapped that day's batch — roughly once a week, not pathological, but unintended and
+// undocumented.
+//
+// So routability is now a function of the CURRENT BATCH, not the scope alone: a target is
+// offered when its `where` is non-empty (true regardless of any batch — an empty `where`
+// never passes vacuously, see rowSatisfiesScope) OR its cohort intersects the batch's
+// beer_ids. `batchBeerIds` is curried in as its own argument, ahead of the row, rather than
+// added as a second positional parameter: `Array.prototype.filter` still takes the returned
+// closure directly (`parsed.filter(isRoutableTarget(batchBeerIds))`), and TypeScript keeps
+// narrowing `scope` from `Scope | null` to `Scope` through `.filter` — wrapping a
+// two-argument predicate in an unannotated arrow loses that narrowing.
 //
 // Deliberately NOT also checking isLegalScope: legality is a rule about issue CREATION (a
 // `where` of review_class alone is a dumping ground), while this is a rule about whether an
 // existing target can accept anything at all. Conflating them would silently hide legacy
 // issues from the model instead of letting the guard judge them.
 export function isRoutableTarget<T extends { scope: Scope | null }>(
-  i: T,
-): i is T & { scope: Scope } {
-  return i.scope !== null && i.scope.where.length > 0;
+  batchBeerIds: ReadonlySet<number>,
+): (i: T) => i is T & { scope: Scope } {
+  return (i): i is T & { scope: Scope } =>
+    i.scope !== null
+    && (i.scope.where.length > 0 || i.scope.beer_ids.some((id) => batchBeerIds.has(id)));
 }
 
 // #509: the same decision rowSatisfiesScope makes, with the reason attached, so a refused

@@ -85,6 +85,19 @@ Two boundaries, both load-bearing:
 - The filter predicate is computed from the same parsed `scope`, in `triage-scope.ts`, next to
   `rowSatisfiesScope`. One definition of "this target can accept something", not two.
 
+**[Superseded by the final review]** "A cohort with no `where` ... can never accept a new row"
+is wrong: `rowSatisfiesScope` accepts a row by cohort membership (`scope.beer_ids.includes
+(row.beer_id)`) *before* it ever looks at `where`, so a cohort-only issue can accept exactly the
+rows its cohort enumerates — it is not "can accept nothing", only "can accept nothing outside
+the cohort". The original filter (`where.length > 0` alone) ignored `beer_ids` entirely and hid
+such an issue from the model regardless of whether the current batch fell inside its cohort,
+which is *stricter than the guard*: a routing the guard would have accepted was never offered.
+Measured over 26 archived production runs: on 4 of them (#322 with row 34642, twice; #320 with
+31816; #320 with 30667) a cohort-only issue's `beer_ids` overlapped that day's batch. Fixed by
+making `isRoutableTarget` a function of the current batch: a target is offered when `where` is
+non-empty OR the scope's cohort intersects the batch's beer_ids. Found by the final whole-branch
+review; six per-task reviews passed it.
+
 ## Change 3 — a refuted route keeps the class
 
 Both scope-violation sites in `triage-plan.ts` (existing target ~247, proposed target ~261)

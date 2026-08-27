@@ -498,10 +498,14 @@ test('guardHits on the finished outcome carries per-guard counts', async () => {
 test('a target the guard would always refuse is not offered to the model, but the guard still sees it', async () => {
   const d = db();
   [1, 2].forEach((n) => seedOrphan(d, n));
-  // beer_ids deliberately excludes 2: rowSatisfiesScope treats cohort membership as an
-  // unconditional match (OR'd with `where`), so if beer 2 were listed here its routing
-  // to #300 would legitimately succeed and never exercise the guard this test targets.
-  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[1],"where":[]}\n```';
+  // beer_ids deliberately excludes BOTH batch rows (1 and 2): rowSatisfiesScope treats
+  // cohort membership as an unconditional match (OR'd with `where`), so a cohort that
+  // named either one would let its routing legitimately succeed and never exercise the
+  // guard this test targets. #509 review (finding 3): isRoutableTarget now also offers a
+  // cohort-only issue whose cohort intersects the CURRENT BATCH — so "not offered" here
+  // depends on beer_id 99 being outside this test's batch, not merely on the scope having
+  // no `where`. See triage-scope.test.ts for the case where the cohort DOES intersect.
+  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[99],"where":[]}\n```';
   const WHERE_SCOPED = 'b\n\n```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":"=","value":0}]}\n```';
   const github = gh({
     listOpenIssues: vi.fn().mockResolvedValue([
@@ -525,6 +529,35 @@ test('a target the guard would always refuse is not offered to the model, but th
   expect(model.analyze.mock.calls[0][0].openIssues.map((i: { number: number }) => i.number)).toEqual([302]);
   const outcome = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
   expect(outcome).toContain('поза scope');
+});
+
+// #509 review (finding 3): the mirror of the test above — a cohort-only issue whose
+// cohort DOES intersect today's batch can accept exactly the rows it enumerates
+// (rowSatisfiesScope ORs cohort membership with `where`), so hiding it from the model was
+// stricter than the guard. Measured across 26 archived production runs: this happened on
+// 4 of them (#322 with row 34642 twice, #320 with 31816, #320 with 30667).
+test('a cohort-only issue whose cohort intersects the batch IS offered to the model', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[1],"where":[]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 'cohort only', body: COHORT_ONLY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null },
+    ],
+    new_issues: [],
+  };
+  const model = llm(analysis);
+  await orphanTriage({ db: d, log, llm: model, github, now: inWindow });
+
+  expect(model.analyze.mock.calls[0][0].openIssues.map((i: { number: number }) => i.number)).toEqual([300]);
+  const outcome = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  // Beer 1 IS in the cohort, so the routing succeeds — no guard hit, not off-scope.
+  expect(outcome).not.toContain('поза scope');
 });
 
 // #509: a row refused by the scope guard used to be left untouched (review_class NULL),

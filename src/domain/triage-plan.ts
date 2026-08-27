@@ -54,6 +54,19 @@ export interface TriagePlan {
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
 
+// #509 review (finding 1): the refused TARGET must be bounded on its own, separately from
+// the note's overall 500-char cap. `target` at the proposed-issue site is
+// `verdict.new_issue_key`, which VerdictSchema bounds only by `z.string().min(1)` — no
+// maximum — so a long enough key can eat the whole `.slice(0, 500)` budget on its own and
+// truncate away the `: <reason>` separator `groupOwnerless`'s OFF_SCOPE regex depends on
+// (triage-inbox.ts), silently dropping the row into the `unrecognised` bucket instead of
+// under the target that refused it. Real model-authored keys measured in production run
+// 15-30 characters (`flasker_glued_brewery`, `garbled-name-noise`,
+// `lobster_brewery_suffix`); 60 is a generous multiple of that, chosen so nothing
+// legitimate is ever truncated while nothing pathological can consume the budget the
+// structured prefix needs to survive.
+const MAX_TARGET_CHARS = 60;
+
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
 // enumerated rows, so a lifetime count would misread the very shape (a narrow issue
 // split out of a magnet) this whole area exists to encourage. Measured on prod
@@ -211,11 +224,18 @@ export function planTriageActions(
     // not two spellings of the same one: the row never claimed cohort membership and lost,
     // so explainScopeRejection's "outside the cohort" would misreport WHY nothing matched.
     const reason = scope === null ? 'no scope block' : explainScopeRejection(row, verdict.review_class, scope);
+    // Bound TARGET before the outer cap, not instead of it: capping only the whole string
+    // (the pre-review shape) truncates wherever the 500-char limit happens to fall, which
+    // for a long enough target lands inside "off-scope <target>" itself and eats the ": "
+    // separator. Bounding the target first guarantees the structured prefix always
+    // survives; the outer `.slice(0, 500)` remains as the belt-and-braces bound on the
+    // free-text tail (reason + the model's own review_note).
+    const boundedTarget = target.length > MAX_TARGET_CHARS ? target.slice(0, MAX_TARGET_CHARS) : target;
     quiet.push({
       ...verdict,
       issue_number: null,
       new_issue_key: null,
-      review_note: `off-scope ${target}: ${reason} | ${verdict.review_note}`.slice(0, 500),
+      review_note: `off-scope ${boundedTarget}: ${reason} | ${verdict.review_note}`.slice(0, 500),
     });
   };
 

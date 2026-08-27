@@ -359,7 +359,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       // number and reconcileSaturatedLabels must still clear a label off an issue the
       // prompt no longer shows.
       const parsed = openIssues.map((i) => ({ ...i, scope: parseScopeBlock(i.body) }));
-      const routable = parsed.filter(isRoutableTarget);
+      // #509 review (finding 3): routability is judged against THIS batch's beer_ids, not the
+      // scope alone — a cohort-only issue can accept exactly the rows its cohort enumerates, so
+      // hiding it from the model regardless of the batch made this filter stricter than the
+      // guard (measured 4/26 archived runs, see isRoutableTarget). `orphans`, not `parsed` or
+      // `routable`, is today's batch.
+      const batchBeerIds = new Set(orphans.map((o) => o.beer_id));
+      const routable = parsed.filter(isRoutableTarget(batchBeerIds));
       const ex1 = await llm.analyze({ orphans, openIssues: routable, probes });
       exchanges.push(ex1);
       // An empty verdict set on a non-empty batch is anomalous (the prompt asks

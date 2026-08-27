@@ -5,7 +5,7 @@ export const MAX_INBOX_ROWS_PER_GROUP = 15;
 
 export interface InboxGroup { key: string; reason: string; rows: OwnerlessRow[]; }
 
-// #509: the note is now `off-scope <target>: <reason> | <the model's original
+// #509: the note is `off-scope <target>: <reason> | <the model's original
 // review_note>` — the scope refusal is prepended to what the model said, not a
 // replacement for it. The reason group is non-greedy and stops at the first
 // ` | `, so the model's free-text tail (which itself may contain further text,
@@ -14,12 +14,24 @@ export interface InboxGroup { key: string; reason: string; rows: OwnerlessRow[];
 // before any model note existed, or nothing follows the colon but `no scope
 // block` — still matches whole: the optional tail is optional.
 //
-// `.` deliberately still excludes newlines (unfixed): a free-text `review_note` CAN
-// contain one, and when it does this regex fails to match. That used to be silently
-// mislabelled as an absence note (see UNRECOGNISED_KEY below for why); it no longer is,
-// but the regex itself is left alone — widening it is a separate, narrower fix than the
-// mislabelling this round of review is about.
-const OFF_SCOPE = /^off-scope (\S+): (.*?)(?: \| .*)?$/;
+// #509 review round 2 (finding 2): the TARGET group is `.+?` (non-greedy, stops at the
+// first `: `), not `\S+`. `new_issue_key` carries no whitespace restriction in the schema
+// (z.string().min(1)), so a model-authored key like `cider brand line` used to fail this
+// regex outright and fall through to UNRECOGNISED_KEY below. Measured across the
+// archives: 23 model-authored keys, 0 with whitespace — never yet observed in production,
+// but nothing in the schema prevents it, so it is fixed here rather than left as a known
+// gap waiting to fire.
+//
+// `.` still deliberately excludes newlines (still NOT fixed, on purpose): a free-text
+// `review_note` CAN contain one, and when it does, both `.`-based groups (target and
+// reason) fail to span it, so the whole regex fails to match. Before this round that
+// unparsed note was silently mislabelled as an absence note (see UNRECOGNISED_KEY below
+// for why); it no longer is — an unparsed note now falls to UNRECOGNISED_KEY, which is
+// honest about not having parsed it — but widening the regex to span newlines is a
+// separate, narrower fix than the mislabelling this round of review addressed, and was
+// deliberately left undone: measured, 0 model review_notes across the archives contain a
+// newline.
+const OFF_SCOPE = /^off-scope (.+?): (.*?)(?: \| .*)?$/;
 // #509 fix round 3: `no absence evidence:` and `unverified:` are both prefixes THIS
 // pipeline writes (triage-plan.ts's guard 3, and orphan-triage.ts's verification gate
 // respectively) — matched by their own literal prefix, not "whatever OFF_SCOPE failed
