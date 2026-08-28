@@ -218,8 +218,8 @@ housekeeping one at the bottom:
 
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
   check-ins from Untappd (see below). This is the popup's main action. While a
-  sync is running the button is disabled and a stripe moves across it: that
-  means "working", not "broken".
+  sync is running the button is greyed out and the line under it counts up
+  (`Syncing… 1200 / 8200`): that means "working", not "broken".
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
   items, or you just ran `/import`). On a page the extension doesn't support,

@@ -12,14 +12,15 @@
   --bg: #ffffff;
   --fg: #1d1d1f;
   --fg-muted: #66666b;
-  --border: rgba(0, 0, 0, 0.14);
-  --hairline: rgba(0, 0, 0, 0.08);
+  --border: rgba(0, 0, 0, 0.44);   /* control boundary — SC 1.4.11 wants 3:1 */
+  --hairline: rgba(0, 0, 0, 0.08); /* decorative separator — exempt */
 
   --accent: #ab6217;          /* AA-safe fill for white text */
   --accent-hover: #985810;
   --accent-active: #874e0d;
   --accent-fg: #ffffff;
-  --brand: #d9822b;           /* brand hue: mark, focus ring, tints — never text on white */
+  --brand: #d9822b;           /* brand hue: the mark and tints — never text or a ring on white */
+  --ring: #874e0d;            /* focus ring: 6.72:1 on --bg, SC 1.4.11 needs 3:1 */
 
   --surface-quiet: rgba(0, 0, 0, 0.04);
   --surface-quiet-hover: rgba(0, 0, 0, 0.07);
@@ -37,13 +38,14 @@
     --bg: #1c1c1e;
     --fg: #f5f5f7;
     --fg-muted: #98989d;
-    --border: rgba(255, 255, 255, 0.16);
+    --border: rgba(255, 255, 255, 0.38);
     --hairline: rgba(255, 255, 255, 0.1);
 
     --accent: #d9822b;        /* brand hue reads correctly on a dark ground */
     --accent-hover: #e8933f;
     --accent-active: #c2741f;
     --accent-fg: #1d1d1f;
+    --ring: #e8933f;          /* 7.03:1 on the dark ground */
 
     --surface-quiet: rgba(255, 255, 255, 0.07);
     --surface-quiet-hover: rgba(255, 255, 255, 0.11);
@@ -185,7 +187,7 @@ h1 {
 }
 
 :focus-visible {
-  outline: 2px solid var(--brand);
+  outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 
