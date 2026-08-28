@@ -477,12 +477,12 @@ function driftRemote(
     'deploy/rsync-filter': REAL_FILTER,
   }, 'old');
   git(seed, 'push', '-q', 'origin', 'main');
-  const changed = {
+  const changedByKind: Record<'src' | 'lockfile' | 'extension', Record<string, string>> = {
     src: { 'src/x.ts': 'export const x = 2;\n' },
     lockfile: { 'package-lock.json': '{"lockfileVersion":3,"bumped":true}\n' },
     extension: { 'extension/popup.css': 'body{color:red}\n' },
-  }[differsIn];
-  const newSha = commit(seed, changed, 'new');
+  };
+  const newSha = commit(seed, changedByKind[differsIn], 'new');
   git(seed, 'push', '-q', 'origin', 'main');
   const tag = 'autodeploy-20260824T120000Z';
   if (tagAt) {
