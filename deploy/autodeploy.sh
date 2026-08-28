@@ -253,12 +253,26 @@ Run: sudo bash deploy/install-autodeploy.sh"
 # "nothing ships", and the caller must not collapse them: the quiet branch in
 # report_drift_once is quieter than #499's reassuring message, so a failure
 # folded into it would be an outage nobody hears about.
+#
+# The filter is read from BOTH sides — DEPLOYED_SHA and $1 — and the SHIP set
+# is their UNION, for the reason spelled out in autodeploy-guard.sh: deploy.sh
+# rsyncs with `--delete --delete-excluded`, so a path that stops shipping is
+# DELETED from /opt. Reading only the target's filter lets a narrowing commit
+# cloak itself and everything it drops. Here the consequence is silence rather
+# than a deploy, but the same rule applies, and a short or missing answer is
+# "cannot assess" (return 1), never "nothing ships".
 shipping_paths() {
-  local main_sha="$1" filter_file diff_out classified
-  filter_file=$(mktemp) || return 1
+  local main_sha="$1" target_filter deployed_filter diff_out c_target c_deployed
+  local expected=0 line i verdict path
+  target_filter=$(mktemp) || return 1
+  deployed_filter=$(mktemp) || { rm -f "$target_filter"; return 1; }
 
-  if ! git -C "$REPO" show "${main_sha}:deploy/rsync-filter" > "$filter_file" 2>/dev/null; then
-    rm -f "$filter_file"
+  if ! git -C "$REPO" show "${main_sha}:deploy/rsync-filter" > "$target_filter" 2>/dev/null; then
+    rm -f "$target_filter" "$deployed_filter"
+    return 1
+  fi
+  if ! git -C "$REPO" show "${DEPLOYED_SHA}:deploy/rsync-filter" > "$deployed_filter" 2>/dev/null; then
+    rm -f "$target_filter" "$deployed_filter"
     return 1
   fi
   # `-c core.quotePath=false`: without it git C-quotes a non-ASCII path (e.g.
@@ -266,16 +280,51 @@ shipping_paths() {
   # not the path it names) — an ordinary merge would needlessly report
   # "cannot assess".
   if ! diff_out=$(git -C "$REPO" -c core.quotePath=false diff --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null); then
-    rm -f "$filter_file"
+    rm -f "$target_filter" "$deployed_filter"
     return 1
   fi
-  if ! classified=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$filter_file" 2>/dev/null); then
-    rm -f "$filter_file"
+  if ! c_target=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$target_filter" 2>/dev/null); then
+    rm -f "$target_filter" "$deployed_filter"
     return 1
   fi
-  rm -f "$filter_file"
+  if ! c_deployed=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$deployed_filter" 2>/dev/null); then
+    rm -f "$target_filter" "$deployed_filter"
+    return 1
+  fi
+  rm -f "$target_filter" "$deployed_filter"
 
-  printf '%s\n' "$classified" | sed -n 's/^SHIP //p'
+  while IFS= read -r line; do
+    if [ -n "$line" ]; then expected=$((expected + 1)); fi
+  done <<< "$diff_out"
+
+  local t_verdicts=() t_paths=() d_verdicts=() d_paths=()
+  while IFS=' ' read -r verdict path; do
+    if [ -z "$path" ]; then continue; fi
+    case "$verdict" in SHIP|SKIP) ;; *) return 1 ;; esac
+    t_verdicts+=("$verdict")
+    t_paths+=("$path")
+  done <<< "$c_target"
+  while IFS=' ' read -r verdict path; do
+    if [ -z "$path" ]; then continue; fi
+    case "$verdict" in SHIP|SKIP) ;; *) return 1 ;; esac
+    d_verdicts+=("$verdict")
+    d_paths+=("$path")
+  done <<< "$c_deployed"
+
+  # I2 — a classifier that answered for fewer lines than it was handed has told
+  # us nothing, and "nothing" must not read as "nothing ships".
+  if [ "${#t_paths[@]}" -ne "$expected" ] || [ "${#d_paths[@]}" -ne "$expected" ]; then
+    return 1
+  fi
+
+  i=0
+  while [ "$i" -lt "$expected" ]; do
+    if [ "${t_paths[$i]}" != "${d_paths[$i]}" ]; then return 1; fi
+    if [ "${t_verdicts[$i]}" = SHIP ] || [ "${d_verdicts[$i]}" = SHIP ]; then
+      printf '%s\n' "${t_paths[$i]}"
+    fi
+    i=$((i + 1))
+  done
 }
 
 report_drift_once() {

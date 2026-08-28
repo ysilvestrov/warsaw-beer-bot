@@ -27,11 +27,18 @@ echo
 
 # Copies, not symlinks, deliberately: the running deployer must not change
 # under a `git checkout` in the operator's working tree.
-install -m 0755 deploy/autodeploy.sh          /usr/local/bin/wbb-autodeploy
-install -m 0755 deploy/autodeploy-guard.sh    /usr/local/bin/wbb-autodeploy-guard
-install -m 0755 deploy/read-env.sh            /usr/local/bin/wbb-read-env
+# M2 (#527): DEPENDENCIES FIRST. wbb-ships is what wbb-autodeploy and
+# wbb-autodeploy-guard now call to decide what reaches production, so it is
+# installed BEFORE them: installing a consumer first leaves a sub-second window
+# in which a timer tick finds a new deployer and an old (or absent) predicate.
+# It fails closed either way — installed-current.sh reports
+# "deploy/ships.sh (not installed)" and the guard REFUSEs — but the window is
+# free to remove.
 install -m 0755 deploy/ships.sh               /usr/local/bin/wbb-ships
+install -m 0755 deploy/read-env.sh            /usr/local/bin/wbb-read-env
 install -m 0755 deploy/installed-current.sh   /usr/local/bin/wbb-installed-current
+install -m 0755 deploy/autodeploy-guard.sh    /usr/local/bin/wbb-autodeploy-guard
+install -m 0755 deploy/autodeploy.sh          /usr/local/bin/wbb-autodeploy
 install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
 install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
 systemctl daemon-reload

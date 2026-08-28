@@ -67,11 +67,23 @@ fi
 # cannot touch /opt — refuse every security tag. MEASURED 2026-08-28: seven
 # paths, zero of them shipped, autodeploy dead for three and a half days.
 #
-# The filter is read from the TARGET, not from the clone's working tree and
-# not from the deployed commit. A wrong ACCEPT would need a path that ships
-# under target's filter to be classified as non-shipping; reading target's
-# filter makes that impossible by definition, in one step, without relying on
-# `deploy/***` staying inside the filter forever.
+# The filter is read from BOTH SIDES — the deployed commit and the target —
+# and a path counts as shipping if EITHER filter ships it. The design's first
+# answer was "read the target's filter, and a wrong ACCEPT is impossible by
+# definition, in one step". That argument considered only a WIDENED filter, and
+# it is wrong for a NARROWED one, because deploy/deploy.sh runs
+#
+#     rsync -a --delete --delete-excluded --filter='merge deploy/rsync-filter'
+#
+# so a path that STOPS shipping is DELETED from /opt. A commit that narrows the
+# filter — in the limit to just `- *` — therefore cloaks itself and everything
+# it drops: read against the target alone, `deploy/rsync-filter` and every
+# `src/**` file riding with it classify SKIP, the guard ACCEPTs, and the deploy
+# that follows empties /opt, unattended. The old two-name allowlist refused
+# that by name; this predicate must not lose it. The deployed filter's set is
+# material precisely because `--delete` acts on it, so the SHIP set is the
+# UNION of the two sides, and a missing or unparseable filter on EITHER side
+# is a REFUSE.
 #
 # `-c core.quotePath=false`: without it git C-quotes a non-ASCII path (e.g.
 # `"src/\303\251.ts"`), which ships.sh refuses on sight (the quoted form is
@@ -85,38 +97,103 @@ if ! diff_out=$(git -C "$repo" -c core.quotePath=false diff --name-only "$deploy
   exit 1
 fi
 
-filter_file=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
-trap 'rm -f "$filter_file"' EXIT
+# How many verdicts the classifier owes us. ships.sh emits exactly one line per
+# NON-EMPTY input line, so that is what is counted; an empty diff makes this 0
+# and every loop below a no-op.
+expected=0
+while IFS= read -r _line; do
+  if [ -n "$_line" ]; then expected=$((expected + 1)); fi
+done <<< "$diff_out"
 
-if ! git -C "$repo" show "${target}:deploy/rsync-filter" > "$filter_file" 2>/dev/null; then
+target_filter=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
+deployed_filter=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
+trap 'rm -f "$target_filter" "$deployed_filter"' EXIT
+
+if ! git -C "$repo" show "${target}:deploy/rsync-filter" > "$target_filter" 2>/dev/null; then
   echo "REFUSE: $target carries no deploy/rsync-filter — there is no way to tell what would ship"
   exit 1
 fi
 
-if ! classified=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$filter_file" 2>&1); then
-  echo "REFUSE: could not classify the diff against ${target}:deploy/rsync-filter"
-  echo "$classified"
+if ! git -C "$repo" show "${deployed}:deploy/rsync-filter" > "$deployed_filter" 2>/dev/null; then
+  echo "REFUSE: $deployed carries no deploy/rsync-filter — there is no way to tell what is on the server today, and rsync --delete acts on that set"
   exit 1
 fi
 
-violations=()
-ignored=()
+if ! classified_target=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$target_filter" 2>&1); then
+  echo "REFUSE: could not classify the diff against ${target}:deploy/rsync-filter"
+  echo "$classified_target"
+  exit 1
+fi
+
+if ! classified_deployed=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$deployed_filter" 2>&1); then
+  echo "REFUSE: could not classify the diff against ${deployed}:deploy/rsync-filter"
+  echo "$classified_deployed"
+  exit 1
+fi
+
+# I2 — the classifier's stdout is not trusted to be COMPLETE. A $SHIPS_BIN that
+# exits 0 and prints nothing (or fewer lines than it was handed) yields zero
+# violations and a clean ACCEPT: silence read as "nothing ships". Verdicts are
+# collected in input order and the count checked against `expected` below, so a
+# short answer REFUSEs. The real ships.sh is all-or-nothing, but this script is
+# also run standalone with an arbitrary $WBB_SHIPS, and the branch's own rule is
+# that every failure path REFUSEs.
+target_verdicts=()
+target_paths=()
 while IFS=' ' read -r verdict path; do
   if [ -z "$path" ]; then continue; fi
   case "$verdict" in
-    SHIP)
-      case "$path" in
-        package.json|package-lock.json) ;;
-        *) violations+=("$path") ;;
-      esac
-      ;;
-    SKIP) ignored+=("$path") ;;
+    SHIP|SKIP) ;;
     *)
       echo "REFUSE: unexpected classification '$verdict' for $path"
       exit 1
       ;;
   esac
-done <<< "$classified"
+  target_verdicts+=("$verdict")
+  target_paths+=("$path")
+done <<< "$classified_target"
+
+deployed_verdicts=()
+deployed_paths=()
+while IFS=' ' read -r verdict path; do
+  if [ -z "$path" ]; then continue; fi
+  case "$verdict" in
+    SHIP|SKIP) ;;
+    *)
+      echo "REFUSE: unexpected classification '$verdict' for $path"
+      exit 1
+      ;;
+  esac
+  deployed_verdicts+=("$verdict")
+  deployed_paths+=("$path")
+done <<< "$classified_deployed"
+
+if [ "${#target_paths[@]}" -ne "$expected" ] || [ "${#deployed_paths[@]}" -ne "$expected" ]; then
+  echo "REFUSE: the ships predicate answered for ${#target_paths[@]} (target) and ${#deployed_paths[@]} (deployed) of $expected changed path(s) — an incomplete classification is not the statement 'nothing ships'"
+  exit 1
+fi
+
+violations=()
+ignored=()
+i=0
+while [ "$i" -lt "$expected" ]; do
+  path=${target_paths[$i]}
+  if [ "$path" != "${deployed_paths[$i]}" ]; then
+    echo "REFUSE: the two classifications disagree about path $((i + 1)): '$path' vs '${deployed_paths[$i]}'"
+    exit 1
+  fi
+  # The union: a path reaches production if it can be WRITTEN under the
+  # target's filter, or DELETED under the deployed one.
+  if [ "${target_verdicts[$i]}" = SHIP ] || [ "${deployed_verdicts[$i]}" = SHIP ]; then
+    case "$path" in
+      package.json|package-lock.json) ;;
+      *) violations+=("$path") ;;
+    esac
+  else
+    ignored+=("$path")
+  fi
+  i=$((i + 1))
+done
 
 if [ "${#violations[@]}" -gt 0 ]; then
   echo "REFUSE: ${#violations[@]} path(s) that ship to the server and are not the root manifests:"

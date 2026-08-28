@@ -147,18 +147,70 @@ what an unattended deploy may change **among the paths that can**. Everything
 that ships today — `tsconfig.json`, `src/**`, `scripts/**`, `deploy/**` —
 refuses exactly as it refuses now.
 
-**Where the filter comes from: the target commit**, read as
-`git show <target>:deploy/rsync-filter`, not from the clone's working tree.
+**Where the filter comes from: BOTH commits — the deployed one and the target**,
+read as `git show <deployed>:deploy/rsync-filter` and
+`git show <target>:deploy/rsync-filter`, never from the clone's working tree.
+A path ships if **either** filter ships it; the guard's SHIP set is the union.
 
-A wrong ACCEPT would require a path that ships under *target's* filter to be
-classified as non-shipping. Reading target's filter makes that impossible by
-definition, in one step. Reading the deployed commit's filter is also safe
-today, but only through a two-step argument — "a widened filter is itself a
-change to `deploy/rsync-filter`, and `deploy/***` ships, therefore violation" —
-which holds only while `deploy/***` remains in the filter. The one-step
-guarantee survives the day that stops being true.
+Missing file at either ref, or an unparseable filter at either ref: REFUSE.
 
-Missing file at that ref, or an unparseable filter: REFUSE.
+### Why the union — and the argument this replaces (REFUTED)
+
+This section originally said the opposite, and the refutation is worth keeping
+visible. What it said:
+
+> **Where the filter comes from: the target commit.** A wrong ACCEPT would
+> require a path that ships under *target's* filter to be classified as
+> non-shipping. Reading target's filter makes that impossible by definition, in
+> one step. Reading the deployed commit's filter is also safe today, but only
+> through a two-step argument — "a widened filter is itself a change to
+> `deploy/rsync-filter`, and `deploy/***` ships, therefore violation" — which
+> holds only while `deploy/***` remains in the filter. The one-step guarantee
+> survives the day that stops being true.
+
+**That argument considered only a WIDENED filter.** It equates "affects
+production" with "ships under the new filter", and that equation is false,
+because `deploy/deploy.sh:16` runs
+
+```
+sudo rsync -a --delete --delete-excluded --filter='merge deploy/rsync-filter' ...
+```
+
+A path can change production by **leaving** the filter, not only by entering it:
+one that stops shipping is DELETED from `/opt`. So a commit that NARROWS the
+filter cloaks itself and everything it drops. In the limit — rewriting
+`deploy/rsync-filter` to just `- *` — every changed path, the filter file
+included, classifies `SKIP` against the target; violations come back empty; the
+guard ACCEPTs; and the deploy that follows empties `/opt/warsaw-beer-bot`
+unattended, then reports the bot unhealthy and rolls back to a baseline that is
+no longer on disk. Reproduced live against the real guard and the real
+`ships.sh` in the final whole-branch review. The old two-name allowlist refused
+this by name (`deploy/rsync-filter` is not `package.json`), so the one-sided
+read was a *regression* — a wrong ACCEPT on the unattended path, the failure
+class the severity ordering weights above everything else.
+
+The narrower cases were already safe, which is why this was easy to miss:
+dropping only `+ /src/***` while keeping `+ /deploy/***` still makes
+`deploy/rsync-filter` itself a SHIP, hence a violation, hence a REFUSE. The hole
+is specifically a change that removes the rule covering the filter's own
+directory.
+
+**The rule, restated.** `rsync --delete` makes the DEPLOYED filter's set
+material — it is the set that can be deleted — and the target's filter's set is
+what can be written. Production is affected by the union, so:
+
+```
+ships(path) = ships_under(deployed_filter, path) || ships_under(target_filter, path)
+```
+
+The original argument's real content survives inside this: reading the target is
+still what covers a widened filter, in one step, without relying on `deploy/***`
+staying in the filter forever. The union adds the half it was missing. Both
+`git show`es fail closed, and the classifier must answer for every path it was
+handed — a short or empty answer is REFUSE, not "nothing ships".
+
+For the 2026-08-28 replay the two filters are byte-identical, so the union is
+the same set and P1 is unchanged.
 
 **The ACCEPT message changes.** `ACCEPT: lockfile-only change` becomes false —
 the diff may now legitimately carry unrelated paths. It reports how many
@@ -177,8 +229,12 @@ the exact failure mode #490 already had to remove once.
 
 So drift is redefined by the same predicate:
 
-Same rule for the filter's origin as the guard's, applied to drift's newer
-side: `git show origin/main:deploy/rsync-filter`.
+Same rule for the filter's origin as the guard's — the union of both sides,
+`git show DEPLOYED_SHA:deploy/rsync-filter` and
+`git show origin/main:deploy/rsync-filter`. (Originally written as the newer
+side alone; corrected with Change 2 above. Here a narrowed filter buys silence
+rather than a deploy, so it is strictly less severe — but the same rule
+applies, and "cannot assess" is its own state either way.)
 
 ```
 shipping = { p ∈ diff(DEPLOYED_SHA, origin/main) : ships(p) }
@@ -302,8 +358,11 @@ pending tags as stale, which is correct — but the install cannot be skipped
   and the grammar refuses whatever it does not implement.
 - **A test on the filter's own syntax**, so an unsupported rule surfaces at
   merge time rather than in production.
-- **Read the filter from the newer side** (target / `origin/main`), for the
-  one-step safety argument.
+- ~~**Read the filter from the newer side** (target / `origin/main`), for the
+  one-step safety argument.~~ **REFUTED** by the final whole-branch review — it
+  covers a widened filter and not a narrowed one, and `rsync --delete` makes the
+  deployed side material. Superseded by **read BOTH sides and take the union of
+  the SHIP sets**; see Change 2.
 
 ## Rejected
 

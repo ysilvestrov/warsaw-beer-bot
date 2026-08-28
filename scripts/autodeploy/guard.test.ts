@@ -58,6 +58,12 @@ describe('autodeploy-guard.sh', () => {
   let noFilterRepo: string;
   let noFilterBase: string;
   let noFilterHead: string;
+  let narrowRepo: string;
+  let narrowBase: string;
+  let narrowHead: string;
+  let addedFilterRepo: string;
+  let addedFilterBase: string;
+  let addedFilterHead: string;
 
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), 'wbb-guard-'));
@@ -103,6 +109,35 @@ describe('autodeploy-guard.sh', () => {
     git(noFilterRepo, 'config', 'user.name', 'T');
     noFilterBase = commit(noFilterRepo, { 'package.json': '{}' }, 'base');
     noFilterHead = commit(noFilterRepo, { 'package.json': '{"v":2}' }, 'bump');
+
+    // C1 (final review): a target that NARROWS the filter to the degenerate
+    // `- *`. Read against the target alone, every path in this diff —
+    // including the filter itself — classifies SKIP.
+    narrowRepo = mkdtempSync(join(tmpdir(), 'wbb-guard-narrow-'));
+    git(narrowRepo, 'init', '-q', '-b', 'main');
+    git(narrowRepo, 'config', 'user.email', 't@example.com');
+    git(narrowRepo, 'config', 'user.name', 'T');
+    narrowBase = commit(narrowRepo, {
+      'package.json': '{"name":"x"}',
+      'src/index.ts': 'export const a = 1;\n',
+      'deploy/rsync-filter': REAL_FILTER,
+    }, 'base');
+    narrowHead = commit(narrowRepo, {
+      'deploy/rsync-filter': '- *\n',
+      'src/index.ts': 'export const a = 2;\n',
+    }, 'gut the filter and rewrite src');
+
+    // The deployed side has no filter at all while the target does: the
+    // "what is on the server today" half of the union cannot be computed.
+    addedFilterRepo = mkdtempSync(join(tmpdir(), 'wbb-guard-addedfilter-'));
+    git(addedFilterRepo, 'init', '-q', '-b', 'main');
+    git(addedFilterRepo, 'config', 'user.email', 't@example.com');
+    git(addedFilterRepo, 'config', 'user.name', 'T');
+    addedFilterBase = commit(addedFilterRepo, { 'package.json': '{}' }, 'base');
+    addedFilterHead = commit(addedFilterRepo, {
+      'package.json': '{"v":2}',
+      'deploy/rsync-filter': REAL_FILTER,
+    }, 'add the filter');
   });
 
   it('accepts a lockfile-only diff that is on main', () => {
@@ -218,6 +253,42 @@ describe('autodeploy-guard.sh', () => {
     const r = guard(noFilterRepo, noFilterBase, noFilterHead, 'main');
     expect(r.code).toBe(1);
     expect(r.out).toMatch(/carries no deploy\/rsync-filter/);
+  });
+
+  it('C1 (final review): REFUSES a target that guts deploy/rsync-filter to `- *`', () => {
+    // The wrong-ACCEPT the union rule exists to close. deploy.sh rsyncs with
+    // `--delete --delete-excluded`, so a path that STOPS shipping is deleted
+    // from /opt: reading only the target's filter lets a narrowing commit
+    // cloak itself AND everything it drops, and the deploy that follows an
+    // ACCEPT here empties /opt unattended. Both sides are classified and the
+    // SHIP sets unioned, so the deployed filter still ships both paths.
+    const r = guard(narrowRepo, narrowBase, narrowHead, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/ship to the server/);
+    expect(r.out).toContain('deploy/rsync-filter');
+    expect(r.out).toContain('src/index.ts');
+  });
+
+  it('REFUSES when the DEPLOYED commit carries no deploy/rsync-filter', () => {
+    // The deployed half of the union is not optional: without it there is no
+    // way to say what rsync --delete would remove. The message is unique to
+    // this branch (the target-side branch says "what would ship").
+    const r = guard(addedFilterRepo, addedFilterBase, addedFilterHead, 'main');
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/what is on the server today/);
+  });
+
+  it('I2 (final review): REFUSES a ships predicate that exits 0 and answers nothing', () => {
+    // Silence is not the statement "nothing ships". A classifier that drains
+    // stdin and exits 0 produced zero violations and a clean ACCEPT — the
+    // final review waved 15 shipping src/** paths through this way.
+    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-silent-'));
+    const silent = join(stubDir, 'silent-ships.sh');
+    writeFileSync(silent, '#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n');
+    chmodSync(silent, 0o755);
+    const r = guard(repo, basec, withSrc, 'main', { WBB_SHIPS: silent });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/incomplete classification/);
   });
 
   it('C1: refuses a bogus deployed sha instead of silently accepting', () => {
