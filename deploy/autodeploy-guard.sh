@@ -14,6 +14,10 @@ deployed=${2:?deployed_sha required}
 target=${3:?target_ref required}
 main_ref=${4:?main_ref required}
 
+# #527 — the predicate lives in its own installed copy, like the guard itself;
+# a flat /usr/local/bin means this script cannot reach its sibling through $0.
+SHIPS_BIN="${WBB_SHIPS:-/usr/local/bin/wbb-ships}"
+
 # C1: a `deployed` sha that does not resolve in this checkout is the ordinary
 # first-run case (deploy/README.md seeds it from `git rev-parse origin/main`
 # in the OPERATOR's own clone, not this one) — not exotic. `git diff` on an
@@ -51,31 +55,78 @@ if [ "$(git -C "$repo" rev-parse "$target")" != "$(git -C "$repo" rev-parse "$de
   exit 1
 fi
 
-# The allowlist. NOT extension/** — the extension never ships to the server.
-# Captured into a variable rather than through a process substitution, so a
-# failing `git diff` is caught here instead of silently yielding zero lines
-# (see the C1 note above) — every failure path in this script prints REFUSE
-# and exits 1.
-if ! diff_out=$(git -C "$repo" diff --name-only "$deployed" "$target"); then
+# #527 — the allowlist question is really two questions, and this script used
+# to hold only the second one.
+#
+#   1. Can this path affect production AT ALL?  deploy/rsync-filter answers
+#      that, and it is the only thing that can: it is what rsync executes.
+#   2. Of the paths that can, which may an unattended deploy change?  The root
+#      manifests, and nothing else.
+#
+# Collapsing them into one two-name list made an extension-only merge — which
+# cannot touch /opt — refuse every security tag. MEASURED 2026-08-28: seven
+# paths, zero of them shipped, autodeploy dead for three and a half days.
+#
+# The filter is read from the TARGET, not from the clone's working tree and
+# not from the deployed commit. A wrong ACCEPT would need a path that ships
+# under target's filter to be classified as non-shipping; reading target's
+# filter makes that impossible by definition, in one step, without relying on
+# `deploy/***` staying inside the filter forever.
+#
+# `-c core.quotePath=false`: without it git C-quotes a non-ASCII path (e.g.
+# `"src/\303\251.ts"`), which ships.sh refuses on sight (the quoted form is
+# not the path it names) — a real shipping file would needlessly refuse a
+# safe deploy. Captured into a variable rather than through a process
+# substitution, so a failing `git diff` is caught here instead of silently
+# yielding zero lines (see the C1 note above) — every failure path in this
+# script prints REFUSE and exits 1.
+if ! diff_out=$(git -C "$repo" -c core.quotePath=false diff --name-only "$deployed" "$target"); then
   echo "REFUSE: git diff between $deployed and $target failed"
   exit 1
 fi
-mapfile -t changed <<< "$diff_out"
+
+filter_file=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
+trap 'rm -f "$filter_file"' EXIT
+
+if ! git -C "$repo" show "${target}:deploy/rsync-filter" > "$filter_file" 2>/dev/null; then
+  echo "REFUSE: $target carries no deploy/rsync-filter — there is no way to tell what would ship"
+  exit 1
+fi
+
+if ! classified=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$filter_file" 2>&1); then
+  echo "REFUSE: could not classify the diff against ${target}:deploy/rsync-filter"
+  echo "$classified"
+  exit 1
+fi
 
 violations=()
-for path in "${changed[@]:-}"; do
-  [ -n "$path" ] || continue
-  case "$path" in
-    package.json|package-lock.json) ;;
-    *) violations+=("$path") ;;
+ignored=()
+while IFS=' ' read -r verdict path; do
+  if [ -z "$path" ]; then continue; fi
+  case "$verdict" in
+    SHIP)
+      case "$path" in
+        package.json|package-lock.json) ;;
+        *) violations+=("$path") ;;
+      esac
+      ;;
+    SKIP) ignored+=("$path") ;;
+    *)
+      echo "REFUSE: unexpected classification '$verdict' for $path"
+      exit 1
+      ;;
   esac
-done
+done <<< "$classified"
 
 if [ "${#violations[@]}" -gt 0 ]; then
-  echo "REFUSE: ${#violations[@]} path(s) outside the allowlist:"
+  echo "REFUSE: ${#violations[@]} path(s) that ship to the server and are not the root manifests:"
   printf '  %s\n' "${violations[@]}"
   exit 1
 fi
 
-echo "ACCEPT: lockfile-only change, merged into $main_ref"
+echo "ACCEPT: nothing outside the root manifests ships, merged into $main_ref"
+if [ "${#ignored[@]}" -gt 0 ]; then
+  echo "  ${#ignored[@]} changed path(s) do not ship and were ignored:"
+  printf '    %s\n' "${ignored[@]}"
+fi
 exit 0
