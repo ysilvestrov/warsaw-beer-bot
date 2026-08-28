@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -154,6 +154,10 @@ describe('autodeploy-guard.sh', () => {
   });
 
   it('ACCEPTS a diff that touches a nested package.json — also not shipped', () => {
+    // FLIPPED by #527, same as the extensionLock case above. The old test's
+    // intent — a nested manifest is a different file from the root one —
+    // lives on in ships.test.ts's "anchors file rules at the root: a nested
+    // manifest is a different file".
     const r = guard(repo, extensionLock, subPackage, 'main');
     expect(r.code).toBe(0);
     expect(r.out).toContain('ACCEPT');
@@ -185,13 +189,35 @@ describe('autodeploy-guard.sh', () => {
   it('REFUSES when the ships predicate is unavailable', () => {
     const r = guard(repo, basec, lockOnly, 'main', { WBB_SHIPS: '/nonexistent/wbb-ships' });
     expect(r.code).toBe(1);
+    // Unique to the classify-failure branch: no other REFUSE message in the
+    // guard contains the literal substring "classify" (the unexpected-line
+    // branch says "classification", which does not contain it), and
+    // ships.sh itself never emits the word.
     expect(r.out).toMatch(/classify/i);
   });
 
+  it('REFUSES when the ships predicate emits an unexpected classification line', () => {
+    // Defends the `*)` arm in the classification loop against a WBB_SHIPS
+    // binary whose output format does not match SHIP/SKIP — e.g. an
+    // incompatible version installed out of step with the guard.
+    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-stub-'));
+    const stub = join(stubDir, 'bogus-ships.sh');
+    writeFileSync(stub, '#!/usr/bin/env bash\ncat >/dev/null\necho "MAYBE package.json"\n');
+    chmodSync(stub, 0o755);
+    const r = guard(repo, basec, lockOnly, 'main', { WBB_SHIPS: stub });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/unexpected classification/i);
+  });
+
   it('REFUSES when the target carries no deploy/rsync-filter', () => {
+    // Tightened after fix-round 1/5: /rsync-filter/ alone also matches the
+    // classify-failure branch's message ("could not classify the diff
+    // against <target>:deploy/rsync-filter"), so a mutant that no-ops the
+    // `git show` failure check still passed this test via that other
+    // branch's wording. This phrase is unique to the git-show branch.
     const r = guard(noFilterRepo, noFilterBase, noFilterHead, 'main');
     expect(r.code).toBe(1);
-    expect(r.out).toMatch(/rsync-filter/);
+    expect(r.out).toMatch(/carries no deploy\/rsync-filter/);
   });
 
   it('C1: refuses a bogus deployed sha instead of silently accepting', () => {
