@@ -227,6 +227,7 @@ installed_is_stale() {
       "deploy/autodeploy.sh=$0" \
       "deploy/autodeploy-guard.sh=$GUARD_BIN" \
       "deploy/read-env.sh=$READ_ENV_BIN" \
+      "deploy/ships.sh=$SHIPS_BIN" \
       "deploy/installed-current.sh=$INSTALLED_CHECK_BIN" 2>&1)
 }
 

@@ -30,6 +30,7 @@ echo
 install -m 0755 deploy/autodeploy.sh          /usr/local/bin/wbb-autodeploy
 install -m 0755 deploy/autodeploy-guard.sh    /usr/local/bin/wbb-autodeploy-guard
 install -m 0755 deploy/read-env.sh            /usr/local/bin/wbb-read-env
+install -m 0755 deploy/ships.sh               /usr/local/bin/wbb-ships
 install -m 0755 deploy/installed-current.sh   /usr/local/bin/wbb-installed-current
 install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
 install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
@@ -38,7 +39,8 @@ systemctl daemon-reload
 echo
 echo "== installed =="
 ls -l /usr/local/bin/wbb-autodeploy /usr/local/bin/wbb-autodeploy-guard \
-      /usr/local/bin/wbb-read-env /usr/local/bin/wbb-installed-current
+      /usr/local/bin/wbb-read-env /usr/local/bin/wbb-ships \
+      /usr/local/bin/wbb-installed-current
 ls -l /etc/systemd/system/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.timer
 
 echo
