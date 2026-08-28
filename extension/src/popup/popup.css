@@ -176,25 +176,11 @@ h1 {
   cursor: default;
 }
 
-/* #syncCheckins is disabled if and only if a run is in progress (popup.ts sets it on
-   click and mirrors `s.running`), so this stripe is an honest busy indicator rather
-   than decoration. */
-#syncCheckins:disabled {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    var(--surface-quiet) 0 8px,
-    transparent 8px 16px
-  );
-  background-size: 22.63px 22.63px;
-  animation: busy 700ms linear infinite;
-}
-
-@keyframes busy {
-  to { background-position: 22.63px 0; }
-}
+/* The running state is carried by the disabled fill plus the live "Syncing… 1200 /
+   8200" line beneath, which reports real counts. An indeterminate animation on top
+   of exact numbers is decoration, so there isn't one. */
 
 @media (prefers-reduced-motion: reduce) {
-  #syncCheckins:disabled { animation: none; }
   .btn { transition: none; }
 }
 
