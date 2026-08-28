@@ -30,6 +30,8 @@ NOW_S="${WBB_NOW_S:-$(date +%s)}"
 # The guard comes from the INSTALLED copy, never from the checkout we just
 # fetched into: a guard that ships with the commit it is judging is not a guard.
 GUARD_BIN="${WBB_GUARD:-/usr/local/bin/wbb-autodeploy-guard}"
+# #527 — same install-path pattern as the guard and read-env.
+SHIPS_BIN="${WBB_SHIPS:-/usr/local/bin/wbb-ships}"
 
 # I2 — this script's only points of contact with the outside world: deploy,
 # health check, notify, port lookup, and the security audit. Each is a single
@@ -243,16 +245,61 @@ Run: sudo bash deploy/install-autodeploy.sh"
   write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
+# #527 — the paths of diff(DEPLOYED_SHA, $1) that actually reach production,
+# one per line on stdout.
+#
+# Non-zero exit means WE COULD NOT TELL. That is not the same statement as
+# "nothing ships", and the caller must not collapse them: the quiet branch in
+# report_drift_once is quieter than #499's reassuring message, so a failure
+# folded into it would be an outage nobody hears about.
+shipping_paths() {
+  local main_sha="$1" filter_file diff_out classified
+  filter_file=$(mktemp) || return 1
+
+  if ! git -C "$REPO" show "${main_sha}:deploy/rsync-filter" > "$filter_file" 2>/dev/null; then
+    rm -f "$filter_file"
+    return 1
+  fi
+  # `-c core.quotePath=false`: without it git C-quotes a non-ASCII path (e.g.
+  # `"src/\303\251.ts"`), which ships.sh refuses on sight (the quoted form is
+  # not the path it names) — an ordinary merge would needlessly report
+  # "cannot assess".
+  if ! diff_out=$(git -C "$REPO" -c core.quotePath=false diff --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null); then
+    rm -f "$filter_file"
+    return 1
+  fi
+  if ! classified=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$filter_file" 2>/dev/null); then
+    rm -f "$filter_file"
+    return 1
+  fi
+  rm -f "$filter_file"
+
+  printf '%s\n' "$classified" | sed -n 's/^SHIP //p'
+}
+
 report_drift_once() {
-  local main_sha today behind outside
+  local main_sha today behind shipping outside_count
   main_sha=$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo '')
   today=$(date -u +%Y-%m-%d)
 
   [ -n "$DEPLOYED_SHA" ] || return 0
   [ -n "$main_sha" ] || return 0
 
-  # No drift. Two cases: an episode was open, or there never was one.
-  if [ "$DEPLOYED_SHA" = "$main_sha" ]; then
+  # #527 — classify BEFORE deciding anything. A failure here is its own state.
+  if ! shipping=$(shipping_paths "$main_sha"); then
+    if [ "$LAST_DRIFT_NOTICE" != "$today" ]; then
+      notify "⚠️ autodeploy cannot tell whether production is behind main: classifying the diff against ${main_sha}:deploy/rsync-filter failed. Treat autodeploy as blocked until this is understood."
+      LAST_DRIFT_NOTICE="$today"
+      write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
+    fi
+    return 0
+  fi
+
+  # No drift: nothing that reaches production differs. Commit equality is one
+  # case of this rather than a separate condition — an extension-only merge is
+  # the other, and it is why this function used to siren forever about a
+  # difference nobody could deploy away.
+  if [ -z "$shipping" ]; then
     [ -n "$DRIFT_SINCE" ] || return 0
     # Only close out loud if we spoke. An all-clear for an alarm that never
     # sounded is noise, and it would arrive on exactly the path this change
@@ -280,13 +327,23 @@ report_drift_once() {
   [ "$LAST_DRIFT_NOTICE" != "$today" ] || return 0
 
   behind=$(git -C "$REPO" rev-list --count "${DEPLOYED_SHA}..${main_sha}" 2>/dev/null || echo '?')
-  outside=$(git -C "$REPO" diff --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null |
-    { n=0; while read -r f; do case "$f" in package.json|package-lock.json) ;; *) n=$((n+1));; esac; done; echo "$n"; })
 
-  if [ "$outside" != "0" ]; then
-    notify "⚠️ autodeploy is BLOCKED: production is ${behind} commit(s) behind main, and ${outside} differing path(s) are outside the allowlist. Every security tag will be refused until production is deployed. Run ./deploy/deploy.sh."
+  # Counted in THIS shell, not in a pipeline whose last element is a `{ ... }`
+  # group. That shape is #499's body: a failure inside it is invisible and
+  # yields 0, which reads as "nothing to worry about".
+  outside_count=0
+  while IFS= read -r f; do
+    if [ -z "$f" ]; then continue; fi
+    case "$f" in
+      package.json|package-lock.json) ;;
+      *) outside_count=$((outside_count + 1)) ;;
+    esac
+  done <<< "$shipping"
+
+  if [ "$outside_count" != "0" ]; then
+    notify "⚠️ autodeploy is BLOCKED: production is ${behind} commit(s) behind main, and ${outside_count} path(s) that ship to the server differ. Every security tag will be refused until production is deployed. Run ./deploy/deploy.sh."
   else
-    notify "ℹ️ production is ${behind} commit(s) behind main, but only the manifest and lockfile differ — autodeploy still works."
+    notify "ℹ️ production is ${behind} commit(s) behind main, but the only paths that ship are the manifest and lockfile — autodeploy still works."
   fi
   LAST_DRIFT_NOTICE="$today"
   write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
