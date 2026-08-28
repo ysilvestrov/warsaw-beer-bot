@@ -164,6 +164,46 @@ describe('ships.sh — the grammar refuses what it does not implement', () => {
   });
 });
 
+describe('ships.sh — refuses a malformed path rather than fail open', () => {
+  // The interface silently assumed stdin paths are exactly
+  // `git diff --name-only` output. Four shapes break that assumption
+  // without raising an error of their own, each one a false SKIP for a
+  // path the real filter would ship: a git-C-quoted path, a stray control
+  // character (a trailing \r above all), and a './' or '/' prefix. Each
+  // must be refused, not silently corrected.
+  const filter = filterFile('+ /package.json\n+ /src/***\n- *\n');
+
+  it('refuses a git-C-quoted path', () => {
+    const r = ships(filter, ['"src/\\303\\251.ts"']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+  });
+
+  it('refuses a path with an embedded carriage return', () => {
+    const r = ships(filter, ['package.json\r']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+  });
+
+  it("refuses a path with a leading './'", () => {
+    const r = ships(filter, ['./package.json']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+  });
+
+  it("refuses a path with a leading '/'", () => {
+    const r = ships(filter, ['/package.json']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+  });
+
+  it('is all-or-nothing: a valid path followed by a malformed one yields empty stdout, not one verdict line', () => {
+    const r = ships(filter, ['package.json', 'package.json\r']);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toBe('');
+  });
+});
+
 describe('ships.sh agrees with real rsync, path for path', () => {
   // The oracle. A hand-written predicate that re-derives rsync's matching can
   // be subtly wrong in ways no amount of reading catches — anchoring above

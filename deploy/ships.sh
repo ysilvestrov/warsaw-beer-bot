@@ -11,8 +11,19 @@
 # restated beside it.
 #
 # Usage:  ships.sh <filter-file>   paths on stdin, one per line
+# Input:  repo-relative paths exactly as `git diff --name-only` emits them,
+#         one per line, e.g. `src/index.ts`. Callers should invoke git with
+#         `-c core.quotePath=false` so a non-ASCII path arrives raw instead
+#         of C-quoted (Tasks 2 and 3 do this); a path that still looks
+#         quoted, carries a leading `./` or `/`, or contains a control
+#         character (a stray `\r` included) is refused rather than
+#         guessed at — the backstop for when a caller forgets.
 # Output: `SHIP <path>` or `SKIP <path>`, one line per non-empty input line
-# Exit:   0 = the filter parsed;  1 = it did not (reason on stderr, NO stdout)
+# Exit:   0 = the filter parsed and every path was well-formed;
+#         1 = it did not (reason on stderr, and NOTHING on stdout — not
+#         even the verdicts for input lines that came before a malformed
+#         one; verdicts are buffered and only printed once every line has
+#         validated, so a refusal can never leave a partial result behind)
 #
 # This re-derives rsync's matching in a second engine, which is a debt. It is
 # paid two ways: the grammar implements a small subset EXACTLY and refuses
@@ -93,8 +104,46 @@ if [ "$seen_catchall" -ne 1 ]; then
   exit 1
 fi
 
+# Verdicts are buffered here and printed only after every input line has
+# validated. That is what makes "malformed path -> nothing on stdout" hold
+# even when the malformed line is not the first one: if line 5 is bad, the
+# verdicts already computed for lines 1-4 must never reach a caller that
+# reads stdout as a complete, trustworthy classification.
+output=()
+
 while IFS= read -r path || [ -n "$path" ]; do
   if [ -z "$path" ]; then continue; fi
+
+  # A git-C-quoted path ("src/\303\251.ts") is not the path it names; a
+  # caller that forgot `-c core.quotePath=false` gets a refusal, not a
+  # guess.
+  case "$path" in
+    '"'*)
+      echo "ships: malformed path (looks git-C-quoted; pass -c core.quotePath=false): $path" >&2
+      exit 1
+      ;;
+  esac
+
+  # A leading './' or '/' means this is not the repo-relative form
+  # `git diff --name-only` emits, so it cannot be compared against the
+  # root-anchored rules below without guessing at a rewrite.
+  case "$path" in
+    ./* | /*)
+      echo "ships: malformed path (must be repo-relative, no leading './' or '/'): $path" >&2
+      exit 1
+      ;;
+  esac
+
+  # Any control character, including a stray trailing \r, changes the
+  # bytes being compared. Trimming it would silently substitute a
+  # different (wrong) verdict for a file whose real name may not match
+  # what is left after the trim; refuse instead.
+  case "$path" in
+    *[$'\001'-$'\037']* | *$'\177'*)
+      echo "ships: malformed path (contains a control character): $path" >&2
+      exit 1
+      ;;
+  esac
 
   verdict=SKIP
 
@@ -118,5 +167,9 @@ while IFS= read -r path || [ -n "$path" ]; do
     done
   fi
 
-  printf '%s %s\n' "$verdict" "$path"
+  output+=("$verdict $path")
+done
+
+for line in ${output[@]+"${output[@]}"}; do
+  printf '%s\n' "$line"
 done
