@@ -23,3 +23,7 @@ tmp/
 site/install/
 site/install-uk/
 site/changelog/
+
+# Impeccable design-review snapshots are committed (.impeccable/critique/);
+# the detector's local cache is machine state and is not.
+.impeccable/hook.cache.json

@@ -1,7 +1,237 @@
-body { margin: 0; font: 14px/1.4 system-ui, sans-serif; }
-.card { min-width: 240px; padding: 12px; }
-h1 { font-size: 15px; margin: 0 0 8px; }
-.row { display: flex; flex-direction: column; gap: 8px; }
-button { padding: 8px; cursor: pointer; }
-button:disabled { cursor: default; opacity: 0.5; }
-.status { margin: 10px 0 0; color: #444; min-height: 1.2em; }
+/* Warsaw Beer Overlay — toolbar popup.
+   Tiering: Sync (primary, amber) > Refresh (secondary, outlined) > Clear all cache
+   (ghost, below a hairline). Height and colour both encode rank, so the destructive
+   action can never be mistaken for the primary one.
+   Brand amber #d9822b is only 2.93:1 on white, so the light-mode fill is the deeper
+   #ab6217 (4.68:1); dark mode gets the brand hue at full strength with a dark label
+   (5.75:1). Same brand, honest contrast. */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --fg-muted: #66666b;
+  --border: rgba(0, 0, 0, 0.44);   /* control boundary — SC 1.4.11 wants 3:1 */
+  --hairline: rgba(0, 0, 0, 0.08); /* decorative separator — exempt */
+
+  --accent: #ab6217;          /* AA-safe fill for white text */
+  --accent-hover: #985810;
+  --accent-active: #874e0d;
+  --accent-fg: #ffffff;
+  --brand: #d9822b;           /* brand hue: the mark and tints — never text or a ring on white */
+  --ring: #874e0d;            /* focus ring: 6.72:1 on --bg, SC 1.4.11 needs 3:1 */
+
+  --surface-quiet: rgba(0, 0, 0, 0.04);
+  --surface-quiet-hover: rgba(0, 0, 0, 0.07);
+
+  --disabled-bg: #f2f2f5;
+  --disabled-fg: #a1a1a6;
+
+  --radius: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.09);
+  --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1e;
+    --fg: #f5f5f7;
+    --fg-muted: #98989d;
+    --border: rgba(255, 255, 255, 0.38);
+    --hairline: rgba(255, 255, 255, 0.1);
+
+    --accent: #d9822b;        /* brand hue reads correctly on a dark ground */
+    --accent-hover: #e8933f;
+    --accent-active: #c2741f;
+    --accent-fg: #1d1d1f;
+    --ring: #e8933f;          /* 7.03:1 on the dark ground */
+
+    --surface-quiet: rgba(255, 255, 255, 0.07);
+    --surface-quiet-hover: rgba(255, 255, 255, 0.11);
+
+    --disabled-bg: rgba(255, 255, 255, 0.06);
+    --disabled-fg: #6e6e73;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.5);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+/* Form controls do not inherit type. Without this the popup ships in two typefaces:
+   system-ui for text and the UA's 13.333px Arial for every button. */
+button,
+a { font: inherit; }
+
+::selection { background: rgba(217, 130, 43, 0.28); }
+
+/* One fixed width, so the popup does not resize itself around whichever status
+   string happens to be showing. */
+.card {
+  width: 284px;
+  padding: 14px;
+}
+
+/* ---------- header ---------- */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.mark {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: url(#markFill);
+}
+
+h1 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--fg);
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.ico {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Primary — the action the popup exists for. */
+.btn-primary {
+  min-height: 36px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  box-shadow: var(--shadow-accent);
+}
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.btn-primary:active:not(:disabled) { background: var(--accent-active); }
+
+/* Secondary — available, clearly not the headline. */
+.btn-secondary {
+  min-height: 32px;
+  border-color: var(--border);
+  background: var(--bg);
+  box-shadow: var(--shadow-sm);
+}
+.btn-secondary:hover:not(:disabled) { background: var(--surface-quiet); }
+.btn-secondary:active:not(:disabled) { background: var(--surface-quiet-hover); }
+
+/* Ghost — reachable, never in the primary scan path. */
+.btn-ghost {
+  min-height: 28px;
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.btn-ghost:hover:not(:disabled) { background: var(--surface-quiet); color: var(--fg); }
+.btn-ghost:active:not(:disabled) { background: var(--surface-quiet-hover); }
+
+/* Disabled is its own state, not a faded enabled one. `opacity` on a grey button
+   over white reads as half-painted rather than unavailable. */
+.btn:disabled {
+  background: var(--disabled-bg);
+  border-color: transparent;
+  color: var(--disabled-fg);
+  box-shadow: none;
+  cursor: default;
+}
+
+/* The running state is carried by the disabled fill plus the live "Syncing… 1200 /
+   8200" line beneath, which reports real counts. An indeterminate animation on top
+   of exact numbers is decoration, so there isn't one. */
+
+@media (prefers-reduced-motion: reduce) {
+  .btn { transition: none; }
+}
+
+:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* ---------- status + auth block ---------- */
+
+.status {
+  margin: 6px 0 12px;
+  min-height: 1.2em;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+/* Idle: no message, no reserved band. The height is only held once there is
+   something to hold it for. */
+.status:empty {
+  margin: 0 0 10px;
+  min-height: 0;
+}
+
+.note {
+  margin: 0 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--hairline);
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.guide {
+  display: block;
+  margin-top: 8px;
+  padding: 5px 0;
+  min-height: 24px;      /* WCAG 2.5.8: an inline link here was 19.6px */
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.guide:hover { text-decoration: underline; }
+
+/* ---------- footer ---------- */
+
+.foot {
+  margin-top: 14px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline);
+}

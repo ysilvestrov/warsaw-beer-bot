@@ -212,18 +212,28 @@ this guide first.
 
 ### The toolbar button (popup)
 
-Clicking the extension's icon on the browser toolbar opens a small menu:
+Clicking the extension's icon on the browser toolbar opens a small menu. The
+buttons are ordered **by importance** — the main action on top, the
+housekeeping one at the bottom:
 
-- **"Refresh this page"** — resets the overlay cache for the **current**
-  page and redraws the badges (handy if the shop loaded new items, or you
-  just ran `/import`).
-- **"Clear all cache"** — clears the **entire** local overlay cache (all sites).
-- **"Sync my check-ins"** — pulls in your check-ins from Untappd (see below).
+- **"Sync my check-ins"** (the large amber button at the top) — pulls in your
+  check-ins from Untappd (see below). This is the popup's main action. While a
+  sync is running the button is greyed out and the line under it counts up
+  (`Syncing… 1200 / 8200`): that means "working", not "broken".
+- **"Refresh this page"** (the outlined button) — resets the overlay cache for
+  the **current** page and redraws the badges (handy if the shop loaded new
+  items, or you just ran `/import`). On a page the extension doesn't support,
+  the button is **greyed out and inactive**, with the reason written below it.
+- **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
+  clears the **entire** local overlay cache (all sites). Deliberately the least
+  prominent: you rarely need it.
 
 If **no token** is set yet, the popup also shows — alongside the usual
 buttons above — a "Not connected" note next to a **"Get a token"** button and
 a **"Read the setup guide →"** link. These extra elements disappear once
 you've added a token (Part 3).
+
+The popup follows your **browser theme**: in dark mode it's dark too.
 
 ### "Sync my check-ins" — sync check-ins without Supporter
 
