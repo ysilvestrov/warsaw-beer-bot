@@ -291,6 +291,28 @@ describe('autodeploy-guard.sh', () => {
     expect(r.out).toMatch(/incomplete classification/);
   });
 
+  it('I2 (re-review): REFUSES a right-sized answer about the WRONG paths', () => {
+    // Counting the answers is not enough. basec..withSrc changes three paths;
+    // this stub emits three well-formed SKIP lines about paths that are not in
+    // the diff at all. A count-only check passes it, and every real shipping
+    // path is waved through to ACCEPT. Correspondence — answer i must be about
+    // input path i — is what refuses it.
+    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-wrongpaths-'));
+    const liar = join(stubDir, 'lying-ships.sh');
+    writeFileSync(
+      liar,
+      '#!/usr/bin/env bash\n' +
+        'n=$(grep -c . || true)\n' +
+        'i=0\n' +
+        'while [ "$i" -lt "${n:-0}" ]; do echo "SKIP invented/$i.txt"; i=$((i + 1)); done\n',
+    );
+    chmodSync(liar, 0o755);
+    const r = guard(repo, basec, withSrc, 'main', { WBB_SHIPS: liar });
+    expect(r.code).toBe(1);
+    expect(r.out).toMatch(/was asked .* — that is not a classification of this diff/);
+    expect(r.out).toContain('invented/');
+  });
+
   it('C1: refuses a bogus deployed sha instead of silently accepting', () => {
     const r = guard(repo, 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef', lockOnly, 'main');
     expect(r.code).toBe(1);

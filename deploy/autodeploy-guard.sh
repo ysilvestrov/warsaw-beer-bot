@@ -97,13 +97,15 @@ if ! diff_out=$(git -C "$repo" -c core.quotePath=false diff --name-only "$deploy
   exit 1
 fi
 
-# How many verdicts the classifier owes us. ships.sh emits exactly one line per
-# NON-EMPTY input line, so that is what is counted; an empty diff makes this 0
-# and every loop below a no-op.
-expected=0
+# The exact question put to the classifier, in order. ships.sh emits one line
+# per NON-EMPTY input line, in input order, so this array is what the answers
+# are checked AGAINST — not merely counted against. An empty diff leaves it
+# empty and every loop below a no-op.
+input_paths=()
 while IFS= read -r _line; do
-  if [ -n "$_line" ]; then expected=$((expected + 1)); fi
+  if [ -n "$_line" ]; then input_paths+=("$_line"); fi
 done <<< "$diff_out"
+expected=${#input_paths[@]}
 
 target_filter=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
 deployed_filter=$(mktemp) || { echo "REFUSE: could not create a temporary file for the rsync filter"; exit 1; }
@@ -131,13 +133,16 @@ if ! classified_deployed=$(printf '%s\n' "$diff_out" | "$SHIPS_BIN" "$deployed_f
   exit 1
 fi
 
-# I2 — the classifier's stdout is not trusted to be COMPLETE. A $SHIPS_BIN that
-# exits 0 and prints nothing (or fewer lines than it was handed) yields zero
-# violations and a clean ACCEPT: silence read as "nothing ships". Verdicts are
-# collected in input order and the count checked against `expected` below, so a
-# short answer REFUSEs. The real ships.sh is all-or-nothing, but this script is
-# also run standalone with an arbitrary $WBB_SHIPS, and the branch's own rule is
-# that every failure path REFUSEs.
+# I2 — the classifier's stdout is trusted neither to be COMPLETE nor to be ABOUT
+# THE QUESTION ASKED. A $SHIPS_BIN that exits 0 and prints nothing yields zero
+# violations and a clean ACCEPT: silence read as "nothing ships". Counting the
+# answers is not enough either — a classifier that emits the right NUMBER of
+# lines for FABRICATED paths passes a count check and waves every real shipping
+# path through (reproduced in re-review: 15 src/** paths to ACCEPT). So the
+# verdicts are collected in input order and each one's path is compared against
+# `input_paths` position by position below. The real ships.sh cannot do either
+# of these things, but this script is also run standalone with an arbitrary
+# $WBB_SHIPS, and the branch's rule is that every failure path REFUSEs.
 target_verdicts=()
 target_paths=()
 while IFS=' ' read -r verdict path; do
@@ -173,17 +178,40 @@ if [ "${#target_paths[@]}" -ne "$expected" ] || [ "${#deployed_paths[@]}" -ne "$
   exit 1
 fi
 
+# CORRESPONDENCE, not just arity: every answer must be about the path that was
+# asked about, at the same position. Without this the count check above is
+# satisfied by N verdicts for N invented paths.
+c=0
+while [ "$c" -lt "$expected" ]; do
+  if [ "${target_paths[$c]}" != "${input_paths[$c]}" ]; then
+    echo "REFUSE: the ships predicate answered about '${target_paths[$c]}' where '${input_paths[$c]}' was asked (target, path $((c + 1))) — that is not a classification of this diff"
+    exit 1
+  fi
+  if [ "${deployed_paths[$c]}" != "${input_paths[$c]}" ]; then
+    echo "REFUSE: the ships predicate answered about '${deployed_paths[$c]}' where '${input_paths[$c]}' was asked (deployed, path $((c + 1))) — that is not a classification of this diff"
+    exit 1
+  fi
+  c=$((c + 1))
+done
+
 violations=()
 ignored=()
 i=0
 while [ "$i" -lt "$expected" ]; do
-  path=${target_paths[$i]}
-  if [ "$path" != "${deployed_paths[$i]}" ]; then
-    echo "REFUSE: the two classifications disagree about path $((i + 1)): '$path' vs '${deployed_paths[$i]}'"
-    exit 1
-  fi
+  # Safe by the correspondence check above: both classifications are known to
+  # be about input_paths[i], so all three names agree at this index.
+  path=${input_paths[$i]}
   # The union: a path reaches production if it can be WRITTEN under the
   # target's filter, or DELETED under the deployed one.
+  #
+  # INVARIANT this rests on: the union covers the paths in the DIFF, so a
+  # narrowing that ships under NEITHER filter, with nothing else changed, would
+  # not be seen. That is unreachable only because the DEPLOYED filter contains
+  # `+ /deploy/***` — which makes any change to deploy/rsync-filter itself a
+  # SHIP on the deployed side, hence a violation, hence a REFUSE. Induction:
+  # every deployed filter descends from one that was accepted under this rule,
+  # so it still carries the rule. Removing `+ /deploy/***` from the filter
+  # breaks the induction and this reasoning must be redone before it merges.
   if [ "${target_verdicts[$i]}" = SHIP ] || [ "${deployed_verdicts[$i]}" = SHIP ]; then
     case "$path" in
       package.json|package-lock.json) ;;

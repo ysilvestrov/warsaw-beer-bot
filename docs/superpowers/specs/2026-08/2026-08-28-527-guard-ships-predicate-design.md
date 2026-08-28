@@ -203,11 +203,23 @@ what can be written. Production is affected by the union, so:
 ships(path) = ships_under(deployed_filter, path) || ships_under(target_filter, path)
 ```
 
+**The invariant the union rests on.** The union is taken over the paths in the
+DIFF, so a narrowing whose filter file ships under *neither* filter, with
+nothing else changed, would not be seen. That is unreachable only because the
+DEPLOYED filter contains `+ /deploy/***`, which makes any change to
+`deploy/rsync-filter` itself a SHIP on the deployed side — and by induction
+every deployed filter descends from one accepted under this rule, so it still
+carries it. Removing `+ /deploy/***` from the filter breaks the induction, and
+this reasoning has to be redone before such a change merges. Stated in a comment
+at the union site in `deploy/autodeploy-guard.sh` as well, because it is the
+kind of invariant that is only ever violated by someone who never read it.
+
 The original argument's real content survives inside this: reading the target is
 still what covers a widened filter, in one step, without relying on `deploy/***`
 staying in the filter forever. The union adds the half it was missing. Both
 `git show`es fail closed, and the classifier must answer for every path it was
-handed — a short or empty answer is REFUSE, not "nothing ships".
+handed, ABOUT that path, at that position — a short or empty answer, or an
+answer naming paths that were not asked about, is REFUSE, not "nothing ships".
 
 For the 2026-08-28 replay the two filters are byte-identical, so the union is
 the same set and P1 is unchanged.

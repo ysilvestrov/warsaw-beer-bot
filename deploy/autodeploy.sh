@@ -293,9 +293,11 @@ shipping_paths() {
   fi
   rm -f "$target_filter" "$deployed_filter"
 
+  local in_paths=()
   while IFS= read -r line; do
-    if [ -n "$line" ]; then expected=$((expected + 1)); fi
+    if [ -n "$line" ]; then in_paths+=("$line"); fi
   done <<< "$diff_out"
+  expected=${#in_paths[@]}
 
   local t_verdicts=() t_paths=() d_verdicts=() d_paths=()
   while IFS=' ' read -r verdict path; do
@@ -312,16 +314,26 @@ shipping_paths() {
   done <<< "$c_deployed"
 
   # I2 — a classifier that answered for fewer lines than it was handed has told
-  # us nothing, and "nothing" must not read as "nothing ships".
+  # us nothing, and "nothing" must not read as "nothing ships". Nor is the count
+  # sufficient: N verdicts about N INVENTED paths also counts to N, and would
+  # report "nothing ships" for a diff full of src/**. Both answers must be about
+  # the paths that were asked about, at the same positions — otherwise this is
+  # "cannot assess" (return 1), never silence.
   if [ "${#t_paths[@]}" -ne "$expected" ] || [ "${#d_paths[@]}" -ne "$expected" ]; then
     return 1
   fi
 
   i=0
   while [ "$i" -lt "$expected" ]; do
-    if [ "${t_paths[$i]}" != "${d_paths[$i]}" ]; then return 1; fi
+    if [ "${t_paths[$i]}" != "${in_paths[$i]}" ]; then return 1; fi
+    if [ "${d_paths[$i]}" != "${in_paths[$i]}" ]; then return 1; fi
+    i=$((i + 1))
+  done
+
+  i=0
+  while [ "$i" -lt "$expected" ]; do
     if [ "${t_verdicts[$i]}" = SHIP ] || [ "${d_verdicts[$i]}" = SHIP ]; then
-      printf '%s\n' "${t_paths[$i]}"
+      printf '%s\n' "${in_paths[$i]}"
     fi
     i=$((i + 1))
   done
@@ -338,7 +350,7 @@ report_drift_once() {
   # #527 — classify BEFORE deciding anything. A failure here is its own state.
   if ! shipping=$(shipping_paths "$main_sha"); then
     if [ "$LAST_DRIFT_NOTICE" != "$today" ]; then
-      notify "⚠️ autodeploy cannot tell whether production is behind main: classifying the diff against ${main_sha}:deploy/rsync-filter failed. Treat autodeploy as blocked until this is understood."
+      notify "⚠️ autodeploy cannot tell whether production is behind main: classifying diff(${DEPLOYED_SHA}, ${main_sha}) against deploy/rsync-filter failed. Since #527 the check reads the filter from BOTH commits and classifies against each, so the fault may be on either side — a missing or unparseable filter at either ref, or an answer that did not match the paths asked about. Treat autodeploy as blocked until this is understood."
       LAST_DRIFT_NOTICE="$today"
       write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
     fi

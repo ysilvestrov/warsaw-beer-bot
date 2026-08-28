@@ -819,6 +819,33 @@ describe('#527 drift is drift only when something ships', () => {
     expect(countLines(notifyLog)).toBe(1);
     expect(readFileSync(notifyLog, 'utf8')).toMatch(/cannot tell|cannot assess/i);
   });
+
+  it('I2 (re-review): the right COUNT of answers about the wrong paths is "cannot assess"', () => {
+    // A count-only completeness check is satisfied by N verdicts about N
+    // invented paths — and the drift side would then read that as "nothing
+    // ships" and go silent about a src/** difference. Correspondence makes it
+    // "cannot assess" instead.
+    const r = driftRemote(undefined, 'src');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const liar = stub(
+      h.bin,
+      'lying-ships',
+      'n=$(grep -c . || true)\n' +
+        'i=0\n' +
+        'while [ "$i" -lt "${n:-0}" ]; do echo "SKIP invented/$i.txt"; i=$((i + 1)); done',
+    );
+
+    expect(
+      run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900), WBB_SHIPS: liar }).code,
+    ).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/cannot tell|cannot assess/i);
+  });
 });
 
 /**
