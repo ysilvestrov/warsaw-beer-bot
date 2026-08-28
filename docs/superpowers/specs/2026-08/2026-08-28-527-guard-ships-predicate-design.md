@@ -97,6 +97,18 @@ stderr and **nothing on stdout**. One process per diff, not per path.
 already unrepresentable everywhere in this pipeline; that is not made worse
 here and is not fixed here.)
 
+The filter arrives as a **file**, while its source is a git ref (below) whose
+content comes out of `git show` on stdout — and stdin is already carrying the
+paths. So each caller materialises it first and cleans up after itself:
+
+```
+filter=$(mktemp); trap 'rm -f "$filter"' EXIT
+git -C "$repo" show "<ref>:deploy/rsync-filter" > "$filter" || <fail closed>
+```
+
+A file argument rather than a second stream keeps the script testable with a
+fixture on disk and keeps the two consumers identical.
+
 **Grammar.** Four forms and nothing else:
 
 | Form | Meaning |
@@ -104,7 +116,7 @@ here and is not fixed here.)
 | blank, or first non-space is `#` | ignored |
 | `+ /NAME` (no `/`, no `*?[`) | exact root file |
 | `+ /DIR/***` | that directory and everything under it |
-| `- *` | the terminal catch-all |
+| `- *` | the terminal catch-all — the LAST rule that is neither blank nor a comment |
 
 Anything else — a glob in a name, a `-` rule that is not the terminal one, an
 unknown prefix — is an error, not a guess. We are re-deriving rsync's semantics
@@ -164,6 +176,9 @@ about `popup.css`. A standing daily siren about a condition nobody can clear is
 the exact failure mode #490 already had to remove once.
 
 So drift is redefined by the same predicate:
+
+Same rule for the filter's origin as the guard's, applied to drift's newer
+side: `git show origin/main:deploy/rsync-filter`.
 
 ```
 shipping = { p ∈ diff(DEPLOYED_SHA, origin/main) : ships(p) }
