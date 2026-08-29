@@ -16,6 +16,18 @@ import { join, resolve } from 'node:path';
  */
 
 const SCRIPT = resolve(__dirname, '../../deploy/autodeploy.sh');
+const SHIPS = resolve(__dirname, '../../deploy/ships.sh');
+
+const REAL_FILTER = [
+  '+ /package.json',
+  '+ /package-lock.json',
+  '+ /tsconfig.json',
+  '+ /src/***',
+  '+ /scripts/***',
+  '+ /deploy/***',
+  '- *',
+  '',
+].join('\n');
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
@@ -91,7 +103,13 @@ beforeAll(() => {
   git(seed, 'config', 'user.name', 'T');
   git(seed, 'remote', 'add', 'origin', remoteDir);
 
-  base = commit(seed, { 'package.json': '{"name":"x","version":"1.0.0"}' }, 'base');
+  // #527: a real filter, so the idle-path tests below that incidentally reach
+  // report_drift_once (see the "LAST_FAILED_SHA is skipped" test) hit the
+  // ordinary classify-and-decide path rather than the fail-closed one.
+  base = commit(seed, {
+    'package.json': '{"name":"x","version":"1.0.0"}',
+    'deploy/rsync-filter': REAL_FILTER,
+  }, 'base');
   git(seed, 'push', '-q', 'origin', 'main');
 
   target = commit(seed, { 'package.json': '{"name":"x","version":"1.0.1"}' }, 'lockfile bump');
@@ -145,6 +163,7 @@ function run(h: Harness, extraEnv: Record<string, string>): { code: number; out:
     XDG_DATA_HOME: h.dataDir,
     XDG_STATE_HOME: h.stateDir,
     WBB_INSTALLED_CHECK: defaultInstalledCheck,
+    WBB_SHIPS: SHIPS,
     ...extraEnv,
   };
   try {
@@ -430,13 +449,60 @@ describe('autodeploy.sh', () => {
  * #491. `tagAt` places an `autodeploy-*` tag on one of the two commits. The
  * idle path used to be reachable ONLY when no such tag existed anywhere, which
  * is why every #490 test above leaves this argument off.
+ *
+ * #490/#491 as before. #527: the fixture commits now carry a real
+ * `deploy/rsync-filter`, because report_drift_once reads it from
+ * `origin/main` — a fixture without one is no longer "a repo with two
+ * commits", it is the fail-closed case.
+ *
+ * `differsIn` chooses what the second commit changes: 'src' is drift that
+ * ships and is blocking, 'lockfile' ships and is not, 'extension' ships
+ * nothing at all, and 'narrow-filter' guts `deploy/rsync-filter` to `- *` —
+ * which ships nothing under the TARGET's filter and everything under the
+ * deployed one (final-review C1).
  */
-function driftRemote(tagAt?: 'old' | 'new'): {
-  dir: string; oldSha: string; newSha: string; tag: string;
-} {
+function driftRemote(
+  tagAt?: 'old' | 'new',
+  differsIn: 'src' | 'lockfile' | 'extension' | 'narrow-filter' = 'src',
+): { dir: string; oldSha: string; newSha: string; tag: string } {
   const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-remote-'));
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
   const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-seed-'));
+  git(seed, 'init', '-q', '-b', 'main');
+  git(seed, 'config', 'user.email', 't@example.com');
+  git(seed, 'config', 'user.name', 'T');
+  git(seed, 'remote', 'add', 'origin', dir);
+  const oldSha = commit(seed, {
+    'src/x.ts': 'export const x = 1;\n',
+    'package-lock.json': '{"lockfileVersion":3}\n',
+    'extension/popup.css': 'body{}\n',
+    'deploy/rsync-filter': REAL_FILTER,
+  }, 'old');
+  git(seed, 'push', '-q', 'origin', 'main');
+  const changedByKind: Record<
+    'src' | 'lockfile' | 'extension' | 'narrow-filter',
+    Record<string, string>
+  > = {
+    src: { 'src/x.ts': 'export const x = 2;\n' },
+    lockfile: { 'package-lock.json': '{"lockfileVersion":3,"bumped":true}\n' },
+    extension: { 'extension/popup.css': 'body{color:red}\n' },
+    'narrow-filter': { 'deploy/rsync-filter': '- *\n' },
+  };
+  const newSha = commit(seed, changedByKind[differsIn], 'new');
+  git(seed, 'push', '-q', 'origin', 'main');
+  const tag = 'autodeploy-20260824T120000Z';
+  if (tagAt) {
+    git(seed, 'tag', tag, tagAt === 'old' ? oldSha : newSha);
+    git(seed, 'push', '-q', 'origin', tag);
+  }
+  return { dir, oldSha, newSha, tag };
+}
+
+/** A remote whose commits carry NO rsync-filter: the fail-closed case. */
+function driftRemoteWithoutFilter(): { dir: string; oldSha: string; newSha: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-nofilter-'));
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
+  const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-nofilter-seed-'));
   git(seed, 'init', '-q', '-b', 'main');
   git(seed, 'config', 'user.email', 't@example.com');
   git(seed, 'config', 'user.name', 'T');
@@ -445,12 +511,7 @@ function driftRemote(tagAt?: 'old' | 'new'): {
   git(seed, 'push', '-q', 'origin', 'main');
   const newSha = commit(seed, { 'src/x.ts': 'export const x = 2;\n' }, 'new');
   git(seed, 'push', '-q', 'origin', 'main');
-  const tag = 'autodeploy-20260824T120000Z';
-  if (tagAt) {
-    git(seed, 'tag', tag, tagAt === 'old' ? oldSha : newSha);
-    git(seed, 'push', '-q', 'origin', tag);
-  }
-  return { dir, oldSha, newSha, tag };
+  return { dir, oldSha, newSha };
 }
 
 /** A harness cloned from a drift remote, plus arbitrary state fields. */
@@ -652,6 +713,138 @@ describe('#490 drift episode', () => {
     expect(countLines(notifyLog)).toBe(2);
     expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
     expect(readFileSync(notifyLog, 'utf8').split('\n')[0]).toMatch(/caught up/);
+  });
+});
+
+describe('#527 drift is drift only when something ships', () => {
+  it('says nothing and opens no episode when the only difference never ships', () => {
+    // The 2026-08-28 incident. An extension-only merge leaves production
+    // permanently behind main — there is nothing to deploy, so the baseline
+    // never advances — and a daily reminder about a condition nobody can
+    // clear is the failure mode #490 already had to remove once.
+    const r = driftRemote(undefined, 'extension');
+    const h = driftHarness(r.dir, { DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '' });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: '1000000' }).code).toBe(0);
+
+    expect(existsSync(notifyLog)).toBe(false);
+    // Measured in the state file, not by the absence of a message: an episode
+    // that opens now would announce fifteen minutes from now.
+    expect(readState(h.stateDir).DRIFT_SINCE ?? '').toBe('');
+  });
+
+  it('still announces when a shipping path differs', () => {
+    const r = driftRemote(undefined, 'src');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+  });
+
+  it('reports the non-blocking variant when only the lockfile ships', () => {
+    const r = driftRemote(undefined, 'lockfile');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).not.toMatch(/BLOCKED/);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/still works/);
+  });
+
+  it('does NOT go silent when it cannot classify the diff', () => {
+    // The trap this change creates. The quiet branch above is quieter than
+    // #499's reassuring message: a classification failure and "nothing ships"
+    // would otherwise be the same outcome — total silence.
+    const r = driftRemoteWithoutFilter();
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/cannot tell|cannot assess/i);
+  });
+
+  it('C1 (final review): a merge that GUTS the filter still counts as drift', () => {
+    // The union rule, on the drift side. Classified against origin/main's
+    // filter alone (`- *`), `deploy/rsync-filter` classifies SKIP and this
+    // goes silent — the same blindness that lets the guard ACCEPT it. The
+    // deployed commit's filter still ships `deploy/***`, and rsync --delete
+    // acts on THAT set, so the path reaches production and must be announced.
+    const r = driftRemote(undefined, 'narrow-filter');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+
+    expect(run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900) }).code).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/BLOCKED/);
+  });
+
+  it('I2 (final review): an answer shorter than the question is "cannot assess"', () => {
+    // A ships predicate that drains stdin and exits 0 says nothing about
+    // anything. Folded into the empty branch it would read as "nothing
+    // ships" — total silence about a src/** difference nobody can deploy.
+    const r = driftRemote(undefined, 'src');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const silent = stub(h.bin, 'silent-ships', 'cat >/dev/null\nexit 0');
+
+    expect(
+      run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900), WBB_SHIPS: silent }).code,
+    ).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/cannot tell|cannot assess/i);
+  });
+
+  it('I2 (re-review): the right COUNT of answers about the wrong paths is "cannot assess"', () => {
+    // A count-only completeness check is satisfied by N verdicts about N
+    // invented paths — and the drift side would then read that as "nothing
+    // ships" and go silent about a src/** difference. Correspondence makes it
+    // "cannot assess" instead.
+    const r = driftRemote(undefined, 'src');
+    const h = driftHarness(r.dir, {
+      DEPLOYED_SHA: r.oldSha, PREVIOUS_SHA: '', DRIFT_SINCE: '1000000',
+    });
+    const notifyLog = join(h.bin, 'notify.log');
+    const notify = stub(h.bin, 'notify', `cat >> "${notifyLog}" <<< "$1"`);
+    const liar = stub(
+      h.bin,
+      'lying-ships',
+      'n=$(grep -c . || true)\n' +
+        'i=0\n' +
+        'while [ "$i" -lt "${n:-0}" ]; do echo "SKIP invented/$i.txt"; i=$((i + 1)); done',
+    );
+
+    expect(
+      run(h, { WBB_NOTIFY_CMD: notify, WBB_NOW_S: String(1000000 + 900), WBB_SHIPS: liar }).code,
+    ).toBe(0);
+
+    expect(countLines(notifyLog)).toBe(1);
+    expect(readFileSync(notifyLog, 'utf8')).toMatch(/cannot tell|cannot assess/i);
   });
 });
 
