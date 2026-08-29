@@ -2160,7 +2160,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `.product-title`, brewery з `.manufacturer-product` або bounded detail-page fallback,
   ABV із `.product-description-short`, trailing package volume/format прибирається з name;
   glass/merch категорії `/pl/17-szklomerch` і `/en/17-glassmerch` є whole-page non-beer
-  gate; локально відкидаються set/glassware/deposit products), домен `funkyshop.pl`.
+  gate; локально відкидаються set/glassware/deposit products), домен `funkyshop.pl`),
+  `beershop` (Beershop UPgates SSR — `article.card-item[data-product-id]`, brewery з
+  `.p-i-header strong`, name з решти заголовка; один адаптер покриває мовні домени
+  `beershop.pl`/`.cz`/`.sk`/`.eu`/`.de`; локалізовані маршрути lemonades/cola,
+  functional drinks, gifts/merch, snacks і spirits є whole-page non-beer gate,
+  продубльований стабільними UPgates category-id для fixture/re-render безпеки).
   `registry.pickAdapter(url)`.
   Опційний `reRenderContainerSelector` —
   **звуження скоупу re-parse**, НЕ вмикач re-render (див. нижче). Як додати

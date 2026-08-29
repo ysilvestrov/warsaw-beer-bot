@@ -186,8 +186,9 @@ this guide first.
 
 1. Go to a supported shop:
    `beerrepublic.eu`, `onemorebeer.pl`, `beerfreak.org`, `bierloods22.nl`,
-   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`
-   or `funkyshop.pl`.
+   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`,
+   `funkyshop.pl`, plus the Beershop language sites: `beershop.pl`, `beershop.cz`,
+   `beershop.sk`, `beershop.eu`, and `beershop.de`.
 2. The extension **automatically** reads the beer grid on the page, sends it
    to the bot for matching, and draws a **corner badge** on the cards. What
    the badges mean:

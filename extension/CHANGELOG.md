@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Added Beershop support across its Polish, Czech, Slovak, English, and German domains. Beer badges now follow language switching between `beershop.pl`, `.cz`, `.sk`, `.eu`, and `.de`, while localized soft-drink, functional-drink, gift, merch, snack, and spirits categories are ignored.
+
 ## [0.14.0] - 2026-08-10
 
 - Flasker beers now match through the Untappd link the shop itself publishes on a product page, instead of being searched for by name. Where that link exists it settles the identity outright, so releases whose shop name and Untappd name simply disagree stop sitting unmatched — and a wrong ⭐ that name-matching had picked is corrected.
