@@ -29,19 +29,23 @@ describe('every checked installed copy is actually installed', () => {
     expect(declared).toContain('deploy/ships.sh');
   });
 
-  function escapeRegExp(s: string): string {
-    return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  }
-
   // A bare substring search would treat a commented-out line — e.g.
-  // `# TODO: install deploy/ships.sh` — as proof the file is installed.
+  // `# TODO: install deploy/ships.sh` — as proof the file is installed, and
+  // testing the path against the whole line would let it be satisfied by an
+  // inline comment or by the DESTINATION argument, e.g.
+  //   install -m 0755 deploy/autodeploy.sh /usr/local/bin/wbb-autodeploy # TODO install deploy/ships.sh
   // Require an actual install command: first non-whitespace token is
-  // `install`, and it carries the source path as a whole word.
+  // `install`, and the path is the SOURCE argument — the real form is
+  // `install -m 0755 <src> <dest>`, so the path must be the second-to-last
+  // whitespace-separated token once any unquoted trailing `#` comment is
+  // stripped.
   function installsPath(path: string): boolean {
     return installer.split('\n').some((line) => {
       const trimmed = line.trimStart();
       if (!/^install\b/.test(trimmed)) return false;
-      return new RegExp(`(^|\\s)${escapeRegExp(path)}(\\s|$)`).test(trimmed);
+      const uncommented = trimmed.replace(/#.*$/, '');
+      const tokens = uncommented.trim().split(/\s+/);
+      return tokens.length >= 2 && tokens[tokens.length - 2] === path;
     });
   }
 

@@ -172,6 +172,7 @@ describe('ships.sh — the grammar refuses what it does not implement', () => {
     // above rather than sailing past them.
     const paths = [
       'package.json',
+      'package-lock.json',
       'tsconfig.json',
       'src/index.ts',
       'scripts/tool.ts',
@@ -186,6 +187,7 @@ describe('ships.sh — the grammar refuses what it does not implement', () => {
     expect(r.out).toBe(
       [
         'SHIP package.json',
+        'SHIP package-lock.json',
         'SHIP tsconfig.json',
         'SHIP src/index.ts',
         'SHIP scripts/tool.ts',
