@@ -93,3 +93,13 @@ test('#431 a failing label call throws the same typed error as every other call'
   const fn = stubFetch(403, { message: 'nope' });
   await expect(client(fn).addLabel(405, 'saturated')).rejects.toMatchObject({ status: 403 });
 });
+
+test('setIssueBody PATCHes only the body', async () => {
+  const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}), text: async () => '{}' });
+  const c = createGithubIssuesClient({ token: 't', repo: 'o/r', fetchImpl: fetchImpl as unknown as typeof fetch });
+  await c.setIssueBody(42, 'new body');
+  const [url, init] = fetchImpl.mock.calls[0];
+  expect(url).toBe('https://api.github.com/repos/o/r/issues/42');
+  expect(init.method).toBe('PATCH');
+  expect(JSON.parse(init.body)).toEqual({ body: 'new body' });
+});

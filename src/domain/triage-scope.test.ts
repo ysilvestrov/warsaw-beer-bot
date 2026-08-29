@@ -1,5 +1,6 @@
 import {
   isLegalScope, rowSatisfiesScope, renderScopeBlock, parseScopeBlock, stripScopeBlocks,
+  isRoutableTarget, explainScopeRejection,
   type Scope,
 } from './triage-scope';
 import type { UntriagedFailure } from '../storage/enrich_failures';
@@ -159,4 +160,47 @@ test('a contains value that looks like a scope block cannot hijack the parse', (
     }],
   };
   expect(parseScopeBlock(renderScopeBlock(scope))).toEqual(scope);
+});
+
+// #509 review (finding 3): rowSatisfiesScope accepts a row by COHORT MEMBERSHIP before it
+// ever looks at `where`, so a cohort-only issue is routable exactly when today's batch
+// intersects its cohort — never unconditionally, and never unconditionally not.
+test('a cohort-only scope IS routable when the batch intersects its cohort', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([2, 5]));
+  expect(isRoutable({ scope: { beer_ids: [1, 2], where: [] } })).toBe(true);
+});
+
+test('a cohort-only scope is NOT routable when the batch does not intersect its cohort', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([9, 10]));
+  expect(isRoutable({ scope: { beer_ids: [1, 2], where: [] } })).toBe(false);
+});
+
+test('a missing scope block is never a routable target, batch or not', () => {
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set([1, 2]));
+  expect(isRoutable({ scope: null })).toBe(false);
+});
+
+test('a where-scope is routable regardless of the batch, cohort or not', () => {
+  const where = [{ col: 'candidates_count', op: '=', value: 0 } as const];
+  const isRoutable = isRoutableTarget<{ scope: Scope | null }>(new Set());
+  expect(isRoutable({ scope: { beer_ids: [], where } })).toBe(true);
+  expect(isRoutable({ scope: { beer_ids: [7], where } })).toBe(true);
+});
+
+test('the rejection reason names the first term the row contradicts', () => {
+  const scope: Scope = {
+    beer_ids: [],
+    where: [
+      { col: 'source_url', op: 'contains', value: 'flasker' },
+      { col: 'candidates_count', op: '=', value: 0 },
+    ],
+  };
+  // the row matches term 1 (its source_url is a flasker URL) and fails term 2
+  expect(explainScopeRejection(row({ candidates_count: 3 }), 'matcher_bug', scope))
+    .toBe('candidates_count = 0');
+});
+
+test('the rejection reason for a cohort-only scope says the row is outside the cohort', () => {
+  expect(explainScopeRejection(row({ beer_id: 99 }), 'matcher_bug', { beer_ids: [1], where: [] }))
+    .toBe('outside the cohort');
 });

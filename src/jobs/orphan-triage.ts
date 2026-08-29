@@ -2,7 +2,8 @@ import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { getJobState, setJobState, deleteJobState } from '../storage/job_state';
 import {
-  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue, type UntriagedFailure,
+  listUntriagedFailures, setEnrichFailureReview, countRowsForIssue,
+  listOwnerlessRows, countOwnerlessRows, type UntriagedFailure,
 } from '../storage/enrich_failures';
 import type { TriageLlm, TriageExchange } from '../infra/triage-llm';
 import type { GithubIssuesClient } from '../infra/github-issues';
@@ -10,10 +11,13 @@ import type { TriageArchive } from '../infra/triage-archive';
 import {
   planTriageActions, computeSaturated, type ScopedIssue, type GuardReason, type SaturatedIssue,
 } from '../domain/triage-plan';
-import { parseScopeBlock, renderScopeBlock, stripScopeBlocks } from '../domain/triage-scope';
+import {
+  parseScopeBlock, renderScopeBlock, stripScopeBlocks, isRoutableTarget,
+} from '../domain/triage-scope';
 import { absenceProvedBy, collectTriageProbes, type TriageProbe } from '../domain/triage-probes';
 import { verifyCauses, isCausal } from '../domain/triage-verify';
 import { isTransient } from '../domain/transient-error';
+import { groupOwnerless, buildInboxBody } from '../domain/triage-inbox';
 import type { BeerSearch } from '../sources/untappd/search';
 import type { Analysis, Verdict, OpenIssue } from '../domain/triage-analysis';
 import { warsawDateAndHour } from '../domain/warsaw-time';
@@ -21,6 +25,9 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 export const TRIAGE_LAST_RUN_KEY = 'orphan_triage_last_run';
 export const TRIAGE_LAST_RESULT_KEY = 'orphan_triage_last_result';
 export const TRIAGE_LABEL = 'orphan-triage';
+// #509: the standing report issue for rows a scope guard refused. Never `orphan-triage` —
+// see publishTriageInbox below for why that would be a correctness bug, not a style choice.
+export const INBOX_LABEL = 'triage-inbox';
 // #431: applied and removed by this job. An issue wearing it has enough evidence that
 // the next move is a fix, not more triage.
 export const SATURATED_LABEL = 'saturated';
@@ -73,6 +80,7 @@ export interface TriageOutcome {
   // parts — the digest read as 20 rows on a day that had 15.
   causeStripped: number;   // the #358 gate stripped the cause
   noTarget: number;        // the model named neither an issue nor a key
+  offScope: number;        // #509: the scope guard refused the row's target, class kept
   // Guard tallies, logged every run. Previously reachable only through the `verdict
   // shortfall` warn, whose condition is counted BEFORE the guards run — so a refused row
   // still counts as covered and the guards could fire any number of times in silence.
@@ -127,6 +135,46 @@ async function reconcileSaturatedLabels(
   }
 }
 
+// #509: the inbox is a REPORT, not an owner. `enrich_failures.issue_number` is the key of
+// the #421 lock, so linking these rows to a standing issue would seal them out of both
+// pools forever (June 2026 sealed 157 rows exactly that way). The link is one-directional,
+// DB → issue body, and the rows keep issue_number NULL.
+//
+// Best-effort by design, and called AFTER every DB write and every GitHub write the run
+// owes: a failure here must never cost a verdict that was already earned. Same contract as
+// reconcileSaturatedLabels directly above.
+async function publishTriageInbox(
+  db: DB, log: pino.Logger, github: GithubIssuesClient, dateKey: string,
+): Promise<void> {
+  try {
+    const total = countOwnerlessRows(db);
+    const open = await github.listOpenIssues(INBOX_LABEL);
+    // #509 fix round 3 (MINOR 6): closing the inbox is how a human says "I ground this
+    // pile" (see the design's Change 4). Filing a fresh issue back the next morning with
+    // nothing in it would make that gesture pointless forever — an empty inbox filed on a
+    // day with zero ownerless rows and nobody already watching one serves no one. An
+    // ALREADY-OPEN inbox is the one exception: it still gets rewritten down to empty and
+    // honest, because a stale "N rows" body left open after the pile actually cleared is
+    // its own kind of lie, and the whole point of "rewritten, never appended to" is that
+    // the body always reflects the CURRENT state of the DB.
+    if (total === 0 && open.length === 0) return;
+    if (open.length > 1) {
+      log.warn({ numbers: open.map((i) => i.number) }, 'orphan-triage: more than one open triage inbox');
+    }
+    const groups = groupOwnerless(listOwnerlessRows(db));
+    const body = buildInboxBody(groups, total, dateKey);
+    // Newest wins: a duplicate means a human opened one, and the newest is the one they are
+    // most likely looking at.
+    const target = open.length > 0 ? open.reduce((a, b) => (a.number > b.number ? a : b)) : null;
+    if (target) await github.setIssueBody(target.number, body);
+    // The routing label is deliberately absent: an inbox wearing `orphan-triage` would join
+    // listOpenIssues(TRIAGE_LABEL) and become a target the model can route rows into.
+    else await github.createIssue({ title: 'Тріаж-інбокс: рядки без власника', body, labels: [INBOX_LABEL] });
+  } catch (err) {
+    log.warn({ err }, 'orphan-triage: inbox publish failed');
+  }
+}
+
 export function buildTriageLine(o: TriageOutcome): string {
   if (o.disabledReason) return `Тріаж: вимкнено (${o.disabledReason})`;
   if (o.error) {
@@ -144,9 +192,19 @@ export function buildTriageLine(o: TriageOutcome): string {
   if (o.notABeer > 0) parts.push(`${o.notABeer} not_a_beer`);
   if (o.guardHits.unprobed_absence > 0) parts.push(`${o.guardHits.unprobed_absence} без доказу відсутності`);
   if (o.causeStripped > 0) parts.push(`${o.causeStripped} неперевірених`);
+  if (o.offScope > 0) parts.push(`${o.offScope} без власника (поза scope)`);
   if (o.noTarget > 0) parts.push(`${o.noTarget} без цілі`);
   if (o.guardHits.illegal_scope > 0) parts.push(`${o.guardHits.illegal_scope} нелегальний scope`);
-  if (o.guardHits.scope_violation > 0) parts.push(`${o.guardHits.scope_violation} поза scope`);
+  // #509 final review: guardHits.scope_violation is NOT its own digest part — it is always
+  // >= offScope (offScope is the matcher_bug/parser_bug subset of it; the not_a_beer
+  // remainder, after the CRITICAL fix above, contributes to `skipped` instead), so printing
+  // both republishes the same rows under two labels. A normal day with 5 matcher_bug
+  // refusals used to read "5 без власника (поза scope), 5 поза scope" — the exact "12
+  // not_a_beer + 13 без цілі = 25 on a 13-row day" shape #432 already has a design for
+  // (see the comment above quietOffScope in triage-plan.ts). `guardHits` itself is NOT
+  // dropped — it stays on the logged outcome payload (`orphan-triage finished`), which is
+  // where the post-deploy checkpoint reads it from, so nothing observable is lost, only
+  // the double-printed digest text.
   if (o.skipped > 0) parts.push(`${o.skipped} пропущено`);
   return `Тріаж: ${o.total} нових${parts.length ? ` → ${parts.join(', ')}` : ''}`;
 }
@@ -236,7 +294,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     const empty: TriageOutcome = {
       total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0,
       notABeer: 0,
-      causeStripped: 0, noTarget: 0,
+      causeStripped: 0, noTarget: 0, offScope: 0,
       guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
       saturated: [],
       skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
@@ -249,6 +307,10 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
 
     const orphans = listUntriagedFailures(db, TRIAGE_BATCH_LIMIT);
     if (orphans.length === 0) {
+      // #509: the inbox reports the STANDING ownerless total, not today's activity, so it
+      // still refreshes on a day with nothing new to triage — rows off-scoped on an earlier
+      // day must not wait for tomorrow's batch to show up in the report.
+      await publishTriageInbox(db, log, github, dateKey);
       finish(empty);
       return;
     }
@@ -290,7 +352,21 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
             },
           })
         : new Map();
-      const ex1 = await llm.analyze({ orphans, openIssues, probes });
+      // #509: parse ONCE, above the call. This is the whole structural fix — scope used to
+      // be parsed at line ~352, after the model had already answered, which is why the two
+      // could never agree. `routable` is what the model may choose from; `scopedIssues`
+      // below keeps the FULL set, because the guard must stay able to refuse an invented
+      // number and reconcileSaturatedLabels must still clear a label off an issue the
+      // prompt no longer shows.
+      const parsed = openIssues.map((i) => ({ ...i, scope: parseScopeBlock(i.body) }));
+      // #509 review (finding 3): routability is judged against THIS batch's beer_ids, not the
+      // scope alone — a cohort-only issue can accept exactly the rows its cohort enumerates, so
+      // hiding it from the model regardless of the batch made this filter stricter than the
+      // guard (measured 4/26 archived runs, see isRoutableTarget). `orphans`, not `parsed` or
+      // `routable`, is today's batch.
+      const batchBeerIds = new Set(orphans.map((o) => o.beer_id));
+      const routable = parsed.filter(isRoutableTarget(batchBeerIds));
+      const ex1 = await llm.analyze({ orphans, openIssues: routable, probes });
       exchanges.push(ex1);
       // An empty verdict set on a non-empty batch is anomalous (the prompt asks
       // for a verdict per orphan). Retry once against the same open-issues set.
@@ -299,7 +375,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (ex1.analysis.verdicts.length === 0) {
         log.warn({ batch: orphans.length, stopReason: ex1.raw.stopReason },
           'orphan-triage: empty verdicts, retrying once');
-        const ex2 = await llm.analyze({ orphans, openIssues, probes });
+        const ex2 = await llm.analyze({ orphans, openIssues: routable, probes });
         exchanges.push(ex2);
       }
       analysis = exchanges[exchanges.length - 1].analysis;
@@ -348,10 +424,13 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       }
       // #408: the guards judge a routing decision, so they need the evidence it was
       // made about — the issues' parsed scopes and the batch rows, not just their ids.
-      // Parsing the body is I/O-shaped work and stays here; planTriageActions is pure.
-      scopedIssues = openIssues.map((i) => ({
+      // #509: reuse `parsed` rather than re-parsing — it is the FULL set (not `routable`),
+      // because the guard must stay able to refuse an invented number and
+      // reconcileSaturatedLabels must still clear a label off an issue the prompt no
+      // longer shows.
+      scopedIssues = parsed.map((i) => ({
         number: i.number,
-        scope: parseScopeBlock(i.body),
+        scope: i.scope,
         postCreationRows: countRowsForIssue(db, i.number, i.createdAt),
       }));
       plan = planTriageActions(analysis, scopedIssues, orphans, probes, strippedVerdicts);
@@ -397,6 +476,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     reportGuardAnomalies(log, plan.guardHits);
     outcome.causeStripped = plan.quietCauseStripped;
     outcome.noTarget = plan.quietNoTarget;
+    outcome.offScope = plan.quietOffScope;
 
     if (covered === 0) {
       log.error({ batch: orphans.length, stopReasons: exchanges.map((e) => e.raw.stopReason) },
@@ -478,7 +558,7 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
       if (v.review_class === 'not_on_untappd') outcome.notOnUntappd++;
       else if (v.review_class === 'unidentifiable') outcome.unidentifiable++;
       else if (v.review_class === 'not_a_beer') outcome.notABeer++;
-      // actionable classes are counted by planTriageActions as causeStripped / noTarget
+      // actionable classes are counted by planTriageActions as causeStripped / noTarget / offScope
     }
 
     // #431: recomputed from outcome.commented — the comments that actually POSTED —
@@ -491,6 +571,8 @@ export async function orphanTriage(deps: OrphanTriageDeps): Promise<void> {
     outcome.saturated = computeSaturated(scopedIssues, attachedThisRun);
 
     await reconcileSaturatedLabels(github, log, openIssues, outcome.saturated);
+
+    await publishTriageInbox(db, log, github, dateKey);
 
     finish(outcome);
   } finally {

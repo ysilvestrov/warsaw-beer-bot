@@ -9,6 +9,8 @@ import {
 } from '../sources/untappd/search';
 import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
+import { dominantCandidate } from './rating-dominance';
+import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -21,6 +23,7 @@ const GENERIC_TYPO_RESCUE_NAMES = new Set([
 interface FuzzyTarget {
   value: string;
   exactOnly: boolean;
+  restored: boolean;
 }
 
 export type LookupOutcome =
@@ -63,15 +66,28 @@ function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   const breweryNorm = normalizeBrewery(brewery);
   const targets = new Map<string, FuzzyTarget>();
   for (const [index, raw] of [name, ...name.split(COLLAB_SEP)].entries()) {
-    const value = stripBreweryFromName(normalizeName(raw), breweryNorm);
+    const ident = nameIdentity(raw, breweryNorm);
+    const value = ident.value;
     if (!value) continue;
     const tokenCount = value.split(' ').filter(Boolean).length;
     const exactOnly = index > 0 && tokenCount < 2;
     const existing = targets.get(value);
-    targets.set(value, { value, exactOnly: (existing?.exactOnly ?? true) && exactOnly });
+    targets.set(value, {
+      value,
+      exactOnly: (existing?.exactOnly ?? true) && exactOnly,
+      // Conservative in the same direction as exactOnly: once any raw contributing
+      // to this collision needed restoration, treat the merged target as restored
+      // rather than last-writer-wins (no reachable collision exercises this today,
+      // but the unsafe direction — silently dropping restored — is free to close).
+      restored: (existing?.restored ?? false) || ident.restored,
+    });
   }
   return Array.from(targets.values());
 }
+
+// Candidates are re-read at several stages, so give the candidate-side identity one name.
+const candIdent = (c: SearchResult): NameIdentity => candidateIdentity(c.beer_name, c.brewery_name);
+const candIdentValue = (c: SearchResult): string => candIdent(c).value;
 
 // Among equally-valid name matches, prefer one whose ABV is within tolerance of the
 // input's; otherwise the first (results are latest-first from the search page).
@@ -213,6 +229,7 @@ function nearNameScore(targetValue: string, candidate: SearchResult, singletonSt
   const candidateVariants = new Set([
     candidateNameNorm,
     stripBreweryFromName(candidateNameNorm, candidateBreweryNorm),
+    candIdentValue(candidate),
   ]);
 
   let best: number | null = null;
@@ -415,7 +432,9 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           targetNames.flatMap((targetName) => {
             if (targetName.exactOnly) return [];
             const score =
-              nearNameScore(targetName.value, result, strictPool.length === 1) ??
+              (identityAllowsApprox(targetName, candIdent(result), abv, result.abv)
+                ? nearNameScore(targetName.value, result, strictPool.length === 1)
+                : null) ??
               swappedBrandNameScore(targetName.value, inputBreweryAliases, result);
             return score == null ? [] : [{ result, score }];
           }),
@@ -440,7 +459,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // matches via approximate fuzzy).
     if (strictPool.length > 0) {
       const searcher = new Searcher(strictPool, {
-        keySelector: (r) => normalizeName(r.beer_name),
+        keySelector: (r) => candIdentValue(r),
         threshold: NAME_FUZZY_THRESHOLD,
         returnMatchData: true,
       });
@@ -449,7 +468,9 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           searcher
             .search(targetName.value)
             .filter(
-              (m) => !targetName.exactOnly || normalizeName(m.item.beer_name) === targetName.value,
+              (m) =>
+                (!targetName.exactOnly || candIdentValue(m.item) === targetName.value) &&
+                identityAllowsApprox(targetName, candIdent(m.item), abv, m.item.abv),
             ),
         )
         .sort((a, b) => b.score - a.score);
@@ -475,15 +496,33 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
     // Recovers names that collapse below the key path — e.g. `KULTOWE PILS` → `kultowe`
     // (style-word dropped), `St-Feuillien Blonde` (candidate strips its embedded brewery).
     const relaxedTargetValues = new Set(targetNames.map((t) => t.value));
-    const relaxedExact = relaxedPool.filter((r) =>
-      relaxedTargetValues.has(normalizeName(r.beer_name)),
+    // #505: a restored identity is a style word, a spec label or a bare grade — no
+    // identifying signal on its own. In the relaxed pool it may only win via the
+    // identity disjunct when the input carries brewery evidence at all: with an
+    // empty input brewery (#149) every candidate lands in relaxedPool, so a bare
+    // `IPA` would otherwise match an arbitrary brewery's IPA on no evidence. The
+    // literal-name disjunct above is untouched — matching the beer name verbatim is
+    // real evidence regardless of restoration.
+    const relaxedIdentityValues = new Set(
+      targetNames
+        .filter((t) => !t.restored || inputBreweryAliases.length > 0)
+        .map((t) => t.value),
+    );
+    const relaxedExact = relaxedPool.filter(
+      (r) =>
+        relaxedTargetValues.has(normalizeName(r.beer_name)) ||
+        relaxedIdentityValues.has(candIdentValue(r)),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 
     // Complete identity aliases are a rescue path, not a replacement for the
     // canonical/curated brewery stages above.
     if (identityHits.length > 0) {
-      const identityHit = pickUniqueByAbv(identityHits, abv);
+      // #505: when the input's own identity had to be restored, this rescue must not
+      // accept a candidate whose ABV contradicts the input — restored evidence is too
+      // weak to carry a 3% gap on its own.
+      const inputRestored = targetNames.some((t) => t.restored);
+      const identityHit = pickUniqueByAbv(identityHits, abv, inputRestored);
       return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
     }
 
@@ -507,11 +546,19 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       .sort((a, b) => b.score - a.score);
     if (nativeNearMatches.length > 0) {
       const topScore = nativeNearMatches[0].score;
-      const nativeHit = pickUniqueByAbv(
-        nativeNearMatches.filter((match) => match.score === topScore).map((match) => match.result),
-        abv,
-        true,
-      );
+      const topScored = nativeNearMatches
+        .filter((match) => match.score === topScore)
+        .map((match) => match.result);
+      const uniqueTop = Array.from(new Map(topScored.map((r) => [r.bid, r])).values());
+      // #487: this pool is scored APPROXIMATELY, so a tie here is not an equivalence class —
+      // it is an absence of evidence, and ABV must not select across it. Two exceptions keep
+      // their old behaviour: a single candidate (nothing to select between), and a candidate
+      // set with no popularity data at all (the legacy HTML relay and the web fallback supply
+      // no rating_count — there this rule must not fire, and ABV stays the only signal).
+      const hasPopularity = uniqueTop.some((r) => r.rating_count !== undefined);
+      const nativeHit = uniqueTop.length === 1 || !hasPopularity
+        ? pickUniqueByAbv(uniqueTop, abv, true)
+        : dominantCandidate(uniqueTop, abv);
       return nativeHit ? { kind: 'matched', result: nativeHit } : typoRescue();
     }
 
@@ -563,7 +610,39 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       }
     }
 
-    return typoRescue();
+    // The typo rescue is a matching stage in its own right and is based on an EXACT
+    // name, so it must be tried before the flagship stage — otherwise a popularity
+    // guess would preempt a real name match. Only once it has declined is the input
+    // genuinely unmatched, which is the precondition the flagship stage assumes.
+    const rescued = typoRescue();
+    if (rescued) return rescued;
+
+    // #487 flagship stage. Runs after every other stage — INCLUDING the exact-name typo
+    // rescue above — so this can only turn an orphan into a match and never revisit one
+    // that already worked. It fires when the target carries nothing beyond the brewery
+    // brand — the condition is on the target the stages actually compare, because the
+    // raw-name form (#306's isBareBrandName) does not even describe this case: for
+    // `Kronenbourg 1664` the digits survive baseNormalize.
+    const brandTokens = new Set(inputBreweryAliases.flatMap((a) => a.split(' ')).filter(Boolean));
+    const bareBrandTarget =
+      brandTokens.size > 0 &&
+      targetNames.length > 0 &&
+      targetNames.every((target) => {
+        const tokens = target.value.split(' ').filter(Boolean);
+        return tokens.length > 0 && tokens.every((token) => brandTokens.has(token));
+      });
+    if (bareBrandTarget) {
+      // Strongest evidence only, never mixed: a weak brand hit must not compete with a
+      // strict one for the same brewery.
+      const flagshipPool =
+        strictPool.length ? strictPool :
+        relaxedPool.length ? relaxedPool :
+        nativePool.length ? nativePool : brandPool;
+      const flagship = dominantCandidate(flagshipPool, abv);
+      if (flagship) return { kind: 'matched', result: flagship };
+    }
+
+    return null;
   }
 
   for (const part of parts) {

@@ -7,19 +7,57 @@
   </head>
   <body>
     <main class="card">
-      <h1>Warsaw Beer Overlay</h1>
-      <div class="row">
-        <button id="refresh" type="button">Refresh this page</button>
-        <button id="clearAll" type="button">Clear all cache</button>
-      </div>
-      <p id="status" class="status" aria-live="polite"></p>
-      <div class="row">
-        <button id="syncCheckins" type="button">Sync my check-ins</button>
-      </div>
+      <header class="head">
+        <svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="markFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stop-color="#F8991D" />
+              <stop offset="100%" stop-color="#96CC39" />
+            </linearGradient>
+          </defs>
+          <path d="M12 2.6c0 0-6.8 7-6.8 11.3a6.8 6.8 0 0 0 13.6 0C18.8 9.6 12 2.6 12 2.6z" />
+        </svg>
+        <h1>Warsaw Beer Overlay</h1>
+      </header>
+
+      <button id="syncCheckins" class="btn btn-primary" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        <span>Sync my check-ins</span>
+      </button>
       <p id="syncStatus" class="status" aria-live="polite"></p>
-      <p id="authNote" class="status" style="display:none" aria-live="polite"></p>
-      <button id="getToken" type="button" style="display:none">Get a token</button>
-      <a id="guideLink" target="_blank" rel="noopener" style="display:none">Read the setup guide →</a>
+
+      <button id="refresh" class="btn btn-secondary" type="button">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <polyline points="23 4 23 10 17 10" />
+          <polyline points="1 20 1 14 7 14" />
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+        </svg>
+        <span>Refresh this page</span>
+      </button>
+      <p id="status" class="status" aria-live="polite"></p>
+
+      <p id="authNote" class="note" style="display:none" aria-live="polite"></p>
+      <button id="getToken" class="btn btn-secondary" type="button" style="display:none">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+        </svg>
+        <span>Get a token</span>
+      </button>
+      <a id="guideLink" class="guide" target="_blank" rel="noopener" style="display:none">Read the setup guide →</a>
+
+      <footer class="foot">
+        <button id="clearAll" class="btn btn-ghost" type="button">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <polyline points="3 6 5 6 21 6" />
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+          </svg>
+          <span>Clear all cache</span>
+        </button>
+      </footer>
     </main>
     <script type="module" src="./popup.ts"></script>
   </body>

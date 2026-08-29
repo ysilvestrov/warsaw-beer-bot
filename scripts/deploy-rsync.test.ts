@@ -108,6 +108,7 @@ describe('deploy rsync payload', () => {
       'deploy/record-deployed.sh',
       'deploy/refresh-cookie.sh',
       'deploy/rsync-filter',
+      'deploy/ships.sh',
       'deploy/sudoers.d/warsaw-beer-bot',
       'deploy/warsaw-beer-bot.service',
       'deploy/wbb-autodeploy.service',

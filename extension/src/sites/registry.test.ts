@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { pickAdapter } from './registry';
+import { ADAPTERS, pickAdapter } from './registry';
 import { beerrepublic } from './beerrepublic';
 import { onemorebeer } from './onemorebeer';
 import { beerfreak } from './beerfreak';
@@ -59,8 +59,8 @@ describe('pickAdapter', () => {
 
 describe('adapter ids', () => {
   it('every adapter has a unique non-empty id', () => {
-    const ids = [beerrepublic, onemorebeer, beerfreak, bierloods22, winetime, hoptimaal, flasker, piwnemosty, funkyshop].map((a) => a.id);
-    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'bierloods22', 'winetime', 'hoptimaal', 'flasker', 'piwnemosty', 'funkyshop']);
+    const ids = ADAPTERS.map((a) => a.id);
+    expect(ids).toEqual(['beerrepublic', 'onemorebeer', 'beerfreak', 'bierloods22', 'winetime', 'hoptimaal', 'flasker', 'piwnemosty', 'funkyshop', 'beershop']);
     expect(new Set(ids).size).toBe(ids.length);
     for (const id of ids) expect(id.length).toBeGreaterThan(0);
   });

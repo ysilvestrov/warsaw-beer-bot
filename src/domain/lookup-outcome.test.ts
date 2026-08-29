@@ -6,6 +6,8 @@ import { normalizeName, normalizeBrewery } from './normalize';
 import { applyLookupOutcome } from './lookup-outcome';
 import type { LookupOutcome } from './untappd-lookup';
 import type { SearchResult } from '../sources/untappd/search';
+import { SHADOW_ONLY, classifyOrphanAsNonBeer } from './drink-boundary';
+import { setEnrichFailureReview } from '../storage/enrich_failures';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -113,5 +115,137 @@ describe('applyLookupOutcome merge', () => {
       { untappd_beer_id: number };
     expect(link.untappd_beer_id).toBe(canonicalId);  // match_links redirected to the canonical row
     db.close();
+  });
+});
+
+describe('#430 post-search non-beer enforcer', () => {
+  test('logs what it would classify and writes NO review_class while shadowed', () => {
+    expect(SHADOW_ONLY).toBe(true); // the flip is a deliberate, separate change
+    const { db, id } = fresh();
+    const warns: unknown[] = [];
+    const log = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['https://x/?q=aperol+spritz'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Culaccino', name: 'Aperol Spritz' });
+
+    const row = db.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = ?')
+      .get(id) as { review_class: string | null };
+    expect(row.review_class).toBeNull();          // the DB write, not just the log
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toMatchObject({ beerId: id, token: 'aperol', shadow: true });
+  });
+
+  test('says nothing at all about a row it would not classify', () => {
+    const { db, id } = fresh();
+    const warns: unknown[] = [];
+    const log = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['https://x/?q=hazy+ipa'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Pinta', name: 'Hazy IPA' });
+
+    expect(warns).toHaveLength(0);
+  });
+});
+
+describe('#430 auto-classify must not overwrite an existing verdict (Critical A)', () => {
+  test('a row already triaged keeps its review_class across a not_found retry that would otherwise trip the classifier', () => {
+    const { db, id, log } = fresh();
+
+    // Seed: a prior not_found failure, then a real triage verdict on it — exactly the
+    // shape of a row `enrichOneOrphan` retries every day (matcher_bug stays in the
+    // retry pool, unlike not_a_beer).
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-20T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Some Real Beer' });
+    const seeded = setEnrichFailureReview(db, id, 'matcher_bug', 'seed', '2026-08-20T00:00:01.000Z');
+    expect(seeded).toBe('written'); // fails loud if the seed itself didn't take
+    expect(failRow(db, id).review_class).toBe('matcher_bug');
+
+    // Retry: zero candidates again (0<->0, no crossing, so recordEnrichFailure
+    // preserves review_class) with a name carrying a surviving NON_BEER_NAME_TOKENS
+    // token ('nalewka') — exactly what trips classifyOrphanAsNonBeer.
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Nalewka gruszkowa' });
+
+    // Since F3, the guard (matched + existing review_class → 'none') runs BEFORE the
+    // shadow check, so this integration test genuinely exercises it under the real
+    // committed SHADOW_ONLY=true wiring — before F3 it could not: shadow used to
+    // short-circuit to 'log' first, so this assertion would have passed even with a
+    // broken guard. The guard itself is still proved exhaustively and directly, with
+    // no flag to flip, by autoClassifyAction's own tests in drink-boundary.test.ts
+    // ("the guard wins under shadow too").
+    expect(failRow(db, id).review_class).toBe('matcher_bug');
+  });
+});
+
+describe('#430 F1: the enforcer reads the beer\'s stored style, not a hard-coded null', () => {
+  test('an eligible style (Cydr) protects a name that carries a surviving non-beer token (nalewka)', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const brewery = 'Sad Trzebnicki';
+    const name = 'Nalewka gruszkowa';
+    const id = upsertBeer(db, {
+      untappd_id: null, name, brewery, style: 'Cydr', abv: null, rating_global: null,
+      normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+    });
+
+    // Proves the fix is load-bearing: with style dropped to null (the pre-fix
+    // behaviour this task removes), the very same row WOULD be classified via the
+    // 'nalewka' token — there is no other guard standing between this row and
+    // not_a_beer once style is discarded.
+    expect(classifyOrphanAsNonBeer({ brewery, name, style: null, candidates_count: 0 }))
+      .toEqual({ nonBeer: true, token: 'nalewka' });
+
+    const warns: unknown[] = [];
+    const log = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery, name });
+
+    // With the real stored style read via getBeer (the fix), the eligible family
+    // wins and the enforcer says nothing at all about this row.
+    expect(warns).toHaveLength(0);
+    db.close();
+  });
+});
+
+describe('#430 F4: the pre-mutation review_class must be captured before recordEnrichFailure runs', () => {
+  test('a 0<->>0 candidates crossing clears review_class for re-triage, but the value captured before the crossing still protects this same call', () => {
+    const { db, id, log } = fresh();
+
+    // Seed: a not_found failure WITH candidates (candidates_count > 0), then a real
+    // triage verdict on it.
+    applyLookupOutcome({ db, log }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [cand({})],
+    } as LookupOutcome, '2026-08-20T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Some Real Beer' });
+    const seeded = setEnrichFailureReview(db, id, 'matcher_bug', 'seed', '2026-08-20T00:00:01.000Z');
+    expect(seeded).toBe('written'); // fails loud if the seed itself didn't take
+    expect(failRow(db, id).review_class).toBe('matcher_bug');
+    expect(failRow(db, id).candidates_count).toBeGreaterThan(0);
+
+    // Retry: candidates_count crosses back to 0 (a genuine 0<->>0 crossing, so
+    // recordEnrichFailure nulls review_class to reopen the row for re-triage) AND the
+    // name now carries a surviving NON_BEER_NAME_TOKENS token ('nalewka'), tripping
+    // classifyOrphanAsNonBeer, in the SAME call.
+    const warns: unknown[] = [];
+    const spyLog = { warn: (o: unknown) => warns.push(o), error: () => {} } as unknown as pino.Logger;
+    applyLookupOutcome({ db, log: spyLog }, id, {
+      kind: 'not_found', searchUrls: ['u'], candidates: [],
+    } as LookupOutcome, '2026-08-22T00:00:00.000Z', { brewery: 'Nalej Se', name: 'Nalewka gruszkowa' });
+
+    // The row genuinely IS reopened for re-triage...
+    expect(failRow(db, id).review_class).toBeNull();
+    // ...but auto-classify must not have PROPOSED not_a_beer against it in this same
+    // call: it must take the 'none' (guarded-skip) path, not the 'log' (shadow
+    // proposal) path. Both paths log a warning, so the distinguishing signal is the
+    // message shape: only the 'log' path carries `shadow: true` — case 'none' does
+    // not. The value captured BEFORE recordEnrichFailure ('matcher_bug') is what
+    // routes this call through 'none'.
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toMatchObject({ beerId: id, token: 'nalewka', name: 'Nalewka gruszkowa' });
+    expect(warns[0]).not.toHaveProperty('shadow');
   });
 });

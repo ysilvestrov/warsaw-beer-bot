@@ -10,6 +10,7 @@ import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_f
 import {
   orphanTriage, shouldRunTriage, buildTriageLine, buildSaturatedLine, reportGuardAnomalies,
   TRIAGE_LAST_RUN_KEY, TRIAGE_LAST_RESULT_KEY, TRIAGE_ATTEMPTS_KEY, TRIAGE_MAX_ATTEMPTS,
+  TRIAGE_LABEL, INBOX_LABEL,
   type TriageOutcome,
 } from './orphan-triage';
 import type { Analysis } from '../domain/triage-analysis';
@@ -59,13 +60,19 @@ const gh = (over = {}) => ({
   // type-checked, and a missing value does NOT throw — better-sqlite3 binds undefined,
   // the comparison goes NULL, and countRowsForIssue quietly returns 0, which would
   // disable the guard while every test still passed. So it is set deliberately.
-  listOpenIssues: vi.fn().mockResolvedValue([
+  //
+  // Label-aware: #509's publishTriageInbox queries INBOX_LABEL separately from the
+  // TRIAGE_LABEL call above it. Without this split every test here would hand the
+  // inbox publish the same triage issue as its "existing inbox" and rewrite it —
+  // while every existing assertion, none of which looks at setIssueBody, kept passing.
+  listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL ? [] : [
     { number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
-  ]),
+  ])),
   createIssue: vi.fn().mockResolvedValue(231),
   commentOnIssue: vi.fn().mockResolvedValue(undefined),
   addLabel: vi.fn().mockResolvedValue(undefined),
   removeLabel: vi.fn().mockResolvedValue(undefined),
+  setIssueBody: vi.fn().mockResolvedValue(undefined),
   ...over,
 });
 const exchange = (analysis: Analysis, stopReason: string | null = 'tool_use') => ({
@@ -207,7 +214,11 @@ test('no untriaged orphans: nothing-to-do line, no LLM call', async () => {
   const github = gh();
   await orphanTriage({ db: d, log, llm: theLlm, github, now: inWindow });
   expect(theLlm.analyze).not.toHaveBeenCalled();
-  expect(github.listOpenIssues).not.toHaveBeenCalled();
+  // #509: the inbox reports the STANDING ownerless total, not today's routing activity, so
+  // it still refreshes on a day with nothing new to triage — no TRIAGE_LABEL lookup (no
+  // routing happens), but the INBOX_LABEL lookup fires.
+  expect(github.listOpenIssues).not.toHaveBeenCalledWith(TRIAGE_LABEL);
+  expect(github.listOpenIssues).toHaveBeenCalledWith(INBOX_LABEL);
   expect(JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line).toContain('0 нових');
 });
 
@@ -241,14 +252,14 @@ test('reentrancy guard: overlapping tick is skipped while a run is in progress',
 test('buildTriageLine formats counts', () => {
   expect(buildTriageLine({
     total: 7, commented: [{ issueNumber: 228, count: 2 }], created: [{ issueNumber: 232, count: 1 }],
-    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
+    notOnUntappd: 3, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 1, unverified: 0, error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 7 нових → 2 до #228, 1 нова #232, 3 not_on_untappd, 1 пропущено');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: 'invalid json', attempt: null, disabledReason: null,
   })).toBe('Тріаж: помилка (invalid json)');
   expect(buildTriageLine({
-    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: 'нема GITHUB_TOKEN',
   })).toBe('Тріаж: вимкнено (нема GITHUB_TOKEN)');
 });
@@ -484,6 +495,101 @@ test('guardHits on the finished outcome carries per-guard counts', async () => {
   expect(outcome.guardHits.scope_violation).toBe(1);
 });
 
+test('a target the guard would always refuse is not offered to the model, but the guard still sees it', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  // beer_ids deliberately excludes BOTH batch rows (1 and 2): rowSatisfiesScope treats
+  // cohort membership as an unconditional match (OR'd with `where`), so a cohort that
+  // named either one would let its routing legitimately succeed and never exercise the
+  // guard this test targets. #509 review (finding 3): isRoutableTarget now also offers a
+  // cohort-only issue whose cohort intersects the CURRENT BATCH — so "not offered" here
+  // depends on beer_id 99 being outside this test's batch, not merely on the scope having
+  // no `where`. See triage-scope.test.ts for the case where the cohort DOES intersect.
+  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[99],"where":[]}\n```';
+  const WHERE_SCOPED = 'b\n\n```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":"=","value":0}]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 'cohort only', body: COHORT_ONLY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+      { number: 301, title: 'unscoped', body: 'no block here', labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+      { number: 302, title: 'where scoped', body: WHERE_SCOPED, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  // The model routes beer 2 to the cohort-only issue anyway — it can only do that if the
+  // guard is still judging against the full set, which is what the second assertion checks.
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 302, new_issue_key: null },
+      { beer_id: 2, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null },
+    ],
+    new_issues: [],
+  };
+  const model = llm(analysis);
+  await orphanTriage({ db: d, log, llm: model, github, now: inWindow });
+
+  expect(model.analyze.mock.calls[0][0].openIssues.map((i: { number: number }) => i.number)).toEqual([302]);
+  const outcome = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  expect(outcome).toContain('поза scope');
+});
+
+// #509 review (finding 3): the mirror of the test above — a cohort-only issue whose
+// cohort DOES intersect today's batch can accept exactly the rows it enumerates
+// (rowSatisfiesScope ORs cohort membership with `where`), so hiding it from the model was
+// stricter than the guard. Measured across 26 archived production runs: this happened on
+// 4 of them (#322 with row 34642 twice, #320 with 31816, #320 with 30667).
+test('a cohort-only issue whose cohort intersects the batch IS offered to the model', async () => {
+  const d = db();
+  [1, 2].forEach((n) => seedOrphan(d, n));
+  const COHORT_ONLY = 'b\n\n```triage-scope\n{"beer_ids":[1],"where":[]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 'cohort only', body: COHORT_ONLY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  const analysis: Analysis = {
+    verdicts: [
+      { beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null },
+    ],
+    new_issues: [],
+  };
+  const model = llm(analysis);
+  await orphanTriage({ db: d, log, llm: model, github, now: inWindow });
+
+  expect(model.analyze.mock.calls[0][0].openIssues.map((i: { number: number }) => i.number)).toEqual([300]);
+  const outcome = JSON.parse(getJobState(d, TRIAGE_LAST_RESULT_KEY)!).line;
+  // Beer 1 IS in the cohort, so the routing succeeds — no guard hit, not off-scope.
+  expect(outcome).not.toContain('поза scope');
+});
+
+// #509: a row refused by the scope guard used to be left untouched (review_class NULL),
+// so it came back in tomorrow's batch and the model made the identical routing choice —
+// measured on prod as the same row hitting the same issue nine days running. It must
+// leave the run with a class recorded and no issue_number, so it is neither re-offered
+// to the model as untriaged nor locked out of both enrichment pools by the #421 keyed
+// lock (which reads issue_number, not review_class, as "a fix is coming").
+test('a scope-refused row leaves the run with a class and no issue, so it is not locked', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const WHERE_SCOPED = 'b\n\n```triage-scope\n{"beer_ids":[],"where":[{"col":"candidates_count","op":">","value":0}]}\n```';
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([
+      { number: 300, title: 't', body: WHERE_SCOPED, labels: [], createdAt: '2026-01-01T00:00:00.000Z' },
+    ]),
+  });
+  // seedOrphan writes candidates_count 0, so the row contradicts `candidates_count > 0`.
+  const analysis: Analysis = {
+    verdicts: [{ beer_id: 1, review_class: 'matcher_bug', review_note: 'n', issue_number: 300, new_issue_key: null }],
+    new_issues: [],
+  };
+  await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
+
+  const r = d.prepare('SELECT review_class, issue_number, review_note FROM enrich_failures WHERE beer_id = 1').get() as
+    { review_class: string; issue_number: number | null; review_note: string };
+  expect(r.review_class).toBe('matcher_bug');
+  expect(r.issue_number).toBeNull();
+  expect(r.review_note).toContain('off-scope #300:');
+  expect(github.commentOnIssue).not.toHaveBeenCalled();
+});
+
 // The other side of #408 guard 3: with a search dep the probes actually run, and an
 // empty result IS evidence of absence, so the terminal class survives end to end. This
 // is what stops the guard from collapsing into "always degrade".
@@ -651,12 +757,20 @@ test('without a search dep the job behaves exactly as before', async () => {
 // notABeer is also given a value distinct from noTarget/causeStripped (MINOR 5): a
 // fixture where notABeer is always 0 cannot catch not_a_beer being double-counted
 // into one of the quiet counters, which is exactly how CRITICAL 1 escaped review.
+// offScope is also given its own non-zero value here, alongside a non-zero notABeer:
+// #509's quietOffScope must exclude not_a_beer the same way causeStripped/noTarget do
+// (triage-plan.ts), and a fixture where offScope is always 0 cannot catch that guard
+// double-counting a scope-refused not_a_beer into this part.
+// scope_violation is set to 1, not 0 (#509 final review): offScope is a strict SUBSET of
+// scope_violation (every matcher_bug/parser_bug refusal that bumps offScope also bumps
+// scope_violation in the same call), so offScope:1 with scope_violation:0 could never
+// happen in production — this fixture used to assert exactly that impossible pairing.
 test('buildTriageLine reports the causeStripped count, not unverified', () => {
   expect(buildTriageLine({
     total: 4, commented: [{ issueNumber: 228, count: 1 }], created: [],
-    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
+    notOnUntappd: 1, unidentifiable: 0, notABeer: 3, causeStripped: 2, noTarget: 0, offScope: 1, guardHits: { illegal_scope: 0, scope_violation: 1, unprobed_absence: 0 }, saturated: [], skipped: 0, unverified: 7,
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених');
+  })).toBe('Тріаж: 4 нових → 1 до #228, 1 not_on_untappd, 3 not_a_beer, 2 неперевірених, 1 без власника (поза scope)');
 });
 
 test('logs one evidence summary per run (input for the quality review)', async () => {
@@ -681,7 +795,7 @@ test('logs one evidence summary per run (input for the quality review)', async (
 
 test('buildTriageLine: transient attempts vs final failure', () => {
   const base = {
-    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
+    total: 5, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0, causeStripped: 0, noTarget: 0, offScope: 0, guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 }, saturated: [],
     skipped: 0, unverified: 0, error: null as string | null, disabledReason: null as string | null,
     attempt: null as number | null,
   };
@@ -747,8 +861,14 @@ test('no duplicate GitHub side effects across a transient retry', async () => {
       key: 'k1', title: 'Adapter noise', body: 'b', labels: [], scope: { beer_ids: [1, 2, 3, 4, 5, 6], where: [] },
     }],
   };
-  // One github stub shared across both ticks, so call counts accumulate.
-  const github = gh();
+  // One github stub shared across both ticks, so call counts accumulate. An existing inbox
+  // is pre-seeded so the #509 daily inbox refresh calls setIssueBody, not createIssue — this
+  // test's createIssue count is about routing (the ONE new triage issue), not the inbox.
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 900, title: 'inbox', body: 'old', labels: [INBOX_LABEL], createdAt: '2026-01-01T00:00:00.000Z' }]
+      : [{ number: 228, title: 't', body: SCOPED_BODY, labels: [], createdAt: '2026-01-01T00:00:00.000Z' }])),
+  });
   await orphanTriage({ db: d, log, llm: transientLlm(), github, now: inWindow });
   await orphanTriage({ db: d, log, llm: llm(analysis), github, now: inWindow });
 
@@ -885,17 +1005,23 @@ test('narrow warn stays silent for routine guard work', () => {
 test('buildTriageLine names each quiet mechanism and hides routine guards', () => {
   expect(buildTriageLine({
     total: 15, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 7,
-    causeStripped: 5, noTarget: 1, skipped: 0, unverified: 8,
+    causeStripped: 5, noTarget: 1, offScope: 0, skipped: 0, unverified: 8,
     guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 9 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
   })).toBe('Тріаж: 15 нових → 7 not_a_beer, 9 без доказу відсутності, 5 неперевірених, 1 без цілі');
 
+  // #509 final review: offScope:1/scope_violation:2 is the production-realistic pairing —
+  // of 2 scope refusals, 1 was matcher_bug/parser_bug (counted in offScope) and 1 was
+  // not_a_beer (counted only in scope_violation, and in `skipped` after the CRITICAL fix
+  // above). The old fixture paired offScope:0 with scope_violation:2 and asserted a
+  // rendered "2 поза scope" part that no longer exists — guardHits.scope_violation is not
+  // its own digest text, see the comment above `skipped` in buildTriageLine.
   expect(buildTriageLine({
     total: 3, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 4,
-    causeStripped: 0, noTarget: 0, skipped: 2, unverified: 3,
+    causeStripped: 0, noTarget: 0, offScope: 1, skipped: 2, unverified: 3,
     guardHits: { illegal_scope: 1, scope_violation: 2, unprobed_absence: 0 }, saturated: [],
     error: null, attempt: null, disabledReason: null,
-  })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 нелегальний scope, 2 поза scope, 2 пропущено');
+  })).toBe('Тріаж: 3 нових → 4 not_a_beer, 1 без власника (поза scope), 1 нелегальний scope, 2 пропущено');
 });
 
 test('a throwing archive cannot cost the day: state is written before the archive', async () => {
@@ -1046,7 +1172,7 @@ test('#431: a failed comment must not saturate its issue — nothing landed', as
 // --- #431 the saturated digest line ---------------------------------------------
 const outcomeWith = (saturated: { issueNumber: number; rows: number }[]): TriageOutcome => ({
   total: 0, commented: [], created: [], notOnUntappd: 0, unidentifiable: 0, notABeer: 0,
-  causeStripped: 0, noTarget: 0,
+  causeStripped: 0, noTarget: 0, offScope: 0,
   guardHits: { illegal_scope: 0, scope_violation: 0, unprobed_absence: 0 },
   saturated, skipped: 0, unverified: 0, error: null, attempt: null, disabledReason: null,
 });
@@ -1067,4 +1193,111 @@ test('#431 line: seven saturated → top five plus the total', () => {
   ));
   expect(line).toBe('Насичені: #400 (21), #401 (15), #402 (12), #403 (11), #404 (8) — усього 7');
   expect(line).not.toContain('#405');
+});
+
+// --- #509 the triage inbox --------------------------------------------------------
+
+// #509 fix round 1: the row with the off-scope note (beer 1) is ALREADY reviewed before
+// this run starts — that is what makes it an ownerless row the inbox has to report. A
+// second, UNREVIEWED orphan (beer 2) is seeded so this run is a real one: listUntriagedFailures
+// returns beer 2, the model gives it a (quiet) verdict, the write loop runs, and the inbox is
+// published from the NORMAL-path call site (after reconcileSaturatedLabels) — not the
+// no-new-orphans early return. createIssue is otherwise uncalled in this scenario (beer 2's
+// verdict is a quiet class, no routing), so the single call captured below IS the inbox create.
+test('the inbox issue is created without the routing label, so it can never become a target', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  seedOrphan(d, 2);
+  const github = gh({
+    listOpenIssues: vi.fn().mockResolvedValue([]),
+    createIssue: vi.fn().mockResolvedValue(600),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 2, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).toHaveBeenCalledTimes(1);
+  const created = github.createIssue.mock.calls.at(-1)![0];
+  expect(created.labels).toEqual([INBOX_LABEL]);
+  expect(created.labels).not.toContain(TRIAGE_LABEL);
+  expect(created.body).toContain('#300');
+});
+
+// Same reasoning as the test above: beer 1 is already reviewed (the ownerless row the
+// inbox must report), beer 2 is a fresh untriaged orphan so a real run happens and this
+// exercises the normal-path publishTriageInbox call, not the no-new-orphans one.
+test('an existing open inbox is rewritten, not duplicated', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  setEnrichFailureReview(d, 1, 'matcher_bug', 'off-scope #300: candidates_count = 0', '2026-08-26T00:00:00Z', null);
+  seedOrphan(d, 2);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 600, title: 'inbox', body: 'old', labels: [INBOX_LABEL], createdAt: '2026-08-01T00:00:00.000Z' }]
+      : [])),
+    setIssueBody: vi.fn().mockResolvedValue(undefined),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 2, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('#300'));
+});
+
+// #509 fix round 3 (MINOR 6): zero ownerless rows and no open inbox to rewrite ⇒ nothing
+// filed. Without this guard the job would create a fresh empty inbox issue every single
+// day forever, contradicting the design's own "closing it means I ground this pile"
+// semantics. beer 1's only verdict here is `unidentifiable` — quiet, no routing, no
+// matcher_bug/parser_bug row — so the ownerless pile stays at 0 for the whole run.
+test('an empty ownerless pile with no open inbox files nothing', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({ listOpenIssues: vi.fn().mockResolvedValue([]) });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).not.toHaveBeenCalled();
+});
+
+// The one exception the guard above carves out: an ALREADY-OPEN inbox still gets
+// rewritten down to empty and honest rather than left standing with a stale "5 rows"
+// body from a pile that has since cleared — "rewritten, never appended to" only means
+// something if the rewrite happens even when the news is good.
+test('an empty ownerless pile still rewrites an existing open inbox to empty and honest', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => (label === INBOX_LABEL
+      ? [{ number: 600, title: 'inbox', body: 'old: 5 rows', labels: [INBOX_LABEL], createdAt: '2026-08-01T00:00:00.000Z' }]
+      : [])),
+    setIssueBody: vi.fn().mockResolvedValue(undefined),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  expect(github.createIssue).not.toHaveBeenCalled();
+  expect(github.setIssueBody).toHaveBeenCalledWith(600, expect.stringContaining('**0**'));
+});
+
+test('an inbox failure does not cost the run its verdicts', async () => {
+  const d = db();
+  seedOrphan(d, 1);
+  const github = gh({
+    listOpenIssues: vi.fn(async (label: string) => {
+      if (label === INBOX_LABEL) throw new Error('github down');
+      return [];
+    }),
+  });
+  await orphanTriage({
+    db: d, log, github, now: inWindow,
+    llm: llm({ verdicts: [{ beer_id: 1, review_class: 'unidentifiable', review_note: 'n', issue_number: null, new_issue_key: null }], new_issues: [] }),
+  });
+  const r = d.prepare('SELECT review_class FROM enrich_failures WHERE beer_id = 1').get() as { review_class: string };
+  expect(r.review_class).toBe('unidentifiable');
+  expect(getJobState(d, TRIAGE_LAST_RUN_KEY)).toBe('2026-07-05');
 });

@@ -1,7 +1,7 @@
 import type { Analysis, Verdict } from './triage-analysis';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import { absenceProvedBy, type TriageProbe } from './triage-probes';
-import { isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
+import { explainScopeRejection, isLegalScope, rowSatisfiesScope, type Scope } from './triage-scope';
 
 export interface PlannedNewIssue {
   key: string;
@@ -47,9 +47,145 @@ export interface TriagePlan {
   // as a foreign row — and a report that can print a negative number is not a report.
   quietCauseStripped: number;     // #358 gate stripped the cause, row went quiet
   quietNoTarget: number;          // the model named neither an issue nor a key
+  // #509: refused routing, class kept — a fourth way an actionable class ends with no
+  // issue, counted where it is decided like the other three.
+  quietOffScope: number;
 }
 
 export const MAX_NEW_ISSUES_PER_RUN = 3;
+
+// #509 review (finding 1): the refused TARGET must be bounded on its own, separately from
+// the note's overall 500-char cap. `target` at the proposed-issue site is
+// `verdict.new_issue_key`, which VerdictSchema bounds only by `z.string().min(1)` — no
+// maximum — so a long enough key can eat the whole `.slice(0, 500)` budget on its own and
+// truncate away the `: <reason>` separator `groupOwnerless`'s OFF_SCOPE regex depends on
+// (triage-inbox.ts), silently dropping the row into the `unrecognised` bucket instead of
+// under the target that refused it. Real model-authored keys measured in production run
+// 15-30 characters (`flasker_glued_brewery`, `garbled-name-noise`,
+// `lobster_brewery_suffix`); 60 is a generous multiple of that, chosen so nothing
+// legitimate is ever truncated while nothing pathological can consume the budget the
+// structured prefix needs to survive.
+//
+// #509 review round 3 (rejected finding): two DISTINCT model-authored targets that both
+// exceed 60 characters AND agree on their first 60 would collide under one inbox group
+// heading. Accepted as-is — it needs two keys past the measured 15-30 char range that
+// also share a 60-char prefix, has never occurred, and the failure mode (two mechanisms
+// sharing one heading) is visible to the human reading the report, not silent data loss.
+const MAX_TARGET_CHARS = 60;
+
+// #509 review round 5 (hole 1): `reason` has no bound of its own either. It comes from
+// `explainScopeRejection` (triage-scope.ts), which for a `contains` term is
+// `describeTerm(failing)` = `${col} ${op} ${value}` — `value` is the model-authored
+// `contains` term's free-text value, `z.string().min(1)`, no max, no charset. Bounding
+// `target` alone (above) is not enough: a long enough `reason` can, on its own, push the
+// note's structured part (`off-scope <target>: <reason>`) right up against the outer
+// `.slice(0, 500)` cut, so the cut lands inside the ` | ` delimiter itself instead of past
+// it — not truncating the tail cleanly, but leaving a note that ends in a bare `" |"`
+// with no trailing space. `OFF_SCOPE`'s tail group requires the full three-character
+// literal ` | ` to match at all, so it fails, and the non-greedy reason group backtracks
+// to swallow the stray `" |"` into the reason text: the note still matches (this is why
+// it is a display bug, not a parse failure), but a dangling pipe leaks into what the
+// inbox shows as the reason, and the model's own review_note is silently dropped instead
+// of merely truncated. Same fix as the target: bound the piece BEFORE assembly. With
+// target capped at 60 and reason capped here at 200, the structured prefix plus the full
+// delimiter is at most `"off-scope ".length (10) + 60 + ": ".length (2) + 200 + " | ".length (3)` =
+// 275 characters — nowhere near 500 — so the delimiter is always assembled whole before
+// the outer slice ever runs, and the only thing that slice can still cut is the model's
+// own trailing sentence. That is the degenerate case this cap accepts on purpose: a
+// reason long enough to want the ENTIRE 500-character budget for itself still only ever
+// gets truncated to 200 well-formed characters, producing a note with no tail sentence at
+// all (`review_note` dropped) rather than a note with half a delimiter. A note missing its
+// tail is a smaller loss than one whose reason field is corrupted — the tail is optional
+// context, the reason is the fact a human is meant to act on. 200 is picked the same way
+// 60 is for the target: production reasons are `<col> <op> <value>` over a handful of
+// short column names and operators (`source_url contains ...`, `brewery = ...`), so 200
+// leaves generous headroom over anything measured while still leaving most of the
+// 500-character budget for the tail in the common case.
+const MAX_REASON_CHARS = 200;
+
+// #509 review round 3 (findings A & B — see MAX_TARGET_CHARS above for the rejected
+// finding C): the prior two rounds each patched OFF_SCOPE's regex (triage-inbox.ts) to
+// survive one more shape of model text, and each patch immediately produced a new failure
+// of the same kind, because the two fields the note encodes alongside the fixed literal
+// text — `target` (verdict.new_issue_key, `z.string().nullable()`, no max, no charset) and
+// `reason` (built from explainScopeRejection, which for a `contains` term interpolates the
+// model-authored `value`, `z.string().min(1)`, no max, no charset either) — are
+// UNCONSTRAINED. A regex is a fixed pattern; it cannot be made safe against text it does
+// not control, because for any delimiter it looks for there is always a model string that
+// reproduces it (`cider: brand` reproduces `: `, a `contains` value of `foo | bar`
+// reproduces ` | `). The fix is therefore at the WRITE site, not the parse site: sanitize
+// the two model-authored fields before they are encoded, so neither can contain a
+// delimiter OFF_SCOPE depends on. This is the one place that KNOWS which characters are
+// structural — the writer built the format — whereas the parser can only ever react to
+// text already committed to the column. Substitution (not deletion) keeps the note
+// lossy-but-visible: a human reading the inbox still sees what the model meant, just with
+// the two structural sequences defanged. Once these are sanitized, OFF_SCOPE needs no
+// further widening — its job was never wrong, its input was.
+//
+// #509 review round 4: three more findings, all newlines — in the target, in the reason,
+// and in the model's own `review_note` (which round 3 left unsanitized entirely, since it
+// is appended raw after the note's second `|`). OFF_SCOPE's `.` groups never span `\n`
+// (JS regex, no `s` flag), so a newline ANYWHERE in the note — not just in the field that
+// carries it — makes the whole `^...$` fail to match, and the row falls to
+// UNRECOGNISED_KEY. Same fix as round 3, same reasoning: sanitize at the write site,
+// where the structural characters are known.
+//
+// Order matters, and it is not arbitrary: collapse whitespace runs (newlines and tabs
+// included) to a single space FIRST, and only THEN do the `: `/`|` substitutions. A key
+// of `"cider:\nbrand"` collapses to `"cider: brand"` — now containing the literal `: `
+// trigger — so the substitution below correctly catches it and produces `"cider; brand"`.
+// Reverse the order and that case escapes: substituting first tests the ORIGINAL string
+// for the literal two-character sequence `: ` (colon immediately followed by a space),
+// finds none (a `\n` sits between them, not a space), leaves it untouched, and only
+// THEN collapses the untouched `:\n` down to `: ` — which still contains the very
+// delimiter OFF_SCOPE splits on, now smuggled in by whitespace instead of by the model
+// typing it directly. Collapse-then-substitute is the only order that closes both the
+// literal-delimiter case and the delimiter-hiding-behind-whitespace case in one pass.
+//
+// #509 review round 5 (hole 2): `\s+` collapses an INTERIOR run to one space but leaves a
+// single LEADING or TRAILING space untouched — collapsing a run of length 1 is a no-op.
+// A target of `" cider "` therefore survived as `" cider "`, not `"cider"`: an invisible
+// padding difference that made `groupOwnerless` file it under its own heading instead of
+// joining the `"cider"` group, and rendered as a heading with leading/trailing blank
+// space in the inbox. `.trim()` after the collapse removes exactly that padding. Order
+// between collapse and trim does not matter here (trim only ever touches the edges,
+// collapse only ever touches interior runs, and neither can reintroduce work for the
+// other), unlike the `: `/`|` substitutions below, which genuinely do depend on running
+// after the collapse — so this is placed after collapse simply to read as one pipeline,
+// not because reversing it would break anything.
+const collapseWhitespace = (s: string): string => s.replace(/\s+/g, ' ').trim();
+const sanitizeTarget = (s: string): string =>
+  collapseWhitespace(s).replace(/: /g, '; ').replace(/\|/g, '/');
+const sanitizeReason = (s: string): string =>
+  collapseWhitespace(s).replace(/\|/g, '/');
+// `review_note` is appended raw after the note's final `|` and is never parsed back out
+// into a captured field (OFF_SCOPE's tail, `(?: \| .*)?`, is non-capturing) — so it needs
+// no delimiter substitution, `|` and `: ` inside it are harmless. But it can still break
+// the WHOLE match if it carries a newline (see round 4 above), so it gets the same
+// whitespace collapse the other two fields get.
+const sanitizeReviewNote = (s: string): string => collapseWhitespace(s);
+
+// #509 review round 6 (hole 3): round 5's `.trim()` closed the padding gap but opened a
+// sharper one — a target that is WHITESPACE ONLY (`"   "`, `"\n\t "`) now collapses and
+// trims to the EMPTY string. This is reachable in production, not a theoretical shape:
+// `new_issue_key` is `z.string().min(1)`, and `.min(1)` bounds LENGTH, not content — a
+// three-space string satisfies it exactly as well as `"cider"` does. An empty target
+// makes the assembled note read `off-scope : <reason> | <note>`, and OFF_SCOPE's target
+// group is `(.+?)` — one-or-more characters, deliberately non-greedy but never
+// zero-width — so it cannot match an empty capture and the whole regex fails. The row
+// then falls to UNRECOGNISED_KEY in triage-inbox.ts, which is honest about "not parsed"
+// but loses the one fact this note exists to carry: WHICH target refused the row. The
+// fix follows the same rule every prior round in this file has: sanitize at the write
+// site, where the structural characters (here, "empty" is the structural failure) are
+// known. UNNAMED_TARGET is substituted only when sanitizing collapses the target to
+// nothing — a real target, however short, is never touched — and it deliberately reads
+// as a placeholder (parens, prose) rather than as a target a model could plausibly have
+// typed, so a human scanning the inbox sees it for what it is: not a mechanism name, a
+// gap where one belongs. It also groups every such row under one heading instead of
+// each silently becoming its own `unrecognised` entry, which is the same "cluster what
+// can be clustered" reasoning `groupOwnerless`'s own header comment gives for keying on
+// the target at all.
+const UNNAMED_TARGET = '(target not named)';
 
 // Rows attached AFTER creation, not lifetime rows — #405 was opened carrying 15
 // enumerated rows, so a lifetime count would misread the very shape (a narrow issue
@@ -172,7 +308,76 @@ export function planTriageActions(
   let skipped = 0;
   let quietCauseStripped = 0;
   let quietNoTarget = 0;
+  let quietOffScope = 0;
   const seenBeerIds = new Set<number>();
+
+  // #509: a scope violation refutes the TARGET, not the class. The verdict goes quiet with
+  // its class intact and a trace of what refused it — the model's own note survives too
+  // (appended after the machine reason), the same thing the unprobed_absence branch above
+  // does for its own note; before this the machine reason replaced it outright. It is
+  // deliberately NOT re-routed to another issue: choosing a different target by title
+  // similarity is what built #347, and the guard exists to stop it.
+  const refuseRoute = (verdict: ActionableVerdict, row: UntriagedFailure, target: string, scope: Scope | null): void => {
+    guardHits.scope_violation += 1;
+    // CRITICAL (#509 review): not_a_beer must NOT fall through to `quiet` here. Every
+    // other class's refusal is recoverable — the row keeps its issue_number NULL, stays
+    // in the enrichment pool, and a later run (different scope, different model call)
+    // can route it correctly. not_a_beer is the one class whose write is IRREVERSIBLE:
+    // orphanNotOnTapPredicate (src/storage/beers.ts) excludes it from BOTH enrichment
+    // pools unconditionally — not on backoff, not ever — and listOwnerlessRows only
+    // covers matcher_bug/parser_bug, so a quiet not_a_beer with no issue would leave the
+    // pipeline for good with no issue trail and nothing in the inbox either. CLASS_LABELS
+    // above already states the rule this violates: an irreversible verdict is safe only
+    // when it leaves a scoped issue trail, and a refused routing leaves none. So this one
+    // class falls back to the pre-#509 shape — skipped, retried tomorrow — instead of
+    // being recorded quietly. Measured by replaying all 28 archived production runs: 0 of
+    // 62 not_a_beer verdicts EVER named an issue at all (matcher_bug: 302/369 do;
+    // parser_bug: 15/98), so this costs at most one extra LLM verdict on a day that has
+    // never yet happened.
+    if (verdict.review_class === 'not_a_beer') { skipped++; return; }
+    // Every ActionableClass reaching this line is now parser_bug or matcher_bug — the
+    // not_a_beer branch above already returned. #432: their own no-target site fifteen
+    // lines below counts the same way, for the same reason (outcome.notABeer already
+    // owns not_a_beer's digest part, so counting it twice would double it).
+    quietOffScope += 1;
+    // A missing scope block and a contradicted term are different facts about the issue,
+    // not two spellings of the same one: the row never claimed cohort membership and lost,
+    // so explainScopeRejection's "outside the cohort" would misreport WHY nothing matched.
+    const reason = scope === null ? 'no scope block' : explainScopeRejection(row, verdict.review_class, scope);
+    // Bound TARGET and REASON before the outer cap, not instead of it: capping only the
+    // whole string (the pre-review shape) truncates wherever the 500-char limit happens
+    // to fall, which for a long enough target OR reason lands inside the structured
+    // prefix itself and eats a delimiter the parser depends on ("off-scope <target>"
+    // losing its ": " separator, or "<reason>" losing the " | " tail delimiter — see
+    // MAX_REASON_CHARS above for the full failure mode of the second one). Bounding both
+    // pieces first guarantees the structured prefix `off-scope <target>: <reason>` always
+    // survives whole, delimiters included; the outer `.slice(0, 500)` remains as the
+    // belt-and-braces bound on the one piece that is genuinely free-text tail now: the
+    // model's own review_note.
+    //
+    // #509 review round 3: sanitize BEFORE bounding, not instead of it — sanitizeTarget
+    // and sanitizeReason never GROW their input (each delimiter substitution is one
+    // character for one or two, and round 4's whitespace collapse can only shrink a run
+    // down to one space), so the char budgets always land on sanitized content, never
+    // mid-substitution.
+    // #509 review round 6 (hole 3): a whitespace-only target sanitizes to the empty
+    // string — see UNNAMED_TARGET above for why this is reachable and why the
+    // substitution happens here rather than in OFF_SCOPE. `#<number>` targets (the
+    // hasIssue branch above) can never be empty, so this only ever fires for a
+    // model-authored `new_issue_key`.
+    const sanitizedTarget = sanitizeTarget(target) || UNNAMED_TARGET;
+    const boundedTarget = sanitizedTarget.length > MAX_TARGET_CHARS
+      ? sanitizedTarget.slice(0, MAX_TARGET_CHARS) : sanitizedTarget;
+    const sanitizedReason = sanitizeReason(reason);
+    const boundedReason = sanitizedReason.length > MAX_REASON_CHARS
+      ? sanitizedReason.slice(0, MAX_REASON_CHARS) : sanitizedReason;
+    quiet.push({
+      ...verdict,
+      issue_number: null,
+      new_issue_key: null,
+      review_note: `off-scope ${boundedTarget}: ${boundedReason} | ${sanitizeReviewNote(verdict.review_note)}`.slice(0, 500),
+    });
+  };
 
   for (const verdict of analysis.verdicts) {
     const row = rowById.get(verdict.beer_id);
@@ -198,7 +403,7 @@ export function planTriageActions(
         guardHits.unprobed_absence += 1;
         // matcher_bug with no target falls into the `quiet` branch below: the class is
         // recorded so the row leaves the UNTRIAGED pool, but it stays in the
-        // ENRICHMENT pool (orphanWithoutMatchLinkPredicate excludes only not_a_beer and
+        // ENRICHMENT pool (orphanNotOnTapPredicate excludes only not_a_beer and
         // retired_at), so the cron keeps retrying it under BACKOFF_HOURS.
         // Wrong-but-recoverable replaces wrong-and-terminal.
         quiet.push({
@@ -245,8 +450,7 @@ export function planTriageActions(
       // cosmetic. We deliberately do NOT re-route on failure: choosing a different
       // issue is exactly the title-similarity judgement that produced the pile.
       if (target.scope === null || !rowSatisfiesScope(row, verdict.review_class, target.scope)) {
-        guardHits.scope_violation += 1;
-        skipped++;
+        refuseRoute(verdict, row, `#${verdict.issue_number}`, target.scope);
         continue;
       }
       pushInto(byIssue, verdict.issue_number!, verdict);
@@ -259,8 +463,7 @@ export function planTriageActions(
       // to enforce, and the issue would be born unable to accept the very row that
       // created it.
       if (!rowSatisfiesScope(row, verdict.review_class, proposed.scope)) {
-        guardHits.scope_violation += 1;
-        skipped++;
+        refuseRoute(verdict, row, verdict.new_issue_key!, proposed.scope);
         continue;
       }
       pushInto(byKey, verdict.new_issue_key!, verdict);
@@ -278,5 +481,7 @@ export function planTriageActions(
   const comments: PlannedComment[] = [...byIssue.entries()]
     .map(([issueNumber, verdicts]) => ({ issueNumber, verdicts }));
 
-  return { newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget };
+  return {
+    newIssues, comments, quiet, skipped, guardHits, quietCauseStripped, quietNoTarget, quietOffScope,
+  };
 }

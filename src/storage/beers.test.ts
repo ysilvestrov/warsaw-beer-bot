@@ -489,6 +489,45 @@ describe('listLookupCandidates', () => {
     const [c] = listLookupCandidates(db, 10, new Date('2026-05-26T12:00:00Z'));
     expect(c.review_class).toBe('not_on_untappd');
   });
+
+  // #486: the gap between the two pools, reduced to one row. The beer was on a tap once,
+  // that snapshot is no longer the pub's latest, and the `match_links` row outlives it.
+  // Before the fix it is in NEITHER pool: the on-tap join wants a latest-snapshot tap and
+  // the relay predicate wants no link at all. spec.md called this deliberate; #486 measured
+  // 462 of 911 live orphans sitting in it, 376 never queried once.
+  test('#486: a beer whose tap left the latest snapshot is in exactly one pool', () => {
+    const db = fresh();
+    const beerId = upsertBeer(db, {
+      untappd_id: null, name: 'Dunkelweizen', brewery: 'Weihenstephaner',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'dunkelweizen', normalized_brewery: 'weihenstephaner',
+    });
+    const pubId = upsertPub(db, {
+      slug: 'pub-486', name: 'Pub 486', address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const ref = 'Weihenstephaner Dunkelweizen';
+
+    // The beer was poured on an older snapshot...
+    const oldSnap = createSnapshot(db, pubId, '2026-05-01T12:00:00Z');
+    upsertMatch(db, ref, beerId, 1.0);
+    insertTaps(db, oldSnap, [{
+      tap_number: 1, beer_ref: ref, brewery_ref: 'Weihenstephaner',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+    // ...and the pub's LATEST snapshot pours something else.
+    const newSnap = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+    insertTaps(db, newSnap, [{
+      tap_number: 1, beer_ref: 'Something Else', brewery_ref: 'Other',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const onTap = listLookupCandidates(db, 10, now).map((c) => c.id);
+    const relay = listRelayLookupCandidates(db, 10, now).map((c) => c.id);
+
+    expect(onTap).not.toContain(beerId);   // correct: nobody is pouring it
+    expect(relay).toContain(beerId);       // the point of #486: relay is the complement
+  });
 });
 
 describe('listRelayLookupCandidates', () => {
@@ -567,7 +606,7 @@ describe('listRelayLookupCandidates', () => {
 
   // The relay pool is where 51 of the 75 sealed rows actually sit, so this is the
   // clause that does the work in production. Restoring 'unidentifiable' to the
-  // exclusion in orphanWithoutMatchLinkPredicate turns this red.
+  // exclusion in orphanNotOnTapPredicate turns this red.
   test('excludes only not_a_beer; an unidentifiable orphan stays in the relay pool', () => {
     const db = fresh();
     const notABeer = seedRelayOrphan(db, { brewery: 'Stoelzle', name: 'Kelih Fino 545' });
@@ -714,7 +753,7 @@ describe('listRelayLookupCandidates', () => {
     expect(c.untappd_lookup_count).toBe(0);
   });
 
-  test('an orphan with a link that fell off the latest snapshot is in NEITHER pool (the on-tap gate, #368)', () => {
+  test('#486: an orphan with a link that fell off the latest snapshot is now caught by the relay pool', () => {
     const db = fresh();
     const beerId = seedBeerOnTapLocal(db, { brewery: 'Magic Road', name: 'Clementine' });
 
@@ -741,8 +780,12 @@ describe('listRelayLookupCandidates', () => {
       abv: null, ibu: null, style: null, u_rating: null,
     }]);
 
+    // Before #486 this landed in NEITHER pool (the on-tap gate, #368): the
+    // on-tap join wants a latest-snapshot tap and the old relay predicate
+    // wanted no match_links row at all. orphanNotOnTapPredicate is now the
+    // literal negation of onLatestTapPredicate, so the relay pool catches it.
     expect(listLookupCandidates(db, 10, NOW)).toEqual([]);
-    expect(listRelayLookupCandidates(db, 10, NOW)).toEqual([]);
+    expect(listRelayLookupCandidates(db, 10, NOW).map((c) => c.id)).toEqual([beerId]);
   });
 });
 
@@ -1188,5 +1231,78 @@ describe('#384 provenance', () => {
     });
     const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(id);
     expect(row).toEqual({ untappd_id_source: 'checkin' });
+  });
+});
+
+describe('#486 pool partition', () => {
+  // The invariant stated as an assertion instead of a comment: with one predicate and its
+  // negation, an orphan cannot fall between the pools however its taps and links are arranged.
+  // Every case below is a shape that exists in production.
+  test('every eligible orphan is in exactly one pool, across every tap/link arrangement', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, {
+      slug: 'partition', name: 'Partition', address: null, lat: null, lon: null, city: 'warszawa',
+    });
+    const oldSnap = createSnapshot(db, pubId, '2026-05-01T12:00:00Z');
+    const newSnap = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
+
+    const mk = (name: string): number => upsertBeer(db, {
+      untappd_id: null, name, brewery: 'Br', style: null, abv: null, rating_global: null,
+      normalized_name: name.toLowerCase(), normalized_brewery: 'br',
+    });
+
+    // 1. on a tap on the latest snapshot
+    const current = mk('Current');
+    upsertMatch(db, 'ref-current', current, 1.0);
+    insertTaps(db, newSnap, [{
+      tap_number: 1, beer_ref: 'ref-current', brewery_ref: 'Br',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    // 2. link + tap, but only on the OLDER snapshot (the #486 gap)
+    const rotatedOff = mk('RotatedOff');
+    upsertMatch(db, 'ref-rotated', rotatedOff, 1.0);
+    insertTaps(db, oldSnap, [{
+      tap_number: 2, beer_ref: 'ref-rotated', brewery_ref: 'Br',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    // 3. link whose ref matches no tap at all (retention deleted them)
+    const deadLink = mk('DeadLink');
+    upsertMatch(db, 'ref-dead-no-tap-anywhere', deadLink, 1.0);
+
+    // 4. no link at all (shop-sourced relay orphan)
+    const noLink = mk('NoLink');
+
+    // Pin cases 2 and 3 apart from each other: without this, a typo'd `ref` would silently
+    // collapse rotatedOff into the deadLink shape (no tap reachable at all) and the pool
+    // assertions below would still pass, but for the wrong reason.
+    const joinsSomeTap = (beerRef: string): boolean => !!db
+      .prepare(
+        `SELECT 1 FROM match_links ml JOIN taps t ON t.beer_ref = ml.ontap_ref
+         WHERE ml.ontap_ref = ?`,
+      )
+      .get(beerRef);
+    expect(joinsSomeTap('ref-rotated')).toBe(true);
+    expect(joinsSomeTap('ref-dead-no-tap-anywhere')).toBe(false);
+
+    const now = new Date('2026-05-26T12:00:00Z');
+    const onTap = listLookupCandidates(db, 100, now).map((c) => c.id);
+    const relay = listRelayLookupCandidates(db, 100, now).map((c) => c.id);
+
+    // Exactly one, for every arrangement. The membership pair is asserted as a labelled
+    // tuple so a failure names the beer and which side it fell on, instead of "false !== true".
+    const membership = [current, rotatedOff, deadLink, noLink].map((id) => ({
+      id, onTap: onTap.includes(id), relay: relay.includes(id),
+    }));
+    expect(membership).toEqual([
+      { id: current,    onTap: true,  relay: false },
+      { id: rotatedOff, onTap: false, relay: true  },
+      { id: deadLink,   onTap: false, relay: true  },
+      { id: noLink,     onTap: false, relay: true  },
+    ]);
+    // and the split is the one we intend, not merely disjoint
+    expect(onTap).toEqual([current]);
+    expect(relay.sort()).toEqual([rotatedOff, deadLink, noLink].sort());
   });
 });

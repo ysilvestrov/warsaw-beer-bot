@@ -2,7 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
-import { orphanWithoutMatchLinkPredicate } from './beers';
+import { orphanNotOnTapPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
@@ -11,10 +11,12 @@ export interface StatusMetrics {
   beersTotal: number;
   beersMatched: number;
   orphansPending: number;
-  // #368: orphan'и, яких enrich-крон не бачив би без relay-пулу (немає рядка в
-  // `match_links`), за винятком not_a_beer/retired. Той самий предикат, що і в
-  // listRelayLookupCandidates, мінус backoff — тобто розмір черги дренажу.
-  orphansOffCron: number;
+  // #368/#486: розмір черги relay-дренажу — orphan'и, яких enrich-крон бачить ЛИШЕ через
+  // relay-пул (не на крані зараз), за винятком not_a_beer/retired. Той самий предикат, що
+  // й у listRelayLookupCandidates, мінус backoff. Назва «offCron» була неправдою: цей
+  // лічильник ніколи не міряв cron-недосяжність — недосяжних за побудовою партиції немає
+  // (замок і вичерпаний backoff — окремі, свідомі фільтри поверх неї).
+  orphansRelayQueue: number;
   ratingsMissing: number;
   snapshots: number;
   taps: number;
@@ -99,8 +101,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
             WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
           )`,
     ),
-    orphansOffCron: count(
-      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanWithoutMatchLinkPredicate}`,
+    orphansRelayQueue: count(
+      `SELECT COUNT(*) AS c FROM beers b WHERE ${orphanNotOnTapPredicate}`,
     ),
     sealUnidentifiable: count(
       `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id

@@ -1,7 +1,10 @@
 import { z } from 'zod';
 import type { UntriagedFailure } from '../storage/enrich_failures';
 import type { TriageProbe } from './triage-probes';
-import { ScopeSchema, SCOPE_COLS, SCOPE_OPS } from './triage-scope';
+import {
+  ScopeSchema, SCOPE_COLS, SCOPE_OPS, renderScopeBlock, stripScopeBlocks, type Scope,
+} from './triage-scope';
+import { eligibleFamiliesForPrompt } from './drink-boundary';
 
 // REVIEW_CLASSES lives in its own leaf module and is re-exported here so existing
 // importers of it from this file keep working. It used to be defined in this file
@@ -58,9 +61,14 @@ export interface OpenIssue {
   createdAt: string;
 }
 
+// #509: an open issue as the PROMPT needs it — with its scope already parsed. The field is
+// non-nullable on purpose: the only way to build one is to filter with isRoutableTarget, so
+// an issue the guard would always refuse cannot reach the model by accident.
+export type ScopedOpenIssue = OpenIssue & { scope: Scope };
+
 export interface TriageInput {
   orphans: UntriagedFailure[];
-  openIssues: OpenIssue[];
+  openIssues: ScopedOpenIssue[];
   // Deterministic search evidence for zero-candidate rows (see triage-probes.ts).
   // Absent when the job runs without a search dep or the probe budget ran out.
   probes?: Map<number, TriageProbe>;
@@ -185,8 +193,16 @@ function boundOrphan(o: UntriagedFailure, probe?: TriageProbe) {
 }
 
 export function buildTriagePrompt(input: TriageInput): string {
+  // #509: the scope is rendered from the PARSED structure and placed before the body, not
+  // left to survive the body slice. renderScopeBlock is the same function that wrote the
+  // block into the issue, so what the model reads round-trips through parseScopeBlock into
+  // exactly what the guard will enforce. Any fence in the model-authored body is stripped
+  // first, so there is one scope on screen rather than two competing ones.
   const issues = input.openIssues.slice(0, MAX_OPEN_ISSUES).map((i) =>
-    `#${i.number} [${i.labels.join(', ')}] ${i.title}\n${i.body.slice(0, ISSUE_BODY_CAP)}`,
+    `#${i.number} [${i.labels.join(', ')}] ${i.title}\n`
+    + `Scope (enforced — a row contradicting this can never be attached):\n`
+    + `${renderScopeBlock(i.scope)}\n`
+    + `${stripScopeBlocks(i.body).slice(0, ISSUE_BODY_CAP)}`,
   ).join('\n---\n') || '(none)';
   return [
     'You are the triage analyst for a Warsaw beer-catalog → Untappd matching pipeline.',
@@ -201,10 +217,10 @@ export function buildTriagePrompt(input: TriageInput): string {
     'first NO. The classes are the NO branches, so exactly one always applies:',
     '',
     '1. Is the row a beer product at all? NO -> not_a_beer.',
-    '   Merch, glassware, wine/cider/cocktail/food, kombucha, and bundles: mystery',
-    '   boxes, multipacks, gift sets, "Brewery Pack". A bundle is not a beer even when',
-    '   every bottle inside it is. This is the ONE verdict that is never revisited, so',
-    '   apply it only to the product itself, never to a beer you merely cannot find.',
+    '   Merch, glassware, wine/cocktail/food, and bundles: mystery boxes, multipacks,',
+    '   gift sets, "Brewery Pack". A bundle is not a beer even when every bottle inside',
+    '   it is. This is the ONE verdict that is never revisited, so apply it only to the',
+    '   product itself, never to a beer you merely cannot find.',
     '2. Is OUR row faithful to the shop page? NO -> parser_bug.',
     '   Wrong brewery/name split, truncation, HTML noise, a shop or ingredient token in',
     '   the brewery field. The fix is in our adapter. If the SHOP\'s own listing is',
@@ -227,6 +243,10 @@ export function buildTriagePrompt(input: TriageInput): string {
     'The difference between 3 and 4 is whether you can NAME the beer. "I know it is',
     'Guinness but our rules cannot reach it" is matcher_bug, not unidentifiable —',
     'difficulty of the fix is never a classification input.',
+    '',
+    `Eligible drink families — ${eligibleFamiliesForPrompt()} — ARE beer-adjacent and`,
+    'Untappd lists them; our catalogue already holds 1339 matched rows across them. NEVER',
+    'class one as not_a_beer merely because it is not literally beer.',
     '',
     'Pivot on candidates_count before you blame query noise:',
     '- candidates_count > 0: the search WORKS and returned candidates, so the miss is on the',

@@ -16,7 +16,7 @@ function fresh() {
   return db;
 }
 
-// Only listOpenIssues is exercised; the other two methods throw so an accidental call is
+// Only listOpenIssues is exercised; the other methods throw so an accidental call is
 // loud rather than silently satisfied by a no-op stub.
 function stubGithub(open: { number: number }[]): GithubIssuesClient {
   return {
@@ -28,6 +28,7 @@ function stubGithub(open: { number: number }[]): GithubIssuesClient {
     commentOnIssue: async () => { throw new Error('unexpected commentOnIssue'); },
     addLabel: async () => { throw new Error('unexpected addLabel'); },
     removeLabel: async () => { throw new Error('unexpected removeLabel'); },
+    setIssueBody: async () => { throw new Error('unexpected setIssueBody'); },
   };
 }
 
@@ -116,6 +117,7 @@ describe('unlockFixedOrphans', () => {
       commentOnIssue: async () => { throw new Error('unexpected'); },
       addLabel: async () => { throw new Error('unexpected addLabel'); },
       removeLabel: async () => { throw new Error('unexpected removeLabel'); },
+      setIssueBody: async () => { throw new Error('unexpected setIssueBody'); },
     } as GithubIssuesClient;
 
     const first = await unlockFixedOrphans({ db, log, github: failing, now: NOW });

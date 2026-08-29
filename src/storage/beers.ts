@@ -268,19 +268,37 @@ export interface LookupCandidate {
 //
 // Deliberately NOT applied in two places. `/enrich/candidates` searches in the user's own
 // Untappd session (#89), so the quota this saves is not ours to save and a locked row may
-// still be findable there. `orphansOffCron` in stats.ts counts the whole drain QUEUE, not
+// still be findable there. `orphansRelayQueue` in stats.ts counts the whole drain QUEUE, not
 // the slice eligible right now — which is why it already skips the backoff filter too;
 // hiding locked rows there would make the backlog look like it shrank when it only went
 // quiet. Hence this is appended at the two pool call sites rather than folded into
-// orphanWithoutMatchLinkPredicate, which stats.ts shares.
+// orphanNotOnTapPredicate, which stats.ts shares.
 //
-// Assumes the `beers` alias `b`, like orphanWithoutMatchLinkPredicate.
+// Assumes the `beers` alias `b`, like orphanNotOnTapPredicate.
 export const lockedRowPredicate = `EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
              AND ef.review_class IN ('matcher_bug', 'parser_bug')
              AND ef.issue_number IS NOT NULL
              AND ef.unlocked_at IS NULL
+         )`;
+
+// #486: the single definition of "this beer is on a tap right now" — a `match_links` row
+// reaching a tap on some pub's LATEST snapshot. `listLookupCandidates` interpolates it as-is;
+// `orphanNotOnTapPredicate` below interpolates its negation, which is what makes the two pools
+// a partition rather than two conditions that merely looked complementary. Bakes in the `beers`
+// alias `b`, like the fragments around it; WHERE-clause fragment only.
+export const onLatestTapPredicate = `EXISTS (
+           SELECT 1 FROM match_links ml
+           JOIN taps t ON t.beer_ref = ml.ontap_ref
+           JOIN tap_snapshots ts ON ts.id = t.snapshot_id
+           JOIN (
+             SELECT pub_id, MAX(snapshot_at) AS m
+             FROM tap_snapshots
+             GROUP BY pub_id
+           ) latest ON latest.pub_id = ts.pub_id
+                  AND latest.m = ts.snapshot_at
+           WHERE ml.untappd_beer_id = b.id
          )`;
 
 export function listLookupCandidates(
@@ -311,18 +329,7 @@ export function listLookupCandidates(
              AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
          AND NOT ${lockedRowPredicate}
-         AND EXISTS (
-           SELECT 1 FROM match_links ml
-           JOIN taps t ON t.beer_ref = ml.ontap_ref
-           JOIN tap_snapshots ts ON ts.id = t.snapshot_id
-           JOIN (
-             SELECT pub_id, MAX(snapshot_at) AS m
-             FROM tap_snapshots
-             GROUP BY pub_id
-           ) latest ON latest.pub_id = ts.pub_id
-                  AND latest.m = ts.snapshot_at
-           WHERE ml.untappd_beer_id = b.id
-         )
+         AND ${onLatestTapPredicate}
        ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
     )
     .all() as LookupCandidate[];
@@ -338,34 +345,38 @@ export function listLookupCandidates(
   return eligible.slice(0, limit);
 }
 
-// #368: shared WHERE predicate — "orphan with no match_links row" (untappd_id
-// IS NULL, minus not_a_beer/retired, minus anything already linked). Used by
-// listRelayLookupCandidates below (the drain query) AND by orphansOffCron in
-// stats.ts (the digest metric), so the two can't silently diverge if one is
-// edited later. Bakes in `b` as the `beers` table alias — every call site
-// must FROM/JOIN beers AS b. Fragment only, no WHERE keyword/SELECT/ORDER
-// BY/LIMIT — each caller keeps owning its own query shape. The digest metric
-// interpolates this as-is and deliberately skips the JS-side backoff filter
-// (isEligible) applied below: it counts the whole drain queue, not just the
-// slice eligible to query right now.
-export const orphanWithoutMatchLinkPredicate = `b.untappd_id IS NULL
+// #368/#486: shared WHERE predicate — "orphan that is NOT on a tap right now" (untappd_id
+// IS NULL, minus not_a_beer/retired, minus anything currently on a latest-snapshot tap). Used
+// by listRelayLookupCandidates below (the drain query) AND by orphansRelayQueue in stats.ts
+// (the digest metric), so the two can't silently diverge if one is edited later. Bakes in `b`
+// as the `beers` table alias — every call site must FROM/JOIN beers AS b. Fragment only, no
+// WHERE keyword/SELECT/ORDER BY/LIMIT — each caller keeps owning its own query shape. The
+// digest metric interpolates this as-is and deliberately skips the JS-side backoff filter
+// (isEligible) applied below: it counts the whole drain queue, not just the slice eligible to
+// query right now.
+//
+// #486: the third clause is the NEGATION of onLatestTapPredicate, not an independent test.
+// It used to be `NOT EXISTS(match_links)`, which is strictly narrower — a beer whose link no
+// longer reaches a latest-snapshot tap satisfied neither pool and became unreachable by any
+// cron. spec.md called that deliberate; it cost 462 of 911 orphans, 376 of them never queried
+// once. Writing it as the negation makes the partition a property of the construction.
+export const orphanNotOnTapPredicate = `b.untappd_id IS NULL
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
              AND (ef.review_class = 'not_a_beer' OR ef.retired_at IS NOT NULL)
          )
-         AND NOT EXISTS (
-           SELECT 1 FROM match_links ml WHERE ml.untappd_beer_id = b.id
-         )`;
+         AND NOT ${onLatestTapPredicate}`;
 
-// #368: relay-пул — orphan'и, яких on-tap пул не побачить НІКОЛИ. Рядки, намінчені
-// `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки крамниці), не
-// отримують рядка в `match_links`, бо лінки пише лише on-tap ingest. Тому клауза
-// EXISTS(match_links → taps → latest snapshot) у listLookupCandidates виключає їх
-// структурно, а не тому, що вони зійшли з кранів. Виключення not_a_beer/retired, backoff
-// і сортування — ті самі; інвертований предикат робить пули диз'юнктними за
-// побудовою (дедуп не потрібен), але НЕ покриває orphan'а з рядком у match_links,
-// чий кран зійшов з останнього снапшоту — той не потрапляє в жоден пул.
+// #368/#486: relay-пул — його вміст тепер визначає ЗАПЕРЕЧЕННЯ onLatestTapPredicate.
+// Рядки, намінчені `/enrich/candidates` (ensureBeerRow біжить по кожній картці сторінки
+// крамниці), не отримують рядка в `match_links`, бо лінки пише лише on-tap ingest — їх
+// onLatestTapPredicate виключає структурно, а не тому, що вони зійшли з кранів.
+// Виключення not_a_beer/retired, backoff і сортування — ті самі. Оскільки
+// orphanNotOnTapPredicate — буквальне заперечення onLatestTapPredicate, пули диз'юнктні
+// за побудовою (дедуп не потрібен) і разом покривають усіх orphan'ів: включно з тим, у
+// кого є рядок у `match_links`, але кран зійшов з останнього снапшоту паба — такий тепер
+// потрапляє саме сюди, в relay-пул, а не в жоден.
 export function listRelayLookupCandidates(
   db: DB,
   limit: number,
@@ -378,7 +389,7 @@ export function listRelayLookupCandidates(
               (SELECT ef.review_class FROM enrich_failures ef WHERE ef.beer_id = b.id)
                 AS review_class
        FROM beers b
-       WHERE ${orphanWithoutMatchLinkPredicate}
+       WHERE ${orphanNotOnTapPredicate}
          AND NOT ${lockedRowPredicate}
        ORDER BY b.untappd_lookup_count ASC, b.id ASC`,
     )
@@ -442,7 +453,8 @@ export function listRatingRefreshCandidates(
   now: Date,
 ): RatingRefreshCandidate[] {
   // SQL pre-filter: beers WITH untappd_id but NO rating, currently on tap.
-  // Same on-tap join as listLookupCandidates.
+  // #486: uses onLatestTapPredicate, the same on-tap definition listLookupCandidates
+  // interpolates positively — not a hand-kept copy of its join.
   const rows = db
     .prepare(
       `SELECT b.id, b.untappd_id,
@@ -450,18 +462,7 @@ export function listRatingRefreshCandidates(
        FROM beers b
        WHERE b.untappd_id IS NOT NULL
          AND b.rating_global IS NULL
-         AND EXISTS (
-           SELECT 1 FROM match_links ml
-           JOIN taps t ON t.beer_ref = ml.ontap_ref
-           JOIN tap_snapshots ts ON ts.id = t.snapshot_id
-           JOIN (
-             SELECT pub_id, MAX(snapshot_at) AS m
-             FROM tap_snapshots
-             GROUP BY pub_id
-           ) latest ON latest.pub_id = ts.pub_id
-                  AND latest.m = ts.snapshot_at
-           WHERE ml.untappd_beer_id = b.id
-         )
+         AND ${onLatestTapPredicate}
        ORDER BY b.rating_refresh_count ASC, b.id ASC`,
     )
     .all() as RatingRefreshCandidate[];
