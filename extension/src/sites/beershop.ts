@@ -46,8 +46,8 @@ function baseHost(hostname: string): (typeof BASE_HOSTS)[number] | undefined {
 function pageCategoryId(root: ParentNode): string | undefined {
   const metadataRoot = root instanceof Document ? root : (root as Node).ownerDocument ?? root;
   for (const script of Array.from(metadataRoot.querySelectorAll('script'))) {
-    const match = script.textContent?.match(/"category"\s*:\s*\{\s*"id"\s*:\s*"(\d+)"/);
-    if (match) return match[1];
+    const match = script.textContent?.match(/"category"\s*:\s*\{\s*"id"\s*:\s*(?:"(\d+)"|(\d+))/);
+    if (match) return match[1] ?? match[2];
   }
   return undefined;
 }
@@ -60,7 +60,8 @@ export const beershop: SiteAdapter = {
     const host = baseHost(url.hostname);
     if (!host) return false;
     const pathname = url.pathname.replace(/\/+$/, '') || '/';
-    return NON_BEER_PATHS[host].has(pathname);
+    const categoryPath = pathname.replace(/\/pg-\d+$/, '');
+    return NON_BEER_PATHS[host].has(categoryPath);
   },
 
   parseCards(root) {

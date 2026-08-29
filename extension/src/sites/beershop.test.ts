@@ -23,6 +23,10 @@ function productHtml(categoryId: number, brewery = 'Klín', name = '12° Berry S
   `;
 }
 
+function productHtmlWithNumericCategoryId(categoryId: number): string {
+  return productHtml(categoryId).replace(`"id":"${categoryId}"`, `"id":${categoryId}`);
+}
+
 describe('beershop adapter', () => {
   it.each([
     'https://beershop.pl/katalog-piv',
@@ -71,6 +75,13 @@ describe('beershop adapter', () => {
     if (!grid) return;
 
     expect(adapter.parseCards(grid)).toEqual([]);
+  });
+
+  it('drops products when the page category id is JSON-encoded as a number', () => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(productHtmlWithNumericCategoryId(150), 'text/html');
+    expect(adapter.parseCards(doc)).toEqual([]);
   });
 
   it('drops the live lemonade and cola fixture', () => {
@@ -136,6 +147,21 @@ describe('beershop adapter', () => {
     'https://www.beershop.de/gift-packs',
   ])('treats localized non-beer route %s as a whole non-beer page', (url) => {
     expect(adapterFor(url)?.isNonBeerPage?.(new URL(url))).toBe(true);
+  });
+
+  it.each([
+    'https://www.beershop.pl/limonady-coly/pg-2',
+    'https://www.beershop.eu/gifts-for-brewerers/pg-10',
+  ])('treats a paginated localized non-beer route %s as a whole non-beer page', (url) => {
+    expect(adapterFor(url)?.isNonBeerPage?.(new URL(url))).toBe(true);
+  });
+
+  it.each([
+    'https://www.beershop.pl/limonady-coly/sale',
+    'https://www.beershop.pl/limonady-coly/pg-two',
+    'https://www.beershop.pl/limonady-coly/pg-2/more',
+  ])('does not classify arbitrary nested route %s as a non-beer page', (url) => {
+    expect(adapterFor(url)?.isNonBeerPage?.(new URL(url))).toBe(false);
   });
 
   it.each([
