@@ -177,8 +177,9 @@ https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
 
 1. Зайди на підтримуваний магазин:
    `beerrepublic.eu`, `onemorebeer.pl`, `beerfreak.org`, `bierloods22.nl`,
-   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`
-   або `funkyshop.pl`.
+   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`,
+   `funkyshop.pl`, а також мовні версії Beershop: `beershop.pl`, `beershop.cz`,
+   `beershop.sk`, `beershop.eu` і `beershop.de`.
 2. Розширення **автоматично** зчитує сітку пив на сторінці, надсилає її боту на звірку
    й малює **кутовий бейдж** на картках. Що означають бейджі:
 

@@ -26,6 +26,10 @@ describe('manifest (both variants)', () => {
     expect(cs.matches).toContain('https://beerfreak.org/*');
     expect(cs.matches).toContain('https://*.beerfreak.org/*');
     expect(cs.matches).toContain('https://funkyshop.pl/*');
+    for (const host of ['beershop.pl', 'beershop.cz', 'beershop.sk', 'beershop.eu', 'beershop.de']) {
+      expect(cs.matches).toContain(`https://${host}/*`);
+      expect(cs.matches).toContain(`https://*.${host}/*`);
+    }
   });
 
   it('exposes a popup action with a default icon', () => {
