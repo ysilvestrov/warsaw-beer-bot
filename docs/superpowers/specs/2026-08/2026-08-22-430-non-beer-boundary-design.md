@@ -241,6 +241,64 @@ This is not ceremony. Fact 1 is a rule that ran unattended for six days and dest
 was watching; the cost of a week's delay is ~87 searches, and the cost of being wrong is
 irreversible. The comparison is the deliverable of the follow-up issue, not of this one.
 
+> **CORRECTED after measurement — #480, run 2026-08-29.** Shipping in shadow mode was the right
+> call; the variable it was set up to measure was the wrong one. This section assumes the deciding
+> question is **accuracy** — does the rule's `not_a_beer` agree with the model's verdict on the same
+> row — and that the saving is real but modest (~87 lifetime searches, fact 4). Both premises are
+> answered differently by the week of real traffic: the rule has essentially **no reach**, and what
+> removes its reach is not the token list but the existing-`review_class` guard.
+>
+> Window 2026-08-22 23:08 → 2026-08-29 10:30 UTC; the journal covers it without a gap (retention
+> back to 07-18) and `git log 22256d8..HEAD` over `drink-boundary.ts` and `lookup-outcome.ts` is
+> empty, so the shadowed code was unchanged throughout. Liveness first, so silence cannot be
+> confused with a check that never ran: **52 enrich-cron passes, 657 rows processed, 439
+> `not_found` outcomes** — 439 calls into `classifyOrphanAsNonBeer`. The relay (`/enrich/result`)
+> saw 0 requests in the window, so the cron is the whole exposure.
+>
+> ```
+> drink-boundary: would classify                          0
+> drink-boundary: auto-classify skipped (guard, has class) 4   → 2 distinct rows
+> ```
+>
+> The 4 skips are beer 30081 (`Nalewka gruszkowa`, token `nalewka`) and 30084 (`Big Diva`, style
+> `Szprycer`, token `szprycer`), both `Nalej Se Brewery`, each seen twice (08-25 09:30, 08-28
+> 12:30). Both already carry `parser_bug` from 2026-06-26.
+>
+> Widening the same predicate from the week to the **whole production pool** is what settles it:
+> of 708 orphan rows, exactly **5** are hit by the five tokens with `candidates_count = 0` and no
+> eligible family named — 12309, 30053, 30216 (already `not_a_beer`), 30081, 30084 (`parser_bug`).
+> **All five already carry a `review_class`, so the guard blocks every one.** Live mode has nothing
+> to write, and this is a statement about the pool as it stands, not only about the measured week.
+>
+> The complement is just as decisive. `would classify` is precisely the case the rule exists for —
+> an *untriaged* row a token hits — and it fired **zero** times in 439 opportunities. Meanwhile the
+> model, working the same week without the rule, sealed **10** new rows as `not_a_beer`, all
+> correct (Italian sparkling wines, `Aperitivo Spritz`, a sausage listing, the `Chwilowo brak!`
+> out-of-stock placeholder) and **none** of them a cider/mead/kvass/kombucha. The five tokens hit
+> **0 of those 10**. The rule is not a cheaper version of the model here; on this pool it is an
+> empty set beside it.
+>
+> One thing NOT to read into the numbers. 30081/30084 are formally a class disagreement
+> (`parser_bug` where the rule wants `not_a_beer`), and #480 names that class of disagreement
+> disqualifying on its own. It is not the operative reason here: the model's own note on both rows
+> is *"non-beer item should be filtered before enrichment"* — it agrees they are not beer and
+> differs only on where the fix belongs. The verdict rests on the rule having no reach, not on a
+> substantive disagreement.
+>
+> **Consequence:** `classifyOrphanAsNonBeer`, `autoClassifyAction`, `SHADOW_ONLY` and the call site
+> in `lookup-outcome.ts` are to be deleted — #480's outcome 3, as written there in advance, tracked
+> as **#530**. What
+> this document builds that stands on its own is untouched: `ELIGIBLE_TOKENS` as the single
+> definition, the drift test binding the prompt to it, the ingest fixes, and the repair.
+>
+> Two side readings from the same week, both benign. The removal of `cantina` (see the brewery
+> measurement above) cost **2 orphan rows in total** — 21 `Glera Trevenezie` and 30254 `Vino Bianco
+> Frizzante` — while Cantina Errante's 9 matched beers stayed matched; the accepted cost turned out
+> to be a rounding error, not a stream. And of the 16 repaired rows, **12272 `Kwaśny Zdzichu`
+> matched** (`untappd_id 3115027`) and left `enrich_failures`; the other 15 were re-triaged on
+> 08-23 into `matcher_bug` (10), `unidentifiable` (3) and `not_on_untappd` (2) — **not one was
+> re-sealed as `not_a_beer`**, which is the drift test and the interpolated prompt doing their job.
+
 ### Repair — un-bury the 15
 
 `not_a_beer` is the only hard pool exclusion, so clearing it restores the row to both pools with no
