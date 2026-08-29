@@ -158,9 +158,45 @@ describe('ships.sh — the grammar refuses what it does not implement', () => {
   it("parses the repository's own deploy/rsync-filter", () => {
     // The check that makes an unsupported rule fail a merge instead of a
     // production guard a week later.
-    const r = ships(REPO_FILTER, ['package.json']);
+    //
+    // REAL_FILTER above is a hardcoded snapshot, deliberately NOT derived
+    // from this file: a test that reads its expectations out of the config
+    // it is testing cannot detect a wrong edit to that config — the fixture
+    // would follow the edit silently, and a scenario like "an extension-only
+    // merge is accepted" would quietly invert or go vacuous with nobody
+    // noticing. This test is the link between the hardcoded fixtures and the
+    // real file: it classifies a representative path set against the
+    // REPOSITORY's actual deploy/rsync-filter (not REAL_FILTER) and asserts
+    // the exact SHIP/SKIP split, so any edit to the real filter fails this
+    // test by name and forces whoever made the edit to look at the fixtures
+    // above rather than sailing past them.
+    const paths = [
+      'package.json',
+      'tsconfig.json',
+      'src/index.ts',
+      'scripts/tool.ts',
+      'deploy/deploy.sh',
+      'extension/manifest.json',
+      'docs/plan.md',
+      'spec.md',
+      'vendor/src/x.ts',
+    ];
+    const r = ships(REPO_FILTER, paths);
     expect(r.code).toBe(0);
-    expect(r.out).toBe('SHIP package.json\n');
+    expect(r.out).toBe(
+      [
+        'SHIP package.json',
+        'SHIP tsconfig.json',
+        'SHIP src/index.ts',
+        'SHIP scripts/tool.ts',
+        'SHIP deploy/deploy.sh',
+        'SKIP extension/manifest.json',
+        'SKIP docs/plan.md',
+        'SKIP spec.md',
+        'SKIP vendor/src/x.ts',
+        '',
+      ].join('\n'),
+    );
   });
 });
 
