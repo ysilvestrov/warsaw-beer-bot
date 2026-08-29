@@ -138,8 +138,13 @@ sudo -n -u warsaw-beer-bot bash -lc \
 ## Unattended security autodeploy (#435)
 
 A timer checks for an `autodeploy-*` tag and deploys it only if the change
-touches nothing but the root `package.json` and `package-lock.json`. See
-`docs/superpowers/specs/2026-08/2026-08-16-435-dependency-security-autofix-design.md`.
+touches nothing that **reaches production** except the root `package.json` and
+`package-lock.json`. What reaches production is decided by `deploy/rsync-filter`
+and read by `deploy/ships.sh`; a merge that changes only `extension/**`,
+`docs/**` or `spec.md` ships nothing, so it neither blocks a security tag nor
+counts as drift. See
+`docs/superpowers/specs/2026-08/2026-08-16-435-dependency-security-autofix-design.md`
+and `docs/superpowers/specs/2026-08/2026-08-28-527-guard-ships-predicate-design.md`.
 
 One-time install (as root):
 
