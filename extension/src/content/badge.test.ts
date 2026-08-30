@@ -114,6 +114,31 @@ describe('renderBadge', () => {
     }
   });
 
+  it('opens Untappd on middle-button auxclick after suppressing card navigation', () => {
+    const host = el();
+    host.setAttribute('data-href', '/p/new-one');
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    const navigate = vi.fn();
+    const handleMouseup = (event: MouseEvent) => {
+      if ((event.target as Element).closest('[data-href]')) navigate();
+    };
+    document.body.addEventListener('mouseup', handleMouseup);
+
+    try {
+      renderBadge(host, notDrunkRated);
+      const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+
+      badge.dispatchEvent(new MouseEvent('mouseup', { button: 1, bubbles: true, cancelable: true }));
+      badge.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+
+      expect(navigate).not.toHaveBeenCalled();
+      expect(open).toHaveBeenCalledOnce();
+      expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
+    } finally {
+      document.body.removeEventListener('mouseup', handleMouseup);
+    }
+  });
+
   it('is idempotent — does not double-render', () => {
     const host = el();
     renderBadge(host, drunk(4.0));
