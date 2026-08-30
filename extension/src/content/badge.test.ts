@@ -93,6 +93,21 @@ describe('renderBadge', () => {
     expect(notPrevented).toBe(false); // preventDefault() was called
   });
 
+  it('suppresses mouseup before Beershop delegates card navigation', () => {
+    const host = el();
+    host.setAttribute('data-href', '/p/new-one');
+    const navigate = vi.fn();
+    document.body.addEventListener('mouseup', (event) => {
+      if ((event.target as Element).closest('[data-href]')) navigate();
+    }, { once: true });
+    renderBadge(host, notDrunkRated);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+
+    badge.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it('is idempotent — does not double-render', () => {
     const host = el();
     renderBadge(host, drunk(4.0));
