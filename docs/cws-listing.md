@@ -30,7 +30,7 @@ so you can decide at a glance:
 • ⚪ known beer, not yet linked on Untappd
 
 Works on: BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal,
-Flasker, Piwne Mosty, and Funkyshop.
+Flasker, Piwne Mosty, Funkyshop, and Beershop (its .pl/.cz/.sk/.eu/.de sites).
 
 No account needed to start: global ⭐ ratings appear immediately. To unlock your
 personal "already drank" ✅ badges, connect the companion Telegram bot (it imports
@@ -58,12 +58,12 @@ field per host. Fill them as follows.
 ### Host permission justification (one combined field — paste verbatim)
 
 ⚠️ The field caps at **1000 characters**, so do NOT list every match pattern (the
-reviewer sees them in the manifest). This condensed version is 872 chars:
+reviewer sees them in the manifest). This condensed version is 933 chars:
 
 ```
 Host access maps directly to this extension's single purpose: showing the user's Untappd check-in status and ratings on craft-beer shop pages.
 
-Content scripts run only on 9 specific craft-beer stores — BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal, Flasker, Piwne Mosty and Funkyshop (including their www/regional subdomains) — to read product beer/brewery names from the page and inject a small rating badge next to each beer.
+Content scripts run only on 10 specific craft-beer stores — BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal, Flasker, Piwne Mosty, Funkyshop and Beershop (including their www/regional subdomains, and Beershop's .pl/.cz/.sk/.eu/.de language sites) — to read product beer/brewery names from the page and inject a small rating badge next to each beer.
 
 beer-api.ysilvestrov-ai.uk is the extension's own backend: it receives the page's beer names and returns the rating / already-drunk status. No third party is involved in the core feature.
 
