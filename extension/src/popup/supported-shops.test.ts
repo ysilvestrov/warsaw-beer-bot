@@ -1,10 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ADAPTERS } from '../sites/registry';
 import {
+  browserLanguages,
   openShopWindow,
   renderSupportedShops,
   supportedShopGroups,
 } from './supported-shops';
+
+describe('browserLanguages', () => {
+  it('falls back to the primary language when the language list is unavailable', () => {
+    expect(browserLanguages({ language: 'uk-UA' })).toEqual(['uk-UA']);
+  });
+});
 
 describe('supportedShopGroups', () => {
   it('groups every supported adapter once by the country orders ship from', () => {
@@ -68,5 +75,18 @@ describe('openShopWindow', () => {
     await openShopWindow('https://beerfreak.org/', { create });
 
     expect(create).toHaveBeenCalledWith({ focused: true, url: 'https://beerfreak.org/' });
+  });
+
+  it('opens a new tab when creating a separate window fails', async () => {
+    const windowsCreate = vi.fn(async () => { throw new Error('window unavailable'); });
+    const tabsCreate = vi.fn(async () => ({} as chrome.tabs.Tab));
+
+    await openShopWindow(
+      'https://beerfreak.org/',
+      { create: windowsCreate },
+      { create: tabsCreate },
+    );
+
+    expect(tabsCreate).toHaveBeenCalledWith({ active: true, url: 'https://beerfreak.org/' });
   });
 });

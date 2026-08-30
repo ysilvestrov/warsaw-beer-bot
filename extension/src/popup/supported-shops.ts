@@ -13,6 +13,15 @@ export interface SupportedShopGroup {
 
 type SupportedLanguage = 'uk' | 'pl' | 'en';
 
+interface BrowserLanguageSource {
+  language: string;
+  languages?: readonly string[];
+}
+
+export function browserLanguages(source: BrowserLanguageSource): readonly string[] {
+  return source.languages?.length ? source.languages : [source.language];
+}
+
 interface ShopDefinition {
   id: string;
   name: string;
@@ -115,9 +124,18 @@ interface WindowCreator {
   create(createData: chrome.windows.CreateData): Promise<chrome.windows.Window | undefined>;
 }
 
+interface TabCreator {
+  create(createProperties: chrome.tabs.CreateProperties): Promise<chrome.tabs.Tab>;
+}
+
 export async function openShopWindow(
   url: string,
   windowsApi: WindowCreator = chrome.windows,
+  tabsApi?: TabCreator,
 ): Promise<void> {
-  await windowsApi.create({ focused: true, url });
+  try {
+    await windowsApi.create({ focused: true, url });
+  } catch {
+    await (tabsApi ?? chrome.tabs).create({ active: true, url });
+  }
 }
