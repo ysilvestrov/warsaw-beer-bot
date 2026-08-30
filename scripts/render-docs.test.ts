@@ -120,7 +120,9 @@ describe('renderDocs (real repo files)', () => {
     }
 
     for (const path of screenshotPaths) {
-      expect(readFileSync(join(repoRoot, path)).subarray(1, 4).toString()).toBe('PNG');
+      expect(readFileSync(join(repoRoot, path)).subarray(0, 8)).toEqual(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
     }
   });
 
