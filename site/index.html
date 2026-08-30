@@ -17,14 +17,19 @@
       ul.links { list-style: none; padding: 0; margin: 1.6rem 0; }
       ul.links li { margin: .6rem 0; }
       ul.links a { font-size: 1.05rem; }
-      .shops { color: #666; font-size: .95rem; }
+      .shops { margin-top: 2rem; color: #444; font-size: .95rem; }
+      .shops h2 { margin-bottom: .65rem; color: #1a1a1a; font-size: 1.15rem; }
+      .shops dl { margin: 0; }
+      .shops dt { margin-top: .6rem; font-weight: 650; }
+      .shops dd { margin-left: 0; }
       a { color: #1a5fb4; }
       footer { margin-top: 2.5rem; color: #666; font-size: .9rem; }
       @media (prefers-color-scheme: dark) {
         body { color: #e6e6e6; background: #16181c; }
         a { color: #78aeed; }
         .tagline, .badges { color: #c2c6cc; }
-        .shops, footer { color: #9aa0a6; }
+        .shops, footer { color: #b7bcc3; }
+        .shops h2 { color: #e6e6e6; }
       }
     </style>
   </head>
@@ -47,10 +52,19 @@
       <li>💻 <a href="https://github.com/ysilvestrov/warsaw-beer-bot">Source on GitHub</a></li>
     </ul>
 
-    <p class="shops">
-      Works on BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal,
-      Flasker, Piwne Mosty, and Funkyshop.
-    </p>
+    <section class="shops" aria-labelledby="supported-shops-heading">
+      <h2 id="supported-shops-heading">Supported shops</h2>
+      <dl>
+        <dt>Ukraine</dt>
+        <dd><a href="https://beerfreak.org/">BeerFreak</a>, <a href="https://winetime.com.ua/">WineTime</a>, <a href="https://flasker.com.ua/">Flasker</a></dd>
+        <dt>Poland</dt>
+        <dd><a href="https://onemorebeer.pl/">OneMoreBeer</a>, <a href="https://piwnemosty.pl/">Piwne Mosty</a>, <a href="https://funkyshop.pl/">Funkyshop</a></dd>
+        <dt>The Netherlands</dt>
+        <dd><a href="https://beerrepublic.eu/">Beer Republic</a>, <a href="https://bierloods22.nl/en/">Bierloods22</a>, <a href="https://hoptimaal.com/en/">Hoptimaal</a></dd>
+        <dt>Czechia</dt>
+        <dd><a href="https://beershop.eu/">Beershop</a> (PL, CZ, SK, EU, and DE storefronts)</dd>
+      </dl>
+    </section>
 
     <footer>Warsaw Beer Overlay — personal, non-commercial project by Yuriy Silvestrov.</footer>
   </body>
