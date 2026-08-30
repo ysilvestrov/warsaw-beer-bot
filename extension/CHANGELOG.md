@@ -1,5 +1,9 @@
 # Changelog
 
+## [Unreleased]
+
+- Fixed rating-badge clicks on Beershop opening both Untappd and the shop's product page; the catalog now stays in place while Untappd opens in a new tab.
+
 ## [0.15.0] - 2026-08-30
 
 - Added Beershop support across its Polish, Czech, Slovak, English, and German domains. Beer badges now follow language switching between `beershop.pl`, `.cz`, `.sk`, `.eu`, and `.de`, while localized soft-drink, functional-drink, gift, merch, snack, and spirits categories are ignored.

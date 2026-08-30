@@ -47,6 +47,11 @@ function makeBadge(text: string, href: string | null): HTMLElement {
     cursor: href != null ? 'pointer' : 'default',
   } as Partial<CSSStyleDeclaration>);
   if (href != null) {
+    // Beershop delegates card navigation on mouseup, before click fires.
+    badge.addEventListener('mouseup', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
     badge.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
