@@ -45,6 +45,12 @@ yours — see the privacy policy.
 
 ## Permission justifications
 
+> ⏱ **Вставляй цей текст у дашборд ДО `npm run release:store`.** Поки пакет на рев'ю,
+> поля лістингу сірі й недоступні, тож текст, не вставлений до сабміту, чекатиме кінця
+> рев'ю — а версія вже поїде в стор зі старим описом. Порядок і як виправити, якщо
+> проґавив, — `docs/extension-release.md`.
+
+
 The CWS "Privacy practices" tab gives **one justification field per API permission**
 plus a **single combined "Host permission justification"** textarea that covers ALL
 host access (content-script shop domains + the API host + optional hosts) — not one
