@@ -13,6 +13,8 @@ history. Works on:
 - `flasker.com.ua` (and subdomains)
 - `piwnemosty.pl` (and subdomains)
 - `funkyshop.pl` (and subdomains)
+- Beershop — `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu`,
+  `beershop.de` (and subdomains): badges follow whichever language site you are on
 
 To get everything working you need three things: (1) upload your beer
 history to the bot, (2) get an access token, (3) install and configure the
@@ -228,6 +230,11 @@ housekeeping one at the bottom:
 - **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
   clears the **entire** local overlay cache (all sites). Deliberately the least
   prominent: you rarely need it.
+- **"Supported shops"** — an expandable section listing every supported shop,
+  grouped by country (the counter beside it shows how many there are). Clicking a
+  shop opens it **in a separate browser window**. Beershop appears once: you get
+  the language site that matches your browser languages (`beershop.pl` for Polish,
+  otherwise `beershop.eu`).
 
 If **no token** is set yet, the popup also shows — alongside the usual
 buttons above — a "Not connected" note next to a **"Get a token"** button and

@@ -1,9 +1,10 @@
 # Changelog
 
-## [Unreleased]
+## [0.15.0] - 2026-08-30
 
 - Added Beershop support across its Polish, Czech, Slovak, English, and German domains. Beer badges now follow language switching between `beershop.pl`, `.cz`, `.sk`, `.eu`, and `.de`, while localized soft-drink, functional-drink, gift, merch, snack, and spirits categories are ignored.
 - Added a country-grouped supported-shop directory to the toolbar popup. Each shop opens in a separate browser window, and Beershop resolves to one storefront compatible with the user's supported browser languages instead of appearing once per domain.
+- The popup's actions are now ranked by importance instead of rendering as three identical grey boxes: "Sync my check-ins" is a filled button at the top and the first stop for the keyboard, "Refresh this page" is outlined below it, and the irreversible "Clear all cache" is quiet, under a hairline — previously the destructive action sat directly under the cursor's descent from the toolbar icon. Buttons also inherit the popup's typeface instead of the browser's default one, a disabled button reads as unavailable rather than half-painted, and keyboard focus is visible.
 
 ## [0.14.0] - 2026-08-10
 
