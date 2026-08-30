@@ -4,7 +4,7 @@
 
 It overlays your personal Untappd status and ratings onto craft-beer shop pages
 (BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal, Flasker,
-Piwne Mosty, Funkyshop). For each product it shows a badge:
+Piwne Mosty, Funkyshop, Beershop). For each product it shows a badge:
 
 - ⭐ + number — the beer's **global** Untappd rating.
 - ⚪ — the beer is known but has no linked Untappd id yet.
