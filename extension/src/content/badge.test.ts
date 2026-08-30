@@ -97,15 +97,21 @@ describe('renderBadge', () => {
     const host = el();
     host.setAttribute('data-href', '/p/new-one');
     const navigate = vi.fn();
-    document.body.addEventListener('mouseup', (event) => {
+    const handleMouseup = (event: MouseEvent) => {
       if ((event.target as Element).closest('[data-href]')) navigate();
-    }, { once: true });
-    renderBadge(host, notDrunkRated);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    };
+    document.body.addEventListener('mouseup', handleMouseup);
 
-    badge.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    try {
+      renderBadge(host, notDrunkRated);
+      const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
 
-    expect(navigate).not.toHaveBeenCalled();
+      badge.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+
+      expect(navigate).not.toHaveBeenCalled();
+    } finally {
+      document.body.removeEventListener('mouseup', handleMouseup);
+    }
   });
 
   it('is idempotent — does not double-render', () => {
