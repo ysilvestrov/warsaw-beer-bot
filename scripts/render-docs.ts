@@ -33,9 +33,15 @@ const STYLE = `
   code { background: rgba(127,127,127,.15); padding: .1em .3em; border-radius: 3px; }
   pre { background: rgba(127,127,127,.12); padding: .8rem; border-radius: 6px; overflow-x: auto; }
   img { max-width: 100%; }
+  .popup-screenshot { margin: 1.25rem 0 1.5rem; }
+  .popup-screenshot img { display: block; height: auto; border: 1px solid rgba(127,127,127,.28);
+    border-radius: 8px; }
+  .popup-screenshot figcaption { max-width: 32rem; margin-top: .45rem;
+    color: #5f6368; font-size: .9rem; line-height: 1.45; }
   @media (prefers-color-scheme: dark) {
     body { color: #e6e6e6; background: #16181c; }
     a { color: #78aeed; }
+    .popup-screenshot figcaption { color: #b7bcc3; }
   }`;
 
 export function renderPage(opts: RenderOptions): string {

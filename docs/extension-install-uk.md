@@ -2,17 +2,17 @@
 
 Розширення накладає на сторінки крафтових магазинів твій особистий статус
 **«вже пив»** і **твою оцінку** для кожного пива, яке збігається з твоєю історією
-Untappd. Працює на:
+Untappd. Підтримувані магазини згруповано за країною, з якої вони відправляють
+замовлення:
 
-- `beerrepublic.eu` (і піддомени, напр. `www.beerrepublic.eu`)
-- `onemorebeer.pl` (і піддомени)
-- `beerfreak.org` (і піддомени)
-- `bierloods22.nl` (і піддомени)
-- `winetime.com.ua` (і піддомени)
-- `hoptimaal.com` (і піддомени)
-- `flasker.com.ua` (і піддомени)
-- `piwnemosty.pl` (і піддомени)
-- `funkyshop.pl` (і піддомени)
+- **Україна:** [BeerFreak](https://beerfreak.org/),
+  [WineTime](https://winetime.com.ua/), [Flasker](https://flasker.com.ua/)
+- **Польща:** [OneMoreBeer](https://onemorebeer.pl/),
+  [Piwne Mosty](https://piwnemosty.pl/), [Funkyshop](https://funkyshop.pl/)
+- **Нідерланди:** [Beer Republic](https://beerrepublic.eu/),
+  [Bierloods22](https://bierloods22.nl/en/), [Hoptimaal](https://hoptimaal.com/en/)
+- **Чехія:** [Beershop](https://beershop.eu/) — один магазин із мовними версіями
+  `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu` і `beershop.de`
 
 Щоб усе запрацювало, потрібні три речі: (1) завантажити свою історію пив у бота,
 (2) отримати токен доступу, (3) встановити й налаштувати розширення. Нижче — по кроках.
@@ -175,11 +175,8 @@ https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
 
 ## Частина 4. Використання
 
-1. Зайди на підтримуваний магазин:
-   `beerrepublic.eu`, `onemorebeer.pl`, `beerfreak.org`, `bierloods22.nl`,
-   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`,
-   `funkyshop.pl`, а також мовні версії Beershop: `beershop.pl`, `beershop.cz`,
-   `beershop.sk`, `beershop.eu` і `beershop.de`.
+1. Відкрий будь-який магазин зі списку вище — напряму або через каталог
+   **«Supported shops»** у popup, описаний нижче.
 2. Розширення **автоматично** зчитує сітку пив на сторінці, надсилає її боту на звірку
    й малює **кутовий бейдж** на картках. Що означають бейджі:
 
@@ -205,6 +202,13 @@ https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
 Клік по іконці розширення на панелі браузера відкриває невелике меню. Кнопки
 розташовані **за важливістю** — головна дія вгорі, службова внизу:
 
+<figure class="popup-screenshot">
+  <img src="../assets/popup-supported-shops-collapsed.png"
+       alt="Popup розширення зі згорнутим рядком Supported shops"
+       width="284" height="233" loading="lazy">
+  <figcaption>Каталог магазинів лишається компактним, доки він не потрібен.</figcaption>
+</figure>
+
 - **«Sync my check-ins»** (велика бурштинова кнопка вгорі) — підвантажує твої чекіни
   з Untappd (див. нижче). Це головна дія popup'а. Поки синхронізація йде, кнопка
   сіра й неактивна, а рядок під нею рахує (`Syncing… 1200 / 8200`) — це означає
@@ -213,8 +217,20 @@ https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg
   сторінки й перемальовує бейджі наново (зручно, якщо магазин підвантажив нові позиції
   або ти щойно зробив `/import`). На сторінці, яку розширення не підтримує, кнопка
   **сіра й неактивна**, а під нею написано, чому.
+- **«Supported shops · 10»** — натисни цей рядок, щоб розгорнути або згорнути
+  каталог. Магазини згруповано за країною відправлення. Натисни магазин, щоб
+  відкрити його в окремому активному вікні браузера; якщо браузер не може створити
+  вікно, розширення відкриє нову вкладку. Beershop показано один раз, а його адреса
+  обирається за найкращою сумісністю з мовами браузера.
 - **«Clear all cache»** (сіра кнопка внизу, під тонкою лінією) — чистить **увесь**
   локальний кеш накладки (усі сайти). Навмисно найменш помітна: потрібна рідко.
+
+<figure class="popup-screenshot">
+  <img src="../assets/popup-supported-shops-expanded.png"
+       alt="Розгорнутий каталог Supported shops, згрупований за країною відправлення"
+       width="284" height="519" loading="lazy">
+  <figcaption>Розгорнутий каталог згруповано за країною відправлення; прокрути список, щоб побачити всі магазини.</figcaption>
+</figure>
 
 Якщо токен ще **не заданий**, popup, крім звичних кнопок вище, ще показує
 нотатку «Not connected» поруч із кнопкою **«Get a token»** та посиланням

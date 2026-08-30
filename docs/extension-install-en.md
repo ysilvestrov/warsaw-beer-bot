@@ -2,17 +2,16 @@
 
 The extension overlays your personal **"already had it"** status and **your
 rating** on craft beer shop pages, for every beer that matches your Untappd
-history. Works on:
+history. The supported shops, grouped by where they ship from, are:
 
-- `beerrepublic.eu` (and subdomains, e.g. `www.beerrepublic.eu`)
-- `onemorebeer.pl` (and subdomains)
-- `beerfreak.org` (and subdomains)
-- `bierloods22.nl` (and subdomains)
-- `winetime.com.ua` (and subdomains)
-- `hoptimaal.com` (and subdomains)
-- `flasker.com.ua` (and subdomains)
-- `piwnemosty.pl` (and subdomains)
-- `funkyshop.pl` (and subdomains)
+- **Ukraine:** [BeerFreak](https://beerfreak.org/),
+  [WineTime](https://winetime.com.ua/), [Flasker](https://flasker.com.ua/)
+- **Poland:** [OneMoreBeer](https://onemorebeer.pl/),
+  [Piwne Mosty](https://piwnemosty.pl/), [Funkyshop](https://funkyshop.pl/)
+- **The Netherlands:** [Beer Republic](https://beerrepublic.eu/),
+  [Bierloods22](https://bierloods22.nl/en/), [Hoptimaal](https://hoptimaal.com/en/)
+- **Czechia:** [Beershop](https://beershop.eu/) — one shop with language storefronts
+  at `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu`, and `beershop.de`
 
 To get everything working you need three things: (1) upload your beer
 history to the bot, (2) get an access token, (3) install and configure the
@@ -184,11 +183,8 @@ this guide first.
 
 ## Part 4. Using it
 
-1. Go to a supported shop:
-   `beerrepublic.eu`, `onemorebeer.pl`, `beerfreak.org`, `bierloods22.nl`,
-   `winetime.com.ua`, `hoptimaal.com`, `flasker.com.ua`, `piwnemosty.pl`,
-   `funkyshop.pl`, plus the Beershop language sites: `beershop.pl`, `beershop.cz`,
-   `beershop.sk`, `beershop.eu`, and `beershop.de`.
+1. Open any shop from the supported list above, either directly or from the
+   popup's **"Supported shops"** directory described below.
 2. The extension **automatically** reads the beer grid on the page, sends it
    to the bot for matching, and draws a **corner badge** on the cards. What
    the badges mean:
@@ -217,6 +213,13 @@ Clicking the extension's icon on the browser toolbar opens a small menu. The
 buttons are ordered **by importance** — the main action on top, the
 housekeeping one at the bottom:
 
+<figure class="popup-screenshot">
+  <img src="../assets/popup-supported-shops-collapsed.png"
+       alt="Extension popup with the Supported shops row collapsed"
+       width="284" height="233" loading="lazy">
+  <figcaption>The shop directory stays compact until you need it.</figcaption>
+</figure>
+
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
   check-ins from Untappd (see below). This is the popup's main action. While a
   sync is running the button is greyed out and the line under it counts up
@@ -225,9 +228,21 @@ housekeeping one at the bottom:
   the **current** page and redraws the badges (handy if the shop loaded new
   items, or you just ran `/import`). On a page the extension doesn't support,
   the button is **greyed out and inactive**, with the reason written below it.
+- **"Supported shops · 10"** — click this row to expand or collapse the shop
+  directory. Shops are grouped by the country they ship from. Select any shop
+  to open it in a separate focused browser window; if the browser cannot create
+  one, the extension opens a new tab instead. Beershop appears once and chooses
+  the storefront that best matches your browser languages.
 - **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
   clears the **entire** local overlay cache (all sites). Deliberately the least
   prominent: you rarely need it.
+
+<figure class="popup-screenshot">
+  <img src="../assets/popup-supported-shops-expanded.png"
+       alt="Expanded Supported shops directory grouped by shipping country"
+       width="284" height="519" loading="lazy">
+  <figcaption>The expanded directory is grouped by shipping origin; scroll the list to see every shop.</figcaption>
+</figure>
 
 If **no token** is set yet, the popup also shows — alongside the usual
 buttons above — a "Not connected" note next to a **"Get a token"** button and

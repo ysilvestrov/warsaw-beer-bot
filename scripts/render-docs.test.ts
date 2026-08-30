@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderPage, renderDocs } from './render-docs';
 
@@ -73,6 +74,18 @@ describe('renderPage — single-language page (e.g. changelog)', () => {
 describe('renderDocs (real repo files)', () => {
   const repoRoot = join(__dirname, '..');
   const rendered = renderDocs(repoRoot);
+  const supportedShops = [
+    'Beer Republic',
+    'OneMoreBeer',
+    'BeerFreak',
+    'Bierloods22',
+    'WineTime',
+    'Hoptimaal',
+    'Flasker',
+    'Piwne Mosty',
+    'Funkyshop',
+    'Beershop',
+  ];
 
   it('renders all three targets without throwing', () => {
     expect(rendered.map((r) => r.out).sort()).toEqual([
@@ -90,5 +103,30 @@ describe('renderDocs (real repo files)', () => {
     expect(changelog!.html).toMatch(/<h2[^>]*>\[\d+\.\d+\.\d+\]/);
     expect(changelog!.html).toContain('href="../"'); // ← Home
     expect(changelog!.html.toLowerCase()).not.toContain('українською');
+  });
+
+  it('documents the complete shop directory and popup navigation on every install page', () => {
+    const installPages = rendered.filter((r) => r.out.startsWith('site/install'));
+    const screenshotPaths = [
+      'site/assets/popup-supported-shops-collapsed.png',
+      'site/assets/popup-supported-shops-expanded.png',
+    ];
+
+    for (const page of installPages) {
+      for (const shop of supportedShops) expect(page.html).toContain(shop);
+      expect(page.html).toContain('../assets/popup-supported-shops-collapsed.png');
+      expect(page.html).toContain('../assets/popup-supported-shops-expanded.png');
+      expect(page.html).toContain('Supported shops');
+    }
+
+    for (const path of screenshotPaths) {
+      expect(readFileSync(join(repoRoot, path)).subarray(1, 4).toString()).toBe('PNG');
+    }
+  });
+
+  it('keeps the homepage supported-shop list complete', () => {
+    const homepage = readFileSync(join(repoRoot, 'site/index.html'), 'utf8');
+
+    for (const shop of supportedShops) expect(homepage).toContain(shop);
   });
 });
