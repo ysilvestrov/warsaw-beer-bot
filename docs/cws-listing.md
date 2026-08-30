@@ -18,6 +18,20 @@ in [`cws-review-notes.md`](./cws-review-notes.md). Listing language: **English o
 
 ## Detailed description (paste as-is)
 
+> ⛔ **Не перелічуй магазини по іменах у цьому полі.** Google **відхилив** сабміт
+> 2026-08-30: «Спам і розміщення в магазині», ідентифікатор порушення **Yellow Argon**,
+> «надмірні ключові слова в описі продукту» — і процитував рівно рядок
+> `Works on: BeerRepublic, OneMoreBeer, … and Beershop`. Десять назв брендів підряд
+> класифікуються як keyword stuffing незалежно від того, що всі вони правдиві. Замість
+> списку опис відсилає до самого розширення — з 0.15.0 каталог магазинів живе в popup'і
+> (`extension/src/popup/supported-shops.ts`), тож користувач нічого не втрачає. Те саме стосується будь-якого майбутнього магазину: він додається в popup і
+> в інструкції, **не** сюди.
+>
+> Обмеження стосується **публічного опису**. Обґрунтування host-дозволів нижче — приватне
+> поле для рецензента, і там перелік доменів навпаки обов'язковий: рецензент звіряє його з
+> маніфестом. Не «чисти» його за аналогією.
+
+
 ```
 See which beers you've already had — right on the shop page.
 
@@ -29,8 +43,7 @@ so you can decide at a glance:
 • ❓ a probable match you may have had
 • ⚪ known beer, not yet linked on Untappd
 
-Works on: BeerRepublic, OneMoreBeer, BeerFreak, Bierloods22, WineTime, Hoptimaal,
-Flasker, Piwne Mosty, Funkyshop, and Beershop (its .pl/.cz/.sk/.eu/.de sites).
+You can see the list of supported beer shops directly in the extension UI.
 
 No account needed to start: global ⭐ ratings appear immediately. To unlock your
 personal "already drank" ✅ badges, connect the companion Telegram bot (it imports
