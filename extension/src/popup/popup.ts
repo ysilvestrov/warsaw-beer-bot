@@ -1,7 +1,7 @@
 import { pickAdapter } from '../sites/registry';
 import { clearAll } from '../cache/store';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
-import { renderSupportedShops } from './supported-shops';
+import { browserLanguages, renderSupportedShops } from './supported-shops';
 
 export interface SyncStatusView {
   running: boolean;
@@ -69,7 +69,7 @@ async function initPopup(): Promise<void> {
 
   const shopList = el<HTMLElement>('supportedShops');
   if (shopList) {
-    const languages = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+    const languages = browserLanguages(navigator);
     const shopCount = renderSupportedShops(shopList, languages);
     const countLabel = el<HTMLElement>('shopCount');
     if (countLabel) countLabel.textContent = String(shopCount);
