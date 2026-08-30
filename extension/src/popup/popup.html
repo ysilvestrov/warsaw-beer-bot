@@ -40,6 +40,17 @@
       </button>
       <p id="status" class="status" aria-live="polite"></p>
 
+      <details class="shops">
+        <summary class="shops-summary">
+          <span>Supported shops</span>
+          <span id="shopCount" class="shop-count" aria-label="Number of supported shops"></span>
+          <svg class="shops-chevron" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </summary>
+        <div id="supportedShops" class="shop-list"></div>
+      </details>
+
       <p id="authNote" class="note" style="display:none" aria-live="polite"></p>
       <button id="getToken" class="btn btn-secondary" type="button" style="display:none">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">

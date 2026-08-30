@@ -183,7 +183,10 @@ h1 {
    of exact numbers is decoration, so there isn't one. */
 
 @media (prefers-reduced-motion: reduce) {
-  .btn { transition: none; }
+  .btn,
+  .shops-summary,
+  .shops-chevron,
+  .shop-link { transition: none; }
 }
 
 :focus-visible {
@@ -227,6 +230,97 @@ h1 {
   text-underline-offset: 2px;
 }
 .guide:hover { text-decoration: underline; }
+
+/* ---------- supported shops ---------- */
+
+.shops {
+  margin: 0 0 12px;
+  border-block: 1px solid var(--hairline);
+}
+
+.shops-summary {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  color: var(--fg);
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 120ms ease;
+}
+
+.shops-summary::-webkit-details-marker { display: none; }
+.shops-summary:hover { background: var(--surface-quiet); }
+
+.shop-count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-quiet);
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.shops-chevron {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: var(--fg-muted);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.shops[open] .shops-chevron { transform: rotate(180deg); }
+
+.shop-list {
+  max-height: 286px;
+  margin: 0 -4px;
+  padding: 2px 4px 9px;
+  overflow-y: auto;
+}
+
+.shop-group + .shop-group { margin-top: 8px; }
+
+.shop-country {
+  margin: 0 0 2px;
+  color: var(--fg-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.shop-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 30px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  color: var(--fg);
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.shop-link:hover {
+  background: var(--surface-quiet);
+  color: var(--accent);
+}
+
+.shop-icon {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 
 /* ---------- footer ---------- */
 
