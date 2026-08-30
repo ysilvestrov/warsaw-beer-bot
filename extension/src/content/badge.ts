@@ -57,6 +57,12 @@ function makeBadge(text: string, href: string | null): HTMLElement {
       e.stopPropagation();
       window.open(href, '_blank', 'noopener');
     });
+    badge.addEventListener('auxclick', (e) => {
+      if (e.button !== 1) return;
+      e.preventDefault();
+      e.stopPropagation();
+      window.open(href, '_blank', 'noopener');
+    });
   }
   return badge;
 }
