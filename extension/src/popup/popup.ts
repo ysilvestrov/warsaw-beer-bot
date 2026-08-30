@@ -1,6 +1,7 @@
 import { pickAdapter } from '../sites/registry';
 import { clearAll } from '../cache/store';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
+import { renderSupportedShops } from './supported-shops';
 
 export interface SyncStatusView {
   running: boolean;
@@ -65,6 +66,14 @@ async function initPopup(): Promise<void> {
   const url = tab?.url ?? '';
   refreshBtn.disabled = !canRefresh(url);
   if (refreshBtn.disabled) status.textContent = 'Open a supported shop page to refresh it.';
+
+  const shopList = el<HTMLElement>('supportedShops');
+  if (shopList) {
+    const languages = navigator.languages.length > 0 ? navigator.languages : [navigator.language];
+    const shopCount = renderSupportedShops(shopList, languages);
+    const countLabel = el<HTMLElement>('shopCount');
+    if (countLabel) countLabel.textContent = String(shopCount);
+  }
 
   const authNote = el<HTMLElement>('authNote');
   const getTokenBtn = el<HTMLButtonElement>('getToken');

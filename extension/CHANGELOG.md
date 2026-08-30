@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 - Added Beershop support across its Polish, Czech, Slovak, English, and German domains. Beer badges now follow language switching between `beershop.pl`, `.cz`, `.sk`, `.eu`, and `.de`, while localized soft-drink, functional-drink, gift, merch, snack, and spirits categories are ignored.
+- Added a country-grouped supported-shop directory to the toolbar popup. Each shop opens in a separate browser window, and Beershop resolves to one storefront compatible with the user's supported browser languages instead of appearing once per domain.
 
 ## [0.14.0] - 2026-08-10
 
