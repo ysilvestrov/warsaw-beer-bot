@@ -214,6 +214,7 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   }
 
   void (async () => {
+    let terminalStatus: StoredSyncStatus | null = null;
     try {
       const onProgress = (p: SyncProgress) => {
         void enqueueSyncStatus({
@@ -249,16 +250,21 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
         pageCap: SYNC_PAGE_CAP,
         signal: controller.signal,
       });
-      await enqueueSyncStatus({
+      terminalStatus = {
         running: false,
         serverCount: outcome.serverCount,
         profileTotal: outcome.profileTotal,
         mergedThisRun: outcome.mergedThisRun,
         outcome: outcome.status,
         complete: outcome.complete,
-      });
+      };
+      await enqueueSyncStatus(terminalStatus);
     } catch {
-      await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      if (terminalStatus) {
+        await enqueueSyncStatus(terminalStatus).catch(() => undefined);
+      } else {
+        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      }
     } finally {
       syncRunning = false;
       if (syncAbortController === controller) syncAbortController = null;
