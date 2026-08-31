@@ -17,11 +17,16 @@ function trimBase(baseUrl: string): string {
 
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
+  const upstreamSignal = init.signal;
+  const abortFromUpstream = () => controller.abort();
+  if (upstreamSignal?.aborted) abortFromUpstream();
+  else upstreamSignal?.addEventListener('abort', abortFromUpstream, { once: true });
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timer);
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream);
   }
 }
 
@@ -132,6 +137,7 @@ export async function postCheckinSyncPage(
   token: string,
   html: string,
   maxId: string | null,
+  signal?: AbortSignal,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<CheckinSyncPageResult> {
   let res: Response;
@@ -140,6 +146,7 @@ export async function postCheckinSyncPage(
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ html, maxId }),
+      signal,
     }, timeoutMs);
   } catch {
     throw new ApiError('network');

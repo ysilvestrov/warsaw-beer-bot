@@ -77,12 +77,12 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
         const code = errCode(e);
         return finish(code === 'blocked' ? 'blocked' : code === 'not_linked' ? 'not_linked' : 'error');
       }
-      if (deps.signal?.aborted) return finish('cancelled');
       pages++;
       mergedThisRun += res.merged;
       serverCount = res.serverCount;
       if (res.profileTotal !== null) profileTotal = res.profileTotal;
       deps.onProgress({ serverCount, profileTotal, mergedThisRun });
+      if (deps.signal?.aborted) return finish('cancelled');
 
       if (res.pageSize === 0) return finish('done', res.nextMaxId === null);
       if (res.complete) return finish('done', true);
