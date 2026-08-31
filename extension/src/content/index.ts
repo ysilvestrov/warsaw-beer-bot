@@ -37,7 +37,7 @@ export async function runOverlay(
     for (const card of cards) {
       const key = normalizeKey(card.brewery, card.name);
       const cached = await getCached(key);
-      if (cached) {
+      if (cached && (cached.matched_beer != null || cached.is_drunk)) {
         renderBadge(card.el, cached);
         markSeen(card.el);
       } else {

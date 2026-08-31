@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fixed unmatched beers losing their white-circle badges when returning to a previously visited shop page; unresolved cache entries are now rechecked so the page can show the registered ⚪ orphan or its newly available Untappd rating.
 - Fixed middle-clicking a rating badge on Beershop doing nothing after the catalog navigation was suppressed; middle-click now opens Untappd in a new tab.
 - Fixed rating-badge clicks on Beershop opening both Untappd and the shop's product page; the catalog now stays in place while Untappd opens in a new tab.
 
