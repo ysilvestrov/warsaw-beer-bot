@@ -141,8 +141,16 @@ describe('check-in sync controls', () => {
     expect(retryReply).toEqual({ type: 'checkin-sync:started', alreadyRunning: true });
   });
 
-  it('replies to both start calls when shared startup initialization fails', async () => {
-    vi.mocked(chrome.storage.session.get).mockRejectedValueOnce(new Error('session storage unavailable'));
+  it('replies after an initial status write fails and allows a later start', async () => {
+    vi.mocked(chrome.storage.session.set).mockRejectedValueOnce(new Error('session storage unavailable'));
+    const getSyncState = vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null,
+      profileTotal: 100, serverCount: 13, complete: true,
+    });
 
     const firstStart = handleCheckinSyncStart();
     const retryStart = handleCheckinSyncStart();
@@ -150,13 +158,12 @@ describe('check-in sync controls', () => {
     await expect(firstStart).resolves.toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
     await expect(retryStart).resolves.toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
 
-    await chrome.storage.session.set({
-      checkinSync: {
-        running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
-      },
-    });
     await expect(handleCheckinSyncStart()).resolves.toEqual({
-      type: 'checkin-sync:started', alreadyRunning: true,
+      type: 'checkin-sync:started', alreadyRunning: false,
+    });
+    await vi.waitFor(async () => {
+      expect(getSyncState).toHaveBeenCalledOnce();
+      expect(await handleCheckinSyncStatus()).toMatchObject({ running: false, outcome: 'done' });
     });
   });
 

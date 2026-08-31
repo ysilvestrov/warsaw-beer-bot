@@ -136,7 +136,7 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
 
 let syncWriteChain: Promise<void> = Promise.resolve();
 function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
-  syncWriteChain = syncWriteChain.then(() => writeSyncStatus(s));
+  syncWriteChain = syncWriteChain.catch(() => undefined).then(() => writeSyncStatus(s));
   return syncWriteChain;
 }
 
