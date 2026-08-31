@@ -199,6 +199,37 @@ describe('check-in sync controls', () => {
     expect(writtenOutcomes).not.toContain('error');
   });
 
+  it('recovers a stale running status when terminal status writes keep failing', async () => {
+    let rejectedDoneWrites = 0;
+    vi.mocked(chrome.storage.session.set).mockImplementation(async (values: Record<string, unknown>) => {
+      const status = values.checkinSync as { outcome?: unknown } | undefined;
+      if (status?.outcome === 'done' && rejectedDoneWrites < 2) {
+        rejectedDoneWrites++;
+        throw new Error('session storage unavailable');
+      }
+      for (const [key, value] of Object.entries(values)) sessionStore.set(key, value);
+    });
+    const getSyncState = vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null,
+      profileTotal: 100, serverCount: 13, complete: true,
+    });
+
+    await handleCheckinSyncStart();
+
+    await vi.waitFor(() => expect(rejectedDoneWrites).toBe(2));
+    await vi.waitFor(async () => {
+      expect(await handleCheckinSyncStatus()).toMatchObject({ running: false, outcome: 'error' });
+    });
+    await expect(handleCheckinSyncStart()).resolves.toEqual({
+      type: 'checkin-sync:started', alreadyRunning: false,
+    });
+    await vi.waitFor(() => expect(getSyncState).toHaveBeenCalledTimes(2));
+  });
+
   it('wakes the delay when stopped instead of fetching another page', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
       username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
