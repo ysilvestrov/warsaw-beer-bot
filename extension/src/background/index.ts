@@ -173,14 +173,20 @@ export function feedUrl(username: string, maxId: string | null): string {
 
 export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
   if (syncStartPromise) {
-    await syncStartPromise;
-    return { type: 'checkin-sync:started', alreadyRunning: true };
+    try {
+      await syncStartPromise;
+      return { type: 'checkin-sync:started', alreadyRunning: true };
+    } catch {
+      return { type: 'checkin-sync:started', alreadyRunning: false };
+    }
   }
   if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
   const startPromise = beginCheckinSync();
   syncStartPromise = startPromise;
   try {
     return await startPromise;
+  } catch {
+    return { type: 'checkin-sync:started', alreadyRunning: false };
   } finally {
     if (syncStartPromise === startPromise) syncStartPromise = null;
   }
