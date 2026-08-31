@@ -9,7 +9,7 @@ interface ItemMeta {
   item_category2?: string;
 }
 
-const CARD_SELECTOR = '#search .product[data-product_id]';
+const CARD_SELECTOR = '.product[data-product_id]';
 const NON_BEER_PAGE_RE = /\/pol_m_(?:PRZEKASKI|SZKLO-I-MERCH)(?:[-_/]|$)/i;
 const NON_BEER_TITLE_RE = /\b(?:bon podarunkowy|chipsy|orzeszki|paluchy|plecak|shaker|szkło|t-shirt|torba)\b/i;
 const PACKAGING_SUFFIX_RE = /\s+-\s+(?:butelka|puszka)\s+\d+\s*ml\s*$/i;
@@ -112,10 +112,15 @@ export const piwnemosty: SiteAdapter = {
   isNonBeerPage: (url) => NON_BEER_PAGE_RE.test(url.pathname),
 
   parseCards(root) {
+    const grid = root instanceof Element && root.matches('#search')
+      ? root
+      : root.querySelector('#search');
+    if (!grid) return [];
+
     const meta = itemMetadata(root);
     const cards: Card[] = [];
 
-    for (const el of Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
+    for (const el of Array.from(grid.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
       const id = el.getAttribute('data-product_id') ?? '';
       const item = meta.get(id);
       const rawTitle = item?.item_name?.trim() || text(el.querySelector('.product__name'));

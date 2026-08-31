@@ -5,10 +5,13 @@ import { ADAPTERS } from './registry';
 import { startOverlay } from '../content/main';
 import type { MatchResult, RawBeer } from '../api/types';
 
-const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const fixturePath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.html`);
 const nonBeerHtmlPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.html`);
 const nonBeerJsonPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.json`);
+const waitForBadge = () => vi.waitFor(
+  () => expect(document.querySelector('[data-beerbadge]')).not.toBeNull(),
+  { timeout: 5_000 },
+);
 
 // Load a fixture's <body> into the live jsdom document so MutationObserver works.
 function mountFixture(html: string) {
@@ -77,14 +80,12 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     const html = readFileSync(fixturePath(id), 'utf8');
     mountFixture(html);
     const stop = startOverlay(document, adapter, sendMatch, { debounceMs: 10 });
-    await tick(20);
-    expect(document.querySelector('[data-beerbadge]')).not.toBeNull();
+    await waitForBadge();
 
     // synthesize AJAX navigation: identical content, fresh badge-less nodes
     mountFixture(html);
     expect(document.querySelector('[data-beerbadge]')).toBeNull();
-    await tick(50);
-    expect(document.querySelector('[data-beerbadge]')).not.toBeNull();
+    await waitForBadge();
     stop();
   });
 });
