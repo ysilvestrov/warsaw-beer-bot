@@ -62,6 +62,85 @@ describe('check-in sync controls', () => {
     expect((fetchMock.mock.calls[0]?.[1]?.signal as AbortSignal).aborted).toBe(true);
   });
 
+  it('aborts an in-flight backend page submit', async () => {
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    let markBackendStarted!: () => void;
+    const backendStarted = new Promise<void>((resolve) => { markBackendStarted = resolve; });
+    let rejectBackend: ((reason?: unknown) => void) | undefined;
+    const fetchMock = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      if (String(url).startsWith('https://untappd.com/')) {
+        return Promise.resolve(new Response('<html>feed</html>', { status: 200 }));
+      }
+      markBackendStarted();
+      return new Promise<Response>((_resolve, reject) => {
+        rejectBackend = reject;
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleCheckinSyncStart();
+    await backendStarted;
+    await handleCheckinSyncStop();
+
+    try {
+      await vi.waitFor(async () => {
+        expect((await handleCheckinSyncStatus()).outcome).toBe('cancelled');
+      }, { timeout: 300 });
+    } finally {
+      rejectBackend?.(new DOMException('Test cleanup', 'AbortError'));
+    }
+  });
+
+  it('clears a stale persisted running state when no live run exists', async () => {
+    await chrome.storage.session.set({
+      checkinSync: {
+        running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
+      },
+    });
+
+    expect(await handleCheckinSyncStop()).toEqual({ type: 'checkin-sync:stopped', stopped: true });
+    expect(await handleCheckinSyncStatus()).toMatchObject({
+      running: false, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: 'cancelled', complete: false,
+    });
+  });
+
+  it('reserves startup before awaiting storage so a retry cannot launch a duplicate run', async () => {
+    let releaseFirstRead!: () => void;
+    const firstRead = new Promise<Record<string, unknown>>((resolve) => {
+      releaseFirstRead = () => resolve({});
+    });
+    vi.mocked(chrome.storage.session.get).mockImplementationOnce(async () => firstRead);
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
+    vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: '11', profileTotal: 100, serverCount: 12, complete: false,
+    });
+
+    const firstStart = handleCheckinSyncStart();
+    await Promise.resolve();
+    let retrySettled = false;
+    const retryStart = handleCheckinSyncStart().then((reply) => {
+      retrySettled = true;
+      return reply;
+    });
+    await Promise.resolve();
+    const settledBeforeFirstStartFinished = retrySettled;
+    releaseFirstRead();
+    await firstStart;
+    const retryReply = await retryStart;
+    await vi.waitFor(async () => {
+      expect((await handleCheckinSyncStatus()).running).toBe(false);
+    });
+
+    expect(settledBeforeFirstStartFinished).toBe(false);
+    expect(retryReply).toEqual({ type: 'checkin-sync:started', alreadyRunning: true });
+  });
+
   it('wakes the delay when stopped instead of fetching another page', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
       username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,

@@ -1308,8 +1308,9 @@ XMLHttpRequest` (без нього Untappd 307-редіректить на `/hom
 стрічки (`nextMaxId === null` / 0 чекінів), або жорсткий cap (~200 сторінок/прогін). Two-phase:
 Phase 1 (top-up) з «зараз», Phase 2 (deep extend) з збереженого `deepest_max_id` — повторні «Sync»
 поглиблюють покриття. Поки прогін активний, primary-кнопка стає «Stop»; повідомлення
-`checkin-sync:stop` скасовує активний feed-запит або паузу між сторінками й завершує прогін
-зі станом `cancelled`. Після cap кнопка явно показує «Continue — N left» (або «Continue sync»,
+`checkin-sync:stop` скасовує активний feed-запит, submit сторінки до backend або паузу між
+сторінками й завершує прогін зі станом `cancelled`. Після cap кнопка явно показує
+«Continue — N left» (або «Continue sync»,
 якщо `profileTotal` невідомий), але наступний bounded-прогін запускається лише кліком користувача.
 Якщо callback на `checkin-sync:start` не приходить, popup після 1.5 s повторює start один раз,
 а після другого timeout усе одно переходить до polling статусу, тому не зависає на «Starting…».

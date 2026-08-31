@@ -142,6 +142,8 @@ function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
 
 let syncRunning = false;
 let syncAbortController: AbortController | null = null;
+type CheckinSyncStartReply = { type: 'checkin-sync:started'; alreadyRunning: boolean };
+let syncStartPromise: Promise<CheckinSyncStartReply> | null = null;
 
 function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
   if (signal.aborted) return Promise.resolve();
@@ -169,8 +171,22 @@ export function feedUrl(username: string, maxId: string | null): string {
     : `https://untappd.com/profile/more_feed/${u}/${encodeURIComponent(maxId)}?v2=true`;
 }
 
-export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:started'; alreadyRunning: boolean }> {
+export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
+  if (syncStartPromise) {
+    await syncStartPromise;
+    return { type: 'checkin-sync:started', alreadyRunning: true };
+  }
   if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
+  const startPromise = beginCheckinSync();
+  syncStartPromise = startPromise;
+  try {
+    return await startPromise;
+  } finally {
+    if (syncStartPromise === startPromise) syncStartPromise = null;
+  }
+}
+
+async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const cur = await readSyncStatus();
   if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
 
@@ -183,7 +199,13 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
   syncRunning = true;
   const controller = new AbortController();
   syncAbortController = controller;
-  await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  try {
+    await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  } catch (error) {
+    syncRunning = false;
+    syncAbortController = null;
+    throw error;
+  }
 
   void (async () => {
     try {
@@ -215,7 +237,7 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
           }
           return res.text();
         },
-        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
+        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal),
         onProgress,
         sleep: (ms) => abortableDelay(ms, controller.signal),
         pageCap: SYNC_PAGE_CAP,
@@ -241,8 +263,14 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
 }
 
 export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:stopped'; stopped: boolean }> {
-  if (!syncRunning || !syncAbortController) return { type: 'checkin-sync:stopped', stopped: false };
-  syncAbortController.abort();
+  if (syncAbortController) {
+    syncAbortController.abort();
+    return { type: 'checkin-sync:stopped', stopped: true };
+  }
+
+  const cur = await readSyncStatus();
+  if (!cur.running) return { type: 'checkin-sync:stopped', stopped: false };
+  await enqueueSyncStatus({ ...cur, running: false, outcome: 'cancelled' });
   return { type: 'checkin-sync:stopped', stopped: true };
 }
 

@@ -73,6 +73,24 @@ describe('runCheckinSync', () => {
     expect(submitPage).not.toHaveBeenCalled();
   });
 
+  it('records an accepted page before reporting cancellation', async () => {
+    const controller = new AbortController();
+    const onProgress = vi.fn();
+    const submitPage = async () => {
+      controller.abort();
+      return page({ merged: 5, serverCount: 17, profileTotal: 100, nextMaxId: '11' });
+    };
+
+    const out = await runCheckinSync(baseDeps({
+      submitPage,
+      onProgress,
+      signal: controller.signal,
+    }));
+
+    expect(out).toMatchObject({ status: 'cancelled', serverCount: 17, mergedThisRun: 5 });
+    expect(onProgress).toHaveBeenCalledWith({ serverCount: 17, profileTotal: 100, mergedThisRun: 5 });
+  });
+
   it('surfaces not_linked from getState', async () => {
     const getState = vi.fn(async () => { throw Object.assign(new Error(), { code: 'not_linked' }); });
     const out = await runCheckinSync(baseDeps({ getState }));
