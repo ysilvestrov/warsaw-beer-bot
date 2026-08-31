@@ -194,7 +194,6 @@ export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
 
 async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const cur = await readSyncStatus();
-  if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
@@ -287,7 +286,13 @@ export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:sto
 }
 
 export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
-  return { type: 'checkin-sync:status:ok', ...(await readSyncStatus()) };
+  const status = await readSyncStatus();
+  if (status.running && !syncRunning && !syncAbortController) {
+    const recovered = { ...status, running: false, outcome: 'error' as const };
+    await enqueueSyncStatus(recovered).catch(() => undefined);
+    return { type: 'checkin-sync:status:ok', ...recovered };
+  }
+  return { type: 'checkin-sync:status:ok', ...status };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
