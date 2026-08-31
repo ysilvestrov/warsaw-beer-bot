@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible } from './popup';
+import { afterEach, describe, it, expect, vi } from 'vitest';
+import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -27,7 +27,7 @@ describe('formatSyncStatus', () => {
   });
   it('prompts to continue when capped', () => {
     expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 5000, outcome: 'capped', complete: false }))
-      .toBe('Synced 5000 of 8200 — tap Sync again to continue.');
+      .toBe('Synced 5000 of 8200.');
   });
   it('reports full sync on completion', () => {
     expect(formatSyncStatus({ running: false, serverCount: 8200, profileTotal: 8200, mergedThisRun: 100, outcome: 'done', complete: true }))
@@ -55,7 +55,63 @@ describe('formatSyncStatus', () => {
   });
   it('shows ? for total when capped and total is unknown', () => {
     expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: null, mergedThisRun: 5000, outcome: 'capped', complete: false }))
-      .toBe('Synced 5000 of ? — tap Sync again to continue.');
+      .toBe('Synced 5000.');
+  });
+  it('reports where a cancelled sync stopped', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 400, outcome: 'cancelled', complete: false }))
+      .toBe('Sync stopped at 5000 of 8200.');
+  });
+});
+
+describe('syncButtonLabel', () => {
+  it('offers Stop while a sync is running', () => {
+    expect(syncButtonLabel({ running: true, serverCount: 100, profileTotal: 500, mergedThisRun: 100, outcome: null, complete: false }))
+      .toBe('Stop');
+  });
+
+  it('shows the remaining count after the page cap', () => {
+    expect(syncButtonLabel({ running: false, serverCount: 100, profileTotal: 500, mergedThisRun: 100, outcome: 'capped', complete: false }))
+      .toBe('Continue — 400 left');
+  });
+
+  it('offers a generic continuation when the profile total is unknown', () => {
+    expect(syncButtonLabel({ running: false, serverCount: 100, profileTotal: null, mergedThisRun: 100, outcome: 'capped', complete: false }))
+      .toBe('Continue sync');
+  });
+});
+
+describe('requestSyncStart', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('does not retry after the first runtime callback arrives', async () => {
+    const sendStart = vi.fn((callback: () => void) => { callback(); });
+
+    await expect(requestSyncStart(sendStart, 1000)).resolves.toBe(true);
+    expect(sendStart).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries once when the first runtime callback never arrives', async () => {
+    vi.useFakeTimers();
+    const callbacks: (() => void)[] = [];
+    const sendStart = vi.fn((callback: () => void) => { callbacks.push(callback); });
+
+    const acknowledged = requestSyncStart(sendStart, 1000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sendStart).toHaveBeenCalledTimes(2);
+    callbacks[1]!();
+
+    await expect(acknowledged).resolves.toBe(true);
+  });
+
+  it('returns after the retry timeout so polling can recover the popup', async () => {
+    vi.useFakeTimers();
+    const sendStart = vi.fn((_callback: () => void) => {});
+
+    const acknowledged = requestSyncStart(sendStart, 1000);
+    await vi.advanceTimersByTimeAsync(2000);
+
+    await expect(acknowledged).resolves.toBe(false);
+    expect(sendStart).toHaveBeenCalledTimes(2);
   });
 });
 

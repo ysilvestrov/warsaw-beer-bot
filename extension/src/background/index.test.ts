@@ -1,5 +1,27 @@
-import { describe, it, expect } from 'vitest';
-import { feedUrl } from './index';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { feedUrl, handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop } from './index';
+import { setSettings } from '../shared/config';
+import * as client from '../api/client';
+
+const sessionStore = new Map<string, unknown>();
+
+beforeEach(async () => {
+  sessionStore.clear();
+  Object.assign(chrome.storage, {
+    session: {
+      get: vi.fn(async (key: string) => sessionStore.has(key) ? { [key]: sessionStore.get(key) } : {}),
+      set: vi.fn(async (values: Record<string, unknown>) => {
+        for (const [key, value] of Object.entries(values)) sessionStore.set(key, value);
+      }),
+    },
+  });
+  await setSettings({ token: 'tok', baseUrl: 'https://api.test' });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('feedUrl', () => {
   it('page 1 (null cursor) is the full profile page', () => {
@@ -14,5 +36,49 @@ describe('feedUrl', () => {
 
   it('encodes the username', () => {
     expect(feedUrl('a b/c', null)).toBe('https://untappd.com/user/a%20b%2Fc');
+  });
+});
+
+describe('check-in sync controls', () => {
+  it('stops the active run and records a cancelled outcome', async () => {
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    let markFeedStarted!: () => void;
+    const feedStarted = new Promise<void>((resolve) => { markFeedStarted = resolve; });
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      markFeedStarted();
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await handleCheckinSyncStart();
+    await feedStarted;
+    expect(await handleCheckinSyncStop()).toEqual({ type: 'checkin-sync:stopped', stopped: true });
+
+    await vi.waitFor(async () => {
+      expect((await handleCheckinSyncStatus()).outcome).toBe('cancelled');
+    });
+    expect((fetchMock.mock.calls[0]?.[1]?.signal as AbortSignal).aborted).toBe(true);
+  });
+
+  it('wakes the delay when stopped instead of fetching another page', async () => {
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    });
+    const fetchMock = vi.fn(async () => new Response('<html>feed</html>', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const submitPage = vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
+      merged: 1, alreadyKnown: 0, pageSize: 25, nextMaxId: '11', profileTotal: 100, serverCount: 13, complete: false,
+    });
+
+    await handleCheckinSyncStart();
+    await vi.waitFor(() => expect(submitPage).toHaveBeenCalledTimes(1));
+    await handleCheckinSyncStop();
+
+    await vi.waitFor(async () => {
+      expect((await handleCheckinSyncStatus()).outcome).toBe('cancelled');
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
