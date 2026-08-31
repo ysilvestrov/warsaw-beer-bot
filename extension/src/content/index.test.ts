@@ -77,6 +77,32 @@ describe('runOverlay', () => {
     expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('⚪');
   });
 
+  it('rechecks an unresolved cached beer even when stale cache marks it drunk', async () => {
+    const card: Card = { el: cardEl(), brewery: 'PINTA', name: 'Unknown' };
+    const unresolved: MatchResult = {
+      raw: { brewery: 'PINTA', name: 'Unknown' },
+      matched_beer: null,
+      is_drunk: true,
+      drunk_uncertain: false,
+      user_rating: 4,
+    };
+    await setCached(normalizeKey('PINTA', 'Unknown'), unresolved);
+    const sendMatch = vi.fn(async (): Promise<MatchResult[]> => [{
+      ...unresolved,
+      matched_beer: {
+        id: 7,
+        name: 'Unknown',
+        brewery: 'PINTA',
+        rating_global: null,
+        untappd_id: null,
+      },
+    }]);
+
+    await runOverlay(document, adapterFor([card]), sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'PINTA', name: 'Unknown' }]);
+  });
+
   it('loads details for uncached cards before sending them to match', async () => {
     const cached: Card = { el: cardEl(), brewery: 'Cached', name: 'Beer' };
     const uncached: Card = { el: cardEl(), brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0' };
