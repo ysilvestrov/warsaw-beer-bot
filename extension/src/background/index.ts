@@ -287,7 +287,7 @@ export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:sto
 
 export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
   const status = await readSyncStatus();
-  if (status.running && !syncRunning && !syncAbortController) {
+  if (status.running && !syncStartPromise && !syncRunning && !syncAbortController) {
     const recovered = { ...status, running: false, outcome: 'error' as const };
     await enqueueSyncStatus(recovered).catch(() => undefined);
     return { type: 'checkin-sync:status:ok', ...recovered };

@@ -108,6 +108,11 @@ describe('check-in sync controls', () => {
   });
 
   it('reserves startup before awaiting storage so a retry cannot launch a duplicate run', async () => {
+    await chrome.storage.session.set({
+      checkinSync: {
+        running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
+      },
+    });
     let releaseFirstRead!: () => void;
     const firstRead = new Promise<Record<string, unknown>>((resolve) => {
       releaseFirstRead = () => resolve({});
@@ -130,6 +135,7 @@ describe('check-in sync controls', () => {
     });
     await Promise.resolve();
     const settledBeforeFirstStartFinished = retrySettled;
+    const statusDuringStartup = await handleCheckinSyncStatus();
     releaseFirstRead();
     await firstStart;
     const retryReply = await retryStart;
@@ -138,6 +144,7 @@ describe('check-in sync controls', () => {
     });
 
     expect(settledBeforeFirstStartFinished).toBe(false);
+    expect(statusDuringStartup).toMatchObject({ running: true, outcome: null });
     expect(retryReply).toEqual({ type: 'checkin-sync:started', alreadyRunning: true });
   });
 
