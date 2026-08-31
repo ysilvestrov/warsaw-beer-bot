@@ -269,10 +269,11 @@ Supporter.
   and uploads to the bot the ones it doesn't have yet. Progress is shown
   right there: `Syncing… 1200 / 8200`.
 - **Multiple runs for a large history:** a single run loads a limited
-  number of pages. If you have a lot of check-ins, you'll see **"Synced
-  5000 of 8200 — tap Sync again to continue."** — just click **"Sync my
-  check-ins"** again; each subsequent run **continues deeper**, rather than
-  starting over. Once everything is loaded — **"✓ Fully synced"**.
+  number of pages. If you have a lot of check-ins, the button becomes
+  **"Continue — 3200 left"** — click it to start the next bounded run. Each
+  subsequent run **continues deeper**, rather than starting over. While a run
+  is active, the same button becomes **"Stop"**. Once everything is loaded —
+  **"✓ Fully synced"**.
 - **Who needs this:** Supporters — to quickly top up new check-ins (e.g.
   after a festival where you tried 30+ beers in a day, but the background
   server sync only picks up 25); non-Supporters — to upload their history

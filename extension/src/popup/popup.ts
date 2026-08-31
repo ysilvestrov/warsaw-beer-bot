@@ -8,7 +8,7 @@ export interface SyncStatusView {
   serverCount: number;
   profileTotal: number | null;
   mergedThisRun: number;
-  outcome: 'done' | 'capped' | 'not_linked' | 'blocked' | 'error' | null;
+  outcome: 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'error' | null;
   complete: boolean;
 }
 
@@ -22,13 +22,48 @@ export function formatSyncStatus(s: SyncStatusView): string {
     case 'not_linked': return 'Link your Untappd account in the bot first (/link).';
     case 'blocked': return 'Untappd is rate-limiting — try again later.';
     case 'error': return 'Sync failed — check your connection and token, then retry.';
-    case 'capped': return `Synced ${s.serverCount} of ${s.profileTotal ?? '?'} — tap Sync again to continue.`;
+    case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
+    case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'done':
       return s.complete
         ? `✓ Fully synced (${s.serverCount}).`
         : `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     default: return '';
   }
+}
+
+export function syncButtonLabel(s: SyncStatusView): string {
+  if (s.running) return 'Stop';
+  if (s.outcome === 'capped') {
+    return s.profileTotal === null
+      ? 'Continue sync'
+      : `Continue — ${Math.max(0, s.profileTotal - s.serverCount)} left`;
+  }
+  return 'Sync my check-ins';
+}
+
+type SendSyncStart = (callback: () => void) => void;
+
+export async function requestSyncStart(sendStart: SendSyncStart, timeoutMs: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const acknowledged = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (value: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => finish(false), timeoutMs);
+      try {
+        sendStart(() => finish(true));
+      } catch {
+        finish(false);
+      }
+    });
+    if (acknowledged) return true;
+  }
+  return false;
 }
 
 // True when the URL belongs to a supported shop, so "Refresh this page" can act.
@@ -113,15 +148,21 @@ async function initPopup(): Promise<void> {
   const syncBtn = el<HTMLButtonElement>('syncCheckins');
   const syncStatus = el<HTMLElement>('syncStatus');
   if (syncBtn && syncStatus) {
+    const syncLabel = syncBtn.querySelector('span');
+    let latestSyncStatus: SyncStatusView | null = null;
     const render = (s: SyncStatusView) => {
+      latestSyncStatus = s;
       syncStatus.textContent = formatSyncStatus(s);
-      syncBtn.disabled = s.running;
+      syncBtn.disabled = false;
+      if (syncLabel) syncLabel.textContent = syncButtonLabel(s);
     };
     const poll = () => {
       chrome.runtime.sendMessage({ type: 'checkin-sync:status' }, (s?: SyncStatusView) => {
         if (chrome.runtime.lastError || !s) {
+          latestSyncStatus = null;
           syncStatus.textContent = 'Sync interrupted — tap Sync to resume.';
           syncBtn.disabled = false;
+          if (syncLabel) syncLabel.textContent = 'Sync my check-ins';
           return;
         }
         render(s);
@@ -129,6 +170,12 @@ async function initPopup(): Promise<void> {
       });
     };
     syncBtn.addEventListener('click', async () => {
+      if (latestSyncStatus?.running) {
+        syncBtn.disabled = true;
+        syncStatus.textContent = 'Stopping…';
+        chrome.runtime.sendMessage({ type: 'checkin-sync:stop' }, () => { void chrome.runtime.lastError; });
+        return;
+      }
       syncBtn.disabled = true;
       syncStatus.textContent = 'Starting…';
       // Fetching the user's feed needs the untappd.com host permission (optional,
@@ -141,7 +188,13 @@ async function initPopup(): Promise<void> {
         syncBtn.disabled = false;
         return;
       }
-      chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => poll());
+      await requestSyncStart((callback) => {
+        chrome.runtime.sendMessage({ type: 'checkin-sync:start' }, () => {
+          void chrome.runtime.lastError;
+          callback();
+        });
+      }, 1500);
+      poll();
     });
     poll(); // reflect an in-progress run when the popup (re)opens
   }

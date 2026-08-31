@@ -6,7 +6,7 @@ export interface SyncProgress {
   mergedThisRun: number;
 }
 
-export type SyncStatus = 'done' | 'capped' | 'not_linked' | 'blocked' | 'error';
+export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'error';
 
 export interface SyncOutcome {
   status: SyncStatus;
@@ -24,6 +24,7 @@ export interface CheckinSyncDeps {
   sleep: (ms: number) => Promise<void>;
   pageCap: number;
   delayMs?: number;
+  signal?: AbortSignal;
 }
 
 export const DEFAULT_DELAY_MS = 4000;
@@ -43,11 +44,13 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   try {
     state = await deps.getState();
   } catch (e) {
+    if (deps.signal?.aborted) return finish('cancelled');
     const code = errCode(e);
     return finish(code === 'not_linked' ? 'not_linked' : 'error');
   }
   serverCount = state.serverCount;
   profileTotal = state.profileTotal;
+  if (deps.signal?.aborted) return finish('cancelled');
 
   // Phase 0 starts at "now" (null). Phase 1 (if any) resumes at the saved deep
   // cursor. A fully-known page or feed bottom ends a phase.
@@ -57,19 +60,24 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   for (let phase = 0; phase < startCursors.length; phase++) {
     let maxId = startCursors[phase];
     while (pages < deps.pageCap) {
+      if (deps.signal?.aborted) return finish('cancelled');
       let html: string;
       try {
         html = await deps.fetchFeed(state.username, maxId);
       } catch (e) {
+        if (deps.signal?.aborted) return finish('cancelled');
         return finish(errCode(e) === 'blocked' ? 'blocked' : 'error');
       }
+      if (deps.signal?.aborted) return finish('cancelled');
       let res: CheckinSyncPageResult;
       try {
         res = await deps.submitPage(html, maxId);
       } catch (e) {
+        if (deps.signal?.aborted) return finish('cancelled');
         const code = errCode(e);
         return finish(code === 'blocked' ? 'blocked' : code === 'not_linked' ? 'not_linked' : 'error');
       }
+      if (deps.signal?.aborted) return finish('cancelled');
       pages++;
       mergedThisRun += res.merged;
       serverCount = res.serverCount;

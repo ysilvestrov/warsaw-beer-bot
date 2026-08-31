@@ -2,6 +2,7 @@
 
 ## [Unreleased]
 
+- Fixed check-in sync getting stuck on “Starting…” when the service-worker callback is lost: the popup now retries once and resumes status polling. Active syncs can be stopped from the same primary button, and capped runs expose an explicit “Continue — N left” action instead of burying the next step in status text.
 - Made Piwne Mosty card discovery independent of selector scoping when its catalog grid is replaced, and upgraded the extension test environment to jsdom 30 with state-based re-badge assertions.
 - Fixed unmatched beers losing their white-circle badges when returning to a previously visited shop page; unresolved cache entries are now rechecked so the page can show the registered ⚪ orphan or its newly available Untappd rating.
 - Fixed middle-clicking a rating badge on Beershop doing nothing after the catalog navigation was suppressed; middle-click now opens Untappd in a new tab.
