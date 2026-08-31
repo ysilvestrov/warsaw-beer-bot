@@ -141,6 +141,25 @@ describe('check-in sync controls', () => {
     expect(retryReply).toEqual({ type: 'checkin-sync:started', alreadyRunning: true });
   });
 
+  it('replies to both start calls when shared startup initialization fails', async () => {
+    vi.mocked(chrome.storage.session.get).mockRejectedValueOnce(new Error('session storage unavailable'));
+
+    const firstStart = handleCheckinSyncStart();
+    const retryStart = handleCheckinSyncStart();
+
+    await expect(firstStart).resolves.toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
+    await expect(retryStart).resolves.toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
+
+    await chrome.storage.session.set({
+      checkinSync: {
+        running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
+      },
+    });
+    await expect(handleCheckinSyncStart()).resolves.toEqual({
+      type: 'checkin-sync:started', alreadyRunning: true,
+    });
+  });
+
   it('wakes the delay when stopped instead of fetching another page', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
       username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
