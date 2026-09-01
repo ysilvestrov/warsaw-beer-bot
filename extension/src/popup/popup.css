@@ -28,6 +28,9 @@
   --disabled-bg: #f2f2f5;
   --disabled-fg: #a1a1a6;
 
+  --danger: #b3261e;               /* 6.54:1 on --bg */
+  --danger-surface: #fdecea;       /* --danger on it: 5.72:1 */
+
   --radius: 8px;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.09);
   --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.16);
@@ -52,6 +55,9 @@
 
     --disabled-bg: rgba(255, 255, 255, 0.06);
     --disabled-fg: #6e6e73;
+
+    --danger: #ffb4ab;             /* 10.02:1 on --bg */
+    --danger-surface: #2a1d1d;     /* --danger on it: 9.57:1 */
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
     --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.5);
@@ -167,6 +173,19 @@ h1 {
 }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-quiet); color: var(--fg); }
 .btn-ghost:active:not(:disabled) { background: var(--surface-quiet-hover); }
+
+/* #517: the armed half of the two-step clear. Colour is the only change — the
+   button keeps the ghost tier's height so arming cannot reflow the footer. */
+.btn-ghost.btn-danger {
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.status-foot {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+}
 
 /* Disabled is its own state, not a faded enabled one. `opacity` on a grey button
    over white reads as half-painted rather than unavailable. */

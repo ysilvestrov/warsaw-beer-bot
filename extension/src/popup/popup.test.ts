@@ -1,5 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel } from './popup';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -133,5 +135,42 @@ describe('guideLinkVisible', () => {
   });
   it('links to the hosted setup guide', () => {
     expect(SETUP_GUIDE_URL).toContain('/install/');
+  });
+});
+
+describe('refreshResultText', () => {
+  it('reads as success when there was nothing to do', () => {
+    expect(refreshResultText(0)).toBe('Nothing to refresh — badges are current.');
+  });
+  it('says what will happen next', () => {
+    expect(refreshResultText(3)).toBe('Refreshed — 3 entries will be rechecked.');
+    expect(refreshResultText(1)).toBe('Refreshed — 1 entry will be rechecked.');
+  });
+});
+
+describe('armLiveRegions', () => {
+  it('marks each node polite and tolerates missing ones', () => {
+    const a = document.createElement('p');
+    armLiveRegions([a, null]);
+    expect(a.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
+describe('popup markup', () => {
+  const html = readFileSync(resolve(__dirname, 'popup.html'), 'utf8');
+
+  it('ships no aria-live in the markup — regions are armed after init (#524)', () => {
+    expect(html).not.toContain('aria-live');
+  });
+  it('gives the destructive action its own caption next to it (#518)', () => {
+    expect(html).toContain('id="clearStatus"');
+    expect(html).toContain('id="refreshStatus"');
+    expect(html).not.toContain('id="status"');
+  });
+  it('adds no heading beyond the title (#524 sub-item dropped by design)', () => {
+    expect(html).not.toContain('<h2');
+  });
+  it('pairs no description with the live caption (#518: describedby stays off)', () => {
+    expect(html).not.toContain('aria-describedby');
   });
 });
