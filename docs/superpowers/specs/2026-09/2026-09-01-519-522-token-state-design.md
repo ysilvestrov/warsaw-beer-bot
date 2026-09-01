@@ -87,6 +87,16 @@ tokenless click stored `outcome: 'error'`, with
 `Sync failed — check your connection and token, then retry.` A caption that
 tells a new user their connection is broken is worse than no caption.
 
+Review finding 5 (2026-09-01, whole-branch review): a run already in flight
+when the token is cleared in options is not stopped by this decision. The
+service worker keeps paging Untappd with the token it captured at start, but
+the popup — gated on `hasToken` read at open time — shows the demoted,
+disabled, captioned sync button with no `Stop` control, because `poll()`
+never runs to surface the running state or offer a way to cancel it. No fix
+is planned: the run is capped and self-terminating, and re-saving the token
+restores both polling and `Stop` on the next popup open. Documented here as a
+known, accepted gap rather than left silent.
+
 ### 5. What we are not doing (refuting part of #519 in place)
 
 #519 proposes to "collapse the cache actions behind the fold or hide them until

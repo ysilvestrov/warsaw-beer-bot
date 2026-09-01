@@ -221,9 +221,11 @@ housekeeping one at the bottom:
 </figure>
 
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
-  check-ins from Untappd (see below). This is the popup's main action. While a
-  sync is running the button is greyed out and the line under it counts up
-  (`Syncing… 1200 / 8200`): that means "working", not "broken".
+  check-ins from Untappd (see below). This is the popup's main action **once
+  you've saved a token** — before that, the "Not connected" block below leads
+  instead. While a sync is running the button is greyed out and the line
+  under it counts up (`Syncing… 1200 / 8200`): that means "working", not
+  "broken".
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
   items, or you just ran `/import`). The result lands in the caption right
@@ -237,8 +239,9 @@ housekeeping one at the bottom:
   to open it in a separate focused browser window; if the browser cannot create
   one, the extension opens a new tab instead. Beershop appears once and chooses
   the storefront that best matches your browser languages.
-- **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
-  clears the **entire** local overlay cache (all sites). It asks first: the initial
+- **"Clear all cache"** (the quiet button at the bottom, under a thin rule —
+  once a token is saved, the "Read the setup guide →" link sits just above it)
+  — clears the **entire** local overlay cache (all sites). It asks first: the initial
   click shows how many would go (`Clear cache for 412 entries?`), the second clears
   and reports (`Cleared 412 entries.`) right below the button. Changed your mind?
   Close the popup — nothing happens.
@@ -274,6 +277,9 @@ Supporter.
 - **Prerequisite:** first link your account in the bot — `/link <username>`.
   Without this the button will show "Link your Untappd account in the bot
   first (/link)".
+- **Also needs a saved token** (Part 3). Without one, the button is greyed
+  out and captioned `Add a token to sync your check-ins.` instead (see above,
+  under "The toolbar button (popup)").
 - **The first time**, the browser will ask for permission to access
   `untappd.com` (to read your feed within your session) — click
   **Allow**. If you decline, you'll see "Allow access to untappd.com to
