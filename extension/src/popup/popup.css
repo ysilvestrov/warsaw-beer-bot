@@ -229,6 +229,14 @@ h1 {
   min-height: 0;
 }
 
+/* #524 review: .status:empty (0-2-0) otherwise beats .status-foot (0-1-0), so the
+   idle footer caption still reserved a 10px band under the last control. This
+   selector's specificity (0-3-0) wins outright — the footer caption collapses to
+   no margin at all when empty, without touching the other captions' idle margin. */
+.status.status-foot:empty {
+  margin: 0;
+}
+
 .note {
   margin: 0 0 8px;
   padding-top: 12px;

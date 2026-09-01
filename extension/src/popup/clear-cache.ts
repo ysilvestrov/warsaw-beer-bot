@@ -59,6 +59,9 @@ export function wireClearButton(
           return;
         }
         render({ armed: true, count: n });
+      } catch {
+        status.textContent = 'Could not clear the cache — try again.';
+        render(IDLE);
       } finally {
         inFlight = false;
       }

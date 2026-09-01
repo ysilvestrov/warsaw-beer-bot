@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, beers } from './popup';
+import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, refreshReplyText, beers } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -156,11 +156,42 @@ describe('refreshResultText', () => {
   });
 });
 
+describe('refreshReplyText', () => {
+  it('reports a transport failure regardless of what the reply carries', () => {
+    expect(refreshReplyText(undefined, true)).toBe('Could not reach the page — reload it and retry.');
+    expect(refreshReplyText({ ok: true, cleared: 5 }, true)).toBe('Could not reach the page — reload it and retry.');
+  });
+  it('reports a content-script failure distinctly from a zero-count success (#518)', () => {
+    expect(refreshReplyText({ ok: false, cleared: 0 }, false)).toBe('Refresh failed — reload the page and try again.');
+  });
+  it('falls through to the result text on success', () => {
+    expect(refreshReplyText({ ok: true, cleared: 3 }, false)).toBe('Refreshed — 3 beers will be rechecked.');
+    expect(refreshReplyText(undefined, false)).toBe('Nothing to refresh — no beers found on this page.');
+  });
+});
+
 describe('armLiveRegions', () => {
   it('marks each node polite and tolerates missing ones', () => {
     const a = document.createElement('p');
     armLiveRegions([a, null]);
     expect(a.getAttribute('aria-live')).toBe('polite');
+  });
+});
+
+describe('armLiveRegions call site (popup.ts)', () => {
+  const source = readFileSync(resolve(__dirname, 'popup.ts'), 'utf8');
+  const call = source.match(/armLiveRegions\(\[([\s\S]*?)\]\);/)?.[1] ?? '';
+
+  it('found the call', () => {
+    expect(call).not.toBe('');
+  });
+  it('arms syncStatus, refreshStatus and clearStatus (#524)', () => {
+    expect(call).toMatch(/'syncStatus'/);
+    expect(call).toMatch(/\brefreshStatus\b/);
+    expect(call).toMatch(/'clearStatus'/);
+  });
+  it('never arms authNote — it is static text, not a response to a click (#524)', () => {
+    expect(call).not.toMatch(/authNote/);
   });
 });
 

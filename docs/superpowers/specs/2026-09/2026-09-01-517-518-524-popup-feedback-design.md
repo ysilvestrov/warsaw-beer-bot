@@ -28,7 +28,7 @@ The three issues are one defect seen from three angles, which is why they are de
 
 ### Live regions are armed after init
 
-Each caption receives `aria-live="polite"` **after** initialization has written its initial text, so nothing is announced when the popup opens and every later change — always the result of a user action — is announced once, next to the action.
+Each caption receives `aria-live="polite"` **after** initialization has written its initial text, so nothing is announced when the popup opens and every later change — always the result of a user action — is announced once, next to the action. The one exception is `#syncStatus`: its first text arrives from `poll()`'s asynchronous callback, which resolves after arming completes, so a sync already in progress when the popup opens can still be announced on open.
 
 ### Two-step clear, counted lazily
 
@@ -52,9 +52,11 @@ Reported counts are the counts actually removed, not the count shown when arming
 | refresh cleared nothing | `Nothing to refresh — no beers found on this page.` |
 | refresh cleared N | `Refreshed — N beers will be rechecked.` |
 | refresh could not reach the page | unchanged |
+| refresh content script reported failure | `Refresh failed — reload the page and try again.` |
 | refresh unavailable (disabled) | unchanged: `Open a supported shop page to refresh it.` |
 | clear, empty cache | `Nothing to clear.` |
 | clear, N removed | `Cleared N entries.` |
+| clear, rejected | `Could not clear the cache — try again.` |
 
 `Refreshed (0 cleared).` is literally true and reads as failure; it is the message a user gets when everything is already correct.
 

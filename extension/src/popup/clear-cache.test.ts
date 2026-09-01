@@ -89,6 +89,23 @@ describe('wireClearButton', () => {
     expect(count).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a failed clear, returns to idle, and still works on the next click', async () => {
+    const { button, status, label } = fixture();
+    const clear = vi.fn(async () => { throw new Error('boom'); });
+    const count = vi.fn(async () => 3);
+    wireClearButton(button, status, { count, clear });
+
+    button.click();
+    await vi.waitFor(() => expect(button.classList.contains('btn-danger')).toBe(true));
+    button.click();
+    await vi.waitFor(() => expect(status.textContent).toBe('Could not clear the cache — try again.'));
+    expect(label.textContent).toBe('Clear all cache');
+    expect(button.classList.contains('btn-danger')).toBe(false);
+
+    button.click();
+    await vi.waitFor(() => expect(label.textContent).toBe('Clear cache for 3 entries?'));
+  });
+
   it('ignores rapid double-click from armed state and calls clear once', async () => {
     const { button, status } = fixture();
     const clear = vi.fn(async () => 5);
