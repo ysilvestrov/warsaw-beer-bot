@@ -1,7 +1,8 @@
 import { pickAdapter } from '../sites/registry';
-import { clearAll } from '../cache/store';
+import { clearAll, countAll } from '../cache/store';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
+import { entries, wireClearButton } from './clear-cache';
 
 export interface SyncStatusView {
   running: boolean;
@@ -87,6 +88,22 @@ export function guideLinkVisible(hasToken: boolean): boolean {
   return !hasToken;
 }
 
+/** #524: "Refreshed (0 cleared)." is true and reads as failure. */
+export function refreshResultText(cleared: number): string {
+  return cleared === 0
+    ? 'Nothing to refresh — badges are current.'
+    : `Refreshed — ${entries(cleared)} will be rechecked.`;
+}
+
+/**
+ * #524: attaches aria-live AFTER init has written the initial text, so opening the
+ * popup announces nothing and every later change — always a response to a click —
+ * is announced once, beside the control that caused it.
+ */
+export function armLiveRegions(nodes: Array<HTMLElement | null>): void {
+  for (const node of nodes) node?.setAttribute('aria-live', 'polite');
+}
+
 function el<T extends HTMLElement>(id: string): T | null {
   return document.getElementById(id) as T | null;
 }
@@ -94,13 +111,13 @@ function el<T extends HTMLElement>(id: string): T | null {
 async function initPopup(): Promise<void> {
   const refreshBtn = el<HTMLButtonElement>('refresh');
   const clearBtn = el<HTMLButtonElement>('clearAll');
-  const status = el<HTMLElement>('status');
-  if (!refreshBtn || !clearBtn || !status) return;
+  const refreshStatus = el<HTMLElement>('refreshStatus');
+  if (!refreshBtn || !clearBtn || !refreshStatus) return;
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const url = tab?.url ?? '';
   refreshBtn.disabled = !canRefresh(url);
-  if (refreshBtn.disabled) status.textContent = 'Open a supported shop page to refresh it.';
+  if (refreshBtn.disabled) refreshStatus.textContent = 'Open a supported shop page to refresh it.';
 
   const shopList = el<HTMLElement>('supportedShops');
   if (shopList) {
@@ -132,18 +149,16 @@ async function initPopup(): Promise<void> {
 
   refreshBtn.addEventListener('click', () => {
     if (tab?.id == null) return;
-    status.textContent = 'Refreshing…';
+    refreshStatus.textContent = 'Refreshing…';
     chrome.tabs.sendMessage(tab.id, { type: 'refresh-page' }, (reply?: { cleared?: number }) => {
-      status.textContent = chrome.runtime.lastError
+      refreshStatus.textContent = chrome.runtime.lastError
         ? 'Could not reach the page — reload it and retry.'
-        : `Refreshed (${reply?.cleared ?? 0} cleared).`;
+        : refreshResultText(reply?.cleared ?? 0);
     });
   });
 
-  clearBtn.addEventListener('click', async () => {
-    await clearAll();
-    status.textContent = 'Cache cleared.';
-  });
+  const clearStatus = el<HTMLElement>('clearStatus');
+  if (clearStatus) wireClearButton(clearBtn, clearStatus, { count: countAll, clear: clearAll });
 
   const syncBtn = el<HTMLButtonElement>('syncCheckins');
   const syncStatus = el<HTMLElement>('syncStatus');
@@ -198,6 +213,8 @@ async function initPopup(): Promise<void> {
     });
     poll(); // reflect an in-progress run when the popup (re)opens
   }
+
+  armLiveRegions([el<HTMLElement>('syncStatus'), refreshStatus, el<HTMLElement>('clearStatus')]);
 }
 
 if (typeof document !== 'undefined' && document.getElementById('refresh')) {
