@@ -1,3 +1,5 @@
+@import "../shared/extension-ui.css";
+
 /* Warsaw Beer Overlay — toolbar popup.
    Tiering: Sync (primary, amber) > Refresh (secondary, outlined) > Clear all cache
    (ghost, below a hairline). Height and colour both encode rank, so the destructive
@@ -5,66 +7,6 @@
    Brand amber #d9822b is only 2.93:1 on white, so the light-mode fill is the deeper
    #ab6217 (4.68:1); dark mode gets the brand hue at full strength with a dark label
    (5.75:1). Same brand, honest contrast. */
-
-:root {
-  color-scheme: light dark;
-
-  --bg: #ffffff;
-  --fg: #1d1d1f;
-  --fg-muted: #66666b;
-  --border: rgba(0, 0, 0, 0.44);   /* control boundary — SC 1.4.11 wants 3:1 */
-  --hairline: rgba(0, 0, 0, 0.08); /* decorative separator — exempt */
-
-  --accent: #ab6217;          /* AA-safe fill for white text */
-  --accent-hover: #985810;
-  --accent-active: #874e0d;
-  --accent-fg: #ffffff;
-  --brand: #d9822b;           /* brand hue: the mark and tints — never text or a ring on white */
-  --ring: #874e0d;            /* focus ring: 6.72:1 on --bg, SC 1.4.11 needs 3:1 */
-
-  --surface-quiet: rgba(0, 0, 0, 0.04);
-  --surface-quiet-hover: rgba(0, 0, 0, 0.07);
-
-  --disabled-bg: #f2f2f5;
-  --disabled-fg: #a1a1a6;
-
-  --danger: #b3261e;               /* 6.54:1 on --bg */
-  --danger-surface: #fdecea;       /* --danger on it: 5.72:1 */
-
-  --radius: 8px;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.09);
-  --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.16);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #1c1c1e;
-    --fg: #f5f5f7;
-    --fg-muted: #98989d;
-    --border: rgba(255, 255, 255, 0.38);
-    --hairline: rgba(255, 255, 255, 0.1);
-
-    --accent: #d9822b;        /* brand hue reads correctly on a dark ground */
-    --accent-hover: #e8933f;
-    --accent-active: #c2741f;
-    --accent-fg: #1d1d1f;
-    --ring: #e8933f;          /* 7.03:1 on the dark ground */
-
-    --surface-quiet: rgba(255, 255, 255, 0.07);
-    --surface-quiet-hover: rgba(255, 255, 255, 0.11);
-
-    --disabled-bg: rgba(255, 255, 255, 0.06);
-    --disabled-fg: #6e6e73;
-
-    --danger: #ffb4ab;             /* 10.02:1 on --bg */
-    --danger-surface: #2a1d1d;     /* --danger on it: 9.57:1 */
-
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --shadow-accent: 0 1px 2px rgba(0, 0, 0, 0.5);
-  }
-}
-
-* { box-sizing: border-box; }
 
 body {
   margin: 0;
@@ -75,13 +17,6 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--border) transparent;
 }
-
-/* Form controls do not inherit type. Without this the popup ships in two typefaces:
-   system-ui for text and the UA's 13.333px Arial for every button. */
-button,
-a { font: inherit; }
-
-::selection { background: rgba(217, 130, 43, 0.28); }
 
 /* One fixed width, so the popup does not resize itself around whichever status
    string happens to be showing. */
@@ -116,20 +51,9 @@ h1 {
 
 /* ---------- buttons ---------- */
 
-.btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
+.card > .btn,
+.foot .btn {
   width: 100%;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
-  background: none;
-  color: var(--fg);
-  font-weight: 500;
-  letter-spacing: -0.005em;
-  cursor: pointer;
-  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .ico {
@@ -142,27 +66,6 @@ h1 {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
-
-/* Primary — the action the popup exists for. */
-.btn-primary {
-  min-height: 36px;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font-weight: 600;
-  box-shadow: var(--shadow-accent);
-}
-.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-.btn-primary:active:not(:disabled) { background: var(--accent-active); }
-
-/* Secondary — available, clearly not the headline. */
-.btn-secondary {
-  min-height: 32px;
-  border-color: var(--border);
-  background: var(--bg);
-  box-shadow: var(--shadow-sm);
-}
-.btn-secondary:hover:not(:disabled) { background: var(--surface-quiet); }
-.btn-secondary:active:not(:disabled) { background: var(--surface-quiet-hover); }
 
 /* Ghost — reachable, never in the primary scan path. */
 .btn-ghost {
@@ -186,31 +89,14 @@ h1 {
   margin: 6px 0 0;
   color: var(--fg-muted);
 }
-
-/* Disabled is its own state, not a faded enabled one. `opacity` on a grey button
-   over white reads as half-painted rather than unavailable. */
-.btn:disabled {
-  background: var(--disabled-bg);
-  border-color: transparent;
-  color: var(--disabled-fg);
-  box-shadow: none;
-  cursor: default;
-}
-
 /* The running state is carried by the disabled fill plus the live "Syncing… 1200 /
    8200" line beneath, which reports real counts. An indeterminate animation on top
    of exact numbers is decoration, so there isn't one. */
 
 @media (prefers-reduced-motion: reduce) {
-  .btn,
   .shops-summary,
   .shops-chevron,
   .shop-link { transition: none; }
-}
-
-:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 
 /* ---------- status + auth block ---------- */
