@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, refreshReplyText, beers } from './popup';
+import { canRefresh, formatSyncStatus, authNoteText, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, refreshReplyText, beers } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -128,16 +128,6 @@ describe('authNoteText', () => {
   });
 });
 
-describe('guideLinkVisible', () => {
-  it('shows the guide link only when there is no token', () => {
-    expect(guideLinkVisible(false)).toBe(true);
-    expect(guideLinkVisible(true)).toBe(false);
-  });
-  it('links to the hosted setup guide', () => {
-    expect(SETUP_GUIDE_URL).toContain('/install/');
-  });
-});
-
 describe('beers', () => {
   it('pluralizes a beer count', () => {
     expect(beers(1)).toBe('1 beer');
@@ -192,6 +182,60 @@ describe('armLiveRegions call site (popup.ts)', () => {
   });
   it('never arms authNote — it is static text, not a response to a click (#524)', () => {
     expect(call).not.toMatch(/authNote/);
+  });
+});
+
+describe('initPopup', () => {
+  const html = readFileSync(resolve(__dirname, 'popup.html'), 'utf8');
+
+  async function bootPopup(token: string) {
+    // Only the body content: assigning a fragment to documentElement would leave
+    // jsdom without a <body> for popup.ts to query.
+    document.body.innerHTML = html.split('<body>')[1].split('</body>')[0];
+    const sendMessage = vi.fn();
+    const chromeStub = globalThis.chrome as unknown as Record<string, unknown>;
+    await (chromeStub.storage as { local: { set(o: object): Promise<void> } }).local.set({ token });
+    chromeStub.tabs = { query: vi.fn(async () => [{ id: 7, url: 'https://beerfreak.org/p/1' }]) };
+    chromeStub.permissions = { request: vi.fn(async () => true) };
+    (chromeStub.runtime as Record<string, unknown>).sendMessage = sendMessage;
+    (chromeStub.runtime as Record<string, unknown>).openOptionsPage = vi.fn();
+    vi.resetModules();
+    await import('./popup');
+    await new Promise((r) => setTimeout(r, 0));
+    return { sendMessage };
+  }
+
+  it('without a token: sync is disabled, captioned, and never polled (#519)', async () => {
+    const { sendMessage } = await bootPopup('');
+    const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
+    expect(syncBtn.disabled).toBe(true);
+    expect(document.getElementById('syncStatus')?.textContent).toBe('Add a token to sync your check-ins.');
+    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(false);
+  });
+
+  it('without a token: the auth block leads and the guide sits inside it (#519, #522)', async () => {
+    await bootPopup('');
+    const header = document.querySelector('header.head');
+    const authBlock = document.getElementById('authBlock') as HTMLElement;
+    expect(header?.nextElementSibling).toBe(authBlock);
+    expect(authBlock.contains(document.getElementById('guideLink'))).toBe(true);
+    expect((document.getElementById('guideLink') as HTMLElement).style.display).toBe('');
+  });
+
+  it('with a token: the guide link stays visible in the footer (#522)', async () => {
+    await bootPopup('tok');
+    const guide = document.getElementById('guideLink') as HTMLAnchorElement;
+    expect(document.querySelector('footer.foot')?.contains(guide)).toBe(true);
+    expect(guide.style.display).toBe('');
+    expect(guide.href).toBe(SETUP_GUIDE_URL);
+    expect((document.getElementById('authBlock') as HTMLElement).style.display).toBe('none');
+  });
+
+  it('with a token: sync is primary and its status is polled', async () => {
+    const { sendMessage } = await bootPopup('tok');
+    const syncBtn = document.getElementById('syncCheckins') as HTMLButtonElement;
+    expect(syncBtn.classList.contains('btn-primary')).toBe(true);
+    expect(sendMessage.mock.calls.some(([m]) => m?.type === 'checkin-sync:status')).toBe(true);
   });
 });
 
