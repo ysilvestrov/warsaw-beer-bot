@@ -77,4 +77,31 @@ describe('wireClearButton', () => {
     button.click();
     await vi.waitFor(() => expect(status.textContent).toBe('Cleared 2 entries.'));
   });
+
+  it('ignores rapid double-click from idle state and calls count once', async () => {
+    const { button, label, status } = fixture();
+    const count = vi.fn(async () => 5);
+    wireClearButton(button, status, { count, clear: vi.fn() });
+
+    button.click();
+    button.click(); // second click before first count() settles
+    await vi.waitFor(() => expect(label.textContent).toBe('Clear cache for 5 entries?'));
+    expect(count).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores rapid double-click from armed state and calls clear once', async () => {
+    const { button, status } = fixture();
+    const clear = vi.fn(async () => 5);
+    const count = vi.fn(async () => 5);
+    wireClearButton(button, status, { count, clear });
+
+    button.click();
+    await vi.waitFor(() => expect(button.classList.contains('btn-danger')).toBe(true));
+
+    clear.mockClear(); // reset to measure second sequence
+    button.click();
+    button.click(); // second click before first clear() settles
+    await vi.waitFor(() => expect(status.textContent).toBe('Cleared 5 entries.'));
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
 });

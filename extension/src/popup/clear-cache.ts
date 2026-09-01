@@ -34,6 +34,7 @@ export function wireClearButton(
 ): void {
   const label = button.querySelector('span');
   let state: ClearState = IDLE;
+  let inFlight = false;
 
   const render = (next: ClearState): void => {
     state = next;
@@ -42,19 +43,25 @@ export function wireClearButton(
   };
 
   button.addEventListener('click', () => {
+    if (inFlight) return;
+    inFlight = true;
     void (async () => {
-      if (state.armed) {
-        const removed = await deps.clear();
-        status.textContent = clearResultText(removed);
-        render(IDLE);
-        return;
+      try {
+        if (state.armed) {
+          const removed = await deps.clear();
+          status.textContent = clearResultText(removed);
+          render(IDLE);
+          return;
+        }
+        const n = await deps.count();
+        if (n === 0) {
+          status.textContent = 'Nothing to clear.';
+          return;
+        }
+        render({ armed: true, count: n });
+      } finally {
+        inFlight = false;
       }
-      const n = await deps.count();
-      if (n === 0) {
-        status.textContent = 'Nothing to clear.';
-        return;
-      }
-      render({ armed: true, count: n });
     })();
   });
 }
