@@ -105,6 +105,20 @@ export function refreshResultText(cleared: number): string {
 }
 
 /**
+ * #518: the click handler gets three outcomes, not two — a transport failure
+ * (`chrome.runtime.lastError`, e.g. the content script isn't injected on this page),
+ * the content script itself reporting failure (`reply?.ok === false`, from
+ * extension/src/content/main.ts's catch), and success. Collapsing the second into
+ * the zero-cleared success text made a real failure read as "no beers on this page",
+ * a factual claim about the shop that isn't true.
+ */
+export function refreshReplyText(reply: { ok?: boolean; cleared?: number } | undefined, lastError: boolean): string {
+  if (lastError) return 'Could not reach the page — reload it and retry.';
+  if (reply?.ok === false) return 'Refresh failed — reload the page and try again.';
+  return refreshResultText(reply?.cleared ?? 0);
+}
+
+/**
  * #524: attaches aria-live AFTER init has written the initial text, so opening the
  * popup announces nothing and every later change — always a response to a click —
  * is announced once, beside the control that caused it.
@@ -159,10 +173,8 @@ async function initPopup(): Promise<void> {
   refreshBtn.addEventListener('click', () => {
     if (tab?.id == null) return;
     refreshStatus.textContent = 'Refreshing…';
-    chrome.tabs.sendMessage(tab.id, { type: 'refresh-page' }, (reply?: { cleared?: number }) => {
-      refreshStatus.textContent = chrome.runtime.lastError
-        ? 'Could not reach the page — reload it and retry.'
-        : refreshResultText(reply?.cleared ?? 0);
+    chrome.tabs.sendMessage(tab.id, { type: 'refresh-page' }, (reply?: { ok?: boolean; cleared?: number }) => {
+      refreshStatus.textContent = refreshReplyText(reply, Boolean(chrome.runtime.lastError));
     });
   });
 
