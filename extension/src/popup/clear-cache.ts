@@ -45,9 +45,14 @@ export function wireClearButton(
   button.addEventListener('click', () => {
     if (inFlight) return;
     inFlight = true;
+    // Which dependency is running decides which failure to name: counting is a read,
+    // and reporting it as a failed clear would tell the user something destructive was
+    // attempted when nothing was.
+    let phase: 'count' | 'clear' = 'count';
     void (async () => {
       try {
         if (state.armed) {
+          phase = 'clear';
           const removed = await deps.clear();
           status.textContent = clearResultText(removed);
           render(IDLE);
@@ -58,9 +63,16 @@ export function wireClearButton(
           status.textContent = 'Nothing to clear.';
           return;
         }
+        // The caption belongs to the previous action ('Nothing to clear.', or the count
+        // from an earlier clear). Leaving it beside an armed button pairs the question
+        // with an answer to a different one.
+        status.textContent = '';
         render({ armed: true, count: n });
       } catch {
-        status.textContent = 'Could not clear the cache — try again.';
+        status.textContent =
+          phase === 'clear'
+            ? 'Could not clear the cache — try again.'
+            : 'Could not read the cache — try again.';
         render(IDLE);
       } finally {
         inFlight = false;

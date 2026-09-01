@@ -56,6 +56,7 @@ Reported counts are the counts actually removed, not the count shown when arming
 | refresh unavailable (disabled) | unchanged: `Open a supported shop page to refresh it.` |
 | clear, empty cache | `Nothing to clear.` |
 | clear, N removed | `Cleared N entries.` |
+| clear, the count itself failed | `Could not read the cache — try again.` |
 | clear, rejected | `Could not clear the cache — try again.` |
 
 `Refreshed (0 cleared).` is literally true and reads as failure; it is the message a user gets when everything is already correct.
