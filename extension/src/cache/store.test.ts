@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getCached, setCached, CACHE_TTL_MS, clearKeys, clearAll } from './store';
+import { getCached, setCached, CACHE_TTL_MS, clearKeys, clearAll, countAll } from './store';
 import type { MatchResult } from '../api/types';
 
 const sample: MatchResult = {
@@ -55,5 +55,25 @@ describe('cache/store', () => {
     await clearAll();
     expect(await getCached('a|x')).toBeNull();
     expect((await chrome.storage.local.get('token')).token).toBe('keep-me');
+  });
+
+  it('countAll counts our entries and leaves them alone', async () => {
+    await setCached('a|x', sample);
+    await setCached('b|y', sample);
+    await chrome.storage.local.set({ 'unrelated:key': 1 });
+    expect(await countAll()).toBe(2);
+    expect(await getCached('a|x')).toEqual(sample);
+  });
+
+  it('countAll is 0 on an empty cache', async () => {
+    await chrome.storage.local.set({ 'unrelated:key': 1 });
+    expect(await countAll()).toBe(0);
+  });
+
+  it('clearAll returns how many entries it removed', async () => {
+    await setCached('a|x', sample);
+    await setCached('b|y', sample);
+    expect(await clearAll()).toBe(2);
+    expect(await clearAll()).toBe(0);
   });
 });
