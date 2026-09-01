@@ -323,6 +323,10 @@ describe('schema migrations', () => {
       // and this test would silently assert nothing.
       db.exec('ALTER TABLE beers DROP COLUMN untappd_id_source');
       db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
+      // v26 (#379) also re-runs in this rewind window (>= 22) but ALTERs
+      // user_profiles, untouched by anything else rewound here. Drop it too, or
+      // the second migrate() call fails with "duplicate column name".
+      db.exec('ALTER TABLE user_profiles DROP COLUMN announce_opt_out');
       db.prepare('DELETE FROM schema_version WHERE version >= 22').run();
 
       // Two beers: one pinned via match_links, one not.
@@ -363,6 +367,11 @@ describe('schema migrations', () => {
       // LATER row (v24+) in place would make it skip v23 entirely and this test would
       // silently assert nothing against the dropped column (see #377 v22 test history).
       db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
+      // v26 (#379) also runs in this rewind window (>= 23) but isn't touched by the
+      // v24 rebuild below (it ALTERs user_profiles, not enrich_failures), so its
+      // column survives from the first migrate() call above. Drop it too, or the
+      // second migrate() call fails with "duplicate column name" when v26 re-runs.
+      db.exec('ALTER TABLE user_profiles DROP COLUMN announce_opt_out');
       db.prepare('DELETE FROM schema_version WHERE version >= 23').run();
 
       db.prepare(
@@ -447,6 +456,11 @@ describe('schema migrations', () => {
       db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);`);
       migrate(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 24').run();
+      // v26 (#379) also re-runs in this rewind window (>= 24) but ALTERs
+      // user_profiles, not enrich_failures, so the manual rebuild below doesn't
+      // erase its column the way it erases enrich_failures' v25 column. Drop it
+      // too, or the second migrate() call fails with "duplicate column name".
+      db.exec('ALTER TABLE user_profiles DROP COLUMN announce_opt_out');
       db.exec(`
         DROP TABLE enrich_failures;
         CREATE TABLE enrich_failures (
@@ -491,9 +505,9 @@ describe('schema migrations', () => {
         .get(notABeer) as { r: string | null };
       expect(kept.r).not.toBeNull();
 
-      // Updated 24 -> 25 by #421: this rewind starts from v23 and runs migrate() to
+      // Updated 25 -> 26 by #379: this rewind starts from v23 and runs migrate() to
       // completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(25);
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(26);
     });
   });
 
@@ -539,7 +553,9 @@ describe('schema migrations', () => {
       const db = openDb(':memory:');
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      expect(version.v).toBe(25);
+      // Updated 25 -> 26 by #379: a fresh DB's reachable head moves whenever a
+      // later migration is added; this still proves v25 wasn't lost along the way.
+      expect(version.v).toBe(26);
     });
   });
 });

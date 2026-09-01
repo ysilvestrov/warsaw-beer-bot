@@ -27,3 +27,11 @@ export function findTelegramIdByHash(db: DB, tokenHash: string): number | null {
     .get(tokenHash) as { telegram_id: number } | undefined;
   return row ? row.telegram_id : null;
 }
+
+/** Whether this user currently holds an extension token (rotation is 1:1, so 0 or 1 row). */
+export function hasApiToken(db: DB, telegramId: number): boolean {
+  const row = db
+    .prepare('SELECT 1 AS present FROM api_tokens WHERE telegram_id = ? LIMIT 1')
+    .get(telegramId) as { present: number } | undefined;
+  return row !== undefined;
+}
