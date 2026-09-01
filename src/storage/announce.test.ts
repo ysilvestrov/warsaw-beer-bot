@@ -34,12 +34,15 @@ describe('announceRecipients', () => {
   });
 
   test('carries each recipient language, and null for an unset or unknown one', () => {
+    // Inserted in DESCENDING telegram_id order on purpose: without `ORDER BY
+    // t.telegram_id` in announceRecipients, sqlite returns rows in rowid/insertion
+    // order (3, 2, 1) and this assertion — which expects ascending output — catches it.
     const db = freshDb();
-    withToken(db, 1);
-    setUserLanguage(db, 1, 'uk');
-    withToken(db, 2); // language never set
     withToken(db, 3);
     db.prepare("UPDATE user_profiles SET language = 'kl' WHERE telegram_id = 3").run();
+    withToken(db, 2); // language never set
+    withToken(db, 1);
+    setUserLanguage(db, 1, 'uk');
     expect(announceRecipients(db)).toEqual([
       { telegramId: 1, language: 'uk' },
       { telegramId: 2, language: null },

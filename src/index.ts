@@ -305,10 +305,13 @@ async function main(): Promise<void> {
     }),
     // announce-release (#379): tell token holders when a new extension version is
     // actually live. Hourly UTC tick; the job checks the Warsaw [09:00,22:00) send
-    // window and its own job_state version marker, so it sends at most once per
-    // published version and never at night. Same UTC-tick pattern as daily-status —
-    // node-cron's timezone pin is unreliable on this host. The signal is Chrome's own
-    // update endpoint, not `npm run release:store`, which only submits for review.
+    // window and its own job_state version marker, so it sends once per version
+    // transition and never at night — with a deliberate at-least-once bias, not
+    // exactly-once: a rollback followed by a republish legitimately re-announces, and a
+    // process death mid-loop can re-send to recipients already delivered in that run.
+    // Same UTC-tick pattern as daily-status — node-cron's timezone pin is unreliable on
+    // this host. The signal is Chrome's own update endpoint, not `npm run
+    // release:store`, which only submits for review.
     cron.schedule('40 * * * *', () => {
       announceRelease({
         db,

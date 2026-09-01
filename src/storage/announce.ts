@@ -35,6 +35,12 @@ export function getAnnounceOptOut(db: DB, telegramId: number): boolean {
   return row?.announce_opt_out === 1;
 }
 
+/**
+ * Precondition: a `user_profiles` row for `telegramId` must already exist (every
+ * caller runs `ensureProfile` first). This is a bare `UPDATE` — zero rows changed is
+ * indistinguishable from success, so calling it before the profile exists silently
+ * no-ops.
+ */
 export function setAnnounceOptOut(db: DB, telegramId: number, optOut: boolean): void {
   db.prepare('UPDATE user_profiles SET announce_opt_out = ? WHERE telegram_id = ?')
     .run(optOut ? 1 : 0, telegramId);

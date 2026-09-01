@@ -23,7 +23,12 @@ import path from 'node:path';
 const src = (): string => readFileSync(path.join(__dirname, '../index.ts'), 'utf8');
 
 test('src/index.ts schedules announceRelease hourly at minute 40, not on a timezone-pinned schedule', () => {
-  expect(src()).toMatch(/cron\.schedule\('40 \* \* \* \*',\s*\(\)\s*=>\s*\{[\s\S]{0,400}?announceRelease\(\{/);
+  // Optional whitespace between `schedule(` and the literal tolerates a Prettier-style
+  // multi-line reformat of a semantically correct call; the rest of the anchor —
+  // literal immediately followed by `, () => {`, then a bounded gap to
+  // `announceRelease({` — is unchanged, so the joint-defeat gap this guard closes
+  // stays closed (see comment above).
+  expect(src()).toMatch(/cron\.schedule\(\s*'40 \* \* \* \*',\s*\(\)\s*=>\s*\{[\s\S]{0,400}?announceRelease\(\{/);
 });
 
 test('src/index.ts mounts the /announce command composer', () => {

@@ -298,4 +298,66 @@ describe('announceRelease', () => {
     await announceRelease(d);
     expect(alerts).toEqual([]);
   });
+
+  test('every delivery classified "other" holds the marker for a retry', async () => {
+    const db = freshDb();
+    withToken(db, 1); withToken(db, 2);
+    setJobState(db, ANNOUNCED_VERSION_KEY, '0.15.0');
+    const { deps: d } = deps(db, {
+      send: async () => { throw new Error('socket hang up'); },
+    });
+    const r = await announceRelease(d);
+    expect(r).toMatchObject({
+      outcome: 'announced',
+      sent: 0,
+      failed: { blocked: 0, rate_limited: 0, other: 2 },
+    });
+    // Held, not advanced: a future tick still has a shot at delivering 0.16.0.
+    expect(getJobState(db, ANNOUNCED_VERSION_KEY)).toBe('0.15.0');
+  });
+
+  test('every delivery classified "blocked" still advances the marker (permanent, not transient)', async () => {
+    const db = freshDb();
+    withToken(db, 1); withToken(db, 2);
+    setJobState(db, ANNOUNCED_VERSION_KEY, '0.15.0');
+    const { deps: d } = deps(db, {
+      send: async () => { throw { code: 403 }; },
+    });
+    const r = await announceRelease(d);
+    expect(r).toMatchObject({
+      outcome: 'announced',
+      sent: 0,
+      failed: { blocked: 2, rate_limited: 0, other: 0 },
+    });
+    // Not held: retrying forever against two permanently-blocked recipients buys nothing.
+    expect(getJobState(db, ANNOUNCED_VERSION_KEY)).toBe('0.16.0');
+  });
+
+  test('zero recipients (everyone opted out) still advances the marker', async () => {
+    const db = freshDb();
+    withToken(db, 1);
+    setAnnounceOptOut(db, 1, true);
+    setJobState(db, ANNOUNCED_VERSION_KEY, '0.15.0');
+    const { deps: d } = deps(db);
+    const r = await announceRelease(d);
+    expect(r).toMatchObject({ outcome: 'announced', sent: 0, failed: { blocked: 0, rate_limited: 0, other: 0 } });
+    expect(getJobState(db, ANNOUNCED_VERSION_KEY)).toBe('0.16.0');
+  });
+
+  test('the rate-limit retry sleep is capped at 60s even when retry_after asks for longer', async () => {
+    const db = freshDb();
+    withToken(db, 1);
+    setJobState(db, ANNOUNCED_VERSION_KEY, '0.15.0');
+    const slept: number[] = [];
+    const { deps: d } = deps(db, {
+      sleep: async (ms: number) => { slept.push(ms); },
+      send: async (id: number) => {
+        if (id === 1 && slept.length === 0) throw { code: 429, parameters: { retry_after: 900 } };
+      },
+    });
+    await announceRelease(d);
+    // 900s reported by Telegram must not appear verbatim in the sleep call — capped to 60s.
+    expect(slept).toContain(60000);
+    expect(slept).not.toContain(900000);
+  });
 });

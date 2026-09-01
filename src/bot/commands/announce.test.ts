@@ -55,8 +55,19 @@ describe('handleAnnounce', () => {
   test('"on" clears the opt-out and confirms', () => {
     const db = freshDb();
     ensureProfile(db, 1);
+    rotateToken(db, 1, hashToken('raw'), '2026-09-01T00:00:00Z');
     setAnnounceOptOut(db, 1, true);
     expect(run(db, 1, '/announce on')).toEqual([t('announce.turned_on')]);
+    expect(getAnnounceOptOut(db, 1)).toBe(false);
+  });
+
+  test('"on" without a token adds the honest caveat rather than promising delivery', () => {
+    const db = freshDb();
+    ensureProfile(db, 1);
+    setAnnounceOptOut(db, 1, true);
+    expect(run(db, 1, '/announce on')).toEqual([
+      `${t('announce.turned_on')}\n${t('announce.no_token')}`,
+    ]);
     expect(getAnnounceOptOut(db, 1)).toBe(false);
   });
 
