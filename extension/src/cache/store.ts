@@ -30,8 +30,19 @@ export async function clearKeys(keys: string[]): Promise<void> {
   await chrome.storage.local.remove(keys.map((k) => PREFIX + k));
 }
 
-export async function clearAll(): Promise<void> {
+async function ourKeys(): Promise<string[]> {
   const all = await chrome.storage.local.get();
-  const ours = Object.keys(all).filter((k) => k.startsWith(PREFIX));
+  return Object.keys(all).filter((k) => k.startsWith(PREFIX));
+}
+
+/** How many cached match results are stored, without touching them (#517). */
+export async function countAll(): Promise<number> {
+  return (await ourKeys()).length;
+}
+
+/** Removes every cached match result and reports how many went (#517). */
+export async function clearAll(): Promise<number> {
+  const ours = await ourKeys();
   if (ours.length > 0) await chrome.storage.local.remove(ours);
+  return ours.length;
 }
