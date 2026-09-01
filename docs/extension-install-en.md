@@ -226,16 +226,22 @@ housekeeping one at the bottom:
   (`Syncing… 1200 / 8200`): that means "working", not "broken".
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
-  items, or you just ran `/import`). On a page the extension doesn't support,
-  the button is **greyed out and inactive**, with the reason written below it.
+  items, or you just ran `/import`). The result lands in the caption right
+  below the button: `Nothing to refresh — badges are current.` when nothing was
+  cached for the page, or `Refreshed — 3 entries will be rechecked.` otherwise.
+  On a page the extension doesn't support, the button is **greyed out and
+  inactive**, with that same caption explaining why — and clearing the cache no
+  longer wipes that explanation away.
 - **"Supported shops · 10"** — click this row to expand or collapse the shop
   directory. Shops are grouped by the country they ship from. Select any shop
   to open it in a separate focused browser window; if the browser cannot create
   one, the extension opens a new tab instead. Beershop appears once and chooses
   the storefront that best matches your browser languages.
 - **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
-  clears the **entire** local overlay cache (all sites). Deliberately the least
-  prominent: you rarely need it.
+  clears the **entire** local overlay cache (all sites). It asks first: the initial
+  click shows how much would go (`Clear cache for 412 entries?`), the second clears
+  and reports (`Cleared 412 entries.`) right below the button. Changed your mind?
+  Close the popup — nothing happens.
 
 <figure class="popup-screenshot">
   <img src="../assets/popup-supported-shops-expanded.png"
