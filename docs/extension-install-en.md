@@ -123,6 +123,10 @@ The extension will appear in the list. Pin its icon to the toolbar
 Updates arrive **automatically** — Chrome pulls new versions from the store
 on its own. Nothing to download, unpack, or reload.
 
+If you have an extension token, the bot sends you a Telegram message once a
+new version actually reaches users (not when it's merely submitted for
+review). Don't want those — send the bot `/announce off`.
+
 > **Switching from an older unpacked build?** Paste the token in Options
 > (Part 3) and **remove the old copy** in `chrome://extensions`. It's the
 > same token — no need to re-issue it: it isn't tied to an extension ID and

@@ -1588,3 +1588,5 @@ sqlite3 'file:/var/lib/warsaw-beer-bot/bot.db?mode=ro' \
 ```
 
 Expect `0.15.0` after the first in-window tick, and the first real announcement when 0.16.0 goes live in the store.
+
+**Ordering constraint.** The seed swallows whatever version is live at the moment it fires, not the moment the code was deployed — deploy outside the Warsaw `[09:00, 22:00)` window and a new store version can land in the gap, and the first in-window tick seeds *that* version instead, silently swallowing it. So: deploy, wait for the first in-window tick, confirm with the `sqlite3` check above that the marker reads `0.15.0`, and only *then* submit the next release to the store.
