@@ -136,7 +136,7 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
 
 let syncWriteChain: Promise<void> = Promise.resolve();
 function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
-  syncWriteChain = syncWriteChain.then(() => writeSyncStatus(s));
+  syncWriteChain = syncWriteChain.catch(() => undefined).then(() => writeSyncStatus(s));
   return syncWriteChain;
 }
 
@@ -173,14 +173,20 @@ export function feedUrl(username: string, maxId: string | null): string {
 
 export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
   if (syncStartPromise) {
-    await syncStartPromise;
-    return { type: 'checkin-sync:started', alreadyRunning: true };
+    try {
+      await syncStartPromise;
+      return { type: 'checkin-sync:started', alreadyRunning: true };
+    } catch {
+      return { type: 'checkin-sync:started', alreadyRunning: false };
+    }
   }
   if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
   const startPromise = beginCheckinSync();
   syncStartPromise = startPromise;
   try {
     return await startPromise;
+  } catch {
+    return { type: 'checkin-sync:started', alreadyRunning: false };
   } finally {
     if (syncStartPromise === startPromise) syncStartPromise = null;
   }
@@ -188,7 +194,6 @@ export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
 
 async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const cur = await readSyncStatus();
-  if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
@@ -208,6 +213,7 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   }
 
   void (async () => {
+    let terminalStatus: StoredSyncStatus | null = null;
     try {
       const onProgress = (p: SyncProgress) => {
         void enqueueSyncStatus({
@@ -243,16 +249,21 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
         pageCap: SYNC_PAGE_CAP,
         signal: controller.signal,
       });
-      await enqueueSyncStatus({
+      terminalStatus = {
         running: false,
         serverCount: outcome.serverCount,
         profileTotal: outcome.profileTotal,
         mergedThisRun: outcome.mergedThisRun,
         outcome: outcome.status,
         complete: outcome.complete,
-      });
+      };
+      await enqueueSyncStatus(terminalStatus);
     } catch {
-      await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      if (terminalStatus) {
+        await enqueueSyncStatus(terminalStatus).catch(() => undefined);
+      } else {
+        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      }
     } finally {
       syncRunning = false;
       if (syncAbortController === controller) syncAbortController = null;
@@ -275,7 +286,13 @@ export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:sto
 }
 
 export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
-  return { type: 'checkin-sync:status:ok', ...(await readSyncStatus()) };
+  const status = await readSyncStatus();
+  if (status.running && !syncStartPromise && !syncRunning && !syncAbortController) {
+    const recovered = { ...status, running: false, outcome: 'error' as const };
+    await enqueueSyncStatus(recovered).catch(() => undefined);
+    return { type: 'checkin-sync:status:ok', ...recovered };
+  }
+  return { type: 'checkin-sync:status:ok', ...status };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
