@@ -54,6 +54,16 @@ describe('parsePublishedVersion', () => {
     const xml = '<gupdate><app><updatecheck version="1.2.3" status="ok"/></app></gupdate>';
     expect(parsePublishedVersion(xml)).toBe('1.2.3');
   });
+
+  test('a hyphen-prefixed impostor attribute (x-status) is not mistaken for status → null', () => {
+    const xml = '<gupdate><app><updatecheck x-status="ok" version="9.9.9"/></app></gupdate>';
+    expect(parsePublishedVersion(xml)).toBeNull();
+  });
+
+  test('a hyphen-prefixed impostor attribute (min-version) is not mistaken for version → null', () => {
+    const xml = '<gupdate><app><updatecheck status="ok" min-version="9.9.9"/></app></gupdate>';
+    expect(parsePublishedVersion(xml)).toBeNull();
+  });
 });
 
 describe('compareVersions', () => {
