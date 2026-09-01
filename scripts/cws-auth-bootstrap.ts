@@ -11,6 +11,7 @@ import {
 } from 'node:fs';
 import { resolve } from 'node:path';
 import { getAccessToken, getItem } from './cws-client';
+import { CWS_ITEM_ID } from '../src/sources/cws-version';
 
 // One-time helper for #266: turns a Desktop-app OAuth client into a long-lived refresh
 // token for the Chrome Web Store API, and can re-verify existing credentials
@@ -179,7 +180,7 @@ async function verify(): Promise<void> {
     clientSecret: requireEnv('CWS_CLIENT_SECRET'),
     refreshToken: requireEnv('CWS_REFRESH_TOKEN'),
   });
-  const itemId = process.env.CWS_ITEM_ID ?? 'fdelmnhijeiojadcaihfdpecfcldbndg';
+  const itemId = process.env.CWS_ITEM_ID ?? CWS_ITEM_ID;
   const item = await getItem(itemId, token);
   console.log(
     `OK — item ${item.id}: draft version ${item.crxVersion ?? '(none)'}, uploadState ${item.uploadState ?? '(none)'}`,
