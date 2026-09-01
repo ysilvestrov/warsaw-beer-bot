@@ -3,6 +3,7 @@ import { clearAll, countAll } from '../cache/store';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';
+import { applyTokenState, tokenStateView } from './token-state';
 
 export interface SyncStatusView {
   running: boolean;
@@ -83,11 +84,6 @@ export function authNoteText(hasToken: boolean): string | null {
     : "Not connected — showing global ratings only (⭐). Add a token to see which beers you've had ✅ and your own rating.";
 }
 
-/** The setup-guide link is shown in the same no-token state as the auth note. */
-export function guideLinkVisible(hasToken: boolean): boolean {
-  return !hasToken;
-}
-
 /** Pluralizes a count of beers (parsed cards) — the refresh result's noun, distinct from clear-cache.ts's cache-entry `entries()`. */
 export function beers(n: number): string {
   return n === 1 ? '1 beer' : `${n} beers`;
@@ -151,23 +147,26 @@ async function initPopup(): Promise<void> {
   }
 
   const authNote = el<HTMLElement>('authNote');
+  const authBlock = el<HTMLElement>('authBlock');
   const getTokenBtn = el<HTMLButtonElement>('getToken');
   const guideLink = el<HTMLAnchorElement>('guideLink');
+  const syncBtn = el<HTMLButtonElement>('syncCheckins');
+  const syncStatus = el<HTMLElement>('syncStatus');
+  const card = document.querySelector<HTMLElement>('.card');
+  const header = document.querySelector<HTMLElement>('header.head');
+  const foot = document.querySelector<HTMLElement>('footer.foot');
+
   const { token } = await getSettings();
-  const note = authNoteText(Boolean(token));
-  if (authNote && getTokenBtn && guideLink) {
-    if (note) {
-      authNote.textContent = note;
-      authNote.style.display = '';
-      getTokenBtn.style.display = '';
-      getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
-      guideLink.href = SETUP_GUIDE_URL;
-      guideLink.style.display = guideLinkVisible(Boolean(token)) ? '' : 'none';
-    } else {
-      authNote.style.display = 'none';
-      getTokenBtn.style.display = 'none';
-      guideLink.style.display = 'none';
-    }
+  const hasToken = Boolean(token);
+
+  if (authNote && authBlock && getTokenBtn && guideLink && syncBtn && syncStatus && card && header && foot) {
+    authNote.textContent = authNoteText(hasToken) ?? '';
+    guideLink.href = SETUP_GUIDE_URL;
+    getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
+    applyTokenState(
+      { card, header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
+      tokenStateView(hasToken),
+    );
   }
 
   refreshBtn.addEventListener('click', () => {
@@ -181,9 +180,7 @@ async function initPopup(): Promise<void> {
   const clearStatus = el<HTMLElement>('clearStatus');
   if (clearStatus) wireClearButton(clearBtn, clearStatus, { count: countAll, clear: clearAll });
 
-  const syncBtn = el<HTMLButtonElement>('syncCheckins');
-  const syncStatus = el<HTMLElement>('syncStatus');
-  if (syncBtn && syncStatus) {
+  if (hasToken && syncBtn && syncStatus) {
     const syncLabel = syncBtn.querySelector('span');
     let latestSyncStatus: SyncStatusView | null = null;
     const render = (s: SyncStatusView) => {
