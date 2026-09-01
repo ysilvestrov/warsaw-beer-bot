@@ -89,9 +89,9 @@ describe('fetchPublishedVersion', () => {
     expect(seen[0]).toContain(encodeURIComponent(`id=${CWS_ITEM_ID}&uc`));
   });
 
-  test('a non-2xx response is null, not a throw', async () => {
+  test('a non-2xx is null even when the body would parse (the status guard, not the parser)', async () => {
     const fetchImpl = (async () =>
-      ({ ok: false, status: 503, text: async () => '' } as unknown as Response)) as unknown as typeof fetch;
+      ({ ok: false, status: 503, text: async () => REAL_XML } as unknown as Response)) as unknown as typeof fetch;
     expect(await fetchPublishedVersion({ fetchImpl })).toBeNull();
   });
 
