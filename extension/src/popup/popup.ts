@@ -2,7 +2,7 @@ import { pickAdapter } from '../sites/registry';
 import { clearAll, countAll } from '../cache/store';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
-import { entries, wireClearButton } from './clear-cache';
+import { wireClearButton } from './clear-cache';
 
 export interface SyncStatusView {
   running: boolean;
@@ -88,11 +88,20 @@ export function guideLinkVisible(hasToken: boolean): boolean {
   return !hasToken;
 }
 
-/** #524: "Refreshed (0 cleared)." is true and reads as failure. */
+/** Pluralizes a count of beers (parsed cards) — the refresh result's noun, distinct from clear-cache.ts's cache-entry `entries()`. */
+export function beers(n: number): string {
+  return n === 1 ? '1 beer' : `${n} beers`;
+}
+
+// #524: "Refreshed (0 cleared)." is true and reads as failure. `cleared` is the
+// number of cache keys `refreshCards` pushed — one per parsed card on the page
+// (extension/src/content/refresh.ts) — so 0 means the adapter found no beer cards
+// on this page, NOT that the cache was already warm; a page full of already-cached
+// beers reports the card count, never zero.
 export function refreshResultText(cleared: number): string {
   return cleared === 0
-    ? 'Nothing to refresh — badges are current.'
-    : `Refreshed — ${entries(cleared)} will be rechecked.`;
+    ? 'Nothing to refresh — no beers found on this page.'
+    : `Refreshed — ${beers(cleared)} will be rechecked.`;
 }
 
 /**
