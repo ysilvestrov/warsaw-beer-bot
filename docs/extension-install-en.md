@@ -250,10 +250,17 @@ housekeeping one at the bottom:
   <figcaption>The expanded directory is grouped by shipping origin; scroll the list to see every shop.</figcaption>
 </figure>
 
-If **no token** is set yet, the popup also shows — alongside the usual
-buttons above — a "Not connected" note next to a **"Get a token"** button and
-a **"Read the setup guide →"** link. These extra elements disappear once
-you've added a token (Part 3).
+Until a token is saved, the popup puts a "Not connected" block with a
+**"Get a token"** button directly under the header — it's the first stop for
+`Tab`. The **"Sync my check-ins"** button is greyed out and inactive in this
+state, captioned `Add a token to sync your check-ins.`: without a token,
+syncing couldn't succeed anyway, so the extension doesn't ask for extra
+access to untappd.com only to show a connection error.
+
+Once you save a token (Part 3), that block disappears and "Sync my
+check-ins" becomes the main button again. The **"Read the setup guide →"**
+link doesn't go anywhere — it just moves down to the bottom of the popup,
+above "Clear all cache".
 
 The popup follows your **browser theme**: in dark mode it's dark too.
 
