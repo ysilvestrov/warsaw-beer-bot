@@ -10,6 +10,7 @@
 - Fixed unmatched beers losing their white-circle badges when returning to a previously visited shop page; unresolved cache entries are now rechecked so the page can show the registered ⚪ orphan or its newly available Untappd rating.
 - Fixed middle-clicking a rating badge on Beershop doing nothing after the catalog navigation was suppressed; middle-click now opens Untappd in a new tab.
 - Fixed rating-badge clicks on Beershop opening both Untappd and the shop's product page; the catalog now stays in place while Untappd opens in a new tab.
+- Before a token is saved, the popup now leads with getting one: «Get a token» sits directly under the title as the main button and is the keyboard's first stop, while «Sync my check-ins» is greyed out and explains that it needs a token — previously it was the big amber button, and pressing it asked for access to untappd.com only to fail with a connection error. The setup-guide link also stops vanishing once a token exists: it moves to the bottom of the popup and stays available for exactly the people who might hit a sync problem.
 
 ## [0.15.0] - 2026-08-30
 
