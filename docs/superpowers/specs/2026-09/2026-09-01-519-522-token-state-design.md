@@ -116,6 +116,7 @@ export interface TokenStateView {
 
 export interface TokenStateNodes {
   card: HTMLElement;
+  header: HTMLElement;   // <header class="head">; the auth block is inserted after it
   authBlock: HTMLElement;
   syncBtn: HTMLButtonElement;
   syncStatus: HTMLElement;
