@@ -25,13 +25,19 @@ export function updateCheckUrl(itemId: string): string {
  * `<updatecheck>` at all, which is what keeps "could not read" distinguishable from
  * "unchanged". Attributes are read individually rather than in one ordered pattern, so
  * a future reordering by Google cannot silently turn a real version into null.
+ *
+ * Both attribute regexes anchor the name on `(?:^|\s)`, not `\b`: `\b` only checks a
+ * character-class transition, so it is satisfied just as well by the boundary inside
+ * `x-status=` or `min-version=` as by a real whitespace-delimited attribute — those
+ * hyphenated impostors would otherwise be read as the genuine `status`/`version` and
+ * let the parser invent a version that was never actually reported.
  */
 export function parsePublishedVersion(xml: string): string | null {
   const tag = /<updatecheck\b([^>]*)>/.exec(xml);
   if (!tag) return null;
   const attrs = tag[1];
-  if (/\bstatus="([^"]*)"/.exec(attrs)?.[1] !== 'ok') return null;
-  const version = /\bversion="([^"]*)"/.exec(attrs)?.[1];
+  if (/(?:^|\s)status="([^"]*)"/.exec(attrs)?.[1] !== 'ok') return null;
+  const version = /(?:^|\s)version="([^"]*)"/.exec(attrs)?.[1];
   // Dotted numerics only — anything else is a shape we do not understand, and guessing
   // would feed compareVersions a NaN.
   return version && /^\d+(\.\d+)*$/.test(version) ? version : null;
