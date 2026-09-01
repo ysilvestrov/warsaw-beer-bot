@@ -409,6 +409,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN unlocked_at TEXT;
     `,
   },
+  {
+    version: 26,
+    // #379: opt-out for extension release announcements. Default 0 — existing token
+    // holders receive announcements, and the message itself tells them how to stop.
+    // Plain ADD COLUMN like `language` (v3) and `city` (v14) before it.
+    sql: `
+      ALTER TABLE user_profiles ADD COLUMN announce_opt_out INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

@@ -44,15 +44,18 @@ export function allProfiles(db: DB): ProfileRow[] {
   return db.prepare('SELECT * FROM user_profiles').all() as ProfileRow[];
 }
 
-const KNOWN_LOCALES = new Set<Locale>(['uk', 'pl', 'en']);
+const KNOWN_LOCALES = new Set<string>(['uk', 'pl', 'en']);
+
+/** A stored language string narrowed to a Locale; null for unset or unrecognized. */
+export function toLocale(v: string | null | undefined): Locale | null {
+  return v != null && KNOWN_LOCALES.has(v) ? (v as Locale) : null;
+}
 
 export function getUserLanguage(db: DB, telegramId: number): Locale | null {
   const row = db
     .prepare('SELECT language FROM user_profiles WHERE telegram_id = ?')
     .get(telegramId) as { language: string | null } | undefined;
-  const v = row?.language;
-  if (v == null) return null;
-  return (KNOWN_LOCALES as Set<string>).has(v) ? (v as Locale) : null;
+  return toLocale(row?.language);
 }
 
 export function setUserLanguage(db: DB, telegramId: number, lang: Locale): void {
