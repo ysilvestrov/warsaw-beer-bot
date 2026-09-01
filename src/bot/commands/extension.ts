@@ -6,13 +6,15 @@ import type { DB } from '../../storage/db';
 import { ensureProfile } from '../../storage/user_profiles';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
 import { escapeHtml } from './newbeers-format';
+import { CWS_ITEM_ID } from '../../sources/cws-version';
 
 // Public hostname served via the Cloudflare tunnel → 127.0.0.1:API_PORT.
 const API_URL = 'https://beer-api.ysilvestrov-ai.uk/match';
 
-// Chrome Web Store listing (#267). The store build's ID is assigned by CWS, not by our key.
-export const STORE_URL =
-  'https://chromewebstore.google.com/detail/fdelmnhijeiojadcaihfdpecfcldbndg';
+// Chrome Web Store listing (#267). The store build's ID is assigned by CWS, not by our
+// key; it lives in src/sources/cws-version.ts so the listing link, the release script
+// and the version poller can never drift apart (#379).
+export const STORE_URL = `https://chromewebstore.google.com/detail/${CWS_ITEM_ID}`;
 
 // Mints a fresh raw token, stores only its hash (1:1 rotation), returns the raw.
 export function generateAndStoreToken(db: DB, telegramId: number, at: string): string {

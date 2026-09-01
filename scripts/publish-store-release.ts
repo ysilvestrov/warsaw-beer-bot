@@ -9,13 +9,16 @@ import {
   type CwsCreds,
   type CwsItem,
 } from './cws-client';
+import { CWS_ITEM_ID } from '../src/sources/cws-version';
 
 // Uploads the store build to the Chrome Web Store and submits it for review (#266).
 // Run via `npm run release:store` from the repo root, which builds the store package
 // first. This is the only release channel — the off-store bot channel was retired in
 // #267.
 
-export const DEFAULT_ITEM_ID = 'fdelmnhijeiojadcaihfdpecfcldbndg';
+// Re-exported for the existing callers and tests; the id itself lives in src/ so the
+// bot's listing link and the #379 version poller share exactly one copy.
+export const DEFAULT_ITEM_ID = CWS_ITEM_ID;
 
 export interface StoreEnv extends CwsCreds {
   itemId: string;
