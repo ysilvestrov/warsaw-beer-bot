@@ -28,6 +28,7 @@ export const en: Messages = {
   'cmd.help': 'this help',
   'cmd.start': 'start',
   'cmd.extension': 'browser-extension access token',
+  'cmd.announce': 'extension release announcements',
   'cmd.status': 'your status & settings',
 
   // link
@@ -126,4 +127,16 @@ export const en: Messages = {
     'Install the extension: {url}\n' +
     'If you see "Item not available", sign in to your Google account and reload ' +
     '(the extension is flagged 18+ because it is about beer).',
+
+  // announce (#379)
+  'announce.released':
+    '🍺 The extension has been updated to version {version} — Chrome will pick it up on its own shortly.',
+  'announce.changelog': "What's new: {url}",
+  'announce.opt_out_hint': "Don't want these — send /announce off.",
+  'announce.status_on': 'Release announcements: on. Turn off with /announce off',
+  'announce.status_off': 'Release announcements: off. Turn on with /announce on',
+  'announce.turned_on': "Done — I'll tell you about new extension versions.",
+  'announce.turned_off': "Done — I won't bother you again. Turn back on with /announce on",
+  'announce.no_token':
+    'Announcements only go to extension token holders, though — get one with /extension.',
 };
