@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applyTokenState, tokenStateView, type TokenStateNodes } from './token-state';
 
-function fixture(): TokenStateNodes & { root: HTMLElement } {
+function fixture(): TokenStateNodes & { card: HTMLElement } {
   document.body.innerHTML = `
     <main class="card">
       <header class="head"><h1>Warsaw Beer Overlay</h1></header>
@@ -22,7 +22,9 @@ function fixture(): TokenStateNodes & { root: HTMLElement } {
     </main>`;
   const q = <T extends HTMLElement>(sel: string) => document.querySelector(sel) as T;
   return {
-    root: q('.card'),
+    // Not part of TokenStateNodes (the applier never reads it, #519/#522 review
+    // finding 3) — kept here only for the test below that asserts the auth
+    // block's position relative to the card itself.
     card: q('.card'),
     header: q('header.head'),
     authBlock: q('#authBlock'),
@@ -72,6 +74,9 @@ describe('applyTokenState — no token', () => {
     applyTokenState(n, tokenStateView(false));
     expect(n.authBlock.contains(n.guideLink)).toBe(true);
     expect(n.guideLink.style.display).toBe('');
+    // Order, not just containment: `Get a token` is the primary CTA and must
+    // stay the first focusable thing in the block — the guide link trails it.
+    expect(n.getTokenBtn.nextElementSibling).toBe(n.guideLink);
   });
 
   it('disables sync, demotes it, and says what is missing', () => {
@@ -98,6 +103,9 @@ describe('applyTokenState — token present', () => {
     expect(n.authBlock.style.display).toBe('none');
     expect(n.foot.contains(n.guideLink)).toBe(true);
     expect(n.guideLink.style.display).toBe('');
+    // Order, not just containment: the guide link must lead the footer so
+    // `Clear all cache` — the destructive control — stays last in tab order.
+    expect(n.foot.firstElementChild).toBe(n.guideLink);
   });
 
   it('leaves sync primary, enabled and uncaptioned', () => {

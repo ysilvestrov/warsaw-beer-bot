@@ -152,19 +152,18 @@ async function initPopup(): Promise<void> {
   const guideLink = el<HTMLAnchorElement>('guideLink');
   const syncBtn = el<HTMLButtonElement>('syncCheckins');
   const syncStatus = el<HTMLElement>('syncStatus');
-  const card = document.querySelector<HTMLElement>('.card');
   const header = document.querySelector<HTMLElement>('header.head');
   const foot = document.querySelector<HTMLElement>('footer.foot');
 
   const { token } = await getSettings();
   const hasToken = Boolean(token);
 
-  if (authNote && authBlock && getTokenBtn && guideLink && syncBtn && syncStatus && card && header && foot) {
+  if (authNote && authBlock && getTokenBtn && guideLink && syncBtn && syncStatus && header && foot) {
     authNote.textContent = authNoteText(hasToken) ?? '';
     guideLink.href = SETUP_GUIDE_URL;
     getTokenBtn.addEventListener('click', () => chrome.runtime.openOptionsPage());
     applyTokenState(
-      { card, header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
+      { header, authBlock, syncBtn, syncStatus, getTokenBtn, guideLink, foot },
       tokenStateView(hasToken),
     );
   }
