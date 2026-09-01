@@ -2211,7 +2211,14 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
   видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
   повідомлення `refresh-page` контент-скрипту → `refreshCards` + `clearKeys` +
-  `runOverlay`); «Clear all cache» — чистить усі `mc2:`-ключі (`clearAll`). Ключі
+  `runOverlay`); «Clear all cache» — двокроковий: перший клік рахує записи й озброює кнопку
+  (`Clear cache for N entries?`, danger-тон), другий чистить усі `mc2:`-ключі
+  (`clearAll`) і звітує `Cleared N entries.`; порожній кеш не озброює
+  (`Nothing to clear.`). Таймера немає — озброєний стан живе, доки popup відкритий.
+  Кожен контрол має **власний** підпис (`#syncStatus`, `#refreshStatus`,
+  `#clearStatus`); `#refreshStatus` несе або причину блокування, або результат
+  останнього оновлення. `aria-live="polite"` вішається після ініціалізації, тож
+  відкриття popup'а не озвучує нічого, а `#authNote` не є live-регіоном. Ключі
   кешу site-незалежні (`normalizeKey(brewery,name)`), тож «per-site» реалізовано як
   «оновити відкриту сторінку». Поки токен **не заданий**, popup, **окрім** цього
   меню (кнопки лишаються), додатково показує «Not connected», кнопку «Get a token»
