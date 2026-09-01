@@ -38,4 +38,10 @@ describe('buildExtensionMessage', () => {
     expect(html).toContain(`Install: ${STORE_URL}`);
     expect(STORE_URL).toContain('fdelmnhijeiojadcaihfdpecfcldbndg');
   });
+
+  test('STORE_URL is built from the single CWS item id (#379)', async () => {
+    const { CWS_ITEM_ID } = await import('../../sources/cws-version.js');
+    expect(STORE_URL).toContain(CWS_ITEM_ID);
+    expect(STORE_URL).toBe(`https://chromewebstore.google.com/detail/${CWS_ITEM_ID}`);
+  });
 });
