@@ -29,7 +29,12 @@ export function handleAnnounce(args: AnnounceArgs): void {
 
   if (arg === 'off' || arg === 'on') {
     setAnnounceOptOut(db, telegramId, arg === 'off');
-    reply(t(arg === 'off' ? 'announce.turned_off' : 'announce.turned_on'));
+    const lines = [t(arg === 'off' ? 'announce.turned_off' : 'announce.turned_on')];
+    // Only 'on' makes a delivery promise ("I'll tell you about new versions"), and
+    // without a token the bot cannot keep it — a store install is anonymous and this
+    // user does not exist for delivery. 'off' promises nothing, so it stays as-is.
+    if (arg === 'on' && !hasApiToken(db, telegramId)) lines.push(t('announce.no_token'));
+    reply(lines.join('\n'));
     return;
   }
 

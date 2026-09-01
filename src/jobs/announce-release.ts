@@ -158,7 +158,11 @@ export async function announceRelease(deps: AnnounceDeps): Promise<AnnounceResul
       } catch (e) {
         const { kind, retryAfterSec } = classifySendFailure(e);
         if (attempt === 0 && kind === 'rate_limited' && retryAfterSec !== null) {
-          await sleep(retryAfterSec * 1000);
+          // The reported/classified retryAfterSec is unchanged — only the sleep is
+          // capped. An uncapped sleep on a large retry_after could park the job past
+          // the next hourly tick, letting two runs overlap and both read the same old
+          // marker.
+          await sleep(Math.min(retryAfterSec, 60) * 1000);
           continue;
         }
         log.warn({ err: e, telegramId: recipient.telegramId, kind }, 'announce-release: delivery failed');
@@ -172,9 +176,25 @@ export async function announceRelease(deps: AnnounceDeps): Promise<AnnounceResul
     await sleep(gapMs); // ~20 msg/s, the throttle #283 left as an obligation
   }
 
-  // Only now. If the process dies mid-loop the marker still holds the old version and
-  // the next tick retries; writing first would lose the announcement permanently.
-  setJobState(db, ANNOUNCED_VERSION_KEY, seen);
+  // Only now, and only if something could still be salvaged by trying again. If the
+  // process dies mid-loop the marker still holds the old version and the next tick
+  // retries; writing first would lose the announcement permanently. The same logic
+  // extends to a whole-run failure: if nobody was delivered AND at least one failure
+  // was retryable in principle (not a permanent 403), advancing the marker here would
+  // bury the announcement forever, recoverable only by hand-editing job_state on
+  // production. A run where every failure is 'blocked' still advances — that is a
+  // permanent condition, not a transient one, and holding the marker would retry
+  // forever. A run with zero recipients also still advances — sent === 0 with every
+  // failure count at 0 is not a failed run at all.
+  const retryableFailures = failed.other + failed.rate_limited;
+  if (sent === 0 && retryableFailures > 0) {
+    log.warn(
+      { version: seen, failed },
+      'announce-release: marker held, nothing delivered and at least one failure was retryable',
+    );
+  } else {
+    setJobState(db, ANNOUNCED_VERSION_KEY, seen);
+  }
   const total = failed.blocked + failed.rate_limited + failed.other;
   log.info({ version: seen, sent, failed }, 'announce-release sent');
   deps.notifyAdmin?.(
