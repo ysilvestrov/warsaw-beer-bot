@@ -212,4 +212,24 @@ describe('popup markup', () => {
   it('pairs no description with the live caption (#518: describedby stays off)', () => {
     expect(html).not.toContain('aria-describedby');
   });
+
+  it('wraps the note and Get a token in one movable block (#519)', () => {
+    expect(html).toContain('id="authBlock"');
+    const block = html.match(/<section id="authBlock"[\s\S]*?<\/section>/)?.[0] ?? '';
+    expect(block).toContain('id="authNote"');
+    expect(block).toContain('id="getToken"');
+  });
+
+  it('parks the guide link in the footer ahead of the destructive action (#522)', () => {
+    const foot = html.match(/<footer class="foot">[\s\S]*?<\/footer>/)?.[0] ?? '';
+    expect(foot).toContain('id="guideLink"');
+    expect(foot.indexOf('id="guideLink"')).toBeLessThan(foot.indexOf('id="clearAll"'));
+  });
+
+  it('ships the auth block and the guide link hidden, so init places them before they are seen', () => {
+    const block = html.match(/<section id="authBlock"[^>]*>/)?.[0] ?? '';
+    expect(block).toContain('display:none');
+    const link = html.match(/<a id="guideLink"[^>]*>/)?.[0] ?? '';
+    expect(link).toContain('display:none');
+  });
 });

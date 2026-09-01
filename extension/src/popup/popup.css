@@ -123,10 +123,16 @@ h1 {
   margin: 0;
 }
 
-.note {
-  margin: 0 0 8px;
+/* #519: the block moves as a unit to the top of the card, so the rule that
+   fences it off belongs to the wrapper, not to the note's first line. */
+.auth {
   padding-top: 12px;
   border-top: 1px solid var(--hairline);
+  margin-bottom: 8px;
+}
+
+.note {
+  margin: 0 0 8px;
   color: var(--fg-muted);
   font-size: 12px;
 }
