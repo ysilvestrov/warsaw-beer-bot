@@ -35,6 +35,7 @@ export interface Messages {
   'cmd.start': string;
   'cmd.extension': string;
   'cmd.status': string;
+  'cmd.announce': string;
 
   // link
   'link.usage': string;
@@ -123,6 +124,16 @@ export interface Messages {
   'status.distinct_beers': string;    // {count}
   'status.last_checkin': string;      // {date}
   'status.no_checkins': string;
+
+  // announce (#379 — extension release announcements)
+  'announce.released': string;        // {version}
+  'announce.changelog': string;       // {url}
+  'announce.opt_out_hint': string;
+  'announce.status_on': string;
+  'announce.status_off': string;
+  'announce.turned_on': string;
+  'announce.turned_off': string;
+  'announce.no_token': string;
 }
 
 export type Translator = (
