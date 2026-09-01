@@ -106,6 +106,37 @@ describe('wireClearButton', () => {
     await vi.waitFor(() => expect(label.textContent).toBe('Clear cache for 3 entries?'));
   });
 
+  it('clears a stale caption when it arms, so the question stands alone', async () => {
+    const { button, status, label } = fixture();
+    let stored = 0;
+    wireClearButton(button, status, { count: async () => stored, clear: async () => stored });
+
+    button.click();
+    await vi.waitFor(() => expect(status.textContent).toBe('Nothing to clear.'));
+
+    stored = 3; // the open page cached three beers while the popup stayed open
+    button.click();
+    await vi.waitFor(() => expect(label.textContent).toBe('Clear cache for 3 entries?'));
+    expect(status.textContent).toBe('');
+  });
+
+  it('names the read, not the clear, when counting is what failed', async () => {
+    const { button, status, label } = fixture();
+    const clear = vi.fn(async () => 0);
+    wireClearButton(button, status, {
+      count: async () => {
+        throw new Error('storage unavailable');
+      },
+      clear,
+    });
+
+    button.click();
+    await vi.waitFor(() => expect(status.textContent).toBe('Could not read the cache — try again.'));
+    expect(label.textContent).toBe('Clear all cache');
+    expect(button.classList.contains('btn-danger')).toBe(false);
+    expect(clear).not.toHaveBeenCalled();
+  });
+
   it('ignores rapid double-click from armed state and calls clear once', async () => {
     const { button, status } = fixture();
     const clear = vi.fn(async () => 5);
