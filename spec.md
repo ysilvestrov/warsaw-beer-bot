@@ -2206,7 +2206,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   base URL редагований (дефолт `https://beer-api.ysilvestrov-ai.uk`, §5.9);
   options-сторінка має Test connection (`GET /health` + 1-beer `/match`) і завжди
   показує посилання «Read the setup guide →» на хостований install-гайд
-  (`docs/extension-install-en.md`/`-uk.md`).
+  (`docs/extension-install-en.md`/`-uk.md`). Popup і options імпортують спільний
+  `extension-ui.css`: light/dark токени, системний шрифт для form controls,
+  контрастний `:focus-visible` ring і button tiers; в options «Save» = primary,
+  «Test connection» = secondary.
 - **Popup керування кешем** (toolbar `action`, дозвіл `activeTab`):
   «Refresh this page» — для активної вкладки підтримуваного магазину скидає бейджі
   видимих карток (видаляє їхні `mc2:`-записи кешу + ре-рендер живцем через
