@@ -18,7 +18,6 @@ export interface TokenStateView {
 }
 
 export interface TokenStateNodes {
-  card: HTMLElement;
   header: HTMLElement;
   authBlock: HTMLElement;
   syncBtn: HTMLButtonElement;

@@ -131,6 +131,17 @@ h1 {
   margin-bottom: 8px;
 }
 
+/* #519/#522 review finding 4: when the block leads the card (no token), it
+   sits directly under .head, which already carries its own margin-bottom.
+   The fence rule is redundant there — it just adds dead space between the
+   <h1> and the primary CTA and softens the very promotion this state is
+   for — so drop it for that position only. Any other position keeps the
+   fence. */
+.head + .auth {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .note {
   margin: 0 0 8px;
   color: var(--fg-muted);
