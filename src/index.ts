@@ -225,6 +225,10 @@ async function main(): Promise<void> {
     ),
   );
 
+  // #379/#564: guards the announce-release cron below against overlapping runs — see
+  // the comment on that cron for why a run can outlast the hourly tick.
+  let announceInFlight = false;
+
   const cronJobs = [
     cron.schedule('0 */12 * * *', () => {
       refreshOntap({
@@ -313,6 +317,15 @@ async function main(): Promise<void> {
     // this host. The signal is Chrome's own update endpoint, not `npm run
     // release:store`, which only submits for review.
     cron.schedule('40 * * * *', () => {
+      // A run can outlast the hourly tick: Telegraf caps each API call at 500s, so four
+      // recipients timing out twice is ~70 minutes. Without this guard the next tick
+      // would start a second run, read the still-unadvanced marker, and announce the
+      // same version to the same people again.
+      if (announceInFlight) {
+        log.warn('announce-release: previous run still in flight, skipping this tick');
+        return;
+      }
+      announceInFlight = true;
       announceRelease({
         db,
         log,
@@ -320,7 +333,9 @@ async function main(): Promise<void> {
         send: (telegramId, html) =>
           bot.telegram.sendMessage(telegramId, html, { parse_mode: 'HTML' }).then(() => {}),
         notifyAdmin: adminAlert,
-      }).catch((e) => log.error({ err: e }, 'announce-release cron'));
+      })
+        .catch((e) => log.error({ err: e }, 'announce-release cron'))
+        .finally(() => { announceInFlight = false; });
     }),
   ];
 
