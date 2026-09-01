@@ -49,14 +49,16 @@ Reported counts are the counts actually removed, not the count shown when arming
 
 | situation | text |
 |---|---|
-| refresh cleared nothing | `Nothing to refresh — badges are current.` |
-| refresh cleared N | `Refreshed — N entries will be rechecked.` |
+| refresh cleared nothing | `Nothing to refresh — no beers found on this page.` |
+| refresh cleared N | `Refreshed — N beers will be rechecked.` |
 | refresh could not reach the page | unchanged |
 | refresh unavailable (disabled) | unchanged: `Open a supported shop page to refresh it.` |
 | clear, empty cache | `Nothing to clear.` |
 | clear, N removed | `Cleared N entries.` |
 
 `Refreshed (0 cleared).` is literally true and reads as failure; it is the message a user gets when everything is already correct.
+
+**Refuted 2026-09-01 (fix round 1, task 4 review):** the row above is wrong about what `cleared` counts. `refreshCards` (`extension/src/content/refresh.ts:9-16`) pushes one cache key per **parsed card** found on the page, and the content-script reply (`extension/src/content/main.ts:115`) returns `cleared: keys.length` — a count of cards, not of cache hits. So `cleared === 0` means the adapter found no beer cards on this page, never "the cache was already warm"; a page full of already-cached beers reports the card count, not zero. #524's framing above ("the message a user gets when everything is already correct") is refuted by the code it describes. The copy changed to `Nothing to refresh — no beers found on this page.` / `Refreshed — N beers will be rechecked.`, and the result noun changed from cache-entries (`entries()`) to beers (`beers()`, `popup/popup.ts`) to match what is actually being counted.
 
 ### Headings
 

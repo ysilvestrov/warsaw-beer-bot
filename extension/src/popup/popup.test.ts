@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText } from './popup';
+import { canRefresh, formatSyncStatus, authNoteText, guideLinkVisible, requestSyncStart, syncButtonLabel, armLiveRegions, refreshResultText, beers } from './popup';
 import { SETUP_GUIDE_URL } from '../shared/config';
 
 describe('canRefresh', () => {
@@ -138,13 +138,21 @@ describe('guideLinkVisible', () => {
   });
 });
 
+describe('beers', () => {
+  it('pluralizes a beer count', () => {
+    expect(beers(1)).toBe('1 beer');
+    expect(beers(3)).toBe('3 beers');
+    expect(beers(0)).toBe('0 beers');
+  });
+});
+
 describe('refreshResultText', () => {
-  it('reads as success when there was nothing to do', () => {
-    expect(refreshResultText(0)).toBe('Nothing to refresh — badges are current.');
+  it('reads zero as "no beer cards found on this page", not "cache already warm"', () => {
+    expect(refreshResultText(0)).toBe('Nothing to refresh — no beers found on this page.');
   });
   it('says what will happen next', () => {
-    expect(refreshResultText(3)).toBe('Refreshed — 3 entries will be rechecked.');
-    expect(refreshResultText(1)).toBe('Refreshed — 1 entry will be rechecked.');
+    expect(refreshResultText(3)).toBe('Refreshed — 3 beers will be rechecked.');
+    expect(refreshResultText(1)).toBe('Refreshed — 1 beer will be rechecked.');
   });
 });
 
