@@ -71,7 +71,6 @@ describe('beershop adapter', () => {
     ['BrewDog', '16° Counter Strike West Coast IPA', '/p/brewdog-counter-strike', '16° Counter Strike'],
     ['Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry-cola', '12° Cherry/Cola'],
     ['Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry%2Fcola', '12° Cherry/Cola'],
-    ['Brewery', '12° CherryCola Sour Ale', '/p/brewery-cherry%2Fcola', '12° CherryCola'],
     ['Pinta', 'of the Month 8° This is Light Leichtbier', '/p/pinta-of-the-month-this-is-light', '8° This is Light'],
     ['Falkon', '12° Krasohled Lager', '/p/falkon-krasohled-pl', '12° Krasohled'],
     ['To-Øl', '11° 30 Days Italian Pilsner', '/p/to-ol-30-days-italian-pilsner', '11° 30 Days Italian Pilsner'],

@@ -72,12 +72,13 @@ function productSlugTokens(header: Element | null): string[] {
   }
 }
 
-function hasTerminalTokenMatch(values: string[], sequence: string[]): boolean {
-  if (sequence.length === 0) return false;
-  let lastNameToken = values.length - 1;
-  while (lastNameToken >= 0 && PRODUCT_SLUG_SUFFIXES.has(values[lastNameToken])) lastNameToken -= 1;
-  const slugName = values.slice(0, lastNameToken + 1).join('');
-  return slugName.endsWith(sequence.join(''));
+function hasTerminalTokenSequence(values: string[], sequence: string[]): boolean {
+  if (sequence.length === 0 || sequence.length > values.length) return false;
+  return values.some((_, start) => {
+    const matches = sequence.every((token, offset) => values[start + offset] === token);
+    const suffix = values.slice(start + sequence.length);
+    return matches && suffix.every((token) => PRODUCT_SLUG_SUFFIXES.has(token));
+  });
 }
 
 function beerNameFromTitle(name: string, header: Element | null): string {
@@ -93,7 +94,7 @@ function beerNameFromTitle(name: string, header: Element | null): string {
   for (let matchedLength = comparableVisibleTokens.length - 1; matchedLength > 0; matchedLength -= 1) {
     const titlePrefix = comparableVisibleTokens.slice(0, matchedLength);
     if (comparableVisibleTokens[matchedLength]?.index === titlePrefix[titlePrefix.length - 1].index) continue;
-    if (!hasTerminalTokenMatch(slugTokens, titlePrefix.map(({ token }) => token))) continue;
+    if (!hasTerminalTokenSequence(slugTokens, titlePrefix.map(({ token }) => token))) continue;
 
     const lastMatchedToken = titlePrefix[titlePrefix.length - 1];
     const matchedName = visibleTokens.slice(0, lastMatchedToken.index + 1).join(' ');
