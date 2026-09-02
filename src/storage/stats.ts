@@ -56,6 +56,13 @@ export interface StatusMetrics {
   lockedRows: number;
   unlocked7d: number;
   verdictsOutlived7d: number;
+  // #558. `unrescuedRows` робить новий стан видимим, а не мовчазним. `unlockedUnadjudicated7d`
+  // — міра ДОТРИМАННЯ правила: рядок, який розімкнули без вердикту адюдикації і який досі
+  // сирота. Правило застосовують — цифра мала; тихо пропускають — росте. Обидві дешеві й
+  // не потребують знімка стану: порівнювати outcome+candidates_count до/після перезарядки
+  // було б неможливо без двох додаткових колонок, бо recordEnrichFailure їх перезаписує.
+  unrescuedRows: number;
+  unlockedUnadjudicated7d: number;
 }
 
 export function collectStatus(db: DB, now: Date): StatusMetrics {
@@ -158,6 +165,14 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     sealRetiredFalsified: count(
       `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.retired_at IS NOT NULL AND b.untappd_id IS NULL`,
+    ),
+    unrescuedRows: count(
+      'SELECT COUNT(*) AS c FROM enrich_failures WHERE unrescued_at IS NOT NULL',
+    ),
+    unlockedUnadjudicated7d: count(
+      `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+        WHERE ef.unlocked_at >= ? AND ef.unrescued_at IS NULL AND b.untappd_id IS NULL`,
+      [cutoff7d],
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),

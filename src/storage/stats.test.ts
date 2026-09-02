@@ -7,7 +7,9 @@ import { collectStatus } from './stats';
 import { setJobState } from './job_state';
 import { recordMatchUsage } from './api_usage';
 import { upsertMatch } from './match_links';
-import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure } from './enrich_failures';
+import {
+  recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued, markUnlocked,
+} from './enrich_failures';
 import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
 
 function fresh() {
@@ -76,6 +78,8 @@ test('collectStatus computes all metrics', () => {
     sealNotABeer: 0,
     sealNotABeer7d: 0,
     sealRetiredFalsified: 0,
+    unrescuedRows: 0,
+    unlockedUnadjudicated7d: 0,
   });
 });
 
@@ -318,4 +322,42 @@ it('lockedRows does not count a retired row that kept its actionable verdict', (
   expect(retireEnrichFailure(db, id, 'resolved by a shipped fix', '2026-08-11T00:00:00Z')).toBe(true);
 
   expect(collectStatus(db, new Date('2026-08-16T12:00:00Z')).lockedRows).toBe(0);
+});
+
+// A locked orphan (#558, same shape as enrich_failures.test.ts): has a failure row, an
+// actionable review_class, and an owning issue. Asserts the seed write actually landed —
+// a silently no-op'd seed would produce a green test that proves nothing.
+function orphanWithIssue(db: ReturnType<typeof fresh>, beerId: number, issue: number): void {
+  upsertBeer(db, {
+    untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
+    normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
+  });
+  recordEnrichFailure(db, {
+    beer_id: beerId, brewery: `b${beerId}`, name: `n${beerId}`,
+    search_url: 'u', source_url: '', outcome: 'not_found', candidates_count: 0,
+    candidates_summary: '', at: '2026-09-01T00:00:00Z',
+  });
+  const written = setEnrichFailureReview(db, beerId, 'parser_bug', 'note', '2026-09-01T00:00:00Z', issue);
+  expect(written).toBe('written');
+}
+
+// #558. `unrescuedRows` makes the marker visible. `unlockedUnadjudicated7d` is the
+// compliance meter: row 2 was unlocked (beat 1 fired) but never got a verdict either way
+// (no unrescued_at, still an orphan) — that is the rule being skipped. Row 1 was unlocked
+// AND marked, so it does not add to the debt. Row 3 is still locked and touches neither
+// counter.
+it('counts unrescued rows, and unlocked rows nobody adjudicated', () => {
+  const db = fresh();
+  orphanWithIssue(db, 1, 558);
+  orphanWithIssue(db, 2, 558);
+  orphanWithIssue(db, 3, 558);
+  markUnrescued(db, 1, 558, '2026-09-01T00:00:00Z');
+  markUnlocked(db, 1, '2026-09-01T00:00:00Z');   // позначений і розімкнений
+  markUnlocked(db, 2, '2026-09-01T00:00:00Z');   // розімкнений БЕЗ вердикту -> борг
+  // 3 просто лежить під замком
+
+  const m = collectStatus(db, new Date('2026-09-02T00:00:00Z'));
+  expect(m.unrescuedRows).toBe(1);
+  expect(m.unlockedUnadjudicated7d).toBe(1);
+  expect(m.sealRetiredFalsified).toBe(0);        // новий стан НЕ протікає в сторожа retire
 });
