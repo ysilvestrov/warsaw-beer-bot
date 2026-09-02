@@ -8,8 +8,11 @@ import { parseVerdictFile, applyVerdicts } from '../src/jobs/adjudicate-apply';
 import { lookupBeer } from '../src/domain/untappd-lookup';
 import { CANARY_QUERY } from '../src/jobs/enrich-orphans';
 import { ALGOLIA_DEFAULTS, createAlgoliaSearch } from '../src/sources/untappd/algolia';
+import { createPersistentCircuitBreaker } from '../src/domain/untappd-circuit';
 
 loadOperatorEnv();
+
+const USAGE = 'usage: --issue <n> [--limit <n>] | --apply <file>';
 
 function arg(argv: string[], flag: string): string | null {
   const i = argv.indexOf(flag);
@@ -30,11 +33,14 @@ async function main(argv: string[]): Promise<number> {
       for (const s of report.skipped) console.log(`  skipped ${s.beer_id}: ${s.reason}`);
       return 0;
     }
-    if (!issueRaw) { console.error('usage: --issue <n> [--limit <n>] | --apply <file>'); return 2; }
+    if (!issueRaw) { console.error(USAGE); return 2; }
     const issue = parseInt(issueRaw, 10);
+    // #576: `--issue abc` must not silently become `NaN` in the row query below (which would
+    // match zero rows and look like a clean, empty run instead of a rejected bad argument).
+    if (!Number.isInteger(issue)) { console.error(USAGE); return 2; }
     const env = loadEnv();
     // Композиційний корінь (`src/index.ts:95`) додає сюди ще `refreshKeys`, який тягне свіжі
-    // ключі зі сторінки пошуку. Тут він свідомо НЕ потрібен: прогін короткий і ручний, а
+    // ключі зі сторінки пошуку. Тут він свідомо НЕ потрібен (#576): прогін короткий і ручний, а
     // протухлий ключ проявляється як провал канарки — тобто саме як «нічого не пишемо», що
     // й є безпечним наслідком. Тягнути сюди `untappdSearchHttp` заради цього означало б
     // копіювати половину композиційного кореня в ops-скрипт.
@@ -43,8 +49,19 @@ async function main(argv: string[]): Promise<number> {
       searchKey: env.UNTAPPD_ALGOLIA_SEARCH_KEY ?? ALGOLIA_DEFAULTS.searchKey,
       proxyUrl: env.WEBSHARE_PROXY,
     });
+    // #576: the SAME persistent breaker the crons trip (`src/index.ts:173-179`), so a manual
+    // run cannot deepen an outage they have already detected. onTrip/onRecover are no-ops on
+    // purpose: this tool only ever READS the circuit — it never calls onResult, so they can
+    // never fire.
+    const breaker = createPersistentCircuitBreaker({
+      db,
+      key: 'untappd_circuit_open_until',
+      cooldownMs: 6 * 60 * 60 * 1000,
+      onTrip: () => {},
+      onRecover: () => {},
+    });
     const out = await probeIssueRows({
-      db, log,
+      db, log, breaker,
       lookup: (beer) => lookupBeer({ ...beer, search }),
       canary: async () => (await search.search(CANARY_QUERY)).length > 0,
       limit: limitRaw ? parseInt(limitRaw, 10) : undefined,
@@ -66,4 +83,6 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-main(process.argv.slice(2)).then((code) => { process.exitCode = code; });
+main(process.argv.slice(2))
+  .then((code) => { process.exitCode = code; })
+  .catch((err) => { console.error(err); process.exitCode = 1; });
