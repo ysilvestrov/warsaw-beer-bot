@@ -20,6 +20,7 @@ export type EnrichOrphans = (
     // #384: the Untappd identity the shop publishes on its own product page.
     bid?: number;
     bidSlug?: string;
+    brand?: string;
   }[],
 ) => void;
 
@@ -119,6 +120,7 @@ export async function runOverlay(
           ...(x.miss!.card.bid !== undefined && x.miss!.card.bidSlug !== undefined
             ? { bidSlug: x.miss!.card.bidSlug }
             : {}),
+          ...(x.miss!.card.brand !== undefined ? { brand: x.miss!.card.brand } : {}),
           // `!== undefined`, never truthiness: 0.0% is a real ABV and the only thing
           // separating some same-brewery twins (#322).
           ...(x.miss!.abv !== undefined ? { abv: x.miss!.abv } : {}),

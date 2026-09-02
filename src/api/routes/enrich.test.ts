@@ -844,6 +844,32 @@ describe('POST /enrich/result — published bid (#384)', () => {
     );
   });
 
+  it('links a Flasker imported beer through its published bid (#307)', async () => {
+    const rochefort = {
+      bid: 6134078,
+      beer_name: 'Trappistes Rochefort 8 (2025)',
+      brewery_name: 'Abbaye Notre-Dame de Saint-Rémy',
+      brewery_alias: [],
+      beer_slug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
+      style: 'Belgian Strong Dark Ale',
+      abv: 9.2,
+      global_rating: 4.01,
+    };
+    const hydrate = vi.fn(async () => new Map([[rochefort.bid, rochefort]]));
+    const { app } = setup({ hydrateByBid: hydrate });
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'Trappistes', name: 'Rochefort 8 (2025)', abv: 9.2,
+      bid: rochefort.bid, bidSlug: rochefort.beer_slug, brand: 'Імпортне пиво',
+      pageUrl: 'https://flasker.com.ua/product/trappistes-rochefort-8-2025-330-ml/',
+      algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toEqual({
+      status: 'matched', untappd_id: rochefort.bid, rating_global: 4.01,
+    });
+  });
+
   // Provenance may be raised by a bid, never lowered: merging into a check-in-sourced
   // canonical row must not restamp it 'bid' and thereby make it overridable.
   it('does not weaken the canonical row\'s stamp when merging into it', async () => {

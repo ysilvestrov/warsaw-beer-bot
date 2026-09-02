@@ -16,6 +16,28 @@ const BULGOGI: HydratedBeer = {
   global_rating: 4.06,
 };
 
+const ROCHEFORT: HydratedBeer = {
+  bid: 6134078,
+  beer_name: 'Trappistes Rochefort 8 (2025)',
+  brewery_name: 'Abbaye Notre-Dame de Saint-Rémy',
+  brewery_alias: [],
+  beer_slug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
+  style: 'Belgian Strong Dark Ale',
+  abv: 9.2,
+  global_rating: 4.01,
+};
+
+const DE_CAM: HydratedBeer = {
+  bid: 3615616,
+  beer_name: 'Abrikoos - Rabarber (2018)',
+  brewery_name: 'Geuzestekerij De Cam',
+  brewery_alias: ['Oude Cam'],
+  beer_slug: 'geuzestekerij-de-cam-abrikoos-rabarber-2018',
+  style: 'Lambic - Fruit',
+  abv: 7,
+  global_rating: 4.07,
+};
+
 function freshDb() {
   const db = openDb(':memory:');   // same helper the other storage tests use
   migrate(db);
@@ -82,6 +104,44 @@ describe('resolveByBid', () => {
     // recordBrewery is what the caller logs next to the shop brand.
     expect(out).toEqual({
       kind: 'rejected', reason: 'brewery-mismatch', recordBrewery: 'Mad Brew',
+    });
+  });
+
+  it('accepts Flasker imported beer when its full title agrees with the published bid (#307)', async () => {
+    const out = await resolveByBid({
+      db: freshDb(), bid: ROCHEFORT.bid,
+      bidSlug: ROCHEFORT.beer_slug ?? undefined,
+      brand: 'Імпортне пиво',
+      shopBrewery: 'Trappistes', shopName: 'Rochefort 8 (2025)',
+      sourceUrl: 'https://flasker.com.ua/product/trappistes-rochefort-8-2025-330-ml/',
+      hydrate: hydrateWith(ROCHEFORT),
+    });
+    expect(out.kind).toBe('accepted');
+  });
+
+  it('accepts a title whose leading brewery fragment completes the published identity (#307)', async () => {
+    const out = await resolveByBid({
+      db: freshDb(), bid: DE_CAM.bid,
+      brand: 'Імпортне пиво',
+      shopBrewery: 'De', shopName: 'Cam Abrikoos Rabarber (2018)',
+      sourceUrl: 'https://flasker.com.ua/product/de-cam-abrikoos-rabarber-2018-750-ml/',
+      hydrate: hydrateWith(DE_CAM),
+    });
+    expect(out.kind).toBe('accepted');
+  });
+
+  it.each([
+    ['a different shop', 'https://shop.example/beer/', 'Trappistes', 'Rochefort 8 (2025)'],
+    ['a different title', 'https://flasker.com.ua/product/wrong/', 'Other', 'Beer'],
+  ])('does not relax the brewery guard for %s', async (_case, sourceUrl, shopBrewery, shopName) => {
+    const out = await resolveByBid({
+      db: freshDb(), bid: ROCHEFORT.bid,
+      brand: 'Імпортне пиво', shopBrewery, shopName, sourceUrl,
+      hydrate: hydrateWith(ROCHEFORT),
+    });
+    expect(out).toEqual({
+      kind: 'rejected', reason: 'brewery-mismatch',
+      recordBrewery: 'Abbaye Notre-Dame de Saint-Rémy',
     });
   });
 

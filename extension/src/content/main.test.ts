@@ -117,6 +117,25 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     });
   });
 
+  it('preserves an explicit placeholder brand separately from brewery (#307)', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{
+      key: 'k0', el, brewery: 'Trappistes', name: 'Rochefort 8 (2025)',
+      brand: 'Імпортне пиво', bid: 6134078,
+      bidSlug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
+    }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+
+    expect(sent.find((m) => m.type === 'enrich:result')).toMatchObject({
+      brewery: 'Trappistes', name: 'Rochefort 8 (2025)',
+      brand: 'Імпортне пиво', bid: 6134078,
+    });
+  });
+
   // #391: the executed ladder rung must survive the content-script → service-worker hop.
   it('forwards the executed query into the enrich:result message', async () => {
     await chrome.storage.local.set({ enrichEnabled: true, token: 't' });

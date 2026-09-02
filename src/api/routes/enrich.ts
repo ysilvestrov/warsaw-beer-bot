@@ -230,7 +230,8 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     if (bid !== undefined) {
       const resolved = await resolveByBid({
         db: deps.db, bid, bidSlug, brand,
-        shopName: name, shopAbv: abv ?? null,
+        shopBrewery: brewery, shopName: name, shopAbv: abv ?? null,
+        sourceUrl: pageUrl,
         hydrate: deps.hydrateByBid,
       });
       if (resolved.kind === 'accepted') {

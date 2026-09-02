@@ -570,6 +570,35 @@ describe('#384 flasker.loadCardDetails', () => {
     fetchSpy.mockRestore();
   });
 
+  it('keeps the title identity when Flasker exposes its imported-beer placeholder (#307)', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard(
+        'https://flasker.com.ua/product/trappistes-rochefort-8-2025-330-ml/',
+        'Trappistes Rochefort 8 (2025) 330 ml',
+      )}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () =>
+        '<a href="https://untappd.com/b/abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025/6134078">u</a>' +
+        '<script>{"brand":{"@type":"Brand","name":"Імпортне пиво"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({
+      brewery: 'Trappistes',
+      name: 'Rochefort 8 (2025)',
+      brand: 'Імпортне пиво',
+      bid: 6134078,
+      bidSlug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
+    });
+    fetchSpy.mockRestore();
+  });
+
   it('leaves the heuristic brewery and bid fields untouched when the detail fetch fails', async () => {
     // Distinct URL from the previous test: loadDetail caches per URL at module
     // scope across the whole file, so a shared URL would hit that cache instead
