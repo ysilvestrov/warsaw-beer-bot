@@ -345,16 +345,23 @@ function orphanWithIssue(db: ReturnType<typeof fresh>, beerId: number, issue: nu
 // compliance meter: row 2 was unlocked (beat 1 fired) but never got a verdict either way
 // (no unrescued_at, still an orphan) — that is the rule being skipped. Row 1 was unlocked
 // AND marked, so it does not add to the debt. Row 3 is still locked and touches neither
-// counter.
+// counter. Row 4 covers the OTHER way a row leaves the debt: unlocked, unadjudicated, but
+// it has since MATCHED (untappd_id set) — the free retry actually worked, nobody had to
+// write a verdict, and the row must not still read as skipped-adjudication debt. Review
+// finding #1/#2 (2026-09-02): this branch of the query (`b.untappd_id IS NULL`) had zero
+// coverage before row 4 — a dropped or inverted clause left the count at 1 either way.
 it('counts unrescued rows, and unlocked rows nobody adjudicated', () => {
   const db = fresh();
   orphanWithIssue(db, 1, 558);
   orphanWithIssue(db, 2, 558);
   orphanWithIssue(db, 3, 558);
+  orphanWithIssue(db, 4, 558);
   markUnrescued(db, 1, 558, '2026-09-01T00:00:00Z');
   markUnlocked(db, 1, '2026-09-01T00:00:00Z');   // позначений і розімкнений
   markUnlocked(db, 2, '2026-09-01T00:00:00Z');   // розімкнений БЕЗ вердикту -> борг
   // 3 просто лежить під замком
+  markUnlocked(db, 4, '2026-09-01T00:00:00Z');   // розімкнений БЕЗ вердикту, АЛЕ вже зматчений
+  db.prepare('UPDATE beers SET untappd_id = ? WHERE id = ?').run(999558, 4);
 
   const m = collectStatus(db, new Date('2026-09-02T00:00:00Z'));
   expect(m.unrescuedRows).toBe(1);
