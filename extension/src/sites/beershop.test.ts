@@ -70,6 +70,7 @@ describe('beershop adapter', () => {
   it.each([
     ['BrewDog', '16° Counter Strike West Coast IPA', '/p/brewdog-counter-strike', '16° Counter Strike'],
     ['Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry-cola', '12° Cherry/Cola'],
+    ['Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry%2Fcola', '12° Cherry/Cola'],
     ['Pinta', 'of the Month 8° This is Light Leichtbier', '/p/pinta-of-the-month-this-is-light', '8° This is Light'],
     ['Falkon', '12° Krasohled Lager', '/p/falkon-krasohled-pl', '12° Krasohled'],
     ['To-Øl', '11° 30 Days Italian Pilsner', '/p/to-ol-30-days-italian-pilsner', '11° 30 Days Italian Pilsner'],
@@ -103,6 +104,20 @@ describe('beershop adapter', () => {
     expect(adapter.parseCards(doc)[0]).toMatchObject({
       brewery: 'Brewery',
       name: '12° Beer Різдвяне IPA',
+    });
+  });
+
+  it('does not truncate a title when the product path contains only part of a punctuated word', () => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(
+      productHtml(156, 'Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry'),
+      'text/html',
+    );
+
+    expect(adapter.parseCards(doc)[0]).toMatchObject({
+      brewery: 'Brewery',
+      name: '12° Cherry/Cola Sour Ale',
     });
   });
 

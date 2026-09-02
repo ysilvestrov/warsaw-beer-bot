@@ -54,6 +54,10 @@ function comparableToken(value: string): string {
     .replace(/[^\p{L}\p{N}]/gu, '');
 }
 
+function comparableTokens(value: string): string[] {
+  return value.split(/[/-]+/).map(comparableToken).filter(Boolean);
+}
+
 function productSlugTokens(header: Element | null): string[] {
   const href = header?.getAttribute('href');
   if (!href) return [];
@@ -62,7 +66,7 @@ function productSlugTokens(header: Element | null): string[] {
   if (!match) return [];
 
   try {
-    return decodeURIComponent(match[1]).split('-').map(comparableToken).filter(Boolean);
+    return comparableTokens(decodeURIComponent(match[1]));
   } catch {
     return [];
   }
@@ -84,12 +88,12 @@ function beerNameFromTitle(name: string, header: Element | null): string {
   const visibleName = plato?.[2] ?? withoutSeriesLabel;
   const visibleTokens = visibleName.split(/\s+/);
   const comparableVisibleTokens = visibleTokens
-    .flatMap((word, index) => word.split(/[/-]+/).map((part) => ({ index, token: comparableToken(part) })))
-    .filter(({ token }) => token);
+    .flatMap((word, index) => comparableTokens(word).map((token) => ({ index, token })));
   const slugTokens = productSlugTokens(header);
 
   for (let matchedLength = comparableVisibleTokens.length - 1; matchedLength > 0; matchedLength -= 1) {
     const titlePrefix = comparableVisibleTokens.slice(0, matchedLength);
+    if (comparableVisibleTokens[matchedLength]?.index === titlePrefix[titlePrefix.length - 1].index) continue;
     if (!hasTerminalTokenSequence(slugTokens, titlePrefix.map(({ token }) => token))) continue;
 
     const lastMatchedToken = titlePrefix[titlePrefix.length - 1];
