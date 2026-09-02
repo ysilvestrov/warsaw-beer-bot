@@ -17,7 +17,7 @@ function fresh() {
 }
 
 // An orphan whose triage verdict already names `issue` as its rescuing fix — the shape
-// every row adjudicateIssueRows is asked about has. Mirrors seedLocked
+// every row probeIssueRows is asked about has. Mirrors seedLocked
 // (src/jobs/unlock-fixed-orphans.test.ts:36): a seed that writes through a guarded API
 // must assert the write actually landed, or a silently no-op'd seed makes every
 // assertion below true about nothing.
@@ -142,5 +142,53 @@ describe('probeIssueRows', () => {
     const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
     expect(out.status === 'ok' && out.file.verdicts[0].verdict).toBe('already_marked');
     expect(lookup).not.toHaveBeenCalled();     // a settled row costs no quota
+  });
+
+  // #558 review finding #5, reasserted here: the row query's `ef.retired_at IS NULL` and
+  // `b.untappd_id IS NULL` clauses had zero coverage before this test, and dropping either
+  // would silently make the probe re-probe (and mark unrescued) a row a shipped fix already
+  // resolved, or a row whose beer already carries a real Untappd bid — neither has anything
+  // left to adjudicate.
+  it('skips a retired row and a row whose beer already matched — neither is probed', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    expect(retireEnrichFailure(db, 1, 'resolved by a shipped fix', '2026-08-05T00:00:00Z')).toBe(true);
+
+    orphanWithIssue(db, 2, 576);
+    db.prepare('UPDATE beers SET untappd_id = ? WHERE id = 2').run(999576);
+
+    const lookup = vi.fn(notFound);
+    const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
+
+    expect(out.status === 'ok' && out.file.verdicts).toEqual([]);
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  // Finding 2 (review round on #576): every other test in this file drives `lookup` through
+  // `notFound`, so a swap of the rescued/unrescued branches — or a dropped inconclusive
+  // branch — would pass all of them. One test per remaining LookupOutcome kind closes that.
+  it('maps a matched probe to rescued', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = async () =>
+      ({ kind: 'matched' as const, result: { bid: 42, name: 'x', brewery: 'y' } as never });
+    const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
+    expect(out.status === 'ok' && out.file.verdicts[0].verdict).toBe('rescued');
+  });
+
+  it('maps a transient probe to inconclusive', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = async () => ({ kind: 'transient' as const, error: new Error('boom') });
+    const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
+    expect(out.status === 'ok' && out.file.verdicts[0].verdict).toBe('inconclusive');
+  });
+
+  it('maps a blocked probe to inconclusive', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = async () => ({ kind: 'blocked' as const, searchUrl: 'u' });
+    const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
+    expect(out.status === 'ok' && out.file.verdicts[0].verdict).toBe('inconclusive');
   });
 });
