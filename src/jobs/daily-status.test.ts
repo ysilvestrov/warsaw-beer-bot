@@ -25,6 +25,7 @@ const base: StatusMetrics = {
   sealUnidentifiable: 9, sealUnidentifiableReobserved: 7,
   sealNotABeer: 29, sealNotABeer7d: 0, sealRetiredFalsified: 28,
   lockedRows: 12, unlocked7d: 3, verdictsOutlived7d: 2,
+  unrescuedRows: 4, unlockedUnadjudicated7d: 1,
 };
 
 test('buildStatusMessage: full message exact string', () => {
@@ -39,7 +40,7 @@ test('buildStatusMessage: full message exact string', () => {
       '• Рейтинги: 134 зматчених пив без рейтингу',
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
-      '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д',
+      '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д · 4 unrescued (1 розімкнено без вердикту/7д)',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
       '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',
