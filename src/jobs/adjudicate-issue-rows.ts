@@ -1,7 +1,25 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { LookupOutcome } from '../domain/untappd-lookup';
-import { markUnrescued } from '../storage/enrich_failures';
+import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
+
+export interface Verdict {
+  beer_id: number; brewery: string; name: string;
+  verdict: 'unrescued' | 'rescued' | 'inconclusive' | 'already_marked';
+}
+
+export interface VerdictFile {
+  issue: number;
+  probed_at: string;
+  verdicts: Verdict[];
+}
+
+// #576: проба або ціла, або її немає. Часткового результату не буває — тому ніякого
+// `{status:'ok', partial:true}`.
+export type ProbeOutcome =
+  | { status: 'ok'; file: VerdictFile }
+  | { status: 'circuit_open' }
+  | { status: 'canary_failed'; at: 'before' | 'after' };
 
 // #558: адюдикація рядків одного фіксу. Політика вже вимагає реплею перед фіксом —
 // різниця лише в тому, що досі його результат жив у чаті й помирав із сесією.
@@ -16,64 +34,86 @@ import { markUnrescued } from '../storage/enrich_failures';
 // `{ kind: 'transient' }`, а не в exception — той самий контракт, що й тут. Кидок із
 // `lookup` пробив би адюдикацію одного рядка й обірвав пробу решти рядків issue без
 // жодного запису, і жоден тип цього не зловить.
-export interface AdjudicateDeps {
+export interface ProbeDeps {
   db: DB;
   log: pino.Logger;
   lookup: (beer: { brewery: string; name: string; abv: number | null }) => Promise<LookupOutcome>;
+  // #576: один пошук завідомо наявного пива. Системний збій (ротований ключ, перейменований
+  // індекс, м'який IP-бан) віддає 200+порожньо НА ВСЕ, що для нас невідрізненне від чесного
+  // not_found — і без цієї перевірки перетворилося б на маркер `unrescued` на КОЖНОМУ рядку
+  // issue. Захист від transient/blocked (#316) цього не бачить: збій виглядає добропорядно.
+  canary: () => Promise<boolean>;
+  breaker?: CircuitBreaker;
+  sleep?: (ms: number) => Promise<void>;
+  sleepMs?: number;
+  limit?: number;
   now?: () => Date;
 }
 
-export interface AdjudicateResult {
-  probed: number;
-  rescued: number;       // проба знайшла пиво — рядок лишається як є, крон його злінкує
-  marked: number;        // проба не знайшла нічого — маркер щойно поставлено
-  // #558 review finding #6: markUnrescued повертає false, коли рядок УЖЕ мав маркер
-  // (ідемпотентність) — без цього лічильника такий рядок не потрапляв у жоден кошик, і
-  // повторний прогін вже адюдикованого issue друкував «marked: 0», що читається як
-  // «нічого не знайдено», а не як «усе вже вирішено». probed завжди дорівнює
-  // rescued + marked + alreadyMarked + inconclusive.
-  alreadyMarked: number;
-  inconclusive: number;  // transient/blocked — не вердикт, нічого не пишемо (#316)
-}
-
-export async function adjudicateIssueRows(
-  deps: AdjudicateDeps,
+export async function probeIssueRows(
+  deps: ProbeDeps,
   issueNumber: number,
-): Promise<AdjudicateResult> {
+): Promise<ProbeOutcome> {
   const now = (deps.now ?? (() => new Date()))();
+  const breaker = deps.breaker ?? noopBreaker;
+  const sleepMs = deps.sleepMs ?? 500;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+
+  // #576: брейкер ЧИТАЄМО, але не пишемо. Разова ручна команда не повинна поглиблювати
+  // чужу аварію — і так само не повинна автоматично гальмувати фонові джоби.
+  if (!breaker.canAttempt(now)) {
+    deps.log.warn('adjudicate: circuit open, refusing to probe');
+    return { status: 'circuit_open' };
+  }
+
+  if (!(await deps.canary())) {
+    deps.log.error('adjudicate: opening canary failed — Untappd search looks broken');
+    return { status: 'canary_failed', at: 'before' };
+  }
+
   const rows = deps.db
     .prepare(
-      `SELECT b.id, b.brewery, b.name, b.abv
+      `SELECT b.id, b.brewery, b.name, b.abv, ef.unrescued_at
          FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.issue_number = ?
           AND ef.retired_at IS NULL
-          AND b.untappd_id IS NULL`,
+          AND b.untappd_id IS NULL
+        ORDER BY b.id`,
     )
-    .all(issueNumber) as { id: number; brewery: string; name: string; abv: number | null }[];
+    .all(issueNumber) as {
+      id: number; brewery: string; name: string; abv: number | null; unrescued_at: string | null;
+    }[];
 
-  const out: AdjudicateResult = {
-    probed: 0, rescued: 0, marked: 0, alreadyMarked: 0, inconclusive: 0,
-  };
-  for (const row of rows) {
-    out.probed += 1;
+  const selected = deps.limit === undefined ? rows : rows.slice(0, deps.limit);
+  const verdicts: Verdict[] = [];
+
+  for (const row of selected) {
+    const base = { beer_id: row.id, brewery: row.brewery, name: row.name };
+    // Уже вирішений рядок не варто пробувати вдруге — це чиста витрата квоти, а вердикт
+    // від неї не зміниться (маркер знімає лише явний ре-арм).
+    if (row.unrescued_at !== null) {
+      verdicts.push({ ...base, verdict: 'already_marked' });
+      continue;
+    }
     const outcome = await deps.lookup({ brewery: row.brewery, name: row.name, abv: row.abv });
-    if (outcome.kind === 'matched') {
-      out.rescued += 1;
-      continue;
-    }
-    if (outcome.kind !== 'not_found') {
-      // Мережевий збій — не свідчення про рядок. Позначити його тут означало б записати
-      // «фікс тебе не рятує» на підставі того, що впав проксі.
-      out.inconclusive += 1;
+    await sleep(sleepMs);
+    if (outcome.kind === 'matched') verdicts.push({ ...base, verdict: 'rescued' });
+    else if (outcome.kind === 'not_found') verdicts.push({ ...base, verdict: 'unrescued' });
+    else {
       deps.log.warn({ beerId: row.id, kind: outcome.kind }, 'adjudicate: inconclusive probe');
-      continue;
+      verdicts.push({ ...base, verdict: 'inconclusive' });
     }
-    // markUnrescued is idempotent (WHERE unrescued_at IS NULL) — re-probing an already
-    // settled row is deliberate (re-running an adjudicated issue must stay safe), so a
-    // `false` here is not nothing happening, it is the row confirming its prior verdict.
-    if (markUnrescued(deps.db, row.id, issueNumber, now.toISOString())) out.marked += 1;
-    else out.alreadyMarked += 1;
   }
-  deps.log.info({ issueNumber, ...out }, 'adjudicate-issue-rows finished');
-  return out;
+
+  // #576: закривна канарка. Якщо Untappd зламався ПОСЕРЕДИНІ, хвіст прогону складається з
+  // хибних `unrescued` — а оскільки досі нічого не записано, достатньо не віддати файл.
+  if (!(await deps.canary())) {
+    deps.log.error('adjudicate: closing canary failed — discarding the whole run');
+    return { status: 'canary_failed', at: 'after' };
+  }
+
+  return {
+    status: 'ok',
+    file: { issue: issueNumber, probed_at: now.toISOString(), verdicts },
+  };
 }
