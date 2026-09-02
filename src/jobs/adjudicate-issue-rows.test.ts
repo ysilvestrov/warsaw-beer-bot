@@ -6,6 +6,8 @@ import { upsertBeer, getBeer } from '../storage/beers';
 import {
   recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from '../storage/enrich_failures';
+import { getJobState, setJobState } from '../storage/job_state';
+import { isCircuitOpen } from '../domain/untappd-circuit';
 import { probeIssueRows } from './adjudicate-issue-rows';
 
 const log = pino({ level: 'silent' });
@@ -60,6 +62,32 @@ describe('probeIssueRows', () => {
     const beer = getBeer(db, 1)!;
     expect(beer.untappd_lookup_count).toBe(2);
     expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
+  });
+
+  // #576 I1: the runner wires its breaker as `{ canAttempt: (now) => !isCircuitOpen(...), ... }`
+  // (never `createPersistentCircuitBreaker`, whose `canAttempt` deletes `job_state` on a
+  // malformed or expired value — that was the bug review found live). This test drives
+  // `probeIssueRows` through THAT exact composition with an EXPIRED open_until already
+  // persisted, and demands `job_state` come back byte-identical — the assertion the original
+  // "writes NOTHING" test above never made, because it only checked `enrich_failures`/`beers`.
+  it('leaves an expired circuit-open marker in job_state untouched (production breaker wiring)', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const KEY = 'untappd_circuit_open_until';
+    setJobState(db, KEY, '2026-08-01T00:00:00.000Z'); // long expired relative to the probe's `now`
+
+    const breaker = {
+      canAttempt: (now: Date) => !isCircuitOpen(db, KEY, now),
+      onResult: () => {},
+      state: 'closed' as const,
+    };
+    const out = await probeIssueRows(
+      { db, log, lookup: notFound, canary: okCanary, breaker, now: () => new Date('2026-09-02T10:00:00Z') },
+      576,
+    );
+
+    expect(out.status).toBe('ok');
+    expect(getJobState(db, KEY)).toBe('2026-08-01T00:00:00.000Z');
   });
 
   it('returns a verdict per row, carrying the exact input it probed', async () => {

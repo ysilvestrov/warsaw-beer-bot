@@ -4,7 +4,10 @@ import { upsertBeer } from '../storage/beers';
 import {
   recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from '../storage/enrich_failures';
-import { parseVerdictFile, applyVerdicts } from './adjudicate-apply';
+import {
+  parseVerdictFile, applyVerdicts, isVerdictFileStale, verdictFileAgeMs, formatAge,
+  summarizeVerdictFile, STALE_VERDICT_FILE_MS,
+} from './adjudicate-apply';
 import type { Verdict } from './adjudicate-issue-rows';
 
 function fresh() {
@@ -112,5 +115,58 @@ describe('applyVerdicts', () => {
     expect(() => parseVerdictFile({ issue: 576 })).toThrow();
     expect(() => parseVerdictFile({ issue: 576, probed_at: 'x', verdicts: [{ beer_id: 1 }] })).toThrow();
     expect(parseVerdictFile(fileFor([]))).toEqual(fileFor([]));
+  });
+
+  // #576 minor finding: `missing` is the one SkipReason branch with no coverage — a verdict
+  // naming a beer_id that has no row in `enrich_failures`/`beers` at all (e.g. the beer row was
+  // deleted between probe and apply).
+  it('skips a verdict naming a beer_id with no row at all', () => {
+    const db = fresh();
+    const report = applyVerdicts(db, fileFor([
+      { beer_id: 999999, brewery: 'Nobody', name: 'Nothing', verdict: 'unrescued' },
+    ]), '2026-09-02T11:00:00.000Z');
+    expect(report).toEqual({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 999999, reason: 'missing' }] });
+  });
+});
+
+describe('verdict-file staleness (#576 I3)', () => {
+  const file = fileFor([{ beer_id: 1, brewery: 'x', name: 'y', verdict: 'unrescued' }]);
+
+  it('is not stale immediately after the probe', () => {
+    expect(isVerdictFileStale(file, file.probed_at)).toBe(false);
+  });
+
+  it('is not stale just under the threshold', () => {
+    const now = new Date(Date.parse(file.probed_at) + STALE_VERDICT_FILE_MS - 1000).toISOString();
+    expect(isVerdictFileStale(file, now)).toBe(false);
+  });
+
+  it('is stale just over the threshold', () => {
+    const now = new Date(Date.parse(file.probed_at) + STALE_VERDICT_FILE_MS + 1000).toISOString();
+    expect(isVerdictFileStale(file, now)).toBe(true);
+  });
+
+  it('computes age in milliseconds', () => {
+    const now = new Date(Date.parse(file.probed_at) + 90 * 60 * 1000).toISOString();
+    expect(verdictFileAgeMs(file, now)).toBe(90 * 60 * 1000);
+  });
+
+  it('formats sub-hour ages in minutes and hour-plus ages in hours', () => {
+    expect(formatAge(30 * 60 * 1000)).toBe('30m');
+    expect(formatAge(90 * 60 * 1000)).toBe('1.5h');
+  });
+
+  it('summarizes issue, probed_at, age, and the verdict tally before any write', () => {
+    const f = fileFor([
+      { beer_id: 1, brewery: 'x', name: 'y', verdict: 'unrescued' },
+      { beer_id: 2, brewery: 'x', name: 'z', verdict: 'rescued' },
+      { beer_id: 3, brewery: 'x', name: 'w', verdict: 'inconclusive' },
+      { beer_id: 4, brewery: 'x', name: 'v', verdict: 'already_marked' },
+    ]);
+    const now = new Date(Date.parse(f.probed_at) + 30 * 60 * 1000).toISOString();
+    expect(summarizeVerdictFile(f, now)).toBe(
+      'issue 576, probed_at 2026-09-02T10:00:00.000Z (30m ago), '
+      + '4 verdicts: 1 rescued / 1 unrescued / 1 inconclusive / 1 already marked',
+    );
   });
 });

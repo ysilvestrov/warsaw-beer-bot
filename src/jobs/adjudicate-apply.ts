@@ -1,6 +1,7 @@
 import type { DB } from '../storage/db';
 import { markUnrescued } from '../storage/enrich_failures';
 import type { Verdict, VerdictFile } from './adjudicate-issue-rows';
+import { tallyVerdicts, formatVerdictTally } from './adjudicate-issue-rows';
 
 const VERDICTS = ['unrescued', 'rescued', 'inconclusive', 'already_marked'] as const;
 
@@ -40,7 +41,7 @@ export interface ApplyReport {
 export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyReport {
   const report: ApplyReport = { marked: 0, alreadyMarked: 0, skipped: [] };
   const read = db.prepare(
-    `SELECT b.brewery, b.name, b.untappd_id, ef.issue_number, ef.retired_at, ef.unrescued_at
+    `SELECT b.brewery, b.name, b.untappd_id, ef.issue_number, ef.retired_at
        FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE ef.beer_id = ?`,
   );
@@ -50,7 +51,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (v.verdict !== 'unrescued') continue;
       const row = read.get(v.beer_id) as {
         brewery: string; name: string; untappd_id: number | null;
-        issue_number: number | null; retired_at: string | null; unrescued_at: string | null;
+        issue_number: number | null; retired_at: string | null;
       } | undefined;
       const skip = (reason: SkipReason) => report.skipped.push({ beer_id: v.beer_id, reason });
       if (!row) { skip('missing'); continue; }
@@ -64,4 +65,39 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
   });
   run(file.verdicts);
   return report;
+}
+
+// #576 I3: a defensible number, not a precise one — the design's own mitigation for staleness
+// was "`--apply` is done in the same session, alongside", which is convention, not code. Four
+// hours covers a same-session apply with a break for a coffee or an interruption, while still
+// catching "I found this file from three days ago and scrolled up to the wrong `apply with:`
+// line" — the exact way a re-armed row (which the four per-row checks below cannot see, since
+// `rearmLookup` touches none of `brewery`/`name`/`issue_number`/`retired_at`/`untappd_id`) gets
+// silently re-marked and its re-arm's grant quietly cancelled.
+export const STALE_VERDICT_FILE_MS = 4 * 60 * 60 * 1000;
+
+export function verdictFileAgeMs(file: VerdictFile, nowIso: string): number {
+  return new Date(nowIso).getTime() - Date.parse(file.probed_at);
+}
+
+export function isVerdictFileStale(file: VerdictFile, nowIso: string): boolean {
+  return verdictFileAgeMs(file, nowIso) > STALE_VERDICT_FILE_MS;
+}
+
+// Short, human-readable age for the pre-apply print and the refusal message. Deliberately coarse
+// (one decimal on hours) — an operator deciding whether to trust a file does not need seconds.
+export function formatAge(ms: number): string {
+  const hours = ms / (60 * 60 * 1000);
+  if (hours < 1) return `${Math.round(ms / 60_000)}m`;
+  return `${Math.round(hours * 10) / 10}h`;
+}
+
+// #576 I3: printed before any write, so the operator sees exactly what they are about to apply
+// (which file, from which run, how many verdicts of each kind) instead of a bare "marked N,
+// already marked M" after the fact.
+export function summarizeVerdictFile(file: VerdictFile, nowIso: string): string {
+  const age = verdictFileAgeMs(file, nowIso);
+  const tally = formatVerdictTally(tallyVerdicts(file.verdicts));
+  return `issue ${file.issue}, probed_at ${file.probed_at} (${formatAge(age)} ago), `
+    + `${file.verdicts.length} verdicts: ${tally}`;
 }

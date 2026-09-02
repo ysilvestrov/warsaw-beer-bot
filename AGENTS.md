@@ -157,12 +157,22 @@ If the canary fails on either side of the probe, the whole run is discarded rath
 in part — the tool refuses to write anything for that run, so a partial set of markers can
 never exist.
 
-Each row ends in exactly one of three states:
+Each row ends in exactly one of four verdicts:
 
-- the probe found the beer — leave the row alone, the enrich cron will link it;
-- the probe found nothing — the row is marked `unrescued_at`, so closing the issue no longer
-  hands it a free backoff reset for lookups that cannot succeed;
-- the probe was transient or blocked — write nothing. A network failure is not a verdict.
+- the probe found the beer (`rescued`) — leave the row alone, the enrich cron will link it;
+- the probe found nothing (`unrescued`) — the row is marked `unrescued_at`, so closing the issue
+  no longer hands it a free backoff reset for lookups that cannot succeed;
+- the probe was transient or blocked (`inconclusive`) — write nothing. A network failure is not
+  a verdict;
+- the row already carried the marker before this probe (`already_marked`) — not probed again,
+  since only an explicit re-arm can change its fate.
+
+`--apply` re-checks each `unrescued` verdict against the row's *current* state before writing,
+and skips (rather than writing) a row that moved since the probe. Two of those skips need a
+human decision, not a shrug: `input_changed` (the row's brewery/name were edited) means re-probe
+it — the verdict is about a beer that no longer exists in the database under that name;
+`issue_moved` (it was re-triaged onto another issue) means leave it alone — it belongs to its
+new issue's adjudication now, not this one's.
 
 Do this per row. Never bulk-update by `WHERE issue_number = …`: a row whose fate you cannot
 name individually keeps its current state.
