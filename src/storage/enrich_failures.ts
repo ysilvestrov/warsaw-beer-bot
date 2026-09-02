@@ -124,16 +124,52 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // unlocked_at and reset the backoff for a retry that can never run, silently spending the
 // row's one bet and leaving it in-flight forever, since beat 2 needs a failure that never
 // comes. 3 such rows exist on prod today.
-export function listLockedRows(db: DB): { beer_id: number; issue_number: number }[] {
-  return db
+export function listLockedRows(
+  db: DB,
+): { beer_id: number; issue_number: number; unrescued: boolean }[] {
+  const rows = db
     .prepare(
-      `SELECT beer_id, issue_number FROM enrich_failures
+      `SELECT beer_id, issue_number, unrescued_at FROM enrich_failures
         WHERE review_class IN ('matcher_bug', 'parser_bug')
           AND issue_number IS NOT NULL
           AND unlocked_at IS NULL
           AND retired_at IS NULL`,
     )
-    .all() as { beer_id: number; issue_number: number }[];
+    .all() as { beer_id: number; issue_number: number; unrescued_at: string | null }[];
+  return rows.map((r) => ({
+    beer_id: r.beer_id,
+    issue_number: r.issue_number,
+    unrescued: r.unrescued_at !== null,
+  }));
+}
+
+// #558: «фікс приїхав, і реплей довів, що цього рядка він не рятує». НЕ термінальний у
+// сенсі retired_at: рядок лишається в пулі й доживає свій бекоф — знімається лише
+// безкоштовне обнулення лічильника, яке дає закриття issue. review_class зберігається
+// (клас каже, ЯКИЙ це дефект; маркер — що конкретний фікс до нього не дотягнувся).
+// Ідемпотентний: WHERE unrescued_at IS NULL, тож повторний запуск не рухає таймстемп.
+export function markUnrescued(
+  db: DB,
+  beerId: number,
+  issueNumber: number,
+  atIso: string,
+): boolean {
+  const info = db
+    .prepare(
+      `UPDATE enrich_failures
+          SET unrescued_at = ?, unrescued_issue = ?
+        WHERE beer_id = ? AND unrescued_at IS NULL`,
+    )
+    .run(atIso, issueNumber, beerId);
+  return info.changes > 0;
+}
+
+// #558: знімається завжди разом із явним ре-армом (див. rearmLookup), бо ре-арм означає
+// нове свідчення. Окрема функція, щоб ops-шлях міг зняти маркер без ре-арму.
+export function clearUnrescued(db: DB, beerId: number): void {
+  db.prepare(
+    'UPDATE enrich_failures SET unrescued_at = NULL, unrescued_issue = NULL WHERE beer_id = ?',
+  ).run(beerId);
 }
 
 // #421 beat 1: the row is spending its post-fix free retry. The verdict is deliberately
