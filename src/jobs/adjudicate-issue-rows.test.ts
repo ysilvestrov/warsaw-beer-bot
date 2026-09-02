@@ -3,8 +3,10 @@ import { vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
-import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure } from '../storage/enrich_failures';
-import { adjudicateIssueRows } from './adjudicate-issue-rows';
+import {
+  recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
+} from '../storage/enrich_failures';
+import { probeIssueRows } from './adjudicate-issue-rows';
 
 const log = pino({ level: 'silent' });
 
@@ -34,108 +36,111 @@ function orphanWithIssue(db: ReturnType<typeof fresh>, beerId: number, issue: nu
   expect(written).toBe('written');
 }
 
-describe('adjudicateIssueRows', () => {
-  it('marks a row whose live probe still finds nothing', async () => {
+const okCanary = async () => true;
+const notFound = async () =>
+  ({ kind: 'not_found' as const, searchUrls: ['u'], candidates: [] });
+
+describe('probeIssueRows', () => {
+  it('writes NOTHING to the database during a probe', async () => {
     const db = fresh();
-    orphanWithIssue(db, 1, 558);
-    const out = await adjudicateIssueRows(
-      { db, log, lookup: async () => ({ kind: 'not_found', searchUrls: ['u'], candidates: [] }),
-        now: () => new Date('2026-09-02T10:00:00Z') },
-      558,
-    );
-    expect(out).toMatchObject({ probed: 1, marked: 1, rescued: 0, inconclusive: 0 });
-    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
-      .get() as { unrescued_at: string; unrescued_issue: number };
-    expect(row.unrescued_at).toBe('2026-09-02T10:00:00.000Z');
-    expect(row.unrescued_issue).toBe(558);
-  });
-
-  // #558 review finding #6: markUnrescued's idempotency guard (WHERE unrescued_at IS NULL)
-  // means a re-probed, already-settled row returns `false` and used to land in NO bucket —
-  // re-running an already-adjudicated issue printed `probed: 1, marked: 0`, indistinguishable
-  // from "found nothing to mark". `alreadyMarked` makes that outcome legible instead.
-  it('counts a re-probe of an already-marked row as alreadyMarked, not silence', async () => {
-    const db = fresh();
-    orphanWithIssue(db, 1, 558);
-    const lookup = async () => ({ kind: 'not_found' as const, searchUrls: ['u'], candidates: [] });
-    await adjudicateIssueRows({ db, log, lookup, now: () => new Date('2026-09-02T10:00:00Z') }, 558);
-
-    const out = await adjudicateIssueRows(
-      { db, log, lookup, now: () => new Date('2026-09-03T10:00:00Z') },
-      558,
-    );
-
-    expect(out).toMatchObject({ probed: 1, marked: 0, alreadyMarked: 1, rescued: 0, inconclusive: 0 });
-    // The original timestamp survives — a re-probe re-confirms, it does not re-date the verdict.
-    const row = db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = 1')
-      .get() as { unrescued_at: string };
-    expect(row.unrescued_at).toBe('2026-09-02T10:00:00.000Z');
-  });
-
-  it('does NOT mark a row the probe now matches — it reports a rescue and leaves the row alone', async () => {
-    const db = fresh();
-    orphanWithIssue(db, 1, 558);
-    const out = await adjudicateIssueRows(
-      { db, log, lookup: async () => ({ kind: 'matched', result: { bid: 42, name: 'x', brewery: 'y' } as never }),
-        now: () => new Date('2026-09-02T10:00:00Z') },
-      558,
-    );
-    expect(out).toMatchObject({ probed: 1, marked: 0, rescued: 1 });
-    const row = db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = 1')
-      .get() as { unrescued_at: string | null };
-    expect(row.unrescued_at).toBeNull();
-  });
-
-  it('NEVER marks on a transient or blocked probe — a network failure is not a verdict', async () => {
-    for (const outcome of [{ kind: 'transient', error: new Error('boom') },
-                           { kind: 'blocked', searchUrl: 'u' }] as const) {
-      const db = fresh();
-      orphanWithIssue(db, 1, 558);
-      const out = await adjudicateIssueRows(
-        { db, log, lookup: async () => outcome as never, now: () => new Date('2026-09-02T10:00:00Z') },
-        558,
-      );
-      expect(out).toMatchObject({ marked: 0, inconclusive: 1 });
-      const row = db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = 1')
-        .get() as { unrescued_at: string | null };
-      expect(row.unrescued_at).toBeNull();
-    }
-  });
-
-  // Review finding #5 (2026-09-02): the row query's `ef.retired_at IS NULL` and
-  // `b.untappd_id IS NULL` clauses had zero coverage — dropping either would silently make
-  // the tool re-probe (and mark `unrescued`) a row a shipped fix already resolved, or a row
-  // whose beer already carries a real Untappd bid. Neither has anything left to adjudicate.
-  it('skips a retired row and a row whose beer already matched — neither gets probed', async () => {
-    const db = fresh();
-    orphanWithIssue(db, 1, 558);
-    expect(retireEnrichFailure(db, 1, 'resolved by a shipped fix', '2026-08-05T00:00:00Z')).toBe(true);
-
-    orphanWithIssue(db, 2, 558);
-    db.prepare('UPDATE beers SET untappd_id = ? WHERE id = 2').run(999558);
-
-    const lookup = vi.fn(async () => ({ kind: 'not_found' as const, searchUrls: ['u'], candidates: [] }));
-    const out = await adjudicateIssueRows(
-      { db, log, lookup, now: () => new Date('2026-09-02T10:00:00Z') },
-      558,
-    );
-
-    expect(out).toMatchObject({ probed: 0, rescued: 0, marked: 0, inconclusive: 0 });
-    expect(lookup).not.toHaveBeenCalled();
-  });
-
-  it('touches no lookup counters — adjudication must not spend the row backoff', async () => {
-    const db = fresh();
-    orphanWithIssue(db, 1, 558);
+    orphanWithIssue(db, 1, 576);
     db.prepare('UPDATE beers SET untappd_lookup_count = 2, untappd_lookup_at = ? WHERE id = 1')
       .run('2026-08-01T00:00:00Z');
-    await adjudicateIssueRows(
-      { db, log, lookup: async () => ({ kind: 'not_found', searchUrls: ['u'], candidates: [] }),
-        now: () => new Date('2026-09-02T10:00:00Z') },
-      558,
+
+    const out = await probeIssueRows(
+      { db, log, lookup: notFound, canary: okCanary, now: () => new Date('2026-09-02T10:00:00Z') },
+      576,
     );
+
+    expect(out.status).toBe('ok');
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
+      .get() as { unrescued_at: string | null; unrescued_issue: number | null };
+    expect(row.unrescued_at).toBeNull();
+    expect(row.unrescued_issue).toBeNull();
     const beer = getBeer(db, 1)!;
     expect(beer.untappd_lookup_count).toBe(2);
     expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
+  });
+
+  it('returns a verdict per row, carrying the exact input it probed', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const out = await probeIssueRows(
+      { db, log, lookup: notFound, canary: okCanary, now: () => new Date('2026-09-02T10:00:00Z') },
+      576,
+    );
+    expect(out).toEqual({
+      status: 'ok',
+      file: {
+        issue: 576,
+        probed_at: '2026-09-02T10:00:00.000Z',
+        verdicts: [{ beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued' }],
+      },
+    });
+  });
+
+  it('refuses to probe at all when the closing canary fails', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    let calls = 0;
+    const canary = async () => { calls += 1; return calls === 1; };   // before ok, after fails
+    const out = await probeIssueRows({ db, log, lookup: notFound, canary }, 576);
+    expect(out).toEqual({ status: 'canary_failed', at: 'after' });
+  });
+
+  it('does not probe a single row when the opening canary fails', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = vi.fn(notFound);
+    const out = await probeIssueRows({ db, log, lookup, canary: async () => false }, 576);
+    expect(out).toEqual({ status: 'canary_failed', at: 'before' });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('does not probe when the circuit is open, and does not touch the breaker', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = vi.fn(notFound);
+    const canary = vi.fn(okCanary);
+    const out = await probeIssueRows(
+      {
+        db, log, lookup, canary,
+        breaker: {
+          canAttempt: () => false,
+          onResult: () => { throw new Error('breaker must not be written'); },
+          state: 'open' as const,
+        },
+      },
+      576,
+    );
+    expect(out).toEqual({ status: 'circuit_open' });
+    expect(lookup).not.toHaveBeenCalled();
+    expect(canary).not.toHaveBeenCalled();
+  });
+
+  it('sleeps between probes and honours the limit', async () => {
+    const db = fresh();
+    for (const id of [1, 2, 3]) orphanWithIssue(db, id, 576);
+    const slept: number[] = [];
+    const out = await probeIssueRows(
+      {
+        db, log, lookup: notFound, canary: okCanary, limit: 2,
+        sleep: async (ms) => { slept.push(ms); }, sleepMs: 500,
+      },
+      576,
+    );
+    expect(out.status).toBe('ok');
+    expect(out.status === 'ok' && out.file.verdicts).toHaveLength(2);
+    expect(slept).toEqual([500, 500]);       // one per probed row, none skipped
+  });
+
+  it('reports an already-marked row without probing it again', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    markUnrescued(db, 1, 576, '2026-09-01T00:00:00Z');
+    const lookup = vi.fn(notFound);
+    const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
+    expect(out.status === 'ok' && out.file.verdicts[0].verdict).toBe('already_marked');
+    expect(lookup).not.toHaveBeenCalled();     // a settled row costs no quota
   });
 });
