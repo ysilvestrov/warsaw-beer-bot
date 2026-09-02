@@ -10,7 +10,8 @@ applies_when:
   - "Adding a supported shop to the browser extension"
   - "Building a parser from captured storefront HTML"
   - "Reviewing adapter PRs that touch registry, manifest, fixtures, and spec"
-tags: [shop-adapter, parser, browser-extension, fixtures, review-workflow, worktrees]
+  - "Fixing parsing regressions in an existing shop adapter"
+tags: [shop-adapter, parser, browser-extension, fixtures, review-workflow, worktrees, changelog]
 ---
 
 # Building Shop Adapters From Live Fixtures
@@ -20,6 +21,8 @@ tags: [shop-adapter, parser, browser-extension, fixtures, review-workflow, workt
 The WineTime adapter work solved issue #88 by adding support for `winetime.com.ua` to the browser extension. The implementation itself was straightforward after the storefront shape was understood, but the session exposed several workflow and parser-design traps that can recur when adding future shop adapters.
 
 The final WineTime adapter parses SSR product cards, prefers embedded product metadata keyed by product id, falls back to visible DOM text, registers the shop in the adapter registry and manifest, and adds fixture-backed tests plus changelog/spec updates.
+
+A follow-up fix for issue #119 exposed another adapter-specific trap: WineTime repeated the brewery name at both ends of a product title. The parsed `Varvar / Blanche de Blanche Varvar` pair over-constrained Untappd search. Stripping the exact trailing brewery token restored `Varvar / Blanche de Blanche` without broadening downstream matching.
 
 ## Guidance
 
@@ -55,9 +58,13 @@ function withVisibleBrewery(source: string, productKey: string, brewery: string)
 
 Treat product-title cleanup as conservative normalization, not a full taxonomy parser. WineTime titles included category prefixes, brewery names, Ukrainian descriptors, packaging words, and volume suffixes. The final implementation stripped only the known category prefix, exact brewery prefixes, trailing volume, and trailing Ukrainian descriptors such as `світле`, `темне`, `нефільтроване`, and `фільтроване`. It deliberately preserved label words such as `CAN` because those may be part of the product name.
 
+Handle repeated brewery names as an exact edge-token cleanup, not fuzzy substring deletion. Remove a trailing brewery only when it is the whole remaining value or follows a token boundary; a word that merely ends with the same letters must stay intact. Test this at the adapter boundary with the complete search-facing pair, not only through an internal cleanup helper. The issue #119 regression fixture therefore asserts `brewery: 'Varvar'` and `name: 'Blanche de Blanche'` through `parseCards`.
+
+When parser behavior changes, update the extension changelog against its current release structure. If `main` moved entries out of `[Unreleased]` while the branch was open, preserve the released sections and place the fix under the relevant release instead of recreating a stale heading.
+
 When the PR is open, wait for automatic review and evaluate findings technically. The WineTime automatic review produced one useful test-helper finding and two suggestions that did not justify more code: a local DOM mutation was already isolated to a per-test document, and a custom error class or full HTML dump would add noise to a fixture helper. The useful finding was fixed; the others were answered in review threads with the technical rationale and then resolved.
 
-After merge, clean up only the completed adapter work. In this session, `main` also contained unrelated merged work, and local branches/worktrees for other issues existed. Cleanup removed the WineTime worktree, local branch, and remote branch, switched the root checkout to `main`, and pulled the merge commit, while leaving unrelated issue branches untouched.
+After merge, clean up only the completed adapter work. In this session, `main` also contained unrelated merged work, and local branches/worktrees for other issues existed. Cleanup removed the WineTime worktree, local branch, and remote branch, switched the root checkout to `main`, and pulled the merge commit, while leaving unrelated issue branches untouched. When squash merging makes `git branch -d` unable to prove ancestry, verify the PR's merged head before narrowly force-deleting that local branch.
 
 ## Why This Matters
 
@@ -65,10 +72,13 @@ Shop adapters are narrow changes, but they touch many integration surfaces: capt
 
 The metadata-first plus fallback pattern makes adapters resilient to storefront markup changes without overfitting to every visible text row. The review discipline keeps automatic comments useful without turning every suggestion into unnecessary complexity.
 
+Parser cleanup belongs at the adapter boundary because the backend matcher only sees the brewery/name pair the adapter emits. A narrow normalization rule plus a search-facing regression test preserves valid label text while preventing duplicated brewery tokens from degrading matches.
+
 ## When to Apply
 
 - Add a new browser-extension supported shop.
 - Update an existing shop adapter after storefront markup changes.
+- Fix a shop adapter whose parsed brewery/name pair makes Untappd search too broad or too narrow.
 - Review adapter PRs that add fixtures and parser cleanup rules.
 - Rebase adapter work after another shop adapter lands on `main`.
 
@@ -82,18 +92,24 @@ For SSR storefronts, prefer this workflow:
 4. Prefer embedded metadata when it has product identity and manufacturer/title.
 5. Keep DOM fallback tests.
 6. Add a metadata-preference test where DOM text is intentionally wrong.
-7. Run targeted adapter/conformance/manifest tests, then the full extension test suite and build.
+7. Add adapter-boundary regressions for cleanup rules that changed the search-facing brewery/name pair.
+8. Run targeted adapter/conformance/manifest tests, then the full extension test suite and build.
+9. Rebase on current `main` before resolving extension release or changelog placement.
 
 Avoid this workflow:
 
 1. Start from an unrelated feature branch.
 2. Parse only the visible card text.
 3. Add a test whose expected metadata value also matches the fallback DOM value.
-4. Accept every automated review suggestion without checking whether it improves this codebase.
+4. Strip brewery text with unconstrained substring matching.
+5. Recreate a stale changelog heading after `main` has released it.
+6. Accept every automated review suggestion without checking whether it improves this codebase.
 
 ## Related
 
 - Issue #88: Add WineTime to the supported shops.
+- Issue #119: Wrong beer parse in WineTime.
 - PR #114: WineTime adapter implementation and follow-up review fixes.
+- PR #121: WineTime repeated trailing brewery parser fix.
 - `docs/adapter-authoring.md`: baseline adapter-authoring guide.
 - `spec.md` section 6: browser extension adapter contract.
