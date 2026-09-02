@@ -8,7 +8,7 @@ import { setJobState } from './job_state';
 import { recordMatchUsage } from './api_usage';
 import { upsertMatch } from './match_links';
 import {
-  recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued, markUnlocked,
+  recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from './enrich_failures';
 import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
 
@@ -324,47 +324,73 @@ it('lockedRows does not count a retired row that kept its actionable verdict', (
   expect(collectStatus(db, new Date('2026-08-16T12:00:00Z')).lockedRows).toBe(0);
 });
 
-// A locked orphan (#558, same shape as enrich_failures.test.ts): has a failure row, an
-// actionable review_class, and an owning issue. Asserts the seed write actually landed —
-// a silently no-op'd seed would produce a green test that proves nothing.
-function orphanWithIssue(db: ReturnType<typeof fresh>, beerId: number, issue: number): void {
-  upsertBeer(db, {
-    untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
-    normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
-  });
-  recordEnrichFailure(db, {
-    beer_id: beerId, brewery: `b${beerId}`, name: `n${beerId}`,
-    search_url: 'u', source_url: '', outcome: 'not_found', candidates_count: 0,
-    candidates_summary: '', at: '2026-09-01T00:00:00Z',
-  });
-  const written = setEnrichFailureReview(db, beerId, 'parser_bug', 'note', '2026-09-01T00:00:00Z', issue);
-  expect(written).toBe('written');
-}
-
-// #558. `unrescuedRows` makes the marker visible. `unlockedUnadjudicated7d` is the
-// compliance meter: row 2 was unlocked (beat 1 fired) but never got a verdict either way
-// (no unrescued_at, still an orphan) — that is the rule being skipped. Row 1 was unlocked
-// AND marked, so it does not add to the debt. Row 3 is still locked and touches neither
-// counter. Row 4 covers the OTHER way a row leaves the debt: unlocked, unadjudicated, but
-// it has since MATCHED (untappd_id set) — the free retry actually worked, nobody had to
-// write a verdict, and the row must not still read as skipped-adjudication debt. Review
-// finding #1/#2 (2026-09-02): this branch of the query (`b.untappd_id IS NULL`) had zero
-// coverage before row 4 — a dropped or inverted clause left the count at 1 either way.
-it('counts unrescued rows, and unlocked rows nobody adjudicated', () => {
+// #558. `unrescuedRows` makes the marker visible.
+//
+// Review finding #2 (2026-09-02): `unlockedUnadjudicated7d` was replaced — the
+// `unlocked_at`-keyed version read ~0 by construction (beat 2 nulls `unlocked_at` on the
+// row's very next failure, hours before the digest ever reads it). The new query reuses
+// `verdictsOutlived7d`'s residue (beat 2 clears `review_class` but leaves `issue_number`,
+// which survives the full week) restricted to rows nobody has since adjudicated
+// (`unrescued_at IS NULL`). Row 1: beat 2 already fired, still unadjudicated, recent — the
+// rule being skipped, counts as debt. Row 2: same beat-2 shape, but adjudicated
+// (`unrescued_at` set) — debt paid, excluded. Row 3 is still locked (a live verdict, not
+// beat-2 residue) — excluded regardless of `unrescued_at`, same exclusion `verdictsOutlived7d`
+// itself relies on.
+it('counts unrescued rows, and settled verdicts nobody adjudicated', () => {
   const db = fresh();
-  orphanWithIssue(db, 1, 558);
-  orphanWithIssue(db, 2, 558);
-  orphanWithIssue(db, 3, 558);
-  orphanWithIssue(db, 4, 558);
-  markUnrescued(db, 1, 558, '2026-09-01T00:00:00Z');
-  markUnlocked(db, 1, '2026-09-01T00:00:00Z');   // позначений і розімкнений
-  markUnlocked(db, 2, '2026-09-01T00:00:00Z');   // розімкнений БЕЗ вердикту -> борг
-  // 3 просто лежить під замком
-  markUnlocked(db, 4, '2026-09-01T00:00:00Z');   // розімкнений БЕЗ вердикту, АЛЕ вже зматчений
-  db.prepare('UPDATE beers SET untappd_id = ? WHERE id = ?').run(999558, 4);
+  const mk = (name: string) => upsertBeer(db, {
+    untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
+    normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
+  });
+  const fail = (id: number, name: string, at: string) => recordEnrichFailure(db, {
+    beer_id: id, brewery: 'Mad Brew', name, search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 3, candidates_summary: '', at,
+  });
 
-  const m = collectStatus(db, new Date('2026-09-02T00:00:00Z'));
+  // 1) beat-2 residue, unadjudicated, recent -> debt.
+  const debt = mk('Debt Row');
+  fail(debt, 'Debt Row', '2026-08-15T00:00:00Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 558 WHERE beer_id = ?').run(debt);
+
+  // 2) same shape, but adjudicated -> debt paid.
+  const paid = mk('Paid Row');
+  fail(paid, 'Paid Row', '2026-08-15T00:00:00Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 558 WHERE beer_id = ?').run(paid);
+  markUnrescued(db, paid, 558, '2026-08-15T01:00:00Z');
+
+  // 3) still locked (a live verdict) -> not beat-2 residue at all.
+  const locked = mk('Locked Row');
+  fail(locked, 'Locked Row', '2026-08-10T00:00:00Z');
+  setEnrichFailureReview(db, locked, 'matcher_bug', 'note', '2026-08-10T01:00:00Z', 558);
+
+  const m = collectStatus(db, new Date('2026-08-16T12:00:00Z'));
   expect(m.unrescuedRows).toBe(1);
   expect(m.unlockedUnadjudicated7d).toBe(1);
   expect(m.sealRetiredFalsified).toBe(0);        // новий стан НЕ протікає в сторожа retire
+});
+
+// 7-day boundary test (review finding #2): the query is `last_at >= cutoff7d`, inclusive.
+// A row exactly ON the cutoff instant must still count; one second earlier must not.
+it('unlockedUnadjudicated7d respects the 7-day boundary (>=, not >)', () => {
+  const db = fresh();
+  const mk = (name: string) => upsertBeer(db, {
+    untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
+    normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
+  });
+  const fail = (id: number, name: string, at: string) => recordEnrichFailure(db, {
+    beer_id: id, brewery: 'Mad Brew', name, search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 3, candidates_summary: '', at,
+  });
+
+  const onCutoff = mk('On Cutoff');
+  fail(onCutoff, 'On Cutoff', '2026-08-09T12:00:00.000Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 558 WHERE beer_id = ?').run(onCutoff);
+
+  const justBefore = mk('Just Before');
+  fail(justBefore, 'Just Before', '2026-08-09T11:59:59.000Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 558 WHERE beer_id = ?').run(justBefore);
+
+  // now = 2026-08-16T12:00:00.000Z -> cutoff7d = 2026-08-09T12:00:00.000Z exactly.
+  const m = collectStatus(db, new Date('2026-08-16T12:00:00.000Z'));
+  expect(m.unlockedUnadjudicated7d).toBe(1);
 });

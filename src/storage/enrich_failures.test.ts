@@ -351,13 +351,17 @@ describe('markUnrescued / clearUnrescued / listLockedRows (#558)', () => {
     expect(row.retired_at).toBeNull();
   });
 
-  it('listLockedRows reports the marker so the unlock job can act on it', () => {
+  // #558 review finding #1: the field is `unrescued_issue` (the number), not a boolean —
+  // the unlock guard needs to compare it against the row's CURRENT issue_number, and a
+  // collapsed boolean is exactly what let a stale marker block a re-arm it had no evidence
+  // against (see unlock-fixed-orphans.test.ts for the guard's own coverage of that case).
+  it('listLockedRows reports which issue proved the marker, not just whether one exists', () => {
     const db = freshDb();
     orphanWithIssue(db, 1, 558);
     orphanWithIssue(db, 2, 558);
     markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
     const rows = listLockedRows(db).sort((a, b) => a.beer_id - b.beer_id);
-    expect(rows.map((r) => [r.beer_id, r.unrescued])).toEqual([[1, true], [2, false]]);
+    expect(rows.map((r) => [r.beer_id, r.unrescued_issue])).toEqual([[1, 558], [2, null]]);
   });
 
   it('clearUnrescued removes the marker without touching the rest of the row', () => {
@@ -690,6 +694,42 @@ describe('recordEnrichFailure: an unlocked row settles its verdict', () => {
 
     const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 4').get() as any;
     expect(row.review_class).toBeNull();
+  });
+
+  // #558 review finding #1, arm 3 of 3: beat 2 must clear the `unrescued` marker along with
+  // the verdict it was measured against. Left in place, the marker would name a fix that a
+  // FUTURE issue_number (this row's next triage) never replayed against — exactly the gap
+  // the unlock-fixed-orphans guard fix depends on not existing.
+  it('clears the unrescued marker when the post-unlock retry fails again', () => {
+    const db = freshDb();
+    seedFailure(db, 6);
+    db.prepare('UPDATE enrich_failures SET candidates_count = 3 WHERE beer_id = 6').run();
+    expect(setEnrichFailureReview(db, 6, 'matcher_bug', 'alias gap → #500', NOW, 500)).toBe('written');
+    expect(markUnrescued(db, 6, 500, '2026-08-15T05:00:00.000Z')).toBe(true);
+    unlock(db, 6);
+
+    failAgain(db, 6);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 6').get() as any;
+    expect(row.review_class).toBeNull();
+    expect(row.unrescued_at).toBeNull();
+    expect(row.unrescued_issue).toBeNull();
+  });
+
+  // Same arm, reached via the 0<->>0 boundary instead of unlocked_at — the marker must not
+  // survive by whichever door the verdict left through.
+  it('clears the unrescued marker when candidates_count crosses the 0<->>0 boundary', () => {
+    const db = freshDb();
+    seedFailure(db, 7);
+    expect(setEnrichFailureReview(db, 7, 'unidentifiable', 'no candidates', NOW, 500)).toBe('written');
+    expect(markUnrescued(db, 7, 500, '2026-08-15T05:00:00.000Z')).toBe(true);
+
+    failAgain(db, 7, 4);
+
+    const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = 7').get() as any;
+    expect(row.review_class).toBeNull();
+    expect(row.unrescued_at).toBeNull();
+    expect(row.unrescued_issue).toBeNull();
   });
 
   // Red if beat 2 is moved ABOVE the blocked guard (#425), or if that guard is removed.

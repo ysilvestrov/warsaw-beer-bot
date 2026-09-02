@@ -57,10 +57,20 @@ export interface StatusMetrics {
   unlocked7d: number;
   verdictsOutlived7d: number;
   // #558. `unrescuedRows` робить новий стан видимим, а не мовчазним. `unlockedUnadjudicated7d`
-  // — міра ДОТРИМАННЯ правила: рядок, який розімкнули без вердикту адюдикації і який досі
-  // сирота. Правило застосовують — цифра мала; тихо пропускають — росте. Обидві дешеві й
-  // не потребують знімка стану: порівнювати outcome+candidates_count до/після перезарядки
-  // було б неможливо без двох додаткових колонок, бо recordEnrichFailure їх перезаписує.
+  // — міра ДОТРИМАННЯ правила: рядок, чий вердикт пережив свій фікс (beat 2 residue: клас
+  // очищено, issue_number лишився) і на якого досі нема вердикту адюдикації. Правило
+  // застосовують — цифра мала; тихо пропускають — росте. Обидві дешеві й не потребують
+  // знімка стану: порівнювати outcome+candidates_count до/після перезарядки було б
+  // неможливо без двох додаткових колонок, бо recordEnrichFailure їх перезаписує.
+  //
+  // Review finding #2 (2026-09-02): перша редакція ключувалась на `unlocked_at`, який
+  // beat 2 нулить на найближчому ж провалі — а щойно перезаряджений рядок (лічильник = 0)
+  // сортується ПЕРШИМ в обох пулах, тож до дайджесту о ~09:00 рядок майже завжди вже встиг
+  // і спалити спробу, і покинути колонку. Цифра читалась як ~0 незалежно від того,
+  // дотримались правила чи ні — вона не могла впасти гучно. Це була помилка дизайну, не
+  // лише реалізації: замінено на `verdictsOutlived7d`-подібний запит (той самий залишок:
+  // клас очищено, issue_number лишився), звужений до рядків без `unrescued_at` — цей стан
+  // живе повний тиждень.
   unrescuedRows: number;
   unlockedUnadjudicated7d: number;
 }
@@ -169,9 +179,22 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     unrescuedRows: count(
       'SELECT COUNT(*) AS c FROM enrich_failures WHERE unrescued_at IS NOT NULL',
     ),
+    // Review finding #2 (2026-09-02): the ORIGINAL query keyed on `unlocked_at >= cutoff7d`,
+    // but `unlocked_at` is exactly the column beat 2 nulls on the row's very next failure —
+    // and a just-re-armed row (untappd_lookup_count = 0) sorts FIRST in both pool queries.
+    // Unlock runs ~00:20 Warsaw, enrich-orphans every 3h, the digest reads at ~09:00: by then
+    // the row has almost always already spent its retry and left the column, so the number
+    // read ~0 whether the rule was honoured or silently skipped — it could not fail loud.
+    // The fix keys on the same durable residue `verdictsOutlived7d` already reads (beat 2
+    // clears review_class but LEAVES issue_number), restricted to rows nobody has since
+    // adjudicated: a shipped fix did not settle this row, and no `unrescued_at` verdict says
+    // why not either. That state persists for the full week, so this grows when the runbook
+    // rule (adjudicate every row of a closing issue) is skipped and shrinks when it is
+    // applied — the actual compliance signal, not a same-day snapshot of it.
     unlockedUnadjudicated7d: count(
-      `SELECT COUNT(*) AS c FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
-        WHERE ef.unlocked_at >= ? AND ef.unrescued_at IS NULL AND b.untappd_id IS NULL`,
+      `SELECT COUNT(*) AS c FROM enrich_failures
+        WHERE review_class IS NULL AND issue_number IS NOT NULL
+          AND last_at >= ? AND unrescued_at IS NULL`,
       [cutoff7d],
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),

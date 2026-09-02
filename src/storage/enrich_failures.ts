@@ -100,6 +100,22 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
              OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.reviewed_at END,
+         -- #558 review finding #1: unrescued_at/unrescued_issue name a (verdict, issue)
+         -- pair -- "THIS fix, replayed against THIS row, does not rescue it". The pair must
+         -- not outlive the verdict it was measured against, so it is nulled in exactly the
+         -- arms that already null review_class/review_note/reviewed_at above. Left alone, a
+         -- beat-2 re-fail (or an issue-number remap onto a sub-issue) leaves a marker naming
+         -- a fix that was never replayed against the row's new verdict/issue -- and once
+         -- untappd_lookup_count reaches the backoff ceiling, rearmLookup is the only way out,
+         -- which a stale marker then permanently withholds.
+         unrescued_at       = CASE
+           WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
+           THEN NULL ELSE enrich_failures.unrescued_at END,
+         unrescued_issue    = CASE
+           WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
+             OR enrich_failures.unlocked_at IS NOT NULL
+           THEN NULL ELSE enrich_failures.unrescued_issue END,
          unlocked_at        = NULL`,
     ).run(
       r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
@@ -124,23 +140,24 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // unlocked_at and reset the backoff for a retry that can never run, silently spending the
 // row's one bet and leaving it in-flight forever, since beat 2 needs a failure that never
 // comes. 3 such rows exist on prod today.
+// #558 review finding #1: this used to collapse `unrescued_issue` into a boolean, which the
+// unlock guard read as "any marker at all skips the re-arm" — regardless of WHICH issue
+// proved it. A row re-triaged onto a different issue (or remapped to a sub-issue per the
+// CLAUDE.md rule) then denies its own re-arm on a fix that was never replayed against it.
+// The caller must compare `unrescued_issue` against `issue_number` itself, so the number —
+// not a derived boolean — is what crosses this boundary.
 export function listLockedRows(
   db: DB,
-): { beer_id: number; issue_number: number; unrescued: boolean }[] {
-  const rows = db
+): { beer_id: number; issue_number: number; unrescued_issue: number | null }[] {
+  return db
     .prepare(
-      `SELECT beer_id, issue_number, unrescued_at FROM enrich_failures
+      `SELECT beer_id, issue_number, unrescued_issue FROM enrich_failures
         WHERE review_class IN ('matcher_bug', 'parser_bug')
           AND issue_number IS NOT NULL
           AND unlocked_at IS NULL
           AND retired_at IS NULL`,
     )
-    .all() as { beer_id: number; issue_number: number; unrescued_at: string | null }[];
-  return rows.map((r) => ({
-    beer_id: r.beer_id,
-    issue_number: r.issue_number,
-    unrescued: r.unrescued_at !== null,
-  }));
+    .all() as { beer_id: number; issue_number: number; unrescued_issue: number | null }[];
 }
 
 // #558: «фікс приїхав, і реплей довів, що цього рядка він не рятує». НЕ термінальний у

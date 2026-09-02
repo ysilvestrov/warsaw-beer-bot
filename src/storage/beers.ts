@@ -136,11 +136,14 @@ export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): Fil
 // #369: a row that just gained an ABV deserves an immediate retry — the previous
 // lookup ran blind, which is the whole bug. Resets the backoff so isEligible()
 // returns true at once. isNotABeer still gates eligibility separately.
-// #558: and ALWAYS clears the `unrescued` marker. This is mechanically safe precisely
-// because unlock-fixed-orphans never calls this function for marked rows — guarded by
-// the `if (row.unrescued)` branch in its unlock loop — so any call that reaches here is
-// explicit evidence (an ops re-arm, or a fresh ABV in ensureBeerRow), while the marker
-// only asserted "a free attempt TODAY buys nothing".
+// #558: and ALWAYS clears the `unrescued` marker. unlock-fixed-orphans skips calling this
+// for a row ONLY when the marker names the very issue that just closed (its guard compares
+// `unrescued_issue` against `issue_number`, review finding #1, 2026-09-02) — a marker naming
+// a different, stale issue (re-triage, or a CLAUDE.md sub-issue remap) reaches here along
+// the ordinary re-arm path, and clearing it is correct: that marker was evidence about a
+// fix nobody has replayed against the row's current issue, so it must not survive a re-arm
+// that just gave the row a fresh, untested shot. Every OTHER caller (an ops re-arm, or a
+// fresh ABV in ensureBeerRow) is unconditionally explicit new evidence, same as before.
 export function rearmLookup(db: DB, beerId: number): void {
   db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
     .run(beerId);
