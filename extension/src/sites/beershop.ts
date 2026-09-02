@@ -84,7 +84,7 @@ function beerNameFromTitle(name: string, header: Element | null): string {
   const visibleName = plato?.[2] ?? withoutSeriesLabel;
   const visibleTokens = visibleName.split(/\s+/);
   const comparableVisibleTokens = visibleTokens
-    .map((word, index) => ({ index, token: comparableToken(word) }))
+    .flatMap((word, index) => word.split(/[/-]+/).map((part) => ({ index, token: comparableToken(part) })))
     .filter(({ token }) => token);
   const slugTokens = productSlugTokens(header);
 
