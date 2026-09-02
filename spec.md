@@ -2194,7 +2194,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   glass/merch категорії `/pl/17-szklomerch` і `/en/17-glassmerch` є whole-page non-beer
   gate; локально відкидаються set/glassware/deposit products), домен `funkyshop.pl`),
   `beershop` (Beershop UPgates SSR — `article.card-item[data-product-id]`, brewery з
-  `.p-i-header strong`, name з решти заголовка; один адаптер покриває мовні домени
+  `.p-i-header strong`, name з решти заголовка, звіреної з `/p/<product-slug>`:
+  trailing display-only style і префікс серії `of the Month` прибираються, Plato
+  зберігається, а якщо slug не впізнає title — лишається видимий name; один адаптер покриває мовні домени
   `beershop.pl`/`.cz`/`.sk`/`.eu`/`.de`; локалізовані маршрути lemonades/cola,
   functional drinks, gifts/merch, snacks і spirits є whole-page non-beer gate,
   продубльований стабільними UPgates category-id для fixture/re-render безпеки).
