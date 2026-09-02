@@ -198,6 +198,33 @@ describe('unlockFixedOrphans', () => {
     expect(row.unrescued_at).not.toBeNull();              // маркер лишається
   });
 
+  // #558 review finding #1: a marker naming a DIFFERENT issue than the one that just
+  // closed must NOT block the re-arm — that fix was never replayed against this row. This
+  // is exactly the shape left behind by the beat-2 re-triage in the review's own repro, and
+  // by the CLAUDE.md orphan-triage remap routine (`UPDATE ... SET issue_number = <child>`),
+  // which moves a row onto a narrower issue while an old marker still names the parent.
+  it('re-arms a row whose marker names a DIFFERENT issue than the one that closed', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'remapped', 'parser_bug', 500);
+    db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
+      .run('2026-08-01T00:00:00Z', beerId);
+    expect(markUnrescued(db, beerId, 500, '2026-08-20T00:00:00Z')).toBe(true);
+    // Remap onto a sub-issue: review_class is left untouched by design, only issue_number moves.
+    db.prepare('UPDATE enrich_failures SET issue_number = 600 WHERE beer_id = ?').run(beerId);
+
+    const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
+
+    expect(out.unlocked).toBe(1);
+    expect(out.rearmSkipped).toBe(0);
+    const beer = getBeer(db, beerId)!;
+    expect(beer.untappd_lookup_count).toBe(0);      // re-armed: #500's replay never tested #600's fix
+    expect(beer.untappd_lookup_at).toBeNull();
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = ?')
+      .get(beerId) as { unrescued_at: string | null; unrescued_issue: number | null };
+    expect(row.unrescued_at).toBeNull();            // rearmLookup clears the now-stale marker too
+    expect(row.unrescued_issue).toBeNull();
+  });
+
   it('still re-arms an unmarked row', async () => {
     const db = fresh();
     const beerId = seedLocked(db, 'ordinary', 'matcher_bug', 700);
@@ -212,15 +239,45 @@ describe('unlockFixedOrphans', () => {
     expect(beer.untappd_lookup_at).toBeNull();
   });
 
+  // Extracts an `export function NAME(...) { ... }` body by brace-depth counting, so the
+  // slice ends at the function's own closing brace regardless of what comes after it in
+  // the file (unlike the const-predicate helper below, which can key off the fixed
+  // `` `; `` a SQL-template const always ends with).
+  function functionBody(src: string, name: string): string {
+    const start = src.indexOf(`export function ${name}`);
+    expect(start, `${name} not found`).toBeGreaterThan(-1);
+    const braceStart = src.indexOf('{', start);
+    let depth = 0;
+    let i = braceStart;
+    for (; i < src.length; i += 1) {
+      if (src[i] === '{') depth += 1;
+      else if (src[i] === '}') {
+        depth -= 1;
+        if (depth === 0) { i += 1; break; }
+      }
+    }
+    return src.slice(start, i);
+  }
+
   // #558: маркер знімає лише безкоштовне обнулення бекофу. Щойно він потрапить у предикат
   // пулу, рядок зникне з обігу — рівно те, що #412 вже коштувало 157 рядків.
+  //
+  // Review finding #7 (2026-09-02): the original guard covered only beers.ts. A future
+  // exclusion could just as easily land next to isNotABeer/isWebFallbackBlocked in
+  // enrich_failures.ts instead — those are the OTHER place a beer gets held out of a pool,
+  // so the same invariant must hold there too.
   it('no pool predicate reads the unrescued marker', () => {
-    const src = readFileSync(path.join(__dirname, '../storage/beers.ts'), 'utf8');
+    const beersSrc = readFileSync(path.join(__dirname, '../storage/beers.ts'), 'utf8');
     for (const name of ['orphanNotOnTapPredicate', 'onLatestTapPredicate', 'lockedRowPredicate']) {
-      const start = src.indexOf(`export const ${name}`);
+      const start = beersSrc.indexOf(`export const ${name}`);
       expect(start, `${name} not found`).toBeGreaterThan(-1);
-      const body = src.slice(start, src.indexOf('`;', start));
+      const body = beersSrc.slice(start, beersSrc.indexOf('`;', start));
       expect(body).not.toContain('unrescued');
+    }
+
+    const enrichSrc = readFileSync(path.join(__dirname, '../storage/enrich_failures.ts'), 'utf8');
+    for (const name of ['isNotABeer', 'isWebFallbackBlocked']) {
+      expect(functionBody(enrichSrc, name)).not.toContain('unrescued');
     }
   });
 });
