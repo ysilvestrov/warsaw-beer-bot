@@ -23,6 +23,10 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
+## [Unreleased]
+
+- Fixed imported beers on Flasker showing no badge because the shop labels their brewery as «Імпортне пиво». The extension now keeps the beer identity from the title and verifies the Untappd link published on the product page.
+
 ## [0.16.0] - 2026-09-02
 
 - Before you save a token, the popup now leads with getting one: «Get a token» sits directly under the title as the main button and is the keyboard's first stop, while «Sync my check-ins» is greyed out and explains that it needs a token — previously it was the big amber button, and pressing it asked for access to untappd.com only to fail with a connection error. The link to the setup guide also stops vanishing once you have a token: it moves to the bottom of the popup, where the people most likely to hit a sync problem can still find it.

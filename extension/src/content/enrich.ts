@@ -16,6 +16,8 @@ export interface OrphanBeer {
   bid?: number;
   /** #384: the slug published alongside `bid`; a server-side integrity signal. */
   bidSlug?: string;
+  /** Product-page brand; separate when a shop exposes a non-brewery placeholder. */
+  brand?: string;
 }
 
 /** The shop-published facts that travel with a beer to /enrich/* (#369). */

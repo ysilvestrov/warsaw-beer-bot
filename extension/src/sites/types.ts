@@ -9,6 +9,8 @@ export interface Card {
   bid?: number;
   /** #384: the slug published alongside `bid`; server-side integrity signal. */
   bidSlug?: string;
+  /** Product-page brand used to verify a published bid; may differ from parsed brewery. */
+  brand?: string;
   skip?: boolean;
 }
 

@@ -1101,10 +1101,15 @@ not_found → `recordLookupNotFound` (backoff++), blocked → НІЧОГО не 
 додатково приймають `bid` (`/enrich/result` — ще й `bidSlug`+`brand`, потрібні лише
 гейту). `/enrich/result` резолвить bid **до** пошукового пайплайна: спершу локальний
 каталог (`beers.untappd_id`, UNIQUE-індекс, без Algolia-виклику), при промасі —
-batched Algolia hydrate за `objectID` (нижче, `hydrateByBid`). **Єдине вето** гейта
-(`resolveByBid`, `src/domain/bid-identity.ts`) — збіг пивоварні (`brand` ⟷
-`brewery_name`/`brewery_alias` через `breweryAliases`); розбіжність назви, ABV чи slug
-лише логується (`notes`), ніколи не ветує — для `Tomatol Bulgogi` шоп каже
+batched Algolia hydrate за `objectID` (нижче, `hydrateByBid`). Звичайний гейт
+(`resolveByBid`, `src/domain/bid-identity.ts`) вимагає збіг пивоварні (`brand` ⟷
+`brewery_name`/`brewery_alias` через `breweryAliases`). Вузький виняток — Flasker
+публікує для всіх іноземних товарів службовий brand `Імпортне пиво`: лише для
+`flasker.com.ua` та цього точного placeholder-а bid приймається, коли нормалізований
+повний title (`brewery + name` до detail-hydration) дорівнює Untappd beer name або
+складається з хвостової частини Untappd brewery та beer name (#307). Інші магазини,
+placeholder-и й розбіжні title не обходять brewery-гейт. Для звичайного brand
+розбіжність назви, ABV чи slug лише логується (`notes`), ніколи не ветує — для `Tomatol Bulgogi` шоп каже
 `3,8%`/`Tomatol Bulgogi`, а зв'язаний Untappd-запис — `4,2%`/`Tomatøl:BULDAK BULGOGI`,
 і bid все одно правильний.
 
@@ -2168,11 +2173,14 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   відкидається; ABV із `%` у title; для кожної ще не кешованої картки `loadCardDetails`
   довантажує сторінку товару (#384: до `MAX_DETAIL_FETCHES_PER_PASS = 20` запитів за
   прохід, дедуп за URL, помилки проковтуються — картка лишається на даних із title).
-  Звідти читаються два сигнали: JSON-LD `brand` (покриття **45/45**) — мапиться через
+  Звідти читаються два сигнали: JSON-LD `brand` (покриття **45/45**, але для імпорту
+  це службове `Імпортне пиво`, а не назва броварні) — мапиться через
   `BREWERY_RULES`/реєстр (`canonicalizeBrand`) **до** заміни розпізнаної з title
   пивоварні, бо сирий `brand` це відображуване ім'я магазину, а `canonical` реєстру —
   вивірена Untappd-форма (без мапінгу override відкотив би реконсиляцію: `Правда`
   замість `Pravda`, `Volta` замість `Volta Brewery`, `MUZA` замість `MUZA BREWING CO`);
+  `Імпортне пиво` не перезаписує title-derived brewery, а ретранслюється окремим
+  `brand` для source-scoped bid-гейта (#307);
   і опублікований `untappd.com/b/<slug>/<bid>` (покриття **37/45**) — ретранслюється як
   `bid`/`bidSlug`/`brand` у `/enrich/candidates`/`/enrich/result` (identity-канал —
   вище, `POST /enrich/candidates` / `POST /enrich/result`)), домен `flasker.com.ua`), `piwnemosty`

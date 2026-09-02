@@ -305,6 +305,7 @@ export interface ProductDetail {
 
 const UNTAPPD_BEER_RE = /untappd\.com\/b\/([a-z0-9-]+)\/(\d+)/i;
 const LD_BRAND_RE = /"brand"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]{1,80})"/;
+const IMPORTED_BEER_PLACEHOLDER = 'Імпортне пиво';
 
 // Pure string parsing so it is testable against a captured fixture without a DOM.
 export function parseProductDetail(html: string): ProductDetail {
@@ -463,7 +464,12 @@ export const flasker: SiteAdapter = {
       // never reveals — but it is the shop's own display string, not a canonical
       // one, so it must be mapped through the registry/rules first (canonicalizeBrand)
       // or it would de-canonicalize breweries those tables already reconciled.
-      if (detail.brand) card.brewery = canonicalizeBrand(detail.brand);
+      if (detail.brand) {
+        const brand = canonicalizeBrand(detail.brand);
+        card.brand = brand;
+        // This is a storefront section shared by foreign beers, not a brewery.
+        if (brand !== IMPORTED_BEER_PLACEHOLDER) card.brewery = brand;
+      }
       if (detail.bid !== undefined) {
         card.bid = detail.bid;
         card.bidSlug = detail.bidSlug;

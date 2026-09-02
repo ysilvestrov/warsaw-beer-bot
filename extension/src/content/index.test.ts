@@ -307,6 +307,32 @@ describe('runOverlay bid-contradiction orphans (#384)', () => {
 
     expect(enrich.mock.calls[0][0][0]).toMatchObject({ bid: 555, bidSlug: 'b-orphan' });
   });
+
+  it('relays a placeholder brand separately from the title-derived brewery (#307)', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{
+      el: a,
+      brewery: 'Trappistes',
+      name: 'Rochefort 8 (2025)',
+      brand: 'Імпортне пиво',
+      bid: 6134078,
+      bidSlug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
+    }]);
+    const orphan: MatchResult = {
+      raw: { brewery: 'Trappistes', name: 'Rochefort 8 (2025)' },
+      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
+    };
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapter, async () => [orphan], enrich);
+
+    expect(enrich.mock.calls[0][0][0]).toMatchObject({
+      brewery: 'Trappistes',
+      name: 'Rochefort 8 (2025)',
+      brand: 'Імпортне пиво',
+      bid: 6134078,
+    });
+  });
 });
 
 // #384: the cache lookup key is computed before loadCardDetails; the write key used to be

@@ -43,10 +43,11 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
       name: o.name,
       ...(o.abv !== undefined ? { abv: o.abv } : {}),
       ...(o.style !== undefined ? { style: o.style } : {}),
-      // #384: the shop-published Untappd identity. runEnrichment derives the `brand` the
-      // server checks it against from the (hydrated) brewery, so it is not carried here.
+      // #384/#307: normally brand equals the hydrated brewery; Flasker imports carry
+      // the explicit placeholder separately from their title identity.
       ...(o.bid !== undefined ? { bid: o.bid } : {}),
       ...(o.bidSlug !== undefined ? { bidSlug: o.bidSlug } : {}),
+      ...(o.brand !== undefined ? { brand: o.brand } : {}),
     }));
     await runEnrichment(beers, {
       getCandidates: async (bs) =>
