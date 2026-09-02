@@ -12,7 +12,9 @@ Untappd. Підтримувані магазини згруповано за к�
 - **Нідерланди:** [Beer Republic](https://beerrepublic.eu/),
   [Bierloods22](https://bierloods22.nl/en/), [Hoptimaal](https://hoptimaal.com/en/)
 - **Чехія:** [Beershop](https://beershop.eu/) — один магазин із мовними версіями
-  `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu` і `beershop.de`
+  `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu` і `beershop.de`;
+  назву пива розширення звіряє з адресою товару, щоб не приймати дописаний стиль
+  за частину назви
 
 Щоб усе запрацювало, потрібні три речі: (1) завантажити свою історію пив у бота,
 (2) отримати токен доступу, (3) встановити й налаштувати розширення. Нижче — по кроках.

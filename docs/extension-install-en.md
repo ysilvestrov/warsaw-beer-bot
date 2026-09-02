@@ -11,7 +11,9 @@ history. The supported shops, grouped by where they ship from, are:
 - **The Netherlands:** [Beer Republic](https://beerrepublic.eu/),
   [Bierloods22](https://bierloods22.nl/en/), [Hoptimaal](https://hoptimaal.com/en/)
 - **Czechia:** [Beershop](https://beershop.eu/) — one shop with language storefronts
-  at `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu`, and `beershop.de`
+  at `beershop.pl`, `beershop.cz`, `beershop.sk`, `beershop.eu`, and `beershop.de`;
+  the extension checks the beer name against the product address so a trailing
+  style label is not mistaken for part of the name
 
 To get everything working you need three things: (1) upload your beer
 history to the bot, (2) get an access token, (3) install and configure the

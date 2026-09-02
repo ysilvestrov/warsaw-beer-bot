@@ -12,12 +12,17 @@ function adapterFor(url = 'https://www.beershop.pl/katalog-piv') {
   return adapter;
 }
 
-function productHtml(categoryId: number, brewery = 'Klín', name = '12° Berry Sour Ale'): string {
+function productHtml(
+  categoryId: number,
+  brewery = 'Klín',
+  name = '12° Berry Sour Ale',
+  href = '/p/test',
+): string {
   return `
     <script>var upgates = {"category":{"id":"${categoryId}"}};</script>
     <div class="p-l-boxes">
       <article class="card card-item" data-product-id="1">
-        <h4 class="p-i-header"><a href="/p/test"><strong>${brewery}</strong><br>${name}</a></h4>
+        <h4 class="p-i-header"><a href="${href}"><strong>${brewery}</strong><br>${name}</a></h4>
       </article>
     </div>
   `;
@@ -52,7 +57,51 @@ describe('beershop adapter', () => {
     expect(cards.length).toBeGreaterThan(20);
     expect(cards[0]).toMatchObject({
       brewery: 'Klín',
+      name: '12° Berry',
+    });
+    expect(cards.find(({ el }) => (
+      el.querySelector('.p-i-header a')?.getAttribute('href') === '/p/fenek-sun-and-soil'
+    ))).toMatchObject({ brewery: 'Fenek', name: '12° Sun & Soil' });
+    expect(cards.find(({ el }) => (
+      el.querySelector('.p-i-header a')?.getAttribute('href')?.includes('gelato-pink-guava')
+    ))).toMatchObject({ brewery: 'Funky-Fluid', name: '18° Gelato Pink Guava Mango Sticky Rice' });
+  });
+
+  it.each([
+    ['BrewDog', '16° Counter Strike West Coast IPA', '/p/brewdog-counter-strike', '16° Counter Strike'],
+    ['Pinta', 'of the Month 8° This is Light Leichtbier', '/p/pinta-of-the-month-this-is-light', '8° This is Light'],
+    ['Falkon', '12° Krasohled Lager', '/p/falkon-krasohled-pl', '12° Krasohled'],
+    ['To-Øl', '11° 30 Days Italian Pilsner', '/p/to-ol-30-days-italian-pilsner', '11° 30 Days Italian Pilsner'],
+  ])('uses the product path to exclude BeerShop display-only text from %s %s', (brewery, title, href, expected) => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(productHtml(156, brewery, title, href), 'text/html');
+
+    expect(adapter.parseCards(doc)[0]).toMatchObject({ brewery, name: expected });
+  });
+
+  it('keeps the visible title when the product path cannot identify it', () => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(productHtml(156), 'text/html');
+
+    expect(adapter.parseCards(doc)[0]).toMatchObject({
+      brewery: 'Klín',
       name: '12° Berry Sour Ale',
+    });
+  });
+
+  it('does not truncate a title when its product path transliterates a name token', () => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(
+      productHtml(156, 'Brewery', '12° Beer Різдвяне IPA', '/p/brewery-beer-rizdviane'),
+      'text/html',
+    );
+
+    expect(adapter.parseCards(doc)[0]).toMatchObject({
+      brewery: 'Brewery',
+      name: '12° Beer Різдвяне IPA',
     });
   });
 

@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed many Beershop beers showing no badge because a style printed after the beer name was searched as part of the name. The extension now uses the product address to keep the actual name, while preserving the degree and real name endings such as «Italian Pilsner».
 - Fixed imported beers on Flasker showing no badge because the shop labels their brewery as «Імпортне пиво». The extension now keeps the beer identity from the title and verifies the Untappd link published on the product page.
 
 ## [0.16.0] - 2026-09-02
