@@ -147,7 +147,17 @@ Before closing a `parser_bug` or `matcher_bug` issue, every row that names it mu
 fix in a known state. The replay you already have to run is the evidence; record it instead
 of letting it die with the session.
 
-Run the adjudication over the issue's rows. Each row ends in exactly one of three states:
+Run it in two steps. `npm run adjudicate -- --issue <n>` does the live probing: it checks a
+canary search before and after the run, touches nothing in the database, and prints a
+verdict file. Then `npm run adjudicate -- --apply <file>` does the writing: it never touches
+the network, re-checks each verdict against the row's current state, and writes markers in
+a single transaction.
+
+If the canary fails on either side of the probe, the whole run is discarded rather than kept
+in part — the tool refuses to write anything for that run, so a partial set of markers can
+never exist.
+
+Each row ends in exactly one of three states:
 
 - the probe found the beer — leave the row alone, the enrich cron will link it;
 - the probe found nothing — the row is marked `unrescued_at`, so closing the issue no longer
