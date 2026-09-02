@@ -52,7 +52,67 @@ When implementing a feature:
 
 When changing the browser extension:
 
-- update the extension changelog as part of the same change
+- update the extension changelog as part of the same change, following the
+  Extension Changelog rules below
+- update `docs/extension-install-uk.md` in the same change if a user would see
+  the difference (a new supported shop, an option, a popup button, new badge
+  behaviour, a change to the install or update flow)
+
+---
+
+Extension Changelog
+
+`extension/CHANGELOG.md` is user-facing copy, not engineering notes. It is
+rendered to the public changelog page, and it is the entire content of the
+release announcement the bot sends to extension users when a new version reaches
+the Chrome Web Store (#379). Someone who does not read code reads every line you
+put there.
+
+Write each entry for the person using the extension:
+
+- Lead with the symptom they would have noticed — a badge that did not appear, a
+  button that did nothing, a beer filed under the wrong brewery — then say what
+  it does now.
+- Name things as the interface names them ("Sync my check-ins", the white-circle
+  badge, the options page), not as the code names them. Selectors, adapters,
+  observers, service workers, parse stages and cache entries are our vocabulary,
+  not theirs.
+- If a change has no effect a user could notice — test infrastructure, a
+  dependency bump, a refactor — it does not belong in the changelog at all.
+  Delete the line; do not reword it. The git history already records it.
+- One entry per user-visible change, under `## [Unreleased]`, newest section on
+  top.
+
+A single entry must not pair a real fix with an invisible one. This line shipped
+in 0.16.0 and is the example to avoid:
+
+> Made Piwne Mosty card discovery independent of selector scoping when its
+> catalog grid is replaced, and upgraded the extension test environment to jsdom
+> 30 with state-based re-badge assertions.
+
+It went out in a release announcement. The first half describes a real fix in
+code vocabulary; the second half describes nothing a user can perceive. Rewritten
+and trimmed to one sentence:
+
+> Fixed badges not appearing on Piwne Mosty listings after the shop redraws its
+> catalog — for example when you filter it or move between pages.
+
+The same rules are in the header comment of `extension/CHANGELOG.md` and in
+`CLAUDE.md`. They are repeated because a changelog line is written by one change
+and reread only at the release cut, which is how the line above survived review.
+
+---
+
+Releasing the Extension
+
+Publishing to the Chrome Web Store is a maintainer action; do not run it unless
+asked. If you do, the ordering in `docs/extension-release.md` is load-bearing:
+**merge the release PR into `main` before running `npm run release:store`.**
+Google can publish a submitted version in under an hour, and once it is live the
+next announcement tick sends users a link to the changelog page — which is built
+from `main`. Submitting before the merge sends a link to a page that does not yet
+list the version being announced. (The store package is byte-identical either
+way; the announcement is not.)
 
 ---
 
