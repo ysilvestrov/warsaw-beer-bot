@@ -141,6 +141,27 @@ number says who fixes it. Changing both at once is how a verdict loses its evide
 
 ---
 
+Adjudicating an issue's rows
+
+Before closing a `parser_bug` or `matcher_bug` issue, every row that names it must leave the
+fix in a known state. The replay you already have to run is the evidence; record it instead
+of letting it die with the session.
+
+Run the adjudication over the issue's rows. Each row ends in exactly one of three states:
+
+- the probe found the beer — leave the row alone, the enrich cron will link it;
+- the probe found nothing — the row is marked `unrescued_at`, so closing the issue no longer
+  hands it a free backoff reset for lookups that cannot succeed;
+- the probe was transient or blocked — write nothing. A network failure is not a verdict.
+
+Do this per row. Never bulk-update by `WHERE issue_number = …`: a row whose fate you cannot
+name individually keeps its current state.
+
+The marker is not a seal. The row stays in its pool with its existing backoff, and any
+explicit re-arm clears the marker — it asserts only "as of today, a free retry buys nothing".
+
+---
+
 Architecture
 
 Preserve the existing architecture.
