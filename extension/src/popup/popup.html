@@ -28,7 +28,7 @@
         </svg>
         <span>Sync my check-ins</span>
       </button>
-      <p id="syncStatus" class="status" aria-live="polite"></p>
+      <p id="syncStatus" class="status"></p>
 
       <button id="refresh" class="btn btn-secondary" type="button">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -38,7 +38,7 @@
         </svg>
         <span>Refresh this page</span>
       </button>
-      <p id="status" class="status" aria-live="polite"></p>
+      <p id="refreshStatus" class="status"></p>
 
       <details class="shops">
         <summary class="shops-summary">
@@ -51,16 +51,18 @@
         <div id="supportedShops" class="shop-list"></div>
       </details>
 
-      <p id="authNote" class="note" style="display:none" aria-live="polite"></p>
-      <button id="getToken" class="btn btn-secondary" type="button" style="display:none">
-        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-          <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
-        </svg>
-        <span>Get a token</span>
-      </button>
-      <a id="guideLink" class="guide" target="_blank" rel="noopener" style="display:none">Read the setup guide →</a>
+      <section id="authBlock" class="auth" style="display:none">
+        <p id="authNote" class="note"></p>
+        <button id="getToken" class="btn btn-secondary" type="button">
+          <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3" />
+          </svg>
+          <span>Get a token</span>
+        </button>
+      </section>
 
       <footer class="foot">
+        <a id="guideLink" class="guide" target="_blank" rel="noopener" style="display:none">Read the setup guide →</a>
         <button id="clearAll" class="btn btn-ghost" type="button">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
             <polyline points="3 6 5 6 21 6" />
@@ -68,6 +70,7 @@
           </svg>
           <span>Clear all cache</span>
         </button>
+        <p id="clearStatus" class="status status-foot"></p>
       </footer>
     </main>
     <script type="module" src="./popup.ts"></script>

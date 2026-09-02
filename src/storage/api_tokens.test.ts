@@ -1,7 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
 import { ensureProfile } from './user_profiles';
-import { hashToken, rotateToken, findTelegramIdByHash } from './api_tokens';
+import { hashToken, rotateToken, findTelegramIdByHash, hasApiToken } from './api_tokens';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -43,5 +43,13 @@ describe('api_tokens storage', () => {
     rotateToken(db, 222, hashToken('b'), '2026-06-07T00:00:00Z');
     rotateToken(db, 111, hashToken('a2'), '2026-06-07T02:00:00Z');
     expect(findTelegramIdByHash(db, hashToken('b'))).toBe(222);
+  });
+
+  it('hasApiToken is true only while a token exists for that user', () => {
+    const db = fresh();
+    expect(hasApiToken(db, 111)).toBe(false);
+    rotateToken(db, 111, hashToken('raw'), '2026-09-01T00:00:00Z');
+    expect(hasApiToken(db, 111)).toBe(true);
+    expect(hasApiToken(db, 222)).toBe(false);
   });
 });

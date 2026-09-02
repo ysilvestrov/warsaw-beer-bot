@@ -22,6 +22,7 @@ import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
 import { cityCommand } from './bot/commands/city';
 import { extensionCommand } from './bot/commands/extension';
+import { announceCommand } from './bot/commands/announce';
 import { helpCommand } from './bot/commands/help';
 import { statusCommand } from './bot/commands/status';
 import { createApiApp, createApiServer } from './api';
@@ -39,6 +40,8 @@ import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
+import { announceRelease } from './jobs/announce-release';
+import { fetchPublishedVersion } from './sources/cws-version';
 import { createTriageLlm } from './infra/triage-llm';
 import { createTriageArchive } from './infra/triage-archive';
 import { createGithubIssuesClient } from './infra/github-issues';
@@ -197,6 +200,7 @@ async function main(): Promise<void> {
     langCommand,
     cityCommand,
     extensionCommand,
+    announceCommand,
     statusCommand,
     helpCommand,
     createRefreshCommand(
@@ -220,6 +224,10 @@ async function main(): Promise<void> {
       buildNewbeersMessage,
     ),
   );
+
+  // #379/#564: guards the announce-release cron below against overlapping runs — see
+  // the comment on that cron for why a run can outlast the hourly tick.
+  let announceInFlight = false;
 
   const cronJobs = [
     cron.schedule('0 */12 * * *', () => {
@@ -298,6 +306,36 @@ async function main(): Promise<void> {
     cron.schedule('20 * * * *', () => {
       unlockFixedOrphans({ db, log, github: triageGithub })
         .catch((e) => log.error({ err: e }, 'unlock-fixed-orphans cron'));
+    }),
+    // announce-release (#379): tell token holders when a new extension version is
+    // actually live. Hourly UTC tick; the job checks the Warsaw [09:00,22:00) send
+    // window and its own job_state version marker, so it sends once per version
+    // transition and never at night — with a deliberate at-least-once bias, not
+    // exactly-once: a rollback followed by a republish legitimately re-announces, and a
+    // process death mid-loop can re-send to recipients already delivered in that run.
+    // Same UTC-tick pattern as daily-status — node-cron's timezone pin is unreliable on
+    // this host. The signal is Chrome's own update endpoint, not `npm run
+    // release:store`, which only submits for review.
+    cron.schedule('40 * * * *', () => {
+      // A run can outlast the hourly tick: Telegraf caps each API call at 500s, so four
+      // recipients timing out twice is ~70 minutes. Without this guard the next tick
+      // would start a second run, read the still-unadvanced marker, and announce the
+      // same version to the same people again.
+      if (announceInFlight) {
+        log.warn('announce-release: previous run still in flight, skipping this tick');
+        return;
+      }
+      announceInFlight = true;
+      announceRelease({
+        db,
+        log,
+        fetchVersion: () => fetchPublishedVersion(),
+        send: (telegramId, html) =>
+          bot.telegram.sendMessage(telegramId, html, { parse_mode: 'HTML' }).then(() => {}),
+        notifyAdmin: adminAlert,
+      })
+        .catch((e) => log.error({ err: e }, 'announce-release cron'))
+        .finally(() => { announceInFlight = false; });
     }),
   ];
 

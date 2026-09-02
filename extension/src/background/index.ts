@@ -109,6 +109,7 @@ export async function handleEnrichResult(
 
 export interface CheckinSyncStartMessage { type: 'checkin-sync:start' }
 export interface CheckinSyncStatusMessage { type: 'checkin-sync:status' }
+export interface CheckinSyncStopMessage { type: 'checkin-sync:stop' }
 
 const SYNC_PAGE_CAP = 200;
 const SYNC_STATE_KEY = 'checkinSync';
@@ -135,11 +136,29 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
 
 let syncWriteChain: Promise<void> = Promise.resolve();
 function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
-  syncWriteChain = syncWriteChain.then(() => writeSyncStatus(s));
+  syncWriteChain = syncWriteChain.catch(() => undefined).then(() => writeSyncStatus(s));
   return syncWriteChain;
 }
 
 let syncRunning = false;
+let syncAbortController: AbortController | null = null;
+type CheckinSyncStartReply = { type: 'checkin-sync:started'; alreadyRunning: boolean };
+let syncStartPromise: Promise<CheckinSyncStartReply> | null = null;
+
+function abortableDelay(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
 
 // Page 1 (maxId === null) is the full profile page. Every older page is served by
 // Untappd's "Show More" XHR endpoint /profile/more_feed/<user>/<offset>?v2=true (a raw
@@ -152,10 +171,29 @@ export function feedUrl(username: string, maxId: string | null): string {
     : `https://untappd.com/profile/more_feed/${u}/${encodeURIComponent(maxId)}?v2=true`;
 }
 
-export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:started'; alreadyRunning: boolean }> {
+export async function handleCheckinSyncStart(): Promise<CheckinSyncStartReply> {
+  if (syncStartPromise) {
+    try {
+      await syncStartPromise;
+      return { type: 'checkin-sync:started', alreadyRunning: true };
+    } catch {
+      return { type: 'checkin-sync:started', alreadyRunning: false };
+    }
+  }
   if (syncRunning) return { type: 'checkin-sync:started', alreadyRunning: true };
+  const startPromise = beginCheckinSync();
+  syncStartPromise = startPromise;
+  try {
+    return await startPromise;
+  } catch {
+    return { type: 'checkin-sync:started', alreadyRunning: false };
+  } finally {
+    if (syncStartPromise === startPromise) syncStartPromise = null;
+  }
+}
+
+async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const cur = await readSyncStatus();
-  if (cur.running) return { type: 'checkin-sync:started', alreadyRunning: true };
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
@@ -164,9 +202,18 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
   }
 
   syncRunning = true;
-  await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  const controller = new AbortController();
+  syncAbortController = controller;
+  try {
+    await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  } catch (error) {
+    syncRunning = false;
+    syncAbortController = null;
+    throw error;
+  }
 
   void (async () => {
+    let terminalStatus: StoredSyncStatus | null = null;
     try {
       const onProgress = (p: SyncProgress) => {
         void enqueueSyncStatus({
@@ -189,37 +236,63 @@ export async function handleCheckinSyncStart(): Promise<{ type: 'checkin-sync:st
           const res = await fetch(feedUrl(username, maxId), {
             credentials: 'include',
             headers: isMoreFeed ? { 'X-Requested-With': 'XMLHttpRequest' } : undefined,
+            signal: controller.signal,
           });
           if ((isMoreFeed && res.redirected) || !res.ok) {
             throw new ApiError(res.status === 403 || res.status === 429 ? 'blocked' : 'server');
           }
           return res.text();
         },
-        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId),
+        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal),
         onProgress,
-        sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+        sleep: (ms) => abortableDelay(ms, controller.signal),
         pageCap: SYNC_PAGE_CAP,
+        signal: controller.signal,
       });
-      await enqueueSyncStatus({
+      terminalStatus = {
         running: false,
         serverCount: outcome.serverCount,
         profileTotal: outcome.profileTotal,
         mergedThisRun: outcome.mergedThisRun,
         outcome: outcome.status,
         complete: outcome.complete,
-      });
+      };
+      await enqueueSyncStatus(terminalStatus);
     } catch {
-      await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      if (terminalStatus) {
+        await enqueueSyncStatus(terminalStatus).catch(() => undefined);
+      } else {
+        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+      }
     } finally {
       syncRunning = false;
+      if (syncAbortController === controller) syncAbortController = null;
     }
   })();
 
   return { type: 'checkin-sync:started', alreadyRunning: false };
 }
 
+export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:stopped'; stopped: boolean }> {
+  if (syncAbortController) {
+    syncAbortController.abort();
+    return { type: 'checkin-sync:stopped', stopped: true };
+  }
+
+  const cur = await readSyncStatus();
+  if (!cur.running) return { type: 'checkin-sync:stopped', stopped: false };
+  await enqueueSyncStatus({ ...cur, running: false, outcome: 'cancelled' });
+  return { type: 'checkin-sync:stopped', stopped: true };
+}
+
 export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
-  return { type: 'checkin-sync:status:ok', ...(await readSyncStatus()) };
+  const status = await readSyncStatus();
+  if (status.running && !syncStartPromise && !syncRunning && !syncAbortController) {
+    const recovered = { ...status, running: false, outcome: 'error' as const };
+    await enqueueSyncStatus(recovered).catch(() => undefined);
+    return { type: 'checkin-sync:status:ok', ...recovered };
+  }
+  return { type: 'checkin-sync:status:ok', ...status };
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -229,6 +302,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
   if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
+  if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }
   if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }
   return undefined;
 });

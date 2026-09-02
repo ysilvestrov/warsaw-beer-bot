@@ -135,6 +135,12 @@ describe('parseTitle', () => {
     })).toEqual({ brewery: 'Mad Brew', name: 'DE ZWARTE REGEL: Tweede Kring', abv: 6.5 });
   });
 
+  it('resolves the Morava series to VibrantPour without dropping the series name', () => {
+    expect(parseTitle('ПРЕДРЕЛІЗ: Morava Winter Flow IS 10% 0.33', {
+      productUrl: 'https://flasker.com.ua/product/предреліз-morava-winter-flow-is-10-0-33/',
+    })).toEqual({ brewery: 'VibrantPour', name: 'Morava Winter Flow IS', abv: 10 });
+  });
+
   // #385: Tomatøl is a Mad Brew series, and the title carries only the series
   // name — the fallback split would emit "Tomatol" as the brewery.
   it('resolves the Tomatol series to Mad Brew from the product slug', () => {

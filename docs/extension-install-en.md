@@ -123,6 +123,10 @@ The extension will appear in the list. Pin its icon to the toolbar
 Updates arrive **automatically** — Chrome pulls new versions from the store
 on its own. Nothing to download, unpack, or reload.
 
+If you have an extension token, the bot sends you a Telegram message once a
+new version actually reaches users (not when it's merely submitted for
+review). Don't want those — send the bot `/announce off`.
+
 > **Switching from an older unpacked build?** Paste the token in Options
 > (Part 3) and **remove the old copy** in `chrome://extensions`. It's the
 > same token — no need to re-issue it: it isn't tied to an extension ID and
@@ -221,21 +225,30 @@ housekeeping one at the bottom:
 </figure>
 
 - **"Sync my check-ins"** (the large amber button at the top) — pulls in your
-  check-ins from Untappd (see below). This is the popup's main action. While a
-  sync is running the button is greyed out and the line under it counts up
-  (`Syncing… 1200 / 8200`): that means "working", not "broken".
+  check-ins from Untappd (see below). This is the popup's main action **once
+  you've saved a token** — before that, the "Not connected" block below leads
+  instead. While a sync is running the button is greyed out and the line
+  under it counts up (`Syncing… 1200 / 8200`): that means "working", not
+  "broken".
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
-  items, or you just ran `/import`). On a page the extension doesn't support,
-  the button is **greyed out and inactive**, with the reason written below it.
+  items, or you just ran `/import`). The result lands in the caption right
+  below the button: `Nothing to refresh — no beers found on this page.` when
+  the extension didn't find any beer cards there, or `Refreshed — 3 beers will
+  be rechecked.` when it did. On a page the extension doesn't support, the
+  button is **greyed out and inactive**, with that same caption explaining why
+  — and clearing the cache no longer wipes that explanation away.
 - **"Supported shops · 10"** — click this row to expand or collapse the shop
   directory. Shops are grouped by the country they ship from. Select any shop
   to open it in a separate focused browser window; if the browser cannot create
   one, the extension opens a new tab instead. Beershop appears once and chooses
   the storefront that best matches your browser languages.
-- **"Clear all cache"** (the quiet button at the bottom, under a thin rule) —
-  clears the **entire** local overlay cache (all sites). Deliberately the least
-  prominent: you rarely need it.
+- **"Clear all cache"** (the quiet button at the bottom, under a thin rule —
+  once a token is saved, the "Read the setup guide →" link sits just above it)
+  — clears the **entire** local overlay cache (all sites). It asks first: the initial
+  click shows how many would go (`Clear cache for 412 entries?`), the second clears
+  and reports (`Cleared 412 entries.`) right below the button. Changed your mind?
+  Close the popup — nothing happens.
 
 <figure class="popup-screenshot">
   <img src="../assets/popup-supported-shops-expanded.png"
@@ -244,10 +257,17 @@ housekeeping one at the bottom:
   <figcaption>The expanded directory is grouped by shipping origin; scroll the list to see every shop.</figcaption>
 </figure>
 
-If **no token** is set yet, the popup also shows — alongside the usual
-buttons above — a "Not connected" note next to a **"Get a token"** button and
-a **"Read the setup guide →"** link. These extra elements disappear once
-you've added a token (Part 3).
+Until a token is saved, the popup puts a "Not connected" block with a
+**"Get a token"** button directly under the header — it's the first stop for
+`Tab`. The **"Sync my check-ins"** button is greyed out and inactive in this
+state, captioned `Add a token to sync your check-ins.`: without a token,
+syncing couldn't succeed anyway, so the extension doesn't ask for extra
+access to untappd.com only to show a connection error.
+
+Once you save a token (Part 3), that block disappears and "Sync my
+check-ins" becomes the main button again. The **"Read the setup guide →"**
+link doesn't go anywhere — it just moves down to the bottom of the popup,
+above "Clear all cache".
 
 The popup follows your **browser theme**: in dark mode it's dark too.
 
@@ -261,6 +281,9 @@ Supporter.
 - **Prerequisite:** first link your account in the bot — `/link <username>`.
   Without this the button will show "Link your Untappd account in the bot
   first (/link)".
+- **Also needs a saved token** (Part 3). Without one, the button is greyed
+  out and captioned `Add a token to sync your check-ins.` instead (see above,
+  under "The toolbar button (popup)").
 - **The first time**, the browser will ask for permission to access
   `untappd.com` (to read your feed within your session) — click
   **Allow**. If you decline, you'll see "Allow access to untappd.com to
@@ -269,10 +292,11 @@ Supporter.
   and uploads to the bot the ones it doesn't have yet. Progress is shown
   right there: `Syncing… 1200 / 8200`.
 - **Multiple runs for a large history:** a single run loads a limited
-  number of pages. If you have a lot of check-ins, you'll see **"Synced
-  5000 of 8200 — tap Sync again to continue."** — just click **"Sync my
-  check-ins"** again; each subsequent run **continues deeper**, rather than
-  starting over. Once everything is loaded — **"✓ Fully synced"**.
+  number of pages. If you have a lot of check-ins, the button becomes
+  **"Continue — 3200 left"** — click it to start the next bounded run. Each
+  subsequent run **continues deeper**, rather than starting over. While a run
+  is active, the same button becomes **"Stop"**. Once everything is loaded —
+  **"✓ Fully synced"**.
 - **Who needs this:** Supporters — to quickly top up new check-ins (e.g.
   after a festival where you tried 30+ beers in a day, but the background
   server sync only picks up 25); non-Supporters — to upload their history

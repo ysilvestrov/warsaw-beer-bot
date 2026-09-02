@@ -29,6 +29,7 @@ export const uk: Messages = {
   'cmd.start': 'почати',
   'cmd.extension': 'токен для браузерного розширення',
   'cmd.status': 'твій статус і налаштування',
+  'cmd.announce': 'анонси нових версій розширення',
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
@@ -126,4 +127,16 @@ export const uk: Messages = {
     'Встановити розширення: {url}\n' +
     'Якщо побачиш «Item not available» — залогінься в Google-акаунт і онови сторінку ' +
     '(розширення позначене 18+ через пивну тематику).',
+
+  // announce (#379)
+  'announce.released':
+    '🍺 Розширення оновилось до версії {version} — Chrome підтягне його сам найближчим часом.',
+  'announce.changelog': 'Що нового: {url}',
+  'announce.opt_out_hint': 'Не хочеш таких повідомлень — надішли /announce off.',
+  'announce.status_on': 'Анонси нових версій розширення: увімкнені. Вимкнути — /announce off',
+  'announce.status_off': 'Анонси нових версій розширення: вимкнені. Увімкнути — /announce on',
+  'announce.turned_on': 'Готово — розповідатиму про нові версії розширення.',
+  'announce.turned_off': 'Готово — більше не турбуватиму. Повернути — /announce on',
+  'announce.no_token':
+    'Втім, анонси йдуть лише власникам токена розширення — отримати його можна через /extension.',
 };

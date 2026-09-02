@@ -45,6 +45,7 @@ const BREWERY_RULES: BreweryRule[] = [
     canonical: 'VibrantPour',
     tags: ['vibrant pour'],
     slugPrefixes: ['vibrant-pour-', 'vibrantpour-'],
+    familySlugPrefixes: ['morava-'],
     titleAliases: ['Vibrant Pour', 'VibrantPour'],
   },
   {

@@ -28,6 +28,7 @@ export const pl: Messages = {
   'cmd.help': 'ta pomoc',
   'cmd.start': 'start',
   'cmd.extension': 'token dla rozszerzenia przeglądarki',
+  'cmd.announce': 'ogłoszenia o nowych wersjach rozszerzenia',
   'cmd.status': 'twój status i ustawienia',
 
   // link
@@ -126,4 +127,16 @@ export const pl: Messages = {
     'Zainstaluj rozszerzenie: {url}\n' +
     'Jeśli zobaczysz „Item not available", zaloguj się na konto Google i odśwież stronę ' +
     '(rozszerzenie jest oznaczone 18+ ze względu na tematykę piwną).',
+
+  // announce (#379)
+  'announce.released':
+    '🍺 Rozszerzenie zaktualizowano do wersji {version} — Chrome pobierze je sam w najbliższym czasie.',
+  'announce.changelog': 'Co nowego: {url}',
+  'announce.opt_out_hint': 'Nie chcesz takich wiadomości — wyślij /announce off.',
+  'announce.status_on': 'Ogłoszenia o nowych wersjach: włączone. Wyłącz — /announce off',
+  'announce.status_off': 'Ogłoszenia o nowych wersjach: wyłączone. Włącz — /announce on',
+  'announce.turned_on': 'Gotowe — będę informować o nowych wersjach rozszerzenia.',
+  'announce.turned_off': 'Gotowe — nie będę więcej przeszkadzać. Przywróć — /announce on',
+  'announce.no_token':
+    'Ogłoszenia trafiają jednak tylko do posiadaczy tokenu rozszerzenia — po token: /extension.',
 };
