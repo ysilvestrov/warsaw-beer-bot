@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.16.0] - 2026-09-02
 
 - Restyled the options page to match the toolbar popup: Save is now the clear primary action, Test connection is secondary, form controls use one system typeface, keyboard focus is visible, and the page follows the browser's light or dark theme with accessible amber contrast.
 - «Clear all cache» now asks before it acts: the first click shows how many cached entries would go, the second clears them and reports the number — and each popup action reports beside its own button, so clearing the cache no longer erases the explanation of why «Refresh this page» is unavailable. The refresh caption now names what it found on the page instead of counting cache entries, and none of the three captions is read aloud by a screen reader when the popup opens — only when a click changes one.
