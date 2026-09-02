@@ -50,6 +50,18 @@ export interface ProbeDeps {
   now?: () => Date;
 }
 
+// #576: a throwing canary must read as a FAILED canary, not as a crash. A rotated key raises
+// an auth error rather than returning 200+empty, and that is precisely the case the canary
+// exists for — letting it escape would turn "we write nothing" into an unhandled rejection.
+// Mirrors the inline try/catch in `enrich-orphans.ts` around its identical canary call.
+async function canaryOk(canary: () => Promise<boolean>): Promise<boolean> {
+  try {
+    return await canary();
+  } catch {
+    return false;
+  }
+}
+
 export async function probeIssueRows(
   deps: ProbeDeps,
   issueNumber: number,
@@ -66,7 +78,7 @@ export async function probeIssueRows(
     return { status: 'circuit_open' };
   }
 
-  if (!(await deps.canary())) {
+  if (!(await canaryOk(deps.canary))) {
     deps.log.error('adjudicate: opening canary failed — Untappd search looks broken');
     return { status: 'canary_failed', at: 'before' };
   }
@@ -107,7 +119,7 @@ export async function probeIssueRows(
 
   // #576: закривна канарка. Якщо Untappd зламався ПОСЕРЕДИНІ, хвіст прогону складається з
   // хибних `unrescued` — а оскільки досі нічого не записано, достатньо не віддати файл.
-  if (!(await deps.canary())) {
+  if (!(await canaryOk(deps.canary))) {
     deps.log.error('adjudicate: closing canary failed — discarding the whole run');
     return { status: 'canary_failed', at: 'after' };
   }

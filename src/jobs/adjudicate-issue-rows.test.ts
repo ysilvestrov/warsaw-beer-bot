@@ -97,6 +97,32 @@ describe('probeIssueRows', () => {
     expect(lookup).not.toHaveBeenCalled();
   });
 
+  // Finding 2 (review round on #576): a rotated key raises rather than returning 200+empty —
+  // the exact case the canary exists to catch. A throw here must read as a failed canary, not
+  // escape as an unhandled rejection that skips the "nothing written" outcome entirely.
+  it('treats a throwing opening canary as a failed canary, not a crash', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const lookup = vi.fn(notFound);
+    const canary = async () => { throw new Error('auth error: key rotated'); };
+    const out = await probeIssueRows({ db, log, lookup, canary }, 576);
+    expect(out).toEqual({ status: 'canary_failed', at: 'before' });
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it('treats a throwing closing canary as a failed canary, not a crash', async () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    let calls = 0;
+    const canary = async () => {
+      calls += 1;
+      if (calls === 1) return true;         // before: ok
+      throw new Error('auth error: key rotated');   // after: throws
+    };
+    const out = await probeIssueRows({ db, log, lookup: notFound, canary }, 576);
+    expect(out).toEqual({ status: 'canary_failed', at: 'after' });
+  });
+
   it('does not probe when the circuit is open, and does not touch the breaker', async () => {
     const db = fresh();
     orphanWithIssue(db, 1, 576);
