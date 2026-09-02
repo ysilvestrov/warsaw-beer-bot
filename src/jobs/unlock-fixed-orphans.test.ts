@@ -1,8 +1,10 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { upsertBeer, getBeer } from '../storage/beers';
-import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure } from '../storage/enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued } from '../storage/enrich_failures';
 import { getJobState } from '../storage/job_state';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
@@ -173,5 +175,52 @@ describe('unlockFixedOrphans', () => {
     expect(out.unlocked).toBe(0);
     const row = db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(row.unlocked_at).toBe('2026-08-15T06:00:00.000Z');
+  });
+
+  // Обидві сироти під замком на issue 700, яка вже НЕ у відкритому наборі (stubGithub([])).
+  it('unlocks a marked row but does NOT re-arm it — the closure cannot rescue it', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'frozen', 'parser_bug', 700);
+    db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
+      .run('2026-08-01T00:00:00Z', beerId);
+    expect(markUnrescued(db, beerId, 700, '2026-09-01T00:00:00Z')).toBe(true);
+
+    const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
+
+    expect(out.unlocked).toBe(1);
+    expect(out.rearmSkipped).toBe(1);
+    const beer = getBeer(db, beerId)!;
+    expect(beer.untappd_lookup_count).toBe(3);            // лічильник НЕ обнулено
+    expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
+    const row = db.prepare('SELECT unlocked_at, unrescued_at FROM enrich_failures WHERE beer_id = ?')
+      .get(beerId) as { unlocked_at: string | null; unrescued_at: string | null };
+    expect(row.unlocked_at).not.toBeNull();               // замок усе одно знято
+    expect(row.unrescued_at).not.toBeNull();              // маркер лишається
+  });
+
+  it('still re-arms an unmarked row', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'ordinary', 'matcher_bug', 700);
+    db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
+      .run('2026-08-01T00:00:00Z', beerId);
+
+    const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
+
+    expect(out.rearmSkipped).toBe(0);
+    const beer = getBeer(db, beerId)!;
+    expect(beer.untappd_lookup_count).toBe(0);
+    expect(beer.untappd_lookup_at).toBeNull();
+  });
+
+  // #558: маркер знімає лише безкоштовне обнулення бекофу. Щойно він потрапить у предикат
+  // пулу, рядок зникне з обігу — рівно те, що #412 вже коштувало 157 рядків.
+  it('no pool predicate reads the unrescued marker', () => {
+    const src = readFileSync(path.join(__dirname, '../storage/beers.ts'), 'utf8');
+    for (const name of ['orphanNotOnTapPredicate', 'onLatestTapPredicate', 'lockedRowPredicate']) {
+      const start = src.indexOf(`export const ${name}`);
+      expect(start, `${name} not found`).toBeGreaterThan(-1);
+      const body = src.slice(start, src.indexOf('`;', start));
+      expect(body).not.toContain('unrescued');
+    }
   });
 });
