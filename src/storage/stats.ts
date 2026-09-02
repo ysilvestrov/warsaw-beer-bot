@@ -191,10 +191,15 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     // why not either. That state persists for the full week, so this grows when the runbook
     // rule (adjudicate every row of a closing issue) is skipped and shrinks when it is
     // applied — the actual compliance signal, not a same-day snapshot of it.
+    // `retired_at IS NULL` is defensive rather than load-bearing: retireEnrichFailure PRESERVES
+    // review_class, and both pools hold retired rows out, so a retired row can never be re-queried
+    // into the beat-2 state this counts. Kept anyway for the reason every sibling metric carries
+    // the same clause — a retired row is settled, and debt it cannot owe should not be countable
+    // if some future path does clear a retired row's verdict.
     unlockedUnadjudicated7d: count(
       `SELECT COUNT(*) AS c FROM enrich_failures
         WHERE review_class IS NULL AND issue_number IS NOT NULL
-          AND last_at >= ? AND unrescued_at IS NULL`,
+          AND last_at >= ? AND unrescued_at IS NULL AND retired_at IS NULL`,
       [cutoff7d],
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),

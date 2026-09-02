@@ -363,6 +363,27 @@ it('counts unrescued rows, and settled verdicts nobody adjudicated', () => {
   fail(locked, 'Locked Row', '2026-08-10T00:00:00Z');
   setEnrichFailureReview(db, locked, 'matcher_bug', 'note', '2026-08-10T01:00:00Z', 558);
 
+  // 4) beat-2 residue with NO owning issue — a plain untriaged orphan, not a skipped
+  // adjudication. Covers `issue_number IS NOT NULL`, which every other row here satisfies.
+  const ownerless = mk('Ownerless Row');
+  fail(ownerless, 'Ownerless Row', '2026-08-15T00:00:00Z');
+
+  // 5) beat-2 residue, unadjudicated, recent — but already retired. Covers `retired_at IS NULL`
+  // (AI review finding 2, PR #575). The state is unreachable through the normal flow, since
+  // retireEnrichFailure preserves review_class and both pools exclude retired rows; the clause
+  // and this row exist so a future path that did clear a retired row's verdict cannot silently
+  // report it as unpaid debt.
+  const retired = mk('Retired Row');
+  fail(retired, 'Retired Row', '2026-08-15T00:00:00Z');
+  db.prepare('UPDATE enrich_failures SET issue_number = 558 WHERE beer_id = ?').run(retired);
+  expect(retireEnrichFailure(db, retired, 'fix shipped', '2026-08-15T02:00:00Z')).toBe(true);
+  db.prepare('UPDATE enrich_failures SET review_class = NULL WHERE beer_id = ?').run(retired);
+  // The beer is matched, so this row does not also register as retire-debt in
+  // sealRetiredFalsified (which counts retired rows that are STILL orphans). The
+  // unlockedUnadjudicated7d query never joins `beers`, so the retired clause is exercised
+  // either way — this only keeps the two watchdogs' assertions independent.
+  db.prepare('UPDATE beers SET untappd_id = 999558 WHERE id = ?').run(retired);
+
   const m = collectStatus(db, new Date('2026-08-16T12:00:00Z'));
   expect(m.unrescuedRows).toBe(1);
   expect(m.unlockedUnadjudicated7d).toBe(1);
