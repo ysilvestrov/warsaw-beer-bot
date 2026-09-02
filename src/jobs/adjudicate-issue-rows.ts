@@ -21,6 +21,25 @@ export type ProbeOutcome =
   | { status: 'circuit_open' }
   | { status: 'canary_failed'; at: 'before' | 'after' };
 
+// #576 minor finding: the runner printed each row and then a bare file path — a zero-row
+// result, a bad `--limit`, and a typo'd `--issue` all render as the same silence. Shared by both
+// the probe summary line and the `--apply` pre-flight print (I3), so the two never drift.
+export function tallyVerdicts(verdicts: Verdict[]): Record<Verdict['verdict'], number> {
+  const t: Record<Verdict['verdict'], number> = {
+    rescued: 0, unrescued: 0, inconclusive: 0, already_marked: 0,
+  };
+  for (const v of verdicts) t[v.verdict] += 1;
+  return t;
+}
+
+export function formatVerdictTally(t: Record<Verdict['verdict'], number>): string {
+  return `${t.rescued} rescued / ${t.unrescued} unrescued / ${t.inconclusive} inconclusive / ${t.already_marked} already marked`;
+}
+
+export function summarizeProbe(file: VerdictFile): string {
+  return `probed ${file.verdicts.length} rows for issue ${file.issue}: ${formatVerdictTally(tallyVerdicts(file.verdicts))}`;
+}
+
 // #558: адюдикація рядків одного фіксу. Політика вже вимагає реплею перед фіксом —
 // різниця лише в тому, що досі його результат жив у чаті й помирав із сесією.
 //

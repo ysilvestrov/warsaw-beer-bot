@@ -1,4 +1,4 @@
-import { createCircuitBreaker, createPersistentCircuitBreaker } from './untappd-circuit';
+import { createCircuitBreaker, createPersistentCircuitBreaker, isCircuitOpen } from './untappd-circuit';
 import { getJobState, setJobState } from '../storage/job_state';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -209,6 +209,49 @@ test('two persistent breakers with distinct keys are isolated (profile trip)', (
   expect(algolia.canAttempt(at(1))).toBe(true);
   expect(getJobState(db, 'untappd_profile_http_open_until')).not.toBeNull();
   expect(getJobState(db, 'untappd_circuit_open_until')).toBeNull();
+});
+
+describe('isCircuitOpen', () => {
+  // #576 I1: this is the assertion the original "writes NOTHING" test on the probe was
+  // missing — it checked `enrich_failures`/`beers` but never `job_state`, so a breaker whose
+  // `canAttempt` secretly deletes on read sailed straight through review. Seed an EXPIRED
+  // open_until (the exact case `createPersistentCircuitBreaker.canAttempt` deletes) and assert
+  // both the verdict (not open) and that job_state is untouched.
+  test('an expired open_until reads as not-open and is left on disk, byte-identical', () => {
+    const db = freshDb();
+    setJobState(db, KEY, '2026-06-04T06:00:00.000Z');
+
+    const result = isCircuitOpen(db, KEY, at(6));
+
+    expect(result).toBe(false);
+    expect(getJobState(db, KEY)).toBe('2026-06-04T06:00:00.000Z');
+  });
+
+  test('a future open_until reads as open and is left on disk', () => {
+    const db = freshDb();
+    setJobState(db, KEY, '2026-06-04T06:00:00.000Z');
+
+    const result = isCircuitOpen(db, KEY, at(1));
+
+    expect(result).toBe(true);
+    expect(getJobState(db, KEY)).toBe('2026-06-04T06:00:00.000Z');
+  });
+
+  test('a malformed value reads as not-open and is left on disk (deletion is a writer\'s job, not a reader\'s)', () => {
+    const db = freshDb();
+    setJobState(db, KEY, 'not-a-date');
+
+    const result = isCircuitOpen(db, KEY, at(0));
+
+    expect(result).toBe(false);
+    expect(getJobState(db, KEY)).toBe('not-a-date');
+  });
+
+  test('no persisted value reads as not-open', () => {
+    const db = freshDb();
+    expect(isCircuitOpen(db, KEY, at(0))).toBe(false);
+    expect(getJobState(db, KEY)).toBeNull();
+  });
 });
 
 test('two persistent breakers with distinct keys are isolated (algolia trip)', () => {

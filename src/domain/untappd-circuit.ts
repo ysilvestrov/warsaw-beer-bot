@@ -59,6 +59,19 @@ function parseTimestamp(value: string | null): number | null {
   return Number.isFinite(ms) ? ms : null;
 }
 
+// #576 I1: a genuinely read-only check, for callers (the adjudicate probe) that must consult the
+// shared circuit without being able to mutate it. `createPersistentCircuitBreaker.canAttempt` is
+// NOT that: it calls `deleteJobState` on a malformed value and again on an expired one, so a tool
+// wired to it can trip `job_state` clean on a read alone (found live on #576's own runner: an
+// expired `untappd_circuit_open_until` was gone after one probe run, though nothing in that tool
+// ever calls `onResult`). This function reads `job_state`, parses with the exact same
+// `parseTimestamp`, and deletes nothing — an expired or malformed entry is simply treated as
+// "not open" and left on disk for whichever writer (a cron's `onResult`) actually owns it.
+export function isCircuitOpen(db: DB, key: string, now: Date): boolean {
+  const openUntil = parseTimestamp(getJobState(db, key));
+  return openUntil != null && openUntil > now.getTime();
+}
+
 export function createPersistentCircuitBreaker(opts: PersistentCircuitOptions): CircuitBreaker {
   let state: CircuitState = 'closed';
   let openedAt = 0;
