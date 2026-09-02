@@ -381,7 +381,7 @@ git commit -m "feat(#558): closing an issue no longer re-arms a row it provably 
 - Consumes: `markUnrescued` (Task 1); `lookupBeer(args: { brewery: string; name: string; abv?: number | null; search: BeerSearch }): Promise<LookupOutcome>` з `src/domain/untappd-lookup.ts`, де `LookupOutcome` = `{kind:'matched';result} | {kind:'not_found';searchUrls;candidates} | {kind:'transient';error} | {kind:'blocked';searchUrl}`.
 - Produces: `adjudicateIssueRows(deps: AdjudicateDeps, issueNumber: number): Promise<AdjudicateResult>`.
 
-Живе в `src/`, а не в `scripts/`: `tsconfig.json` компілює лише `src/**/*` (`rootDir: "src"`), а в проді немає `tsx` — його зрізає `npm prune --omit=dev`, тож інструмент у `scripts/` там не запуститься.
+Живе в `src/jobs/`, поруч зі `unlock-fixed-orphans.ts`/`enrich-orphans.ts`: це джоба (DI-залежності, юніт-тести), а не ops-скрипт. (Виправлення 2026-09-02: попереднє обґрунтування — «`scripts/` у проді не запускається, бо там немає `tsx`» — перевірено на живому сервері й спростовано: `tsx` є regular dependency, переживає `npm prune --omit=dev`, і `scripts/*.ts` реально їдуть у прод і запускаються там; див. `spec.md:1616` і `docs/superpowers/specs/2026-07/2026-07-20-ops-tools-prod-reachable-design.md`.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -652,7 +652,7 @@ Run: `grep -n "retired_at\|enrich_failures\|unlocked_at" spec.md`
 Щільним стилем решти файлу, поруч із булітом про декомпозицію `orphan-triage`:
 
 ```markdown
-- **Фікс `parser_bug`/`matcher_bug` ухвалює долю КОЖНОГО свого рядка**: реплей перед фіксом обов'язковий і так, тож його вивід має лягти в БД, а не померти з сесією. Кожен рядок issue виходить із фіксу в одному з трьох станів — врятований (крон його злінкує), позначений `unrescued_at` (жива проба нічого не знайшла: закриття issue більше не дасть йому безкоштовного обнулення бекофу), або лишається в пулі без маркера. **По рядку, ніколи гуртом** `WHERE issue_number = …`. Маркер **не запечатує**: рядок лишається в пулі зі своїм бекофом, а будь-який явний ре-арм його чистить. `transient`/`blocked` — не вердикт, на них не позначають нічого. Інструмент: `adjudicateIssueRows` (живе в `src/`, бо `scripts/` у проді не запускається — там немає `tsx`).
+- **Фікс `parser_bug`/`matcher_bug` ухвалює долю КОЖНОГО свого рядка**: реплей перед фіксом обов'язковий і так, тож його вивід має лягти в БД, а не померти з сесією. Кожен рядок issue виходить із фіксу в одному з трьох станів — врятований (крон його злінкує), позначений `unrescued_at` (жива проба нічого не знайшла: закриття issue більше не дасть йому безкоштовного обнулення бекофу), або лишається в пулі без маркера. **По рядку, ніколи гуртом** `WHERE issue_number = …`. Маркер **не запечатує**: рядок лишається в пулі зі своїм бекофом, а будь-який явний ре-арм його чистить. `transient`/`blocked` — не вердикт, на них не позначають нічого. Інструмент: `adjudicateIssueRows` (`src/jobs/`, поруч із `unlock-fixed-orphans.ts`/`enrich-orphans.ts` — це джоба, а не ops-скрипт: DI-залежності, юніт-тести, живе там, де решта джоб).
 ```
 
 - [ ] **Step 3: Додай підрозділ в `AGENTS.md`**
