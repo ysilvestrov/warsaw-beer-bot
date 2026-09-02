@@ -1,16 +1,38 @@
 # Changelog
 
+<!--
+  This file is USER-FACING: it is rendered to
+  https://ysilvestrov.github.io/warsaw-beer-bot/changelog/ and it is the entire
+  content of the release announcement the bot sends to extension users (#379).
+
+  So write every entry for the person using the extension, not for us:
+
+  - Say what THEY see change — a badge that now appears, a button that now
+    works, a beer that now shows the right brewery. Lead with the symptom they
+    would have noticed, then what it does now.
+  - Name things as the UI names them («Sync my check-ins», ⚪, the options page),
+    not as the code names them (selectors, adapters, caches, observers,
+    service workers, parse stages).
+  - If a change has NO effect a user could notice — test infrastructure, a
+    dependency bump, a refactor — it does not belong here at all. Delete the
+    line; do not translate it. The git log already records it.
+  - One entry per user-visible change, newest section on top, ordered by how
+    much the reader is likely to care.
+
+  Written under `## [Unreleased]`; the release cut renames that heading to
+  `## [x.y.z] - DATE` (see docs/extension-release.md).
+-->
+
 ## [0.16.0] - 2026-09-02
 
-- Restyled the options page to match the toolbar popup: Save is now the clear primary action, Test connection is secondary, form controls use one system typeface, keyboard focus is visible, and the page follows the browser's light or dark theme with accessible amber contrast.
-- «Clear all cache» now asks before it acts: the first click shows how many cached entries would go, the second clears them and reports the number — and each popup action reports beside its own button, so clearing the cache no longer erases the explanation of why «Refresh this page» is unavailable. The refresh caption now names what it found on the page instead of counting cache entries, and none of the three captions is read aloud by a screen reader when the popup opens — only when a click changes one.
-- Fixed Flasker Morava series listings being attributed to a fake `Morava` brewery or losing `Morava` from the beer name; their product addresses now resolve them to VibrantPour before the fallback title split.
-- Fixed check-in sync getting stuck on “Starting…” when the service-worker callback is lost: the popup now retries once and resumes status polling. Active syncs can be stopped from the same primary button, and capped runs expose an explicit “Continue — N left” action instead of burying the next step in status text.
-- Made Piwne Mosty card discovery independent of selector scoping when its catalog grid is replaced, and upgraded the extension test environment to jsdom 30 with state-based re-badge assertions.
-- Fixed unmatched beers losing their white-circle badges when returning to a previously visited shop page; unresolved cache entries are now rechecked so the page can show the registered ⚪ orphan or its newly available Untappd rating.
-- Fixed middle-clicking a rating badge on Beershop doing nothing after the catalog navigation was suppressed; middle-click now opens Untappd in a new tab.
-- Fixed rating-badge clicks on Beershop opening both Untappd and the shop's product page; the catalog now stays in place while Untappd opens in a new tab.
-- Before a token is saved, the popup now leads with getting one: «Get a token» sits directly under the title as the main button and is the keyboard's first stop, while «Sync my check-ins» is greyed out and explains that it needs a token — previously it was the big amber button, and pressing it asked for access to untappd.com only to fail with a connection error. The setup-guide link also stops vanishing once a token exists: it moves to the bottom of the popup and stays available for exactly the people who might hit a sync problem.
+- Before you save a token, the popup now leads with getting one: «Get a token» sits directly under the title as the main button and is the keyboard's first stop, while «Sync my check-ins» is greyed out and explains that it needs a token — previously it was the big amber button, and pressing it asked for access to untappd.com only to fail with a connection error. The link to the setup guide also stops vanishing once you have a token: it moves to the bottom of the popup, where the people most likely to hit a sync problem can still find it.
+- «Clear all cache» now asks before it acts: the first click tells you how many cached entries would go, the second clears them and reports how many it removed. Each popup action also reports beside its own button, so clearing the cache no longer wipes out the explanation of why «Refresh this page» is unavailable — and the refresh caption now says how many beers it found on the page instead of counting cache entries. None of the three captions is read aloud when the popup opens, only when your click changes one.
+- Fixed check-in sync getting stuck on «Starting…» and never moving: it now recovers on its own and picks the progress back up. A running sync can be stopped with the same button, and a run that hits its limit offers «Continue — N left» instead of hiding the next step in the status text.
+- Fixed beers losing their ⚪ badge when you come back to a shop page you have already visited. Beers that had no answer the first time are now checked again, so the page can show the ⚪ or a rating that has since appeared on Untappd.
+- Fixed clicking a rating badge on Beershop opening both Untappd and the shop's own product page; the shop page now stays where it is while Untappd opens in a new tab. Middle-clicking a badge works again too.
+- Fixed badges not appearing on Piwne Mosty listings after the shop redraws its catalog — for example when you filter it or move between pages.
+- Fixed Flasker's Morava series being listed under a brewery called «Morava» that does not exist, or losing «Morava» from the beer name. Those beers now appear under VibrantPour, where they belong.
+- The options page now looks and behaves like the toolbar popup: «Save» is the clear primary action, «Test connection» is the secondary one beside it, keyboard focus is visible, and the page follows your browser's light or dark theme.
 
 ## [0.15.0] - 2026-08-30
 
