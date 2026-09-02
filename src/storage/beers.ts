@@ -137,9 +137,10 @@ export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): Fil
 // lookup ran blind, which is the whole bug. Resets the backoff so isEligible()
 // returns true at once. isNotABeer still gates eligibility separately.
 // #558: and ALWAYS clears the `unrescued` marker. This is mechanically safe precisely
-// because unlock-fixed-orphans never calls this function for marked rows — so any call
-// that reaches here is explicit evidence (an ops re-arm, or a fresh ABV in
-// ensureBeerRow), while the marker only asserted "a free attempt TODAY buys nothing".
+// because unlock-fixed-orphans never calls this function for marked rows — guarded by
+// the `if (row.unrescued)` branch in its unlock loop — so any call that reaches here is
+// explicit evidence (an ops re-arm, or a fresh ABV in ensureBeerRow), while the marker
+// only asserted "a free attempt TODAY buys nothing".
 export function rearmLookup(db: DB, beerId: number): void {
   db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
     .run(beerId);

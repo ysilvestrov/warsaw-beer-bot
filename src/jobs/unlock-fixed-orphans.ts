@@ -26,6 +26,9 @@ export interface UnlockDeps {
 export interface UnlockOutcome {
   unlocked: number;
   issuesClosed: number;
+  // #558: скільки рядків розімкнено БЕЗ перезарядки, бо реплей при фіксі довів, що
+  // закриття цієї issue їх не рятує. Окремо від `unlocked`, бо замок таки знято.
+  rearmSkipped: number;
   skippedReason: string | null;
   error: string | null;
 }
@@ -51,7 +54,9 @@ export async function unlockFixedOrphans(deps: UnlockDeps): Promise<UnlockOutcom
   const { db, log, github } = deps;
   const now = (deps.now ?? (() => new Date()))();
   const { date } = warsawDateAndHour(now);
-  const empty: UnlockOutcome = { unlocked: 0, issuesClosed: 0, skippedReason: null, error: null };
+  const empty: UnlockOutcome = {
+    unlocked: 0, issuesClosed: 0, rearmSkipped: 0, skippedReason: null, error: null,
+  };
 
   if (getJobState(db, UNLOCK_LAST_RUN_KEY) === date) {
     return { ...empty, skippedReason: 'done_today' };
@@ -84,14 +89,20 @@ export async function unlockFixedOrphans(deps: UnlockDeps): Promise<UnlockOutcom
   const closed = new Set(locked.map((r) => r.issue_number).filter((n) => !openNumbers.has(n)));
   const atIso = now.toISOString();
   let unlocked = 0;
+  let rearmSkipped = 0;
   for (const row of locked) {
     if (!closed.has(row.issue_number)) continue;
-    rearmLookup(db, row.beer_id);
+    // #558: маркер означає «реплей при фіксі довів, що цей рядок фікс не рятує», тож
+    // безкоштовне обнулення бекофу купило б лише до 4 лукапів, які не можуть влучити.
+    // markUnlocked лишається: issue справді закрита, замок справді знято — рядок просто
+    // повертається в пул зі своїм наявним бекофом, а не з обнуленим.
+    if (row.unrescued) rearmSkipped += 1;
+    else rearmLookup(db, row.beer_id);
     markUnlocked(db, row.beer_id, atIso);
     unlocked += 1;
   }
 
   setJobState(db, UNLOCK_LAST_RUN_KEY, date);
-  log.info({ unlocked, issuesClosed: closed.size }, 'unlock-fixed-orphans finished');
-  return { unlocked, issuesClosed: closed.size, skippedReason: null, error: null };
+  log.info({ unlocked, rearmSkipped, issuesClosed: closed.size }, 'unlock-fixed-orphans finished');
+  return { unlocked, rearmSkipped, issuesClosed: closed.size, skippedReason: null, error: null };
 }
