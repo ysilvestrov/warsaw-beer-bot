@@ -242,38 +242,44 @@ git commit -m "feat(#558): add the unrescued marker, and clear it on any explici
 
 - [ ] **Step 1: Write the failing test**
 
+Файл уже має хелпер `seedLocked(db, name, cls, issue): number` (рядок 36) — **користуйся ним**,
+не заводь свій. Він уже перевіряє, що `setEnrichFailureReview` повернув `'written'`
+(інакше сід міг би тихо не записатись і тест був би зеленим ні про що).
+
 ```ts
+import { markUnrescued } from '../storage/enrich_failures';
+
+// Обидві сироти під замком на issue 700, яка вже НЕ у відкритому наборі (stubGithub([])).
 it('unlocks a marked row but does NOT re-arm it — the closure cannot rescue it', async () => {
   const db = fresh();
-  orphanWithIssue(db, 1, 700);
-  // рядок уже витратив бекоф
-  db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = 1')
-    .run('2026-08-01T00:00:00Z');
-  markUnrescued(db, 1, 700, '2026-09-01T00:00:00Z');
+  const beerId = seedLocked(db, 'frozen', 'parser_bug', 700);
+  db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
+    .run('2026-08-01T00:00:00Z', beerId);
+  expect(markUnrescued(db, beerId, 700, '2026-09-01T00:00:00Z')).toBe(true);
 
   const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
   expect(out.unlocked).toBe(1);
   expect(out.rearmSkipped).toBe(1);
-  const beer = getBeer(db, 1)!;
+  const beer = getBeer(db, beerId)!;
   expect(beer.untappd_lookup_count).toBe(3);            // лічильник НЕ обнулено
   expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
-  const row = db.prepare('SELECT unlocked_at, unrescued_at FROM enrich_failures WHERE beer_id = 1')
-    .get() as { unlocked_at: string | null; unrescued_at: string | null };
+  const row = db.prepare('SELECT unlocked_at, unrescued_at FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { unlocked_at: string | null; unrescued_at: string | null };
   expect(row.unlocked_at).not.toBeNull();               // замок усе одно знято
   expect(row.unrescued_at).not.toBeNull();              // маркер лишається
 });
 
 it('still re-arms an unmarked row', async () => {
   const db = fresh();
-  orphanWithIssue(db, 2, 700);
-  db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = 2')
-    .run('2026-08-01T00:00:00Z');
+  const beerId = seedLocked(db, 'ordinary', 'matcher_bug', 700);
+  db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
+    .run('2026-08-01T00:00:00Z', beerId);
 
   const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
   expect(out.rearmSkipped).toBe(0);
-  const beer = getBeer(db, 2)!;
+  const beer = getBeer(db, beerId)!;
   expect(beer.untappd_lookup_count).toBe(0);
   expect(beer.untappd_lookup_at).toBeNull();
 });
@@ -327,11 +333,36 @@ export interface UnlockOutcome {
 Run: `npm test && npm run typecheck`
 Expected: усе зелене.
 
-- [ ] **Step 5: Mutation-prove the guard**
+- [ ] **Step 5: Add the source guard that the marker never becomes a pool exclusion**
+
+Головний ризик цієї роботи — повторити опік #412, де рядок вилетів з обох пулів. Юніт-тест
+цього не спіймає: небезпека в тому, що хтось ПІЗНІШЕ допише `unrescued_at` у предикат пулу.
+Тому — source-guard, у стилі наявних інваріантів композиційного кореня:
+
+```ts
+import { readFileSync } from 'node:fs';
+
+// #558: маркер знімає лише безкоштовне обнулення бекофу. Щойно він потрапить у предикат
+// пулу, рядок зникне з обігу — рівно те, що #412 вже коштувало 157 рядків.
+it('no pool predicate reads the unrescued marker', () => {
+  const src = readFileSync(new URL('../storage/beers.ts', import.meta.url), 'utf8');
+  for (const name of ['orphanNotOnTapPredicate', 'onLatestTapPredicate', 'lockedRowPredicate']) {
+    const start = src.indexOf(`export const ${name}`);
+    expect(start, `${name} not found`).toBeGreaterThan(-1);
+    const body = src.slice(start, src.indexOf('`;', start));
+    expect(body).not.toContain('unrescued');
+  }
+});
+```
+
+Мутаційна перевірка: тимчасово додай `AND ef.unrescued_at IS NULL` до
+`orphanNotOnTapPredicate` → тест має впасти. Поверни.
+
+- [ ] **Step 6: Mutation-prove the guard**
 
 Заміни `if (row.unrescued) rearmSkipped += 1; else rearmLookup(...)` на безумовний `rearmLookup(...)` → перший тест має впасти на `untappd_lookup_count`. Поверни.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/jobs/unlock-fixed-orphans.ts src/jobs/unlock-fixed-orphans.test.ts
@@ -354,12 +385,14 @@ git commit -m "feat(#558): closing an issue no longer re-arms a row it provably 
 
 - [ ] **Step 1: Write the failing test**
 
+`orphanWithIssue(db, beerId, issue)` тут — локальний хелпер цього файлу: створює сироту
+через `upsertBeer`, пише `recordEnrichFailure`, і ставить вердикт через
+`setEnrichFailureReview`, **перевіривши, що той повернув `'written'`** (див. `seedLocked`
+у `src/jobs/unlock-fixed-orphans.test.ts:36` як зразок — сід, який тихо не записався,
+дає зелений тест ні про що).
+
 ```ts
 import { adjudicateIssueRows } from './adjudicate-issue-rows';
-
-const searchStub = (byQuery: Record<string, unknown[]>) => ({
-  search: async (q: string) => (byQuery[q] ?? []) as never[],
-});
 
 it('marks a row whose live probe still finds nothing', async () => {
   const db = fresh();
