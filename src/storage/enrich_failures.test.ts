@@ -12,6 +12,9 @@ import {
   countRowsForIssue,
   listOwnerlessRows,
   countOwnerlessRows,
+  markUnrescued,
+  clearUnrescued,
+  listLockedRows,
   type EnrichFailureRow,
 } from './enrich_failures';
 
@@ -297,6 +300,76 @@ describe('retireEnrichFailure', () => {
     retireEnrichFailure(db, id, 'retired: current non-beer filter rejects', '2026-07-19T00:00:00Z');
     const got = db.prepare('SELECT review_note FROM enrich_failures WHERE beer_id = ?').get(id) as any;
     expect(got.review_note).toBe('retired: current non-beer filter rejects');
+  });
+});
+
+// A locked orphan (#421): has a failure row, a review_class that keeps it locked, and an
+// owning issue. Asserts the seed write actually landed — a silently no-op'd seed would
+// produce a green test that proves nothing (see seedLocked in unlock-fixed-orphans.test.ts).
+function orphanWithIssue(db: ReturnType<typeof openDb>, beerId: number, issue: number): void {
+  upsertBeer(db, {
+    untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
+    normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
+  });
+  recordEnrichFailure(db, {
+    beer_id: beerId, brewery: `b${beerId}`, name: `n${beerId}`,
+    search_url: 'u', source_url: '', outcome: 'not_found', candidates_count: 0,
+    candidates_summary: '', at: '2026-09-01T00:00:00Z',
+  });
+  const written = setEnrichFailureReview(db, beerId, 'parser_bug', 'note', '2026-09-01T00:00:00Z', issue);
+  expect(written).toBe('written');
+}
+
+describe('markUnrescued / clearUnrescued / listLockedRows (#558)', () => {
+  it('marks a row unrescued and records which fix proved it', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 558);
+    expect(markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z')).toBe(true);
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
+      .get() as { unrescued_at: string; unrescued_issue: number };
+    expect(row.unrescued_at).toBe('2026-09-02T10:00:00Z');
+    expect(row.unrescued_issue).toBe(558);
+  });
+
+  it('is idempotent: a second mark neither overwrites the timestamp nor reports a change', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 558);
+    markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
+    expect(markUnrescued(db, 1, 999, '2026-09-03T10:00:00Z')).toBe(false);
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
+      .get() as { unrescued_at: string; unrescued_issue: number };
+    expect(row.unrescued_at).toBe('2026-09-02T10:00:00Z');
+    expect(row.unrescued_issue).toBe(558);
+  });
+
+  it('never writes retired_at', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 558);
+    markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
+    const row = db.prepare('SELECT retired_at FROM enrich_failures WHERE beer_id = 1')
+      .get() as { retired_at: string | null };
+    expect(row.retired_at).toBeNull();
+  });
+
+  it('listLockedRows reports the marker so the unlock job can act on it', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 558);
+    orphanWithIssue(db, 2, 558);
+    markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
+    const rows = listLockedRows(db).sort((a, b) => a.beer_id - b.beer_id);
+    expect(rows.map((r) => [r.beer_id, r.unrescued])).toEqual([[1, true], [2, false]]);
+  });
+
+  it('clearUnrescued removes the marker without touching the rest of the row', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 558);
+    markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
+    clearUnrescued(db, 1);
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue, review_class FROM enrich_failures WHERE beer_id = 1')
+      .get() as { unrescued_at: string | null; unrescued_issue: number | null; review_class: string };
+    expect(row.unrescued_at).toBeNull();
+    expect(row.unrescued_issue).toBeNull();
+    expect(row.review_class).toBe('parser_bug');
   });
 });
 

@@ -225,7 +225,7 @@ describe('recordLookupTransient', () => {
 import { upsertPub } from './pubs';
 import { createSnapshot, insertTaps } from './snapshots';
 import { upsertMatch } from './match_links';
-import { recordEnrichFailure, setEnrichFailureReview } from './enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview, markUnrescued } from './enrich_failures';
 import { listLookupCandidates, listRelayLookupCandidates } from './beers';
 
 describe('listLookupCandidates', () => {
@@ -1182,6 +1182,23 @@ describe('fillOrphanFacts', () => {
   });
 });
 
+// A locked orphan (#421): has a failure row, a review_class that keeps it locked, and an
+// owning issue. Asserts the seed write actually landed — a silently no-op'd seed would
+// produce a green test that proves nothing (see seedLocked in unlock-fixed-orphans.test.ts).
+function orphanWithIssue(db: ReturnType<typeof openDb>, beerId: number, issue: number): void {
+  upsertBeer(db, {
+    untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
+    normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
+  });
+  recordEnrichFailure(db, {
+    beer_id: beerId, brewery: `b${beerId}`, name: `n${beerId}`,
+    search_url: 'u', source_url: '', outcome: 'not_found', candidates_count: 0,
+    candidates_summary: '', at: '2026-09-01T00:00:00Z',
+  });
+  const written = setEnrichFailureReview(db, beerId, 'parser_bug', 'note', '2026-09-01T00:00:00Z', issue);
+  expect(written).toBe('written');
+}
+
 describe('rearmLookup', () => {
   test('clears the backoff so an orphan is retried at once', () => {
     const db = fresh();
@@ -1192,6 +1209,17 @@ describe('rearmLookup', () => {
     const row = getBeerRow(db, id)!;
     expect(row.untappd_lookup_at).toBeNull();
     expect(row.untappd_lookup_count).toBe(0);
+  });
+
+  it('clears the unrescued marker — an explicit re-arm is new evidence (#558)', () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 558);
+    markUnrescued(db, 1, 558, '2026-09-02T10:00:00Z');
+    rearmLookup(db, 1);
+    const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
+      .get() as { unrescued_at: string | null; unrescued_issue: number | null };
+    expect(row.unrescued_at).toBeNull();
+    expect(row.unrescued_issue).toBeNull();
   });
 });
 

@@ -505,9 +505,10 @@ describe('schema migrations', () => {
         .get(notABeer) as { r: string | null };
       expect(kept.r).not.toBeNull();
 
-      // Updated 25 -> 26 by #379: this rewind starts from v23 and runs migrate() to
-      // completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(26);
+      // Updated 25 -> 26 by #379, 26 -> 27 by #558: this rewind starts from v23 and runs
+      // migrate() to completion, so the reachable head moves whenever a later migration
+      // is added.
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(27);
     });
   });
 
@@ -553,9 +554,10 @@ describe('schema migrations', () => {
       const db = openDb(':memory:');
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      // Updated 25 -> 26 by #379: a fresh DB's reachable head moves whenever a
-      // later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(26);
+      // Updated 25 -> 26 by #379, 26 -> 27 by #558: a fresh DB's reachable head moves
+      // whenever a later migration is added; this still proves v25 wasn't lost along
+      // the way.
+      expect(version.v).toBe(27);
     });
   });
 });

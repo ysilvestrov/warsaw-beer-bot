@@ -418,6 +418,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE user_profiles ADD COLUMN announce_opt_out INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 27,
+    // #558: третій термінальний стан. `retired_at` стверджує «фікс розв'язав проблему» і
+    // стережеться `sealRetiredFalsified`; тут твердження інше — «фікс приїхав, і реплей
+    // довів, що ЦЕЙ рядок він не рятує». Окремі колонки саме тому, що змішування зробило б
+    // сторожа сліпим. `unrescued_issue` — машиночитана причина (#508 виставив рахунок за
+    // 250 рядків із причиною у вільному тексті). Пулів це не змінює: рядок лишається
+    // в пулі зі своїм бекофом, ми відбираємо лише безкоштовне обнулення лічильника.
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN unrescued_at TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN unrescued_issue INTEGER;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
