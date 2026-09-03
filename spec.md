@@ -1648,6 +1648,12 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   Nominatim — напряму. Circuit breaker тригериться лише після
   `UNTAPPD_BLOCK_THRESHOLD` (default 3) **послідовних** блоків (rotation: один 403
   = один флагнутий exit-IP); будь-який успіх скидає лічильник.
+- **`fetch` — з пакета `undici`, не глобальний (#581).** `createHttp` і
+  `createAlgoliaSearch` беруть `fetch` з npm-пакета `undici`, а не з глобального
+  Node `fetch`: глобальний `fetch` — це вбудована копія undici з іншим контрактом
+  хендлерів, і переданий їй `dispatcher` (з npm-`ProxyAgent`) кидає
+  `InvalidArgumentError: invalid onRequestStart method`. Два HTTP-стеки в одному
+  запиті — і є цей дефект; тримати `fetch` і `ProxyAgent` з одного пакета обов'язково.
 - **Стратегія ротації exit-IP (#222).** `p.webshare.io` не ротує в межах однієї
   HTTPS CONNECT тунелі, тому довготривалий `ProxyAgent` фіксує 1–2 IP на весь
   процес. Виправлення: безкукова клієнт (`refresh-tap-ratings`, search-key fetch)
@@ -1658,6 +1664,10 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   того, як блок досягне circuit breaker. Метрика `rotated` в результаті джоба
   рахує блоки, поглинуті ротацією; `blocked` — лише ті, що пережили ретрай і
   дійшли до breaker'а.
+- **Гейтований smoke справжнього Webshare (#581).** `http.webshare-smoke.test.ts`
+  проганяє CONNECT-тунель крізь реальний Webshare на реальних креденшлах; вмикається
+  двома змінними — `UNTAPPD_PROXY_SMOKE=1` і `WEBSHARE_PROXY` — інакше skip і в CI
+  не запускається ніколи.
 - Snapshot-модель замість перезапису — джерела не опитуються частіше, ніж треба.
 
 ### 5.9 Інфраструктура / деплой
