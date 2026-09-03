@@ -36,6 +36,14 @@ describe('addCoverage', () => {
     expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 300 }]);
   });
 
+  // Той самий стик, але в зворотному порядку вставки: тут працює нижня межа пошуку
+  // (`from - 1`), а не верхня. Без цього тесту рядок `const low = from - 1` не має доказу.
+  it('merges ranges separated by no integer at all, lower range added first', () => {
+    addCoverage(db, 1, 100, 200);
+    addCoverage(db, 1, 201, 300);
+    expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 300 }]);
+  });
+
   // Розрив у ОДИН id — це чекін, якого ми не бачили. Зливати не можна.
   it('does not merge across a one-id gap', () => {
     addCoverage(db, 1, 202, 300);
