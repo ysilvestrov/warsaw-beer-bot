@@ -101,4 +101,47 @@ describe('parseAdjudicateArgs', () => {
   it('rejects --apply with no path', () => {
     expect(parseAdjudicateArgs(['--apply']).mode).toBe('usage');
   });
+
+  // #576 (рев'ю PR #580, P2): `--apply` ковтав наступний токен яким би він не був, тож
+  // `--apply --force` ставав шляхом до файлу з іменем `--force`.
+  it('rejects a flag standing where --apply expects a file path', () => {
+    const out = parseAdjudicateArgs(['--apply', '--force']);
+    expect(out.mode).toBe('usage');
+    expect(out.mode === 'usage' && out.reason).toContain('--apply');
+  });
+
+  it('rejects a flag standing where --issue expects a number', () => {
+    expect(parseAdjudicateArgs(['--issue', '--limit', '2']).mode).toBe('usage');
+  });
+
+  // #576 (рев'ю PR #580, P2): режимні прапорці з чужого режиму мовчки ігнорувались.
+  it('rejects --limit in apply mode instead of ignoring it', () => {
+    const out = parseAdjudicateArgs(['--apply', '/tmp/x.json', '--limit', '2']);
+    expect(out.mode).toBe('usage');
+    expect(out.mode === 'usage' && out.reason).toContain('--limit');
+  });
+
+  it('rejects --force in probe mode instead of ignoring it', () => {
+    const out = parseAdjudicateArgs(['--issue', '558', '--force']);
+    expect(out.mode).toBe('usage');
+    expect(out.mode === 'usage' && out.reason).toContain('--force');
+  });
+
+  // #576 (рев'ю PR #580, P2): зайвий позиційний токен ігнорувався — а це рівно та описка,
+  // через яку ручна команда працює над не тим файлом прогону.
+  it('rejects a stray positional argument', () => {
+    const out = parseAdjudicateArgs(['--issue', '558', 'typo']);
+    expect(out.mode).toBe('usage');
+    expect(out.mode === 'usage' && out.reason).toContain('typo');
+  });
+
+  it('rejects a second file path instead of silently applying the first', () => {
+    const out = parseAdjudicateArgs(['--apply', '/tmp/a.json', '/tmp/b.json']);
+    expect(out.mode).toBe('usage');
+    expect(out.mode === 'usage' && out.reason).toContain('/tmp/b.json');
+  });
+
+  it('rejects the same flag given twice rather than silently taking the first', () => {
+    expect(parseAdjudicateArgs(['--issue', '558', '--issue', '559']).mode).toBe('usage');
+  });
 });
