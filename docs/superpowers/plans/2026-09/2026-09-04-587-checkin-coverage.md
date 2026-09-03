@@ -351,7 +351,22 @@ Expected: усе зелене.
 Тимчасово заміни в `addCoverage` рядок `if (r.from_id < lo) lo = r.from_id;` на порожній —
 тест `collapses several ranges when one bridges them` має впасти. Поверни рядок.
 Тимчасово заміни `const low = from - 1;` на `const low = from;` — має впасти
-`merges ranges separated by no integer at all`. Поверни.
+`merges ranges separated by no integer at all, lower range added first`. Поверни.
+
+**Увага, дефект цього плану, виявлений під час виконання:** спершу тут стояв тест
+`merges ranges separated by no integer at all`, і він цю мутацію НЕ ловить — він вставляє
+вищий діапазон першим, тож працює лише верхня межа (`to + 1`). Нижню межу доводить лише
+дзеркальний порядок вставки, тому в Крок 1 доданий окремий тест:
+
+```ts
+  // Той самий стик, але в зворотному порядку вставки: тут працює нижня межа пошуку
+  // (`from - 1`), а не верхня. Без цього тесту рядок `const low = from - 1` не має доказу.
+  it('merges ranges separated by no integer at all, lower range added first', () => {
+    addCoverage(db, 1, 100, 200);
+    addCoverage(db, 1, 201, 300);
+    expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 300 }]);
+  });
+```
 
 - [ ] **Крок 9: коміт**
 
