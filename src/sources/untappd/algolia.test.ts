@@ -70,6 +70,21 @@ describe('createAlgoliaSearch (direct)', () => {
     expect(JSON.parse(calls[0].init.body as string)).toEqual({ query: 'hazy ipa', hitsPerPage: 5 });
   });
 
+  // #581 (AI-рев'ю PR #585): база зі слешем на кінці давала `//1/indexes/…`. Сервер, у якого
+  // роут на `/1/indexes/…`, такого шляху не впізнає — і тест перевіряв би не те, що думає.
+  it('does not double the slash when endpointBase ends with one', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: string) => {
+      calls.push(url);
+      return jsonRes({ hits: [], nbHits: 0 });
+    }) as unknown as typeof fetch;
+    const s = createAlgoliaSearch({
+      appId: 'APP', searchKey: 'KEY', fetchImpl, endpointBase: 'http://127.0.0.1:3000/',
+    });
+    await s.search('x');
+    expect(calls[0]).toBe('http://127.0.0.1:3000/1/indexes/beer/query');
+  });
+
   it('returns [] for a genuine empty result (200, nbHits 0)', async () => {
     const fetchImpl = (async () => jsonRes({ hits: [], nbHits: 0 })) as unknown as typeof fetch;
     const s = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl });

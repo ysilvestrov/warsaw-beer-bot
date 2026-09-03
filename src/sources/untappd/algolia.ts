@@ -117,8 +117,16 @@ export interface AlgoliaSearchOpts {
   endpointBase?: string;
 }
 
+// #581 (AI-рев'ю PR #585): база могла приїхати зі слешем на кінці, і конкатенація дала б
+// `//1/indexes/…`. Сервер, у якого роут зареєстрований на `/1/indexes/…`, такого шляху просто
+// не впізнає — і відповідь була б не та, яку тест думає, що перевіряє. Заразом це єдине місце,
+// де живе дефолтний хост: раніше він був виписаний двічі й міг розійтися сам із собою.
+function baseUrl(appId: string, base?: string): string {
+  return (base ?? `https://${appId}-dsn.algolia.net`).replace(/\/+$/, '');
+}
+
 function endpoint(appId: string, base?: string): string {
-  return `${base ?? `https://${appId}-dsn.algolia.net`}/1/indexes/beer/query`;
+  return `${baseUrl(appId, base)}/1/indexes/beer/query`;
 }
 
 export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
@@ -163,8 +171,7 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
       }),
     };
     if (useProxy && proxy) init.dispatcher = proxy;
-    const base = opts.endpointBase ?? `https://${keys.appId}-dsn.algolia.net`;
-    const url = `${base}/1/indexes/*/objects`;
+    const url = `${baseUrl(keys.appId, opts.endpointBase)}/1/indexes/*/objects`;
     const res = await f(url, init);
     lastAt = Date.now();
     if (!res.ok) throw new HttpError(res.status, url);

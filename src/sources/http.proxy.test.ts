@@ -14,10 +14,12 @@ import { createRotatingDispatcher } from './proxy-rotator';
 // `fetchImpl`. Виконується справжній `fetch` зі справжнім `ProxyAgent`, тобто рівно та пара,
 // яку бамп undici ^7→^8 і розсинхронізував. Усе на 127.0.0.1: ні Webshare, ні мережі назовні.
 
-interface Origin { url: string; close(): Promise<void>; }
+interface Origin { url: string; lastPath(): string | null; close(): Promise<void>; }
 
 async function startOrigin(body: string): Promise<Origin> {
-  const server = http.createServer((_req, res) => {
+  let lastPath: string | null = null;
+  const server = http.createServer((req, res) => {
+    lastPath = req.url ?? null;
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end(body);
   });
@@ -25,6 +27,7 @@ async function startOrigin(body: string): Promise<Origin> {
   const { port } = server.address() as AddressInfo;
   return {
     url: `http://127.0.0.1:${port}/`,
+    lastPath: () => lastPath,
     close: () => new Promise<void>((r) => { server.close(() => r()); }),
   };
 }
@@ -38,7 +41,9 @@ async function startProxy(): Promise<Proxy> {
     seen += 1;
     const target = new URL(req.url as string);
     const up = http.request(
-      { host: target.hostname, port: target.port, path: target.pathname, method: req.method },
+      // #581 (AI-рев'ю PR #585): `search` обов'язковий — інакше проксі мовчки з'їдає
+      // query-рядок, і origin отримує не той запит, який клієнт відправив.
+      { host: target.hostname, port: target.port, path: target.pathname + target.search, method: req.method },
       (ur) => { res.writeHead(ur.statusCode ?? 502, ur.headers); ur.pipe(res); },
     );
     up.on('error', () => { res.writeHead(502); res.end(); });
@@ -59,11 +64,15 @@ test('createHttp reaches the origin THROUGH the proxy with no fetch stand-in', a
   const rotator = createRotatingDispatcher({ proxyUrl: proxy.url, mode: 'per-request' });
   try {
     const client = createHttp({ userAgent: 'wbb-proxy-test', minGapMs: 0, rotator });
-    const body = await client.get(origin.url);
+    const body = await client.get(`${origin.url}?format=json`);
     expect(body).toBe('HELLO-ORIGIN');
     // Друге твердження несе не менше за перше: без нього тест був би однаково зеленим,
     // якби запит пішов ПОВЗ проксі напряму в origin.
     expect(proxy.seen()).toBe(1);
+    // Третє — що крізь проксі доїхав саме той запит, а не обрізаний до шляху. Наші реальні
+    // цілі (Algolia, ipify) query-рядок несуть, тож мовчазна втрата `search` була б дефектом,
+    // який видно лише в проді.
+    expect(origin.lastPath()).toBe('/?format=json');
   } finally {
     rotator.close();
     await origin.close();
@@ -87,7 +96,9 @@ function selfSignedCert(): { key: string; cert: string; dir: string } {
 
 async function startTlsOrigin(body: string): Promise<Origin> {
   const { key, cert, dir } = selfSignedCert();
-  const server = https.createServer({ key, cert }, (_req, res) => {
+  let lastPath: string | null = null;
+  const server = https.createServer({ key, cert }, (req, res) => {
+    lastPath = req.url ?? null;
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end(body);
   });
@@ -95,6 +106,7 @@ async function startTlsOrigin(body: string): Promise<Origin> {
   const { port } = server.address() as AddressInfo;
   return {
     url: `https://127.0.0.1:${port}/`,
+    lastPath: () => lastPath,
     // Закриття origin забирає з собою і теку з приватним ключем — інакше вона
     // лишається в tmpdir() після кожного прогону і накопичується без кінця.
     // Безумовно: спрацьовує з того самого finally, що й при впалому тесті.
