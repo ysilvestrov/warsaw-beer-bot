@@ -1,5 +1,6 @@
-import { ProxyAgent } from 'undici';
+import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { HttpError, normalizeProxyUrl } from '../http';
+import type { FetchInitLike, FetchLike } from '../fetch-like';
 import type { BeerSearch, SearchResult, HydratedBeer } from './search';
 
 interface AlgoliaHit {
@@ -107,18 +108,22 @@ export function extractAlgoliaKeys(html: string): AlgoliaKeys | null {
 export interface AlgoliaSearchOpts {
   appId: string;
   searchKey: string;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchLike;
   proxyUrl?: string;                                 // Webshare fallback (Task 4)
   refreshKeys?: () => Promise<AlgoliaKeys | null>;   // Task 4
   minGapMs?: number;
+  /** #581: база ендпойнта. Дефолт — реальний Algolia; підмінюється лише тестом, щоб
+   *  проксований шлях можна було перевірити на 127.0.0.1, без зовнішньої мережі. */
+  endpointBase?: string;
 }
 
-function endpoint(appId: string): string {
-  return `https://${appId}-dsn.algolia.net/1/indexes/beer/query`;
+function endpoint(appId: string, base?: string): string {
+  return `${base ?? `https://${appId}-dsn.algolia.net`}/1/indexes/beer/query`;
 }
 
 export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
-  const f = opts.fetchImpl ?? fetch;
+  // #581: глобальний `fetch` не приймає `dispatcher` з npm-undici.
+  const f = opts.fetchImpl ?? undiciFetch;
   const gap = opts.minGapMs ?? 250;
   const proxy = opts.proxyUrl ? new ProxyAgent(normalizeProxyUrl(opts.proxyUrl)) : undefined;
   let keys: AlgoliaKeys = { appId: opts.appId, searchKey: opts.searchKey };
@@ -127,7 +132,7 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
   async function rawSearch(query: string, useProxy: boolean): Promise<SearchResult[]> {
     const wait = Math.max(0, lastAt + gap - Date.now());
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const init: RequestInit & { dispatcher?: unknown } = {
+    const init: FetchInitLike = {
       method: 'POST',
       headers: {
         'X-Algolia-Application-Id': keys.appId,
@@ -137,16 +142,16 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
       body: JSON.stringify({ query, hitsPerPage: ALGOLIA_HITS_PER_PAGE }),
     };
     if (useProxy && proxy) init.dispatcher = proxy;
-    const res = await f(endpoint(keys.appId), init);
+    const res = await f(endpoint(keys.appId, opts.endpointBase), init);
     lastAt = Date.now();
-    if (!res.ok) throw new HttpError(res.status, endpoint(keys.appId));
+    if (!res.ok) throw new HttpError(res.status, endpoint(keys.appId, opts.endpointBase));
     return parseAlgoliaResponse((await res.json()) as AlgoliaResponse);
   }
 
   async function rawHydrate(bids: number[], useProxy: boolean): Promise<Map<number, HydratedBeer>> {
     const wait = Math.max(0, lastAt + gap - Date.now());
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    const init: RequestInit & { dispatcher?: unknown } = {
+    const init: FetchInitLike = {
       method: 'POST',
       headers: {
         'X-Algolia-Application-Id': keys.appId,
@@ -158,7 +163,8 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
       }),
     };
     if (useProxy && proxy) init.dispatcher = proxy;
-    const url = `https://${keys.appId}-dsn.algolia.net/1/indexes/*/objects`;
+    const base = opts.endpointBase ?? `https://${keys.appId}-dsn.algolia.net`;
+    const url = `${base}/1/indexes/*/objects`;
     const res = await f(url, init);
     lastAt = Date.now();
     if (!res.ok) throw new HttpError(res.status, url);
