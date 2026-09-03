@@ -67,6 +67,16 @@ export function latestCheckinAt(db: DB, telegramId: number): string | null {
   return row.m;
 }
 
+// #587: межа, нижче якої порожня відповідь фіду законна. Вище неї порожньо бути не може —
+// принаймні цей наш власний чекін мав би повернутися, — тож порожнеча там доводить зламану
+// сесію, а не дно стрічки.
+export function oldestCheckinId(db: DB, telegramId: number): number | null {
+  const row = db
+    .prepare('SELECT MIN(CAST(checkin_id AS INTEGER)) AS m FROM checkins WHERE telegram_id = ?')
+    .get(telegramId) as { m: number | null };
+  return row.m;
+}
+
 export function countDistinctBeers(db: DB, telegramId: number): number {
   const row = db
     .prepare('SELECT COUNT(DISTINCT beer_id) AS n FROM checkins WHERE telegram_id = ? AND beer_id IS NOT NULL')

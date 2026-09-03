@@ -444,6 +444,37 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE beers ADD COLUMN rearm_count INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 29,
+    // #587: скаляр `deepest_max_id` брався як мінімум із двох обходів, не суцільних між
+    // собою, і цим СТВЕРДЖУВАВ покриття, якого ніхто не встановлював — 41 чекін лишився
+    // недосяжним обома фазами. Тут покриття стає тим, що сторінка фіду доводить сама:
+    // діапазоном [найстарший_на_сторінці, курсор]. Об'єднання таких діапазонів збрехати
+    // не може, а обірваний прогін просто перестає їх додавати.
+    //
+    // Сидуємо лише тих, кому число це підтверджує: `synced >= profile_total` — свідчення
+    // для запису діапазону, а не гейт для чогось іншого. Межі беремо рівно MIN/MAX наявних
+    // чекінів: сид не додає від себе нічого ні згори, ні знизу.
+    sql: `
+      CREATE TABLE IF NOT EXISTS checkin_coverage (
+        telegram_id INTEGER NOT NULL
+                      REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+        from_id     INTEGER NOT NULL,
+        to_id       INTEGER NOT NULL,
+        PRIMARY KEY (telegram_id, from_id)
+      );
+
+      INSERT INTO checkin_coverage (telegram_id, from_id, to_id)
+      SELECT s.telegram_id,
+             MIN(CAST(c.checkin_id AS INTEGER)),
+             MAX(CAST(c.checkin_id AS INTEGER))
+        FROM checkin_sync_state s
+        JOIN checkins c ON c.telegram_id = s.telegram_id
+       WHERE s.profile_total IS NOT NULL
+       GROUP BY s.telegram_id
+      HAVING COUNT(*) >= s.profile_total;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
