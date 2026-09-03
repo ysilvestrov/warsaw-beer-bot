@@ -431,6 +431,19 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN unrescued_issue INTEGER;
     `,
   },
+  {
+    version: 28,
+    // #576 (рев'ю PR #580): ре-арм спостережуваний лише за тим, що він обнуляє
+    // `untappd_lookup_at`/`untappd_lookup_count`. Але рядок, щойно ре-армлений і ще не
+    // перепробуваний, уже має нулі — і другий ре-арм по ньому не змінює в БД НІЧОГО. Тоді
+    // адюдикація не бачить, що між пробою і застосуванням рядку дали новий шанс, і мовчки
+    // його скасовує. Монотонний лічильник робить сам ФАКТ ре-арму спостережуваним незалежно
+    // від того, що він там обнулив. Лічильник, а не таймстамп: два ре-арми в ту саму
+    // мілісекунду таймстамп не розрізнив би, а це рівно той випадок, який ми ловимо.
+    sql: `
+      ALTER TABLE beers ADD COLUMN rearm_count INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

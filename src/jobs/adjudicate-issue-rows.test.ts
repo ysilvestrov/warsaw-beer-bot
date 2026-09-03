@@ -107,7 +107,7 @@ describe('probeIssueRows', () => {
         probed_at: '2026-09-02T10:00:00.000Z',
         verdicts: [{
           beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued',
-          lookup_count: 1, lookup_at: '2026-08-30T02:11:07.000Z',
+          lookup_count: 1, lookup_at: '2026-08-30T02:11:07.000Z', rearm_count: 0
         }],
       },
     });

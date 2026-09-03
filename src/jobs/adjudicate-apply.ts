@@ -29,6 +29,9 @@ export function parseVerdictFile(raw: unknown): VerdictFile {
     if (v.lookup_at !== null && typeof v.lookup_at !== 'string') {
       throw new Error(`verdict file: verdict ${v.beer_id} has a non-string lookup_at`);
     }
+    if (!Number.isInteger(v.rearm_count)) {
+      throw new Error(`verdict file: verdict ${v.beer_id} is missing the probed rearm_count`);
+    }
   }
   return f;
 }
@@ -51,7 +54,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
   const report: ApplyReport = { marked: 0, alreadyMarked: 0, skipped: [] };
   const read = db.prepare(
     `SELECT b.brewery, b.name, b.untappd_id, b.untappd_lookup_at, b.untappd_lookup_count,
-            ef.issue_number, ef.retired_at
+            b.rearm_count, ef.issue_number, ef.retired_at
        FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE ef.beer_id = ?`,
   );
@@ -61,7 +64,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (v.verdict !== 'unrescued') continue;
       const row = read.get(v.beer_id) as {
         brewery: string; name: string; untappd_id: number | null;
-        untappd_lookup_at: string | null; untappd_lookup_count: number;
+        untappd_lookup_at: string | null; untappd_lookup_count: number; rearm_count: number;
         issue_number: number | null; retired_at: string | null;
       } | undefined;
       const skip = (reason: SkipReason) => report.skipped.push({ beer_id: v.beer_id, reason });
@@ -76,7 +79,12 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       // цей рядок відомо, і писати за нею термінальний маркер не можна. Пропускаємо —
       // оператор перепробує. Вікно свіжості файлу цього не ловить: воно судить прогін
       // цілком, а зрушити може окремий рядок усередині свіжого файлу.
-      if (row.untappd_lookup_count !== v.lookup_count || row.untappd_lookup_at !== v.lookup_at) {
+      // `rearm_count` тут не надлишковий: ре-арм по рядку, який УЖЕ мав нулі в лукап-полях,
+      // не змінює в них нічого, тож без лічильника він невидимий — а це саме той рядок, над
+      // яким оператор зараз працює. Лічильник ловить факт, лукап-поля ловлять роботу крона.
+      if (row.untappd_lookup_count !== v.lookup_count
+        || row.untappd_lookup_at !== v.lookup_at
+        || row.rearm_count !== v.rearm_count) {
         skip('lookup_moved'); continue;
       }
       if (markUnrescued(db, v.beer_id, file.issue, atIso)) report.marked += 1;
