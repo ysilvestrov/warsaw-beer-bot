@@ -1,5 +1,7 @@
 import PQueue from 'p-queue';
+import { fetch as undiciFetch } from 'undici';
 import type { RotatingDispatcher } from './proxy-rotator';
+import type { FetchInitLike, FetchLike, FetchResponseLike } from './fetch-like';
 
 export { normalizeProxyUrl } from './proxy-rotator';
 
@@ -26,7 +28,7 @@ export interface Http {
 export interface HttpOpts {
   userAgent: string;
   minGapMs?: number;
-  fetchImpl?: typeof fetch;
+  fetchImpl?: FetchLike;
   cookie?: string;
   redirect?: RequestRedirect;
   rotator?: RotatingDispatcher;
@@ -37,7 +39,8 @@ export interface HttpOpts {
 
 export function createHttp(opts: HttpOpts): Http {
   const queue = new PQueue({ concurrency: 1 });
-  const f = opts.fetchImpl ?? fetch;
+  // #581: саме тут була поломка — глобальний `fetch` не приймає `dispatcher` з npm-undici.
+  const f = opts.fetchImpl ?? undiciFetch;
   const gap = opts.minGapMs ?? 2000;
   let lastAt = 0;
 
@@ -45,10 +48,10 @@ export function createHttp(opts: HttpOpts): Http {
     | { kind: 'ok'; body: string }
     | { kind: 'block'; reason: string; status: number };
 
-  async function doFetch(url: string): Promise<Response> {
+  async function doFetch(url: string): Promise<FetchResponseLike> {
     const headers: Record<string, string> = { 'User-Agent': opts.userAgent };
     if (opts.cookie) headers['Cookie'] = `untappd_user_v3_e=${opts.cookie}`;
-    const fetchOpts: RequestInit & { dispatcher?: unknown } = { headers };
+    const fetchOpts: FetchInitLike = { headers };
     if (opts.redirect) fetchOpts.redirect = opts.redirect;
     const dispatcher = opts.rotator?.current();
     if (dispatcher) fetchOpts.dispatcher = dispatcher;
@@ -57,7 +60,7 @@ export function createHttp(opts: HttpOpts): Http {
     return res;
   }
 
-  async function classify(url: string, res: Response): Promise<Outcome> {
+  async function classify(url: string, res: FetchResponseLike): Promise<Outcome> {
     // With redirect:'manual', any 3xx means the session cookie is invalid — an
     // auth problem, never an IP block (so it must not trigger rotation).
     if (res.status >= 300 && res.status < 400) {
