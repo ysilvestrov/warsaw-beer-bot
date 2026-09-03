@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt, countDistinctBeers } from './checkins';
+import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt, countDistinctBeers, oldestCheckinId } from './checkins';
 import { upsertBeer } from './beers';
 
 function setup() {
@@ -120,6 +120,21 @@ describe('latestCheckinAt', () => {
     mergeCheckin(db, { checkin_id: 'rfc-late', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: 'Tue, 05 May 2026 21:40:37 +0000', venue: null });
     mergeCheckin(db, { checkin_id: 'rfc-mid', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: 'Wed, 29 Apr 2026 18:53:59 +0000', venue: null });
     expect(latestCheckinAt(db, 1)).toBe('2026-05-05 21:40:37');
+  });
+});
+
+describe('oldestCheckinId', () => {
+  it('reports the oldest checkin id numerically, not lexicographically', () => {
+    const db = openDb(':memory:'); migrate(db);
+    // '900' > '1000' як рядки — саме тому потрібен CAST.
+    mergeCheckin(db, { checkin_id: '900', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-01 00:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: '1000', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-02 00:00:00', venue: null });
+    expect(oldestCheckinId(db, 1)).toBe(900);
+  });
+
+  it('returns null when the user has no checkins', () => {
+    const db = openDb(':memory:'); migrate(db);
+    expect(oldestCheckinId(db, 999)).toBeNull();
   });
 });
 
