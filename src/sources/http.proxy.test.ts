@@ -1,5 +1,12 @@
 import http from 'node:http';
+import https from 'node:https';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ProxyAgent } from 'undici';
 import { createHttp } from './http';
 import { createRotatingDispatcher } from './proxy-rotator';
 
@@ -56,6 +63,80 @@ test('createHttp reaches the origin THROUGH the proxy with no fetch stand-in', a
     expect(body).toBe('HELLO-ORIGIN');
     // Друге твердження несе не менше за перше: без нього тест був би однаково зеленим,
     // якби запит пішов ПОВЗ проксі напряму в origin.
+    expect(proxy.seen()).toBe(1);
+  } finally {
+    rotator.close();
+    await origin.close();
+    await proxy.close();
+  }
+});
+
+// Сертифікат генерується тут, а не комітиться: приватний ключ у репо — це вічна сирена
+// секрет-сканера, а сертифікат із датою — тест, який одного дня почне падати сам по собі.
+// Перевірка сертифіката в клієнті все одно вимкнена, тож його термін ролі не грає.
+function selfSignedCert(): { key: string; cert: string } {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-proxy-tls-'));
+  const keyPath = join(dir, 'k.pem');
+  const certPath = join(dir, 'c.pem');
+  execFileSync('openssl', [
+    'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+    '-keyout', keyPath, '-out', certPath, '-days', '1', '-subj', '/CN=localhost',
+  ], { stdio: 'ignore' });
+  return { key: readFileSync(keyPath, 'utf8'), cert: readFileSync(certPath, 'utf8') };
+}
+
+async function startTlsOrigin(body: string): Promise<Origin> {
+  const { key, cert } = selfSignedCert();
+  const server = https.createServer({ key, cert }, (_req, res) => {
+    res.writeHead(200, { 'content-type': 'text/plain' });
+    res.end(body);
+  });
+  await new Promise<void>((r) => { server.listen(0, '127.0.0.1', () => r()); });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `https://127.0.0.1:${port}/`,
+    close: () => new Promise<void>((r) => { server.close(() => r()); }),
+  };
+}
+
+/** Проксі, що вміє CONNECT — саме той шлях, яким ходить реальний https-трафік. */
+async function startConnectProxy(): Promise<Proxy> {
+  let seen = 0;
+  const server = http.createServer();
+  server.on('connect', (req, clientSocket, head) => {
+    seen += 1;
+    const [host, port] = (req.url as string).split(':');
+    const up = net.connect(Number(port), host, () => {
+      clientSocket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head?.length) up.write(head);
+      up.pipe(clientSocket);
+      clientSocket.pipe(up);
+    });
+    up.on('error', () => clientSocket.destroy());
+    clientSocket.on('error', () => up.destroy());
+  });
+  await new Promise<void>((r) => { server.listen(0, '127.0.0.1', () => r()); });
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    seen: () => seen,
+    close: () => new Promise<void>((r) => { server.close(() => r()); }),
+  };
+}
+
+test('createHttp tunnels https through the proxy with CONNECT', async () => {
+  const origin = await startTlsOrigin('HELLO-TLS');
+  const proxy = await startConnectProxy();
+  const rotator = createRotatingDispatcher({
+    proxyUrl: proxy.url,
+    mode: 'per-request',
+    // Клас ProxyAgent і `fetch` тут справжні; послаблена ЛИШЕ перевірка сертифіката,
+    // бо origin самопідписаний. Шов `agentFactory` уже існує в проді (#222).
+    agentFactory: (url) => new ProxyAgent({ uri: url, requestTls: { rejectUnauthorized: false } }),
+  });
+  try {
+    const client = createHttp({ userAgent: 'wbb-proxy-test', minGapMs: 0, rotator });
+    expect(await client.get(origin.url)).toBe('HELLO-TLS');
     expect(proxy.seen()).toBe(1);
   } finally {
     rotator.close();
