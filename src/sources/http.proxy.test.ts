@@ -3,7 +3,7 @@ import https from 'node:https';
 import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProxyAgent } from 'undici';
@@ -74,7 +74,7 @@ test('createHttp reaches the origin THROUGH the proxy with no fetch stand-in', a
 // Сертифікат генерується тут, а не комітиться: приватний ключ у репо — це вічна сирена
 // секрет-сканера, а сертифікат із датою — тест, який одного дня почне падати сам по собі.
 // Перевірка сертифіката в клієнті все одно вимкнена, тож його термін ролі не грає.
-function selfSignedCert(): { key: string; cert: string } {
+function selfSignedCert(): { key: string; cert: string; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), 'wbb-proxy-tls-'));
   const keyPath = join(dir, 'k.pem');
   const certPath = join(dir, 'c.pem');
@@ -82,11 +82,11 @@ function selfSignedCert(): { key: string; cert: string } {
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
     '-keyout', keyPath, '-out', certPath, '-days', '1', '-subj', '/CN=localhost',
   ], { stdio: 'ignore' });
-  return { key: readFileSync(keyPath, 'utf8'), cert: readFileSync(certPath, 'utf8') };
+  return { key: readFileSync(keyPath, 'utf8'), cert: readFileSync(certPath, 'utf8'), dir };
 }
 
 async function startTlsOrigin(body: string): Promise<Origin> {
-  const { key, cert } = selfSignedCert();
+  const { key, cert, dir } = selfSignedCert();
   const server = https.createServer({ key, cert }, (_req, res) => {
     res.writeHead(200, { 'content-type': 'text/plain' });
     res.end(body);
@@ -95,7 +95,15 @@ async function startTlsOrigin(body: string): Promise<Origin> {
   const { port } = server.address() as AddressInfo;
   return {
     url: `https://127.0.0.1:${port}/`,
-    close: () => new Promise<void>((r) => { server.close(() => r()); }),
+    // Закриття origin забирає з собою і теку з приватним ключем — інакше вона
+    // лишається в tmpdir() після кожного прогону і накопичується без кінця.
+    // Безумовно: спрацьовує з того самого finally, що й при впалому тесті.
+    close: () => new Promise<void>((r) => {
+      server.close(() => {
+        rmSync(dir, { recursive: true, force: true });
+        r();
+      });
+    }),
   };
 }
 
