@@ -1654,6 +1654,8 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   хендлерів, і переданий їй `dispatcher` (з npm-`ProxyAgent`) кидає
   `InvalidArgumentError: invalid onRequestStart method`. Два HTTP-стеки в одному
   запиті — і є цей дефект; тримати `fetch` і `ProxyAgent` з одного пакета обов'язково.
+  Стосується обох інстансів `createHttp` — і проксованого, і прямого (скрейп магазинів,
+  Nominatim): фабрика одна на двох.
 - **Стратегія ротації exit-IP (#222).** `p.webshare.io` не ротує в межах однієї
   HTTPS CONNECT тунелі, тому довготривалий `ProxyAgent` фіксує 1–2 IP на весь
   процес. Виправлення: безкукова клієнт (`refresh-tap-ratings`, search-key fetch)
