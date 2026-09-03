@@ -1,3 +1,18 @@
 {
-  "buildPath": "code"
+  "buildPath": "code",
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "broken-image",
+        "value": "*",
+        "files": [
+          "src/api/routes/checkins.test.ts"
+        ],
+        "createdAt": "2026-09-03T23:40:07.658Z",
+        "reason": "synthetic HTML fixture string testing the check-in feed parser's selectors, not rendered UI"
+      }
+    ]
+  }
 }

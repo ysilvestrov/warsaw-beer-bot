@@ -5,7 +5,7 @@ import type { ApiDeps, ApiEnv } from '../types';
 import { getProfile } from '../../storage/user_profiles';
 import { upsertBeer } from '../../storage/beers';
 import { mergeCheckin, countCheckins, checkinExists } from '../../storage/checkins';
-import { getSyncState, advanceSyncState } from '../../storage/checkin_sync_state';
+import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
 import { isBlockPage } from '../../sources/untappd/block';
@@ -80,7 +80,8 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         if (existed) alreadyKnown++;
         else merged++;
       }
-      advanceSyncState(deps.db, telegramId, page.nextMaxId, page.nextMaxId === null, page.profileTotal);
+      // #587: Task 3 переписує обробку курсора на покриття; тут лишень зберігаємо лік профілю.
+      recordProfileTotal(deps.db, telegramId, page.profileTotal);
     })();
 
     return c.json({
