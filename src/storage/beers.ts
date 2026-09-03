@@ -145,8 +145,13 @@ export function fillOrphanFacts(db: DB, beerId: number, facts: OrphanFacts): Fil
 // that just gave the row a fresh, untested shot. Every OTHER caller (an ops re-arm, or a
 // fresh ABV in ensureBeerRow) is unconditionally explicit new evidence, same as before.
 export function rearmLookup(db: DB, beerId: number): void {
-  db.prepare('UPDATE beers SET untappd_lookup_at = NULL, untappd_lookup_count = 0 WHERE id = ?')
-    .run(beerId);
+  // #576: `rearm_count` монотонний і НЕ обнуляється — саме він робить ре-арм спостережуваним
+  // тоді, коли обнулення нічого не змінює (рядок уже мав нулі). Див. міграцію 28.
+  db.prepare(
+    `UPDATE beers
+        SET untappd_lookup_at = NULL, untappd_lookup_count = 0, rearm_count = rearm_count + 1
+      WHERE id = ?`,
+  ).run(beerId);
   db.prepare(
     'UPDATE enrich_failures SET unrescued_at = NULL, unrescued_issue = NULL WHERE beer_id = ?',
   ).run(beerId);

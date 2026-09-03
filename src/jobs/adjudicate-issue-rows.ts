@@ -12,6 +12,10 @@ export interface Verdict {
   // скасовував його. Ці два поля — єдиний слід, який ре-арм лишає: він обнуляє обидва.
   lookup_count: number;
   lookup_at: string | null;
+  // #576 (рев'ю PR #580): двох полів вище мало. Рядок, щойно ре-армлений і ще не
+  // перепробуваний, має нулі в обох — і наступний ре-арм не змінює в них нічого. Монотонний
+  // лічильник ловить сам факт ре-арму, а не його побічний ефект.
+  rearm_count: number;
 }
 
 export interface VerdictFile {
@@ -111,7 +115,7 @@ export async function probeIssueRows(
   const rows = deps.db
     .prepare(
       `SELECT b.id, b.brewery, b.name, b.abv, b.untappd_lookup_at, b.untappd_lookup_count,
-              ef.unrescued_at
+              b.rearm_count, ef.unrescued_at
          FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.issue_number = ?
           AND ef.retired_at IS NULL
@@ -120,7 +124,7 @@ export async function probeIssueRows(
     )
     .all(issueNumber) as {
       id: number; brewery: string; name: string; abv: number | null;
-      untappd_lookup_at: string | null; untappd_lookup_count: number;
+      untappd_lookup_at: string | null; untappd_lookup_count: number; rearm_count: number;
       unrescued_at: string | null;
     }[];
 
@@ -131,6 +135,7 @@ export async function probeIssueRows(
     const base = {
       beer_id: row.id, brewery: row.brewery, name: row.name,
       lookup_count: row.untappd_lookup_count, lookup_at: row.untappd_lookup_at,
+      rearm_count: row.rearm_count,
     };
     // Уже вирішений рядок не варто пробувати вдруге — це чиста витрата квоти, а вердикт
     // від неї не зміниться (маркер знімає лише явний ре-арм).
