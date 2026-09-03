@@ -16,11 +16,15 @@ import { isCircuitOpen } from '../src/domain/untappd-circuit';
 loadOperatorEnv();
 
 async function main(argv: string[]): Promise<number> {
+  // #576 (рев'ю PR #580): друк usage не має залежати ні від оточення, ні від бази. Раніше
+  // `npm run adjudicate` без аргументів на машині без DATABASE_PATH падав у loadEnv/openDb —
+  // тобто рівно там, де людина шукала підказку, вона отримувала стек.
   const parsed = parseAdjudicateArgs(argv);
+  if (parsed.mode === 'usage') { console.error(parsed.reason); return 2; }
+
   const log = pino({ level: 'info' });
   const db = openDb(loadEnv().DATABASE_PATH);
   try {
-    if (parsed.mode === 'usage') { console.error(parsed.reason); return 2; }
 
     if (parsed.mode === 'apply') {
       const file = parseVerdictFile(JSON.parse(readFileSync(parsed.path, 'utf8')));

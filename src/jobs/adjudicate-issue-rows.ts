@@ -6,6 +6,12 @@ import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
 export interface Verdict {
   beer_id: number; brewery: string; name: string;
   verdict: 'unrescued' | 'rescued' | 'inconclusive' | 'already_marked';
+  // #576: стан лукап-бухгалтерії НА МОМЕНТ ПРОБИ. `rearmLookup` не чіпає жодного з полів,
+  // які звіряє `applyVerdicts` (brewery/name/issue_number/retired_at/untappd_id) — тобто
+  // ре-арм, що стався між пробою і застосуванням, був невидимий, і застарілий вердикт тихо
+  // скасовував його. Ці два поля — єдиний слід, який ре-арм лишає: він обнуляє обидва.
+  lookup_count: number;
+  lookup_at: string | null;
 }
 
 export interface VerdictFile {
@@ -104,7 +110,8 @@ export async function probeIssueRows(
 
   const rows = deps.db
     .prepare(
-      `SELECT b.id, b.brewery, b.name, b.abv, ef.unrescued_at
+      `SELECT b.id, b.brewery, b.name, b.abv, b.untappd_lookup_at, b.untappd_lookup_count,
+              ef.unrescued_at
          FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.issue_number = ?
           AND ef.retired_at IS NULL
@@ -112,14 +119,19 @@ export async function probeIssueRows(
         ORDER BY b.id`,
     )
     .all(issueNumber) as {
-      id: number; brewery: string; name: string; abv: number | null; unrescued_at: string | null;
+      id: number; brewery: string; name: string; abv: number | null;
+      untappd_lookup_at: string | null; untappd_lookup_count: number;
+      unrescued_at: string | null;
     }[];
 
   const selected = deps.limit === undefined ? rows : rows.slice(0, deps.limit);
   const verdicts: Verdict[] = [];
 
   for (const row of selected) {
-    const base = { beer_id: row.id, brewery: row.brewery, name: row.name };
+    const base = {
+      beer_id: row.id, brewery: row.brewery, name: row.name,
+      lookup_count: row.untappd_lookup_count, lookup_at: row.untappd_lookup_at,
+    };
     // Уже вирішений рядок не варто пробувати вдруге — це чиста витрата квоти, а вердикт
     // від неї не зміниться (маркер знімає лише явний ре-арм).
     if (row.unrescued_at !== null) {

@@ -21,11 +21,20 @@ export function parseVerdictFile(raw: unknown): VerdictFile {
     if (!VERDICTS.includes(v.verdict)) {
       throw new Error(`verdict file: verdict ${v.beer_id} has unknown verdict '${v.verdict}'`);
     }
+    // Без цих двох полів застосування не може побачити ре-арм, тож файл без них — не
+    // недостатній, а небезпечний: він виглядає застосовним і мовчки скасовує ре-арм.
+    if (!Number.isInteger(v.lookup_count)) {
+      throw new Error(`verdict file: verdict ${v.beer_id} is missing the probed lookup_count`);
+    }
+    if (v.lookup_at !== null && typeof v.lookup_at !== 'string') {
+      throw new Error(`verdict file: verdict ${v.beer_id} has a non-string lookup_at`);
+    }
   }
   return f;
 }
 
-export type SkipReason = 'not_orphan' | 'issue_moved' | 'retired' | 'input_changed' | 'missing';
+export type SkipReason =
+  | 'not_orphan' | 'issue_moved' | 'retired' | 'input_changed' | 'missing' | 'lookup_moved';
 
 export interface ApplyReport {
   marked: number;
@@ -41,7 +50,8 @@ export interface ApplyReport {
 export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyReport {
   const report: ApplyReport = { marked: 0, alreadyMarked: 0, skipped: [] };
   const read = db.prepare(
-    `SELECT b.brewery, b.name, b.untappd_id, ef.issue_number, ef.retired_at
+    `SELECT b.brewery, b.name, b.untappd_id, b.untappd_lookup_at, b.untappd_lookup_count,
+            ef.issue_number, ef.retired_at
        FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE ef.beer_id = ?`,
   );
@@ -51,6 +61,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (v.verdict !== 'unrescued') continue;
       const row = read.get(v.beer_id) as {
         brewery: string; name: string; untappd_id: number | null;
+        untappd_lookup_at: string | null; untappd_lookup_count: number;
         issue_number: number | null; retired_at: string | null;
       } | undefined;
       const skip = (reason: SkipReason) => report.skipped.push({ beer_id: v.beer_id, reason });
@@ -59,6 +70,15 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (row.retired_at !== null) { skip('retired'); continue; }
       if (row.issue_number !== file.issue) { skip('issue_moved'); continue; }
       if (row.brewery !== v.brewery || row.name !== v.name) { skip('input_changed'); continue; }
+      // #576: рядок здобув нове свідчення відтоді, як ми його пробували — його або явно
+      // ре-армили (обидва поля обнулено), або крон устиг зробити свій лукап (лічильник
+      // зріс). Обидва випадки означають одне: наша проба більше не найсвіжіше, що про
+      // цей рядок відомо, і писати за нею термінальний маркер не можна. Пропускаємо —
+      // оператор перепробує. Вікно свіжості файлу цього не ловить: воно судить прогін
+      // цілком, а зрушити може окремий рядок усередині свіжого файлу.
+      if (row.untappd_lookup_count !== v.lookup_count || row.untappd_lookup_at !== v.lookup_at) {
+        skip('lookup_moved'); continue;
+      }
       if (markUnrescued(db, v.beer_id, file.issue, atIso)) report.marked += 1;
       else report.alreadyMarked += 1;
     }
@@ -71,9 +91,12 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
 // was "`--apply` is done in the same session, alongside", which is convention, not code. Four
 // hours covers a same-session apply with a break for a coffee or an interruption, while still
 // catching "I found this file from three days ago and scrolled up to the wrong `apply with:`
-// line" — the exact way a re-armed row (which the four per-row checks below cannot see, since
-// `rearmLookup` touches none of `brewery`/`name`/`issue_number`/`retired_at`/`untappd_id`) gets
-// silently re-marked and its re-arm's grant quietly cancelled.
+// line".
+//
+// Це вікно судить ПРОГІН цілком і тому не замінює `lookup_moved`: окремий рядок може зрушити
+// всередині цілком свіжого файлу. Так само `lookup_moved` не замінює вікна: воно ловить те,
+// чого не видно в жодному полі рядка — що світ навколо прогону встиг змінитись. Дві різні
+// перевірки, і жодна з них не є слабшою версією іншої.
 export const STALE_VERDICT_FILE_MS = 4 * 60 * 60 * 1000;
 
 export function verdictFileAgeMs(file: VerdictFile, nowIso: string): number {

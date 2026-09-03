@@ -2,7 +2,7 @@ import pino from 'pino';
 import { vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { upsertBeer, getBeer, recordLookupNotFound } from '../storage/beers';
 import {
   recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from '../storage/enrich_failures';
@@ -93,6 +93,9 @@ describe('probeIssueRows', () => {
   it('returns a verdict per row, carrying the exact input it probed', async () => {
     const db = fresh();
     orphanWithIssue(db, 1, 576);
+    // Ненульовий лукап-стан навмисно: якби проба писала у файл константу замість того, що
+    // справді стоїть у рядку, з нулями це було б невідрізнити. #576 (рев'ю PR #580).
+    recordLookupNotFound(db, 1, '2026-08-30T02:11:07.000Z');
     const out = await probeIssueRows(
       { db, log, lookup: notFound, canary: okCanary, now: () => new Date('2026-09-02T10:00:00Z') },
       576,
@@ -102,7 +105,10 @@ describe('probeIssueRows', () => {
       file: {
         issue: 576,
         probed_at: '2026-09-02T10:00:00.000Z',
-        verdicts: [{ beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued' }],
+        verdicts: [{
+          beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued',
+          lookup_count: 1, lookup_at: '2026-08-30T02:11:07.000Z',
+        }],
       },
     });
   });
