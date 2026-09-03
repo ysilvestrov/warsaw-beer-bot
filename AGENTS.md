@@ -286,6 +286,9 @@ If uncertain, choose the more conservative implementation.
 For every code change:
 
 - ask whether to create a pull request
+- **before creating the PR, fetch `main` and rebase onto it if it has moved** — `git fetch origin main`, then `git rebase origin/main`. Otherwise the rebase has to happen at merge time, and every check (CI, both builds, the AI review) runs a second time while the merge waits on them. A worktree branches from `origin/main`, so the branch starts current; the drift accumulates while the work is under way, which is why this belongs immediately before the PR rather than at the start.
+- after a rebase, **re-run the full gate** (`npm test && npm run typecheck`) before pushing — a rebase breaks a branch even when both sides were green on their own — then `git push --force-with-lease`
+- if `git fetch` fails with `GitHub is temporarily limiting some unauthenticated downloads`, that is #583, not the network: the repo is public, so GitHub never returns a 401 and git therefore never offers credentials. The working form is `git -c http.extraHeader="Authorization: Basic $(printf 'x-access-token:%s' "$(gh auth token)" | base64 -w0)" fetch origin main`. `git push` is unaffected — a push always authenticates.
 - if pull request creation is confirmed, create the PR
 - after creating the PR, wait for review comments/checks to complete before reporting final status
 - evaluate review comments technically before changing code
