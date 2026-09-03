@@ -4,8 +4,9 @@ import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import { getProfile } from '../../storage/user_profiles';
 import { upsertBeer } from '../../storage/beers';
-import { mergeCheckin, countCheckins, checkinExists } from '../../storage/checkins';
+import { mergeCheckin, countCheckins, checkinExists, oldestCheckinId } from '../../storage/checkins';
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
+import { addCoverage, rangeContaining } from '../../storage/checkin_coverage';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
 import { isBlockPage } from '../../sources/untappd/block';
@@ -46,16 +47,44 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
 
-    // maxId is accepted for forward-compat/observability but the authoritative next cursor is
-    // re-derived from the parsed page (page.nextMaxId).
-    const { html } = c.req.valid('json');
+    const { html, maxId } = c.req.valid('json');
     if (isBlockPage(html)) return c.json({ error: 'blocked' }, 502);
 
     const page = parseCheckinFeedPage(html);
+    // Курсор — числовий id. Нечислове сюди прийти не мало б, але без явної перевірки
+    // воно перетворилося б на NaN і впало б уже всередині транзакції, віддавши 500.
+    let cursor: number | null = null;
+    if (maxId !== undefined && maxId !== null) {
+      const n = Number(maxId);
+      if (!Number.isInteger(n) || n <= 0) return c.json({ error: 'bad_cursor' }, 400);
+      cursor = n;
+    }
+
+    // #587: порожня сторінка нічого не доводить. Нижче нашого найстарішого чекіна вона
+    // законна (там і справді може нічого не бути), вище — суперечить нашим власним даним,
+    // бо принаймні той чекін мав би повернутися. Отже вище — це мертва сесія або блок.
+    if (page.checkins.length === 0) {
+      const oldestKnown = oldestCheckinId(deps.db, telegramId);
+      if (cursor !== null && oldestKnown !== null && cursor > oldestKnown) {
+        return c.json({ error: 'no_session' }, 422);
+      }
+      return c.json({
+        merged: 0,
+        alreadyKnown: 0,
+        pageSize: 0,
+        nextMaxId: null,
+        nextCursor: null,
+        profileTotal: page.profileTotal ?? getSyncState(deps.db, telegramId).profile_total,
+        serverCount: countCheckins(deps.db, telegramId),
+        complete: false,
+      });
+    }
+
     let merged = 0;
     let alreadyKnown = 0;
 
     deps.db.transaction(() => {
+      const ids: number[] = [];
       for (const ci of page.checkins) {
         const existed = checkinExists(deps.db, telegramId, ci.checkin_id);
         const beerId = upsertBeer(deps.db, {
@@ -77,21 +106,38 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           checkin_at: ci.checkin_at,
           venue: ci.venue,
         });
+        ids.push(Number(ci.checkin_id));
         if (existed) alreadyKnown++;
         else merged++;
       }
-      // #587: Task 3 переписує обробку курсора на покриття; тут лишень зберігаємо лік профілю.
+
+      // Верхня межа доведеного — курсор, що породив сторінку; для сторінки профілю
+      // (курсора немає) вище найновішого елемента не доведено нічого.
+      const oldest = Math.min(...ids);
+      const newest = Math.max(...ids);
+      addCoverage(deps.db, telegramId, oldest, cursor ?? newest);
       recordProfileTotal(deps.db, telegramId, page.profileTotal);
     })();
+
+    const serverCount = countCheckins(deps.db, telegramId);
+    const state = getSyncState(deps.db, telegramId);
+    const oldestOnPage = Math.min(...page.checkins.map((ci) => Number(ci.checkin_id)));
+    const covering = rangeContaining(deps.db, telegramId, oldestOnPage);
+
+    // Лічильники зійшлися — шукати нижче нічого. Це не твердження про дно стрічки
+    // (його довести не можна), а констатація «роботи немає».
+    const caughtUp = state.profile_total !== null && serverCount >= state.profile_total;
+    const nextCursor = caughtUp ? null : String(covering?.from_id ?? oldestOnPage);
 
     return c.json({
       merged,
       alreadyKnown,
       pageSize: page.checkins.length,
       nextMaxId: page.nextMaxId,
+      nextCursor,
       profileTotal: page.profileTotal,
-      serverCount: countCheckins(deps.db, telegramId),
-      complete: page.nextMaxId === null,
+      serverCount,
+      complete: false,
     });
     },
   );

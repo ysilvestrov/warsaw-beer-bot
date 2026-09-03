@@ -6,6 +6,7 @@ import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { hashToken, rotateToken } from '../../storage/api_tokens';
 import { countCheckins } from '../../storage/checkins';
 import { getSyncState } from '../../storage/checkin_sync_state';
+import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
 import { authMiddleware } from '../middleware/auth';
 import { checkinsRoute } from './checkins';
 import type { ApiEnv } from '../types';
@@ -198,12 +199,14 @@ describe('POST /checkins/sync', () => {
     expect(countCheckins(db, TELEGRAM_ID)).toBe(1);
   });
 
-  it('marks sync complete on an empty (exhausted) page', async () => {
+  // #587: дно стрічки недоказове — порожня сторінка без відомих чекінів це просто
+  // порожній акаунт, і `complete` більше ніде не виставляється в true.
+  it('accepts an empty page with no prior checkins as an empty account', async () => {
     const { app } = setup();
     const res = await post(app, '/checkins/sync', { html: PAGE_BOTTOM, maxId: null }, RAW_TOKEN);
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body).toMatchObject({ pageSize: 0, nextMaxId: null, complete: true });
+    expect(body).toMatchObject({ pageSize: 0, nextMaxId: null, nextCursor: null, complete: false });
   });
 
   it('returns 502 blocked when Untappd serves a block page', async () => {
@@ -232,5 +235,134 @@ describe('POST /checkins/sync', () => {
     // No token → authMiddleware returns 401
     const res = await post(app, '/checkins/sync', { html: PAGE_ONE });
     expect(res.status).toBe(401);
+  });
+});
+
+// Сторінка фіду з довільних id, newest→oldest, за тими самими селекторами, що й PAGE_ONE.
+function pageOf(ids: number[]): string {
+  const items = ids.map((id) => `
+    <div class="item" data-checkin-id="${id}">
+      <p class="text">
+        <a href="/user/bob" class="user">Bob</a> is drinking an <a href="/b/ipa-${id}/${id}">Beer ${id}</a>
+        by <a href="/SomeBrewery">Some Brewery</a>
+      </p>
+      <a href="/user/bob/checkin/${id}" class="time timezoner">Mon, 15 Jun 2026 18:00:00 +0000</a>
+    </div>`).join('');
+  return `<html><body>${items}</body></html>`;
+}
+
+describe('POST /checkins/sync — покриття і nextCursor (#587)', () => {
+  it('records the page range and steps down when nothing is covered yet', async () => {
+    const { app, db } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: null }, RAW_TOKEN);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nextCursor).toBe('580');
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 580, to_id: 600 }]);
+  });
+
+  it('uses the request cursor as the upper bound of the proven range', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    await post(app, '/checkins/sync', { html: pageOf([570, 560]), maxId: '580' }, RAW_TOKEN);
+    // Друга сторінка доводить [560, 580], і 580 склеює її з першою.
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 560, to_id: 600 }]);
+  });
+
+  it('jumps below covered territory instead of walking through it', async () => {
+    const { app, db } = setup();
+    addCoverage(db, TELEGRAM_ID, 100, 500);
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 550, 500]), maxId: null }, RAW_TOKEN);
+    // Сторінка дотягнулася до 500 — це вже покрите, тож стрибаємо під увесь блок.
+    expect((await res.json()).nextCursor).toBe('100');
+  });
+
+  // Регресія #587: діра ПІД верхньою сторінкою і НАД старим покриттям.
+  it('does not jump over a hole that lies below the page', async () => {
+    const { app, db } = setup();
+    addCoverage(db, TELEGRAM_ID, 100, 200);
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 590, 580]), maxId: null }, RAW_TOKEN);
+    // 580 не дотикається до [100,200]: між ними діра, і йти треба в неї, а не під неї.
+    expect((await res.json()).nextCursor).toBe('580');
+    const res2 = await post(app, '/checkins/sync', { html: pageOf([300, 200]), maxId: '580' }, RAW_TOKEN);
+    // Ця сторінка закрила діру й склеїла все: тепер стрибок аж під низ.
+    expect((await res2.json()).nextCursor).toBe('100');
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 100, to_id: 600 }]);
+  });
+
+  it('stops the walk when the counts already agree', async () => {
+    const { app } = setup();
+    // profileTotal = 3 приходить зі сторінки профілю, і рівно 3 чекіни на ній.
+    const html = pageOf([600, 590, 580]).replace(
+      '<body>',
+      '<body><div class="stats"><a><span class="stat">3</span><span class="title">Total</span></a></div>',
+    );
+    const res = await post(app, '/checkins/sync', { html, maxId: null }, RAW_TOKEN);
+    expect((await res.json()).nextCursor).toBeNull();
+  });
+
+  it('accepts an empty page at or below the oldest known checkin as the end of the walk', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: '<html><body></body></html>', maxId: '580' }, RAW_TOKEN);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.nextCursor).toBeNull();
+    expect(body.pageSize).toBe(0);
+    // Нічого про дно не записано: покриття лишилось тим, що довели сторінки.
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 580, to_id: 600 }]);
+  });
+
+  // Порожньо там, де наш власний чекін мав би повернутися → сесія зламана, не дно.
+  it('rejects an empty page above the oldest known checkin as a dead session', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: '<html><body></body></html>', maxId: '900' }, RAW_TOKEN);
+    expect(res.status).toBe(422);
+    expect(await res.json()).toMatchObject({ error: 'no_session' });
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([{ from_id: 580, to_id: 600 }]);
+  });
+
+  it('treats an empty profile page as an empty account, not a dead session', async () => {
+    const { app } = setup();
+    const res = await post(app, '/checkins/sync', { html: '<html><body></body></html>', maxId: null }, RAW_TOKEN);
+    expect(res.status).toBe(200);
+    expect((await res.json()).nextCursor).toBeNull();
+  });
+
+  it('rejects a non-numeric cursor instead of failing inside the transaction', async () => {
+    const { app } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600]), maxId: 'abc' }, RAW_TOKEN);
+    expect(res.status).toBe(400);
+  });
+
+  // Стара версія розширення ігнорує `nextCursor` і шле сторінки за власною логікою,
+  // обриваючись на першій повністю відомій. Сервер від цього не мусить нічого ствердити:
+  // кожна сторінка доводить лише СВІЙ діапазон, і діра лишається видимою.
+  it('records only what each page proves, even when the pages do not form a chain', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    await post(app, '/checkins/sync', { html: pageOf([300, 200]), maxId: '310' }, RAW_TOKEN);
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([
+      { from_id: 580, to_id: 600 },
+      { from_id: 200, to_id: 310 },
+    ]);
+  });
+
+  // Task 3 (доповнення до брифу): нічого в наборі тестів досі не перевіряло, що лічильник
+  // профілю, розпарсений зі сторінки, справді ЗБЕРІГАЄТЬСЯ — коментар до виклику
+  // recordProfileTotal лишав би цей набір зеленим. Читаємо назад ОКРЕМИМ пізнішим викликом.
+  it('persists the profile total parsed from a page so a later call can read it back', async () => {
+    const { app, db } = setup();
+    const html = pageOf([600, 590, 580]).replace(
+      '<body>',
+      '<body><div class="stats"><a><span class="stat">42</span><span class="title">Total</span></a></div>',
+    );
+    const postRes = await post(app, '/checkins/sync', { html, maxId: null }, RAW_TOKEN);
+    expect((await postRes.json()).profileTotal).toBe(42);
+
+    // Окремий пізніший виклик, а не той самий response, де total щойно спарсили:
+    // це доводить, що значення дійсно ЗАПИСАНЕ в стан, а не лише пройшло крізь відповідь.
+    expect(getSyncState(db, TELEGRAM_ID).profile_total).toBe(42);
   });
 });
