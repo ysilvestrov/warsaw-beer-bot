@@ -84,7 +84,9 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     deps.onProgress({ serverCount, profileTotal, mergedThisRun });
     if (deps.signal?.aborted) return finish('cancelled');
 
-    if (res.nextCursor === null) return finish('done');
+    // #587: нестрога рівність навмисно — сервер, відкочений нижче цієї гілки, шле
+    // відповідь без цього поля взагалі, і undefined має зупиняти обхід так само, як null.
+    if (res.nextCursor == null) return finish('done');
     cursor = res.nextCursor;
     if (pages < deps.pageCap) await deps.sleep(delayMs);
   }

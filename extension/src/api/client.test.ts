@@ -220,4 +220,13 @@ describe('postCheckinSyncPage', () => {
     await expect(postCheckinSyncPage('http://x', 'tok', '<html>', null)).rejects.toMatchObject({ code: 'blocked' });
     vi.unstubAllGlobals();
   });
+
+  // #587: 422 контрадикторить наші власні дані (порожня сторінка вище найстарішого
+  // check-in'у) — мертва сесія Untappd, а не дно стрічки. Без цього мапінгу воно
+  // провалюється в generic 'server' і обхід класифікує його як звичайну помилку.
+  it('maps 422 to no_session', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ error: 'no_session' }), { status: 422 })));
+    await expect(postCheckinSyncPage('http://x', 'tok', '<html>', null)).rejects.toMatchObject({ code: 'no_session' });
+    vi.unstubAllGlobals();
+  });
 });
