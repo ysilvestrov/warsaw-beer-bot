@@ -217,6 +217,70 @@ When making changes:
 
 ---
 
+Claims and Their Evidence
+
+A design document must carry a table of every place the system **records
+something as fact** — a state row, a cursor, a coverage range, a verdict, a
+cache others later read as truth — with what it claims beside what proves it.
+
+A row whose evidence is a count, an assumption about an external file, or "it
+has always been so" is a weak row. Probe it live before writing the plan, or
+do not record the claim at all.
+
+Measured on #587: two such rows — a migration seed justified by count equality,
+and an import coverage range justified by assuming an export is complete — went
+through spec, plan, implementation, tests, documentation and a dry run against a
+copy of the production database, then were deleted outright at PR review. That
+is 285 lines written and self-deleted, a quarter of the branch. A third premise
+in the same change — whether the bottom of the feed can be told apart from a
+dead session — was checked with one thirty-second browser probe and removed an
+entire concept from the design before a line of code existed. The difference was
+not difficulty; it was that two of them looked like internal logic rather than a
+claim about data.
+
+---
+
+Staging a Large Change
+
+A change whose plan runs past roughly four tasks, or whose later tasks build on
+a mechanism that does not exist yet, is not planned in one piece.
+
+The spec stays whole. The plan splits: first the **core** — the mechanism the
+change exists for — then its whole-branch review, and only after that review a
+separate plan for the periphery (clients, migrations, adjacent paths, docs).
+
+Why, from #587: a seven-task plan written against code that did not exist yet
+contained three defects of its own — a mutation step naming a test that could
+not catch it, an accumulation scope that broke when the logic moved into a
+module, and a test assuming a file the repo does not have. Each cost a round
+trip. Worse, the premise task 4 rested on died at the very end, after task 4 had
+already been built on it.
+
+---
+
+Sizing a Task Before Dispatching
+
+**This overrides the subagent-driven-development skill's rule that the
+controller never implements.**
+
+Before dispatching a task, size it. A task is small when all three hold:
+
+- its text already contains the complete code to write,
+- it touches at most two files plus their tests,
+- it requires no new decision.
+
+Then the controller implements it directly: change, **full gate**, commit. If
+any of the three fails, dispatch as usual.
+
+Fresh eyes are not lost: work done inline MUST be included in the next task's
+review package and named in the whole-branch review dispatch.
+
+Measured on #587: a five-line popup change got its own implementer (76k tokens)
+and its own reviewer (57k), and so did a twenty-line one — about four wasted
+dispatches out of twenty-five, each with its own full gate.
+
+---
+
 Coding Style
 
 Match the style already present in the affected files.
