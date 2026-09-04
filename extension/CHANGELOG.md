@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed check-in sync stopping short of a full sync when a run had been interrupted earlier (closed tab, lost connection, hitting Stop): it now finds and fills gaps left in the middle of your history instead of getting stuck just above them, and shows «✓ Fully synced» once everything is in. If your Untappd session has expired it now says so instead of quietly reporting success.
 - Fixed many Beershop beers showing no badge because a style printed after the beer name was searched as part of the name. The extension now uses the product address to keep the actual name, while preserving the degree and real name endings such as «Italian Pilsner».
 - Fixed imported beers on Flasker showing no badge because the shop labels their brewery as «Імпортне пиво». The extension now keeps the beer identity from the title and verifies the Untappd link published on the product page.
 
