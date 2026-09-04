@@ -8,7 +8,9 @@ function page(over: Partial<CheckinSyncPageResult>): CheckinSyncPageResult {
 
 function baseDeps(over: Partial<CheckinSyncDeps>): CheckinSyncDeps {
   return {
-    getState: async () => ({ username: 'bob', deepest_max_id: null, complete: false, serverCount: 0, profileTotal: 100 }),
+    // #587: НЕ null — інакше «курсор ігнорується» і «курсор використовується» дають
+    // однаковий результат, і повернення старої фази-2 не впіймає жоден тест.
+    getState: async () => ({ username: 'bob', deepest_max_id: '500', complete: true, serverCount: 0, profileTotal: 100 }),
     fetchFeed: async () => '<html>feed</html>',
     submitPage: async () => page({}),
     onProgress: () => {},
@@ -124,10 +126,13 @@ describe('runCheckinSync', () => {
     expect(onProgress).toHaveBeenCalledTimes(3);
   });
 
-  it('stops cleanly on a zero-item page', async () => {
-    const submitPage = vi.fn(async () => page({ merged: 0, alreadyKnown: 0, pageSize: 0, nextCursor: null }));
+  it('keeps the profile total from page one when later pages carry none', async () => {
+    let n = 0;
+    const submitPage = vi.fn(async () => (++n === 1
+      ? page({ profileTotal: 100, serverCount: 50, nextCursor: '500' })
+      : page({ profileTotal: null, serverCount: 100, nextCursor: null })));
     const out = await runCheckinSync(baseDeps({ submitPage }));
-    expect(submitPage).toHaveBeenCalledTimes(1);
-    expect(out.status).toBe('done');
+    expect(out.profileTotal).toBe(100);
+    expect(out.complete).toBe(true);
   });
 });
