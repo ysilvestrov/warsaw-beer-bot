@@ -4,7 +4,8 @@ import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
 import { countCheckins } from '../../storage/checkins';
 import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
-import { importCheckins } from './import-checkins';
+import { recordProfileTotal } from '../../storage/checkin_sync_state';
+import { importCheckins, sealImportCoverage } from './import-checkins';
 import type { Checkin } from '../../sources/untappd/export';
 
 function row(over: Partial<Checkin>): Checkin {
@@ -36,28 +37,62 @@ describe('importCheckins', () => {
     expect(countCheckins(db, 1)).toBe(2);
   });
 
-  // #587: експорт Untappd — повна історія до своєї дати, тобто рівно доведений діапазон.
-  // Саме цього свідчення бракувало: дані імпорт давав, покриття — ні, і синхронізація
-  // потім змушена була вгадувати, що вже покрито.
-  it('seeds the coverage range the export proves', () => {
+  it('extends bounds across batches', () => {
+    const first = importCheckins(db, 1, [row({ checkin_id: '500' })]);
+    const second = importCheckins(db, 1, [row({ checkin_id: '100' })], first);
+    expect(second).toEqual({ minId: 100, maxId: 500 });
+  });
+
+  it('ignores a non-numeric checkin id when computing the bounds', () => {
+    const bounds = importCheckins(db, 1, [row({ checkin_id: 'abc' }), row({ checkin_id: '300' })]);
+    expect(bounds).toEqual({ minId: 300, maxId: 300 });
+  });
+
+  it('returns the previous bounds for an empty batch', () => {
+    const prev = { minId: 10, maxId: 20 };
+    expect(importCheckins(db, 1, [], prev)).toEqual(prev);
+  });
+
+  // #587: `importCheckins` сам по собі більше не пише покриття — див. `sealImportCoverage`.
+  it('writes no coverage on its own, even for a fully corroborated import', () => {
+    recordProfileTotal(db, 1, 2);
     importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
+    expect(coverageFor(db, 1)).toEqual([]);
+  });
+});
+
+describe('sealImportCoverage', () => {
+  // #587: експорт Untappd — повна історія до своєї дати, тобто рівно доведений діапазон,
+  // АЛЕ лише коли зовнішній лічильник профілю це підтверджує.
+  it('seeds the coverage range the export proves, when the profile total corroborates it', () => {
+    recordProfileTotal(db, 1, 2);
+    const bounds = importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
+    const wrote = sealImportCoverage(db, 1, bounds);
+    expect(wrote).toBe(true);
     expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 900 }]);
   });
 
-  it('extends coverage across batches', () => {
-    const first = importCheckins(db, 1, [row({ checkin_id: '500' })]);
-    importCheckins(db, 1, [row({ checkin_id: '100' })], first);
-    // Дві партії одного експорту; між 100 і 500 експорт теж усе віддав, тож діапазон один.
-    expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 500 }]);
+  // #587: це і є весь сенс правки. Обірвана на пів-дороги вигрузка парситься чисто й просто
+  // дає менше рядків, ніж профіль каже, що їх є насправді — і в такому разі заявляти
+  // покриття не можна, бо саме так [100,900] з дірою на 450 зробили б недосяжною назавжди.
+  it('writes no coverage when the row count falls short of the profile total', () => {
+    recordProfileTotal(db, 1, 3); // файл нібито мав дати 3, дав лише 2
+    const bounds = importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
+    const wrote = sealImportCoverage(db, 1, bounds);
+    expect(wrote).toBe(false);
+    expect(coverageFor(db, 1)).toEqual([]);
   });
 
-  it('ignores a non-numeric checkin id when computing the range', () => {
-    importCheckins(db, 1, [row({ checkin_id: 'abc' }), row({ checkin_id: '300' })]);
-    expect(coverageFor(db, 1)).toEqual([{ from_id: 300, to_id: 300 }]);
+  it('writes no coverage when the profile total is unknown', () => {
+    const bounds = importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
+    const wrote = sealImportCoverage(db, 1, bounds);
+    expect(wrote).toBe(false);
+    expect(coverageFor(db, 1)).toEqual([]);
   });
 
-  it('writes no coverage for an empty batch', () => {
-    importCheckins(db, 1, []);
+  it('writes no coverage for a null bounds (empty import)', () => {
+    recordProfileTotal(db, 1, 0);
+    expect(sealImportCoverage(db, 1, null)).toBe(false);
     expect(coverageFor(db, 1)).toEqual([]);
   });
 
@@ -67,7 +102,9 @@ describe('importCheckins', () => {
   it('does not swallow a coverage hole the import never spanned', () => {
     addCoverage(db, 1, 100, 200);
     addCoverage(db, 1, 900, 1000);
-    importCheckins(db, 1, [row({ checkin_id: '150' })]);
+    recordProfileTotal(db, 1, 1);
+    const bounds = importCheckins(db, 1, [row({ checkin_id: '150' })]);
+    sealImportCoverage(db, 1, bounds);
     expect(coverageFor(db, 1)).toEqual([
       { from_id: 900, to_id: 1000 },
       { from_id: 100, to_id: 200 },
