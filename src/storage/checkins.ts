@@ -70,9 +70,18 @@ export function latestCheckinAt(db: DB, telegramId: number): string | null {
 // #587: межа, нижче якої порожня відповідь фіду законна. Вище неї порожньо бути не може —
 // принаймні цей наш власний чекін мав би повернутися, — тож порожнеча там доводить зламану
 // сесію, а не дно стрічки.
+//
+// Рев'ю PR #592 (P2): нечисловий `checkin_id` (наприклад, залишок битого імпорту) під
+// `CAST(... AS INTEGER)` перетворюється на 0 — і 0 як мінімум тягне межу до нуля, через що
+// `422 no_session` перестає спрацьовувати саме там, де мав би. `GLOB '[0-9]*'` виключає такі
+// рядки з розгляду ще до MIN; WHERE, як і раніше, починається з рівності по telegram_id,
+// тож індекс усе одно використовується.
 export function oldestCheckinId(db: DB, telegramId: number): number | null {
   const row = db
-    .prepare('SELECT MIN(CAST(checkin_id AS INTEGER)) AS m FROM checkins WHERE telegram_id = ?')
+    .prepare(
+      `SELECT MIN(CAST(checkin_id AS INTEGER)) AS m FROM checkins
+        WHERE telegram_id = ? AND checkin_id GLOB '[0-9]*'`,
+    )
     .get(telegramId) as { m: number | null };
   return row.m;
 }

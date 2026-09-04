@@ -378,6 +378,17 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
     expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
   });
 
+  // Рев'ю PR #592 (P2): `oldest <= cursor` сам по собі не доводить, що сторінка та —
+  // найновіший елемент теж мусить лежати не вище курсора. Тут oldest=580 <= 590 проходить
+  // стару перевірку, а newest=600 > 590 виказує ту саму чужу сторінку.
+  it('rejects a page whose newest item is above the request cursor even when the oldest is not', async () => {
+    const { app, db } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '590' }, RAW_TOKEN);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'bad_cursor' });
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
+  });
+
   // Раунд 1 огляду: лічильники можуть зійтися й тоді, коли profile_total ЗМЕНШИВСЯ
   // (користувач видалив чекін на Untappd, наш рядок лишився) — сам збіг чисел не
   // мусить запечатувати діру, що реально існує в покритті, назавжди.
@@ -394,9 +405,16 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
 
   // Раунд 1 огляду: обхід зобов'язаний спускатися. Курсор, що не зменшився, — це цикл,
   // і клієнт після Task 5 не має власного запобіжника, щоб із нього вийти.
+  //
+  // Рев'ю PR #592 (P2): стара сторінка pageOf([600, 580]) із maxId '580' мала newest=600 >
+  // курсора 580 — після додавання перевірки newest > cursor це тепер законний
+  // `400 bad_cursor` ще до вартового циклу, і той тест більше не діставався до нього.
+  // Реалістичний фрагмент повертає елементи не вище курсора: одноелементна сторінка [580]
+  // на курсорі '580' — oldest=newest=580, обидва не вищі за курсор, — проходить перевірку
+  // сторінки і потрапляє рівно на вартового циклу (`nextCursor` дорівнював би самому курсору).
   it('stops instead of looping when the next cursor would not descend from the request cursor', async () => {
     const { app } = setup();
-    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '580' }, RAW_TOKEN);
+    const res = await post(app, '/checkins/sync', { html: pageOf([580]), maxId: '580' }, RAW_TOKEN);
     expect(res.status).toBe(200);
     expect((await res.json()).nextCursor).toBeNull();
   });

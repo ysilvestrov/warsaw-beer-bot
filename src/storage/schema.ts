@@ -452,9 +452,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // діапазоном [найстарший_на_сторінці, курсор]. Об'єднання таких діапазонів збрехати
     // не може, а обірваний прогін просто перестає їх додавати.
     //
-    // Сидуємо лише тих, кому число це підтверджує: `synced >= profile_total` — свідчення
-    // для запису діапазону, а не гейт для чогось іншого. Межі беремо рівно MIN/MAX наявних
-    // чекінів: сид не додає від себе нічого ні згори, ні знизу.
+    // Без сиду (рев'ю PR #592, P1). Перша версія сидувала [MIN, MAX] для кожного, у кого
+    // `COUNT(*) >= profile_total` — але рівність лічильників не доводить суцільність:
+    // користувач, що тримає застарілий рядок (чекін, видалений на Untappd, лишився в нас),
+    // може задовольнити лічильник, поки ІНШИЙ id всередині того самого діапазону насправді
+    // відсутній. Сид тоді покрив би саме ту діру, яку застарілий рядок маскував, і обхід
+    // перестрибував би її назавжди — рівно той дефект, проти якого ця гілка. Доказу
+    // суцільності для історичних рядків нема, тож міграція нічого не стверджує: перший
+    // живий обхід кожного користувача проходить його історію сам і саме цим заодно
+    // знаходить будь-яку діру, яку сид замаскував би.
     sql: `
       CREATE TABLE IF NOT EXISTS checkin_coverage (
         telegram_id INTEGER NOT NULL
@@ -463,16 +469,6 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         to_id       INTEGER NOT NULL,
         PRIMARY KEY (telegram_id, from_id)
       );
-
-      INSERT INTO checkin_coverage (telegram_id, from_id, to_id)
-      SELECT s.telegram_id,
-             MIN(CAST(c.checkin_id AS INTEGER)),
-             MAX(CAST(c.checkin_id AS INTEGER))
-        FROM checkin_sync_state s
-        JOIN checkins c ON c.telegram_id = s.telegram_id
-       WHERE s.profile_total IS NOT NULL
-       GROUP BY s.telegram_id
-      HAVING COUNT(*) >= s.profile_total;
     `,
   },
 ];

@@ -96,7 +96,13 @@ describe('rangeContaining / deepestCoveredId', () => {
   });
 });
 
-describe('migration 29 seeding', () => {
+// Рев'ю PR #592 (P1): рівність лічильників не доводить суцільність — застарілий рядок
+// (чекін, видалений на Untappd, лишився в нас) може задовольнити COUNT(*) >= profile_total,
+// поки інший id усередині того самого діапазону насправді відсутній. Сид тоді ствердив би
+// покриття діри, яку цей застарілий рядок маскував. Тому міграція 29 більше нічого не сидує —
+// цей тест доводить саме це: навіть коли лічильники сходяться, checkin_coverage лишається
+// порожньою, і перший живий обхід проходить історію користувача сам.
+describe('migration 29', () => {
   function seedUser(d: DB, id: number, ids: number[], profileTotal: number | null): void {
     ensureProfile(d, id);
     for (const cid of ids) {
@@ -107,18 +113,14 @@ describe('migration 29 seeding', () => {
       .run(id, profileTotal);
   }
 
-  it('seeds only the users whose counts back the claim', () => {
+  it('leaves checkin_coverage empty for a user whose counts agree — no seed, no unproven claim', () => {
     const fresh = openDb(':memory:');
     migrate(fresh);
     fresh.exec('DELETE FROM checkin_coverage');
-    seedUser(fresh, 10, [100, 500, 900], 3);    // synced == total → сид
-    seedUser(fresh, 11, [100, 500], 9);         // synced < total  → без сиду
-    seedUser(fresh, 12, [100, 500], null);      // total невідомий → без сиду
+    seedUser(fresh, 10, [100, 500, 900], 3); // synced == total — раніше це сидувало б [100, 900]
     fresh.prepare('DELETE FROM schema_version WHERE version = 29').run();
     migrate(fresh);
 
-    expect(coverageFor(fresh, 10)).toEqual([{ from_id: 100, to_id: 900 }]);
-    expect(coverageFor(fresh, 11)).toEqual([]);
-    expect(coverageFor(fresh, 12)).toEqual([]);
+    expect(coverageFor(fresh, 10)).toEqual([]);
   });
 });

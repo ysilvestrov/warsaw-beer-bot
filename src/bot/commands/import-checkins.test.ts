@@ -40,16 +40,30 @@ describe('importCheckins', () => {
   it('extends bounds across batches', () => {
     const first = importCheckins(db, 1, [row({ checkin_id: '500' })]);
     const second = importCheckins(db, 1, [row({ checkin_id: '100' })], first);
-    expect(second).toEqual({ minId: 100, maxId: 500 });
+    expect(second).toEqual({ minId: 100, maxId: 500, rows: 2 });
   });
 
   it('ignores a non-numeric checkin id when computing the bounds', () => {
     const bounds = importCheckins(db, 1, [row({ checkin_id: 'abc' }), row({ checkin_id: '300' })]);
-    expect(bounds).toEqual({ minId: 300, maxId: 300 });
+    expect(bounds).toEqual({ minId: 300, maxId: 300, rows: 1 });
+  });
+
+  // Рев'ю PR #592 (P2): `Number('5e2') === 500`, `Number(' 580 ') === 580`,
+  // `Number('0x244') === 580` — усі три пройшли б стару перевірку `Number.isInteger(n) && n > 0`
+  // і посунули б межі, хоча рядок зберігається в БД під своїм ЛІТЕРАЛЬНИМ (нечисловим) id.
+  // Вимога `/^\d+$/` (та сама, що для курсора в src/api/routes/checkins.ts) відкидає всі три.
+  it('rejects non-decimal checkin ids (scientific notation, padded, hex) when computing bounds', () => {
+    const bounds = importCheckins(db, 1, [
+      row({ checkin_id: '5e2' }),
+      row({ checkin_id: ' 580 ' }),
+      row({ checkin_id: '0x244' }),
+      row({ checkin_id: '300' }),
+    ]);
+    expect(bounds).toEqual({ minId: 300, maxId: 300, rows: 1 });
   });
 
   it('returns the previous bounds for an empty batch', () => {
-    const prev = { minId: 10, maxId: 20 };
+    const prev = { minId: 10, maxId: 20, rows: 5 };
     expect(importCheckins(db, 1, [], prev)).toEqual(prev);
   });
 
@@ -77,6 +91,22 @@ describe('sealImportCoverage', () => {
   // покриття не можна, бо саме так [100,900] з дірою на 450 зробили б недосяжною назавжди.
   it('writes no coverage when the row count falls short of the profile total', () => {
     recordProfileTotal(db, 1, 3); // файл нібито мав дати 3, дав лише 2
+    const bounds = importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
+    const wrote = sealImportCoverage(db, 1, bounds);
+    expect(wrote).toBe(false);
+    expect(coverageFor(db, 1)).toEqual([]);
+  });
+
+  // Рев'ю PR #592 (P1): це і є весь сенс правки. 8 рядків уже лежать у БД (жива
+  // синхронізація), а обірваний імпорт додає лише 2 — `countCheckins` після нього каже 10 і
+  // "підтвердив" би стару перевірку, хоча ФАЙЛ дав рівно 2 рядки, а не всю історію до
+  // [minId, maxId]. Заявка мусить звірятися з `bounds.rows` (сам файл), не з `countCheckins`
+  // (усі рядки користувача з будь-якого джерела).
+  it('writes no coverage for a short import even when the user\'s other rows would satisfy countCheckins', () => {
+    for (let i = 1; i <= 8; i++) {
+      importCheckins(db, 1, [row({ checkin_id: String(1000 + i) })]);
+    }
+    recordProfileTotal(db, 1, 10); // профіль обіцяє 10; countCheckins після імпорту нижче теж дасть 10
     const bounds = importCheckins(db, 1, [row({ checkin_id: '100' }), row({ checkin_id: '900' })]);
     const wrote = sealImportCoverage(db, 1, bounds);
     expect(wrote).toBe(false);
