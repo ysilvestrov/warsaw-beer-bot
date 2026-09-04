@@ -7,11 +7,9 @@ import {
   type Checkin,
   type ExportFormat,
 } from '../../sources/untappd/export';
-import { upsertBeer } from '../../storage/beers';
-import { mergeCheckin } from '../../storage/checkins';
 import { ensureProfile } from '../../storage/user_profiles';
-import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { withBusyRetry } from '../../storage/busy-retry';
+import { importCheckins } from './import-checkins';
 
 const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -54,30 +52,6 @@ importCommand.on('document', async (ctx) => {
   const db = ctx.deps.db;
   const telegramId = ctx.from.id;
 
-  const flushBatch = db.transaction((rows: Checkin[]) => {
-    for (const r of rows) {
-      const beerId = upsertBeer(db, {
-        untappd_id: r.bid ?? null,
-        name: r.beer_name,
-        brewery: r.brewery_name,
-        style: r.beer_type,
-        abv: r.beer_abv,
-        rating_global: r.global_rating,
-        normalized_name: normalizeName(r.beer_name),
-        normalized_brewery: normalizeBrewery(r.brewery_name),
-        untappd_id_source: 'checkin',
-      });
-      mergeCheckin(db, {
-        checkin_id: r.checkin_id,
-        telegram_id: telegramId,
-        beer_id: beerId,
-        user_rating: r.rating_score,
-        checkin_at: r.created_at,
-        venue: r.venue_name,
-      });
-    }
-  });
-
   let total = 0;
   let batch: Checkin[] = [];
   let lastReport = Date.now();
@@ -92,7 +66,7 @@ importCommand.on('document', async (ctx) => {
     for await (const row of iterExport(stream, format)) {
       batch.push(row);
       if (batch.length >= BATCH_SIZE) {
-        await withBusyRetry(() => flushBatch(batch));
+        await withBusyRetry(() => importCheckins(db, telegramId, batch));
         total += batch.length;
         batch = [];
         if (Date.now() - lastReport > PROGRESS_INTERVAL_MS) {
@@ -102,7 +76,7 @@ importCommand.on('document', async (ctx) => {
       }
     }
     if (batch.length) {
-      await withBusyRetry(() => flushBatch(batch));
+      await withBusyRetry(() => importCheckins(db, telegramId, batch));
       total += batch.length;
     }
     await report(ctx.t('import.done', { total, format: format.toUpperCase() }));
