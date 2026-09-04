@@ -146,6 +146,18 @@ describe('oldestCheckinId', () => {
     mergeCheckin(db, { checkin_id: '900', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-02 00:00:00', venue: null });
     expect(oldestCheckinId(db, 1)).toBe(900);
   });
+
+  // Рев'ю PR #592, друге коло (P1): `'5e2' GLOB '[0-9]*'` — істина, бо GLOB із цим шаблоном
+  // перевіряє лише ПЕРШИЙ символ. Без додаткового `NOT GLOB '*[^0-9]*'` такий рядок пройшов би
+  // фільтр, CAST('5e2' AS INTEGER) дав би 5, і межа мовчки поповзла б до числа, якого в БД
+  // немає під жодним id — саме там, де `422 no_session` мав би спрацювати на реальному
+  // найстарішому чекіні (900).
+  it('excludes a checkin_id that only starts with a digit but is not all digits', () => {
+    const db = openDb(':memory:'); migrate(db);
+    mergeCheckin(db, { checkin_id: '5e2', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-01 00:00:00', venue: null });
+    mergeCheckin(db, { checkin_id: '900', telegram_id: 1, beer_id: null, user_rating: null, checkin_at: '2026-01-02 00:00:00', venue: null });
+    expect(oldestCheckinId(db, 1)).toBe(900);
+  });
 });
 
 describe('mergeCheckin checkin_at normalization', () => {
