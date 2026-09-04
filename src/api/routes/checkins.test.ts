@@ -5,7 +5,7 @@ import { migrate } from '../../storage/schema';
 import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { hashToken, rotateToken } from '../../storage/api_tokens';
 import { countCheckins } from '../../storage/checkins';
-import { getSyncState } from '../../storage/checkin_sync_state';
+import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
 import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
 import { authMiddleware } from '../middleware/auth';
 import { checkinsRoute } from './checkins';
@@ -33,8 +33,9 @@ const PAGE_ONE = `
 </body></html>`;
 
 // Same single check-in, NO Show More → feed bottom.
-// Feed bottom = a page (more_feed fragment) with zero check-in items. The walk stops
-// here (nextMaxId null → complete), not on the absence of a Show More button.
+// Feed bottom = a page (more_feed fragment) with zero check-in items. `complete` is
+// dead (#587 — feed bottom is not assertable); the walk stops on zero items, not on
+// the absence of a Show More button.
 const PAGE_BOTTOM = `<html><body></body></html>`;
 
 const RAW_TOKEN = 'test-checkins-token-abc';
@@ -364,5 +365,39 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
     // Окремий пізніший виклик, а не той самий response, де total щойно спарсили:
     // це доводить, що значення дійсно ЗАПИСАНЕ в стан, а не лише пройшло крізь відповідь.
     expect(getSyncState(db, TELEGRAM_ID).profile_total).toBe(42);
+  });
+
+  // Раунд 1 огляду: сторінка, найстаріший елемент якої ВИЩИЙ за курсор, — не той фрагмент,
+  // який ми просили (класичний випадок: 307-редірект more_feed на сторінку профілю).
+  // Раніше це падало прямо в addCoverage() всередині транзакції й віддавало 500.
+  it('rejects a page whose oldest item is above the request cursor instead of 500ing inside the transaction', async () => {
+    const { app, db } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '100' }, RAW_TOKEN);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'bad_cursor' });
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
+  });
+
+  // Раунд 1 огляду: лічильники можуть зійтися й тоді, коли profile_total ЗМЕНШИВСЯ
+  // (користувач видалив чекін на Untappd, наш рядок лишився) — сам збіг чисел не
+  // мусить запечатувати діру, що реально існує в покритті, назавжди.
+  it('keeps walking when the counts agree but coverage still has a hole', async () => {
+    const { app, db } = setup();
+    await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    await post(app, '/checkins/sync', { html: pageOf([300, 200]), maxId: '310' }, RAW_TOKEN);
+    expect(coverageFor(db, TELEGRAM_ID)).toHaveLength(2); // дві незлитні ділянки — діра між ними
+    recordProfileTotal(db, TELEGRAM_ID, 4); // серверний лік уже 4 — «зійшлося»
+
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: null }, RAW_TOKEN);
+    expect((await res.json()).nextCursor).not.toBeNull();
+  });
+
+  // Раунд 1 огляду: обхід зобов'язаний спускатися. Курсор, що не зменшився, — це цикл,
+  // і клієнт після Task 5 не має власного запобіжника, щоб із нього вийти.
+  it('stops instead of looping when the next cursor would not descend from the request cursor', async () => {
+    const { app } = setup();
+    const res = await post(app, '/checkins/sync', { html: pageOf([600, 580]), maxId: '580' }, RAW_TOKEN);
+    expect(res.status).toBe(200);
+    expect((await res.json()).nextCursor).toBeNull();
   });
 });
