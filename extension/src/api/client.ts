@@ -1,6 +1,6 @@
 import type { AlgoliaResponse, CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
 
-export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked';
+export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked' | 'no_session';
 
 export class ApiError extends Error {
   constructor(public code: ApiErrorCode, message?: string) {
@@ -154,6 +154,9 @@ export async function postCheckinSyncPage(
   if (res.status === 401) throw new ApiError('unauthorized');
   if (res.status === 409) throw new ApiError('not_linked');
   if (res.status === 502) throw new ApiError('blocked');
+  // #587: 422 контрадикторить наші власні дані (порожня сторінка вище найстарішого
+  // check-in'у, що ми маємо) — сесія Untappd мертва, а не дно стрічки.
+  if (res.status === 422) throw new ApiError('no_session');
   if (!res.ok) throw new ApiError('server', `status ${res.status}`);
   return (await res.json()) as CheckinSyncPageResult;
 }

@@ -6,7 +6,7 @@ export interface SyncProgress {
   mergedThisRun: number;
 }
 
-export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'error';
+export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'error';
 
 export interface SyncOutcome {
   status: SyncStatus;
@@ -52,50 +52,48 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   profileTotal = state.profileTotal;
   if (deps.signal?.aborted) return finish('cancelled');
 
-  // Phase 0 starts at "now" (null). Phase 1 (if any) resumes at the saved deep
-  // cursor. A fully-known page or feed bottom ends a phase.
-  const startCursors: (string | null)[] = [null];
-  if (state.deepest_max_id !== null && !state.complete) startCursors.push(state.deepest_max_id);
-
-  for (let phase = 0; phase < startCursors.length; phase++) {
-    let maxId = startCursors[phase];
-    while (pages < deps.pageCap) {
+  // #587: одна прогулянка згори вниз. Куди ступати далі — каже сервер (`nextCursor`):
+  // він знає покриття і стрибає під уже покриту територію. Двох фаз і евристики
+  // «усі 25 відомі → стоп» більше немає: саме вони лишали діру недосяжною.
+  let cursor: string | null = null;
+  while (pages < deps.pageCap) {
+    if (deps.signal?.aborted) return finish('cancelled');
+    let html: string;
+    try {
+      html = await deps.fetchFeed(state.username, cursor);
+    } catch (e) {
       if (deps.signal?.aborted) return finish('cancelled');
-      let html: string;
-      try {
-        html = await deps.fetchFeed(state.username, maxId);
-      } catch (e) {
-        if (deps.signal?.aborted) return finish('cancelled');
-        return finish(errCode(e) === 'blocked' ? 'blocked' : 'error');
-      }
-      if (deps.signal?.aborted) return finish('cancelled');
-      let res: CheckinSyncPageResult;
-      try {
-        res = await deps.submitPage(html, maxId);
-      } catch (e) {
-        if (deps.signal?.aborted) return finish('cancelled');
-        const code = errCode(e);
-        return finish(code === 'blocked' ? 'blocked' : code === 'not_linked' ? 'not_linked' : 'error');
-      }
-      pages++;
-      mergedThisRun += res.merged;
-      serverCount = res.serverCount;
-      if (res.profileTotal !== null) profileTotal = res.profileTotal;
-      deps.onProgress({ serverCount, profileTotal, mergedThisRun });
-      if (deps.signal?.aborted) return finish('cancelled');
-
-      if (res.pageSize === 0) return finish('done', res.nextMaxId === null);
-      if (res.complete) return finish('done', true);
-      if (res.pageSize > 0 && res.alreadyKnown === res.pageSize) break; // reached known territory
-      if (res.nextMaxId === null) return finish('done', true);
-      maxId = res.nextMaxId;
-      if (pages < deps.pageCap) await deps.sleep(delayMs);
+      return finish(errCode(e) === 'blocked' ? 'blocked' : 'error');
     }
-    if (pages >= deps.pageCap) return finish('capped', false);
-  }
-  return finish('done', false);
+    if (deps.signal?.aborted) return finish('cancelled');
+    let res: CheckinSyncPageResult;
+    try {
+      res = await deps.submitPage(html, cursor);
+    } catch (e) {
+      if (deps.signal?.aborted) return finish('cancelled');
+      const code = errCode(e);
+      if (code === 'blocked') return finish('blocked');
+      if (code === 'not_linked') return finish('not_linked');
+      if (code === 'no_session') return finish('no_session');
+      return finish('error');
+    }
+    pages++;
+    mergedThisRun += res.merged;
+    serverCount = res.serverCount;
+    if (res.profileTotal !== null) profileTotal = res.profileTotal;
+    deps.onProgress({ serverCount, profileTotal, mergedThisRun });
+    if (deps.signal?.aborted) return finish('cancelled');
 
-  function finish(status: SyncStatus, complete = false): SyncOutcome {
+    if (res.nextCursor === null) return finish('done');
+    cursor = res.nextCursor;
+    if (pages < deps.pageCap) await deps.sleep(delayMs);
+  }
+  return finish('capped');
+
+  function finish(status: SyncStatus): SyncOutcome {
+    // #587: «повністю» — це збіг лічильників, а не дно стрічки: дно недоказове, бо
+    // порожню відповідь віддає і воно, і мертва сесія.
+    const complete = profileTotal !== null && serverCount >= profileTotal;
     return { status, complete, serverCount, profileTotal, mergedThisRun };
   }
 }
