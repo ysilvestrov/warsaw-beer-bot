@@ -6,7 +6,7 @@ import { getProfile } from '../../storage/user_profiles';
 import { upsertBeer } from '../../storage/beers';
 import { mergeCheckin, countCheckins, checkinExists, oldestCheckinId } from '../../storage/checkins';
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
-import { addCoverage, rangeContaining } from '../../storage/checkin_coverage';
+import { addCoverage, rangeContaining, coverageFor } from '../../storage/checkin_coverage';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 import { parseCheckinFeedPage } from '../../sources/untappd/checkin-feed';
 import { isBlockPage } from '../../sources/untappd/block';
@@ -55,6 +55,9 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // воно перетворилося б на NaN і впало б уже всередині транзакції, віддавши 500.
     let cursor: number | null = null;
     if (maxId !== undefined && maxId !== null) {
+      // Той самий числовий формат, що й для id у парсері фіду (`/^\d+$/`): без нього
+      // Number() пропустив би '5e2', ' 580 ' чи '0x244' як валідні числа.
+      if (!/^\d+$/.test(maxId)) return c.json({ error: 'bad_cursor' }, 400);
       const n = Number(maxId);
       if (!Number.isInteger(n) || n <= 0) return c.json({ error: 'bad_cursor' }, 400);
       cursor = n;
@@ -80,11 +83,21 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       });
     }
 
+    // ids/oldest/newest — до транзакції: обидва вартові нижче (суперечливий курсор,
+    // а невдовзі й цикл) мусять спрацювати ДО будь-якого запису.
+    const ids = page.checkins.map((ci) => Number(ci.checkin_id));
+    const oldest = Math.min(...ids);
+    const newest = Math.max(...ids);
+
+    // #587: сторінка, найстаріший елемент якої ВИЩИЙ за курсор, — це не той фрагмент,
+    // який ми просили (класично: 307-редірект more_feed на сторінку профілю). Записати
+    // її діапазон означало б ствердити покриття з чужої сторінки.
+    if (cursor !== null && oldest > cursor) return c.json({ error: 'bad_cursor' }, 400);
+
     let merged = 0;
     let alreadyKnown = 0;
 
     deps.db.transaction(() => {
-      const ids: number[] = [];
       for (const ci of page.checkins) {
         const existed = checkinExists(deps.db, telegramId, ci.checkin_id);
         const beerId = upsertBeer(deps.db, {
@@ -106,28 +119,36 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           checkin_at: ci.checkin_at,
           venue: ci.venue,
         });
-        ids.push(Number(ci.checkin_id));
         if (existed) alreadyKnown++;
         else merged++;
       }
 
       // Верхня межа доведеного — курсор, що породив сторінку; для сторінки профілю
       // (курсора немає) вище найновішого елемента не доведено нічого.
-      const oldest = Math.min(...ids);
-      const newest = Math.max(...ids);
       addCoverage(deps.db, telegramId, oldest, cursor ?? newest);
       recordProfileTotal(deps.db, telegramId, page.profileTotal);
     })();
 
     const serverCount = countCheckins(deps.db, telegramId);
     const state = getSyncState(deps.db, telegramId);
-    const oldestOnPage = Math.min(...page.checkins.map((ci) => Number(ci.checkin_id)));
-    const covering = rangeContaining(deps.db, telegramId, oldestOnPage);
+    const covering = rangeContaining(deps.db, telegramId, oldest);
 
     // Лічильники зійшлися — шукати нижче нічого. Це не твердження про дно стрічки
-    // (його довести не можна), а констатація «роботи немає».
-    const caughtUp = state.profile_total !== null && serverCount >= state.profile_total;
-    const nextCursor = caughtUp ? null : String(covering?.from_id ?? oldestOnPage);
+    // (його довести не можна), а констатація «роботи немає». Але самого збігу чисел
+    // не досить: `profile_total` міг ЗМЕНШИТИСЯ (користувач видалив чекін на Untappd,
+    // наш рядок лишився) — тому коротке замикання вимагає ще й того, щоб покриття
+    // було одним суцільним діапазоном: якщо дір нема, то й іти нікуди.
+    const ranges = coverageFor(deps.db, telegramId);
+    const caughtUp = state.profile_total !== null
+      && serverCount >= state.profile_total
+      && ranges.length === 1;
+    let nextCursor: string | null = caughtUp ? null : String(covering?.from_id ?? oldest);
+
+    // #587: обхід зобов'язаний спускатися. Курсор, що не зменшився, — це цикл, і клієнт
+    // після Task 5 не має власного запобіжника, щоб із нього вийти.
+    if (cursor !== null && nextCursor !== null && Number(nextCursor) >= cursor) {
+      nextCursor = null;
+    }
 
     return c.json({
       merged,
