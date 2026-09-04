@@ -9,7 +9,7 @@ import {
 } from '../../sources/untappd/export';
 import { ensureProfile } from '../../storage/user_profiles';
 import { withBusyRetry } from '../../storage/busy-retry';
-import { importCheckins, type ImportBounds } from './import-checkins';
+import { importCheckins, sealImportCoverage, type ImportBounds } from './import-checkins';
 
 const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -80,6 +80,9 @@ importCommand.on('document', async (ctx) => {
       bounds = await withBusyRetry(() => importCheckins(db, telegramId, batch, bounds));
       total += batch.length;
     }
+    // #587: заявку про покриття робимо рівно раз, коли файл вичерпано, і лише якщо
+    // зовнішнє свідчення (лічильник профілю) її підтверджує — див. import-checkins.ts.
+    await withBusyRetry(() => sealImportCoverage(db, telegramId, bounds));
     await report(ctx.t('import.done', { total, format: format.toUpperCase() }));
   } catch (e) {
     await report(ctx.t('import.failed', { total, message: (e as Error).message }));

@@ -1,8 +1,9 @@
 import type { DB } from '../../storage/db';
 import type { Checkin } from '../../sources/untappd/export';
 import { upsertBeer } from '../../storage/beers';
-import { mergeCheckin } from '../../storage/checkins';
+import { mergeCheckin, countCheckins } from '../../storage/checkins';
 import { addCoverage } from '../../storage/checkin_coverage';
+import { getSyncState } from '../../storage/checkin_sync_state';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 
 export interface ImportBounds {
@@ -15,6 +16,11 @@ export interface ImportBounds {
 // виклику (а не читається назад із покриття): злити можна тільки те, що справді
 // прийшло з ЦЬОГО файлу, інакше стара вигрузка могла б запечатати діру, яку знайшла
 // жива синхронізація десь-інде.
+//
+// Тут НЕ пишемо покриття: те, що ми злили кожен рядок файлу, не доводить, що файл
+// повний (обірвана вигрузка парситься так само чисто й просто дає менше рядків).
+// Заявку про покриття робить окремо `sealImportCoverage`, коли зовнішнє свідчення
+// це підтверджує.
 export function importCheckins(
   db: DB,
   telegramId: number,
@@ -55,7 +61,23 @@ export function importCheckins(
 
     const lo = prev !== null && prev.minId < minId ? prev.minId : minId;
     const hi = prev !== null && prev.maxId > maxId ? prev.maxId : maxId;
-    addCoverage(db, telegramId, lo, hi);
     return { minId: lo, maxId: hi };
   })();
+}
+
+// #587: імпорт доводить, що ми маємо КОЖЕН рядок цього файлу, — але не те, що файл
+// повний. Обірвана на пів-дороги вигрузка парситься без помилки й просто дає менше рядків. Тому
+// заявку про покриття підтверджує лише зовнішнє свідчення — той самий лічильник профілю,
+// яким користується міграція 29. Немає лічильника — немає заявки: перший обхід чесно
+// пройде цю історію сам.
+export function sealImportCoverage(
+  db: DB,
+  telegramId: number,
+  bounds: ImportBounds | null,
+): boolean {
+  if (bounds === null) return false;
+  const { profile_total } = getSyncState(db, telegramId);
+  if (profile_total === null || countCheckins(db, telegramId) < profile_total) return false;
+  addCoverage(db, telegramId, bounds.minId, bounds.maxId);
+  return true;
 }
