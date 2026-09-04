@@ -76,11 +76,17 @@ export function latestCheckinAt(db: DB, telegramId: number): string | null {
 // `422 no_session` перестає спрацьовувати саме там, де мав би. `GLOB '[0-9]*'` виключає такі
 // рядки з розгляду ще до MIN; WHERE, як і раніше, починається з рівності по telegram_id,
 // тож індекс усе одно використовується.
+//
+// Рев'ю PR #592, друге коло (P1): `GLOB '[0-9]*'` вимагає лише, щоб рядок ПОЧИНАВСЯ з цифри,
+// а не щоб він був цифрою цілком — `'5e2' GLOB '[0-9]*'` теж істина. Такий рядок і досі
+// проходить у CAST (CAST('5e2' AS INTEGER) = 5) і тягне межу вниз до вигаданого числа, якого
+// в БД насправді немає під цим id. Додатковий `NOT GLOB '*[^0-9]*'` відкидає будь-який
+// символ поза цифрами де завгодно в рядку — лишається рівно чисто десятковий вигляд.
 export function oldestCheckinId(db: DB, telegramId: number): number | null {
   const row = db
     .prepare(
       `SELECT MIN(CAST(checkin_id AS INTEGER)) AS m FROM checkins
-        WHERE telegram_id = ? AND checkin_id GLOB '[0-9]*'`,
+        WHERE telegram_id = ? AND checkin_id GLOB '[0-9]*' AND checkin_id NOT GLOB '*[^0-9]*'`,
     )
     .get(telegramId) as { m: number | null };
   return row.m;
