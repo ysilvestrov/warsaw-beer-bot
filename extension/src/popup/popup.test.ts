@@ -63,6 +63,14 @@ describe('formatSyncStatus', () => {
     expect(formatSyncStatus({ running: false, serverCount: 5000, profileTotal: 8200, mergedThisRun: 400, outcome: 'cancelled', complete: false }))
       .toBe('Sync stopped at 5000 of 8200.');
   });
+  it('shows the tick when the counts agree', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 12634, profileTotal: 12634, mergedThisRun: 41, outcome: 'done', complete: true }))
+      .toBe('✓ Fully synced (12634).');
+  });
+  it('tells the user to sign in to Untappd when the session is dead', () => {
+    expect(formatSyncStatus({ running: false, serverCount: 10, profileTotal: 8200, mergedThisRun: 0, outcome: 'no_session', complete: false }))
+      .toBe('Untappd session expired — open untappd.com, sign in, then sync again.');
+  });
 });
 
 describe('syncButtonLabel', () => {

@@ -4,13 +4,16 @@ import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';
 import { applyTokenState, tokenStateView } from './token-state';
+import type { SyncOutcome } from '../background/handle-checkin-sync';
 
 export interface SyncStatusView {
   running: boolean;
   serverCount: number;
   profileTotal: number | null;
   mergedThisRun: number;
-  outcome: 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'error' | null;
+  // #587: похідне від фонового типу, а не власна копія — інакше новий статус
+  // фону (напр. `no_session`) мовчки провалюється в `default` без помилки типів.
+  outcome: SyncOutcome['status'] | null;
   complete: boolean;
 }
 
@@ -21,8 +24,10 @@ export function formatSyncStatus(s: SyncStatusView): string {
       : `Syncing… ${s.serverCount}`;
   }
   switch (s.outcome) {
+    case null: return '';
     case 'not_linked': return 'Link your Untappd account in the bot first (/link).';
     case 'blocked': return 'Untappd is rate-limiting — try again later.';
+    case 'no_session': return 'Untappd session expired — open untappd.com, sign in, then sync again.';
     case 'error': return 'Sync failed — check your connection and token, then retry.';
     case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
@@ -30,7 +35,12 @@ export function formatSyncStatus(s: SyncStatusView): string {
       return s.complete
         ? `✓ Fully synced (${s.serverCount}).`
         : `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
-    default: return '';
+    default: {
+      // #587: вичерпний switch — якщо `SyncOutcome['status']` отримає новий варіант
+      // без гілки тут, компілятор впаде на цьому присвоєнні, а не мовчки поверне ''.
+      const exhaustive: never = s.outcome;
+      return exhaustive;
+    }
   }
 }
 
