@@ -126,6 +126,26 @@ describe('runCheckinSync', () => {
     expect(onProgress).toHaveBeenCalledTimes(3);
   });
 
+  // #587: явний `null` — «роботи немає», обхід завершується успішно.
+  it('finishes done on an explicit null nextCursor', async () => {
+    const submitPage = vi.fn(async () => page({ nextCursor: null }));
+    const out = await runCheckinSync(baseDeps({ submitPage }));
+    expect(out.status).toBe('done');
+  });
+
+  // #587: сервер, відкочений нижче цієї гілки, шле відповідь узагалі БЕЗ цього поля —
+  // на відміну від явного `null`. Мовчазна зупинка тут виглядала б як звичайний
+  // частковий прогрес, тож це має бути помилка, а не вдаваний `done`.
+  it('reports an error, not done, when nextCursor is absent from the response', async () => {
+    const submitPage = vi.fn(async () => {
+      const { nextCursor: _drop, ...rest } = page({});
+      return rest as CheckinSyncPageResult;
+    });
+    const out = await runCheckinSync(baseDeps({ submitPage }));
+    expect(out.status).toBe('error');
+    expect(submitPage).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the profile total from page one when later pages carry none', async () => {
     let n = 0;
     const submitPage = vi.fn(async () => (++n === 1
