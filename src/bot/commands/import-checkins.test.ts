@@ -3,7 +3,7 @@ import { openDb, type DB } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
 import { countCheckins } from '../../storage/checkins';
-import { coverageFor } from '../../storage/checkin_coverage';
+import { addCoverage, coverageFor } from '../../storage/checkin_coverage';
 import { importCheckins } from './import-checkins';
 import type { Checkin } from '../../sources/untappd/export';
 
@@ -45,8 +45,8 @@ describe('importCheckins', () => {
   });
 
   it('extends coverage across batches', () => {
-    importCheckins(db, 1, [row({ checkin_id: '500' })]);
-    importCheckins(db, 1, [row({ checkin_id: '100' })]);
+    const first = importCheckins(db, 1, [row({ checkin_id: '500' })]);
+    importCheckins(db, 1, [row({ checkin_id: '100' })], first);
     // Дві партії одного експорту; між 100 і 500 експорт теж усе віддав, тож діапазон один.
     expect(coverageFor(db, 1)).toEqual([{ from_id: 100, to_id: 500 }]);
   });
@@ -59,5 +59,18 @@ describe('importCheckins', () => {
   it('writes no coverage for an empty batch', () => {
     importCheckins(db, 1, []);
     expect(coverageFor(db, 1)).toEqual([]);
+  });
+
+  // #587: імпорт заявляє лише те, що є в самому файлі. Чужий діапазон, до якого він не
+  // дотягнувся, лишається чужим — інакше стара вигрузка запечатала б діру, яку знайшла
+  // жива синхронізація, і ми відтворили б рівно той дефект, проти якого ця гілка.
+  it('does not swallow a coverage hole the import never spanned', () => {
+    addCoverage(db, 1, 100, 200);
+    addCoverage(db, 1, 900, 1000);
+    importCheckins(db, 1, [row({ checkin_id: '150' })]);
+    expect(coverageFor(db, 1)).toEqual([
+      { from_id: 900, to_id: 1000 },
+      { from_id: 100, to_id: 200 },
+    ]);
   });
 });
