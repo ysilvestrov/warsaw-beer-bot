@@ -217,6 +217,63 @@ When making changes:
 
 ---
 
+Classifying a Fix: the Light Path
+
+Not every bug is architectural. A fix may skip the spec and plan documents when
+all four of these hold:
+
+- it **restores** behaviour `spec.md` already describes, and needs no new
+  sentence in `spec.md`;
+- the mechanism of the defect was **proven by a live probe or replay before**
+  the classification — never classify at intake, because an issue's text
+  describes the symptom while the path is decided by the cause;
+- the change stays within two files plus their tests and introduces no new
+  concept;
+- it does not change a rule that acts on all data.
+
+The last condition separates things that look identical from the outside.
+Adding a pair to the curated `ALIAS_PAIRS` list is the light path: the list is
+finite and each entry is proven against the orphan's `candidates_summary`.
+Adding a word to `BREWERY_NOISE`, or changing the normalizer that feeds that
+list, is the full cycle: it changes matching for **every** brewery. The #318
+spec did both under one heading.
+
+The record the light path leaves in place of a spec is the issue plus a commit
+message that **names the mechanism** — not "fix typo". For orphan issues the
+`adjudicate` verdict file is part of that record too.
+
+Nothing about the gate is lighter: the full test gate and the AI PR review are
+identical on both paths.
+
+Operational work — re-arming rows, an `UPDATE` against the production database,
+running an existing script — is outside this rule entirely, because it commits
+no code.
+
+---
+
+The Ratchet Turns One Way
+
+The moment any of the four conditions fails — a third file is needed, a new
+concept appears, a sentence wants to go into `spec.md` — the work **stops
+completely**.
+
+Everything already obtained (the diagnosis, the probe output, a draft fix,
+measurements) is written down as input, and the change restarts on the
+architectural path **from the beginning**: brainstorming, spec, plan, worktree.
+Not "we will add a spec for what is already built": a spec written after the
+fact, around a finished fix, proves exactly one thing — that the fix exists.
+
+Never reclassify downward.
+
+Why the trigger sits after the probe rather than at intake: #587 arrived as
+"the refresh gets stuck on the last step" and looked like a trivial client bug.
+The diagnosis showed a scalar cursor asserting coverage nobody had established,
+and the fix added a new promise to `spec.md`. With this ratchet, a
+misclassification costs half an hour of probing rather than a branch built
+without a spec.
+
+---
+
 Claims and Their Evidence
 
 A design document must carry a table of every place the system **records
