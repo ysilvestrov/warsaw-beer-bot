@@ -1,18 +1,10 @@
 import { Readable } from 'node:stream';
 import { parse as csvParse } from 'csv-parse';
-// stream-json v2 exports: { "./*": "./src/*" } — Node applies the mapping
-// but does NOT append `.js` afterwards, so the require path must be explicit.
-// Vitest resolves without the suffix, so tests pass while `node dist/...`
-// would fail at module load without the explicit .js.
-//
-// The TYPE specifier must be the same one, now that moduleResolution is node16
-// (TypeScript 7 removed node10): node16 honours the exports map, so the old
-// `stream-json/src/streamers/stream-array` resolved through `./*` to
-// `./src/src/...` and could not be found. node10 ignored exports maps
-// entirely, which is why one specifier for the type and another for the
-// require went unnoticed.
+// stream-json v3 is ESM, so require() returns its module namespace rather than
+// the streamArray factory directly. Keep the explicit `.js` suffix because the
+// package exports map does not append it after mapping `./*` to `./src/*`.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const streamArray: typeof import('stream-json/streamers/stream-array.js') =
+const { streamArray }: typeof import('stream-json/streamers/stream-array.js') =
   require('stream-json/streamers/stream-array.js');
 import yauzl from 'yauzl';
 
