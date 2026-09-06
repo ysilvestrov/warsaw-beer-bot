@@ -69,6 +69,8 @@ export interface CheckinSyncPageResult {
   alreadyKnown: number;
   pageSize: number;
   nextMaxId: string | null;
+  /** #587: куди йти далі. Рахує сервер, стрибаючи через покриту територію. `null` = роботи немає. */
+  nextCursor: string | null;
   profileTotal: number | null;
   serverCount: number;
   complete: boolean;

@@ -217,6 +217,127 @@ When making changes:
 
 ---
 
+Classifying a Fix: the Light Path
+
+Not every bug is architectural. A fix may skip the spec and plan documents when
+all four of these hold:
+
+- it **restores** behaviour `spec.md` already describes, and needs no new
+  sentence in `spec.md`;
+- the mechanism of the defect was **proven by a live probe or replay before**
+  the classification — never classify at intake, because an issue's text
+  describes the symptom while the path is decided by the cause;
+- the change stays within two files plus their tests and introduces no new
+  concept;
+- it does not change a rule that acts on all data.
+
+The last condition separates things that look identical from the outside.
+Adding a pair to the curated `ALIAS_PAIRS` list is the light path: the list is
+finite and each entry is proven against the orphan's `candidates_summary`.
+Adding a word to `BREWERY_NOISE`, or changing the normalizer that feeds that
+list, is the full cycle: it changes matching for **every** brewery. The #318
+spec did both under one heading.
+
+The record the light path leaves in place of a spec is the issue plus a commit
+message that **names the mechanism** — not "fix typo". For orphan issues the
+`adjudicate` verdict file is part of that record too.
+
+Nothing about the gate is lighter: the full test gate and the AI PR review are
+identical on both paths.
+
+Operational work — re-arming rows, an `UPDATE` against the production database,
+running an existing script — is outside this rule entirely, because it commits
+no code.
+
+---
+
+The Ratchet Turns One Way
+
+The moment any of the four conditions fails — a third file is needed, a new
+concept appears, a sentence wants to go into `spec.md` — the work **stops
+completely**.
+
+Everything already obtained (the diagnosis, the probe output, a draft fix,
+measurements) is written down as input, and the change restarts on the
+architectural path **from the beginning**: brainstorming, spec, plan, worktree.
+Not "we will add a spec for what is already built": a spec written after the
+fact, around a finished fix, proves exactly one thing — that the fix exists.
+
+Never reclassify downward.
+
+Why the trigger sits after the probe rather than at intake: #587 arrived as
+"the refresh gets stuck on the last step" and looked like a trivial client bug.
+The diagnosis showed a scalar cursor asserting coverage nobody had established,
+and the fix added a new promise to `spec.md`. With this ratchet, a
+misclassification costs half an hour of probing rather than a branch built
+without a spec.
+
+---
+
+Claims and Their Evidence
+
+A design document must carry a table of every place the system **records
+something as fact** — a state row, a cursor, a coverage range, a verdict, a
+cache others later read as truth — with what it claims beside what proves it.
+
+A row whose evidence is a count, an assumption about an external file, or "it
+has always been so" is a weak row. Probe it live before writing the plan, or
+do not record the claim at all.
+
+Measured on #587: two such rows — a migration seed justified by count equality,
+and an import coverage range justified by assuming an export is complete — went
+through spec, plan, implementation, tests, documentation and a dry run against a
+copy of the production database, then were deleted outright at PR review. That
+is 285 lines written and self-deleted, a quarter of the branch. A third premise
+in the same change — whether the bottom of the feed can be told apart from a
+dead session — was checked with one thirty-second browser probe and removed an
+entire concept from the design before a line of code existed. The difference was
+not difficulty; it was that two of them looked like internal logic rather than a
+claim about data.
+
+---
+
+Staging a Large Change
+
+A change whose plan runs past roughly four tasks, or whose later tasks build on
+a mechanism that does not exist yet, is not planned in one piece.
+
+The spec stays whole. The plan splits: first the **core** — the mechanism the
+change exists for — then its whole-branch review, and only after that review a
+separate plan for the periphery (clients, migrations, adjacent paths, docs).
+
+Why, from #587: a seven-task plan written against code that did not exist yet
+contained three defects of its own — a mutation step naming a test that could
+not catch it, an accumulation scope that broke when the logic moved into a
+module, and a test assuming a file the repo does not have. Each cost a round
+trip. Worse, the premise task 4 rested on died at the very end, after task 4 had
+already been built on it.
+
+---
+
+Sizing a Task Before Dispatching
+
+**This overrides the subagent-driven-development skill's rule that the
+controller never implements.**
+
+Before dispatching a task, size it. A task is small when all three hold:
+
+- its text already contains the complete code to write,
+- it touches at most two files plus their tests,
+- it requires no new decision.
+
+Then the controller implements it directly: change, **full gate**, commit. If
+any of the three fails, dispatch as usual.
+
+Fresh eyes are not lost: work done inline MUST be included in the next task's
+review package and named in the whole-branch review dispatch.
+
+Measured on #587: a five-line popup change got its own implementer (76k tokens)
+and its own reviewer (57k), and so did a twenty-line one — about four wasted
+dispatches out of twenty-five, each with its own full gate.
+
+---
+
 Coding Style
 
 Match the style already present in the affected files.

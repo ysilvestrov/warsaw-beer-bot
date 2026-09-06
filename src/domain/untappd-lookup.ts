@@ -126,6 +126,36 @@ function pickUniqueByAbv(
   return abvHits.length === 1 ? abvHits[0] : null;
 }
 
+interface ScoredCandidate {
+  result: SearchResult;
+  score: number;
+}
+
+// Approximate scores identify the best evidence tier, but equal scores do not identify a
+// beer. A unique top result keeps the existing behaviour; a tie needs popularity evidence,
+// with ABV acting only as dominantCandidate's veto.
+function pickScoredCandidate(
+  matches: ScoredCandidate[],
+  abv: number | null,
+): SearchResult | null {
+  const bestByBid = new Map<number, ScoredCandidate>();
+  for (const match of matches) {
+    const existing = bestByBid.get(match.result.bid);
+    if (!existing || match.score > existing.score) bestByBid.set(match.result.bid, match);
+  }
+
+  const unique = Array.from(bestByBid.values());
+  if (unique.length === 0) return null;
+
+  const topScore = Math.max(...unique.map((match) => match.score));
+  const top = unique
+    .filter((match) => match.score === topScore)
+    .map((match) => match.result);
+  if (top.length === 1) return top[0];
+  if (top.some((result) => result.rating_count === undefined)) return null;
+  return dominantCandidate(top, abv);
+}
+
 function editDistance(a: string, b: string): number {
   let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
   for (let aIndex = 1; aIndex <= a.length; aIndex += 1) {
@@ -321,12 +351,17 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
+  const notFound = (): LookupOutcome => ({
+    kind: 'not_found',
+    searchUrls: triedUrls,
+    candidates: seenCandidates,
+  });
 
   // One search attempt's candidate list run through every match stage. Returns a matched
-  // outcome, or null when this list yields nothing. Extracted from the search loop so the
-  // query ladder (#382) can iterate rungs without duplicating 130 lines of staging — and
-  // so "no match" is a return value rather than a `continue` whose meaning depends on how
-  // many loops happen to enclose it.
+  // outcome, a terminal not_found for an unresolved scored tie, or null when this list
+  // yields nothing. Extracted from the search loop so the query ladder (#382) can iterate
+  // rungs without duplicating 130 lines of staging — and so "no match" is a return value
+  // rather than a `continue` whose meaning depends on how many loops happen to enclose it.
   function matchAgainst(results: SearchResult[]): LookupOutcome | null {
     const identityHits = results.filter((result) =>
       (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
@@ -438,20 +473,10 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
               swappedBrandNameScore(targetName.value, inputBreweryAliases, result);
             return score == null ? [] : [{ result, score }];
           }),
-        )
-        .sort((a, b) => b.score - a.score);
+        );
       if (nearMatches.length > 0) {
-        const topScore = nearMatches[0].score;
-        if (abv != null) {
-          const abvHit = nearMatches.find(
-            (match) =>
-              match.score === topScore &&
-              match.result.abv != null &&
-              Math.abs(match.result.abv - abv) <= ABV_TOLERANCE,
-          );
-          if (abvHit) return { kind: 'matched', result: abvHit.result };
-        }
-        return { kind: 'matched', result: nearMatches[0].result };
+        const nearHit = pickScoredCandidate(nearMatches, abv);
+        return nearHit ? { kind: 'matched', result: nearHit } : notFound();
       }
     }
 
@@ -472,23 +497,13 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
                 (!targetName.exactOnly || candIdentValue(m.item) === targetName.value) &&
                 identityAllowsApprox(targetName, candIdent(m.item), abv, m.item.abv),
             ),
-        )
-        .sort((a, b) => b.score - a.score);
+        );
       if (matches.length > 0) {
-        // ABV tiebreak: normalizeName strips vintage years, so different-year /
-        // different-strength variants collapse to identical names and tie at the top
-        // score. ABV is the only separating signal among the equally-scored top matches.
-        const topScore = matches[0].score;
-        if (abv != null) {
-          const abvHit = matches.find(
-            (m) =>
-              m.score === topScore &&
-              m.item.abv != null &&
-              Math.abs(m.item.abv - abv) <= ABV_TOLERANCE,
-          );
-          if (abvHit) return { kind: 'matched', result: abvHit.item };
-        }
-        return { kind: 'matched', result: matches[0].item };
+        const fuzzyHit = pickScoredCandidate(
+          matches.map((match) => ({ result: match.item, score: match.score })),
+          abv,
+        );
+        return fuzzyHit ? { kind: 'matched', result: fuzzyHit } : notFound();
       }
     }
 
@@ -690,5 +705,5 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       return retry;
     }
   }
-  return { kind: 'not_found', searchUrls: triedUrls, candidates: seenCandidates };
+  return notFound();
 }

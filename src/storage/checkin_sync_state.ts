@@ -1,54 +1,35 @@
 import type { DB } from './db';
+import { deepestCoveredId } from './checkin_coverage';
 
 export interface SyncState {
   deepest_max_id: string | null;
+  /** #587: застаріле. Ніхто більше не пише — дно стрічки недоказове (див. спеку). */
   complete: boolean;
   profile_total: number | null;
 }
 
+// #587: курсор більше не зберігається окремо. Він ПОХІДНИЙ від покриття — найглибший
+// доведений id, — тож не існує місця, де можна було б ствердити глибину, якої не досягли.
 export function getSyncState(db: DB, telegramId: number): SyncState {
   const row = db
-    .prepare(
-      'SELECT deepest_max_id, complete, profile_total FROM checkin_sync_state WHERE telegram_id = ?',
-    )
-    .get(telegramId) as
-    | { deepest_max_id: string | null; complete: number; profile_total: number | null }
-    | undefined;
-  if (!row) return { deepest_max_id: null, complete: false, profile_total: null };
+    .prepare('SELECT complete, profile_total FROM checkin_sync_state WHERE telegram_id = ?')
+    .get(telegramId) as { complete: number; profile_total: number | null } | undefined;
+  const deepest = deepestCoveredId(db, telegramId);
   return {
-    deepest_max_id: row.deepest_max_id,
-    complete: row.complete === 1,
-    profile_total: row.profile_total,
+    deepest_max_id: deepest === null ? null : String(deepest),
+    complete: row?.complete === 1,
+    profile_total: row?.profile_total ?? null,
   };
 }
 
-// max_id is a numeric Untappd cursor; "deepest" = lowest value. We keep the
-// minimum of the existing and incoming cursor so a Phase-1 top-up page (a high
-// max_id near "now") never rewinds the Phase-2 deep cursor. complete latches on.
-// profile_total: latest non-null wins — COALESCE keeps the prior value when the
-// incoming page parsed no total.
-export function advanceSyncState(
-  db: DB,
-  telegramId: number,
-  maxId: string | null,
-  complete: boolean,
-  profileTotal: number | null = null,
-): void {
-  const prev = getSyncState(db, telegramId);
-  const deepest = deeper(prev.deepest_max_id, maxId);
+// Єдине, що ще пишеться в цю таблицю: останній відомий лік чекінів у профілі Untappd.
+// COALESCE — щоб сторінка-фрагмент (у якої статистики немає) не стирала значення.
+export function recordProfileTotal(db: DB, telegramId: number, profileTotal: number | null): void {
   db.prepare(
     `INSERT INTO checkin_sync_state (telegram_id, deepest_max_id, complete, profile_total, updated_at)
-       VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+       VALUES (?, NULL, 0, ?, CURRENT_TIMESTAMP)
      ON CONFLICT(telegram_id) DO UPDATE SET
-       deepest_max_id = excluded.deepest_max_id,
-       complete = MAX(checkin_sync_state.complete, excluded.complete),
        profile_total = COALESCE(excluded.profile_total, checkin_sync_state.profile_total),
        updated_at = CURRENT_TIMESTAMP`,
-  ).run(telegramId, deepest, complete || prev.complete ? 1 : 0, profileTotal);
-}
-
-function deeper(a: string | null, b: string | null): string | null {
-  if (a === null) return b;
-  if (b === null) return a;
-  return Number(b) < Number(a) ? b : a;
+  ).run(telegramId, profileTotal);
 }

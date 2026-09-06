@@ -55,7 +55,7 @@ describe('lookupBeer', () => {
     expect(out.result.bid).toBe(6620595);
   });
 
-  test('matched: ABV breaks name-fuzzy ties between same-brand vintages', async () => {
+  test('matched: ABV breaks exact name-key ties between same-brand vintages', async () => {
     // normalizeName strips the year, so both names collapse to "buzdygan
     // rozkoszy" and tie at score 1.0. Untappd returns the 9.8% 2026 vintage
     // first; only the ABV tiebreak should pull the 8.5% entry the tap shows.
@@ -579,43 +579,40 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
   });
 
-  test('Měšťanský: nominative gate opens, name resolves (Kutná Hora Zlata 12)', async () => {
+  test('Měšťanský: nominative gate opens, dominant name resolves (Kutná Hora Zlata 12)', async () => {
     const search = fakeSearch(() => [
-      { bid: 70, beer_name: 'Kutnohorská Zlatá 12', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
-      { bid: 71, beer_name: 'Kutnohorská Zlatá 12 Chmelená za studena', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
-      { bid: 72, beer_name: 'Zlatá 12 nefiltrovaná', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5 },
+      { bid: 70, beer_name: 'Kutnohorská Zlatá 12', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5, rating_count: 10_000 },
+      { bid: 71, beer_name: 'Kutnohorská Zlatá 12 Chmelená za studena', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5, rating_count: 1_000 },
+      { bid: 72, beer_name: 'Zlatá 12 nefiltrovaná', brewery_name: 'Měšťanský pivovar Kutná Hora', style: 'Czech Pale Lager', abv: 5, global_rating: 3.5, rating_count: 500 },
     ]);
     const out = await lookupBeer({ brewery: 'Kutna Hora Brewery', name: 'Zlata 12', search });
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
-    expect([70, 71, 72]).toContain(out.result.bid);
+    expect(out.result.bid).toBe(70);
   });
 });
 
 // #369/#322: the shop publishes "Moc 0.0%" for AleBrowar KWAS CHLEBOWY JASNY.
-// Bright (0.0%) and Light (0.5%) share brewery, style and name — the ABV is the
-// only thing that separates them. A truthiness check anywhere on the relay path
-// would discard the 0 and re-create the ambiguity this test exists to prevent.
-describe('#369/#322 — a relayed 0.0% ABV disambiguates same-brewery twins', () => {
+// Bright (0.0%) and Light (0.5%) share the same approximate name evidence. Since #409,
+// ABV cannot turn that ambiguity into identity without popularity evidence.
+describe('#369/#322 — relayed ABV does not select between approximate twins', () => {
   const twins: SearchResult[] = [
     { bid: 5489374, beer_name: 'Kwas Chlebowy Bright', brewery_name: 'AleBrowar', style: 'Kwas Chlebowy', abv: 0, global_rating: 3.4 },
     { bid: 5489375, beer_name: 'Kwas Chlebowy Light', brewery_name: 'AleBrowar', style: 'Kwas Chlebowy', abv: 0.5, global_rating: 3.3 },
   ];
 
-  test('picks Bright when abv is 0', async () => {
+  test('leaves Bright versus Light unresolved when abv is 0', async () => {
     const out = await lookupBeer({
       brewery: 'AleBrowar', name: 'Kwas Chlebowy', abv: 0, search: fakeSearch(() => twins),
     });
-    expect(out.kind).toBe('matched');
-    expect(out.kind === 'matched' && out.result.bid).toBe(5489374);
+    expect(out.kind).toBe('not_found');
   });
 
-  test('picks Light when abv is 0.5', async () => {
+  test('leaves Bright versus Light unresolved when abv is 0.5', async () => {
     const out = await lookupBeer({
       brewery: 'AleBrowar', name: 'Kwas Chlebowy', abv: 0.5, search: fakeSearch(() => twins),
     });
-    expect(out.kind).toBe('matched');
-    expect(out.kind === 'matched' && out.result.bid).toBe(5489375);
+    expect(out.kind).toBe('not_found');
   });
 });
 
@@ -705,23 +702,22 @@ describe('#382 query ladder', () => {
 });
 
 describe('#347 curated alias batch', () => {
-  test('33544: parent-company prefix, ABV separates the decoy siblings', async () => {
+  test('33544: parent-company prefix, popularity separates the decoy siblings', async () => {
     const search = fakeSearch(() => [
-      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4 },
-      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1 },
-      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2 },
+      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4, rating_count: 10_000 },
+      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1, rating_count: 1_000 },
+      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2, rating_count: 500 },
     ]);
     const out = await lookupBeer({ brewery: 'Browary Książęce Brewery', name: 'Złote Pszeniczne', abv: 4.9, search });
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(323265);
 
-    // The decoys only separate on ABV when they come first: reversed and without an ABV
-    // the 0,0% sibling wins, so this second lookup is what makes the tiebreak load-bearing.
+    // Search order is not identity evidence: reversing every candidate keeps the dominant beer.
     const reversed = fakeSearch(() => [
-      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2 },
-      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1 },
-      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4 },
+      { bid: 6743380, beer_name: 'Złote Pszeniczne Z Nutą Mango', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Fruited', abv: 4.8, global_rating: 3.2, rating_count: 500 },
+      { bid: 4732673, beer_name: 'Książęce Złote Pszeniczne 0,0%', brewery_name: 'Tyskie Browary Książęce', style: 'Non-Alcoholic - Wheat', abv: 0, global_rating: 3.1, rating_count: 1_000 },
+      { bid: 323265, beer_name: 'Książęce Złote Pszeniczne', brewery_name: 'Tyskie Browary Książęce', style: 'Wheat Beer - Other', abv: 4.9, global_rating: 3.4, rating_count: 10_000 },
     ]);
     const outReversed = await lookupBeer({ brewery: 'Browary Książęce Brewery', name: 'Złote Pszeniczne', abv: 4.9, search: reversed });
     expect(outReversed.kind).toBe('matched');
@@ -785,21 +781,210 @@ describe('#347 curated alias batch', () => {
     expect(out.result.bid).toBe(6819716);
   });
 
-  test('34351: a contradicting shop ABV must not veto the published beer (sibling separated only by result order)', async () => {
-    // flasker prints 3.8% in the title while the linked Untappd record says 4.2%.
-    // Both candidates tie: each normalizes to three tokens against the one-token target
-    // `bulgogi`, so both score the same near-name value, and both fall outside the ABV
-    // window. The winner is whichever Algolia returned first — this test pins the observed
-    // live order (2026-08-14), NOT a discriminator. A deterministic tie-break needs the bid
-    // flasker publishes (#384); see the follow-up issue linked from the PR.
-    const search = fakeSearch(() => [
+  describe('#409 order-independent scored candidate selection', () => {
+    const nearCandidates = (): SearchResult[] => [
       { bid: 6648348, beer_name: 'Tomatøl:BULDAK BULGOGI', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.6 },
       { bid: 6708599, beer_name: 'Tomatol: Bulgogi Sriracha', brewery_name: 'Mad Brew', style: 'Sour - Tomato / Vegetable Gose', abv: 4.2, global_rating: 3.5 },
-    ]);
-    const out = await lookupBeer({ brewery: 'Tomatol', name: 'Bulgogi', abv: 3.8, search });
-    expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
-    expect(out.result.bid).toBe(6648348);
+    ];
+    // The full strings score above the Stage 2b threshold, while alpha ↔ beta is
+    // below near-name token coverage, so these candidates exercise fuzzy matching.
+    const fuzzyCandidates = (): SearchResult[] => [
+      { bid: 7101, beer_name: 'Extraordinary Magnificent Beta', brewery_name: 'Example Brewery', style: 'Fruit Beer', abv: 5, global_rating: 3.6 },
+      { bid: 7102, beer_name: 'Extraordinary Magnificent Beta', brewery_name: 'Example Brewery', style: 'Fruit Beer', abv: 5, global_rating: 3.5 },
+    ];
+
+    async function outcomesForBothOrders(
+      brewery: string,
+      name: string,
+      abv: number,
+      candidates: SearchResult[],
+    ) {
+      return Promise.all([
+        lookupBeer({ brewery, name, abv, search: fakeSearch(() => candidates) }),
+        lookupBeer({ brewery, name, abv, search: fakeSearch(() => [...candidates].reverse()) }),
+      ]);
+    }
+
+    test('near-name: missing popularity leaves an exact top-score tie unresolved in either order', async () => {
+      const outcomes = await outcomesForBothOrders('Tomatol', 'Bulgogi', 3.8, nearCandidates());
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
+    });
+
+    test('near-name: an unresolved tie stops before a later collaboration part can match', async () => {
+      let callCount = 0;
+      const out = await lookupBeer({
+        brewery: 'Mad Brew / Other Brewery',
+        name: 'Bulgogi',
+        abv: 4.2,
+        search: fakeSearch(() => {
+          callCount += 1;
+          if (callCount === 1) return nearCandidates();
+          return [{
+            bid: 7100,
+            beer_name: 'Bulgogi',
+            brewery_name: 'Other Brewery',
+            style: 'Fruit Beer',
+            abv: 4.2,
+            global_rating: 3.7,
+          }];
+        }),
+      });
+
+      expect(out.kind).toBe('not_found');
+      expect(callCount).toBe(1);
+    });
+
+    test('near-name: popularity dominance selects the same compatible leader in either order', async () => {
+      const candidates = nearCandidates();
+      candidates[0].rating_count = 1_000;
+      candidates[1].rating_count = 10_000;
+
+      const outcomes = await outcomesForBothOrders('Tomatol', 'Bulgogi', 4.2, candidates);
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['matched', 'matched']);
+      expect(outcomes.map((outcome) => outcome.kind === 'matched' ? outcome.result.bid : null))
+        .toEqual([6708599, 6708599]);
+    });
+
+    test('partial popularity evidence cannot manufacture dominance in either scored stage', async () => {
+      const near = nearCandidates();
+      near[0].rating_count = 10_000;
+      const fuzzy = fuzzyCandidates();
+      fuzzy[0].rating_count = 10_000;
+
+      const [nearOut, fuzzyOut] = await Promise.all([
+        lookupBeer({
+          brewery: 'Tomatol',
+          name: 'Bulgogi',
+          abv: 4.2,
+          search: fakeSearch(() => near),
+        }),
+        lookupBeer({
+          brewery: 'Example Brewery',
+          name: 'Extraordinary Magnificent Alpha',
+          abv: 5,
+          search: fakeSearch(() => fuzzy),
+        }),
+      ]);
+
+      expect([nearOut.kind, fuzzyOut.kind]).toEqual(['not_found', 'not_found']);
+    });
+
+    test('near-name: a contradicting popularity leader does not promote an ABV-compatible runner-up', async () => {
+      const candidates = nearCandidates();
+      candidates[0] = { ...candidates[0], abv: 9, rating_count: 10_000 };
+      candidates[1] = { ...candidates[1], abv: 3.8, rating_count: 1_000 };
+
+      const outcomes = await outcomesForBothOrders('Tomatol', 'Bulgogi', 3.8, candidates);
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
+    });
+
+    test('near-name: one distinct top candidate keeps matching despite an ABV contradiction', async () => {
+      const [candidate] = nearCandidates();
+      const lowerScored = {
+        ...candidate,
+        bid: 6708600,
+        beer_name: 'Tomatol: Bulgogi Sriracha Extra',
+      };
+      const out = await lookupBeer({
+        brewery: 'Tomatol',
+        name: 'Bulgogi',
+        abv: 3.8,
+        search: fakeSearch(() => [lowerScored, candidate, { ...candidate }]),
+      });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(6648348);
+    });
+
+    test('fuzzy: missing popularity leaves an exact top-score tie unresolved in either order', async () => {
+      const outcomes = await outcomesForBothOrders(
+        'Example Brewery',
+        'Extraordinary Magnificent Alpha',
+        5,
+        fuzzyCandidates(),
+      );
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
+    });
+
+    test('fuzzy: an unresolved tie stops before a later collaboration part can match', async () => {
+      let callCount = 0;
+      const out = await lookupBeer({
+        brewery: 'Example Brewery / Other Brewery',
+        name: 'Extraordinary Magnificent Alpha',
+        abv: 5,
+        search: fakeSearch(() => {
+          callCount += 1;
+          if (callCount === 1) return fuzzyCandidates();
+          return [{
+            bid: 7200,
+            beer_name: 'Extraordinary Magnificent Alpha',
+            brewery_name: 'Other Brewery',
+            style: 'Fruit Beer',
+            abv: 5,
+            global_rating: 3.7,
+          }];
+        }),
+      });
+
+      expect(out.kind).toBe('not_found');
+      expect(callCount).toBe(1);
+    });
+
+    test('fuzzy: popularity dominance selects the same compatible leader in either order', async () => {
+      const candidates = fuzzyCandidates();
+      candidates[0].rating_count = 1_000;
+      candidates[1].rating_count = 10_000;
+
+      const outcomes = await outcomesForBothOrders(
+        'Example Brewery',
+        'Extraordinary Magnificent Alpha',
+        5,
+        candidates,
+      );
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['matched', 'matched']);
+      expect(outcomes.map((outcome) => outcome.kind === 'matched' ? outcome.result.bid : null))
+        .toEqual([7102, 7102]);
+    });
+
+    test('fuzzy: a contradicting popularity leader does not promote an ABV-compatible runner-up', async () => {
+      const candidates = fuzzyCandidates();
+      candidates[0] = { ...candidates[0], abv: 9, rating_count: 10_000 };
+      candidates[1] = { ...candidates[1], abv: 5, rating_count: 1_000 };
+
+      const outcomes = await outcomesForBothOrders(
+        'Example Brewery',
+        'Extraordinary Magnificent Alpha',
+        5,
+        candidates,
+      );
+
+      expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
+    });
+
+    test('fuzzy: one distinct top candidate keeps matching despite an ABV contradiction', async () => {
+      const [lowerScored] = fuzzyCandidates();
+      const candidate = {
+        ...lowerScored,
+        bid: 7103,
+        beer_name: 'Extraordinary Magnificent Kappa',
+      };
+      const out = await lookupBeer({
+        brewery: 'Example Brewery',
+        name: 'Extraordinary Magnificent Alpha',
+        abv: 7,
+        search: fakeSearch(() => [lowerScored, candidate, { ...candidate }]),
+      });
+
+      expect(out.kind).toBe('matched');
+      if (out.kind !== 'matched') return;
+      expect(out.result.bid).toBe(7103);
+    });
   });
 });
 

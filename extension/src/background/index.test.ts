@@ -123,7 +123,7 @@ describe('check-in sync controls', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
-      merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: '11', profileTotal: 100, serverCount: 12, complete: false,
+      merged: 0, alreadyKnown: 25, pageSize: 25, nextMaxId: '11', nextCursor: null, profileTotal: 100, serverCount: 12, complete: false,
     });
 
     const firstStart = handleCheckinSyncStart();
@@ -155,7 +155,7 @@ describe('check-in sync controls', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
-      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null,
+      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null, nextCursor: null,
       profileTotal: 100, serverCount: 13, complete: true,
     });
 
@@ -189,8 +189,10 @@ describe('check-in sync controls', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
-      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null,
-      profileTotal: 100, serverCount: 13, complete: true,
+      // #587: `complete` тепер похідне від збігу лічильників — profileTotal:13 тут
+      // навмисно дорівнює serverCount, щоб out.complete вийшло true.
+      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null, nextCursor: null,
+      profileTotal: 13, serverCount: 13, complete: true,
     });
 
     await handleCheckinSyncStart();
@@ -221,7 +223,7 @@ describe('check-in sync controls', () => {
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
-      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null,
+      merged: 1, alreadyKnown: 24, pageSize: 25, nextMaxId: null, nextCursor: null,
       profileTotal: 100, serverCount: 13, complete: true,
     });
 
@@ -244,7 +246,7 @@ describe('check-in sync controls', () => {
     const fetchMock = vi.fn(async () => new Response('<html>feed</html>', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     const submitPage = vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
-      merged: 1, alreadyKnown: 0, pageSize: 25, nextMaxId: '11', profileTotal: 100, serverCount: 13, complete: false,
+      merged: 1, alreadyKnown: 0, pageSize: 25, nextMaxId: '11', nextCursor: '11', profileTotal: 100, serverCount: 13, complete: false,
     });
 
     await handleCheckinSyncStart();
