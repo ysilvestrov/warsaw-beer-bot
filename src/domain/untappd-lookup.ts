@@ -351,12 +351,17 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
+  const notFound = (): LookupOutcome => ({
+    kind: 'not_found',
+    searchUrls: triedUrls,
+    candidates: seenCandidates,
+  });
 
   // One search attempt's candidate list run through every match stage. Returns a matched
-  // outcome, or null when this list yields nothing. Extracted from the search loop so the
-  // query ladder (#382) can iterate rungs without duplicating 130 lines of staging — and
-  // so "no match" is a return value rather than a `continue` whose meaning depends on how
-  // many loops happen to enclose it.
+  // outcome, a terminal not_found for an unresolved scored tie, or null when this list
+  // yields nothing. Extracted from the search loop so the query ladder (#382) can iterate
+  // rungs without duplicating 130 lines of staging — and so "no match" is a return value
+  // rather than a `continue` whose meaning depends on how many loops happen to enclose it.
   function matchAgainst(results: SearchResult[]): LookupOutcome | null {
     const identityHits = results.filter((result) =>
       (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
@@ -471,7 +476,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         );
       if (nearMatches.length > 0) {
         const nearHit = pickScoredCandidate(nearMatches, abv);
-        return nearHit ? { kind: 'matched', result: nearHit } : null;
+        return nearHit ? { kind: 'matched', result: nearHit } : notFound();
       }
     }
 
@@ -498,7 +503,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
           matches.map((match) => ({ result: match.item, score: match.score })),
           abv,
         );
-        return fuzzyHit ? { kind: 'matched', result: fuzzyHit } : null;
+        return fuzzyHit ? { kind: 'matched', result: fuzzyHit } : notFound();
       }
     }
 
@@ -700,5 +705,5 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       return retry;
     }
   }
-  return { kind: 'not_found', searchUrls: triedUrls, candidates: seenCandidates };
+  return notFound();
 }
