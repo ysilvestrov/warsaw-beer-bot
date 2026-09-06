@@ -935,6 +935,13 @@ fuzzy (2b); fuzzy-стадія пробує не лише повну норма�
 strict-кандидата дозволений останній шанс за спільним довгим токеном (`Lagerbier ...` ↔
 `... Lagerbier`). Ця стадія **не застосовується до relaxed brewery pool**, тож relaxed-збіги
 досі вимагають exact name.
+У strict-only near-name стадії та fuzzy Stage 2b однаково оцінені кандидати більше не
+успадковують порядок Algolia (#409). Кандидати спершу дедуплікуються за `bid`, а top-пул
+містить лише exact-максимум score. Один distinct top-кандидат зберігає попередню поведінку,
+включно з відомою ABV-суперечністю. Кілька top-кандидатів вимагають `rating_count` для кожного:
+перемагає лише `dominantCandidate` за чинними `FLAGSHIP_MIN_RATINGS` і `DOMINANCE_RATIO`, а ABV
+може тільки накласти вето без promotion runner-up. Без повного popularity-доказу або без
+домінування lookup завершується `not_found`, незалежно від порядку результатів.
 Пошуковий запит enrich'у будується щаблями `searchQueryLadder` (#382, детальніше нижче) над
 спільним конвеєром `buildSearchQuery`, вихід якого на широкому щаблі дорівнює `cleanSearchQuery`
 (collab-aware: колапсує `COLLAB_SEP`-роздільники, стрипить `BREWERY_NOISE` incl.
@@ -2599,10 +2606,12 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   форми (`Sp. z o.o.`, `S.A.`) ДО токенізації — інакше brewery hard-gate валить
   валідний матч (напр. `Pivovar Černá Hora` ↔ `Cerna Hora Brewery`; ontap
   `Harpagan Brewery` → `harpagan` vs Untappd `Harpagan Contracts`).
-- `untappd-lookup.ts` Stage 2: серед однаково-оцінених name-fuzzy збігів —
+- `untappd-lookup.ts` Stage 2a: серед однакових exact name-key збігів лишається
   ABV-tiebreak (`ABV_TOLERANCE`). `normalizeName` зрізає рік, тож різні
   vintage/міцності одного пива (`Buzdygan Rozkoszy` 8.5% vs `… 2026` 9.8%)
-  колапсують в однакову назву; ABV — єдиний сигнал, що їх розрізняє.
+  колапсують в однаковий exact-ключ; ABV — єдиний сигнал, що їх розрізняє.
+  У scored approximate стадіях 2a.5/2b діє order-independent popularity-контракт #409,
+  описаний вище: ABV там лише veto, а не selector.
   Десяткові release-ідентифікатори в назві (`Ambrosia 9.0`) натомість зберігаються
   як токени і не можуть exact/fuzzy-матчитись до іншого релізу (`Ambrosia 8.0`).
   Числовий tap-noise з `%`/`°`/`ABV` і чотиризначні vintage-роки далі зрізаються.
