@@ -2560,7 +2560,8 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - TypeScript у devDependencies → білд: `npm ci` → build → `npm prune --omit=dev`.
 - Telegraf `handlerTimeout = 90 с` → fire-and-forget для довгих handler'ів.
 - `bot.stop()` не виходить з процесу → явний `createShutdown` + `TimeoutStopSec`.
-- `stream-json@2` потребує явного `.js`-суфікса в require-шляху.
+- `stream-json@3` потребує named export з ESM namespace та явного `.js`-суфікса
+  в require-шляху.
 - Brewery-aliases: `"X / Y"` (білінгва + колаби, будь-який пробіл навколо `/`)
   і паренформа `"X (Y)"` — обидві сторони рахуються як валідна пивоварня;
   `dedupeBreweryAliases` зливає дублі на старті.
