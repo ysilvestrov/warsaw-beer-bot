@@ -811,6 +811,30 @@ describe('#347 curated alias batch', () => {
       expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
     });
 
+    test('near-name: an unresolved tie stops before a later collaboration part can match', async () => {
+      let callCount = 0;
+      const out = await lookupBeer({
+        brewery: 'Mad Brew / Other Brewery',
+        name: 'Bulgogi',
+        abv: 4.2,
+        search: fakeSearch(() => {
+          callCount += 1;
+          if (callCount === 1) return nearCandidates();
+          return [{
+            bid: 7100,
+            beer_name: 'Bulgogi',
+            brewery_name: 'Other Brewery',
+            style: 'Fruit Beer',
+            abv: 4.2,
+            global_rating: 3.7,
+          }];
+        }),
+      });
+
+      expect(out.kind).toBe('not_found');
+      expect(callCount).toBe(1);
+    });
+
     test('near-name: popularity dominance selects the same compatible leader in either order', async () => {
       const candidates = nearCandidates();
       candidates[0].rating_count = 1_000;
@@ -885,6 +909,30 @@ describe('#347 curated alias batch', () => {
       );
 
       expect(outcomes.map((outcome) => outcome.kind)).toEqual(['not_found', 'not_found']);
+    });
+
+    test('fuzzy: an unresolved tie stops before a later collaboration part can match', async () => {
+      let callCount = 0;
+      const out = await lookupBeer({
+        brewery: 'Example Brewery / Other Brewery',
+        name: 'Extraordinary Magnificent Alpha',
+        abv: 5,
+        search: fakeSearch(() => {
+          callCount += 1;
+          if (callCount === 1) return fuzzyCandidates();
+          return [{
+            bid: 7200,
+            beer_name: 'Extraordinary Magnificent Alpha',
+            brewery_name: 'Other Brewery',
+            style: 'Fruit Beer',
+            abv: 5,
+            global_rating: 3.7,
+          }];
+        }),
+      });
+
+      expect(out.kind).toBe('not_found');
+      expect(callCount).toBe(1);
     });
 
     test('fuzzy: popularity dominance selects the same compatible leader in either order', async () => {
