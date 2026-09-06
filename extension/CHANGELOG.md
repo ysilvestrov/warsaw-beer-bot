@@ -23,6 +23,10 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
+## [Unreleased]
+
+- Fixed known Untappd beers showing no badge when their global rating was unavailable. They now show a clickable ⭐ without a number instead of looking as if the extension ignored them.
+
 ## [0.17.0] - 2026-09-04
 
 - Fixed check-in sync stopping short of a full sync when a run had been interrupted earlier (closed tab, lost connection, hitting Stop): it now finds and fills gaps left in the middle of your history instead of getting stuck just above them, and shows «✓ Fully synced» once everything is in. If your Untappd session has expired it now says so instead of quietly reporting success.

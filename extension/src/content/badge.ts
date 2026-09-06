@@ -74,7 +74,7 @@ function attach(host: HTMLElement, badge: HTMLElement): void {
 }
 
 // Guard order: drunk → ✅ (+ personal rating); truly unmatched (matched_beer null) → no
-// badge; fuzzy-match-but-drunk → ❓ (+ global if present); not-drunk bid+global → ⭐;
+// badge; fuzzy-match-but-drunk → ❓ (+ global if present); not-drunk bid → ⭐ (+ global if present);
 // not-drunk matched orphan (no bid) → ⚪. All rendered badges are clickable: a bid → the
 // Untappd beer page; no bid → an Untappd search prefilled with the tried brewery+name.
 function badgeFor(result: MatchResult): HTMLElement | null {
@@ -88,8 +88,9 @@ function badgeFor(result: MatchResult): HTMLElement | null {
   if (result.drunk_uncertain) {
     return makeBadge(m.rating_global != null ? `❓ ${m.rating_global.toFixed(1)}` : '❓', hrefFor(m.untappd_id, brewery, name));
   }
-  if (m.untappd_id != null && m.rating_global != null) {
-    return makeBadge(`⭐ ${m.rating_global.toFixed(1)}`, untappdUrl(m.untappd_id));
+  if (m.untappd_id != null) {
+    const text = m.rating_global != null ? `⭐ ${m.rating_global.toFixed(1)}` : '⭐';
+    return makeBadge(text, untappdUrl(m.untappd_id));
   }
   if (m.untappd_id == null) return makeBadge('⚪', untappdSearchUrl(brewery, name));
   return null;
