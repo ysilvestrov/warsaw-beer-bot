@@ -70,6 +70,21 @@ describe('renderBadge', () => {
     expect(badge!.textContent).toContain('3.9');
   });
 
+  it('shows a clickable bare ⭐ when a catalog beer has a bid but no global rating', () => {
+    const host = el();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+    renderBadge(host, {
+      ...notDrunkRated,
+      matched_beer: { ...notDrunkRated.matched_beer!, rating_global: null },
+    });
+
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge?.textContent).toBe('⭐');
+
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
+  });
+
   it('renders ⚪ for a not-drunk orphan (matched, no bid / no global rating)', () => {
     const host = el();
     renderBadge(host, notDrunkOrphan);
