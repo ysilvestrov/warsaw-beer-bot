@@ -13,7 +13,9 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
   { slug: 'fast-talking', brewery: 'Root + Branch',       name: 'Fast Talking / North Park', bid: 6683161 },
   { slug: 'messorem',     brewery: 'Messorem',            name: 'Globe Coagulant / Finback', bid: 6538432 },
   { slug: 'primator',     brewery: 'Primator',            name: 'PRIMÁTOR FREE MOTHER IN LAW', bid: 5817947 },
-  { slug: 'omnipollo',    brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar', bid: 6423273 },
+  // #409: the legacy relay supplies two equally scored collaborator records without
+  // rating counts, so the approximate tie intentionally fails closed.
+  { slug: 'omnipollo',    brewery: 'Omnipollo collab/ Trillium Brewing Company', name: 'Kanelbullar', bid: null },
   { slug: 'staropolski',  brewery: 'Staropolski',         name: 'KULTOWE PILS',              bid: 1673808 }, // #120 fixed
   { slug: 'st-feuillien', brewery: '',                    name: 'St-Feuillien Blonde',       bid: 22540 },   // #149
   { slug: 'murphys',      brewery: "Murphy's Brewery",     name: "Murphy's Irish Stout",      bid: 5932 },    // #138B
@@ -23,7 +25,7 @@ const cases: Array<{ slug: string; brewery: string; name: string; bid: number | 
 
 describe('#117 lookupBeer against real Untappd search pages', () => {
   for (const { slug, brewery, name, bid } of cases) {
-    test(`${slug} → ${bid === null ? 'not_found (deferred #120)' : `bid ${bid}`}`, async () => {
+    test(`${slug} → ${bid === null ? 'not_found' : `bid ${bid}`}`, async () => {
       const out = await lookupBeer({ brewery, name, search: htmlSearch(html(slug)) });
       if (bid === null) {
         expect(out.kind).toBe('not_found');
