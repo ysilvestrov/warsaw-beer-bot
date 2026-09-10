@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="uk">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Warsaw Beer — MCP для агентів</title>
+    <style>
+  :root { color-scheme: light dark; }
+  body { max-width: 46rem; margin: 2rem auto; padding: 0 1.1rem;
+    font: 16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    color: #1a1a1a; background: #fff; }
+  nav { display: flex; gap: 1rem; margin-bottom: 1.5rem; font-size: .95rem; }
+  a { color: #1a5fb4; }
+  h1 { font-size: 1.7rem; } h2 { margin-top: 2rem; }
+  code { background: rgba(127,127,127,.15); padding: .1em .3em; border-radius: 3px; }
+  pre { background: rgba(127,127,127,.12); padding: .8rem; border-radius: 6px; overflow-x: auto; }
+  img { max-width: 100%; }
+  .popup-screenshot { margin: 1.25rem 0 1.5rem; }
+  .popup-screenshot img { display: block; height: auto; border: 1px solid rgba(127,127,127,.28);
+    border-radius: 8px; }
+  .popup-screenshot figcaption { max-width: 32rem; margin-top: .45rem;
+    color: #5f6368; font-size: .9rem; line-height: 1.45; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e6e6e6; background: #16181c; }
+    a { color: #78aeed; }
+    .popup-screenshot figcaption { color: #b7bcc3; }
+  }</style>
+  </head>
+  <body>
+    <nav>
+      <a href="../">← На головну</a>
+    </nav>
+    <h1>MCP для Claude Code та Codex — звірка пив зі свого агента</h1>
+<p>Той самий матчинг, що робить браузерне розширення на сторінках магазинів,
+доступний і напряму зі свого AI-агента: надсилаєш список пив — отримуєш, що з
+них ти вже пив (і з якою оцінкою), а що каталог бота знає про кожне. Це один
+інструмент, <code>match_beers</code>.</p>
+<p>Знадобиться той самий токен, що й для розширення — див. Частину 1 у
+<a href="../install-uk/">інструкції встановлення розширення</a> (<code>/start</code> → <code>/link</code> →
+<code>/import</code>), якщо ти ще не проходив ці кроки.</p>
+<hr>
+<h2>Токен</h2>
+<p>Надішли боту в Telegram:</p>
+<pre><code>/extension
+</code></pre>
+<p>Бот дасть токен у копійованому блоці. Це <strong>той самий</strong> токен, що й для
+браузерного розширення — жодного окремого токена для MCP заводити не треба.</p>
+<blockquote>
+<p><strong>Важливо:</strong> видача нового токена (повторний <code>/extension</code>) <strong>скасовує
+попередній</strong>. Якщо після цього MCP раптом перестав з&#39;єднуватись — онови
+токен у налаштуваннях клієнта нижче.</p>
+</blockquote>
+<hr>
+<h2>Claude Code</h2>
+<p>Одна команда:</p>
+<pre><code>claude mcp add --transport http warsaw-beer https://beer-api.ysilvestrov-ai.uk/mcp \
+  --header &quot;Authorization: Bearer ТВІЙ_ТОКЕН&quot;
+</code></pre>
+<p>Заміни <code>ТВІЙ_ТОКЕН</code> на те, що дав бот. Перевірити з&#39;єднання:</p>
+<pre><code>claude mcp list
+</code></pre>
+<p>Має з&#39;явитися <code>warsaw-beer</code> зі статусом підключено.</p>
+<hr>
+<h2>Codex CLI</h2>
+<p>Додай у <code>~/.codex/config.toml</code>:</p>
+<pre><code class="language-toml">[mcp_servers.warsaw_beer]
+url = &quot;https://beer-api.ysilvestrov-ai.uk/mcp&quot;
+bearer_token_env_var = &quot;WARSAW_BEER_TOKEN&quot;
+</code></pre>
+<p>Codex бере токен не з файлу, а зі змінної середовища <code>WARSAW_BEER_TOKEN</code> — тож
+перед запуском Codex поклади туди свій токен, наприклад:</p>
+<pre><code>export WARSAW_BEER_TOKEN=&quot;ТВІЙ_ТОКЕН&quot;
+</code></pre>
+<hr>
+<h2>Що означають статуси</h2>
+<p>Питаєш агента про список пив — у відповіді на кожне буде один із шести
+статусів:</p>
+<table>
+<thead>
+<tr>
+<th>Статус</th>
+<th>Що означає</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>drunk</code></td>
+<td>ти точно вже пив це пиво — відомо напевно</td>
+</tr>
+<tr>
+<td><code>probably_drunk</code></td>
+<td>схоже, що ти вже пив, але збіг неточний — варто перевірити самому</td>
+</tr>
+<tr>
+<td><code>not_drunk</code></td>
+<td>твоя історія відома, і в ній цього пива немає</td>
+</tr>
+<tr>
+<td><code>unknown</code></td>
+<td>про твою історію взагалі нічого не відомо — <strong>це не «ти не пив»</strong>, а «нам нема звідки це знати»</td>
+</tr>
+<tr>
+<td><code>not_in_catalog</code></td>
+<td>пиво шукали в каталозі бота — і не знайшли</td>
+</tr>
+<tr>
+<td><code>not_searched</code></td>
+<td>по цьому пиву пошук <strong>не відбувся</strong> — <strong>це не «нема», а «не шукали»</strong></td>
+</tr>
+</tbody></table>
+<p>Два з цих статусів варто зрозуміти правильно, бо вони легко переплутуються з
+іншими:</p>
+<p><strong><code>unknown</code></strong> з&#39;являється, коли в бота взагалі немає твоєї історії пив — а
+наповнює її саме браузерне розширення (через <code>/import</code> або синхронізацію
+чекінів у розширенні). Поки цього не зроблено, бот не може сказати ні «пив»,
+ні «не пив» — він чесно каже «не знаю». Це не привід вважати, що ти нічого не
+пив.</p>
+<p><strong><code>not_searched</code></strong> з&#39;являється тому, що пошук по всьому каталогу — не лише по
+точних збігах — має бюджет <strong>20 позицій на один виклик</strong>. Якщо в списку
+більше пив без точного збігу, частина з них лишається без цього ширшого
+пошуку: не тому, що їх нема в каталозі, а тому, що до них просто не дійшли за
+один раз.</p>
+<hr>
+<h2>Якщо не працює</h2>
+<p><strong>Найважливіше — і найнеочевидніше — саме тут.</strong> Забутий або неправильний
+токен виглядає в обох клієнтах геть не так, як «немає токена».</p>
+<ul>
+<li><p><strong>Claude Code</strong> покаже щось на кшталт:</p>
+<pre><code>Failed to connect — Dynamic Client Registration rejected (HTTP 404): 404 Not Found
+</code></pre>
+<p>Це <strong>не</strong> проблема з OAuth і не проблема сервера. Слів «401», «unauthorized»
+чи «token» у цьому повідомленні не буде взагалі — але означає воно рівно
+одне: токена нема або він неправильний. Онови його командою вище.</p>
+</li>
+<li><p><strong>Codex CLI</strong> просто скаже моделі, що інструмент недоступний у цій сесії.
+Справжня причина — <code>HTTP 401 unauthorized</code> — лежить у технічному потоці
+помилок Codex, а не в тому, що бачить агент. Якщо <code>match_beers</code> раптом
+«зник» — насамперед перевір, чи задано <code>WARSAW_BEER_TOKEN</code> і чи це свіжий
+токен від <code>/extension</code>.</p>
+</li>
+</ul>
+<hr>
+<h2>Межі</h2>
+<ul>
+<li>До <strong>200 пив</strong> за один виклик.</li>
+<li>Пивоварню й назву передавай <strong>окремими полями</strong> (<code>brewery</code> і <code>name</code>), а не
+одним рядком — точний збіг залежить від цього.</li>
+</ul>
+
+  </body>
+</html>
