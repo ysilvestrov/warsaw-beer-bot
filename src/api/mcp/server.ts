@@ -11,15 +11,17 @@ const TOOL_DESCRIPTION = [
   '',
   'Split each beer into `brewery` and `name` yourself; both are required. Do not put the',
   'whole title into `name` with an empty `brewery` — a missing brewery pushes the item into',
-  'a per-request full-catalog search budget of 20, past which items are returned as',
-  '`not_searched` rather than being looked up at all.',
+  'a per-request full-catalog fuzzy-search budget of 20; past that budget only the',
+  'catalogue-wide fuzzy stage is skipped for the item (the exact-match stages still ran).',
   '',
   'Statuses: `drunk` (certain), `probably_drunk` (the beer matched only approximately),',
   '`not_drunk` (we hold check-in data for this user and this beer is not in it),',
   '`unknown` (we hold NO drinking data for this user — never report these as undrunk),',
-  '`not_in_catalog` (searched, not found), `not_searched` (never looked up — do NOT report',
-  'these as missing from the catalog). `confidence: fuzzy` means the matched beer may not',
-  'be the same beer; say so rather than reporting its rating as fact.',
+  '`not_in_catalog` (searched, not found), `not_searched` (the catalogue-wide fuzzy search',
+  'was skipped for this item due to the budget above — the exact-match stages DID run and',
+  'missed, so a miss here is NOT evidence the beer is absent from the catalog).',
+  '`confidence: fuzzy` means the matched beer may not be the same beer; say so rather than',
+  'reporting its rating as fact.',
 ].join('\n');
 
 export const MCP_SERVER_NAME = 'warsaw-beer';

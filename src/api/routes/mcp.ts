@@ -9,7 +9,7 @@ import { createMcpServer } from '../mcp/server';
 // createApiApp): an anonymous answer would report is_drunk=false on every beer, and an
 // agent retells that as "you have not drunk any of these" — plausible and wrong.
 export function mcpRoute(app: Hono<ApiEnv>, deps: ApiDeps, catalog: CatalogCache): void {
-  app.all('/mcp', async (c) => {
+  app.post('/mcp', async (c) => {
     // Same read as /match (`?? null`): a variable no middleware set reads as undefined
     // at runtime even though the type says `number | null`.
     const telegramId = c.get('telegramId') ?? null;
@@ -19,8 +19,7 @@ export function mcpRoute(app: Hono<ApiEnv>, deps: ApiDeps, catalog: CatalogCache
 
     // Stateless: a session lives in process memory, and this process restarts on every
     // deploy — a client holding a session id would get 404 on its next call instead of a
-    // transparent reconnect. enableJsonResponse keeps this off SSE: a second long-lived
-    // path through cloudflared is exactly what caused the 502s in #124.
+    // transparent reconnect. enableJsonResponse keeps POST replies off SSE.
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
@@ -29,4 +28,14 @@ export function mcpRoute(app: Hono<ApiEnv>, deps: ApiDeps, catalog: CatalogCache
     await server.connect(transport);
     return transport.handleRequest(c.req.raw);
   });
+
+  // POST-only, not app.all: in stateless mode the SDK's own `validateSession` returns
+  // undefined for every method, so a bare GET (which MCP clients probe routinely) would
+  // fall through to the SDK's `handleGetRequest` and open a long-lived SSE stream with a
+  // default-on keep-alive `setInterval` — nothing here ever calls close() on it, so a
+  // tunnel-dropped stream leaks that timer plus the closure holding telegramId/deps. That
+  // is exactly the second long-lived path through cloudflared #124 was about.
+  // `enableJsonResponse` governs POST replies only; it does not gate GET. This server has
+  // nothing to push, so refuse the stream outright rather than opening one.
+  app.all('/mcp', (c) => c.json({ error: 'method_not_allowed' }, 405));
 }
