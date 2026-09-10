@@ -4,12 +4,31 @@ import { pl } from './locales/pl';
 import { en } from './locales/en';
 
 describe('locale completeness', () => {
+  // tsc already enforces this today: each locale is a fresh object literal annotated
+  // `: Messages`, so assignability catches a missing key and the excess-property check
+  // catches an extra one; even without the annotation, `LOCALES: Record<Locale, Messages>`
+  // in ./index.ts still catches a missing key. This test is not the completeness
+  // guarantee — it is the tripwire for the ways that static check can be silently lost:
+  // a key made optional in `Messages`, a locale built via spread or `as Messages`
+  // (freshness gone, so extra keys stop erroring), or a computed key.
   test('uk, pl, en carry exactly the same message keys', () => {
     const ukKeys = Object.keys(uk).sort();
     const plKeys = Object.keys(pl).sort();
     const enKeys = Object.keys(en).sort();
     expect(plKeys).toEqual(ukKeys);
     expect(enKeys).toEqual(ukKeys);
+  });
+});
+
+describe('extension.mcp placeholder', () => {
+  // A translator who writes {link} or drops the placeholder entirely ships a literal
+  // "{link}" — or a sentence promising a guide with no link in it — straight to users,
+  // and nothing else in the suite would catch it (the fake Translator in
+  // extension.test.ts can't see the real locale strings).
+  test('the real uk, pl, en strings all carry the {url} placeholder', () => {
+    expect(uk['extension.mcp']).toContain('{url}');
+    expect(pl['extension.mcp']).toContain('{url}');
+    expect(en['extension.mcp']).toContain('{url}');
   });
 });
 
