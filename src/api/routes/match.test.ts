@@ -170,6 +170,7 @@ describe('POST /match', () => {
     await post(appAs(1), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] });
     const stat = lines.find((l) => l.msg === 'match fallback stats');
     expect(stat).toBeTruthy();
+    expect(stat.channel).toBe('extension');
     expect(stat.items).toBe(1);
     expect(stat.fullFallback).toEqual({ attempts: 0, hits: 0, budgetSkipped: 0 });
   });

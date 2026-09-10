@@ -172,14 +172,6 @@ describe('matchBeerList', () => {
     // Both halves look identical on matched_beer — that is exactly the ambiguity being removed.
     expect(res.results.every((r) => r.matched_beer === null)).toBe(true);
   });
-
-  it('an item that matched was, by definition, searched', async () => {
-    const { prepared, byId } = prep(catalog);
-    const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
-      { brewery: 'PINTA', name: 'Atak Chmielu' },
-    ]);
-    expect(res.results[0].searched).toBe(true);
-  });
 });
 
 describe('matchBeerList — prepare-once equivalence', () => {

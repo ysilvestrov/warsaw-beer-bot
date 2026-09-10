@@ -24,7 +24,7 @@ import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
 
-function postPayloadBodyLimit(
+export function postPayloadBodyLimit(
   deps: ApiDeps,
   maxSize: number,
 ): MiddlewareHandler<ApiEnv> {
