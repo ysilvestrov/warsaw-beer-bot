@@ -129,7 +129,7 @@ export const pl: Messages = {
     '(rozszerzenie jest oznaczone 18+ ze względu na tematykę piwną).',
   'extension.mcp':
     'Ten sam token działa też przez MCP — z Claude Code lub Codex możesz zapytać, ' +
-    'które piwa z listy już wypito i jak je oceniono: {url}',
+    'które piwa z listy masz już wypite i z jaką oceną: {url}',
 
   // announce (#379)
   'announce.released':
