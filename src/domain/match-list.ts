@@ -31,6 +31,14 @@ export interface MatchListResult {
   is_drunk: boolean;
   drunk_uncertain: boolean;
   user_rating: number | null;
+  /** How the catalog row was reached; null when nothing matched. */
+  source: 'exact' | 'fuzzy' | null;
+  /**
+   * False when the per-request full-catalog fallback budget (#279) denied this item a
+   * search. `matched_beer: null` with `searched: false` means "never looked at", NOT
+   * "absent from the catalog" — collapsing the two lets a caller assert what we never checked.
+   */
+  searched: boolean;
 }
 
 // Hands control back to the event loop so the long-poll bot processes its updates
@@ -61,9 +69,16 @@ export async function matchBeerList(
   const out: MatchListResult[] = [];
   for (const item of items) {
     const raw = { brewery: item.brewery, name: item.name };
+    // The budget is shared across the batch, so per-item "was it searched" is read as a
+    // delta on the shared counter — no change to matcher.ts is needed.
+    const skippedBefore = budget.budgetSkipped;
     const m = matchPrepared(item, prepared, budget);
+    const searched = budget.budgetSkipped === skippedBefore;
     if (!m) {
-      out.push({ raw, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null });
+      out.push({
+        raw, matched_beer: null, is_drunk: false, drunk_uncertain: false,
+        user_rating: null, source: null, searched,
+      });
     } else {
       const beer = byId.get(m.id)!;
       out.push({
@@ -78,6 +93,8 @@ export async function matchBeerList(
         is_drunk: m.source === 'exact' && drunkSet.has(m.id),
         drunk_uncertain: m.source === 'fuzzy' && drunkSet.has(m.id),
         user_rating: m.source === 'exact' ? (ratingByBeerId.get(m.id) ?? null) : null,
+        source: m.source,
+        searched,
       });
     }
     await yield_();
