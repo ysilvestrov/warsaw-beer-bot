@@ -87,12 +87,24 @@ describe('renderDocs (real repo files)', () => {
     'Beershop',
   ];
 
-  it('renders all three targets without throwing', () => {
+  it('renders all four targets without throwing', () => {
     expect(rendered.map((r) => r.out).sort()).toEqual([
       'site/changelog/index.html',
       'site/install-uk/index.html',
       'site/install/index.html',
+      'site/mcp-uk/index.html',
     ]);
+  });
+
+  it('the MCP guide names the exact symptom of a missing token', () => {
+    // The live probe (docs/pr-evidence/2026-09-10-mcp-client-probe.md) showed Claude Code
+    // reports a forgotten token as an OAuth/DCR failure that never says "token". Without
+    // this sentence on the page, every mistyped token sends someone hunting a problem
+    // that does not exist.
+    const mcp = rendered.find((r) => r.out === 'site/mcp-uk/index.html');
+    expect(mcp).toBeDefined();
+    expect(mcp!.html).toContain('Dynamic Client Registration');
+    expect(mcp!.html).toContain('beer-api.ysilvestrov-ai.uk/mcp');
   });
 
   it('renders the real changelog with the changelog title and a version entry', () => {
@@ -130,5 +142,12 @@ describe('renderDocs (real repo files)', () => {
     const homepage = readFileSync(join(repoRoot, 'site/index.html'), 'utf8');
 
     for (const shop of supportedShops) expect(homepage).toContain(shop);
+  });
+
+  it('the Pages workflow rebuilds when the MCP guide changes', () => {
+    // A page whose source is outside the paths filter is published once and then never
+    // updated again, silently.
+    const yml = readFileSync(join(__dirname, '..', '.github/workflows/pages.yml'), 'utf8');
+    expect(yml).toContain('docs/mcp-uk.md');
   });
 });

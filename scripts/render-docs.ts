@@ -78,6 +78,8 @@ const TARGETS: (Omit<RenderOptions, 'markdown'> & { src: string; out: string })[
     lang: 'uk', title: SETUP_TITLE, altLang: 'en', altHref: '../install/', homeHref: '../' },
   { src: 'extension/CHANGELOG.md', out: 'site/changelog/index.html',
     lang: 'en', title: 'Warsaw Beer Overlay — Changelog', homeHref: '../' },
+  { src: 'docs/mcp-uk.md', out: 'site/mcp-uk/index.html',
+    lang: 'uk', title: 'Warsaw Beer — MCP для агентів', homeHref: '../' },
 ];
 
 // Reads each source under `root` and renders it to HTML. Pure w.r.t. the
