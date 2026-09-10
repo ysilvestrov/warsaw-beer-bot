@@ -37,8 +37,19 @@ describe('createApiApp', () => {
     // doubles memory + rebuild CPU in production. Only the source can prove it did not.
     const index = readFileSync('src/api/index.ts', 'utf8');
     const match = readFileSync('src/api/routes/match.ts', 'utf8');
+    const mcp = readFileSync('src/api/routes/mcp.ts', 'utf8');
     expect(index.match(/createCatalogCache\(/g)).toHaveLength(1);
     expect(match).not.toContain('createCatalogCache');
+    expect(mcp).not.toContain('createCatalogCache');
+  });
+
+  it('mounts the body limit before auth on /mcp', () => {
+    const index = readFileSync('src/api/index.ts', 'utf8');
+    const limitAt = index.indexOf("app.use('/mcp', postPayloadBodyLimit");
+    const authAt = index.indexOf("app.use('/mcp', authMiddleware");
+    expect(limitAt).toBeGreaterThan(-1);
+    expect(authAt).toBeGreaterThan(-1);
+    expect(limitAt).toBeLessThan(authAt);
   });
 
   it('GET /health is open and returns ok', async () => {

@@ -18,6 +18,7 @@ import {
   payloadBodyLimit,
 } from './middleware/payload-limit';
 import { matchRoute } from './routes/match';
+import { mcpRoute } from './routes/mcp';
 import { createCatalogCache } from '../domain/catalog-cache';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
@@ -51,6 +52,11 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   app.use('/match', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));
   app.use('/match', optionalAuthMiddleware(deps.db));
   matchRoute(app, deps, catalog);
+
+  // MCP is token-only (no anonymous path) — see routes/mcp.ts for why.
+  app.use('/mcp', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));
+  app.use('/mcp', authMiddleware(deps.db));
+  mcpRoute(app, deps, catalog);
 
   app.use(
     '/enrich/candidates',
