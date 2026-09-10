@@ -3,6 +3,8 @@ import type { ApiDeps } from '../types';
 import type { CatalogCache } from '../../domain/catalog-cache';
 import { matchBeersArraySchema } from '../match-input';
 import { runMatchTool, renderMatchToolText } from './match-tool';
+import { recordMatchUsage } from '../../storage/api_usage';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
 
 const TOOL_DESCRIPTION = [
   'Match a list of beers against the Warsaw beer catalog and report, for each one, whether',
@@ -41,6 +43,20 @@ export function createMcpServer(
       inputSchema: { beers: matchBeersArraySchema },
     },
     async ({ beers }) => {
+      // Operational usage metric for the daily digest — never break the response.
+      // Counted here, in the tool handler, rather than in the route: the route also serves
+      // initialize/tools/list, and a handshake is not a match.
+      try {
+        recordMatchUsage(deps.db, {
+          date: warsawDateAndHour(new Date()).date,
+          authed: true,          // /mcp has no anonymous path
+          beers: beers.length,
+          channel: 'mcp',
+        });
+      } catch (e) {
+        deps.log.warn({ err: e }, 'api_usage record failed');
+      }
+
       const { output, fallback } = await runMatchTool(deps.db, catalog, telegramId, beers);
       deps.log.info(
         {

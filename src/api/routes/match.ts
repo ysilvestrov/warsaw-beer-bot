@@ -37,6 +37,7 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
         date: warsawDateAndHour(new Date()).date,
         authed: telegramId !== null,
         beers: beers.length,
+        channel: 'extension',
       });
     } catch (e) {
       deps.log.warn({ err: e }, 'api_usage record failed');

@@ -330,6 +330,10 @@ describe('schema migrations', () => {
       // v28 (#576) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо
       // з тієї ж причини, що й рядок вище.
       db.exec('ALTER TABLE beers DROP COLUMN rearm_count');
+      // v30 (MCP wiring task 1) теж перезапускається у вікні відкату і ALTER'ить
+      // api_usage — скидаємо з тієї ж причини, що й рядки вище.
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
       db.prepare('DELETE FROM schema_version WHERE version >= 22').run();
 
       // Two beers: one pinned via match_links, one not.
@@ -378,6 +382,10 @@ describe('schema migrations', () => {
       // v28 (#576) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо
       // з тієї ж причини, що й рядок вище.
       db.exec('ALTER TABLE beers DROP COLUMN rearm_count');
+      // v30 (MCP wiring task 1) теж перезапускається у вікні відкату і ALTER'ить
+      // api_usage — скидаємо з тієї ж причини, що й рядки вище.
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
       db.prepare('DELETE FROM schema_version WHERE version >= 23').run();
 
       db.prepare(
@@ -470,6 +478,10 @@ describe('schema migrations', () => {
       // v28 (#576) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо
       // з тієї ж причини, що й рядок вище.
       db.exec('ALTER TABLE beers DROP COLUMN rearm_count');
+      // v30 (MCP wiring task 1) теж перезапускається у вікні відкату і ALTER'ить
+      // api_usage — скидаємо з тієї ж причини, що й рядки вище.
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
+      db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
       db.exec(`
         DROP TABLE enrich_failures;
         CREATE TABLE enrich_failures (
@@ -514,10 +526,10 @@ describe('schema migrations', () => {
         .get(notABeer) as { r: string | null };
       expect(kept.r).not.toBeNull();
 
-      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587: this
-      // rewind starts from v23 and runs migrate() to completion, so the reachable head moves
-      // whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(29);
+      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
+      // 29 -> 30 by MCP wiring task 1: this rewind starts from v23 and runs migrate() to
+      // completion, so the reachable head moves whenever a later migration is added.
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(30);
     });
   });
 
@@ -563,10 +575,10 @@ describe('schema migrations', () => {
       const db = openDb(':memory:');
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587: a fresh
-      // DB's reachable head moves whenever a later migration is added; this still proves v25
-      // wasn't lost along the way.
-      expect(version.v).toBe(29);
+      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
+      // 29 -> 30 by MCP wiring task 1: a fresh DB's reachable head moves whenever a later
+      // migration is added; this still proves v25 wasn't lost along the way.
+      expect(version.v).toBe(30);
     });
   });
 });

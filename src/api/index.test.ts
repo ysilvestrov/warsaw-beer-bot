@@ -90,7 +90,7 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }, { brewery: 'A', name: 'B' }] }),
     });
     const today = warsawDateAndHour(new Date()).date;
-    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 1, authedRequests: 0, beers: 2 });
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 1, authedRequests: 0, beers: 2, mcpRequests: 0, mcpBeers: 0 });
   });
 
   it('POST /match records authenticated usage when a valid token is sent', async () => {
@@ -102,7 +102,7 @@ describe('createApiApp', () => {
       body: JSON.stringify({ beers: [{ brewery: 'X', name: 'Y' }] }),
     });
     const today = warsawDateAndHour(new Date()).date;
-    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, beers: 1 });
+    expect(getUsageForDate(d.db, today)).toEqual({ anonRequests: 0, authedRequests: 1, beers: 1, mcpRequests: 0, mcpBeers: 0 });
   });
 
   it('POST /match still returns 200 when usage recording fails (best-effort)', async () => {

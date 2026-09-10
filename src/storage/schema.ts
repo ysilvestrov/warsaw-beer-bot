@@ -471,6 +471,20 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 30,
+    // MCP-канал (`POST /mcp`). §3.16 оголошує `anon_requests`/`authed_requests` трафіком
+    // РОЗШИРЕННЯ, і щоденний дайджест друкує з них рядок «Розширення /match». Якби MCP
+    // писав у ті самі лічильники, рядок і далі стверджував би факт про розширення,
+    // рахуючи розширення ПЛЮС агентів, — і виявити підміну було б нізвідки, бо число
+    // просто виросло б. Окремі колонки лишають історичні значення тим, чим вони були.
+    // Проста ALTER TABLE ADD COLUMN: перебудова тут не потрібна, бо жодного CHECK
+    // ця таблиця не має.
+    sql: `
+      ALTER TABLE api_usage ADD COLUMN mcp_requests INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE api_usage ADD COLUMN mcp_beers INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

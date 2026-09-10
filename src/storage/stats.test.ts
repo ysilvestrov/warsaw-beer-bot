@@ -131,10 +131,10 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   migrate(db);
   const now = new Date('2026-06-05T09:30:00Z');
   const yesterday = previousDate(warsawDateAndHour(now).date);
-  recordMatchUsage(db, { date: yesterday, authed: false, beers: 3 });
-  recordMatchUsage(db, { date: yesterday, authed: true, beers: 2 });
+  recordMatchUsage(db, { date: yesterday, authed: false, beers: 3, channel: 'extension' });
+  recordMatchUsage(db, { date: yesterday, authed: true, beers: 2, channel: 'extension' });
   // Same-day (today) row must NOT be counted.
-  recordMatchUsage(db, { date: warsawDateAndHour(now).date, authed: false, beers: 99 });
+  recordMatchUsage(db, { date: warsawDateAndHour(now).date, authed: false, beers: 99, channel: 'extension' });
   const m = collectStatus(db, now);
   expect(m.extMatchRequests).toBe(2);
   expect(m.extMatchAnon).toBe(1);
