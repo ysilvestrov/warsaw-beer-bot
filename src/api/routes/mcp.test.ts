@@ -8,8 +8,10 @@ import { markHad } from '../../storage/untappd_had';
 import { mergeCheckin } from '../../storage/checkins';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
-import { createCatalogCache } from '../../domain/catalog-cache';
+import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cache';
 import { authMiddleware } from '../middleware/auth';
+import { postPayloadBodyLimit } from '../index';
+import { MATCH_BODY_LIMIT_BYTES } from '../middleware/payload-limit';
 import { mcpRoute } from './mcp';
 import type { ApiEnv } from '../types';
 // Never hardcode the protocol version: the SDK rejects an unsupported one, and that
@@ -20,7 +22,9 @@ import { LATEST_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 // hardcoded telegramId (or shared it across requests) would still pass every test below
 // if there were only one user, because the fixture couldn't distinguish "correct" from
 // "same wrong answer for everyone" — see review finding 3 on task 4.
-function setup() {
+// catalogOverride lets a test inject a failing cache (e.g. a rejecting `get()`) without
+// duplicating the whole fixture; production always passes createCatalogCache(db).
+function setup(catalogOverride?: CatalogCache) {
   const db = openDb(':memory:');
   migrate(db);
   ensureProfile(db, 1);
@@ -48,9 +52,13 @@ function setup() {
   rotateToken(db, 1, hashToken('good-token'), '2026-01-01T00:00:00Z');
   rotateToken(db, 2, hashToken('second-token'), '2026-01-01T00:00:00Z');
 
+  const deps = { db, env: {} as never, log: pino({ level: 'silent' }) };
   const app = new Hono<ApiEnv>();
+  // Mirrors createApiApp's mount order exactly (src/api/index.ts): the body-size limit
+  // runs BEFORE auth, so an oversized request never reaches authMiddleware at all.
+  app.use('/mcp', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));
   app.use('/mcp', authMiddleware(db));
-  mcpRoute(app, { db, env: {} as never, log: pino({ level: 'silent' }) }, createCatalogCache(db));
+  mcpRoute(app, deps, catalogOverride ?? createCatalogCache(db));
   return { app, db, panIpani, atakChmielu };
 }
 
@@ -180,5 +188,50 @@ describe('POST /mcp', () => {
     expect(res.status).toBe(405);
     expect(res.headers.get('content-type') ?? '').not.toContain('text/event-stream');
     expect(await res.json()).toEqual({ error: 'method_not_allowed' });
+  });
+
+  it('rejects an oversized /mcp body with 413 before auth ever runs', async () => {
+    // No Authorization header at all: if the body limit were missing, or mounted after
+    // auth, this would come back 401 (no token) instead of 413 — that distinguishes
+    // "the limit ran" from "some other middleware happened to reject the request".
+    const { app } = setup();
+    const body = `{"padding":"${'x'.repeat(MATCH_BODY_LIMIT_BYTES)}"}`;
+    const res = await app.request('/mcp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) },
+      body,
+    });
+    expect(res.status).toBe(413);
+    expect(await res.json()).toEqual({ error: 'payload_too_large' });
+  });
+
+  it('surfaces a catalog-cache failure as an isError tool result, not a JSON-RPC error or 500', async () => {
+    // The spec's Errors section requires a genuine failure (catalog cache rebuild threw)
+    // to come back as a tool-level error, not a transport-level one. Verified against the
+    // MCP SDK's own CallToolRequestSchema handler (server/mcp.js): it catches whatever the
+    // registered handler throws and returns { content: [...], isError: true } inside a
+    // normal (200, `result`) JSON-RPC response — never a top-level `error` envelope, never
+    // an HTTP 500.
+    const failing: CatalogCache = {
+      get: async () => { throw new Error('catalog cache rebuild failed'); },
+      idle: async () => {},
+    };
+    const { app } = setup(failing);
+    await rpc(app, INIT);
+    const res = await rpc(app, {
+      jsonrpc: '2.0', id: 6, method: 'tools/call',
+      params: {
+        name: 'match_beers',
+        arguments: { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] },
+      },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      error?: unknown;
+      result?: { isError?: boolean; content: { type: string; text: string }[] };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result?.isError).toBe(true);
+    expect(body.result?.content[0]?.type).toBe('text');
   });
 });

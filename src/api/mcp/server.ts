@@ -1,8 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
 import type { ApiDeps } from '../types';
 import type { CatalogCache } from '../../domain/catalog-cache';
-import { BEER_TEXT_LIMIT_CHARS } from '../middleware/payload-limit';
+import { matchBeersArraySchema } from '../match-input';
 import { runMatchTool, renderMatchToolText } from './match-tool';
 
 const TOOL_DESCRIPTION = [
@@ -39,18 +38,7 @@ export function createMcpServer(
     {
       title: 'Match beers against the Warsaw beer catalog',
       description: TOOL_DESCRIPTION,
-      inputSchema: {
-        beers: z
-          .array(
-            z.object({
-              brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
-              name: z.string().max(BEER_TEXT_LIMIT_CHARS),
-              abv: z.number().optional(),
-            }),
-          )
-          .min(1)
-          .max(200),
-      },
+      inputSchema: { beers: matchBeersArraySchema },
     },
     async ({ beers }) => {
       const { output, fallback } = await runMatchTool(deps.db, catalog, telegramId, beers);

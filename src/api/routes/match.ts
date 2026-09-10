@@ -9,24 +9,13 @@ import { matchBeerList } from '../../domain/match-list';
 import { recordMatchUsage } from '../../storage/api_usage';
 import { warsawDateAndHour } from '../../domain/warsaw-time';
 import {
-  BEER_TEXT_LIMIT_CHARS,
   MATCH_BODY_LIMIT_BYTES,
   payloadBodyLimit,
   payloadSizeValidationHook,
 } from '../middleware/payload-limit';
+import { matchBeersArraySchema } from '../match-input';
 
-const MatchBody = z.object({
-  beers: z
-    .array(
-      z.object({
-        brewery: z.string().max(BEER_TEXT_LIMIT_CHARS),
-        name: z.string().max(BEER_TEXT_LIMIT_CHARS),
-        abv: z.number().optional(),
-      }),
-    )
-    .min(1)
-    .max(200),
-});
+const MatchBody = z.object({ beers: matchBeersArraySchema });
 
 // Registers POST /match on the given app. Auth is optional here: a missing
 // token yields telegramId===null (anonymous, global-only results); a valid
@@ -63,6 +52,7 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
     const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers);
     deps.log.info(
       {
+        channel: 'extension',
         items: beers.length,
         fullFallback: {
           attempts: fallback.attempts,
