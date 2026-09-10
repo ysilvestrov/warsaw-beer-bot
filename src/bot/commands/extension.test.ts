@@ -2,6 +2,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
 import { findTelegramIdByHash, hashToken } from '../../storage/api_tokens';
+import type { Translator } from '../../i18n/types';
 import { generateAndStoreToken, buildExtensionMessage, STORE_URL } from './extension';
 
 describe('generateAndStoreToken', () => {
@@ -25,7 +26,9 @@ describe('buildExtensionMessage', () => {
       ? `Use & enjoy: ${params?.url}`
       : key === 'extension.store'
         ? `Install: ${params?.url}`
-        : key) as never;
+        : key === 'extension.mcp'
+          ? `MCP guide: ${params?.url}`
+          : key) as never;
 
   it('wraps the token in a <code> block and escapes the instructions', () => {
     const html = buildExtensionMessage(t, 'deadbeef', 'https://beer-api.example/match');
@@ -43,5 +46,20 @@ describe('buildExtensionMessage', () => {
     const { CWS_ITEM_ID } = await import('../../sources/cws-version.js');
     expect(STORE_URL).toContain(CWS_ITEM_ID);
     expect(STORE_URL).toBe(`https://chromewebstore.google.com/detail/${CWS_ITEM_ID}`);
+  });
+
+  it('tells the token holder that the same token works for MCP, with the guide link', () => {
+    const msg = buildExtensionMessage(t, 'deadbeef', 'https://example.test/match');
+    expect(msg).toContain('https://ysilvestrov.github.io/warsaw-beer-bot/mcp-uk/');
+  });
+
+  it('escapes the MCP line like every other locale string', () => {
+    // Telegraf HTML mode: an unescaped & or < in a locale string breaks parsing silently,
+    // and the user gets no message at all.
+    const hostile = ((key: string, vars?: Record<string, string>) =>
+      key === 'extension.mcp' ? 'A & B <tag> {url}'.replace('{url}', vars?.url ?? '') : 'x') as Translator;
+    const msg = buildExtensionMessage(hostile, 'deadbeef', 'u');
+    expect(msg).toContain('A &amp; B &lt;tag&gt;');
+    expect(msg).not.toContain('<tag>');
   });
 });

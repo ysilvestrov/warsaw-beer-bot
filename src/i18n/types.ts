@@ -102,6 +102,7 @@ export interface Messages {
   // extension (browser-extension API token)
   'extension.success': string;   // {url} — instructional text; token sent separately in <code>
   'extension.store': string;     // {url} — Chrome Web Store listing link
+  'extension.mcp': string;       // {url} — MCP guide link; same token works for agents
 
   // status (/status — per-user freshness + settings)
   'status.title': string;

@@ -127,6 +127,9 @@ export const en: Messages = {
     'Install the extension: {url}\n' +
     'If you see "Item not available", sign in to your Google account and reload ' +
     '(the extension is flagged 18+ because it is about beer).',
+  'extension.mcp':
+    'The same token also works over MCP — ask from Claude Code or Codex which beers ' +
+    'on a list you have already had, and how you rated them: {url}',
 
   // announce (#379)
   'announce.released':

@@ -16,6 +16,9 @@ const API_URL = 'https://beer-api.ysilvestrov-ai.uk/match';
 // and the version poller can never drift apart (#379).
 export const STORE_URL = `https://chromewebstore.google.com/detail/${CWS_ITEM_ID}`;
 
+// User guide for the MCP endpoint, published from docs/mcp-uk.md to GitHub Pages.
+const MCP_DOCS_URL = 'https://ysilvestrov.github.io/warsaw-beer-bot/mcp-uk/';
+
 // Mints a fresh raw token, stores only its hash (1:1 rotation), returns the raw.
 export function generateAndStoreToken(db: DB, telegramId: number, at: string): string {
   const raw = randomBytes(32).toString('hex');
@@ -29,7 +32,8 @@ export function generateAndStoreToken(db: DB, telegramId: number, at: string): s
 export function buildExtensionMessage(t: Translator, token: string, url: string): string {
   const intro = escapeHtml(t('extension.success', { url }));
   const store = escapeHtml(t('extension.store', { url: STORE_URL }));
-  return `${intro}\n\n<code>${token}</code>\n\n${store}`;
+  const mcp = escapeHtml(t('extension.mcp', { url: MCP_DOCS_URL }));
+  return `${intro}\n\n<code>${token}</code>\n\n${store}\n\n${mcp}`;
 }
 
 export const extensionCommand = new Composer<BotContext>();
