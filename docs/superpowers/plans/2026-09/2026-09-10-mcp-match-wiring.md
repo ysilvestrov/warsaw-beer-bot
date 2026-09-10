@@ -66,50 +66,55 @@
 
 У `src/storage/api_usage.test.ts` додати:
 
+**Ідіома цього файлу:** він імпортує `{ expect, test }` явно, використовує `test(...)`, не
+`it(...)`, і має хелпер-функцію `db()`, яка вже робить `openDb(':memory:') + migrate`. Тримайся
+його, не заводь свій:
+
 ```ts
-  it('an MCP call increments ONLY the MCP counters', () => {
-    const db = openDb(':memory:');
-    migrate(db);
-    recordMatchUsage(db, { date: '2026-09-10', authed: true, beers: 7, channel: 'mcp' });
+test('recordMatchUsage: an MCP call increments ONLY the MCP counters', () => {
+  const d = db();
+  recordMatchUsage(d, { date: '2026-09-10', authed: true, beers: 7, channel: 'mcp' });
 
-    const usage = getUsageForDate(db, '2026-09-10');
-    expect(usage.mcpRequests).toBe(1);
-    expect(usage.mcpBeers).toBe(7);
-    // §3.16 declares these two the EXTENSION's traffic. If MCP fed them, the daily digest
-    // line would keep claiming a fact about the extension while counting agents too — and
-    // nothing would reveal it, because the number would simply grow.
-    expect(usage.anonRequests).toBe(0);
-    expect(usage.authedRequests).toBe(0);
-    expect(usage.beers).toBe(0);
+  const usage = getUsageForDate(d, '2026-09-10');
+  expect(usage.mcpRequests).toBe(1);
+  expect(usage.mcpBeers).toBe(7);
+  // §3.16 declares these three the EXTENSION's traffic. If MCP fed them, the daily digest
+  // line would keep claiming a fact about the extension while counting agents too — and
+  // nothing would reveal it, because the number would simply grow.
+  expect(usage.anonRequests).toBe(0);
+  expect(usage.authedRequests).toBe(0);
+  expect(usage.beers).toBe(0);
+});
+
+test('recordMatchUsage: an extension call leaves the MCP counters untouched', () => {
+  const d = db();
+  recordMatchUsage(d, { date: '2026-09-10', authed: true, beers: 5, channel: 'extension' });
+
+  const usage = getUsageForDate(d, '2026-09-10');
+  expect(usage.authedRequests).toBe(1);
+  expect(usage.beers).toBe(5);
+  expect(usage.mcpRequests).toBe(0);
+  expect(usage.mcpBeers).toBe(0);
+});
+
+test('recordMatchUsage: both channels accumulate side by side on one date', () => {
+  const d = db();
+  recordMatchUsage(d, { date: '2026-09-10', authed: false, beers: 3, channel: 'extension' });
+  recordMatchUsage(d, { date: '2026-09-10', authed: true,  beers: 4, channel: 'extension' });
+  recordMatchUsage(d, { date: '2026-09-10', authed: true,  beers: 9, channel: 'mcp' });
+
+  const usage = getUsageForDate(d, '2026-09-10');
+  expect(usage).toEqual({
+    anonRequests: 1, authedRequests: 1, beers: 7, mcpRequests: 1, mcpBeers: 9,
   });
-
-  it('an extension call leaves the MCP counters untouched', () => {
-    const db = openDb(':memory:');
-    migrate(db);
-    recordMatchUsage(db, { date: '2026-09-10', authed: true, beers: 5, channel: 'extension' });
-
-    const usage = getUsageForDate(db, '2026-09-10');
-    expect(usage.authedRequests).toBe(1);
-    expect(usage.beers).toBe(5);
-    expect(usage.mcpRequests).toBe(0);
-    expect(usage.mcpBeers).toBe(0);
-  });
-
-  it('both channels accumulate side by side on one date', () => {
-    const db = openDb(':memory:');
-    migrate(db);
-    recordMatchUsage(db, { date: '2026-09-10', authed: false, beers: 3, channel: 'extension' });
-    recordMatchUsage(db, { date: '2026-09-10', authed: true, beers: 4, channel: 'extension' });
-    recordMatchUsage(db, { date: '2026-09-10', authed: true, beers: 9, channel: 'mcp' });
-
-    const usage = getUsageForDate(db, '2026-09-10');
-    expect(usage).toEqual({
-      anonRequests: 1, authedRequests: 1, beers: 7, mcpRequests: 1, mcpBeers: 9,
-    });
-  });
+});
 ```
 
-Перевір наявні тести у файлі: ті, що викликають `recordMatchUsage` без `channel`, тепер не типізуються — додай їм `channel: 'extension'`, нічого іншого в них не міняючи. Якщо якийсь із них асертить `getUsageForDate` цілим об'єктом через `toEqual`, додай два нові поля з нулями.
+**Наявні виклики.** У тестах є **10** викликів `recordMatchUsage(` (перевір
+`grep -rn "recordMatchUsage(" src --include=*.test.ts`) — усі перестануть типізуватися без
+`channel`. Додай кожному `channel: 'extension'` і **нічого іншого в них не міняй**: вони описують
+поведінку розширення, яка не змінюється. Якщо котрийсь асертить `getUsageForDate` цілим об'єктом
+через `toEqual`, допиши два нові поля з нулями.
 
 У `src/api/routes/mcp.test.ts` додати (у наявний `describe`, з наявними хелперами `setup`/`rpc`/`INIT`):
 
@@ -136,7 +141,9 @@
   });
 ```
 
-Імпорти для цього тесту: `getUsageForDate` з `../../storage/api_usage`, `warsawDateAndHour` з `../../domain/warsaw-time`. `setup()` наразі не повертає `db` — якщо так, дописати його у повернений об'єкт, нічого іншого в `setup()` не міняючи.
+Імпорти для цього тесту: `getUsageForDate` з `../../storage/api_usage`, `warsawDateAndHour` з
+`../../domain/warsaw-time`. `setup()` **уже** повертає `db` (`return { app, db, panIpani,
+atakChmielu }`) — нічого в ньому міняти не треба.
 
 - [ ] **Step 2: Запустити й побачити падіння**
 
