@@ -30,6 +30,8 @@ describe('matchBeerList', () => {
         is_drunk: true,
         drunk_uncertain: false,
         user_rating: 4.0,
+        source: 'exact',
+        searched: true,
       },
     ]);
   });
@@ -105,6 +107,8 @@ describe('matchBeerList', () => {
       is_drunk: false,
       drunk_uncertain: false,
       user_rating: null,
+      source: null,
+      searched: true,
     });
   });
 
@@ -130,6 +134,51 @@ describe('matchBeerList', () => {
     expect(res.fallback.attempts).toBe(n);
     expect(res.fallback.budgetSkipped).toBe(3);
     expect(res.fallback.remaining).toBe(0);
+  });
+
+  it('reports how the catalog row was reached', async () => {
+    const { prepared, byId } = prep(catalog);
+    const exact = await matchBeerList(prepared, byId, new Set(), new Map(), [
+      { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
+    ]);
+    expect(exact.results[0].source).toBe('exact');
+
+    // "Atak Chmiel" (typo) reaches catalog 200 only through the fuzzy stage.
+    const fuzzy = await matchBeerList(prepared, byId, new Set(), new Map(), [
+      { brewery: 'PINTA', name: 'Atak Chmiel' },
+    ]);
+    expect(fuzzy.results[0].matched_beer?.id).toBe(200);
+    expect(fuzzy.results[0].source).toBe('fuzzy');
+
+    const miss = await matchBeerList(prepared, byId, new Set(), new Map(), [
+      { brewery: 'Trzech Kumpli', name: 'Nothing Like This' },
+    ]);
+    expect(miss.results[0].matched_beer).toBeNull();
+    expect(miss.results[0].source).toBeNull();
+  });
+
+  it('separates "searched and missed" from "never searched" (fallback budget)', async () => {
+    // One-beer catalog; every input has an unknown brewery, so all of them fall to the
+    // budgeted full-catalog path. The surplus past the budget is never searched at all.
+    const { prepared, byId } = prep([
+      { id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1, rating_global: 3.7 },
+    ]);
+    const n = FULL_FALLBACK_BUDGET + 3;
+    const items = Array.from({ length: n }, (_, i) => ({ brewery: `Unknown${i}`, name: `Mystery ${i}` }));
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), items);
+
+    expect(res.results.slice(0, FULL_FALLBACK_BUDGET).every((r) => r.searched)).toBe(true);
+    expect(res.results.slice(FULL_FALLBACK_BUDGET).map((r) => r.searched)).toEqual([false, false, false]);
+    // Both halves look identical on matched_beer — that is exactly the ambiguity being removed.
+    expect(res.results.every((r) => r.matched_beer === null)).toBe(true);
+  });
+
+  it('an item that matched was, by definition, searched', async () => {
+    const { prepared, byId } = prep(catalog);
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), [
+      { brewery: 'PINTA', name: 'Atak Chmielu' },
+    ]);
+    expect(res.results[0].searched).toBe(true);
   });
 });
 
