@@ -138,6 +138,31 @@ describe('POST /mcp', () => {
     expect(usage.authedRequests).toBe(0);
   });
 
+  it('still returns normal match_beers results when usage recording fails (best-effort)', async () => {
+    // Sibling of the /match test in src/api/index.test.ts: recordMatchUsage runs inside a
+    // try/catch in server.ts specifically so a counter write failure (e.g. SQLITE_BUSY
+    // under write contention) never turns into a broken tool response for the user.
+    const { app, db } = setup();
+    await rpc(app, INIT);
+    db.exec('DROP TABLE api_usage'); // make recordMatchUsage throw inside the tool handler
+    const res = await rpc(app, {
+      jsonrpc: '2.0', id: 3, method: 'tools/call',
+      params: { name: 'match_beers', arguments: { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] } },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      error?: unknown;
+      result?: {
+        isError?: boolean;
+        structuredContent: { results: { status: string; confidence: string }[] };
+      };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result?.isError).toBeFalsy();
+    expect(body.result?.structuredContent.results[0].status).toBe('drunk');
+    expect(body.result?.structuredContent.results[0].confidence).toBe('exact');
+  });
+
   it('rejects a request with no token', async () => {
     const { app } = setup();
     const res = await rpc(app, INIT, null);

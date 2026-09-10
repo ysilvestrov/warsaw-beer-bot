@@ -32,6 +32,8 @@ export interface StatusMetrics {
   extMatchRequests: number;   // total /match requests, previous Warsaw day
   extMatchAnon: number;       // anonymous subset
   extMatchBeers: number;      // sum of beers, previous Warsaw day
+  mcpMatchRequests: number;   // MCP match_beers tool calls, previous Warsaw day
+  mcpMatchBeers: number;      // sum of beers submitted through MCP, previous Warsaw day
   // #377 part B. Two of these can refute the design that produced them:
   // `sealUnidentifiableReobserved` at 0 means the rows are formally back in a pool but
   // the cron never reaches them — the mechanism is dead. A high re-observed count with
@@ -225,5 +227,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     extMatchRequests: usage.anonRequests + usage.authedRequests,
     extMatchAnon: usage.anonRequests,
     extMatchBeers: usage.beers,
+    mcpMatchRequests: usage.mcpRequests,
+    mcpMatchBeers: usage.mcpBeers,
   };
 }

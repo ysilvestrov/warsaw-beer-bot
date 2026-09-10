@@ -73,6 +73,8 @@ test('collectStatus computes all metrics', () => {
     extMatchRequests: 0,
     extMatchAnon: 0,
     extMatchBeers: 0,
+    mcpMatchRequests: 0,
+    mcpMatchBeers: 0,
     sealUnidentifiable: 0,
     sealUnidentifiableReobserved: 0,
     sealNotABeer: 0,
@@ -139,6 +141,26 @@ test('collectStatus: extension /match metrics come from the previous Warsaw day'
   expect(m.extMatchRequests).toBe(2);
   expect(m.extMatchAnon).toBe(1);
   expect(m.extMatchBeers).toBe(5);
+});
+
+test('collectStatus: MCP /match metrics are counted apart from the extension', () => {
+  const db = openDb(':memory:');
+  migrate(db);
+  const now = new Date('2026-06-05T09:30:00Z');
+  const yesterday = previousDate(warsawDateAndHour(now).date);
+  // Distinct, non-equal values everywhere: equal seeds would let the two channels' fields
+  // be swapped without any test noticing.
+  recordMatchUsage(db, { date: yesterday, authed: true, beers: 11, channel: 'extension' });
+  recordMatchUsage(db, { date: yesterday, authed: true, beers: 23, channel: 'mcp' });
+  recordMatchUsage(db, { date: yesterday, authed: true, beers: 23, channel: 'mcp' });
+  // Today's row must NOT be counted, same as for the extension line.
+  recordMatchUsage(db, { date: warsawDateAndHour(now).date, authed: true, beers: 99, channel: 'mcp' });
+
+  const m = collectStatus(db, now);
+  expect(m.extMatchRequests).toBe(1);
+  expect(m.extMatchBeers).toBe(11);
+  expect(m.mcpMatchRequests).toBe(2);
+  expect(m.mcpMatchBeers).toBe(46);
 });
 
 it('orphansRelayQueue includes orphans not on a tap right now (with or without a match_links row), minus not_a_beer/retired', () => {
