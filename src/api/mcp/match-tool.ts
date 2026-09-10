@@ -43,6 +43,14 @@ export interface MatchToolProfile {
   checkins_known: number;
   untappd_had_known: number;
   latest_checkin_at: string | null;
+  /**
+   * True exactly when the drunk set (checkins ∪ untappd_had, the same set `statusFor`
+   * reads) is empty — the same condition that downgrades `not_drunk` to `unknown`.
+   * NOT derived from `checkins_known === 0`: a check-in row with a null `beer_id`
+   * (never matched to a catalog beer) counts toward `checkins_known` but contributes
+   * nothing to the drunk set, so the two can disagree.
+   */
+  drunk_set_empty: boolean;
 }
 
 export interface MatchToolOutput {
@@ -81,6 +89,7 @@ export async function runMatchTool(
         checkins_known: countCheckins(db, telegramId),
         untappd_had_known: hadBeerIds(db, telegramId).size,
         latest_checkin_at: latestCheckinAt(db, telegramId),
+        drunk_set_empty: drunkSetEmpty,
       },
       results: results.map((r) => ({
         input: r.raw,
@@ -108,7 +117,7 @@ export function renderMatchToolText(o: MatchToolOutput): string {
     `profile: ${o.profile.checkins_known} check-ins, ${o.profile.untappd_had_known} marked had`
     + `, latest check-in ${o.profile.latest_checkin_at ?? 'none'}`,
   ];
-  if (o.profile.checkins_known === 0 && o.profile.untappd_had_known === 0) {
+  if (o.profile.drunk_set_empty) {
     lines.push('NOTE: nothing is known about this user\'s drinking, so no beer can be reported as undrunk.');
   }
   for (const r of o.results) {
