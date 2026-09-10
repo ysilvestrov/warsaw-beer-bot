@@ -7,6 +7,8 @@ import { upsertBeer } from '../../storage/beers';
 import { markHad } from '../../storage/untappd_had';
 import { mergeCheckin } from '../../storage/checkins';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
+import { getUsageForDate } from '../../storage/api_usage';
+import { warsawDateAndHour } from '../../domain/warsaw-time';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cache';
 import { authMiddleware } from '../middleware/auth';
@@ -113,6 +115,27 @@ describe('POST /mcp', () => {
     expect(body.result.structuredContent.results[0].confidence).toBe('exact');
     // A text mirror must be present for clients that render only text.
     expect(body.result.content[0].text).toContain('Pan IPAni');
+  });
+
+  it('records MCP usage for a tool call, and not for the handshake', async () => {
+    const { app, db } = setup();
+    await rpc(app, INIT);
+    // The handshake is not a match: initialize and tools/list must not inflate the counter.
+    await rpc(app, { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} });
+    expect(getUsageForDate(db, warsawDateAndHour(new Date()).date).mcpRequests).toBe(0);
+
+    await rpc(app, {
+      jsonrpc: '2.0', id: 3, method: 'tools/call',
+      params: { name: 'match_beers', arguments: { beers: [
+        { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
+        { brewery: 'PINTA', name: 'Atak Chmielu' },
+      ] } },
+    });
+
+    const usage = getUsageForDate(db, warsawDateAndHour(new Date()).date);
+    expect(usage.mcpRequests).toBe(1);
+    expect(usage.mcpBeers).toBe(2);
+    expect(usage.authedRequests).toBe(0);
   });
 
   it('rejects a request with no token', async () => {
