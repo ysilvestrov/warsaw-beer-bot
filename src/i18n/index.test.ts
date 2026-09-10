@@ -1,4 +1,17 @@
 import { createTranslator } from './index';
+import { uk } from './locales/uk';
+import { pl } from './locales/pl';
+import { en } from './locales/en';
+
+describe('locale completeness', () => {
+  test('uk, pl, en carry exactly the same message keys', () => {
+    const ukKeys = Object.keys(uk).sort();
+    const plKeys = Object.keys(pl).sort();
+    const enKeys = Object.keys(en).sort();
+    expect(plKeys).toEqual(ukKeys);
+    expect(enKeys).toEqual(ukKeys);
+  });
+});
 
 describe('createTranslator', () => {
   test('uk resolves Ukrainian strings', () => {

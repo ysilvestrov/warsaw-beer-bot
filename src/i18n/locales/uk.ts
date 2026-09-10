@@ -127,6 +127,9 @@ export const uk: Messages = {
     'Встановити розширення: {url}\n' +
     'Якщо побачиш «Item not available» — залогінься в Google-акаунт і онови сторінку ' +
     '(розширення позначене 18+ через пивну тематику).',
+  'extension.mcp':
+    'Цим самим токеном працює MCP — можна питати з Claude Code чи Codex, ' +
+    'що з переліку пив ти вже пив і як оцінив: {url}',
 
   // announce (#379)
   'announce.released':

@@ -127,6 +127,9 @@ export const pl: Messages = {
     'Zainstaluj rozszerzenie: {url}\n' +
     'Jeśli zobaczysz „Item not available", zaloguj się na konto Google i odśwież stronę ' +
     '(rozszerzenie jest oznaczone 18+ ze względu na tematykę piwną).',
+  'extension.mcp':
+    'Ten sam token działa też przez MCP — z Claude Code lub Codex możesz zapytać, ' +
+    'które piwa z listy już piłeś i jak je oceniłeś: {url}',
 
   // announce (#379)
   'announce.released':
