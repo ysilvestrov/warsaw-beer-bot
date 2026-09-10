@@ -113,25 +113,56 @@ describe('runMatchTool', () => {
     expect(output.results[0].status).toBe('unknown');
     expect(output.results[0].confidence).toBe('exact');
     expect(output.results[0].beer?.rating_global).toBe(3.85);
-    expect(output.profile).toEqual({ checkins_known: 0, untappd_had_known: 0, latest_checkin_at: null });
+    expect(output.profile).toEqual({
+      checkins_known: 0, untappd_had_known: 0, latest_checkin_at: null, drunk_set_empty: true,
+    });
   });
 
   it('reports the profile that "not_drunk" rests on', async () => {
+    // Asymmetric counts (2 check-ins, 1 markHad) so checkins_known and
+    // untappd_had_known can't be confused for each other: swapping the two fields
+    // in the implementation must make this test fail (see fix-round-1 report).
     const db = db0();
     mergeCheckin(db, {
       checkin_id: 'c1', telegram_id: 1, beer_id: 105,
       user_rating: 4.0, checkin_at: '2026-01-05T18:00:00Z', venue: null,
     });
+    mergeCheckin(db, {
+      checkin_id: 'c2', telegram_id: 1, beer_id: 200,
+      user_rating: 3.0, checkin_at: '2026-01-06T10:00:00Z', venue: null,
+    });
     markHad(db, 1, 200, '2026-02-01T10:00:00Z');
     const { output } = await runMatchTool(db, cacheOf(CATALOG), 1, [
       { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
     ]);
-    expect(output.profile.checkins_known).toBe(1);
+    expect(output.profile.checkins_known).toBe(2);
     expect(output.profile.untappd_had_known).toBe(1);
     // mergeCheckin stores canonicalCheckinAt's 'YYYY-MM-DD HH:MM:SS' form (see
     // src/domain/checkin-time.ts), so this is what latestCheckinAt reads back —
-    // not the raw ISO string this test passed in.
-    expect(output.profile.latest_checkin_at).toBe('2026-01-05 18:00:00');
+    // not the raw ISO string this test passed in. c2 is the later checkin.
+    expect(output.profile.latest_checkin_at).toBe('2026-01-06 10:00:00');
+    expect(output.profile.drunk_set_empty).toBe(false);
+  });
+
+  it('the NOTE tracks the same emptiness the status rule uses, not raw check-in counts', async () => {
+    // A check-in row with beer_id NULL contributes to checkins_known (COUNT(*) over
+    // all checkins rows) but NOT to the drunk set (drunkBeerIds/triedBeerIds filter
+    // out NULL beer_id) — so the profile line looks non-empty while every status
+    // still downgrades to 'unknown'. The NOTE must follow the status rule, not the
+    // raw counters.
+    const db = db0();
+    mergeCheckin(db, {
+      checkin_id: 'c1', telegram_id: 1, beer_id: null,
+      user_rating: null, checkin_at: '2026-01-05T18:00:00Z', venue: null,
+    });
+    const { output } = await runMatchTool(db, cacheOf(CATALOG), 1, [
+      { brewery: 'Trzech Kumpli', name: 'Pan IPAni' },
+    ]);
+    expect(output.profile.checkins_known).toBe(1);
+    expect(output.profile.drunk_set_empty).toBe(true);
+    expect(output.results[0].status).toBe('unknown');
+    const text = renderMatchToolText(output);
+    expect(text).toContain("nothing is known about this user's drinking");
   });
 
   it('a beer with no untappd id gets no link rather than a broken one', async () => {
