@@ -9,6 +9,8 @@ import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
 import type { ApiEnv } from '../types';
 import { BEER_TEXT_LIMIT_CHARS, MATCH_BODY_LIMIT_BYTES } from '../middleware/payload-limit';
+import { prepareCatalog } from '../../domain/matcher';
+import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cache';
 
 function setup(log?: pino.Logger) {
   const warn = vi.fn();
@@ -27,16 +29,17 @@ function setup(log?: pino.Logger) {
     checkin_id: 'c1', telegram_id: 1, beer_id: panIpani,
     user_rating: 4.0, checkin_at: '2026-01-01T00:00:00Z', venue: null,
   });
+  const catalog = createCatalogCache(db);
   function appAs(telegramId: number) {
     const app = new Hono<ApiEnv>();
     app.use('/match', async (c, next) => { c.set('telegramId', telegramId); await next(); });
-    matchRoute(app, { db, env: {} as never, log: appLog });
+    matchRoute(app, { db, env: {} as never, log: appLog }, catalog);
     return app;
   }
   function appAnon() {
     const app = new Hono<ApiEnv>();
     // No middleware sets telegramId → route must treat it as anonymous.
-    matchRoute(app, { db, env: {} as never, log: appLog });
+    matchRoute(app, { db, env: {} as never, log: appLog }, catalog);
     return app;
   }
   return { appAs, appAnon, panIpani, warn };
@@ -51,6 +54,31 @@ function post(app: Hono<ApiEnv>, body: unknown) {
 }
 
 describe('POST /match', () => {
+  it('matches against the INJECTED catalog cache, never one of its own', async () => {
+    // The ghost beer exists only inside the stub cache — it is not in the database at all.
+    // If the route built its own cache from `db`, this input could not match anything.
+    const db = openDb(':memory:');
+    migrate(db);
+    ensureProfile(db, 1);
+    const ghost = {
+      id: 777, brewery: 'Ghost Brewing', name: 'Phantom Ale',
+      abv: 5.0, rating_global: 4.2, untappd_id: 4242,
+    };
+    const stub: CatalogCache = {
+      get: async () => ({ prepared: prepareCatalog([ghost]), byId: new Map([[777, ghost]]) }),
+      idle: async () => {},
+    };
+    const app = new Hono<ApiEnv>();
+    app.use('/match', async (c, next) => { c.set('telegramId', 1); await next(); });
+    matchRoute(app, { db, env: {} as never, log: pino({ level: 'silent' }) }, stub);
+
+    const res = await post(app, { beers: [{ brewery: 'Ghost Brewing', name: 'Phantom Ale' }] });
+    expect(res.status).toBe(200);
+    const body = await res.json() as { results: { matched_beer: { id: number; rating_global: number } | null }[] };
+    expect(body.results[0].matched_beer?.id).toBe(777);
+    expect(body.results[0].matched_beer?.rating_global).toBe(4.2);
+  });
+
   it('rejects an anonymous raw body over the route byte limit', async () => {
     const { appAnon, warn } = setup();
     const body = `{"padding":"${'x'.repeat(MATCH_BODY_LIMIT_BYTES)}"}`;
