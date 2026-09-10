@@ -107,8 +107,8 @@ beers: [{ brewery: string, name: string, abv?: number }]   // 1..200
 | Поле | Значення |
 |------|----------|
 | `input` | `{brewery, name}` як надіслано (щоб модель могла зіставити рядки) |
-| `status` | `drunk` \| `probably_drunk` \| `not_drunk` \| `not_in_catalog` \| `not_searched` |
-| `confidence` | `exact` \| `fuzzy` — лише коли є `beer` |
+| `status` | `drunk` \| `probably_drunk` \| `not_drunk` \| `unknown` \| `not_in_catalog` \| `not_searched` (шість, не п'ять — `unknown` див. «(в) Порожній профіль» нижче) |
+| `confidence` | `exact` \| `fuzzy` \| `null` — `null` рівно тоді, коли `beer` теж `null` |
 | `beer` | `{name, brewery, rating_global, untappd_url}` або `null` |
 | `your_rating` | число або `null` (лише для `exact`) |
 
