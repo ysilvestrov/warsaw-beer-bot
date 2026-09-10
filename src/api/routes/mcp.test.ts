@@ -282,4 +282,26 @@ describe('POST /mcp', () => {
     expect(body.result?.isError).toBe(true);
     expect(body.result?.content[0]?.type).toBe('text');
   });
+
+  it('rejects invalid tool input (empty beers) as a 200 isError, never a transport error or 400', async () => {
+    // spec.md's Errors section for /mcp claims schema-invalid input never gets a 400 the
+    // way /match does — the SDK maps a zod failure on the tool's inputSchema to a
+    // JSON-RPC-level -32602 that still rides inside a 200 `result`, not a top-level
+    // `error`. This test is the only thing pinning that claim to the SDK's actual
+    // behaviour; without it, an unattended dependency bump could change the shape and
+    // nothing here would notice.
+    const { app } = setup();
+    await rpc(app, INIT);
+    const res = await rpc(app, {
+      jsonrpc: '2.0', id: 7, method: 'tools/call',
+      params: { name: 'match_beers', arguments: { beers: [] } },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json() as {
+      error?: unknown;
+      result?: { isError?: boolean; content: { type: string; text: string }[] };
+    };
+    expect(body.error).toBeUndefined();
+    expect(body.result?.isError).toBe(true);
+  });
 });
