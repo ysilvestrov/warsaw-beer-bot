@@ -22,6 +22,7 @@ const base: StatusMetrics = {
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
   enrichMatched24h: 5, enrichFailures24h: 3, untappdSearchHealthy: true,
   extMatchRequests: 1234, extMatchAnon: 312, extMatchBeers: 47210,
+  mcpMatchRequests: 87, mcpMatchBeers: 1940,
   sealUnidentifiable: 9, sealUnidentifiableReobserved: 7,
   sealNotABeer: 29, sealNotABeer7d: 0, sealRetiredFalsified: 28,
   lockedRows: 12, unlocked7d: 3, verdictsOutlived7d: 2,
@@ -44,12 +45,21 @@ test('buildStatusMessage: full message exact string', () => {
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
       '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',
+      '• MCP /match (вчора): 87 запитів · 1 940 пив',
       '',
       'На кранах зараз',
       '• 1 118 унікальних пив у 42 пабах',
       '• Нових на кранах (24 год): 37',
     ].join('\n'),
   );
+});
+
+test('buildStatusMessage: the MCP line shows zeros when there was no MCP traffic', () => {
+  const out = buildStatusMessage(
+    { ...base, mcpMatchRequests: 0, mcpMatchBeers: 0 },
+    '2026-06-05 09:00',
+  );
+  expect(out).toContain('• MCP /match (вчора): 0 запитів · 0 пив');
 });
 
 test('buildStatusMessage: stale scrape (>14h) shows warning flag', () => {
