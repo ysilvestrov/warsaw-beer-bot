@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
-import { createCatalogCache } from '../../domain/catalog-cache';
+import type { CatalogCache } from '../../domain/catalog-cache';
 import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
 import { matchBeerList } from '../../domain/match-list';
@@ -31,10 +31,9 @@ const MatchBody = z.object({
 // Registers POST /match on the given app. Auth is optional here: a missing
 // token yields telegramId===null (anonymous, global-only results); a valid
 // token yields personal drunk/rating data (see optionalAuthMiddleware).
-export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
-  const cache = createCatalogCache(deps.db, {
-    onError: (err) => deps.log.error({ err }, 'catalog cache rebuild failed'),
-  });
+// The prepared-catalog cache is created ONCE at the composition root and passed in:
+// a second instance would double both the memory and the rebuild CPU (~30k rows).
+export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache): void {
   app.post(
     '/match',
     payloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES, 'route'),

@@ -1,4 +1,5 @@
 import pino from 'pino';
+import { readFileSync } from 'node:fs';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { ensureProfile } from '../storage/user_profiles';
@@ -31,6 +32,15 @@ function deps() {
 }
 
 describe('createApiApp', () => {
+  it('creates the catalog cache exactly once, and only at the composition root', () => {
+    // A route that builds its own cache compiles, passes its own tests, and silently
+    // doubles memory + rebuild CPU in production. Only the source can prove it did not.
+    const index = readFileSync('src/api/index.ts', 'utf8');
+    const match = readFileSync('src/api/routes/match.ts', 'utf8');
+    expect(index.match(/createCatalogCache\(/g)).toHaveLength(1);
+    expect(match).not.toContain('createCatalogCache');
+  });
+
   it('GET /health is open and returns ok', async () => {
     const app = createApiApp(deps());
     const res = await app.request('/health');

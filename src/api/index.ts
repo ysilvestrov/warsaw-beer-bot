@@ -18,6 +18,7 @@ import {
   payloadBodyLimit,
 } from './middleware/payload-limit';
 import { matchRoute } from './routes/match';
+import { createCatalogCache } from '../domain/catalog-cache';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
@@ -38,12 +39,18 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   app.use('*', cors({ origin: '*' }));
   app.use('*', payloadBodyLimit(deps, GLOBAL_BODY_LIMIT_BYTES, 'global'));
 
+  // Single prepared-catalog cache per process, shared by every route that matches.
+  // #277 stale-while-revalidate; a second instance would double memory and rebuild CPU.
+  const catalog = createCatalogCache(deps.db, {
+    onError: (err) => deps.log.error({ err }, 'catalog cache rebuild failed'),
+  });
+
   app.get('/health', (c) => c.json({ ok: true }));
 
   // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
   app.use('/match', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));
   app.use('/match', optionalAuthMiddleware(deps.db));
-  matchRoute(app, deps);
+  matchRoute(app, deps, catalog);
 
   app.use(
     '/enrich/candidates',
