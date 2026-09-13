@@ -199,3 +199,23 @@ describe('parseUserBeersPage', () => {
     expect(it.style).toBeNull();
   });
 });
+
+describe('parseUserBeersPage — Global Rating block (#616)', () => {
+  const fixture = (name: string) =>
+    fs.readFileSync(path.join(__dirname, '../../../tests/fixtures/untappd', name), 'utf8');
+
+  test('a number, «N/A» and a missing block are three different states', () => {
+    const items = parseUserBeersPage(fixture('user-beers-na.html'));
+    expect(items.map((b) => ({ bid: b.bid, shown: b.global_rating_shown, rating: b.global_rating }))).toEqual([
+      { bid: 6869890, shown: true, rating: null },
+      { bid: 39819, shown: true, rating: 3.3 },
+      { bid: 100001, shown: false, rating: null },
+    ]);
+  });
+
+  test('the captured profile page shows the block on every card', () => {
+    const items = parseUserBeersPage(fixture('user-beers.html'));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((b) => b.global_rating_shown)).toBe(true);
+  });
+});
