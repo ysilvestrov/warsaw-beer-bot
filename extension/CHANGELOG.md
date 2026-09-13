@@ -23,9 +23,9 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
-## [Unreleased]
+## [0.18.0] - 2026-09-13
 
-- Fixed six Flasker beers with no package volume showing no badge. They now show their usual rating or drinking-status badge. Flasker glasses, souvenirs, and other merchandise now show a non-clickable red ✕ instead of looking unrated or receiving a beer badge.
+- Fixed Flasker beers with no volume listed showing no badge. They now show their usual rating or drinking-status badge. Flasker glasses, souvenirs, and other merchandise now show a non-clickable red ✕ instead of looking unrated or receiving a beer badge.
 - Fixed badges not appearing on Flasker for beers with pre-release banners, colon-separated producer names (such as Berryland), or multi-word breweries (such as Evil Twin, Ten Men, and Holy Brew). The extension now recognizes these breweries and separates promotional shelf labels from the beer name.
 - Fixed known Untappd beers showing no badge when their global rating was unavailable. They now show a clickable ⭐ without a number instead of looking as if the extension ignored them.
 
