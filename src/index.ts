@@ -35,7 +35,7 @@ import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
 import { cleanupPollutedOntap } from './jobs/cleanup-polluted-ontap';
 import { enrichOrphans } from './jobs/enrich-orphans';
-import { refreshTapRatings } from './jobs/refresh-tap-ratings';
+import { hydrateRatings } from './jobs/hydrate-ratings';
 import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
@@ -257,16 +257,16 @@ async function main(): Promise<void> {
         notifyAdmin,
       }).catch((e) => log.error({ err: e }, 'enrich-orphans cron'));
     }),
-    // refresh-tap-ratings runs every 3h at xx:30 too, but on hours
-    // 1/4/7/10/13/16/19/22 — offset 1h from enrich-orphans so the two
-    // jobs never burst Untappd simultaneously. 8 runs/day × LIMIT 20.
-    // Bumped from '0 9,21 * * *' (12h) in PR-D-throughput-bump 2026-05-29.
+    // #616: hydrate-ratings — звірка рейтингів злінкованого пива через Algolia getObjects (≤1000 bid
+    // одним запитом). Слот колишньої HTML-джоби рейтингів кранів: xx:30 на годинах 1/4/7/10/13/16/19/22,
+    // зсув на 1 год від enrich-orphans, тож два Algolia-клієнти не б'ють одночасно. Гейт — Algolia-breaker.
     cron.schedule('30 1,4,7,10,13,16,19,22 * * *', () => {
-      refreshTapRatings({
-        db, log, http: untappdSearchHttp,
+      hydrateRatings({
+        db, log,
+        hydrateByBid: (bids) => algoliaSearch.hydrateByBid(bids),
         lookupEnabled: env.UNTAPPD_LOOKUP_ENABLED,
-        breaker: profileHttpBreaker,
-      }).catch((e) => log.error({ err: e }, 'refresh-tap-ratings cron'));
+        breaker: algoliaBreaker,
+      }).catch((e) => log.error({ err: e }, 'hydrate-ratings cron'));
     }),
     // cleanup-old-snapshots: daily at 05:00 Warsaw, a quiet slot away from the
     // on-the-hour scraper runs (00:00/12:00 ontap, 03:00 untappd). Bounds DB
