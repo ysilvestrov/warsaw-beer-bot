@@ -1588,3 +1588,135 @@ describe('ensureOrphan (#617)', () => {
     expect(catalogVersion()).toBe(v);
   });
 });
+
+// ---------------------------------------------------------------------------
+// #616 — гідратація рейтингів
+// ---------------------------------------------------------------------------
+
+import { listRatingHydrationCandidates, applyHydratedRatings, RATING_RECHECK_DAYS } from './beers';
+
+describe('listRatingHydrationCandidates (#616)', () => {
+  const NOW = new Date('2026-09-13T12:00:00.000Z');
+  const daysAgo = (d: number) => new Date(NOW.getTime() - d * 86_400_000).toISOString();
+
+  function seed(
+    db: ReturnType<typeof fresh>,
+    o: { bid: number | null; name: string; rating: number | null; checkedAt?: string | null; refreshAt?: string | null; refreshCount?: number },
+  ): number {
+    const id = seedBeer(db, {
+      untappd_id: o.bid, name: o.name, brewery: 'Browar Test', style: 'IPA', abv: 6.2,
+      rating_global: o.rating, normalized_name: o.name.toLowerCase(), normalized_brewery: 'browar test',
+    });
+    db.prepare('UPDATE beers SET rating_checked_at = ?, rating_refresh_at = ?, rating_refresh_count = ? WHERE id = ?')
+      .run(o.checkedAt ?? null, o.refreshAt ?? null, o.refreshCount ?? 0, id);
+    return id;
+  }
+
+  test('takes linked rows never checked or checked more than 30 days ago; skips orphans and fresh stamps', () => {
+    const db = fresh();
+    const never = seed(db, { bid: 101, name: 'Never', rating: 3.9 });
+    const stale = seed(db, { bid: 102, name: 'Stale', rating: 3.9, checkedAt: daysAgo(RATING_RECHECK_DAYS + 1) });
+    seed(db, { bid: 103, name: 'Fresh', rating: 3.9, checkedAt: daysAgo(RATING_RECHECK_DAYS - 1) });
+    seed(db, { bid: null, name: 'Orphan', rating: null });
+    expect(listRatingHydrationCandidates(db, 10, NOW).map((c) => c.id).sort()).toEqual([never, stale].sort());
+  });
+
+  test('order: missing or zero rating → never checked → oldest checked → id', () => {
+    const db = fresh();
+    const oldChecked = seed(db, { bid: 201, name: 'Old checked', rating: 4.1, checkedAt: daysAgo(90) });
+    const newerChecked = seed(db, { bid: 202, name: 'Newer checked', rating: 4.1, checkedAt: daysAgo(40) });
+    const neverChecked = seed(db, { bid: 203, name: 'Never checked', rating: 4.1 });
+    const zero = seed(db, { bid: 204, name: 'Zero', rating: 0, checkedAt: daysAgo(40) });
+    const missing = seed(db, { bid: 205, name: 'Missing', rating: null });
+    // missing (штампа немає) іде перед zero (штамп 40 днів) усередині першої групи — NULL перший при ASC.
+    expect(listRatingHydrationCandidates(db, 10, NOW).map((c) => c.id))
+      .toEqual([missing, zero, neverChecked, oldChecked, newerChecked]);
+  });
+
+  test('a bid Algolia did not know waits out its backoff; exhausted schedule is excluded', () => {
+    const db = fresh();
+    const waiting = seed(db, { bid: 301, name: 'Waiting', rating: null, refreshAt: daysAgo(1), refreshCount: 1 });
+    const due = seed(db, { bid: 302, name: 'Due', rating: null, refreshAt: daysAgo(4), refreshCount: 1 });
+    const exhausted = seed(db, { bid: 303, name: 'Exhausted', rating: null, refreshAt: daysAgo(400), refreshCount: 4 });
+    const ids = listRatingHydrationCandidates(db, 10, NOW).map((c) => c.id);
+    expect(ids).toContain(due);
+    expect(ids).not.toContain(waiting);
+    expect(ids).not.toContain(exhausted);
+  });
+
+  test('respects the limit', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) seed(db, { bid: 400 + i, name: `Beer ${i}`, rating: null });
+    expect(listRatingHydrationCandidates(db, 3, NOW)).toHaveLength(3);
+  });
+});
+
+describe('applyHydratedRatings (#616)', () => {
+  const NOW_ISO = '2026-09-13T12:00:00.000Z';
+
+  function seedLinked(db: ReturnType<typeof fresh>, bid: number, o: { rating: number | null; style: string | null; abv: number | null }): number {
+    const id = seedBeer(db, {
+      untappd_id: bid, name: `Beer ${bid}`, brewery: 'Browar Test', style: o.style, abv: o.abv,
+      rating_global: o.rating, normalized_name: `beer ${bid}`, normalized_brewery: 'browar test',
+    });
+    db.prepare("UPDATE beers SET rating_refresh_at = '2026-09-01T00:00:00.000Z', rating_refresh_count = 2 WHERE id = ?").run(id);
+    return id;
+  }
+
+  test('overwrites the rating, fills only empty style/abv, stamps and clears the backoff', () => {
+    const db = fresh();
+    const rated = seedLinked(db, 501, { rating: 3.5, style: 'Pils', abv: 5.0 });
+    const bare = seedLinked(db, 502, { rating: null, style: null, abv: null });
+    const out = applyHydratedRatings(db, new Map([
+      [501, { global_rating: 4.06, style: 'Gose', abv: 4.2 }],
+      [502, { global_rating: 3.77, style: 'Stout - Irish Dry', abv: 4.2 }],
+    ]), [501, 502], NOW_ISO);
+    expect(out).toEqual({ updated: 2, changed: 2, unknown: 0 });
+    expect(getBeer(db, rated)).toMatchObject({
+      rating_global: 4.06, style: 'Pils', abv: 5.0,
+      rating_checked_at: NOW_ISO, rating_refresh_at: null, rating_refresh_count: 0,
+    });
+    expect(getBeer(db, bare)).toMatchObject({ rating_global: 3.77, style: 'Stout - Irish Dry', abv: 4.2, rating_checked_at: NOW_ISO });
+  });
+
+  test('Untappd without a rating (<10 ratings) overwrites a stale number with NULL and stamps', () => {
+    const db = fresh();
+    const id = seedLinked(db, 601, { rating: 3.64, style: 'IPA', abv: 6.0 });
+    applyHydratedRatings(db, new Map([[601, { global_rating: null, style: 'IPA', abv: 6.0 }]]), [601], NOW_ISO);
+    expect(getBeer(db, id)).toMatchObject({ rating_global: null, rating_checked_at: NOW_ISO });
+  });
+
+  test('a bid missing from the response only advances the backoff', () => {
+    const db = fresh();
+    const id = seedLinked(db, 701, { rating: 3.9, style: 'IPA', abv: 6.0 });
+    const out = applyHydratedRatings(db, new Map(), [701], NOW_ISO);
+    expect(out).toEqual({ updated: 0, changed: 0, unknown: 1 });
+    expect(getBeer(db, id)).toMatchObject({
+      rating_global: 3.9, rating_checked_at: null, rating_refresh_at: NOW_ISO, rating_refresh_count: 3,
+    });
+  });
+
+  test('bumps the catalog version once when something changed, never when nothing did', () => {
+    const db = fresh();
+    seedLinked(db, 801, { rating: 3.5, style: 'IPA', abv: 6.0 });
+    seedLinked(db, 802, { rating: 3.6, style: 'IPA', abv: 6.0 });
+    const hits = new Map([
+      [801, { global_rating: 4.0, style: 'IPA', abv: 6.0 }],
+      [802, { global_rating: 4.1, style: 'IPA', abv: 6.0 }],
+    ]);
+    const v0 = catalogVersion();
+    applyHydratedRatings(db, hits, [801, 802], NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 1);
+    const again = applyHydratedRatings(db, hits, [801, 802], '2026-10-14T12:00:00.000Z');
+    expect(again).toEqual({ updated: 2, changed: 0, unknown: 0 });
+    expect(catalogVersion()).toBe(v0 + 1);
+  });
+
+  test('a bid whose row vanished between selection and write touches nothing', () => {
+    const db = fresh();
+    const other = seedLinked(db, 901, { rating: 3.9, style: 'IPA', abv: 6.0 });
+    const out = applyHydratedRatings(db, new Map([[999, { global_rating: 4.2, style: 'Lager', abv: 5.0 }]]), [999], NOW_ISO);
+    expect(out).toEqual({ updated: 0, changed: 0, unknown: 0 });
+    expect(getBeer(db, other)).toMatchObject({ rating_global: 3.9, rating_checked_at: null });
+  });
+});
