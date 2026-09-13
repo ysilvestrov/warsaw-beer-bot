@@ -28,8 +28,9 @@ function seed() {
   seedBeer(db, { untappd_id: 100, name: 'A', brewery: 'X', style: null, abv: null, rating_global: 4.0, normalized_name: 'a', normalized_brewery: 'x' });
   seedBeer(db, { untappd_id: 101, name: 'B', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'b', normalized_brewery: 'x' });
   seedBeer(db, { untappd_id: null, name: 'C', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'c', normalized_brewery: 'x' });
-  // #616: штампи звірки рейтингу — свіжий (3 дні), застарілий (34 дні) і на сироті (не рахується).
-  db.prepare("UPDATE beers SET rating_checked_at = '2026-06-01T00:00:00.000Z' WHERE untappd_id = 100").run();
+  // #616: штампи звірки рейтингу — у вікні (20 днів), поза вікном (34 дні) і на сироті (не рахується).
+  // 20 і 34 дні фіксують саме 30-денне вікно: і 7-денне, і 40-денне дадуть інше число.
+  db.prepare("UPDATE beers SET rating_checked_at = '2026-05-15T00:00:00.000Z' WHERE untappd_id = 100").run();
   db.prepare("UPDATE beers SET rating_checked_at = '2026-05-01T00:00:00.000Z' WHERE untappd_id = 101").run();
   db.prepare("UPDATE beers SET rating_checked_at = '2026-06-03T00:00:00.000Z' WHERE name = 'C'").run();
   // users: one linked, one not

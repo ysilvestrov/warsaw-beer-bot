@@ -7,7 +7,11 @@ import path from 'node:path';
 const src = (): string => readFileSync(path.join(__dirname, '../index.ts'), 'utf8');
 
 test('src/index.ts schedules hydrateRatings on a cron tick, gated by the Algolia breaker', () => {
-  const block = src().match(/cron\.schedule\([^)]*\)[\s\S]{0,400}?hydrateRatings\(\{([\s\S]*?)\}\)/);
+  // Розклад дослівно: слот зі зсувом на 1 год від enrich-orphans (обидва б'ють в Algolia). `.catch` —
+  // без нього відмова джоби стає unhandled rejection процесу, а не рядком у лозі.
+  const block = src().match(
+    /cron\.schedule\('30 1,4,7,10,13,16,19,22 \* \* \*', \(\) => \{\s*hydrateRatings\(\{([\s\S]*?)\}\)\.catch\(\(e\) => log\.error\(\{ err: e \}, 'hydrate-ratings cron'\)\);/,
+  );
   expect(block).not.toBeNull();
   expect(block![1]).toMatch(/breaker:\s*algoliaBreaker/);
   expect(block![1]).toMatch(/hydrateByBid:\s*\(bids\)\s*=>\s*algoliaSearch\.hydrateByBid\(bids\)/);
