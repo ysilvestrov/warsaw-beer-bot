@@ -21,7 +21,7 @@ function tile(brewery: string, title: string): string {
 }
 
 describe('onemorebeer non-beer filtering', () => {
-  it('drops accessory/merch tiles (glass, mug, shirt, book)', () => {
+  it('marks accessory/merch tiles (glass, mug, shirt, book) as non-beer', () => {
     const html = `<div class="one-catalog-view-list">
       ${tile('Schneider', 'SCHNEIDER WEISSE SZKLANKA 0,5 L')}
       ${tile('Inne', 'BALTIC PORTER DAY 2025 POKAL 0,33 L (gazetka)')}
@@ -30,7 +30,13 @@ describe('onemorebeer non-beer filtering', () => {
       ${tile('Schneider', 'SCHNEIDER WEISSE KUFEL CERAMIKA WYSOKI 0,5 L')}
     </div>`;
     const doc = new DOMParser().parseFromString(html, 'text/html');
-    expect(onemorebeer.parseCards(doc)).toEqual([]);
+    expect(onemorebeer.parseCards(doc)).toEqual([
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+    ]);
   });
 
   it('keeps a real beer that lives among accessories (MAGIC ROAD, can + deposit)', () => {
@@ -43,7 +49,7 @@ describe('onemorebeer non-beer filtering', () => {
     expect(cards[0].brewery).toBe('Magic Road');
   });
 
-  it('filters delicatessen soft drinks per card while keeping eligible kvass', () => {
+  it('marks delicatessen soft drinks per card while keeping eligible kvass', () => {
     const html = `<div class="one-catalog-view-list">
       ${tile('Kofola', 'KOFOLA ORYGINAL PUSZKA 0,5 L')}
       ${tile('Vigo Kombucha', 'VIGO KOMBUCHA MANGO BUT. 0,33 L')}
@@ -52,9 +58,13 @@ describe('onemorebeer non-beer filtering', () => {
     </div>`;
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const cards = onemorebeer.parseCards(doc);
-    expect(cards).toHaveLength(1);
-    expect(cards[0].brewery).toBe('Koreb');
-    expect(cards[0].name).toBe('KWAS CHLEBOWY');
+    const nonBeerCards = cards.filter((card) => card.nonBeer);
+    const beerCards = cards.filter((card) => !card.nonBeer);
+    expect(nonBeerCards.length).toBeGreaterThan(0);
+    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(beerCards).toHaveLength(1);
+    expect(beerCards[0].brewery).toBe('Koreb');
+    expect(beerCards[0].name).toBe('KWAS CHLEBOWY');
   });
 
   it('does not filter by bare kombucha without the observed soft-drink brand', () => {
@@ -235,7 +245,7 @@ describe('onemorebeer ABV bounds (#369)', () => {
 // The title deliberately does NOT contain "ginger beer" itself, so the drop below can only
 // happen via the Styl row — a mutation that stops passing style through would keep it.
 describe('onemorebeer ginger/root beer gate (#376)', () => {
-  it('drops a 0.0% tile whose published Styl is Ginger beer', () => {
+  it('marks a 0.0% tile whose published Styl is Ginger beer as non-beer', () => {
     const doc = new DOMParser().parseFromString(
       `<div class="one-catalog-view-list">${wrappedTile('Old Jamaica', 'OLD JAMAICA REGULAR BUT. 0,33 L', [
         ['Moc (%)', '0.0%'],
@@ -243,7 +253,9 @@ describe('onemorebeer ginger/root beer gate (#376)', () => {
       ])}</div>`,
       'text/html',
     );
-    expect(onemorebeer.parseCards(doc)).toEqual([]);
+    expect(onemorebeer.parseCards(doc)).toEqual([
+      expect.objectContaining({ nonBeer: true, skip: true }),
+    ]);
   });
 
   it('keeps a tile with no Moc row (ABV absent, style irrelevant) even when Styl is Ginger beer', () => {

@@ -59,7 +59,7 @@ describe('hoptimaal adapter', () => {
     }));
   });
 
-  it('ignores non-beer Hoptimaal categories requested in issue #91', () => {
+  it('marks non-beer Hoptimaal categories requested in issue #91', () => {
     const cards = hoptimaal.parseCards(new DOMParser().parseFromString([
       card('Hoptimaal Beer Club Subscription', '/en/collections/abonnement/products/beer-club'),
       card('Hoptimaal T-shirt', '/en/collections/merch/products/hoptimaal-t-shirt'),
@@ -68,8 +68,12 @@ describe('hoptimaal adapter', () => {
       card('PINTA Barrel Brewing Patience 5th Anniversary (2026)', '/en/collections/craft-beers/products/pinta-patience'),
     ].join(''), 'text/html'));
 
-    expect(cards).toHaveLength(1);
-    expect(cards[0]).toMatchObject({
+    const nonBeerCards = cards.filter((card) => card.nonBeer);
+    const beerCards = cards.filter((card) => !card.nonBeer);
+    expect(nonBeerCards.length).toBeGreaterThan(0);
+    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(beerCards).toHaveLength(1);
+    expect(beerCards[0]).toMatchObject({
       brewery: 'PINTA Barrel Brewing',
       name: 'Patience 5th Anniversary (2026)',
     });

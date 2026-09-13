@@ -85,14 +85,20 @@ export const onemorebeer: SiteAdapter = {
       const brewery = text(el.querySelector(BREWERY_SELECTOR));
       const rawTitle = text(el.querySelector(TITLE_SELECTOR));
       if (!brewery || !rawTitle) continue;
-      if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) continue;
+      if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
       const name = cleanName(rawTitle, brewery);
       if (!name) continue;
       const facts = technicalFacts(el);
       // Match the family against brewery+name together: cleanName strips the brewery
       // prefix from the title, so a name-only check misses cases where the brand carries
       // the family words (#376 follow-up).
-      if (isNonAlcoholicSoftDrinkFamily({ name: `${brewery} ${name}`, style: facts.style, abv: facts.abv })) continue;
+      if (isNonAlcoholicSoftDrinkFamily({ name: `${brewery} ${name}`, style: facts.style, abv: facts.abv })) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
       cards.push({ el, brewery, name, ...facts });
     }
     return cards;
