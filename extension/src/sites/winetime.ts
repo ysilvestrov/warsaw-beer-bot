@@ -151,7 +151,10 @@ export const winetime: SiteAdapter = {
       const product = Number.isFinite(id) ? meta.get(id) : undefined;
       const rawTitle = product?.title ?? text(el.querySelector('.product-micro--title'));
       if (!rawTitle) continue;
-      if (isNonBeerName(rawTitle)) continue;
+      if (isNonBeerName(rawTitle)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
 
       const brewery = product?.manufacturer?.title?.trim() || visibleBrewery(el);
       const name = cleanName(rawTitle, brewery);

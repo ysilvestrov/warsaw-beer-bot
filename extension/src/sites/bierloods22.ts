@@ -48,7 +48,10 @@ export const bierloods22: SiteAdapter = {
       const a = el.querySelector('a.title');
       const titleText = text(a);
       const titleAttr = a?.getAttribute('title') ?? '';
-      if (isPackageTitle(titleText) || isPackageTitle(titleAttr)) continue;
+      if (isPackageTitle(titleText) || isPackageTitle(titleAttr)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
 
       const parsed = splitTitle(titleText, titleAttr);
       if (!parsed) continue;

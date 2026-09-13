@@ -40,7 +40,11 @@ describe('winetime adapter', () => {
     expect(cards.length).toBeGreaterThan(20);
     for (const card of cards) {
       expect(card.el).toBeInstanceOf(HTMLElement);
-      expect(card.name.length).toBeGreaterThan(0);
+      if (card.nonBeer) {
+        expect(card.skip).toBe(true);
+      } else {
+        expect(card.name.length).toBeGreaterThan(0);
+      }
     }
   });
 
@@ -72,6 +76,39 @@ describe('winetime adapter', () => {
         name: 'IPA CAN',
       }),
     );
+  });
+
+  it('marks shared-name non-beer products from published and visible titles', () => {
+    const published = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="120"></span>
+          <div class="product-micro--title">Fallback beer title</div>
+        </a>
+        <script>
+          window.initialData = {};
+          window.initialData.category = {
+            "products": [{ "id": 120, "title": "Gift Set", "manufacturer": null }]
+          };
+        </script>
+      `,
+      'text/html',
+    );
+    const visible = new DOMParser().parseFromString(
+      `
+        <a class="product-micro">
+          <span data-productkey="121"></span>
+          <div class="product-micro--title">Gift Set</div>
+        </a>
+      `,
+      'text/html',
+    );
+
+    for (const doc of [published, visible]) {
+      const cards = winetime.parseCards(doc);
+      expect(cards.length).toBeGreaterThan(0);
+      expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+    }
   });
 
   it('removes a repeated trailing brewery from embedded product titles', () => {

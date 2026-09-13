@@ -42,7 +42,7 @@ describe('beerrepublic adapter', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
   });
 
-  it('ignores non-beer pack, variety pack, and calendar products', () => {
+  it('marks non-beer pack, variety pack, and calendar products', () => {
     const doc = new DOMParser().parseFromString(`
       <section data-section-type="collection">
         ${product('Limited Edition Anniversary Vertical Set', 'Firestone Walker')}
@@ -54,6 +54,11 @@ describe('beerrepublic adapter', () => {
       </section>
     `, 'text/html');
 
-    expect(beerrepublic.parseCards(doc).map((c) => c.name)).toEqual(['Mind Haze Galaxy Bender']);
+    const parsed = beerrepublic.parseCards(doc);
+    expect(parsed.filter((card) => card.nonBeer)).toHaveLength(5);
+    expect(parsed.filter((card) => !card.nonBeer).map((card) => card.name)).toEqual([
+      'Mind Haze Galaxy Bender',
+    ]);
+    expect(parsed.filter((card) => card.nonBeer).every((card) => card.skip)).toBe(true);
   });
 });

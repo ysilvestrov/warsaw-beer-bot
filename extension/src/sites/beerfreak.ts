@@ -245,7 +245,10 @@ export const beerfreak: SiteAdapter = {
       const product = Number.isFinite(id) ? meta.get(id) : undefined;
       const rawTitle = product?.title ?? text(el.querySelector('.catalogCard-title a'));
       if (!rawTitle) continue;
-      if (isNonBeerName(rawTitle) || isBeerFreakBundle(rawTitle)) continue;
+      if (isNonBeerName(rawTitle) || isBeerFreakBundle(rawTitle)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
 
       const parsed = product
         ? product.brand_title == null
