@@ -1378,6 +1378,25 @@ describe('upsertBeerByBid (#617)', () => {
     expect(row.rating_global).toBeCloseTo(3.95);    // було порожнє → заповнено
   });
 
+  // Окремо від тесту вище: там style і rating порожні, тож обидва порядки COALESCE дають те саме
+  // (рев'ю ядра: мутація порядку для style і rating_global виживала).
+  test('stored facts on the row found by bid are never overwritten by incoming ones', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+      untappd_id_source: 'search',
+    });
+    upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, {
+      style: 'Belgian Quadrupel', abv: 5.0, rating_global: 4.2,
+    }));
+    const row = getBeer(db, id)!;
+    expect(row.style).toBe('Belgian Strong Dark Ale');
+    expect(row.abv).toBeCloseTo(9.2);
+    expect(row.rating_global).toBeCloseTo(3.95);
+  });
+
   test('empty input never wipes stored facts (the sync wipe)', () => {
     const db = fresh();
     const id = upsertBeer(db, {
@@ -1412,6 +1431,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test.each([
     ['search', 'checkin', 'checkin'],
+    ['search', 'bid', 'bid'],
     ['bid', 'checkin', 'checkin'],
     ['checkin', 'bid', 'checkin'],
     ['curated', 'checkin', 'curated'],
@@ -1447,7 +1467,9 @@ describe('upsertBeerByBid (#617)', () => {
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
       untappd_id_source: 'search',
     });
-    const ten = upsertBeerByBid(db, bidInput(2002, 'Trappistes Rochefort 10', ROCHEFORT));
+    const ten = upsertBeerByBid(db, bidInput(2002, 'Trappistes Rochefort 10', ROCHEFORT, {
+      style: 'Belgian Quadrupel', abv: 11.3, rating_global: 4.05,
+    }));
     expect(ten).not.toBe(eight);
     const e = getBeer(db, eight)!;
     expect(e.untappd_id).toBe(1001);
@@ -1459,6 +1481,12 @@ describe('upsertBeerByBid (#617)', () => {
     expect(t.untappd_id).toBe(2002);
     expect(t.name).toBe('Trappistes Rochefort 10');
     expect(t.untappd_id_source).toBe('checkin');
+    expect(t.style).toBe('Belgian Quadrupel');
+    expect(t.abv).toBeCloseTo(11.3);
+    expect(t.rating_global).toBeCloseTo(4.05);
+    // без нормалізованої пари новий рядок не знайде ні матчер, ні наступний синк
+    expect(t.normalized_name).toBe(normalizeName('Trappistes Rochefort 10'));
+    expect(t.normalized_brewery).toBe(normalizeBrewery(ROCHEFORT));
   });
 
   // Числа тут однакові, тож numericTokensCompatible злінкований рядок не відсіє — від перехоплення
@@ -1486,8 +1514,51 @@ describe('upsertBeerByBid (#617)', () => {
     const row = getBeer(db, orphan)!;
     expect(row.untappd_id).toBe(6625206);
     expect(row.untappd_id_source).toBe('checkin');
-    expect(row.abv).toBeCloseTo(6.5);
+    expect(row.abv).toBeCloseTo(6.5);      // вхід без ABV (стрічка) → лишається ABV сироти
+    expect(row.style).toBe('Sour');
     expect(row.rating_global).toBeCloseTo(4.1);
+  });
+
+  // Рев'ю ядра: факти сироти прийшли з тексту крана/крамниці, а той ABV «буває помилковим,
+  // тож авторитетний Untappd-ABV переважає» (spec.md §/newbeers) — як і в recordLookupSuccess.
+  test("a resolved orphan takes Untappd's facts over its own", () => {
+    const db = fresh();
+    const res = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery)
+       VALUES (NULL, 'Juicy Trap #20', ?, 'Sour', 6.5, 3.5, ?, ?)`,
+    ).run(PP, normalizeName('Juicy Trap #20'), normalizeBrewery(PP));
+    const orphan = Number(res.lastInsertRowid);
+    upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP, {
+      style: 'Sour - Smoothie / Pastry', abv: 6.8, rating_global: 4.1,
+    }));
+    const row = getBeer(db, orphan)!;
+    expect(row.style).toBe('Sour - Smoothie / Pastry');
+    expect(row.abv).toBeCloseTo(6.8);
+    expect(row.rating_global).toBeCloseTo(4.1);
+  });
+
+  // Рев'ю ядра: listUntriagedFailures і listLockedRows не фільтрують untappd_id IS NULL, тож
+  // стан сироти, що пережив резолвлення, тріажив би й розмикав уже злінковане пиво.
+  test('resolving an orphan clears its orphan state', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Juicy Trap #20', PP, 6.5);
+    recordEnrichFailure(db, {
+      beer_id: orphan, brewery: PP, name: 'Juicy Trap #20',
+      search_url: '', source_url: '', outcome: 'not_found',
+      candidates_count: 0, candidates_summary: '', at: '2026-09-13T10:00:00Z',
+    });
+    const count = () => (db.prepare('SELECT COUNT(*) AS n FROM enrich_failures WHERE beer_id = ?').get(orphan) as { n: number }).n;
+    expect(count()).toBe(1);
+    upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP));
+    expect(count()).toBe(0);
+  });
+
+  test('an orphan of another brewery with the same name is not resolved', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Juicy Trap #20', 'Browar Inny', 6.5);
+    const got = upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
   });
 
   test('an orphan whose numbers differ is not resolved', () => {
@@ -1572,6 +1643,34 @@ describe('ensureOrphan (#617)', () => {
     expect(row.name).toBe('Łan');
     expect(row.style).toBe('Pszeniczne');
     expect(row.abv).toBeCloseTo(4.8);
+  });
+
+  test("another brewery's orphan with the same name is not returned", () => {
+    const db = fresh();
+    const other = ensureOrphan(db, {
+      name: 'Łan', brewery: 'Browar Inny', style: 'Pszeniczne', abv: 4.8, rating_global: null,
+      normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Browar Inny'),
+    });
+    const got = ensureOrphan(db, {
+      name: 'Łan', brewery: 'Sadyba Brewery', style: null, abv: 5.5, rating_global: null,
+      normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
+    });
+    expect(got).not.toBe(other);
+  });
+
+  test('of several equal orphans the oldest is returned', () => {
+    const db = fresh();
+    const insert = (name: string) => Number(db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, normalized_name, normalized_brewery)
+       VALUES (NULL, ?, 'Sadyba Brewery', ?, ?)`,
+    ).run(name, normalizeName(name), normalizeBrewery('Sadyba Brewery')).lastInsertRowid);
+    const oldest = insert('Łan');
+    insert('Łan 12°');
+    const got = ensureOrphan(db, {
+      name: 'Łan', brewery: 'Sadyba Brewery', style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
+    });
+    expect(got).toBe(oldest);
   });
 
   test('bumps the catalog version only when it inserts', () => {
