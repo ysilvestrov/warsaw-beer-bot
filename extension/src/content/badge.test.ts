@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER, resetCard } from './badge';
-import { setSearching, setEnriched, setOrphan } from './badge';
+import { setSearching, setEnriched, setOrphan, setNonBeer } from './badge';
 import type { MatchResult } from '../api/types';
 
 function el(): HTMLElement {
@@ -193,6 +193,30 @@ describe('orphan + enrichment badge states', () => {
     expect(badge.textContent).toContain('3.9');
     (badge as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
     expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
+  });
+});
+
+describe('non-beer badge (#615)', () => {
+  it('renders a red accessible ✕ without an Untappd action', () => {
+    const host = el();
+    const open = vi.spyOn(window, 'open').mockReturnValue(null);
+
+    setNonBeer(host);
+    setNonBeer(host); // replacement stays idempotent
+
+    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+    expect(badge.textContent).toBe('✕');
+    expect(badge.getAttribute('role')).toBe('img');
+    expect(badge.getAttribute('aria-label')).toBe('Не пиво');
+    expect(badge.style.color).toBe('rgb(255, 107, 107)');
+    expect(badge.style.pointerEvents).toBe('none');
+    expect(badge.style.cursor).toBe('default');
+    expect(badge.tabIndex).toBe(-1);
+    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
+
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    badge.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+    expect(open).not.toHaveBeenCalled();
   });
 });
 
