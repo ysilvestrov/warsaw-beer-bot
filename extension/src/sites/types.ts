@@ -32,7 +32,7 @@ export interface SiteAdapter {
   /** Hydrate all cards before cache lookup when details determine eligibility. */
   loadDetailsBeforeCache?: boolean;
   /**
-   * Optional bounded detail hydration for fields that are absent from listing cards.
+   * Optional detail hydration for fields that are absent from listing cards.
    * Called for all cards before cache lookup when loadDetailsBeforeCache is true;
    * otherwise called only for uncached cards before they are sent to /match.
    */

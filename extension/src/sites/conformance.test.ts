@@ -61,7 +61,7 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     expect(parsed.querySelector(adapter.reRenderContainerSelector)).not.toBeNull();
   });
 
-  it('drops non-beer products: parses zero cards from its non-beer fixture (or is exempt)', () => {
+  it('handles non-beer products according to the adapter contract (or is exempt)', async () => {
     // Exemption: a shop with verified-zero non-beers ships {none:true, reason}. Reason required so
     // an exemption is a deliberate, documented choice — not a silently skipped obligation.
     if (existsSync(nonBeerJsonPath(id))) {
@@ -73,6 +73,18 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     }
     expect(existsSync(nonBeerHtmlPath(id))).toBe(true);
     const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+    if (id === 'flasker') {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        text: async () =>
+          '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
+      } as Response);
+      const cards = adapter.parseCards(doc);
+      await adapter.loadCardDetails?.(cards);
+      expect(cards.length).toBeGreaterThan(0);
+      expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+      return;
+    }
     expect(adapter.parseCards(doc)).toEqual([]);
   });
 
