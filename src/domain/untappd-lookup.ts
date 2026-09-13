@@ -1,5 +1,15 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { breweryAliases, breweryAliasesMatch, breweryAliasContained, ABV_TOLERANCE, COLLAB_SEP, nameKeys, intersects, stripBreweryFromName } from './matcher';
+import {
+  breweryAliases,
+  breweryAliasesMatch,
+  breweryAliasContained,
+  ABV_TOLERANCE,
+  COLLAB_SEP,
+  extractYear,
+  nameKeys,
+  intersects,
+  stripBreweryFromName,
+} from './matcher';
 import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
@@ -225,6 +235,63 @@ function hasExactBrandRemainder(
 
 function nameTokens(norm: string): string[] {
   return norm.split(' ').filter((t) => t.length >= 2);
+}
+
+function singleTokenCollabParts(brewery: string): Set<string> {
+  const parts = brewery.split(COLLAB_SEP).map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return new Set();
+  return new Set(
+    parts
+      .map(normalizeBrewery)
+      .filter((part) => part !== '' && !part.includes(' ')),
+  );
+}
+
+function differsOnlyByCollabTokenBoundary(
+  inputTokens: readonly string[],
+  candidateName: string,
+  collabParts: ReadonlySet<string>,
+): boolean {
+  const candidateTokens = normalizeName(candidateName).split(' ').filter(Boolean);
+  const splitLength = candidateTokens.length - inputTokens.length + 1;
+  if (splitLength < 2) return false;
+
+  return inputTokens.some((token, inputIndex) => {
+    if (!collabParts.has(token)) return false;
+    if (!inputTokens.slice(0, inputIndex).every(
+      (prefixToken, index) => prefixToken === candidateTokens[index],
+    )) return false;
+
+    const split = candidateTokens.slice(inputIndex, inputIndex + splitLength);
+    if (split.length !== splitLength || split.join('') !== token) return false;
+
+    return inputTokens.slice(inputIndex + 1).every(
+      (suffixToken, index) =>
+        suffixToken === candidateTokens[inputIndex + splitLength + index],
+    );
+  });
+}
+
+function collabTokenBoundaryRescue(
+  input: { brewery: string; name: string; abv: number | null },
+  strictPool: SearchResult[],
+): SearchResult | null {
+  const inputYear = extractYear(input.name);
+  const inputAbv = input.abv;
+  if (inputYear === null || inputAbv === null) return null;
+
+  const collabParts = singleTokenCollabParts(input.brewery);
+  if (collabParts.size === 0) return null;
+  const inputTokens = normalizeName(input.name).split(' ').filter(Boolean);
+
+  const matches = strictPool.filter((candidate) =>
+    extractYear(candidate.beer_name) === inputYear &&
+    candidate.abv !== null &&
+    Math.abs(candidate.abv - inputAbv) <= ABV_TOLERANCE &&
+    differsOnlyByCollabTokenBoundary(inputTokens, candidate.beer_name, collabParts),
+  );
+  const unique = Array.from(new Map(matches.map((candidate) => [candidate.bid, candidate])).values());
+  return unique.length === 1 ? unique[0] : null;
 }
 
 function bestTokenScore(token: string, others: string[]): number {
@@ -476,7 +543,9 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
         );
       if (nearMatches.length > 0) {
         const nearHit = pickScoredCandidate(nearMatches, abv);
-        return nearHit ? { kind: 'matched', result: nearHit } : notFound();
+        if (nearHit) return { kind: 'matched', result: nearHit };
+        const boundaryHit = collabTokenBoundaryRescue({ brewery, name, abv }, strictPool);
+        return boundaryHit ? { kind: 'matched', result: boundaryHit } : notFound();
       }
     }
 
