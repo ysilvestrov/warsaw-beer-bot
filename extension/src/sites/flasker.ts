@@ -32,13 +32,15 @@ const TWO_WORD_BREWERIES = new Set([
   'safe circle',
   'hrew brew',
   'evil twin',
-  'the lost philosopher',
   'lost philosopher',
-  'de zwarte regel',
   'mad driver',
   'dva bro',
   'strange toys',
   'muza brewing',
+]);
+const THREE_WORD_BREWERIES = new Set([
+  'the lost philosopher',
+  'de zwarte regel',
 ]);
 
 export interface FlaskerEvidence {
@@ -115,7 +117,7 @@ function normalizeTag(tag: string): string {
 
 // Slug-side twin of MERCH_PREFIX_RE (below). Slugs are lowercase and hyphen-joined,
 // so the banner arrives as `предреліз-…` rather than `ПРЕДРЕЛІЗ: …`.
-const SLUG_MERCH_PREFIX_RE = /^(?:предреліз|предредіз|пробник)-/u;
+const SLUG_MERCH_PREFIX_RE = /^(?:предреліз|предредіз|пробник|aotearoa)-+/iu;
 
 function productSlug(productUrl: string | undefined): string | null {
   if (!productUrl) return null;
@@ -185,10 +187,17 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   const tokens = head.split(/\s+/).filter(Boolean);
   if (tokens.length <= 1) return { brewery: head, name: head };
 
+  const firstThree = tokens.length >= 3 ? `${tokens[0]} ${tokens[1]} ${tokens[2]}`.toLowerCase() : '';
   const firstTwo = `${tokens[0]} ${tokens[1]}`.toLowerCase();
-  const takeTwo = TWO_WORD_BREWERIES.has(firstTwo) || PAREN_RE.test(tokens[1]);
 
-  const breweryTokens = takeTwo ? tokens.slice(0, 2) : tokens.slice(0, 1);
+  let takeTokens = 1;
+  if (THREE_WORD_BREWERIES.has(firstThree)) {
+    takeTokens = 3;
+  } else if (TWO_WORD_BREWERIES.has(firstTwo) || PAREN_RE.test(tokens[1])) {
+    takeTokens = 2;
+  }
+
+  const breweryTokens = tokens.slice(0, takeTokens);
   const brewery = breweryTokens.join(' ').replace(/:$/u, '');
   const name = tokens.slice(breweryTokens.length).join(' ').trim();
   return { brewery, name: name || brewery };

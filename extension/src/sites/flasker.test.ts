@@ -784,6 +784,28 @@ describe('Flasker cluster extraction regressions (#558, #579, #566, #481)', () =
       name: 'Paranoia Milk Stout',
       abv: 7,
     });
+    expect(parseTitle('The Lost Philosopher Xmas Eve 10% 330ml')).toEqual({
+      brewery: 'The Lost Philosopher',
+      name: 'Xmas Eve',
+      abv: 10,
+    });
+    expect(parseTitle('DE ZWARTE REGEL Laatste Plicht 9% 330ml')).toEqual({
+      brewery: 'DE ZWARTE REGEL',
+      name: 'Laatste Plicht',
+      abv: 9,
+    });
+  });
+
+  it('sees through AOTEAROA merchandising banner in product slug to family rules', () => {
+    expect(
+      parseTitle('AOTEAROA: Morava Winter Flow IS 10% 0.33l', {
+        productUrl: 'https://flasker.com.ua/product/aotearoa-morava-winter-flow-is-10-0-33/',
+      }),
+    ).toEqual({
+      brewery: 'VibrantPour',
+      name: 'Morava Winter Flow IS',
+      abv: 10,
+    });
   });
 });
 
