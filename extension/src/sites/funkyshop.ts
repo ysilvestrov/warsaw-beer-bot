@@ -68,7 +68,11 @@ export const funkyshop: SiteAdapter = {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
       const rawName = text(el.querySelector('.product-title'));
       const description = text(el.querySelector('.product-description-short'));
-      if (!rawName || isNonBeerTitle(rawName, description)) continue;
+      if (!rawName) continue;
+      if (isNonBeerTitle(rawName, description)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
 
       const brewery = text(el.querySelector('.manufacturer-product'));
       const name = cleanName(rawName);

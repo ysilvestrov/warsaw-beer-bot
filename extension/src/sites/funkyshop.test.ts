@@ -42,9 +42,13 @@ describe('funkyshop adapter', () => {
     );
   });
 
-  it('drops beer sets from beer category grids', () => {
-    expect(cards.map((c) => c.name)).not.toContain('Lervig Rackhouse Barrel Aged Set');
-    expect(cards.map((c) => c.name)).not.toContain("Gelato Week '26 Set");
+  it('marks beer sets from beer category grids as non-beer', () => {
+    const nonBeerCards = cards.filter((card) => card.nonBeer);
+    const beerCards = cards.filter((card) => !card.nonBeer);
+    expect(nonBeerCards.length).toBeGreaterThan(0);
+    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(beerCards.map((card) => card.name)).not.toContain('Lervig Rackhouse Barrel Aged Set');
+    expect(beerCards.map((card) => card.name)).not.toContain("Gelato Week '26 Set");
   });
 
   it('treats issue-listed glass merch categories as whole non-beer pages', () => {
@@ -53,8 +57,12 @@ describe('funkyshop adapter', () => {
     expect(funkyshop.isNonBeerPage?.(new URL('https://funkyshop.pl/pl/4-piwo-rzemieslnicze'))).toBe(false);
   });
 
-  it('drops glass and merch products from the non-beer fixture', () => {
-    expect(parse(nonBeerHtml)).toEqual([]);
+  it('marks glass and merch products from the non-beer fixture as non-beer', () => {
+    expect(parse(nonBeerHtml)).toEqual([
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true, skip: true }),
+    ]);
   });
 
   it('strips trailing volume plus can format from product names', () => {
@@ -89,7 +97,7 @@ describe('funkyshop adapter', () => {
     }));
   });
 
-  it('drops can deposit fee rows from mixed product grids', () => {
+  it('marks can deposit fee rows from mixed product grids as non-beer', () => {
     const cards = parse(`
       <article class="product-miniature">
         <p class="h3 product-title"><a href="/en/funky-shop/can-deposit.html">Can Deposit</a></p>
@@ -97,7 +105,9 @@ describe('funkyshop adapter', () => {
       </article>
     `);
 
-    expect(cards).toEqual([]);
+    expect(cards).toEqual([
+      expect.objectContaining({ nonBeer: true, skip: true }),
+    ]);
   });
 
   it('hydrates missing brewery from the product detail page', async () => {
