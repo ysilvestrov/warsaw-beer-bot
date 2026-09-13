@@ -16,6 +16,7 @@ export interface HydrateRatingsResult {
   updated: number;
   changed: number;
   unknown: number;
+  skipped: number;
   blocked: boolean;
   failed: boolean;
 }
@@ -23,7 +24,7 @@ export interface HydrateRatingsResult {
 export interface HydrateRatingsDeps {
   db: DB;
   log: pino.Logger;
-  hydrateByBid: (bids: number[]) => Promise<Map<number, HydratedBeer>>;
+  hydrateByBid: (bids: number[]) => Promise<Map<number, HydratedBeer | null>>;
   lookupEnabled?: boolean;      // default true
   limit?: number;               // default RATING_HYDRATION_BATCH, ніколи не більше
   now?: () => Date;             // for tests
@@ -31,7 +32,7 @@ export interface HydrateRatingsDeps {
 }
 
 const EMPTY: HydrateRatingsResult = {
-  candidates: 0, updated: 0, changed: 0, unknown: 0, blocked: false, failed: false,
+  candidates: 0, updated: 0, changed: 0, unknown: 0, skipped: 0, blocked: false, failed: false,
 };
 
 export async function hydrateRatings(deps: HydrateRatingsDeps): Promise<HydrateRatingsResult> {
@@ -55,7 +56,7 @@ export async function hydrateRatings(deps: HydrateRatingsDeps): Promise<HydrateR
   }
   const bids = candidates.map((c) => c.untappd_id);
 
-  let hits: Map<number, HydratedBeer>;
+  let hits: Map<number, HydratedBeer | null>;
   try {
     hits = await deps.hydrateByBid(bids);
   } catch (err) {
@@ -77,5 +78,9 @@ export async function hydrateRatings(deps: HydrateRatingsDeps): Promise<HydrateR
   const outcome = applyHydratedRatings(deps.db, hits, bids, now().toISOString());
   const res: HydrateRatingsResult = { ...EMPTY, candidates: candidates.length, ...outcome };
   deps.log.info(res, 'hydrate-ratings done');
+  if (res.skipped > 0) {
+    // Недовірений запис не зупиняє пачку, але й не мовчить: той самий bid повернеться в чергу.
+    deps.log.warn({ skipped: res.skipped }, 'hydrate-ratings skipped records without proof');
+  }
   return res;
 }

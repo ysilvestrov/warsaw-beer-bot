@@ -67,7 +67,7 @@ describe('catalog-version — storage instrumentation', () => {
     expect(linked).toBeGreaterThan(0);
     const v = catalogVersion();
     recordLookupNotFound(db, id, '2026-01-01T00:00:00Z');
-    applyHydratedRatings(db, new Map(), [333], '2026-01-01T00:00:00Z');
+    applyHydratedRatings(db, new Map([[333, null]]), [333], '2026-01-01T00:00:00Z');
     applyHydratedRatings(db, new Map([[333, { global_rating: 3.9, style: 'IPA', abv: 6.1 }]]), [333], '2026-01-02T00:00:00Z');
     expect(catalogVersion()).toBe(v);
   });

@@ -13,7 +13,7 @@ export interface ApiDeps {
    * #384: server-side Algolia hydrate-by-bid, used to resolve a shop-published bid
    * the local catalog does not know. Absent ⇒ bid resolution stays local-only.
    */
-  hydrateByBid?: (bids: number[]) => Promise<Map<number, HydratedBeer>>;
+  hydrateByBid?: (bids: number[]) => Promise<Map<number, HydratedBeer | null>>;
 }
 
 // Hono generics: variables set on the request context by middleware.
