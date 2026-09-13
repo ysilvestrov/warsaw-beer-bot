@@ -22,10 +22,12 @@ The live Algolia query on 2026-09-13 returned three strict-brewery candidates:
 
 `brewerySearchParts` already searches the leading brewery, `Funky Fluid`, so the brewery gate is
 not the defect. The name stage normalizes the input to `birthday cookie multiqlti` and each
-candidate to `birthday cookie multi qlti`. The token coverage floor is 0.75, while `multiqlti`
-scores 0.56 against `multi` and 0.44 against `qlti`. All three candidates therefore miss the
-near-name stage. A one-candidate fixture passes only because the singleton long-token fallback is
-enabled; the live three-candidate result disables that fallback.
+candidate to `birthday cookie multi qlti`. The direct token-coverage branch misses: its floor is
+0.75, while `multiqlti` scores 0.56 against `multi` and 0.44 against `qlti`. The collab-aware
+swapped-brand fallback still admits all three candidates to the near-name cohort with score 1.
+The score/popularity resolver cannot choose among them, so the stage returns terminal `not_found`.
+A one-candidate fixture masks that cohort ambiguity because the resolver accepts its sole scored
+candidate.
 
 The input year is also unavailable to `lookupBeer` candidate selection. Query cleanup and
 `normalizeName` correctly remove a standalone year, while only the local-catalog matcher currently
@@ -106,6 +108,7 @@ Add public-seam tests beside the existing `lookupBeer` tests:
 - a matching boundary and ABV with only wrong-year candidates stays `not_found`;
 - a matching year and boundary with missing or contradictory ABV stays `not_found`;
 - the same boundary difference outside a collab-part token stays `not_found`;
+- any other token difference, including a one-letter token, stays `not_found`;
 - two same-year, same-ABV bids satisfying the repair stay `not_found`;
 - the existing one-candidate fallback and scored-candidate suites remain unchanged.
 
