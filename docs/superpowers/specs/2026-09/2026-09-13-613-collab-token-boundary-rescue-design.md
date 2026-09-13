@@ -34,9 +34,11 @@ also has 13% ABV.
 
 ## Decision
 
-Add a terminal, strict collab-token boundary rescue to `lookupBeer`. It runs only after the current
-exact, near-name, fuzzy, native-alias, brand, Czech-grade, typo, and flagship stages have failed.
-Existing matches therefore keep their current result and provenance.
+Add a strict collab-token boundary rescue to `lookupBeer` at fuzzy Stage 2b's existing terminal
+refusal. It runs only after Stage 2b has found an approximate top cohort but the current
+score/popularity resolver cannot choose one `bid` and would otherwise return `not_found`.
+Existing matches therefore keep their current result and provenance; the rescue never preempts a
+result selected by an existing stage.
 
 The rescue accepts a candidate only when every condition below holds:
 
@@ -62,6 +64,12 @@ Keep the helper and rescue inside `src/domain/untappd-lookup.ts`. This rule belo
 enrichment: it needs the raw search-result cohort, the collab brewery parts, year, and ABV together.
 It must not change `normalizeName`, `nameKeys`, the local `/match` catalog path, fuzzy thresholds, or
 the order-independent popularity resolver.
+
+The live #613 cohort reaches Stage 2b: all three whole-name scores are 0.96. The current resolver
+then refuses the tied cohort because no candidate meets the popularity-dominance rule. Place the
+rescue after that resolver returns no winner and immediately before the same terminal `not_found`.
+Putting it after the flagship block would be dead code for this cohort because Stage 2b returns
+early; putting it before the resolver could replace an existing successful result.
 
 The rescue returns the ordinary `{ kind: 'matched', result }` outcome. Existing callers continue
 through `applyLookupOutcome`, so server cron and client relay receive the same behavior without a
