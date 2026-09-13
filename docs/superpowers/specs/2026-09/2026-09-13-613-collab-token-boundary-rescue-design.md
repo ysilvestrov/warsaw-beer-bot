@@ -34,8 +34,8 @@ also has 13% ABV.
 
 ## Decision
 
-Add a strict collab-token boundary rescue to `lookupBeer` at fuzzy Stage 2b's existing terminal
-refusal. It runs only after Stage 2b has found an approximate top cohort but the current
+Add a strict collab-token boundary rescue to `lookupBeer` at the strict-only near-name stage's
+existing terminal refusal. It runs only after that stage has found an approximate top cohort but the current
 score/popularity resolver cannot choose one `bid` and would otherwise return `not_found`.
 Existing matches therefore keep their current result and provenance; the rescue never preempts a
 result selected by an existing stage.
@@ -65,11 +65,12 @@ enrichment: it needs the raw search-result cohort, the collab brewery parts, yea
 It must not change `normalizeName`, `nameKeys`, the local `/match` catalog path, fuzzy thresholds, or
 the order-independent popularity resolver.
 
-The live #613 cohort reaches Stage 2b: all three whole-name scores are 0.96. The current resolver
-then refuses the tied cohort because no candidate meets the popularity-dominance rule. Place the
-rescue after that resolver returns no winner and immediately before the same terminal `not_found`.
-Putting it after the flagship block would be dead code for this cohort because Stage 2b returns
-early; putting it before the resolver could replace an existing successful result.
+The live #613 cohort reaches the strict-only near-name stage, where the collab-aware swapped-brand
+comparison scores all three candidates at 1. The current resolver then refuses the tied cohort
+because no candidate meets the popularity-dominance rule. Place the rescue after that resolver
+returns no winner and immediately before the same terminal `not_found`. Putting it at Stage 2b or
+after the flagship block would be dead code for this cohort because near-name returns early;
+putting it before the resolver could replace an existing successful result.
 
 The rescue returns the ordinary `{ kind: 'matched', result }` outcome. Existing callers continue
 through `applyLookupOutcome`, so server cron and client relay receive the same behavior without a
