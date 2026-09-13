@@ -25,6 +25,9 @@ The extension works even **without a token**: shop pages show **global
 Untappd ratings** (⭐ badge) and links to the beer/search. This lets you see
 right away how it works.
 
+On Flasker, products the shop itself files under a "not beer" category also get
+a red `✕`; it needs no token and is not a link.
+
 Personal features are unlocked by a **token** (Part 2): a ✅ "you already had
 this" badge with **your own** rating, a ❓ for likely matches, plus searching
 for missing beers and check-in syncing. The extension popup will show "Not
@@ -167,12 +170,15 @@ this guide first.
    **Off** by default.
 
    > **Separately from this checkbox, on Flasker.** On `flasker.com.ua` pages, the
-   > extension automatically opens each new product's own page in the background
-   > (up to 20 per page load) even without this permission, to read the brewery and
-   > the Untappd link the shop publishes on the product's own page. Requests go only
-   > to `flasker.com.ua` itself — no new browser permission is needed. Thanks to
-   > this, beers the shop links directly to Untappd are matched exactly, and a badge
-   > that previously pointed at the wrong beer can now correct itself.
+   > extension automatically loads the pages of all visible products in the
+   > background, even without this permission. From there it reads the product
+   > category, the brewery, and the Untappd link the shop publishes. This way beers
+   > with no volume listed aren't lost, and glasses, souvenirs, and other products
+   > the shop confirms aren't sent for matching as beer and get a red `✕`. Requests
+   > go only to `flasker.com.ua` itself — no new browser permission is needed. It
+   > also works for imported items that Flasker labels with the generic brand
+   > "Імпортне пиво" (imported beer): the extension doesn't treat that label as a
+   > brewery name and instead checks the product against the published Untappd link.
 5. Click **"Save"**.
    - If you changed the URL to a non-default one, the browser will ask for
      permission to access that host — allow it, otherwise the extension
@@ -199,17 +205,19 @@ this guide first.
    |---|---|
    | **✅** (with a rating, e.g. `✅ 4.2`) | you've **already had** this beer — shows **your** rating; **click opens Untappd** (or a search, if there's no Untappd page yet) |
    | **❓** (with a rating, e.g. `❓ 4.1`) | you've **likely** already had this beer, but the match is fuzzy; shows the **global** rating (if available); **click opens Untappd** to check (or an Untappd search, if there's no Untappd id yet) |
-   | **⭐** (with a rating, e.g. `⭐ 4.1`) | you haven't had it yet, the beer is on Untappd — shows the **global** rating; **click opens Untappd** |
+   | **⭐** (with a rating, e.g. `⭐ 4.1`, or without one) | you haven't had it yet, the beer is on Untappd — shows the **global** rating when it's available; **click opens Untappd** |
    | **⚪** | the beer is matched as an orphan (no Untappd page/rating yet); **click opens an Untappd search** pre-filled with the name |
    | **⏳** | a search on Untappd is in progress (only if "Find missing beers…" is enabled — Part 3, step 4) |
+   | <span style="color:#d32f2f">**✕**</span> | Flasker only: the shop filed the product under a **"not beer"** category; the badge is **not clickable** |
    | _(no badge)_ | the beer couldn't be matched to the catalog |
 
 3. This also works with SPA navigation: when the shop re-renders the list
    (filters, pagination), the overlay updates itself.
 
 > **✅ + your rating** only appear for beers from your own history (requires
-> `/import`, Part 1). The **⭐ global rating** is also shown for beers you
-> haven't had yet, if they're already in the bot's catalog. **❓** — a beer
+> `/import`, Part 1). **⭐** is also shown for beers you haven't had yet, if
+> they're already in the bot's catalog; when the global rating is available, it
+> sits next to it. **❓** — a beer
 > that's likely from your history, but the match is fuzzy: check it on
 > Untappd (click the badge).
 
