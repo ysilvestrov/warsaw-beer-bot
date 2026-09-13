@@ -167,6 +167,32 @@ export function normalizeName(s: string): string {
   return tokens.join(' ');
 }
 
+// #617: цифрові токени, які normalizeName відкидає як шум. Дві назви з рівною нормалізованою
+// формою можуть бути різними пивами (Rochefort 8 / 10, Juicy Trap #19 / #20) — і різняться
+// вони саме тут. Той самий конвеєр, що в normalizeName, тож специфікація (12,5°, 0,5%) уже
+// прибрана stripSearchNoise, а десятковий ідентифікатор (10.0) лишається одним нецифровим токеном.
+export function numericNameTokens(s: string): string[] {
+  return baseNormalize(preserveDecimalIdentifiers(stripSearchNoise(s)))
+    .split(' ')
+    .filter((t) => /^\d+$/.test(t));
+}
+
+const YEAR_TOKEN = /^(?:19|20)\d{2}$/;
+
+// #617: чи можуть дві назви з рівною нормалізованою формою бути одним пивом. Роки порівнюються
+// лише коли рік є в обох — те саме правило, що в матчері (кандидат без року сумісний з будь-яким
+// роком). Решта цифрових токенів мусить збігатися як мультимножина.
+export function numericTokensCompatible(a: string, b: string): boolean {
+  const ta = numericNameTokens(a);
+  const tb = numericNameTokens(b);
+  const years = (ts: string[]) => ts.filter((t) => YEAR_TOKEN.test(t)).sort().join(' ');
+  const rest = (ts: string[]) => ts.filter((t) => !YEAR_TOKEN.test(t)).sort().join(' ');
+  const ya = years(ta);
+  const yb = years(tb);
+  if (ya !== '' && yb !== '' && ya !== yb) return false;
+  return rest(ta) === rest(tb);
+}
+
 export function normalizeBrewery(s: string): string {
   const tokens = baseNormalize(
     stripLegalForm(canonicalizeBreweryBrand(s)).replace(SUPERSCRIPT_FOOTNOTE, ''),
