@@ -1293,4 +1293,138 @@ describe('lookupBeer — name identity floor (#505)', () => {
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(42001);
   });
+
+  describe('#613 collab-token boundary rescue', () => {
+    const candidates: SearchResult[] = [
+      {
+        bid: 5989079,
+        beer_name: 'Birthday Cookie: Multi Qlti 2024',
+        brewery_name: 'Funky Fluid',
+        style: 'Stout - Imperial / Double Pastry',
+        abv: 13,
+        global_rating: 4.08,
+        brewery_alias: ['Browar Funky Fluid'],
+        alias_alt: [],
+        rating_count: 131,
+      },
+      {
+        bid: 6852067,
+        beer_name: 'Birthday Cookie: Multi Qlti 2026',
+        brewery_name: 'Funky Fluid',
+        style: 'Stout - Imperial / Double Pastry',
+        abv: 13,
+        global_rating: 0,
+        brewery_alias: ['Browar Funky Fluid'],
+        alias_alt: [],
+        rating_count: 0,
+      },
+      {
+        bid: 5526331,
+        beer_name: 'Birthday Cookie: Multi Qlti (2023)',
+        brewery_name: 'Funky Fluid',
+        style: 'Stout - Imperial / Double Pastry',
+        abv: 12,
+        global_rating: 4.29273,
+        brewery_alias: ['Browar Funky Fluid'],
+        alias_alt: [],
+        rating_count: 110,
+      },
+    ];
+
+    test.each([false, true])(
+      'resolves the recorded 2026 row independently of result order (reversed=%s)',
+      async (reversed) => {
+        const results = reversed ? [...candidates].reverse() : candidates;
+        const out = await lookupBeer({
+          brewery: 'Funky Fluid X MultiQlti Brewery',
+          name: 'Birthday Cookie MultiQlti 2026 36°',
+          abv: 13,
+          search: fakeSearch(() => results),
+        });
+
+        expect(out.kind).toBe('matched');
+        if (out.kind !== 'matched') return;
+        expect(out.result.bid).toBe(6852067);
+      },
+    );
+
+    test('refuses boundary-equivalent candidates from the wrong year', async () => {
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid X MultiQlti Brewery',
+        name: 'Birthday Cookie MultiQlti 2026 36°',
+        abv: 13,
+        search: fakeSearch(() => candidates.filter((candidate) => candidate.bid !== 6852067)),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test.each([
+      {
+        label: 'missing input year',
+        inputName: 'Birthday Cookie MultiQlti 36°',
+        candidateName: 'Birthday Cookie: Multi Qlti 2026',
+      },
+      {
+        label: 'missing candidate year',
+        inputName: 'Birthday Cookie MultiQlti 2026 36°',
+        candidateName: 'Birthday Cookie: Multi Qlti',
+      },
+    ])('refuses $label', async ({ inputName, candidateName }) => {
+      const target = { ...candidates[1], beer_name: candidateName };
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid X MultiQlti Brewery',
+        name: inputName,
+        abv: 13,
+        search: fakeSearch(() => [target, candidates[0]]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test.each([
+      { label: 'missing input ABV', inputAbv: null, candidateAbv: 13 },
+      { label: 'missing candidate ABV', inputAbv: 13, candidateAbv: null },
+      { label: 'contradictory ABV', inputAbv: 13, candidateAbv: 12.5 },
+    ])('refuses $label', async ({ inputAbv, candidateAbv }) => {
+      const target = { ...candidates[1], abv: candidateAbv };
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid X MultiQlti Brewery',
+        name: 'Birthday Cookie MultiQlti 2026 36°',
+        abv: inputAbv,
+        search: fakeSearch(() => [target, candidates[0]]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('does not ignore the same token boundary outside a collab participant', async () => {
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid',
+        name: 'Birthday Cookie MultiQlti 2026 36°',
+        abv: 13,
+        search: fakeSearch(() => [candidates[1], candidates[0]]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('does not forgive a different one-letter token elsewhere in the name', async () => {
+      const target = { ...candidates[1], beer_name: 'B Birthday Cookie: Multi Qlti 2026' };
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid X MultiQlti Brewery',
+        name: 'A Birthday Cookie MultiQlti 2026 36°',
+        abv: 13,
+        search: fakeSearch(() => [target, candidates[0]]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('refuses two distinct bids with the same repaired name, year, and ABV', async () => {
+      const duplicate = { ...candidates[1], bid: 7000000 };
+      const out = await lookupBeer({
+        brewery: 'Funky Fluid X MultiQlti Brewery',
+        name: 'Birthday Cookie MultiQlti 2026 36°',
+        abv: 13,
+        search: fakeSearch(() => [candidates[1], duplicate, candidates[0]]),
+      });
+      expect(out.kind).toBe('not_found');
+    });
+  });
 });
