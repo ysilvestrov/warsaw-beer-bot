@@ -5,7 +5,7 @@ import type { ApiDeps, ApiEnv } from '../types';
 import {
   findBeerByNormalized,
   getBeer,
-  upsertBeer,
+  ensureOrphan,
   fillOrphanFacts,
   rearmLookup,
   refusesBidOverride,
@@ -132,8 +132,9 @@ function ensureBeerRow(db: ApiDeps['db'], brewery: string, name: string, facts: 
     if (abvGained) rearmLookup(db, existing.id);
     return abvGained || changed ? getBeer(db, existing.id)! : existing;
   }
-  const id = upsertBeer(db, {
-    untappd_id: null, name, brewery,
+  // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
+  const id = ensureOrphan(db, {
+    name, brewery,
     style: facts.style ?? null, abv: sanitizeAbv(facts.abv) ?? null,
     rating_global: null, normalized_name, normalized_brewery,
   });
