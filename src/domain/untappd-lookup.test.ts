@@ -512,6 +512,19 @@ describe('lookupBeer', () => {
     expect(calls).toBe(2); // original pass + exactly one head-retry pass
   });
 
+  test('#271: decimal comma in degree/abv/volume is not treated as a list delimiter', async () => {
+    let queried = '';
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        queried = query;
+        return [];
+      },
+    };
+    await lookupBeer({ brewery: 'Kormoran', name: 'Rewolucje 12,5°', search });
+    // Should strip the degree spec whole in cleanSearchQuery, not truncate to "Rewolucje 12" via headBeforeTail
+    expect(queried).toBe('Kormoran Rewolucje');
+  });
+
   test('#321 grade: single same-grade lager candidate (Desitka → Kamenická 10)', async () => {
     const search = fakeSearch(() => [
       { bid: 12141, beer_name: 'Kamenická 10', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Pale Lager', abv: 4.2, global_rating: 3.3 },
@@ -1426,5 +1439,191 @@ describe('lookupBeer — name identity floor (#505)', () => {
       });
       expect(out.kind).toBe('not_found');
     });
+  });
+});
+
+describe('#353 zero-hit descriptor and packaging retry with guards', () => {
+  test('rescues trailing style descriptors when primary search zeroes (#590 Mazák)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (query.includes('West Coast IPA')) return [];
+        if (query.includes('Rainbow of Death')) {
+          return [{
+            bid: 2852216,
+            beer_name: 'Rainbow of Death',
+            brewery_name: 'Pivovar Mazák',
+            style: 'IPA - American',
+            abv: 6.5,
+            global_rating: 4.0,
+          }];
+        }
+        return [];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Mazák',
+      name: '16° Rainbow of Death West Coast IPA',
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(2852216);
+  });
+
+  test('rescues trailing packaging tokens when primary search zeroes (#388 Mind Haze 473ml)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (query.includes('473ml')) return [];
+        if (query.includes('Mind Haze')) {
+          return [{
+            bid: 2916237,
+            beer_name: 'Mind Haze',
+            brewery_name: 'Firestone Walker Brewing Company',
+            style: 'IPA - New England / Hazy',
+            abv: 6.7,
+            global_rating: 4.0,
+          }];
+        }
+        return [];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Firestone Walker',
+      name: 'Mind Haze 473ml',
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(2916237);
+  });
+
+  test('rescues trailing CAN packaging token (#388 O.J. Blanche CAN)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (query.includes('CAN')) return [];
+        if (query.includes('Blanche')) {
+          return [{
+            bid: 4624110,
+            beer_name: 'O.J. Cloudy Wheat Beer / Blanche',
+            brewery_name: 'Liquor Zaar',
+            style: 'Wheat Beer - Witbier / Blanche',
+            abv: 5.0,
+            global_rating: 4.0,
+          }];
+        }
+        return [];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Liquor Zaar',
+      name: 'O.J. Blanche CAN',
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(4624110);
+  });
+
+  test('alcohol-class guard: non-alcoholic input never matches alcoholic candidate twin (#353 / #33783)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (/bezalkoholowe/i.test(query)) return [];
+        return [{
+          bid: 1000186,
+          beer_name: 'Pan IPAni',
+          brewery_name: 'Browar Trzech Kumpli',
+          style: 'IPA - White / Wheat',
+          abv: 6.0,
+          global_rating: 4.0,
+        }];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Trzech Kumpli',
+      name: 'Pan IPAni Bezalkoholowe',
+      abv: 0.5,
+      search,
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('alcohol-class guard accepts non-alcoholic candidate when input has non-alcoholic descriptor (#404)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (/pale\s+ale/i.test(query)) return [];
+        return [{
+          bid: 5042332,
+          beer_name: 'Maz Non-Alcoholic',
+          brewery_name: 'Omnipollo',
+          style: 'Non-Alcoholic - Pale Ale',
+          abv: 0.3,
+          global_rating: 4.0,
+        }];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Omnipollo',
+      name: 'Maz Non-Alcoholic Pale Ale',
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5042332);
+  });
+
+  test('ABV tolerance guard: descriptor-retry candidate with contradicting ABV is rejected (#353 / #33517)', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (/niepasteryzowane/i.test(query)) return [];
+        return [{
+          bid: 9999,
+          beer_name: 'Jasne',
+          brewery_name: 'Browar Artezan',
+          style: 'Lager - Pale',
+          abv: 5.0,
+          global_rating: 4.0,
+        }];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Artezan Brewery',
+      name: 'Jasne Niepasteryzowane',
+      abv: 4.6, // 4.6 vs 5.0 => diff 0.4 > ABV_TOLERANCE 0.3
+      search,
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('zero-hit only: does not trigger descriptor retry if primary search found candidates', async () => {
+    const queriesCalled: string[] = [];
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        queriesCalled.push(query);
+        // Returns an unrelated candidate that matcher will reject
+        return [{
+          bid: 1111,
+          beer_name: 'Completely Different Name',
+          brewery_name: 'Other Brewery',
+          style: 'Stout',
+          abv: 10.0,
+          global_rating: 4.0,
+        }];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Mazák',
+      name: '16° Rainbow of Death West Coast IPA',
+      search,
+    });
+    expect(out.kind).toBe('not_found');
+    // Verify stripped query was NOT called because seenCandidates.length > 0
+    expect(queriesCalled.some((q) => q === 'Mazak Rainbow of Death' || q === 'Mazák Rainbow of Death')).toBe(false);
   });
 });
