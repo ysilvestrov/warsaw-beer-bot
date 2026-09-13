@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
+import { upsertBeer, upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 function fresh() {
@@ -1332,5 +1332,259 @@ describe('#486 pool partition', () => {
     // and the split is the one we intend, not merely disjoint
     expect(onTap).toEqual([current]);
     expect(relay.sort()).toEqual([rotatedOff, deadLink, noLink].sort());
+  });
+});
+
+describe('upsertBeerByBid (#617)', () => {
+  const ROCHEFORT = 'Abbaye Notre-Dame de Saint-Rémy';
+  const PP = 'Piwne Podziemie';
+
+  function bidInput(
+    bid: number, name: string, brewery: string,
+    extra: Partial<Parameters<typeof upsertBeerByBid>[1]> = {},
+  ) {
+    return {
+      untappd_id: bid, name, brewery,
+      normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+      untappd_id_source: 'checkin' as const,
+      ...extra,
+    };
+  }
+
+  // Сирота напряму, в обхід upsertBeer: той зливає дві сироти з однаковою нормалізованою парою.
+  function insertOrphanRaw(db: ReturnType<typeof fresh>, name: string, brewery: string, abv: number): number {
+    const res = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery)
+       VALUES (NULL, ?, ?, 'Sour', ?, NULL, ?, ?)`,
+    ).run(name, brewery, abv, normalizeName(name), normalizeBrewery(brewery));
+    return Number(res.lastInsertRowid);
+  }
+
+  test('fills only empty facts on the row found by bid', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: null, abv: 9.2, rating_global: null,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+      untappd_id_source: 'search',
+    });
+    const got = upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, {
+      style: 'Belgian Quadrupel', abv: 5.0, rating_global: 3.95,
+    }));
+    expect(got).toBe(id);
+    const row = getBeer(db, id)!;
+    expect(row.style).toBe('Belgian Quadrupel');   // було порожнє → заповнено
+    expect(row.abv).toBeCloseTo(9.2);               // було 9.2 → не перезаписано
+    expect(row.rating_global).toBeCloseTo(3.95);    // було порожнє → заповнено
+  });
+
+  test('empty input never wipes stored facts (the sync wipe)', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+      untappd_id_source: 'search',
+    });
+    upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, {
+      style: null, abv: null, rating_global: null,
+    }));
+    const row = getBeer(db, id)!;
+    expect(row.style).toBe('Belgian Strong Dark Ale');
+    expect(row.abv).toBeCloseTo(9.2);
+    expect(row.rating_global).toBeCloseTo(3.95);
+  });
+
+  test('never renames the row found by bid (#618 owns Untappd names)', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 6700001, name: "Don't Shoot", brewery: 'Inne Beczki Brewery',
+      style: 'IPA', abv: 5.8, rating_global: 3.8,
+      normalized_name: normalizeName("Don't Shoot"), normalized_brewery: normalizeBrewery('Inne Beczki Brewery'),
+      untappd_id_source: 'search',
+    });
+    upsertBeerByBid(db, bidInput(6700001, "HopGang: Don't Shoot", 'Inne Beczki'));
+    const row = getBeer(db, id)!;
+    expect(row.name).toBe("Don't Shoot");
+    expect(row.brewery).toBe('Inne Beczki Brewery');
+    expect(row.normalized_name).toBe(normalizeName("Don't Shoot"));
+  });
+
+  test.each([
+    ['search', 'checkin', 'checkin'],
+    ['bid', 'checkin', 'checkin'],
+    ['checkin', 'bid', 'checkin'],
+    ['curated', 'checkin', 'curated'],
+    ['curated', 'bid', 'curated'],
+  ] as const)('provenance only strengthens: stored %s + incoming %s → %s', (stored, incoming, expected) => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: 'Quad', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+      untappd_id_source: stored,
+    });
+    upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, { untappd_id_source: incoming }));
+    expect(getBeer(db, id)!.untappd_id_source).toBe(expected);
+  });
+
+  test('a row with no provenance takes the incoming one', () => {
+    const db = fresh();
+    const id = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: 'Quad', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+    });
+    upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, { untappd_id_source: 'bid' }));
+    expect(getBeer(db, id)!.untappd_id_source).toBe('bid');
+  });
+
+  test('a vintage twin with another bid is never touched: a new row is inserted', () => {
+    const db = fresh();
+    const eight = upsertBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
+      style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
+      untappd_id_source: 'search',
+    });
+    const ten = upsertBeerByBid(db, bidInput(2002, 'Trappistes Rochefort 10', ROCHEFORT));
+    expect(ten).not.toBe(eight);
+    const e = getBeer(db, eight)!;
+    expect(e.untappd_id).toBe(1001);
+    expect(e.name).toBe('Trappistes Rochefort 8');
+    expect(e.abv).toBeCloseTo(9.2);
+    expect(e.rating_global).toBeCloseTo(3.95);
+    expect(e.untappd_id_source).toBe('search');
+    const t = getBeer(db, ten)!;
+    expect(t.untappd_id).toBe(2002);
+    expect(t.name).toBe('Trappistes Rochefort 10');
+    expect(t.untappd_id_source).toBe('checkin');
+  });
+
+  // Числа тут однакові, тож numericTokensCompatible злінкований рядок не відсіє — від перехоплення
+  // його береже лише умова `untappd_id IS NULL` у resolvableOrphan. Тест «vintage twin» вище цю
+  // умову не ловить: там 8 ≠ 10 і фільтр чисел відсіює рядок сам.
+  test('a linked row with the same name and numbers but another bid is never taken over', () => {
+    const db = fresh();
+    const linked = upsertBeer(db, {
+      untappd_id: 111, name: 'Juicy Trap #20', brewery: PP,
+      style: 'Sour', abv: 6.5, rating_global: 3.9,
+      normalized_name: normalizeName('Juicy Trap #20'), normalized_brewery: normalizeBrewery(PP),
+      untappd_id_source: 'search',
+    });
+    const got = upsertBeerByBid(db, bidInput(222, 'Juicy Trap #20', PP));
+    expect(got).not.toBe(linked);
+    expect(getBeer(db, linked)!.untappd_id).toBe(111);
+    expect(getBeer(db, got)!.untappd_id).toBe(222);
+  });
+
+  test('resolves the one orphan with the same pair and compatible numeric tokens', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Juicy Trap #20', PP, 6.5);
+    const got = upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP, { rating_global: 4.1 }));
+    expect(got).toBe(orphan);
+    const row = getBeer(db, orphan)!;
+    expect(row.untappd_id).toBe(6625206);
+    expect(row.untappd_id_source).toBe('checkin');
+    expect(row.abv).toBeCloseTo(6.5);
+    expect(row.rating_global).toBeCloseTo(4.1);
+  });
+
+  test('an orphan whose numbers differ is not resolved', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Juicy Trap #19', PP, 6.5);
+    const got = upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
+  });
+
+  test('a year on one side only still resolves the orphan', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Krzyż Południa', 'Ziemia Obiecana', 5.5);
+    const got = upsertBeerByBid(db, bidInput(6800001, 'Krzyż Południa (2026)', 'Ziemia Obiecana'));
+    expect(got).toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBe(6800001);
+  });
+
+  test('two compatible orphans are ambiguous: neither is resolved, a new row is inserted', () => {
+    const db = fresh();
+    const a = insertOrphanRaw(db, 'Juicy Trap #20', PP, 6.5);
+    const b = insertOrphanRaw(db, 'Juicy Trap #20 18°', PP, 6.6);
+    const got = upsertBeerByBid(db, bidInput(6625206, 'Juicy Trap #20', PP));
+    expect(got).not.toBe(a);
+    expect(got).not.toBe(b);
+    expect(getBeer(db, a)!.untappd_id).toBeNull();
+    expect(getBeer(db, b)!.untappd_id).toBeNull();
+    expect(getBeer(db, got)!.untappd_id).toBe(6625206);
+  });
+
+  test('bumps the catalog version on insert and on update', () => {
+    const db = fresh();
+    let v = catalogVersion();
+    const id = upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT));
+    expect(catalogVersion()).toBeGreaterThan(v);
+    v = catalogVersion();
+    upsertBeerByBid(db, bidInput(1001, 'Trappistes Rochefort 8', ROCHEFORT, { abv: 9.2 }));
+    expect(catalogVersion()).toBeGreaterThan(v);
+    expect(getBeer(db, id)!.abv).toBeCloseTo(9.2);
+  });
+});
+
+describe('ensureOrphan (#617)', () => {
+  const MONSTERS = 'Monsters Brewery';
+
+  test('inserts a new orphan beside a linked vintage with the same normalized name', () => {
+    const db = fresh();
+    const linked = upsertBeer(db, {
+      untappd_id: 6300175, name: 'O Tiole Mio! 2026 15°', brewery: MONSTERS,
+      style: 'Pastry Sour', abv: 6.0, rating_global: 3.7,
+      normalized_name: normalizeName('O Tiole Mio! 2026 15°'), normalized_brewery: normalizeBrewery(MONSTERS),
+      untappd_id_source: 'search',
+    });
+    const got = ensureOrphan(db, {
+      name: 'O tiole mio! 2025', brewery: MONSTERS, style: null, abv: 6.5, rating_global: null,
+      normalized_name: normalizeName('O tiole mio! 2025'), normalized_brewery: normalizeBrewery(MONSTERS),
+    });
+    expect(got).not.toBe(linked);
+    const l = getBeer(db, linked)!;
+    expect(l.name).toBe('O Tiole Mio! 2026 15°');
+    expect(l.untappd_id).toBe(6300175);
+    expect(l.style).toBe('Pastry Sour');
+    expect(l.rating_global).toBeCloseTo(3.7);
+    const o = getBeer(db, got)!;
+    expect(o.untappd_id).toBeNull();
+    expect(o.untappd_id_source).toBeNull();
+    expect(o.abv).toBeCloseTo(6.5);
+  });
+
+  test('returns an existing orphan with the same pair without overwriting it', () => {
+    const db = fresh();
+    const first = ensureOrphan(db, {
+      name: 'Łan', brewery: 'Sadyba Brewery', style: 'Pszeniczne', abv: 4.8, rating_global: null,
+      normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
+    });
+    const again = ensureOrphan(db, {
+      name: 'Łan 12°', brewery: 'Sadyba Brewery', style: null, abv: 5.5, rating_global: null,
+      normalized_name: normalizeName('Łan 12°'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
+    });
+    expect(again).toBe(first);
+    const row = getBeer(db, first)!;
+    expect(row.name).toBe('Łan');
+    expect(row.style).toBe('Pszeniczne');
+    expect(row.abv).toBeCloseTo(4.8);
+  });
+
+  test('bumps the catalog version only when it inserts', () => {
+    const db = fresh();
+    const input = {
+      name: 'Łan', brewery: 'Sadyba Brewery', style: 'Pszeniczne', abv: 4.8, rating_global: null,
+      normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
+    };
+    let v = catalogVersion();
+    ensureOrphan(db, input);
+    expect(catalogVersion()).toBeGreaterThan(v);
+    v = catalogVersion();
+    ensureOrphan(db, input);
+    expect(catalogVersion()).toBe(v);
   });
 });
