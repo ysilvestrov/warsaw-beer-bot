@@ -183,7 +183,7 @@ describe('refreshAllUntappd', () => {
     expect(row.brewery).toBe('Pinta');
   });
 
-  test('global_rating null on /beers → rating_global of the row found by bid set to NULL (idempotent re-read)', async () => {
+  test('Global Rating (N/A) on /beers → rating_global of the row found by bid set to NULL and stamped (#616)', async () => {
     const db = fresh();
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
@@ -219,11 +219,55 @@ describe('refreshAllUntappd', () => {
       </div>`;
     const http = fakeHttp({ 'https://untappd.com/user/someone/beers': html });
 
-    await refreshAllUntappd({ db, log: silentLog, http });
+    await refreshAllUntappd({ db, log: silentLog, http, now: () => new Date('2026-09-13T03:00:00.000Z') });
 
     const row = findBeerByNormalized(db, 'new brews', 'brand new release')!;
     expect(row.id).toBe(seededId);
     expect(row.rating_global).toBeNull();
+    const stamped = db.prepare('SELECT rating_checked_at FROM beers WHERE id = ?').get(seededId) as { rating_checked_at: string | null };
+    expect(stamped.rating_checked_at).toBe('2026-09-13T03:00:00.000Z');
+  });
+
+  test('#616: a card without the Global Rating block leaves the rating and the stamp of the row found by bid', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const id = insertBeer(db, 777, 'Quiet Page', 'Silent Brewery', 3.9);
+    db.prepare("UPDATE beers SET rating_checked_at = '2026-09-01T00:00:00.000Z' WHERE id = ?").run(id);
+    const html = `
+      <div class="beer-item" data-bid="777">
+        <div class="beer-details">
+          <p class="name"><a href="/b/x/777">Quiet Page</a></p>
+          <p class="brewery"><a href="/x">Silent Brewery</a></p>
+          <p class="style">Lager</p>
+          <div class="ratings">
+            <div class="you">
+              <p>Their Rating (4)</p>
+              <div class="caps" data-rating="4"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    await refreshAllUntappd({
+      db, log: silentLog, http: fakeHttp({ 'https://untappd.com/user/someone/beers': html }),
+      now: () => new Date('2026-09-13T03:00:00.000Z'),
+    });
+    const row = db.prepare('SELECT rating_global, rating_checked_at FROM beers WHERE id = ?').get(id) as { rating_global: number | null; rating_checked_at: string | null };
+    expect(row).toEqual({ rating_global: 3.9, rating_checked_at: '2026-09-01T00:00:00.000Z' });
+  });
+
+  test('#616: the profile page strengthens a searched link to checkin', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const id = insertBeer(db, 888, 'Guessed Beer', 'Some Brewery', 3.7);
+    db.prepare("UPDATE beers SET untappd_id_source = 'search' WHERE id = ?").run(id);
+    await refreshAllUntappd({
+      db, log: silentLog,
+      http: fakeHttp({ 'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(888, 'Guessed Beer', 'Some Brewery', '3.72') }),
+    });
+    const row = db.prepare('SELECT untappd_id_source, rating_global FROM beers WHERE id = ?').get(id) as { untappd_id_source: string; rating_global: number };
+    expect(row).toEqual({ untappd_id_source: 'checkin', rating_global: 3.72 });
   });
 
   test('hits /beers (plural), not /beer (singular)', async () => {
@@ -441,6 +485,10 @@ describe('refreshAllUntappd', () => {
     expect(rating(eight)).toBe(3.95);
     const had = db.prepare('SELECT beer_id FROM untappd_had WHERE telegram_id = 1').all() as { beer_id: number }[];
     expect(had.map((h) => h.beer_id)).toEqual([ten]);
+    const stamp = (id: number) =>
+      (db.prepare('SELECT rating_checked_at FROM beers WHERE id = ?').get(id) as { rating_checked_at: string | null }).rating_checked_at;
+    expect(stamp(ten)).not.toBeNull();
+    expect(stamp(eight)).toBeNull();
   });
 
   test('CookieExpiredError: calls notifyAdmin once and stops processing further users', async () => {
