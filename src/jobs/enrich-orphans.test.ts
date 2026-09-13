@@ -2,7 +2,8 @@ import { vi } from 'vitest';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
@@ -31,7 +32,7 @@ function seedOrphanOnTap(
   brewery: string,
   name: string,
 ): number {
-  const beerId = upsertBeer(db, {
+  const beerId = seedBeer(db, {
     name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase(),
   });
@@ -55,7 +56,7 @@ function seedRelayOrphan(
   brewery: string,
   name: string,
 ): number {
-  return upsertBeer(db, {
+  return seedBeer(db, {
     name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase(),
   });
@@ -97,7 +98,7 @@ describe('enrichOrphans', () => {
   test('merged duplicate bid: reports merged, not matched or not_found', async () => {
     const db = fresh();
     // Canonical row already owns bid 555.
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 555, name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: 'marine', normalized_brewery: 'moon lark',
@@ -127,7 +128,7 @@ describe('enrichOrphans', () => {
   test('merged duplicate bid via the web fallback: reports merged, not matched or not_found', async () => {
     const db = fresh();
     // Canonical row already owns bid 555.
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 555, name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: 'marine', normalized_brewery: 'moon lark',

@@ -1,7 +1,8 @@
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 import { enrichOneOrphan } from './untappd-enrich';
@@ -26,7 +27,7 @@ function throwingSearch(err: Error): BeerSearch {
 describe('enrichOneOrphan', () => {
   test('matched: fills untappd_id + rating, returns "matched"', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'Fifty/Fifty Clementine & Passionfruit', brewery: 'Magic Road Brewery',
       style: null, abv: 4.6, rating_global: null,
       normalized_name: 'fifty fifty clementine passionfruit',
@@ -47,7 +48,7 @@ describe('enrichOneOrphan', () => {
 
   test('not_found: increments count + records lookup_at, returns "not_found"', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'Something Obscure', brewery: 'Unknown Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: 'something obscure', normalized_brewery: 'unknown',
@@ -68,7 +69,7 @@ describe('enrichOneOrphan', () => {
 
   test('transient: search error, records lookup_at without incrementing count', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -87,7 +88,7 @@ describe('enrichOneOrphan', () => {
 
   test('skipped: beer already has untappd_id', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 42,
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
@@ -105,7 +106,7 @@ describe('enrichOneOrphan', () => {
 
   test('skipped: backoff not yet elapsed', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -130,7 +131,7 @@ describe('enrichOneOrphan', () => {
     const db = fresh();
 
     // Canonical entry already has untappd_id=999.
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 999,
       name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
@@ -138,7 +139,7 @@ describe('enrichOneOrphan', () => {
     });
 
     // Orphan for the same Untappd beer (collab ontap name, no untappd_id).
-    const orphanId = upsertBeer(db, {
+    const orphanId = seedBeer(db, {
       name: 'Marine', brewery: 'Moon Lark & AleBrowar Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: 'marine', normalized_brewery: 'moon lark alebrowar',
@@ -175,7 +176,7 @@ describe('enrichOneOrphan', () => {
 
   test('applies the web fallback when the normal lookup yields 0 candidates', async () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'Ice Brett Porter Double BA Suszona Śliwka i Cynamon', brewery: 'Maryensztadt',
       style: null, abv: 11.5, rating_global: null,
       normalized_name: 'ice brett porter double ba suszona sliwka i cynamon',
@@ -201,7 +202,7 @@ describe('enrichOneOrphan', () => {
 
   test('blocked: returns "blocked" and records nothing (no backoff mutation)', async () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'A', brewery: 'X', style: null, abv: null,
       rating_global: null, normalized_name: 'a', normalized_brewery: 'x',
     });
@@ -225,7 +226,7 @@ describe('recurring backoff tail (#421)', () => {
     db: ReturnType<typeof fresh>,
     cls: 'not_on_untappd' | 'unidentifiable',
   ): number {
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'Charred Memory', brewery: 'Hoppy Hog',
       style: null, abv: null, rating_global: null,
       normalized_name: 'charred memory', normalized_brewery: 'hoppy hog',

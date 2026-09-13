@@ -2,7 +2,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertPub } from '../../storage/pubs';
 import { createSnapshot, insertTaps } from '../../storage/snapshots';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { upsertMatch } from '../../storage/match_links';
 import { createTranslator } from '../../i18n';
 import { setFilters } from '../../storage/user_filters';
@@ -25,12 +25,12 @@ function seedTwoPubs(db: ReturnType<typeof fresh>) {
   });
   const snapA = createSnapshot(db, pubA, '2026-05-25T12:00:00Z');
   const snapB = createSnapshot(db, pubB, '2026-05-25T12:00:00Z');
-  const beerA = upsertBeer(db, {
+  const beerA = seedBeer(db, {
     untappd_id: 1, name: 'Atak Chmielu', brewery: 'Pinta', style: 'AIPA',
     abv: 6.1, rating_global: 3.85,
     normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
   });
-  const beerB = upsertBeer(db, {
+  const beerB = seedBeer(db, {
     untappd_id: 2, name: 'Buty Skejta', brewery: 'Stu Mostow', style: 'Pils',
     abv: 5.0, rating_global: 3.5,
     normalized_name: 'buty skejta', normalized_brewery: 'stu mostow',
@@ -53,11 +53,11 @@ function seedOrphanAndEmptyTap(db: ReturnType<typeof fresh>) {
     slug: 'orphan-pub', name: 'Orphan Pub', address: null, lat: null, lon: null, city: 'warszawa',
   });
   const snapId = createSnapshot(db, pubId, '2026-06-21T00:00:00Z');
-  const mysteryId = upsertBeer(db, {
+  const mysteryId = seedBeer(db, {
     name: 'Mystery Beer', brewery: 'Mystery Brewery', style: 'IPA', abv: 6,
     rating_global: null, normalized_name: 'mystery beer', normalized_brewery: 'mystery brewery',
   });
-  const emptyId = upsertBeer(db, {
+  const emptyId = seedBeer(db, {
     name: 'N/A', brewery: 'N/A', style: null, abv: null, rating_global: null,
     normalized_name: 'n a', normalized_brewery: 'n a',
   });
@@ -129,7 +129,7 @@ describe('buildNewbeersMessage', () => {
       slug: 'pub-a', name: 'Pub A', address: null, lat: null, lon: null, city: 'warszawa',
     });
     const snapId = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 200, name: 'Buty Skejta', brewery: 'Stu Mostow', style: 'Pils',
       abv: 5.0, rating_global: 3.5,
       normalized_name: 'buty skejta', normalized_brewery: 'stu mostow',
@@ -165,7 +165,7 @@ describe('buildNewbeersMessage', () => {
     const pubY = upsertPub(db, { slug: 'pub-y', name: 'Pub Y', address: null, lat: null, lon: null, city: 'warszawa' });
     const snapX = createSnapshot(db, pubX, '2026-05-25T12:00:00Z');
     const snapY = createSnapshot(db, pubY, '2026-05-25T12:00:00Z');
-    const beer = upsertBeer(db, {
+    const beer = seedBeer(db, {
       untappd_id: 50, name: 'Shared Brew', brewery: 'Co-op', style: 'IPA',
       abv: 6.0, rating_global: 3.7,
       normalized_name: 'shared brew', normalized_brewery: 'co op',
@@ -236,7 +236,7 @@ describe('buildNewbeersMessage', () => {
     ];
     for (const row of beerRows) {
       const snap = createSnapshot(db, row.pubId, '2026-08-10T12:00:00Z');
-      const beerId = upsertBeer(db, {
+      const beerId = seedBeer(db, {
         untappd_id: row.beerId, name: row.ref, brewery: 'Test', style: 'IPA',
         abv: 6, rating_global: 4, normalized_name: row.ref.toLowerCase(),
         normalized_brewery: 'test',

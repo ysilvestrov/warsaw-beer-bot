@@ -2,7 +2,7 @@ import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertPub } from './pubs';
 import { createSnapshot, latestSnapshot, insertTaps, tapsForSnapshot, tapsForSnapshotWithBeer, currentTapStyles, deleteOldSnapshots } from './snapshots';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { upsertMatch } from './match_links';
 
 function setup() {
@@ -49,7 +49,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
   test('tap with NULL u_rating + matched beer carrying rating_global → fallback rating, beer_id set', () => {
     const { db, snapId } = setupWithBeer();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 100,
       name: 'Atak Chmielu',
       brewery: 'Pinta',
@@ -70,7 +70,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
   test('tap with non-NULL u_rating + matched beer with different rating_global → COALESCE keeps tap u_rating', () => {
     const { db, snapId } = setupWithBeer();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 101,
       name: 'Buty Skejta',
       brewery: 'Stu Mostow',
@@ -91,7 +91,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
   test('tap with NULL u_rating + matched beer with NULL rating_global → NULL u_rating, beer_id set', () => {
     const { db, snapId } = setupWithBeer();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 102,
       name: 'New Release',
       brewery: 'New Brews',
@@ -122,7 +122,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
   test('matched beer with abv → prefers beers.abv over the (garbage) tap abv', () => {
     const { db, snapId } = setupWithBeer();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 6400148,
       name: 'Gardees II - 2025',
       brewery: 'Brasserie La Malpolon',
@@ -143,7 +143,7 @@ describe('tapsForSnapshotWithBeer', () => {
 
   test('matched beer with NULL abv → falls back to tap abv', () => {
     const { db, snapId } = setupWithBeer();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 200,
       name: 'No Abv Beer',
       brewery: 'X',

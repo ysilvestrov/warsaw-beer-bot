@@ -1,7 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertPub } from './pubs';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { createSnapshot, insertTaps } from './snapshots';
 import { collectStatus } from './stats';
 import { setJobState } from './job_state';
@@ -25,9 +25,9 @@ function tap(beerRef: string) {
 function seed() {
   const db = fresh();
   // beers: matched+rated, matched+no-rating, orphan
-  upsertBeer(db, { untappd_id: 100, name: 'A', brewery: 'X', style: null, abv: null, rating_global: 4.0, normalized_name: 'a', normalized_brewery: 'x' });
-  upsertBeer(db, { untappd_id: 101, name: 'B', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'b', normalized_brewery: 'x' });
-  upsertBeer(db, { untappd_id: null, name: 'C', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'c', normalized_brewery: 'x' });
+  seedBeer(db, { untappd_id: 100, name: 'A', brewery: 'X', style: null, abv: null, rating_global: 4.0, normalized_name: 'a', normalized_brewery: 'x' });
+  seedBeer(db, { untappd_id: 101, name: 'B', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'b', normalized_brewery: 'x' });
+  seedBeer(db, { untappd_id: null, name: 'C', brewery: 'X', style: null, abv: null, rating_global: null, normalized_name: 'c', normalized_brewery: 'x' });
   // users: one linked, one not
   db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (?, ?)').run(1, 'bob');
   db.prepare('INSERT INTO user_profiles (telegram_id, untappd_username) VALUES (?, ?)').run(2, null);
@@ -166,7 +166,7 @@ test('collectStatus: MCP /match metrics are counted apart from the extension', (
 it('orphansRelayQueue includes orphans not on a tap right now (with or without a match_links row), minus not_a_beer/retired', () => {
   const db = fresh();
   // 1) relay-orphan без лінка → рахується
-  upsertBeer(db, {
+  seedBeer(db, {
     name: 'Barrel Pie', brewery: 'The Bruery', style: null, abv: null, rating_global: null,
     normalized_name: 'barrel pie', normalized_brewery: 'the bruery',
   });
@@ -174,13 +174,13 @@ it('orphansRelayQueue includes orphans not on a tap right now (with or without a
   // прибрала їх, або кран так і не з'явився) → теж рахується. Це саме та відмінність, яка
   // на проді підняла лічильник з 285 до 713 — без цього case тест лишається зеленим, навіть
   // якщо цей включний шлях зламано.
-  const danglingLink = upsertBeer(db, {
+  const danglingLink = seedBeer(db, {
     name: 'Old Growler', brewery: 'Departed', style: null, abv: null, rating_global: null,
     normalized_name: 'old growler', normalized_brewery: 'departed',
   });
   upsertMatch(db, 'ref-no-tap-anywhere', danglingLink, 1.0);
   // 2) relay-orphan, протриажений як not_a_beer → НЕ рахується
-  const notABeer = upsertBeer(db, {
+  const notABeer = seedBeer(db, {
     name: 'Kelih Fino 545', brewery: 'Stoelzle', style: null, abv: null, rating_global: null,
     normalized_name: 'kelih fino 545', normalized_brewery: 'stoelzle',
   });
@@ -194,7 +194,7 @@ it('orphansRelayQueue includes orphans not on a tap right now (with or without a
   // #486 зробив relay-предикат буквальним запереченням on-tap предиката, тож
   // рядок з лінком, що досягає крана на ОСТАННЬОМУ снапшоті паба, тепер належить
   // on-tap пулу, а не «нікому» — крон його й так бачить.
-  const linked = upsertBeer(db, {
+  const linked = seedBeer(db, {
     name: 'Clementine', brewery: 'Magic Road', style: null, abv: null, rating_global: null,
     normalized_name: 'clementine', normalized_brewery: 'magic road',
   });
@@ -217,7 +217,7 @@ it('orphansRelayQueue includes orphans not on a tap right now (with or without a
 // when it only went quiet, and the lock's own audit counter is what reports that number.
 it('orphansRelayQueue still counts a row that is locked out of the pools', () => {
   const db = fresh();
-  const locked = upsertBeer(db, {
+  const locked = seedBeer(db, {
     name: 'Bitter Cost', brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: 'bitter cost', normalized_brewery: 'mad brew',
   });
@@ -237,7 +237,7 @@ it('orphansRelayQueue still counts a row that is locked out of the pools', () =>
 // makes the re-observed count equal the total and turns this red.
 it('counts the seals, the re-observed subset and the falsified retirements', () => {
   const db = fresh();
-  const seedOrphan = (name: string): number => upsertBeer(db, {
+  const seedOrphan = (name: string): number => seedBeer(db, {
     name, brewery: 'B', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'b',
   });
@@ -288,7 +288,7 @@ it('counts the seals, the re-observed subset and the falsified retirements', () 
 // unlock count means our fixes never cover the rows that motivated them.
 it('counts locked rows, in-flight unlocks and verdicts outlived by their fix', () => {
   const db = fresh();
-  const mk = (name: string) => upsertBeer(db, {
+  const mk = (name: string) => seedBeer(db, {
     untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
   });
@@ -331,7 +331,7 @@ it('counts locked rows, in-flight unlocks and verdicts outlived by their fix', (
 // retired-orphan debt that sealRetiredFalsified exists to report.
 it('lockedRows does not count a retired row that kept its actionable verdict', () => {
   const db = fresh();
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     untappd_id: null, name: 'Bitter Cost', brewery: 'Mad Brew',
     style: null, abv: null, rating_global: null,
     normalized_name: 'bitter cost', normalized_brewery: 'mad brew',
@@ -360,7 +360,7 @@ it('lockedRows does not count a retired row that kept its actionable verdict', (
 // itself relies on.
 it('counts unrescued rows, and settled verdicts nobody adjudicated', () => {
   const db = fresh();
-  const mk = (name: string) => upsertBeer(db, {
+  const mk = (name: string) => seedBeer(db, {
     untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
   });
@@ -416,7 +416,7 @@ it('counts unrescued rows, and settled verdicts nobody adjudicated', () => {
 // A row exactly ON the cutoff instant must still count; one second earlier must not.
 it('unlockedUnadjudicated7d respects the 7-day boundary (>=, not >)', () => {
   const db = fresh();
-  const mk = (name: string) => upsertBeer(db, {
+  const mk = (name: string) => seedBeer(db, {
     untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
   });

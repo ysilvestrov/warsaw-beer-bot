@@ -2,7 +2,8 @@ import { vi } from 'vitest';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, findBeerByNormalized } from '../storage/beers';
+import { findBeerByNormalized } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { ensureProfile, setUntappdUsername } from '../storage/user_profiles';
 import { HttpError, type Http } from '../sources/http';
 import { refreshAllUntappd } from './refresh-untappd';
@@ -28,7 +29,7 @@ function fakeHttp(htmlByUrl: Record<string, string>): Http {
   };
 }
 
-// #617: сід напряму — upsertBeer злив би два рядки з однаковою нормалізованою назвою в один
+// #617: сід напряму — seedBeer злив би два рядки з однаковою нормалізованою назвою в один
 // (саме той дефект, який тут перевіряється).
 function insertBeer(db: ReturnType<typeof fresh>, bid: number, name: string, brewery: string, rating: number): number {
   return Number(db.prepare(
@@ -123,7 +124,7 @@ describe('refreshAllUntappd', () => {
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
 
-    const seededId = upsertBeer(db, {
+    const seededId = seedBeer(db, {
       untappd_id: 6400148,
       name: 'Gardees',
       brewery: 'Malpolon',
@@ -152,7 +153,7 @@ describe('refreshAllUntappd', () => {
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
 
-    const seededId = upsertBeer(db, {
+    const seededId = seedBeer(db, {
       untappd_id: null,
       name: 'Atak Chmielu',
       brewery: 'Pinta',
@@ -187,7 +188,7 @@ describe('refreshAllUntappd', () => {
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
 
-    const seededId = upsertBeer(db, {
+    const seededId = seedBeer(db, {
       untappd_id: 555,
       name: 'Brand New Release',
       brewery: 'New Brews',

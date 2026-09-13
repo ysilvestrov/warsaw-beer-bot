@@ -2,7 +2,8 @@ import pino from 'pino';
 import { vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer, recordLookupNotFound } from '../storage/beers';
+import { getBeer, recordLookupNotFound } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import {
   recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from '../storage/enrich_failures';
@@ -25,7 +26,7 @@ function fresh() {
 // assertion below true about nothing.
 function orphanWithIssue(db: ReturnType<typeof fresh>, beerId: number, issue: number): void {
   const name = `Row ${beerId}`;
-  const returnedId = upsertBeer(db, {
+  const returnedId = seedBeer(db, {
     untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
   });

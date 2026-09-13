@@ -1,11 +1,11 @@
 import { openDb } from './db';
 import { migrate } from './schema';
 import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt, countDistinctBeers, oldestCheckinId } from './checkins';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 
 function setup() {
   const db = openDb(':memory:'); migrate(db);
-  const beerId = upsertBeer(db, {
+  const beerId = seedBeer(db, {
     name: 'Atak', brewery: 'Pinta', style: 'IPA', abv: 6, rating_global: 3.9,
     normalized_name: 'atak', normalized_brewery: 'pinta',
   });
@@ -34,8 +34,8 @@ test('hasBeenDrunk ignores other users', () => {
 describe('latestRatingsByBeer', () => {
   it('returns the most recent non-null rating per beer for the user', () => {
     const db = openDb(':memory:'); migrate(db);
-    const beerA = upsertBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
-    const beerB = upsertBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
+    const beerA = seedBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
+    const beerB = seedBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
     const base = { telegram_id: 1, venue: null as string | null };
     mergeCheckin(db, { ...base, checkin_id: 'c1', beer_id: beerA, user_rating: 3.0, checkin_at: '2026-01-01T00:00:00Z' });
     mergeCheckin(db, { ...base, checkin_id: 'c2', beer_id: beerA, user_rating: 4.5, checkin_at: '2026-03-01T00:00:00Z' });
@@ -47,7 +47,7 @@ describe('latestRatingsByBeer', () => {
 
   it('falls back to an older non-null rating when the newest is null', () => {
     const db = openDb(':memory:'); migrate(db);
-    const beer = upsertBeer(db, { name: 'X', brewery: 'Y', normalized_name: 'x', normalized_brewery: 'y' });
+    const beer = seedBeer(db, { name: 'X', brewery: 'Y', normalized_name: 'x', normalized_brewery: 'y' });
     const base = { telegram_id: 1, venue: null as string | null };
     mergeCheckin(db, { ...base, checkin_id: 'd1', beer_id: beer, user_rating: 3.7, checkin_at: '2026-01-01T00:00:00Z' });
     mergeCheckin(db, { ...base, checkin_id: 'd2', beer_id: beer, user_rating: null, checkin_at: '2026-05-01T00:00:00Z' });
@@ -85,9 +85,9 @@ describe('countDistinctBeers', () => {
 
   it('counts distinct non-null beer_ids for the user', () => {
     const db = openDb(':memory:'); migrate(db);
-    const beerA = upsertBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
-    const beerB = upsertBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
-    const beerC = upsertBeer(db, { name: 'D', brewery: 'B', normalized_name: 'd', normalized_brewery: 'b' });
+    const beerA = seedBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
+    const beerB = seedBeer(db, { name: 'C', brewery: 'B', normalized_name: 'c', normalized_brewery: 'b' });
+    const beerC = seedBeer(db, { name: 'D', brewery: 'B', normalized_name: 'd', normalized_brewery: 'b' });
     // two check-ins of beerA, one of beerB, one with null beer_id, and another user's beerC
     mergeCheckin(db, { checkin_id: 'a', telegram_id: 1, beer_id: beerA, user_rating: null, checkin_at: '2024-01-01 10:00:00', venue: null });
     mergeCheckin(db, { checkin_id: 'b', telegram_id: 1, beer_id: beerA, user_rating: null, checkin_at: '2024-01-02 10:00:00', venue: null });

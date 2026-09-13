@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { evaluateCandidate, gateWebCandidate, runWebFallback } from './web-fallback';
 import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
 import type { BeerSearch } from '../sources/untappd/search';
@@ -91,7 +91,7 @@ describe('evaluateCandidate (stage-returning gate core)', () => {
 });
 
 function seed(db: ReturnType<typeof openDb>, brewery: string, name: string) {
-  return upsertBeer(db, { name, brewery, normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase() });
+  return seedBeer(db, { name, brewery, normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase() });
 }
 function freshDb() {
   const db = openDb(':memory:');

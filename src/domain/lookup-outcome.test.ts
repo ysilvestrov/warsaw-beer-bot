@@ -1,7 +1,8 @@
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from './normalize';
 import { applyLookupOutcome } from './lookup-outcome';
 import type { LookupOutcome } from './untappd-lookup';
@@ -12,7 +13,7 @@ import { setEnrichFailureReview } from '../storage/enrich_failures';
 function fresh() {
   const db = openDb(':memory:');
   migrate(db);
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     untappd_id: null, name: 'Taking Shape', brewery: 'Track', style: null, abv: null, rating_global: null,
     normalized_name: normalizeName('Taking Shape'), normalized_brewery: normalizeBrewery('Track'),
   });
@@ -92,7 +93,7 @@ describe('applyLookupOutcome failure logging', () => {
 describe('applyLookupOutcome merge', () => {
   test("returns 'merged' and redirects match_links when the bid already belongs to another row", () => {
     const { db, id, log } = fresh();
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 777, name: 'Canonical Beer', brewery: 'Canonical Brewery',
       style: null, abv: null, rating_global: 4.2,
       normalized_name: normalizeName('Canonical Beer'),
@@ -187,7 +188,7 @@ describe('#430 F1: the enforcer reads the beer\'s stored style, not a hard-coded
     migrate(db);
     const brewery = 'Sad Trzebnicki';
     const name = 'Nalewka gruszkowa';
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name, brewery, style: 'Cydr', abv: null, rating_global: null,
       normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
     });

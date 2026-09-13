@@ -1,7 +1,7 @@
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import pino from 'pino';
-import { upsertBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { backfillNormalizedBrewery } from './backfill-normalized-brewery';
 
 function fresh() {
@@ -15,7 +15,7 @@ const silentLog = pino({ level: 'silent' });
 describe('backfillNormalizedBrewery', () => {
   test('recomputes stale normalized_brewery under new rules', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 2388534,
       name: 'Buzdygan Rozkoszy',
       brewery: 'Harpagan Contracts',
@@ -37,7 +37,7 @@ describe('backfillNormalizedBrewery', () => {
 
   test('leaves already-correct rows untouched and is idempotent', () => {
     const db = fresh();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 1,
       name: 'Atak Chmielu',
       brewery: 'Pinta',

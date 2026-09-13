@@ -1,7 +1,7 @@
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { catalogVersion } from '../storage/catalog-version';
 import { cleanupPollutedOntap } from './cleanup-polluted-ontap';
 
@@ -27,7 +27,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('single polluted row, no canonical → rewrite in place', async () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
       brewery: 'Wagabunda Brewery',
@@ -55,7 +55,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('polluted + ontap canonical → merge with match_links + checkins repointed', async () => {
     const db = fresh();
-    const cleanId = upsertBeer(db, {
+    const cleanId = seedBeer(db, {
       untappd_id: null,
       name: 'Oxymel',
       brewery: 'Wagabunda Brewery',
@@ -65,7 +65,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_name: 'oxymel',
       normalized_brewery: 'wagabunda',
     });
-    const pollutedId = upsertBeer(db, {
+    const pollutedId = seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
       brewery: 'Wagabunda Brewery',
@@ -99,7 +99,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('polluted ontap-side row merges into untappd-side canonical (cross-source)', async () => {
     const db = fresh();
-    const untappdId = upsertBeer(db, {
+    const untappdId = seedBeer(db, {
       untappd_id: 12345,
       name: 'Oxymel',
       brewery: 'Wagabunda Brewery',
@@ -109,7 +109,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_name: 'oxymel',
       normalized_brewery: 'wagabunda',
     });
-    const pollutedId = upsertBeer(db, {
+    const pollutedId = seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
       brewery: 'Wagabunda Brewery',
@@ -129,7 +129,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('two polluted rows resolving to the same normalized name, no canonical → both rewrite (become duplicates)', async () => {
     const db = fresh();
-    const aId = upsertBeer(db, {
+    const aId = seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
       brewery: 'Wagabunda Brewery',
@@ -139,7 +139,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_name: 'wagabunda brewery oxymel 14 4 5 ale',
       normalized_brewery: 'wagabunda',
     });
-    const bId = upsertBeer(db, {
+    const bId = seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 12°·4,2% — Sour',
       brewery: 'Wagabunda Brewery',
@@ -163,7 +163,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('idempotent: second invocation returns {0, 0}', async () => {
     const db = fresh();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: null,
       name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
       brewery: 'Wagabunda Brewery',
@@ -183,7 +183,7 @@ describe('cleanupPollutedOntap', () => {
 
   test('clean rows preserved — no pollution markers means no touching', async () => {
     const db = fresh();
-    const cleanId = upsertBeer(db, {
+    const cleanId = seedBeer(db, {
       untappd_id: null,
       name: 'Oxymel',
       brewery: 'Wagabunda Brewery',
@@ -193,7 +193,7 @@ describe('cleanupPollutedOntap', () => {
       normalized_name: 'oxymel',
       normalized_brewery: 'wagabunda',
     });
-    const untappdRowId = upsertBeer(db, {
+    const untappdRowId = seedBeer(db, {
       untappd_id: 99,
       name: 'Some Brewery Stuff 14°·5%',
       brewery: 'Some Brewery',

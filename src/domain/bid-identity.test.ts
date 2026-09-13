@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { resolveByBid } from './bid-identity';
 import type { HydratedBeer } from '../sources/untappd/search';
 
@@ -188,7 +188,7 @@ describe('resolveByBid', () => {
 
   it('resolves from the local catalog without calling Algolia', async () => {
     const db = freshDb();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
       style: 'Gose', abv: 4.2, rating_global: 4.06,
       normalized_name: 'tomatol buldak bulgogi', normalized_brewery: 'mad brew',
@@ -205,7 +205,7 @@ describe('resolveByBid', () => {
 
   it('still applies the brewery veto on the local path', async () => {
     const db = freshDb();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
       normalized_name: 'tomatol buldak bulgogi', normalized_brewery: 'mad brew',
     });

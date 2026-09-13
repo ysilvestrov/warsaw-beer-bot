@@ -1,13 +1,8 @@
 import { catalogVersion, bumpCatalogVersion } from './catalog-version';
 import { openDb } from './db';
 import { migrate } from './schema';
-import {
-  upsertBeer,
-  recordLookupSuccess,
-  recordRatingSuccess,
-  recordLookupNotFound,
-  recordRatingNotFound,
-} from './beers';
+import { recordLookupSuccess, recordRatingSuccess, recordLookupNotFound, recordRatingNotFound } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 describe('catalog-version', () => {
@@ -18,8 +13,8 @@ describe('catalog-version', () => {
   });
 });
 
-function seedBeer(db: ReturnType<typeof openDb>) {
-  return upsertBeer(db, {
+function seedAtakChmielu(db: ReturnType<typeof openDb>) {
+  return seedBeer(db, {
     name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA', abv: 6.1, rating_global: 3.7,
     normalized_name: normalizeName('Atak Chmielu'),
     normalized_brewery: normalizeBrewery('Pinta'),
@@ -32,11 +27,11 @@ describe('catalog-version — storage instrumentation', () => {
     migrate(db);
 
     let v = catalogVersion();
-    const id = seedBeer(db);           // upsertBeer (insert)
+    const id = seedAtakChmielu(db);           // seedBeer (insert)
     expect(catalogVersion()).toBeGreaterThan(v);
 
     v = catalogVersion();
-    upsertBeer(db, {                   // upsertBeer (update — same normalized keys)
+    seedBeer(db, {                   // seedBeer (update — same normalized keys)
       name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA', abv: 6.2, rating_global: 3.8,
       normalized_name: normalizeName('Atak Chmielu'),
       normalized_brewery: normalizeBrewery('Pinta'),
@@ -55,7 +50,7 @@ describe('catalog-version — storage instrumentation', () => {
   it('does NOT bump on timestamp/counter-only mutators', () => {
     const db = openDb(':memory:');
     migrate(db);
-    const id = seedBeer(db);
+    const id = seedAtakChmielu(db);
 
     const v = catalogVersion();
     recordLookupNotFound(db, id, '2026-01-01T00:00:00Z');

@@ -14,7 +14,7 @@ import {
   CHECKINS_HTML_LIMIT_CHARS,
   CHECKINS_SYNC_BODY_LIMIT_BYTES,
 } from '../middleware/payload-limit';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 
 // Synthetic feed pages verified against parseCheckinFeedPage's real selectors.
@@ -448,9 +448,9 @@ describe('POST /checkins/sync — beer identity (#617)', () => {
   function seed(
     db: ReturnType<typeof openDb>,
     bid: number, name: string, brewery: string,
-    over: Partial<Parameters<typeof upsertBeer>[1]> = {},
+    over: Partial<Parameters<typeof seedBeer>[1]> = {},
   ): number {
-    return upsertBeer(db, {
+    return seedBeer(db, {
       untappd_id: bid, name, brewery,
       style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),

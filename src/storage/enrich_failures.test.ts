@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate, V23_BACKFILL_SQL } from './schema';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import {
   recordEnrichFailure,
@@ -21,7 +21,7 @@ import {
 function freshDbWithBeer() {
   const db = openDb(':memory:');
   migrate(db);
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     untappd_id: null, name: 'Taking Shape', brewery: 'Track', style: null, abv: null, rating_global: null,
     normalized_name: normalizeName('Taking Shape'), normalized_brewery: normalizeBrewery('Track'),
   });
@@ -68,7 +68,7 @@ const BEER_WORDS = ['one', 'two', 'three', 'four', 'five', 'six'];
 function insertBeer(db: ReturnType<typeof openDb>, n: number) {
   const name = `Beer ${BEER_WORDS[n - 1]}`;
   const brewery = `Craft ${BEER_WORDS[n - 1]}`;
-  return upsertBeer(db, {
+  return seedBeer(db, {
     untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
   });
@@ -253,7 +253,7 @@ describe('enrich_failures', () => {
   // them the same beer, so the batch must carry it (2026-07-28 evidence pipeline).
   test('listUntriagedFailures exposes the beer abv and style', () => {
     const db = testDb();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'Hazy American Pale Ale', brewery: 'ReCraft Brewery',
       style: 'Hazy APA', abv: 4.2, rating_global: null,
       normalized_name: normalizeName('Hazy American Pale Ale'),
@@ -307,7 +307,7 @@ describe('retireEnrichFailure', () => {
 // owning issue. Asserts the seed write actually landed — a silently no-op'd seed would
 // produce a green test that proves nothing (see seedLocked in unlock-fixed-orphans.test.ts).
 function orphanWithIssue(db: ReturnType<typeof openDb>, beerId: number, issue: number): void {
-  upsertBeer(db, {
+  seedBeer(db, {
     untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
     normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
   });

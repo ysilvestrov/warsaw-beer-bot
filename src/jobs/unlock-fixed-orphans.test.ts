@@ -3,7 +3,8 @@ import path from 'node:path';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued } from '../storage/enrich_failures';
 import { getJobState } from '../storage/job_state';
 import type { GithubIssuesClient } from '../infra/github-issues';
@@ -41,7 +42,7 @@ function seedLocked(
   cls: 'matcher_bug' | 'parser_bug',
   issue: number | null,
 ): number {
-  const beerId = upsertBeer(db, {
+  const beerId = seedBeer(db, {
     untappd_id: null, name, brewery: 'Mad Brew', style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: 'mad brew',
   });

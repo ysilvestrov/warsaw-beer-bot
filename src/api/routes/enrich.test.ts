@@ -2,7 +2,8 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { upsertBeer, findBeerByNormalized, getBeer } from '../../storage/beers';
+import { findBeerByNormalized, getBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
 import { enrichRoute } from './enrich';
@@ -89,7 +90,7 @@ describe('POST /enrich/candidates', () => {
 
   it('is not eligible when the beer already has an untappd_id', async () => {
     const { db, app } = setup();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 42, name: 'Atak Chmielu', brewery: 'PINTA', style: null, abv: null, rating_global: 3.9,
       normalized_name: normalizeName('Atak Chmielu'), normalized_brewery: normalizeBrewery('PINTA'),
     });
@@ -100,7 +101,7 @@ describe('POST /enrich/candidates', () => {
 
   it('is not eligible when recently searched (backoff active)', async () => {
     const { db, app } = setup();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'Foo', brewery: 'Bar', style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Foo'), normalized_brewery: normalizeBrewery('Bar'),
     });
@@ -117,7 +118,7 @@ describe('POST /enrich/candidates', () => {
   // The asymmetry is deliberate, so it needs an assertion or it will be "fixed" later.
   it('stays eligible for the extension while locked out of the server pools', async () => {
     const { db, app } = setup();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'Bitter Cost', brewery: 'Mad Brew',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Bitter Cost'),
@@ -138,7 +139,7 @@ describe('POST /enrich/candidates', () => {
 
   it('is not eligible when triaged as not_a_beer', async () => {
     const { db, app } = setup();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'Never', brewery: 'Hopeless', style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Never'), normalized_brewery: normalizeBrewery('Hopeless'),
     });
@@ -252,7 +253,7 @@ describe('POST /enrich/candidates', () => {
   // never offered in the first place.
 
   function linkedRow(db: ReturnType<typeof setup>['db'], untappd_id: number, source?: string) {
-    return upsertBeer(db, {
+    return seedBeer(db, {
       untappd_id, name: 'Tomatol Bulgogi', brewery: 'Mad Brew',
       style: null, abv: null, rating_global: 3.7,
       normalized_name: normalizeName('Tomatol Bulgogi'),
@@ -485,7 +486,7 @@ describe('POST /enrich/result', () => {
 
   it('reports an already-matched beer without overwriting it', async () => {
     const { db, app } = setup();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 111, name: 'Atak Chmielu', brewery: 'PINTA', style: null, abv: null, rating_global: 4.0,
       normalized_name: normalizeName('Atak Chmielu'), normalized_brewery: normalizeBrewery('PINTA'),
     });
@@ -568,7 +569,7 @@ describe('POST /enrich/result', () => {
     const { db, app } = setup();
     // A different row already owns bid 5469263 → recordLookupSuccess will hit the
     // UNIQUE constraint and merge the freshly created orphan into it.
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 5469263, name: 'Legacy Row', brewery: 'Legacy Brewery',
       style: null, abv: null, rating_global: 3.5,
       normalized_name: normalizeName('Legacy Row'),
@@ -742,13 +743,13 @@ describe('POST /enrich/result — published bid (#384)', () => {
   it('overrides a machine-derived link and merges into the canonical row', async () => {
     const { app, db, info } = setup({ hydrateByBid: hydrateBulgogi() });
     // The canonical row, as created by the check-ins sync.
-    const canonical = upsertBeer(db, {
+    const canonical = seedBeer(db, {
       untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
       normalized_name: normalizeName('Tomatøl:BULDAK BULGOGI'),
       normalized_brewery: normalizeBrewery('Mad Brew'),
     });
     // The shop-identity row, wrongly matched by search.
-    const shopRow = upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
+    const shopRow = seedBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
 
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8,
@@ -768,7 +769,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
 
   it.each(['curated', 'checkin'] as const)('refuses to override a %s link', async (source) => {
     const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
-    const protectedRow = upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: source }));
+    const protectedRow = seedBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: source }));
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
       bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
@@ -781,7 +782,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   // sends no bid, and must see byte-for-byte the old behaviour.
   it('is unchanged for a client that sends no bid', async () => {
     const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
-    const row = upsertBeer(db, shopRowInput({
+    const row = seedBeer(db, shopRowInput({
       untappd_id: 6708599, untappd_id_source: 'search', rating_global: 3.1,
     }));
     const res = await post(app, '/enrich/result', {
@@ -796,7 +797,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   it('takes the early return when the bid agrees with the stored link', async () => {
     const hydrate = hydrateBulgogi();
     const { app, db } = setup({ hydrateByBid: hydrate });
-    const row = upsertBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'search' }));
+    const row = seedBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'search' }));
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
       bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },
@@ -811,7 +812,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   // rather than trusting the prose.
   it('a later search cannot clobber a bid-sourced link', async () => {
     const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
-    const row = upsertBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'bid' }));
+    const row = seedBeer(db, shopRowInput({ untappd_id: 6648348, untappd_id_source: 'bid' }));
     // A relay carrying search candidates but no bid — the pre-0.14 shape.
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
@@ -824,7 +825,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   it('links an orphan straight from the bid, stamps provenance, and logs the divergences', async () => {
     const hydrate = hydrateBulgogi();
     const { app, db, info } = setup({ hydrateByBid: hydrate });
-    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+    const orphan = seedBeer(db, shopRowInput({ untappd_id: null }));
 
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 3.8,
@@ -874,13 +875,13 @@ describe('POST /enrich/result — published bid (#384)', () => {
   // canonical row must not restamp it 'bid' and thereby make it overridable.
   it('does not weaken the canonical row\'s stamp when merging into it', async () => {
     const { app, db } = setup({ hydrateByBid: hydrateBulgogi() });
-    const canonical = upsertBeer(db, {
+    const canonical = seedBeer(db, {
       untappd_id: 6648348, name: 'Tomatøl:BULDAK BULGOGI', brewery: 'Mad Brew',
       normalized_name: normalizeName('Tomatøl:BULDAK BULGOGI'),
       normalized_brewery: normalizeBrewery('Mad Brew'),
       untappd_id_source: 'checkin',
     });
-    upsertBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
+    seedBeer(db, shopRowInput({ untappd_id: 6708599, untappd_id_source: 'search' }));
 
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
@@ -893,7 +894,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
 
   it('falls through to the normal pipeline when the guard vetoes', async () => {
     const { app, db, warn } = setup({ hydrateByBid: hydrateBulgogi() });
-    const orphan = upsertBeer(db, {
+    const orphan = seedBeer(db, {
       untappd_id: null, name: 'Tomatol Bulgogi', brewery: 'Browar Stu Mostów',
       normalized_name: normalizeName('Tomatol Bulgogi'),
       normalized_brewery: normalizeBrewery('Browar Stu Mostów'),
@@ -918,7 +919,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   it('falls through and logs the underlying error when hydration fails', async () => {
     const err = new Error('403 blocked');
     const { app, db, warn } = setup({ hydrateByBid: vi.fn(async () => { throw err; }) });
-    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+    const orphan = seedBeer(db, shopRowInput({ untappd_id: null }));
 
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
@@ -941,7 +942,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
   // stored link" into "re-guess it" — strictly worse than before this feature.
   it('keeps an existing link when the bid fails to resolve, instead of re-guessing', async () => {
     const { app, db } = setup({ hydrateByBid: vi.fn(async () => { throw new Error('403 blocked'); }) });
-    const row = upsertBeer(db, shopRowInput({
+    const row = seedBeer(db, shopRowInput({
       untappd_id: 6708599, untappd_id_source: 'search', rating_global: 3.1,
     }));
     const res = await post(app, '/enrich/result', {
@@ -957,7 +958,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
 
   it('falls through when no hydrate function is wired and the bid is unknown locally', async () => {
     const { app, db } = setup(); // no hydrateByBid dep at all
-    const orphan = upsertBeer(db, shopRowInput({ untappd_id: null }));
+    const orphan = seedBeer(db, shopRowInput({ untappd_id: null }));
     const res = await post(app, '/enrich/result', {
       brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
       bid: 6648348, brand: 'Mad Brew', algolia: { hits: [] },

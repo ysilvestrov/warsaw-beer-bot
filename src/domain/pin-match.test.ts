@@ -1,7 +1,8 @@
 import { describe, test, expect } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { upsertMatch, getMatch } from '../storage/match_links';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import { pinMatch, unpinByRef, unpinByBeer, listPins } from './pin-match';
@@ -13,7 +14,7 @@ function newDb() {
 }
 
 function orphan(db: ReturnType<typeof openDb>, brewery: string, name: string): number {
-  return upsertBeer(db, {
+  return seedBeer(db, {
     untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase(),
   });
@@ -24,7 +25,7 @@ const AT = '2026-07-23T12:00:00.000Z';
 describe('pinMatch', () => {
   test('merge case: redirects the orphan link to the canonical row, pins it, deletes orphan', () => {
     const db = newDb();
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
       style: null, abv: null, rating_global: 4.1,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
@@ -50,7 +51,7 @@ describe('pinMatch', () => {
 
   test('#384: merge case stamps the canonical row curated — it is now a reviewed_by_user=1 target', () => {
     const db = newDb();
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
       style: null, abv: null, rating_global: 4.1,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
@@ -67,7 +68,7 @@ describe('pinMatch', () => {
 
   test('merge case: redirects the orphan checkins to the canonical row (no FK abort)', () => {
     const db = newDb();
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
       style: null, abv: null, rating_global: 4.1,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
@@ -128,7 +129,7 @@ describe('pinMatch', () => {
 describe('unpin & list', () => {
   test('unpinByRef clears the flag for a merged pin addressed by its ontap_ref', () => {
     const db = newDb();
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
       style: null, abv: null, rating_global: null,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
@@ -181,7 +182,7 @@ describe('unpin & list', () => {
 
 test('#384: a pin stamps curated so a published bid can never override it', () => {
   const db = newDb();
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     untappd_id: null, name: 'Urodzinowe', brewery: 'Recraft',
     normalized_name: 'urodzinowe', normalized_brewery: 'recraft',
   });
