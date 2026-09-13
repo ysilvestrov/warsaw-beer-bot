@@ -1644,6 +1644,16 @@ describe('listRatingHydrationCandidates (#616)', () => {
     expect(ids).not.toContain(exhausted);
   });
 
+  test('a stamp exactly 30 days old is not yet due; a millisecond older is', () => {
+    const db = fresh();
+    seed(db, { bid: 111, name: 'Exact', rating: 3.9, checkedAt: daysAgo(RATING_RECHECK_DAYS) });
+    const older = seed(db, {
+      bid: 112, name: 'Older', rating: 3.9,
+      checkedAt: new Date(NOW.getTime() - RATING_RECHECK_DAYS * 86_400_000 - 1).toISOString(),
+    });
+    expect(listRatingHydrationCandidates(db, 10, NOW).map((c) => c.id)).toEqual([older]);
+  });
+
   test('respects the limit', () => {
     const db = fresh();
     for (let i = 0; i < 5; i++) seed(db, { bid: 400 + i, name: `Beer ${i}`, rating: null });
@@ -1710,6 +1720,17 @@ describe('applyHydratedRatings (#616)', () => {
     const again = applyHydratedRatings(db, hits, [801, 802], '2026-10-14T12:00:00.000Z');
     expect(again).toEqual({ updated: 2, changed: 0, unknown: 0 });
     expect(catalogVersion()).toBe(v0 + 1);
+  });
+
+  test('filling only an empty style or only an empty ABV still bumps the catalog version', () => {
+    const db = fresh();
+    seedLinked(db, 811, { rating: 4.0, style: null, abv: 6.0 });
+    seedLinked(db, 812, { rating: 4.1, style: 'IPA', abv: null });
+    const v0 = catalogVersion();
+    applyHydratedRatings(db, new Map([[811, { global_rating: 4.0, style: 'IPA', abv: 6.0 }]]), [811], NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 1);
+    applyHydratedRatings(db, new Map([[812, { global_rating: 4.1, style: 'IPA', abv: 5.5 }]]), [812], NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 2);
   });
 
   test('a bid whose row vanished between selection and write touches nothing', () => {

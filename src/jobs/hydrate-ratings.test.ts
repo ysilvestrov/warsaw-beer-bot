@@ -86,6 +86,32 @@ describe('hydrateRatings (#616)', () => {
     expect(getBeer(db, id)).toMatchObject({ rating_global: 3.5, rating_checked_at: null, rating_refresh_count: 0 });
   });
 
+  test('an HTTP 5xx is a transient failure, a 429 is a block', async () => {
+    for (const [status, blocked] of [[500, false], [429, true]] as const) {
+      const db = fresh();
+      const id = seedLinked(db, 104, 3.5);
+      const { breaker, results } = spyBreaker();
+      const res = await hydrateRatings({
+        db, log: silentLog, breaker, now: () => NOW,
+        hydrateByBid: async () => { throw new HttpError(status, 'https://x-dsn.algolia.net/1/indexes/*/objects'); },
+      });
+      expect(res).toMatchObject({ blocked, failed: !blocked });
+      expect(results).toEqual(blocked ? [true] : []);
+      expect(getBeer(db, id)).toMatchObject({ rating_checked_at: null, rating_refresh_count: 0 });
+    }
+  });
+
+  test('a negative limit never widens the request past the batch', async () => {
+    const db = fresh();
+    for (let i = 0; i < RATING_HYDRATION_BATCH + 2; i++) seedLinked(db, 30_000 + i, null);
+    const sizes: number[] = [];
+    await hydrateRatings({
+      db, log: silentLog, now: () => NOW, limit: -1,
+      hydrateByBid: async (bids) => { sizes.push(bids.length); return new Map(); },
+    });
+    expect(sizes.every((s) => s <= RATING_HYDRATION_BATCH)).toBe(true);
+  });
+
   test('disabled lookup, an open breaker and an empty queue never call Algolia', async () => {
     let called = 0;
     const hydrateByBid = async () => { called++; return new Map<number, HydratedBeer>(); };

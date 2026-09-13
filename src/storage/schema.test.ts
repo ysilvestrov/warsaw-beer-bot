@@ -603,4 +603,21 @@ describe('v31 rating_checked_at (#616)', () => {
     const row = db.prepare('SELECT rating_checked_at FROM beers WHERE untappd_id = 4473').get() as { rating_checked_at: string | null };
     expect(row.rating_checked_at).toBeNull();
   });
+
+  it('resets the legacy HTML-job backoff and turns stored zeros into NULL', () => {
+    // Рядки, записані до v31: бекоф старої джоби (count/at мали інший зміст) і рейтинг 0.
+    const db = openDb(':memory:');
+    migrate(db);
+    db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
+    db.prepare('DELETE FROM schema_version WHERE version >= 31').run();
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery, rating_refresh_at, rating_refresh_count)
+                VALUES (1, 6869890, 'Prototype', 'Funky Fluid', 0, 'prototype', 'funky fluid', '2026-09-12T01:30:00.000Z', 4),
+                       (2, 4473, 'Guinness Draught', 'Guinness', 3.77, 'guinness draught', 'guinness', '2026-09-12T01:30:00.000Z', 0)`).run();
+    migrate(db);
+    const rows = db.prepare('SELECT id, rating_global, rating_refresh_at, rating_refresh_count FROM beers ORDER BY id').all();
+    expect(rows).toEqual([
+      { id: 1, rating_global: null, rating_refresh_at: null, rating_refresh_count: 0 },
+      { id: 2, rating_global: 3.77, rating_refresh_at: null, rating_refresh_count: 0 },
+    ]);
+  });
 });
