@@ -213,6 +213,24 @@ describe('parseUserBeersPage — Global Rating block (#616)', () => {
     ]);
   });
 
+  test('a Global Rating label without a readable data-rating proves nothing; an explicit «(N/A)» label does (review #625)', () => {
+    const card = (label: string, caps: string) => `
+      <div class="beer-item" data-bid="777">
+        <div class="beer-details">
+          <p class="name"><a href="/b/x/777">Quiet Page</a></p>
+          <p class="brewery"><a href="/x">Silent Brewery</a></p>
+          <p class="style">Lager</p>
+          <div class="ratings"><div class="you"><p>${label}</p>${caps}</div></div>
+        </div>
+      </div>`;
+    for (const caps of ['', '<div class="caps"></div>', '<div class="caps" data-rating="soon"></div>']) {
+      const [it] = parseUserBeersPage(card('Global Rating (3.72)', caps));
+      expect(it).toMatchObject({ global_rating: null, global_rating_shown: false });
+    }
+    const [na] = parseUserBeersPage(card('Global Rating (N/A)', '<div class="caps" data-rating="N/A"></div>'));
+    expect(na).toMatchObject({ global_rating: null, global_rating_shown: true });
+  });
+
   test('the captured profile page shows the block on every card', () => {
     const items = parseUserBeersPage(fixture('user-beers.html'));
     expect(items.length).toBeGreaterThan(0);

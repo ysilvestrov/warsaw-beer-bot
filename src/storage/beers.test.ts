@@ -1450,6 +1450,12 @@ describe('listRatingHydrationCandidates (#616)', () => {
     expect(listRatingHydrationCandidates(db, 10, NOW).map((c) => c.id)).toEqual([older]);
   });
 
+  test('a negative limit returns no rows instead of slicing from the end (review #625)', () => {
+    const db = fresh();
+    for (let i = 0; i < 5; i++) seed(db, { bid: 450 + i, name: `Neg ${i}`, rating: null });
+    expect(listRatingHydrationCandidates(db, -1, NOW)).toEqual([]);
+  });
+
   test('respects the limit', () => {
     const db = fresh();
     for (let i = 0; i < 5; i++) seed(db, { bid: 400 + i, name: `Beer ${i}`, rating: null });
@@ -1615,6 +1621,19 @@ describe('recordProfileBeer (#616)', () => {
     expect(catalogVersion()).toBe(v0 + 2);                 // ABV сторінки порожній — не зміна
     recordProfileBeer(db, id, { global_rating: null, global_rating_shown: false, abv: null }, NOW_ISO);
     expect(catalogVersion()).toBe(v0 + 2);                 // без блоку рейтинг не змінюється
+  });
+
+  test('a Global Rating block clears an Algolia-unknown backoff; a card without it leaves the backoff (review #625)', () => {
+    for (const [shown, expected] of [
+      [true, { rating_refresh_at: null, rating_refresh_count: 0 }],
+      [false, { rating_refresh_at: '2026-06-01T00:00:00.000Z', rating_refresh_count: 4 }],
+    ] as const) {
+      const db = fresh();
+      const id = seedRow(db, { rating: 3.9, abv: 5.0 });
+      db.prepare("UPDATE beers SET rating_refresh_at = '2026-06-01T00:00:00.000Z', rating_refresh_count = 4 WHERE id = ?").run(id);
+      recordProfileBeer(db, id, { global_rating: 3.9, global_rating_shown: shown, abv: 5.0 }, NOW_ISO);
+      expect(getBeer(db, id)).toMatchObject(expected);
+    }
   });
 
   test('an unknown beer id is a no-op', () => {
