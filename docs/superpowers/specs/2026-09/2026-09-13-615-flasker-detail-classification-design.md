@@ -41,17 +41,25 @@ the deciding signal for this adapter.
 ### 1. Build provisional Flasker cards from the listing
 
 Flasker keeps extracting the visible title, product URL, tags and category hint from the three
-supported listing shapes. A title is parseable when either a volume or an ABV token supplies the
-end boundary of the beer name; when both exist, the earlier token remains the boundary.
+supported listing shapes. A title is parseable as a beer identity when either a volume or an ABV
+token supplies the end boundary of the beer name; when both exist, the earlier token remains the
+boundary. A remaining listing with a product URL but no such marker is still emitted as a
+classification-only candidate with its raw title and `skip = true`. It may become confirmed
+non-beer, but cannot enter matching because the listing does not supply a safe brewery/name
+boundary. The existing explicit non-alcoholic soft-drink family exclusion remains terminal.
 
 The synchronous title and listing-category gates remain useful cheap evidence, but they are no
-longer terminal when a card has ABV and a product URL. Such a card becomes provisional and requires
-detail-page confirmation. This is what permits a beer named after food (`Сало … 4.5%`) to survive
-long enough to reach its authoritative category.
+longer terminal when a card has a product URL and either volume or ABV makes its title parseable.
+Such a card becomes provisional and requires detail-page confirmation. This is what permits a beer
+named after food (`Сало … 4.5%`) to survive long enough to reach its authoritative category while
+also carrying volume-bearing merchandise such as the thermos through to the explicit non-beer
+badge.
 
 Cards admitted only by the new path are fail-closed: until detail classification succeeds, they
-carry `skip = true`. A failed or malformed detail response therefore cannot turn an arbitrary
-percent-bearing product into a beer.
+carry `skip = true`. A parsed provisional card may enter matching after a usable detail category
+does not veto it. A classification-only card remains skipped even when its category looks like a
+beer style, because category cannot invent the missing identity. A failed or malformed detail
+response therefore cannot turn an arbitrary product into a beer.
 
 Cards that already passed the old volume/title rules remain fail-open on detail failure. The new
 network dependency must not remove badges from established Flasker beer cards during a transient
@@ -119,7 +127,8 @@ contract is deliberately isolated in #623.
 
 | Condition | Result |
 |---|---|
-| Detail category confirms beer | Continue to cache lookup, `/match` and normal badge flow |
+| Detail category does not veto a parsed provisional beer | Continue to cache lookup, `/match` and normal badge flow |
+| Detail category does not veto a classification-only card | Keep skipped; the listing still lacks a safe beer identity |
 | Detail category confirms non-beer | Render non-clickable red `✕`; mark seen; no API or cache write |
 | Detail fetch fails for an established volume/title beer | Preserve current fail-open beer behavior |
 | Detail fetch fails for a provisional card | No badge and no API call; retry on a later page lifecycle |
@@ -145,6 +154,7 @@ The regression tests live with the behavior they protect:
 1. `flasker.test.ts`: all six reported no-volume/food-named beers become provisional cards and,
    after beer-category details, retain `VibrantPour` identity and ABV.
 2. `flasker.test.ts`: the thermos detail fixture (`Сувеніри`) becomes confirmed non-beer.
+   A markerless glass card follows the same explicit non-beer path without ever becoming matchable.
 3. `flasker.test.ts`: category extraction covers beer and non-beer product metadata; malformed and
    failed details never claim non-beer.
 4. `flasker.test.ts`: a pass with 24 unique product URLs attempts all 24, replacing the existing
@@ -153,7 +163,10 @@ The regression tests live with the behavior they protect:
    non-beer renders `✕`, is marked seen, and never reaches `/match`, enrichment or cache writes.
 6. `badge.test.ts`: the `✕` badge uses the intended red treatment and accessible label, has no link,
    click/auxclick behavior or pointer cursor, and remains idempotent/resettable.
-7. Existing Flasker fixture, conformance, re-render, refresh and normal badge tests remain green.
+7. `sites/conformance.test.ts`: Flasker is the only adapter whose non-beer fixture produces
+   provisional cards and, after mocked non-beer category hydration, explicit `nonBeer` cards;
+   every other adapter retains the zero-card parse contract until #623.
+8. Existing Flasker fixture, re-render, refresh and normal badge tests remain green.
 
 The RED instrument is the adapter-level test using the six real titles and category responses: on
 current `main`, four return no card at the volume gate and two return no card at the title gate.
@@ -185,6 +198,7 @@ Expected core implementation files:
 - `extension/src/content/badge.test.ts`
 - `extension/src/sites/flasker.ts`
 - `extension/src/sites/flasker.test.ts`
+- `extension/src/sites/conformance.test.ts`
 
 Expected specification and user-facing files:
 
