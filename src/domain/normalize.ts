@@ -355,3 +355,44 @@ export function searchQueryLadder(brewery: string, name: string): string[] {
   const wide = cleanSearchQuery(brewery, name);
   return narrow === wide ? [narrow] : [narrow, wide];
 }
+
+const PACKAGING_PATTERN = /\b(?:can|cans|bottle|bottles|pack|\d+-?pack|keg|\d+(?:[.,]\d+)?\s*(?:ml|cl|l))\b/gi;
+
+const STYLE_DESCRIPTOR_PATTERN = new RegExp(
+  '^(.+?)\\s+(?:' +
+  '(?:west\\s+coast|new\\s+england|hazy|american|double|imperial|triple|session|baltic|foreign\\s+extra)\\s+(?:ipa|apa|dipa|neipa|stout|porter|lager|pils|pilsner|gose|sour|ale)|' +
+  '(?:pale|blonde|red|amber|dark|golden|brown)\\s+ale|' +
+  '(?:tomato\\s+vegetable|tomato)\\s+gose|' +
+  '(?:malt\\s+beer\\s+kvas|malt\\s+beer|hard\\s+seltzer)|' +
+  '(?:flavoured\\s+beer|kwas\\s+chlebowy\\s+jasny|kwas\\s+chlebowy|piwo\\s+aromatyzowane)|' +
+  '(?:jasny|jasne|ciemne|ciemny)\\s+(?:lager|pils|pelne)|' +
+  '(?:světlý\\s+ležák|svetly\\s+lezak)|' +
+  'niepasteryzowane|pasteryzowane|bezalkoholowe|alkofrei|alkoholfrei|nealko|' +
+  'special\\s+edition|limited\\s+edition|edycja\\s+specjalna|' +
+  'ipa|apa|dipa|neipa|tipa|stout|porter|lager|pils|pilsner|gose|sour|tripel|dubbel|quadrupel|kvas' +
+  ')$',
+  'iu',
+);
+
+// #353: Strip trailing generic style descriptors and packaging/format tokens
+// when an Algolia query returns 0 candidates due to token over-constraint.
+export function stripDescriptorAndPackaging(rawName: string): string | null {
+  let name = stripSearchNoise(rawName);
+  let prev = '';
+  while (prev !== name) {
+    prev = name;
+    name = name.replace(new RegExp('(?:\\s+' + PACKAGING_PATTERN.source + ')+\\s*$', 'iu'), '').trim();
+  }
+  const styleMatch = STYLE_DESCRIPTOR_PATTERN.exec(name);
+  if (styleMatch) {
+    name = styleMatch[1].trim();
+  }
+  prev = '';
+  while (prev !== name) {
+    prev = name;
+    name = name.replace(new RegExp('(?:\\s+' + PACKAGING_PATTERN.source + ')+\\s*$', 'iu'), '').trim();
+  }
+  name = name.replace(/[\s\-–—:,]+$/, '').trim();
+  const originalClean = stripSearchNoise(rawName);
+  return name.length > 0 && name !== originalClean ? name : null;
+}

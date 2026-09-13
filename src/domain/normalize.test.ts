@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, numericNameTokens, numericTokensCompatible } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, numericNameTokens, numericTokensCompatible, stripDescriptorAndPackaging } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -619,5 +619,41 @@ describe('numericTokensCompatible (#617)', () => {
   ])('%s ↔ %s → %s', (a, b, expected) => {
     expect(numericTokensCompatible(a, b)).toBe(expected);
     expect(numericTokensCompatible(b, a)).toBe(expected);
+  });
+});
+
+describe('stripDescriptorAndPackaging (#353)', () => {
+  test('strips trailing multi-word and single-word style descriptors (#590, #533, #559)', () => {
+    expect(stripDescriptorAndPackaging('16° Rainbow of Death West Coast IPA')).toBe('Rainbow of Death');
+    expect(stripDescriptorAndPackaging('Rewolucje Warmińskie niepasteryzowane 12,5°')).toBe('Rewolucje Warmińskie');
+    expect(stripDescriptorAndPackaging('Dark Roast Foreign Extra Stout')).toBe('Dark Roast');
+    expect(stripDescriptorAndPackaging('Hawaiian Curry Gose')).toBe('Hawaiian Curry');
+    expect(stripDescriptorAndPackaging('Kim-Yum Tomato Gose')).toBe('Kim-Yum');
+    expect(stripDescriptorAndPackaging('Maltdrikke Malt Beer KVAS')).toBe('Maltdrikke');
+    expect(stripDescriptorAndPackaging('Glød Frisk: Pink Guava, hard seltzer')).toBe('Glød Frisk: Pink Guava');
+  });
+
+  test('strips trailing packaging, container, and volume tokens (#388)', () => {
+    expect(stripDescriptorAndPackaging('Extra CAN')).toBe('Extra');
+    expect(stripDescriptorAndPackaging('Oranjeboom Lager CAN')).toBe('Oranjeboom');
+    expect(stripDescriptorAndPackaging('Mind Haze 473ml')).toBe('Mind Haze');
+    expect(stripDescriptorAndPackaging('O.J. Strong CAN')).toBe('O.J. Strong');
+    expect(stripDescriptorAndPackaging('O.J. Blanche CAN')).toBe('O.J. Blanche');
+    expect(stripDescriptorAndPackaging('IPA 4-pack')).toBe('IPA');
+  });
+
+  test('strips combined style descriptors and packaging tokens (#404)', () => {
+    expect(stripDescriptorAndPackaging('Maz Non-Alcoholic Pale Ale')).toBe('Maz Non-Alcoholic');
+    expect(stripDescriptorAndPackaging('PanIPAni 16.5° Special Edition')).toBe('PanIPAni');
+  });
+
+  test('returns null when no descriptors or packaging tokens are present', () => {
+    expect(stripDescriptorAndPackaging('Atak Chmielu')).toBeNull();
+    expect(stripDescriptorAndPackaging('Rainbow of Death')).toBeNull();
+  });
+
+  test('returns null when stripping would leave an empty name', () => {
+    expect(stripDescriptorAndPackaging('IPA')).toBeNull();
+    expect(stripDescriptorAndPackaging('CAN')).toBeNull();
   });
 });
