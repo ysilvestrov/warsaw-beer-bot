@@ -107,6 +107,15 @@ export function setOrphan(host: HTMLElement, brewery: string, name: string): voi
   attach(host, makeBadge('⚪', untappdSearchUrl(brewery, name)));
 }
 
+/** Show that the shop explicitly classified this card as not beer. */
+export function setNonBeer(host: HTMLElement): void {
+  const badge = makeBadge('✕', null);
+  badge.style.color = '#ff6b6b';
+  badge.setAttribute('role', 'img');
+  badge.setAttribute('aria-label', 'Не пиво');
+  attach(host, badge);
+}
+
 /** Replace the badge with a loading glyph while an Untappd search is in flight. */
 export function setSearching(host: HTMLElement): void {
   attach(host, makeBadge('⏳', null));
