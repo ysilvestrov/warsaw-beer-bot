@@ -525,6 +525,26 @@ describe('lookupBeer', () => {
     expect(queried).toBe('Kormoran Rewolucje');
   });
 
+  test('#271: comma following a digit is treated as a list delimiter when followed by non-digit', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (query === 'Pinta Fantazja') {
+          return [{
+            bid: 12345,
+            beer_name: 'Fantazja 1',
+            brewery_name: 'Browar Pinta',
+            style: 'Sour - Fruited',
+            abv: 5.0,
+            global_rating: 4.0,
+          }];
+        }
+        return [];
+      },
+    };
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja 1, Mango', search });
+    expect(out.kind).toBe('matched');
+  });
+
   test('#321 grade: single same-grade lager candidate (Desitka → Kamenická 10)', async () => {
     const search = fakeSearch(() => [
       { bid: 12141, beer_name: 'Kamenická 10', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Pale Lager', abv: 4.2, global_rating: 3.3 },
@@ -1574,6 +1594,29 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
     expect(out.kind).toBe('matched');
     if (out.kind !== 'matched') return;
     expect(out.result.bid).toBe(5042332);
+  });
+
+  test('alcohol-class guard rejects alcoholic twin for space-separated "Non Alcoholic" without input ABV', async () => {
+    const search: BeerSearch = {
+      search: async (query: string) => {
+        if (/pale\s+ale/i.test(query)) return [];
+        return [{
+          bid: 1000,
+          beer_name: 'Maz',
+          brewery_name: 'Omnipollo',
+          style: 'Pale Ale',
+          abv: 6.0,
+          global_rating: 4.0,
+        }];
+      },
+    };
+
+    const out = await lookupBeer({
+      brewery: 'Omnipollo',
+      name: 'Maz Non Alcoholic Pale Ale',
+      search,
+    });
+    expect(out.kind).toBe('not_found');
   });
 
   test('ABV tolerance guard: descriptor-retry candidate with contradicting ABV is rejected (#353 / #33517)', async () => {

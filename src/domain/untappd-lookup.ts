@@ -64,7 +64,7 @@ function brewerySearchParts(brewery: string): string[] {
 // " #<n>". Deliberately EXCLUDES the " - " dash (often a real sub-edition) and any token cap, both
 // of which risk truncating a legitimate name. Returns null when there is no such delimiter or the
 // head is empty / equal to the whole name.
-const TAIL_LIST_DELIMITER = /(?<!\d),(?!\d)|\s#\d/;
+const TAIL_LIST_DELIMITER = /,(?!\d)|(?<!\d),|\s#\d/;
 function headBeforeTail(name: string): string | null {
   const m = TAIL_LIST_DELIMITER.exec(name);
   if (!m) return null;
@@ -74,11 +74,11 @@ function headBeforeTail(name: string): string | null {
 
 // #353: Guards on the descriptor-retry path. An input with a non-alcoholic descriptor or ABV <= 0.7
 // must never match an alcoholic candidate (>= 2.0%) and vice versa.
-const NON_ALCOHOLIC_REGEX = /\b(?:bezalkoholowe|non-?alcoholic|alkofrei|alkoholfrei|nealko|0[,.]0%?|zero)\b/i;
+const NON_ALCOHOLIC_REGEX = /\b(?:bezalkoholow\w*|non[- ]?alcoholic|alkofrei|alkoholfrei|nealko|0[,.]0%?|zero)\b/i;
 
 function isAlcoholClassMismatch(inputAbv: number | null | undefined, rawName: string, cand: SearchResult): boolean {
   const isInputNonAlco = (inputAbv != null && inputAbv <= 0.7) || NON_ALCOHOLIC_REGEX.test(rawName);
-  const isCandNonAlco = (cand.abv != null && cand.abv <= 0.7) || (cand.style != null && /non-alcoholic/i.test(cand.style));
+  const isCandNonAlco = (cand.abv != null && cand.abv <= 0.7) || (cand.style != null && NON_ALCOHOLIC_REGEX.test(cand.style));
 
   if (isInputNonAlco && cand.abv != null && cand.abv >= 2.0) return true;
   if (!isInputNonAlco && inputAbv != null && inputAbv >= 2.0 && isCandNonAlco) return true;
