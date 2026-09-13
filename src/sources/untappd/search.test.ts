@@ -108,6 +108,26 @@ describe('parseSearchPage', () => {
     expect(it.global_rating).toBeNull();
   });
 
+  test('global_rating is null when data-rating is "0" (<10 ratings, #616)', () => {
+    const html = `
+      <div class="beer-item">
+        <div class="beer-details">
+          <p class="name"><a href="/b/x/6869890">Prototype</a></p>
+          <p class="brewery"><a>Funky Fluid</a></p>
+          <p class="style">IPA</p>
+        </div>
+        <div class="details beer">
+          <p class="abv">6% ABV</p>
+          <div class="rating">
+            <div class="caps" data-rating="0"></div>
+          </div>
+        </div>
+      </div>`;
+    const [it] = parseSearchPage(html);
+    expect(it.bid).toBe(6869890);
+    expect(it.global_rating).toBeNull();
+  });
+
   test('abv null when text is "N/A% ABV"', () => {
     const html = `
       <div class="beer-item">

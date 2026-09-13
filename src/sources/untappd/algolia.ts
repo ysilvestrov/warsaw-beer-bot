@@ -2,6 +2,7 @@ import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { HttpError, normalizeProxyUrl } from '../http';
 import type { FetchInitLike, FetchLike } from '../fetch-like';
 import type { BeerSearch, SearchResult, HydratedBeer } from './search';
+import { untappdRating } from './rating';
 
 interface AlgoliaHit {
   bid?: unknown;
@@ -58,7 +59,7 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
       brewery_name: str(h.brewery_name),
       style: style.length > 0 ? style : null,
       abv: num(h.beer_abv),
-      global_rating: num(h.rating_score),
+      global_rating: untappdRating(h.rating_score),
       brewery_alias: strList(h.brewery_alias),
       alias_alt: strList(h.alias_alt),
       rating_count: ratingCount(h.rating_count),
@@ -84,7 +85,7 @@ export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBe
     brewery_name: str(h.brewery_name),
     style: style.length > 0 ? style : null,
     abv: num(h.beer_abv),
-    global_rating: num(h.rating_score),
+    global_rating: untappdRating(h.rating_score),
     beer_slug: slug.length > 0 ? slug : null,
     brewery_alias: strList(h.brewery_alias),
     rating_count: ratingCount(h.rating_count),
