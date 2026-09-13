@@ -697,6 +697,49 @@ export function applyHydratedRatings(
   return out;
 }
 
+export interface ProfileBeerFacts {
+  global_rating: number | null;
+  global_rating_shown: boolean;
+  abv: number | null;
+}
+
+// #616: рядок, знайдений за bid зі сторінки `/beers` профілю (refreshAllUntappd). Блок «Global Rating»
+// (число або «N/A») — пряма відповідь Untappd про рейтинг: перезапис і штамп звірки. Без блоку
+// сторінка про рейтинг нічого не каже — рейтинг і штамп не чіпаються. ABV сторінки перемагає, коли
+// він є (як і до #616). Сторінка — власний запис Untappd про те, що користувач пив цей bid, тож
+// провенанс лінка посилюється до 'checkin' ('curated' лишається).
+export function recordProfileBeer(
+  db: DB,
+  beerId: number,
+  facts: ProfileBeerFacts,
+  nowIso: string,
+): void {
+  const before = db
+    .prepare('SELECT rating_global, abv, untappd_id_source FROM beers WHERE id = ?')
+    .get(beerId) as
+    | { rating_global: number | null; abv: number | null; untappd_id_source: UntappdIdSource | null }
+    | undefined;
+  if (!before) return;
+  const source = strongerSource(before.untappd_id_source, 'checkin');
+  if (facts.global_rating_shown) {
+    db.prepare(
+      `UPDATE beers SET
+         rating_global = ?,
+         abv = COALESCE(?, abv),
+         rating_checked_at = ?,
+         untappd_id_source = ?
+       WHERE id = ?`,
+    ).run(facts.global_rating, facts.abv, nowIso, source, beerId);
+  } else {
+    db.prepare('UPDATE beers SET abv = COALESCE(?, abv), untappd_id_source = ? WHERE id = ?')
+      .run(facts.abv, source, beerId);
+  }
+  const abvChanged = facts.abv !== null && facts.abv !== before.abv;
+  const ratingChanged = facts.global_rating_shown && facts.global_rating !== before.rating_global;
+  // Кеш /match залежить від рейтингу й ABV, не від штампа чи провенансу.
+  if (abvChanged || ratingChanged) bumpCatalogVersion();
+}
+
 export function readWebTriedAt(db: DB, beerId: number): string | null {
   const row = db
     .prepare('SELECT web_tried_at FROM beers WHERE id = ?')

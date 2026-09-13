@@ -1741,3 +1741,80 @@ describe('applyHydratedRatings (#616)', () => {
     expect(getBeer(db, other)).toMatchObject({ rating_global: 3.9, rating_checked_at: null });
   });
 });
+
+// ---------------------------------------------------------------------------
+// #616 — рядок, знайдений за bid зі сторінки /beers профілю
+// ---------------------------------------------------------------------------
+
+import { recordProfileBeer } from './beers';
+
+describe('recordProfileBeer (#616)', () => {
+  const NOW_ISO = '2026-09-13T03:00:00.000Z';
+  type Source = 'search' | 'bid' | 'checkin' | 'curated' | null;
+
+  function seedRow(db: ReturnType<typeof fresh>, o: { rating: number | null; abv: number | null; source?: Source; checkedAt?: string | null }): number {
+    const id = seedBeer(db, {
+      untappd_id: 6869890, name: 'Prototype', brewery: 'Funky Fluid', style: 'IPA', abv: o.abv,
+      rating_global: o.rating, normalized_name: 'prototype', normalized_brewery: 'funky fluid',
+    });
+    // `source: null` — справжній кейс «провенансу немає», тож дефолт лише для відсутнього ключа.
+    db.prepare('UPDATE beers SET untappd_id_source = ?, rating_checked_at = ? WHERE id = ?')
+      .run(o.source === undefined ? 'search' : o.source, o.checkedAt ?? null, id);
+    return id;
+  }
+
+  test('a Global Rating number overwrites the rating and stamps; page ABV wins when present', () => {
+    const db = fresh();
+    const id = seedRow(db, { rating: 3.5, abv: 5.0 });
+    recordProfileBeer(db, id, { global_rating: 4.05, global_rating_shown: true, abv: 6.3 }, NOW_ISO);
+    expect(getBeer(db, id)).toMatchObject({ rating_global: 4.05, abv: 6.3, rating_checked_at: NOW_ISO });
+  });
+
+  test('Global Rating (N/A) writes NULL and stamps; an absent page ABV keeps the stored one', () => {
+    const db = fresh();
+    const id = seedRow(db, { rating: 3.64, abv: 6.0 });
+    recordProfileBeer(db, id, { global_rating: null, global_rating_shown: true, abv: null }, NOW_ISO);
+    expect(getBeer(db, id)).toMatchObject({ rating_global: null, abv: 6.0, rating_checked_at: NOW_ISO });
+  });
+
+  test('a card without the block leaves rating and stamp alone but still takes the page ABV', () => {
+    const db = fresh();
+    const id = seedRow(db, { rating: 3.9, abv: 5.0, checkedAt: '2026-09-01T00:00:00.000Z' });
+    recordProfileBeer(db, id, { global_rating: null, global_rating_shown: false, abv: 6.3 }, NOW_ISO);
+    expect(getBeer(db, id)).toMatchObject({ rating_global: 3.9, abv: 6.3, rating_checked_at: '2026-09-01T00:00:00.000Z' });
+  });
+
+  test.each([
+    [null, 'checkin'], ['search', 'checkin'], ['bid', 'checkin'], ['checkin', 'checkin'], ['curated', 'curated'],
+  ] as [Source, Source][])('provenance %s → %s, with and without the block', (stored, expected) => {
+    for (const shown of [true, false]) {
+      const db = fresh();
+      const id = seedRow(db, { rating: 3.9, abv: 5.0, source: stored });
+      recordProfileBeer(db, id, { global_rating: 3.9, global_rating_shown: shown, abv: 5.0 }, NOW_ISO);
+      expect(getBeer(db, id)?.untappd_id_source).toBe(expected);
+    }
+  });
+
+  test('bumps the catalog only when the rating or the ABV actually changed', () => {
+    const db = fresh();
+    const id = seedRow(db, { rating: 4.05, abv: 6.3 });
+    const v0 = catalogVersion();
+    recordProfileBeer(db, id, { global_rating: 4.05, global_rating_shown: true, abv: 6.3 }, NOW_ISO);
+    expect(catalogVersion()).toBe(v0);                     // нічого не змінилось
+    recordProfileBeer(db, id, { global_rating: 4.1, global_rating_shown: true, abv: 6.3 }, NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 1);                 // рейтинг
+    recordProfileBeer(db, id, { global_rating: 4.1, global_rating_shown: false, abv: 7.0 }, NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 2);                 // лише ABV
+    recordProfileBeer(db, id, { global_rating: 4.1, global_rating_shown: false, abv: null }, NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 2);                 // ABV сторінки порожній — не зміна
+    recordProfileBeer(db, id, { global_rating: null, global_rating_shown: false, abv: null }, NOW_ISO);
+    expect(catalogVersion()).toBe(v0 + 2);                 // без блоку рейтинг не змінюється
+  });
+
+  test('an unknown beer id is a no-op', () => {
+    const db = fresh();
+    const v0 = catalogVersion();
+    expect(() => recordProfileBeer(db, 99_999, { global_rating: 4.0, global_rating_shown: true, abv: 5.0 }, NOW_ISO)).not.toThrow();
+    expect(catalogVersion()).toBe(v0);
+  });
+});
