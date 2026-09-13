@@ -157,6 +157,34 @@ describe('runOverlay', () => {
     expect(sendMatch).not.toHaveBeenCalled();
   });
 
+  it('classifies before cache and renders confirmed non-beer without API or cache writes', async () => {
+    const card: Card = { el: cardEl(), brewery: 'Термос', name: 'для пляшки' };
+    await setCached(
+      normalizeKey(card.brewery, card.name),
+      drunkResult(card.brewery, card.name),
+    );
+    vi.mocked(chrome.storage.local.set).mockClear();
+    const adapter: SiteAdapter = {
+      ...adapterFor([card]),
+      loadDetailsBeforeCache: true,
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].nonBeer = true;
+        cards[0].skip = true;
+      }),
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapter, sendMatch, enrich);
+
+    expect(adapter.loadCardDetails).toHaveBeenCalledWith([card]);
+    expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('✕');
+    expect(isSeen(card.el)).toBe(true);
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(enrich).not.toHaveBeenCalled();
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+  });
+
   it('awaits waitForGrid before parsing when the adapter defines it', async () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };
