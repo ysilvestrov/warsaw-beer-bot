@@ -272,7 +272,7 @@ const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|\
 
 // Category hint (Barn2 table data-product_cat). Category names are safe for
 // broader snack/merch tokens since they are not beer names.
-const NONBEER_CATEGORY_RE = /(?:снек|снэк|закуск|набор|набір|сет|\bset\b|аксесуар|сувенір|мерч|merch|подарунк|snack|\bglass\b|\bgift\b)/iu;
+const NONBEER_CATEGORY_RE = /(?:снек|снэк|закуск|набор|набір|сет|\bset\b|аксесуар|сувенір|келих|склянк|мерч|merch|подарунк|snack|\bglass\b|\bgift\b)/iu;
 
 export function isNonBeerTitle(title: string): boolean {
   return isNonBeerName(title) || NONBEER_TITLE_RE.test(title);

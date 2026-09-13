@@ -311,6 +311,8 @@ describe('isNonBeerCategory (table data-product_cat hint)', () => {
   it('drops snack/merch categories', () => {
     expect(isNonBeerCategory('812:Снеки, ')).toBe(true);
     expect(isNonBeerCategory('900:Аксесуари, ')).toBe(true);
+    expect(isNonBeerCategory('Келихи')).toBe(true);
+    expect(isNonBeerCategory('Склянки')).toBe(true);
   });
   it('keeps a beer-style category', () => {
     expect(isNonBeerCategory('812:Темне міцне, ')).toBe(false);
