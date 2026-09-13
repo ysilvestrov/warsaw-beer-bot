@@ -485,6 +485,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE api_usage ADD COLUMN mcp_beers INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 31,
+    // #616: «рейтинг звірено з Untappd у момент T». Без бекфілу: доказу звірки немає ні в кого —
+    // стара джоба рейтингів не штампувала, а синк чекінів до #617 рейтинги стирав.
+    sql: `
+      ALTER TABLE beers ADD COLUMN rating_checked_at TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
