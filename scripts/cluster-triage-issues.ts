@@ -116,7 +116,6 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
 
   const shop = detectShop(combinedText, scope?.where as any);
   const titleLower = issue.title.toLowerCase();
-  const bodyLower = issue.body.toLowerCase();
 
   let locus: ArchitecturalLocus = 'other';
   let clusterKey = 'misc';
@@ -146,11 +145,8 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/untappd-lookup.ts',
     ];
   }
-  // Shop Adapters (check title first or explicit scope where clause)
-  else if (
-    titleLower.includes('flasker') ||
-    (scope?.where as any)?.some((t: any) => t.col === 'source_url' && String(t.value).includes('flasker'))
-  ) {
+  // Shop Adapters (check normalized shop detection or title)
+  else if (shop === 'flasker' || titleLower.includes('flasker')) {
     locus = 'adapter_bug';
     clusterKey = 'flasker-adapter';
     clusterTitle = 'Flasker Shop Adapter & Scraper Extraction';
@@ -159,22 +155,26 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'extension/scripts/gen-flasker-breweries.ts',
       'extension/src/sites/flasker-breweries.generated.ts',
     ];
-  } else if (
-    titleLower.includes('winetime') ||
-    (scope?.where as any)?.some((t: any) => t.col === 'source_url' && String(t.value).includes('winetime'))
-  ) {
+  } else if (shop === 'winetime' || titleLower.includes('winetime')) {
     locus = 'adapter_bug';
     clusterKey = 'winetime-adapter';
     clusterTitle = 'WineTime Shop Adapter';
     targetFiles = ['extension/src/sites/winetime.ts'];
-  } else if (
-    titleLower.includes('beershop') ||
-    (scope?.where as any)?.some((t: any) => t.col === 'source_url' && String(t.value).includes('beershop'))
-  ) {
+  } else if (shop === 'beershop' || titleLower.includes('beershop')) {
     locus = 'adapter_bug';
     clusterKey = 'beershop-adapter';
     clusterTitle = 'BeerShop.eu Series & Title Banner Splitting';
     targetFiles = ['extension/src/sites/beershop.ts'];
+  } else if (shop === 'beerfreak' || titleLower.includes('beerfreak')) {
+    locus = 'adapter_bug';
+    clusterKey = 'beerfreak-adapter';
+    clusterTitle = 'BeerFreak Shop Adapter';
+    targetFiles = ['extension/src/sites/beerfreak.ts'];
+  } else if (shop === 'onemorebeer' || titleLower.includes('onemorebeer')) {
+    locus = 'adapter_bug';
+    clusterKey = 'onemorebeer-adapter';
+    clusterTitle = 'OneMoreBeer Shop Adapter';
+    targetFiles = ['extension/src/sites/onemorebeer.ts'];
   } else if (titleLower.includes('internal-cron')) {
     locus = 'adapter_bug';
     clusterKey = 'internal-cron-parser';
@@ -350,7 +350,7 @@ export function groupIntoClusters(classifiedIssues: ClassifiedIssue[]): IssueClu
 
 export function fetchOpenOrphanIssues(): RawIssue[] {
   const stdout = execSync(
-    'gh issue list --state open --label orphan-triage --limit 100 --json number,title,body,labels,createdAt,updatedAt,comments',
+    'gh issue list --state open --label orphan-triage --limit 500 --json number,title,body,labels,createdAt,updatedAt,comments',
     { encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 }
   );
   return JSON.parse(stdout) as RawIssue[];
@@ -392,7 +392,7 @@ export function formatClusterReportMarkdown(clusters: IssueCluster[]): string {
 }
 
 // CLI runner when executed directly
-if (require.main === module || process.argv[1]?.endsWith('cluster-triage-issues.ts')) {
+if (process.argv[1]?.endsWith('cluster-triage-issues.ts') || process.argv[1]?.endsWith('cluster-triage-issues')) {
   try {
     const issues = fetchOpenOrphanIssues();
     const classified = issues.map(classifyIssue);
