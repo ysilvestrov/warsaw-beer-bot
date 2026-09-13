@@ -9,7 +9,7 @@ import type { SiteAdapter } from '../sites/types';
 export function refreshCards(doc: Document, adapter: SiteAdapter): string[] {
   const keys: string[] = [];
   for (const card of adapter.parseCards(doc)) {
-    keys.push(normalizeKey(card.brewery, card.name));
+    if (!card.nonBeer) keys.push(normalizeKey(card.brewery, card.name));
     resetCard(card.el);
   }
   return keys;

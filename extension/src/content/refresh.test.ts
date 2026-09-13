@@ -32,4 +32,25 @@ describe('refreshCards', () => {
     expect(isSeen(b)).toBe(false);
     expect(b.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
   });
+
+  it('resets a confirmed non-beer without returning a cache key', () => {
+    const host = cardEl();
+    const adapter = {
+      id: 'fake',
+      hostMatch: () => true,
+      parseCards: () => [{
+        el: host,
+        brewery: '',
+        name: '',
+        nonBeer: true,
+        skip: true,
+      }],
+    } as SiteAdapter;
+
+    const keys = refreshCards(document, adapter);
+
+    expect(keys).toEqual([]);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(isSeen(host)).toBe(false);
+  });
 });
