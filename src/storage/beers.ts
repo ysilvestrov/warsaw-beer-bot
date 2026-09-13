@@ -523,78 +523,8 @@ export function listRelayLookupCandidates(
   return eligible.slice(0, limit);
 }
 
-export function recordRatingSuccess(
-  db: DB,
-  beerId: number,
-  rating: number,
-): void {
-  // Success overwrites whatever rating_global was there. Count not touched —
-  // the beer leaves the candidate pool naturally (rating_global IS NOT NULL).
-  db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?')
-    .run(rating, beerId);
-  bumpCatalogVersion();
-}
-
-export function recordRatingNotFound(
-  db: DB,
-  beerId: number,
-  at: string,
-): void {
-  db.prepare(
-    `UPDATE beers SET
-       rating_refresh_at = ?,
-       rating_refresh_count = rating_refresh_count + 1
-     WHERE id = ?`,
-  ).run(at, beerId);
-}
-
-export function recordRatingTransient(
-  db: DB,
-  beerId: number,
-  at: string,
-): void {
-  db.prepare(
-    'UPDATE beers SET rating_refresh_at = ? WHERE id = ?',
-  ).run(at, beerId);
-}
-
-export interface RatingRefreshCandidate {
-  id: number;
-  untappd_id: number;
-  rating_refresh_at: string | null;
-  rating_refresh_count: number;
-}
-
-export function listRatingRefreshCandidates(
-  db: DB,
-  limit: number,
-  now: Date,
-): RatingRefreshCandidate[] {
-  // SQL pre-filter: beers WITH untappd_id but NO rating, currently on tap.
-  // #486: uses onLatestTapPredicate, the same on-tap definition listLookupCandidates
-  // interpolates positively — not a hand-kept copy of its join.
-  const rows = db
-    .prepare(
-      `SELECT b.id, b.untappd_id,
-              b.rating_refresh_at, b.rating_refresh_count
-       FROM beers b
-       WHERE b.untappd_id IS NOT NULL
-         AND b.rating_global IS NULL
-         AND ${onLatestTapPredicate}
-       ORDER BY b.rating_refresh_count ASC, b.id ASC`,
-    )
-    .all() as RatingRefreshCandidate[];
-
-  // JS-side backoff filter using the shared lookup-backoff module.
-  const eligible = rows.filter((r) =>
-    isEligible(now, r.rating_refresh_at, r.rating_refresh_count),
-  );
-
-  return eligible.slice(0, limit);
-}
-
 // #616: звірка рейтингу злінкованого пива з Untappd (Algolia getObjects за bid). На відміну від
-// listRatingRefreshCandidates — без гейту «на крані» і з повторною звіркою наявних рейтингів.
+// колишньої HTML-джоби — без гейту «на крані» і з повторною звіркою наявних рейтингів.
 export const RATING_RECHECK_DAYS = 30;
 
 export interface RatingHydrationCandidate {
