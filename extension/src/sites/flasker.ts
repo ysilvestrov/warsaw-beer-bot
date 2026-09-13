@@ -25,7 +25,21 @@ function volumeIndex(title: string): number {
 
 // --- brewery / name ------------------------------------------------------
 const PAREN_RE = /^\([^)]*\)$/u;
-const TWO_WORD_BREWERIES = new Set(['vibrant pour']);
+const TWO_WORD_BREWERIES = new Set([
+  'vibrant pour',
+  'ten men',
+  'holy brew',
+  'safe circle',
+  'hrew brew',
+  'evil twin',
+  'the lost philosopher',
+  'lost philosopher',
+  'de zwarte regel',
+  'mad driver',
+  'dva bro',
+  'strange toys',
+  'muza brewing',
+]);
 
 export interface FlaskerEvidence {
   productTags?: string[];
@@ -41,6 +55,12 @@ interface BreweryRule {
 }
 
 const BREWERY_RULES: BreweryRule[] = [
+  {
+    canonical: 'Evil Twin Brewing',
+    tags: ['evil twin', 'eviltwin'],
+    slugPrefixes: ['evil-twin-', 'eviltwin-'],
+    titleAliases: ['Evil Twin Brewing', 'Evil Twin', 'EvilTwin'],
+  },
   {
     canonical: 'VibrantPour',
     tags: ['vibrant pour'],
@@ -153,6 +173,15 @@ function stripTitleAlias(head: string, aliases: string[]): string {
 }
 
 function splitBreweryName(head: string): { brewery: string; name: string } {
+  const colonIdx = head.indexOf(':');
+  if (colonIdx > 0 && colonIdx < head.length - 1) {
+    const candidateBrewery = head.slice(0, colonIdx).trim();
+    const candidateName = head.slice(colonIdx + 1).replace(/^[\s:–—-]+/u, '').trim();
+    if (candidateBrewery && candidateName) {
+      return { brewery: candidateBrewery, name: candidateName };
+    }
+  }
+
   const tokens = head.split(/\s+/).filter(Boolean);
   if (tokens.length <= 1) return { brewery: head, name: head };
 
@@ -160,7 +189,7 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   const takeTwo = TWO_WORD_BREWERIES.has(firstTwo) || PAREN_RE.test(tokens[1]);
 
   const breweryTokens = takeTwo ? tokens.slice(0, 2) : tokens.slice(0, 1);
-  const brewery = breweryTokens.join(' ');
+  const brewery = breweryTokens.join(' ').replace(/:$/u, '');
   const name = tokens.slice(breweryTokens.length).join(' ').trim();
   return { brewery, name: name || brewery };
 }
@@ -207,7 +236,7 @@ export function breweryFromRegistryHead(
   for (const brewery of FLASKER_BREWERIES) {
     for (const m of brewery.match) {
       const lm = m.toLowerCase();
-      if (lower === lm || lower.startsWith(`${lm} `)) {
+      if (lower === lm || (lower.startsWith(lm) && /^[\s:–—-]/u.test(lower.slice(lm.length)))) {
         if (!best || m.length > best.matched.length) best = { brewery, matched: m };
       }
     }
@@ -216,7 +245,7 @@ export function breweryFromRegistryHead(
 }
 
 // Title-side twin of SLUG_MERCH_PREFIX_RE (above) — keep the two vocabularies in step.
-const MERCH_PREFIX_RE = /^(?:(?:ПРЕДРЕЛІЗ|ПРЕДРЕДІЗ)(?=$|[\s:–—-])|ПРОБНИК:)[\s:–—-]*/iu;
+const MERCH_PREFIX_RE = /^(?:(?:ПРЕДРЕЛІЗ|ПРЕДРЕДІЗ|AOTEAROA)(?=$|[\s:–—-])|ПРОБНИК:)[\s:–—-]*/iu;
 
 export function stripMerchandisingPrefix(name: string): string {
   const stripped = name.replace(MERCH_PREFIX_RE, '').trim();
