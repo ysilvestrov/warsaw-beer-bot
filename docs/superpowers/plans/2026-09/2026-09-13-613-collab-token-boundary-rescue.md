@@ -156,6 +156,17 @@ describe('#613 collab-token boundary rescue', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('does not forgive a different one-letter token elsewhere in the name', async () => {
+    const target = { ...candidates[1], beer_name: 'B Birthday Cookie: Multi Qlti 2026' };
+    const out = await lookupBeer({
+      brewery: 'Funky Fluid X MultiQlti Brewery',
+      name: 'A Birthday Cookie MultiQlti 2026 36°',
+      abv: 13,
+      search: fakeSearch(() => [target, candidates[0]]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
   test('refuses two distinct bids with the same repaired name, year, and ABV', async () => {
     const duplicate = { ...candidates[1], bid: 7000000 };
     const out = await lookupBeer({
@@ -213,12 +224,11 @@ function singleTokenCollabParts(brewery: string): Set<string> {
 }
 
 function differsOnlyByCollabTokenBoundary(
-  inputName: string,
+  inputTokens: readonly string[],
   candidateName: string,
   collabParts: ReadonlySet<string>,
 ): boolean {
-  const inputTokens = nameTokens(normalizeName(inputName));
-  const candidateTokens = nameTokens(normalizeName(candidateName));
+  const candidateTokens = normalizeName(candidateName).split(' ').filter(Boolean);
   const splitLength = candidateTokens.length - inputTokens.length + 1;
   if (splitLength < 2) return false;
 
@@ -248,13 +258,14 @@ function collabTokenBoundaryRescue(
 
   const collabParts = singleTokenCollabParts(input.brewery);
   if (collabParts.size === 0) return null;
+  const inputTokens = normalizeName(input.name).split(' ').filter(Boolean);
 
   const matches = strictPool.filter((candidate) =>
     extractYear(candidate.beer_name) === inputYear &&
     candidate.abv !== null &&
     Math.abs(candidate.abv - inputAbv) <= ABV_TOLERANCE &&
     differsOnlyByCollabTokenBoundary(
-      input.name,
+      inputTokens,
       candidate.beer_name,
       collabParts,
     ),
@@ -291,7 +302,7 @@ Run:
 npx vitest run src/domain/untappd-lookup.test.ts -t "#613 collab-token boundary rescue"
 ```
 
-Expected: all #613 cases pass, including both candidate orders and every fail-closed case.
+Expected: all 11 #613 cases pass, including both candidate orders and every fail-closed case.
 
 - [ ] **Step 7: Run the complete owner test file and typecheck**
 
