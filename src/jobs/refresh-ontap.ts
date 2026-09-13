@@ -10,7 +10,7 @@ import { resolveTapIdentity } from '../sources/ontap/identity';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch, getMatch, type MatchRow } from '../storage/match_links';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { ensureOrphan, getBeer } from '../storage/beers';
 import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
@@ -131,7 +131,9 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             reusedMergedLinks++;
             continue;
           } else {
-            beerId = upsertBeer(db, {
+            // #617: промах матчера — сирота. ensureOrphan шукає лише серед сиріт: кран іншого
+            // вінтажу, якого матчер свідомо не зматчив, не перейменовує злінкований рядок.
+            beerId = ensureOrphan(db, {
               name,
               brewery,
               style: t.style,
