@@ -182,8 +182,8 @@ src/
 | `name` | TEXT | NOT NULL | канонічна назва пива |
 | `brewery` | TEXT | NOT NULL | пивоварня |
 | `style` | TEXT | nullable | стиль |
-| `abv` | REAL | nullable | міцність, %; заповнюється з Untappd (`refreshAllUntappd` парсить `.abv`, backfill через `COALESCE`; orphan-lookup — теж) |
-| `rating_global` | REAL | nullable | публічний рейтинг Untappd (`global_weighted_rating_score`) |
+| `abv` | REAL | nullable | міцність, %; заповнюється з Untappd (`refreshAllUntappd` парсить `.abv`, backfill через `COALESCE`; orphan-lookup — теж). Шлях за bid (синк чекінів, `/import`, `refreshAllUntappd`) на рядку, знайденому за bid, **лише заповнює порожнє** й нічого не стирає; на резолвленій сироті Untappd-значення переважає (#617) |
+| `rating_global` | REAL | nullable | публічний рейтинг Untappd (`global_weighted_rating_score`); шлях за bid — те саме правило, що для `abv` (#617) |
 | `normalized_name` | TEXT | NOT NULL | для матчингу |
 | `normalized_brewery` | TEXT | NOT NULL | для матчингу |
 | `untappd_lookup_at` | TEXT | nullable (v5) | час останньої спроби lookup |
@@ -311,7 +311,7 @@ Untappd — `Banany Na Rauszu 2026`), людина фіксує матч вру�
 | | | **PK (telegram_id, beer_id)** | |
 
 Індекс: `idx_untappd_had_telegram (telegram_id)`.
-Заповнюється скрейпером (`markHad`). Об'єднання з `checkins` дає повний
+Заповнюється скрейпером (`markHad`); рядок пива шукається за bid зі сторінки `/beers`, а не за нормалізованою назвою — інакше позначка «пив» лягала б на вінтаж-близнюка (#617). Об'єднання з `checkins` дає повний
 «drunk-set» — див. §5.2.
 
 ### 3.8 `user_profiles` — профіль користувача
@@ -636,8 +636,9 @@ side-effect-free. Джерело тексту — `buildHelpText` з `src/bot/co
 до **20 MB** (ліміт Telegram `getFile`; великий JSON → запакувати в ZIP).
 **Під капотом:** streaming-парсер (`csv-parse` / `stream-json` / `yauzl`),
 вставка батчами по **500** у `db.transaction`, живий лічильник прогресу.
-Ідемпотентний за `UNIQUE(telegram_id, checkin_id)`. Зчитує
-`rating_global` у `beers` (через `upsertBeer`).
+Ідемпотентний за `UNIQUE(telegram_id, checkin_id)`. Рядок пива — через `upsertBeerByBid`
+(рядок експорту з bid: `style`/`abv`/`rating_global` лише заповнюють порожнє, без перейменування)
+або `ensureOrphan` (рядок без bid; злінкованого пива не торкається), #617.
 
 **Покриття (#587): імпорт нічого не заявляє.** Кожен батч зливає свої рядки в
 `checkins` — і це все, що він робить; у `checkin_coverage` (§3.15) імпорт не пише
@@ -917,7 +918,7 @@ exact-матчів. Серверна помилка → `500 { error: "internal"
 **Кеш каталогу (eventual consistency, #277).** `/match` матчить по спільному
 процес-рівневому кешу підготовленого каталогу (`catalog-cache.ts`), інвалідованому
 монотонним лічильником (`catalog-version.ts`), який бампають записи в каталог — і
-storage-мутатори (`upsertBeer`, `recordLookupSuccess`, `mergeIntoCanonical`,
+storage-мутатори (`upsertBeerByBid`, `ensureOrphan`, `recordLookupSuccess`, `mergeIntoCanonical`,
 `recordRatingSuccess`), і raw-SQL записи в cron/maintenance-джобах
 (`refresh-untappd`, `cleanup-polluted-ontap`, `dedupe-brewery-aliases`). Стратегія —
 stale-while-revalidate: після зміни каталогу перезбірка йде у фоні (single-flight),
@@ -1328,7 +1329,7 @@ placeholder-и й розбіжні title не обходять brewery-гейт.
 Провенанс живе в `beers.untappd_id_source` (міграція **v22**: `search`/`bid`/`curated`/
 `checkin`). Опублікований bid перезаписує `search`/`bid`/`NULL`, але ніколи `curated` чи
 `checkin` (`stampBidProvenance`/`refusesBidOverride`, `src/storage/beers.ts`) — інакше
-bid міг би **послабити** ручний пін (#343) чи check-in-based зв'язок. Бекфіл міграції
+bid міг би **послабити** ручний пін (#343) чи check-in-based зв'язок. Шлях за bid (`upsertBeerByBid`, #617) тримає ранг `curated` > `checkin` > `bid` > `search` > `NULL`: провенанс лише посилюється, тож синк чекінів не понижує пін до `checkin`. Бекфіл міграції
 позначає всі наявні піни (`match_links.reviewed_by_user = 1`) як `curated`: без нього
 кожен існуючий пін читався б як NULL = machine-derived = перезаписуваний. Обидва
 ендпоінти гейтяться тим самим `refusesBidOverride`: `/enrich/candidates` виставляє
@@ -1533,8 +1534,10 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 `POST /checkins/sync` приймає `{ html, maxId? }` (обрізана клієнтом сторінка стрічки + курсор,
 що її породив). Сервер: детектить блок-сторінку (спільний `block.ts`) → `502 { error: "blocked" }`
 (курсор не чіпає); валідує курсор — не `/^\d+$/` (нечисловий, з пробілами, `0x…`, `5e2`) →
-`400 { error: "bad_cursor" }`; парсить `parseCheckinFeedPage(html)`; на кожен чекін `upsertBeer`
-за **bid** (канонічний `untappd_id` — без fuzzy, попутно резолвить orphan'и) → локальний
+`400 { error: "bad_cursor" }`; парсить `parseCheckinFeedPage(html)`; на кожен чекін `upsertBeerByBid`
+за **bid** (канонічний `untappd_id`; не знайдено — резолвить **єдину** сироту з тією самою нормалізованою
+парою й сумісними цифровими токенами назви, інакше новий рядок; факти не стираються, назва не змінюється,
+провенанс лише посилюється, #617) → локальний
 `beers.id`, далі `mergeCheckin` (ідемпотентно за `UNIQUE(telegram_id, checkin_id)`); зливає
 доведений діапазон сторінки в `checkin_coverage` (§3.15) і оновлює `checkin_sync_state.profile_total`
 (§3.14). Повертає `{ merged, alreadyKnown, pageSize, nextMaxId, nextCursor, profileTotal,
@@ -1700,6 +1703,11 @@ schema_version **14** додає `pubs.city` (`NOT NULL DEFAULT 'warszawa'`) т�
 (свіжий orphan завжди досяжний через власний бакет пивоварні). Прибирає ~114×1.3 с
 синхронних блокувань event-loop на запуск. Startup-джоба `cleanupPollutedOntap` використовує
 той самий чанк-білд (одноразовий, без інкрементального add).
+
+**Сирота при промаху матчера (#617).** Промах іде в `ensureOrphan`: вона шукає за нормалізованою парою
+**лише серед сиріт** і злінкованого рядка не торкається ніколи — кран іншого вінтажу, якого матчер свідомо
+не зматчив, дає нову сироту, а не перейменування злінкованого рядка. Факти наявної сироти не
+переписуються. Відоме обмеження: сироти з однаковою нормалізованою назвою злипаються.
 
 **Untappd circuit breakers (persistent via `job_state`).** VPS-originated
 Untappd-звернення гейтяться **двома незалежними** circuit breaker'ами за різними
