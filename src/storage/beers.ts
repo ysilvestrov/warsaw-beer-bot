@@ -42,6 +42,7 @@ export interface BeerRow extends BeerInput {
   untappd_lookup_count: number;
   rating_refresh_at: string | null;
   rating_refresh_count: number;
+  rating_checked_at: string | null;
   web_tried_at: string | null;
 }
 
