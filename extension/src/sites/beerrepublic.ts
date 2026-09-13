@@ -15,7 +15,10 @@ export const beerrepublic: SiteAdapter = {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>('.product-item'))) {
       const name = text(el.querySelector('.product-item__title'));
       if (!name) continue;
-      if (isNonBeerName(name)) continue;
+      if (isNonBeerName(name)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
       const brewery = text(el.querySelector('.product-item__vendor'));
       cards.push({ el, brewery, name });
     }

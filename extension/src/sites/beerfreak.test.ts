@@ -145,15 +145,16 @@ describe('beerfreak adapter', () => {
     }));
   });
 
-  it('drops BeerFreak tasting sets and multi-beer packs', () => {
-    const parsed = beerfreak.parseCards(docWithProducts([
+  it('marks BeerFreak tasting sets and multi-beer packs as non-beer', () => {
+    const cards = beerfreak.parseCards(docWithProducts([
       { id: 29993, brand_title: 'FUNKY FLUID (Польща)', title: 'WORLD CUP SERIES - 5 SPECIAL BEER' },
       { id: 31072, brand_title: 'ГОНІР - HONIR BREWERY (Україна)', title: 'Дегустаціний сет від Honir Brewery' },
       { id: 31073, brand_title: 'Example Brewery', title: 'Example Brewery Mix Pack' },
       { id: 31074, brand_title: 'Example Brewery', title: 'Example Brewery Tasting Set' },
     ]));
 
-    expect(parsed).toEqual([]);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
   });
 
   it('keeps legitimate BeerFreak beers with incidental set-like substrings', () => {

@@ -45,7 +45,7 @@ describe('bierloods22 brewery extraction (#117)', () => {
     expect(c.name).toBe('Solo');
   });
 
-  it('ignores beer-package cards from the Bierloods22 package category', () => {
+  it('marks beer-package cards from the Bierloods22 package category as non-beer', () => {
     const cards = parse([
       card('Bierloods22 Beerbox - Surprise Box IPA', 'Beerbox - Surprise Box IPA'),
       card('Bierloods22 Beertasting box: all styles', 'Beertasting box: all styles'),
@@ -53,10 +53,14 @@ describe('bierloods22 brewery extraction (#117)', () => {
       card('Browar Stu Mostów ART+81', 'Browar Stu Mostów - ART+81'),
     ].join(''));
 
-    expect(cards).toHaveLength(1);
-    expect(cards[0]).toMatchObject({
-      brewery: 'Browar Stu Mostów',
-      name: 'ART+81',
-    });
+    const nonBeerCards = cards.filter((card) => card.nonBeer);
+    expect(nonBeerCards).toHaveLength(3);
+    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(cards.filter((card) => !card.nonBeer)).toEqual([
+      expect.objectContaining({
+        brewery: 'Browar Stu Mostów',
+        name: 'ART+81',
+      }),
+    ]);
   });
 });
