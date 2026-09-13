@@ -1,5 +1,6 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
+import { numericTokensCompatible } from '../domain/normalize';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
 
@@ -82,6 +83,119 @@ export function upsertBeer(db: DB, b: BeerInput): number {
   ).run(b.untappd_id ?? null, b.name, b.brewery, b.style ?? null, b.abv ?? null,
         b.rating_global ?? null, b.normalized_name, b.normalized_brewery,
         b.untappd_id_source ?? null);
+  bumpCatalogVersion();
+  return Number(res.lastInsertRowid);
+}
+
+// #617: провенанс лінка лише посилюється. 'curated' — рішення людини, 'checkin' — власний запис
+// Untappd, 'bid' — опублікований крамницею, 'search' — наше вгадування. Поточний upsertBeer робив
+// COALESCE(нове, старе) і так понижував пін до 'checkin'.
+const SOURCE_RANK: Record<UntappdIdSource, number> = { search: 1, bid: 2, checkin: 3, curated: 4 };
+
+function strongerSource(stored: UntappdIdSource | null, incoming: UntappdIdSource): UntappdIdSource {
+  if (stored === null) return incoming;
+  return SOURCE_RANK[incoming] > SOURCE_RANK[stored] ? incoming : stored;
+}
+
+export interface BidBeerInput {
+  untappd_id: number;
+  name: string;
+  brewery: string;
+  style?: string | null;
+  abv?: number | null;
+  rating_global?: number | null;
+  normalized_name: string;
+  normalized_brewery: string;
+  untappd_id_source: UntappdIdSource;
+}
+
+// #617: сирота, яку можна резолвити цим bid — рівно одна з тією самою нормалізованою парою і
+// сумісними цифровими токенами назви. normalizeName викидає цифри, тож без другої умови чекін
+// «Rochefort 10» віддав би bid сироті «Rochefort 8». Двозначність не вирішується вгадуванням.
+function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_source: UntappdIdSource | null } | null {
+  const orphans = db
+    .prepare(
+      `SELECT id, name, untappd_id_source FROM beers
+        WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?`,
+    )
+    .all(b.normalized_brewery, b.normalized_name) as {
+      id: number; name: string; untappd_id_source: UntappdIdSource | null;
+    }[];
+  const compatible = orphans.filter((o) => numericTokensCompatible(o.name, b.name));
+  return compatible.length === 1 ? compatible[0] : null;
+}
+
+// #617: ідентичність за Untappd bid — для синку чекінів, /import і refresh-untappd.
+// Рядок шукається за bid; не знайдено — серед сиріт (resolvableOrphan); інакше новий рядок.
+// Злінкованого рядка з іншим bid не торкається ніколи. Факти лише заповнюють порожнє, назва й
+// броварня не змінюються (#618), провенанс лише посилюється.
+export function upsertBeerByBid(db: DB, b: BidBeerInput): number {
+  const byBid = db
+    .prepare('SELECT id, untappd_id_source FROM beers WHERE untappd_id = ?')
+    .get(b.untappd_id) as { id: number; untappd_id_source: UntappdIdSource | null } | undefined;
+  const target = byBid ?? resolvableOrphan(db, b);
+
+  if (target) {
+    db.prepare(
+      `UPDATE beers SET
+         untappd_id = ?,
+         style = COALESCE(style, ?),
+         abv = COALESCE(abv, ?),
+         rating_global = COALESCE(rating_global, ?),
+         untappd_id_source = ?
+       WHERE id = ?`,
+    ).run(
+      b.untappd_id, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+      strongerSource(target.untappd_id_source, b.untappd_id_source), target.id,
+    );
+    bumpCatalogVersion();
+    return target.id;
+  }
+
+  const res = db.prepare(
+    `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global,
+       normalized_name, normalized_brewery, untappd_id_source)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    b.untappd_id, b.name, b.brewery, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+    b.normalized_name, b.normalized_brewery, b.untappd_id_source,
+  );
+  bumpCatalogVersion();
+  return Number(res.lastInsertRowid);
+}
+
+export interface OrphanBeerInput {
+  name: string;
+  brewery: string;
+  style?: string | null;
+  abv?: number | null;
+  rating_global?: number | null;
+  normalized_name: string;
+  normalized_brewery: string;
+}
+
+// #617: рядок без bid — для гілки сироти refresh-ontap і рядків /import без bid. Шукає лише серед
+// сиріт; знайдену повертає без перезапису. Злінкованого рядка не торкається ніколи: сирота поряд
+// зі злінкованим вінтажем тієї ж назви — нормальний стан (UNIQUE лише на untappd_id).
+// Відоме обмеження: сироти з однаковою нормалізованою назвою злипаються — як і до #617.
+export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
+  const existing = db
+    .prepare(
+      `SELECT id FROM beers
+        WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?
+        ORDER BY id LIMIT 1`,
+    )
+    .get(b.normalized_brewery, b.normalized_name) as { id: number } | undefined;
+  if (existing) return existing.id;
+
+  const res = db.prepare(
+    `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global,
+       normalized_name, normalized_brewery)
+     VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    b.name, b.brewery, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+    b.normalized_name, b.normalized_brewery,
+  );
   bumpCatalogVersion();
   return Number(res.lastInsertRowid);
 }
