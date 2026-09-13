@@ -1,7 +1,7 @@
 import { catalogVersion, bumpCatalogVersion } from './catalog-version';
 import { openDb } from './db';
 import { migrate } from './schema';
-import { recordLookupSuccess, recordRatingSuccess, recordLookupNotFound, recordRatingNotFound } from './beers';
+import { recordLookupSuccess, recordRatingSuccess, recordLookupNotFound, recordRatingNotFound, upsertBeerByBid, ensureOrphan } from './beers';
 import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
@@ -26,15 +26,21 @@ describe('catalog-version — storage instrumentation', () => {
     const db = openDb(':memory:');
     migrate(db);
 
+    // #617: продакшн-мутатори рядка пива — ensureOrphan (вставка сироти) і upsertBeerByBid
+    // (оновлення за bid). Тестовий seedBeer тут нічого не доводив би про продакшн.
     let v = catalogVersion();
-    const id = seedAtakChmielu(db);           // seedBeer (insert)
+    const id = ensureOrphan(db, {
+      name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA', abv: 6.1, rating_global: 3.7,
+      normalized_name: normalizeName('Atak Chmielu'),
+      normalized_brewery: normalizeBrewery('Pinta'),
+    });
     expect(catalogVersion()).toBeGreaterThan(v);
 
     v = catalogVersion();
-    seedBeer(db, {                   // seedBeer (update — same normalized keys)
-      name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA', abv: 6.2, rating_global: 3.8,
-      normalized_name: normalizeName('Atak Chmielu'),
-      normalized_brewery: normalizeBrewery('Pinta'),
+    upsertBeerByBid(db, {
+      untappd_id: 222, name: 'Other', brewery: 'Pinta', style: null, abv: 5.0, rating_global: null,
+      normalized_name: normalizeName('Other'), normalized_brewery: normalizeBrewery('Pinta'),
+      untappd_id_source: 'checkin',
     });
     expect(catalogVersion()).toBeGreaterThan(v);
 

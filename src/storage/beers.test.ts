@@ -1487,6 +1487,24 @@ describe('upsertBeerByBid (#617)', () => {
 describe('ensureOrphan (#617)', () => {
   const MONSTERS = 'Monsters Brewery';
 
+  // Рев'ю гілки #617: у гілці сироти refresh-ontap наявна сирота з тією ж нормалізованою парою
+  // досяжна лише тоді, коли матчер відкинув її як інший рік, — повернути її означало б приліпити
+  // кран «2025» до сироти «2024» (і шукати його на Untappd під назвою 2024).
+  test('an orphan of another year is not reused: a new orphan is inserted', () => {
+    const db = fresh();
+    const old = ensureOrphan(db, {
+      name: 'Piwobranie 2024', brewery: 'Browar Grodzisk', style: 'Grodziskie', abv: 3.1, rating_global: null,
+      normalized_name: normalizeName('Piwobranie 2024'), normalized_brewery: normalizeBrewery('Browar Grodzisk'),
+    });
+    const got = ensureOrphan(db, {
+      name: 'Piwobranie 2025', brewery: 'Browar Grodzisk', style: null, abv: 3.2, rating_global: null,
+      normalized_name: normalizeName('Piwobranie 2025'), normalized_brewery: normalizeBrewery('Browar Grodzisk'),
+    });
+    expect(got).not.toBe(old);
+    expect(getBeer(db, old)!.name).toBe('Piwobranie 2024');
+    expect(getBeer(db, got)!.name).toBe('Piwobranie 2025');
+  });
+
   test('inserts a new orphan beside a linked vintage with the same normalized name', () => {
     const db = fresh();
     const linked = seedBeer(db, {

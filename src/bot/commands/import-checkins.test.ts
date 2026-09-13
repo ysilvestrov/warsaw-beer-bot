@@ -64,6 +64,8 @@ describe('importCheckins', () => {
     const ck = db.prepare("SELECT beer_id FROM checkins WHERE checkin_id = '100'").get() as { beer_id: number };
     expect(ck.beer_id).not.toBe(linked);
     expect(getBeer(db, ck.beer_id)!.untappd_id).toBeNull();
+    // рев'ю гілки: без цього рядок без bid, пущений у upsertBeerByBid, дав би сироту з source 'checkin'
+    expect(getBeer(db, ck.beer_id)!.untappd_id_source).toBeNull();
   });
 
   it('import fills empty facts of a beer found by bid but never overwrites stored ones', () => {
