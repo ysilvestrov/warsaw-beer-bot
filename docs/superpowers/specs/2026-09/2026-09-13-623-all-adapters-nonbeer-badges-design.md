@@ -84,7 +84,7 @@ All adapters use the `setNonBeer` renderer introduced by #615:
 The host card receives `data-beerseen` after the badge is attached. The standard observer therefore
 does not repeatedly process it, while replacement DOM nodes are classified and badged normally.
 The existing refresh flow removes the badge and seen marker and lets the adapter classify the card
-again.
+again, but does not derive or invalidate a match-cache key for a confirmed non-beer card.
 
 ## Failure behavior
 
@@ -112,11 +112,14 @@ No database state, durable cache entry, cursor, coverage range, or server-side v
 
 1. Update each adapter's focused tests so its existing non-beer cases return confirmed non-beer
    cards rather than `[]`, while false-positive guards and malformed-card behavior stay unchanged.
-2. Update adapter conformance so every `<id>.nonbeer.html` fixture yields one or more cards and all
-   are `nonBeer + skip`; retain an explicit path for documented no-non-beer exemptions if one is
-   added later.
-3. Add conformance-level overlay assertions that non-beer fixtures render `✕`, receive
-   `data-beerseen`, and make no `/match` call.
+2. Update adapter conformance so per-card `<id>.nonbeer.html` fixtures yield one or more cards and
+   all are `nonBeer + skip`. Flasker remains the detail-hydrated case. Beershop's captured fixture
+   remains an explicit exception because its category id is whole-page evidence and must still
+   yield `[]`; a synthetic mixed grid containing a shared pack-name match proves Beershop's
+   per-card contract instead.
+3. Add conformance-level overlay assertions that per-card non-beer fixtures render `✕`, receive
+   `data-beerseen`, and make no `/match` call. Cover Beershop's mixed-grid card in its focused test
+   or an exported conformance case without weakening the whole-page fixture assertion.
 4. Extend content tests to prove the non-beer branch runs before cache-key calculation and performs
    no cache read/write, matching, or enrichment.
 5. Keep the shared badge accessibility and interaction tests from #615 as the single renderer
