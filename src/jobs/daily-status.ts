@@ -22,7 +22,7 @@ export function buildStatusMessage(
     'Стан',
     `• Останній скрейп: ${scrapeLine}`,
     `• Каталог: ${group(m.beersTotal)} пив · ${matchPct}% зматчено · ${group(m.orphansPending)} orphan'ів у черзі · ${group(m.orphansRelayQueue)} у relay-черзі`,
-    `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу`,
+    `• Рейтинги: ${group(m.ratingsMissing)} зматчених пив без рейтингу · ${group(m.ratingsChecked30d)} звірено за 30 днів`,
     `• Enrich: +${group(m.enrichMatched24h)} зматчено / ${group(m.enrichFailures24h)} провалів за 24 год · пошук ${m.untappdSearchHealthy ? '✅' : '⚠️'}`,
     ...(triageLine ? [`• ${triageLine}`] : []),
     ...(saturatedLine ? [`• ${saturatedLine}`] : []),

@@ -16,7 +16,7 @@ function emptyDb() {
 
 const base: StatusMetrics = {
   lastScrapeHoursAgo: 9.3, pubsScraped24h: 42,
-  beersTotal: 12840, beersMatched: 10000, orphansPending: 287, orphansRelayQueue: 751, ratingsMissing: 134,
+  beersTotal: 12840, beersMatched: 10000, orphansPending: 287, orphansRelayQueue: 751, ratingsMissing: 134, ratingsChecked30d: 30120,
   snapshots: 1976, taps: 29459, dbSizeMb: 13.2,
   usersTotal: 31, usersLinked: 24,
   onTapDistinct: 1118, onTapPubs: 42, newOnTap24h: 37,
@@ -38,7 +38,7 @@ test('buildStatusMessage: full message exact string', () => {
       'Стан',
       '• Останній скрейп: 9 год тому ✅ (42 паби за 24 год)',
       "• Каталог: 12 840 пив · 78% зматчено · 287 orphan'ів у черзі · 751 у relay-черзі",
-      '• Рейтинги: 134 зматчених пив без рейтингу',
+      '• Рейтинги: 134 зматчених пив без рейтингу · 30 120 звірено за 30 днів',
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
       '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д · 4 unrescued (1 розімкнено без вердикту/7д)',
