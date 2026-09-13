@@ -3,7 +3,7 @@
 // connection's busy_timeout. better-sqlite3 is synchronous, so we retry the
 // whole operation with an async backoff that yields the event loop — giving the
 // checkpoint time to finish before the next attempt. Safe because callers wrap
-// idempotent work (upsertBeer/mergeCheckin key off UNIQUE columns).
+// idempotent work (upsertBeerByBid/mergeCheckin key off UNIQUE columns).
 
 export function isBusyError(e: unknown): boolean {
   return (
