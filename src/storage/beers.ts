@@ -572,11 +572,12 @@ export interface RatingHydrationOutcome {
   updated: number;
   changed: number;
   unknown: number;
+  skipped: number;
 }
 
 export function applyHydratedRatings(
   db: DB,
-  hits: Map<number, HydratedRatingFacts>,
+  hits: Map<number, HydratedRatingFacts | null>,
   bids: number[],
   nowIso: string,
 ): RatingHydrationOutcome {
@@ -600,13 +601,19 @@ export function applyHydratedRatings(
        rating_refresh_count = rating_refresh_count + 1
      WHERE untappd_id = ?`,
   );
-  const out: RatingHydrationOutcome = { updated: 0, changed: 0, unknown: 0 };
+  const out: RatingHydrationOutcome = { updated: 0, changed: 0, unknown: 0, skipped: 0 };
   db.transaction(() => {
     for (const bid of bids) {
       const before = read.get(bid) as
         | { rating_global: number | null; style: string | null; abv: number | null }
         | undefined;
       if (!before) continue;
+      // #616: відсутній ключ — відповідь нічого не довела про цей bid (запис не розібрався або належить
+      // іншому bid): ні штампа, ні бекофу. Явний null — Algolia цього bid не знає: лише бекоф.
+      if (!hits.has(bid)) {
+        out.skipped++;
+        continue;
+      }
       const hit = hits.get(bid);
       if (!hit) {
         backoff.run(nowIso, bid);

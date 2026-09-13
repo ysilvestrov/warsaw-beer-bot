@@ -50,14 +50,28 @@ describe('hydrateRatings (#616)', () => {
     const { breaker, results } = spyBreaker();
     const res = await hydrateRatings({
       db, log: silentLog, breaker, now: () => NOW,
-      hydrateByBid: async (bids) => { calls.push(bids); return new Map([[6648348, hydrated(6648348, 4.06)]]); },
+      hydrateByBid: async (bids) => {
+        calls.push(bids);
+        return new Map<number, HydratedBeer | null>([[6648348, hydrated(6648348, 4.06)], [999999999, null]]);
+      },
     });
     expect(calls).toHaveLength(1);
     expect([...calls[0]].sort()).toEqual([6648348, 999999999]);
-    expect(res).toEqual({ candidates: 2, updated: 1, changed: 1, unknown: 1, blocked: false, failed: false });
+    expect(res).toEqual({ candidates: 2, updated: 1, changed: 1, unknown: 1, skipped: 0, blocked: false, failed: false });
     expect(results).toEqual([false]);
     expect(getBeer(db, known)).toMatchObject({ rating_global: 4.06, rating_checked_at: NOW.toISOString() });
     expect(getBeer(db, unknown)).toMatchObject({ rating_global: 3.9, rating_checked_at: null, rating_refresh_count: 1 });
+  });
+
+  test('a bid the response gave no proof for is reported as skipped and left untouched', async () => {
+    const db = fresh();
+    const id = seedLinked(db, 105, 3.5);
+    const res = await hydrateRatings({
+      db, log: silentLog, now: () => NOW,
+      hydrateByBid: async () => new Map<number, HydratedBeer | null>(),
+    });
+    expect(res).toMatchObject({ candidates: 1, updated: 0, unknown: 0, skipped: 1, failed: false });
+    expect(getBeer(db, id)).toMatchObject({ rating_global: 3.5, rating_checked_at: null, rating_refresh_count: 0 });
   });
 
   test('a block trips the breaker and writes nothing', async () => {

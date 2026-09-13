@@ -1477,7 +1477,7 @@ describe('applyHydratedRatings (#616)', () => {
       [501, { global_rating: 4.06, style: 'Gose', abv: 4.2 }],
       [502, { global_rating: 3.77, style: 'Stout - Irish Dry', abv: 4.2 }],
     ]), [501, 502], NOW_ISO);
-    expect(out).toEqual({ updated: 2, changed: 2, unknown: 0 });
+    expect(out).toEqual({ updated: 2, changed: 2, unknown: 0, skipped: 0 });
     expect(getBeer(db, rated)).toMatchObject({
       rating_global: 4.06, style: 'Pils', abv: 5.0,
       rating_checked_at: NOW_ISO, rating_refresh_at: null, rating_refresh_count: 0,
@@ -1492,11 +1492,21 @@ describe('applyHydratedRatings (#616)', () => {
     expect(getBeer(db, id)).toMatchObject({ rating_global: null, rating_checked_at: NOW_ISO });
   });
 
-  test('a bid missing from the response only advances the backoff', () => {
+  test('a bid with no entry in the map (no proof either way) is skipped: no stamp, no backoff', () => {
+    const db = fresh();
+    const id = seedLinked(db, 702, { rating: 3.9, style: 'IPA', abv: 6.0 });
+    const out = applyHydratedRatings(db, new Map(), [702], NOW_ISO);
+    expect(out).toEqual({ updated: 0, changed: 0, unknown: 0, skipped: 1 });
+    expect(getBeer(db, id)).toMatchObject({
+      rating_global: 3.9, rating_checked_at: null, rating_refresh_at: '2026-09-01T00:00:00.000Z', rating_refresh_count: 2,
+    });
+  });
+
+  test("Algolia's explicit null for a bid only advances the backoff", () => {
     const db = fresh();
     const id = seedLinked(db, 701, { rating: 3.9, style: 'IPA', abv: 6.0 });
-    const out = applyHydratedRatings(db, new Map(), [701], NOW_ISO);
-    expect(out).toEqual({ updated: 0, changed: 0, unknown: 1 });
+    const out = applyHydratedRatings(db, new Map([[701, null]]), [701], NOW_ISO);
+    expect(out).toEqual({ updated: 0, changed: 0, unknown: 1, skipped: 0 });
     expect(getBeer(db, id)).toMatchObject({
       rating_global: 3.9, rating_checked_at: null, rating_refresh_at: NOW_ISO, rating_refresh_count: 3,
     });
@@ -1514,7 +1524,7 @@ describe('applyHydratedRatings (#616)', () => {
     applyHydratedRatings(db, hits, [801, 802], NOW_ISO);
     expect(catalogVersion()).toBe(v0 + 1);
     const again = applyHydratedRatings(db, hits, [801, 802], '2026-10-14T12:00:00.000Z');
-    expect(again).toEqual({ updated: 2, changed: 0, unknown: 0 });
+    expect(again).toEqual({ updated: 2, changed: 0, unknown: 0, skipped: 0 });
     expect(catalogVersion()).toBe(v0 + 1);
   });
 
@@ -1533,7 +1543,7 @@ describe('applyHydratedRatings (#616)', () => {
     const db = fresh();
     const other = seedLinked(db, 901, { rating: 3.9, style: 'IPA', abv: 6.0 });
     const out = applyHydratedRatings(db, new Map([[999, { global_rating: 4.2, style: 'Lager', abv: 5.0 }]]), [999], NOW_ISO);
-    expect(out).toEqual({ updated: 0, changed: 0, unknown: 0 });
+    expect(out).toEqual({ updated: 0, changed: 0, unknown: 0, skipped: 0 });
     expect(getBeer(db, other)).toMatchObject({ rating_global: 3.9, rating_checked_at: null });
   });
 });

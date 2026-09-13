@@ -176,7 +176,7 @@ describe('hydrateByBid (#384)', () => {
       abv: 4.2,
       global_rating: 4.06,
     });
-    expect(out.has(999999999)).toBe(false);
+    expect(out.get(999999999)).toBeNull();   // #616: явний null — Algolia цього bid не знає
   });
 
   it('returns an empty map for an empty input without calling the network', async () => {
@@ -220,8 +220,9 @@ describe('hydrateByBid (#384)', () => {
     await expect(search.hydrateByBid([1])).rejects.toMatchObject({ name: 'HttpError', status: 403 });
   });
 
-  // #616: гідратор пише бекоф «Algolia не знає bid» за відсутнім записом. Тому відповідь, де позиції
-  // не зіставляються з запитом, мусить бути помилкою, а не «усі bid невідомі».
+  // #616: гідратор пише бекоф «Algolia не знає bid» лише за явним null на позиції цього bid. Відповідь,
+  // де позиції не зіставляються з запитом, — помилка; поганий запис на одній позиції — пропуск цього bid
+  // (ні запису, ні null), щоб один запис не зупиняв усю пачку.
   const hit = (bid: number) => ({ bid, beer_name: 'B', brewery_name: 'Br', brewery_alias: [], beer_slug: null,
     type_name: 'IPA', beer_abv: 5, rating_score: 4 });
 
@@ -233,11 +234,14 @@ describe('hydrateByBid (#384)', () => {
     }
   });
 
-  it('a record at a position that is not the requested bid is a failure (#616)', async () => {
+  it('a record at a position that is not the requested bid is skipped, the rest of the batch survives (#616)', async () => {
     for (const second of [{ ...hit(3) }, { objectID: '2', beer_name: 'No bid field', brewery_name: 'Br' }]) {
       const fetchImpl = (async () => new Response(JSON.stringify({ results: [hit(1), second] }), { status: 200 })) as unknown as typeof fetch;
       const search = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl, minGapMs: 0 });
-      await expect(search.hydrateByBid([1, 2])).rejects.toThrow(/hydrate/);
+      const out = await search.hydrateByBid([1, 2]);
+      expect(out.get(1)?.bid).toBe(1);
+      expect(out.has(2)).toBe(false);   // доказу немає: ні запису, ні null
+      expect(out.has(3)).toBe(false);
     }
   });
 });

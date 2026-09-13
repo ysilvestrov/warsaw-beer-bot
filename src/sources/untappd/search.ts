@@ -28,8 +28,12 @@ export interface HydratedBeer extends SearchResult {
 // errors for transient failures; resolves [] for a genuine no-result query.
 export interface BeerSearch {
   search(query: string): Promise<SearchResult[]>;
-  /** #384: fetch full records by bid (objectID === bid). Missing bids are absent from the map. */
-  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer>>;
+  /**
+   * #384: fetch full records by bid (objectID === bid).
+   * #616: a bid Algolia does not know maps to an explicit `null`; a bid whose record could not be
+   * trusted (unparsable, or another bid at its position) is absent from the map — no proof either way.
+   */
+  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer | null>>;
 }
 
 const MAX_ITEMS = 5;
