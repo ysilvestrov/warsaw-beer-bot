@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed badges not appearing on Flasker for beers with pre-release banners, colon-separated producer names (such as Berryland), or multi-word breweries (such as Evil Twin, Ten Men, and Holy Brew). The extension now recognizes these breweries and separates promotional shelf labels from the beer name.
 - Fixed known Untappd beers showing no badge when their global rating was unavailable. They now show a clickable ⭐ without a number instead of looking as if the extension ignored them.
 
 ## [0.17.0] - 2026-09-04

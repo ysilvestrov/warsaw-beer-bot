@@ -252,12 +252,10 @@ describe('parseTitle', () => {
   });
 
   it('leaves a colon-bearing brewery alone when there is no banner (negative guard)', () => {
-    // No registry entry for "DE ZWARTE REGEL" exists (verified against
-    // flasker-breweries.generated.ts), so this is the pre-existing
-    // first-word fallback — unrelated to the fix, and unchanged by it since
-    // there is no banner here for stripMerchandisingPrefix to act on.
+    // There is no banner here for stripMerchandisingPrefix to act on;
+    // colon-separated producer headers now resolve the producer name (#481, #558).
     expect(parseTitle('DE ZWARTE REGEL: Laatste Plicht 9 9% 330ml'))
-      .toEqual({ brewery: 'DE', name: 'ZWARTE REGEL: Laatste Plicht 9', abv: 9 });
+      .toEqual({ brewery: 'DE ZWARTE REGEL', name: 'Laatste Plicht 9', abv: 9 });
   });
 });
 
@@ -727,3 +725,65 @@ describe('#384 brand canonicalization (post-review fix)', () => {
     expect(brewery).toBe('Mad Brew');
   });
 });
+
+describe('Flasker cluster extraction regressions (#558, #579, #566, #481)', () => {
+  it('strips merchandising prefixes without product tags (#558, #566)', () => {
+    expect(parseTitle('ПРЕДРЕЛІЗ: Safe Circle Blond Ale 5% 330ml')).toEqual({
+      brewery: 'Safe Circle',
+      name: 'Blond Ale',
+      abv: 5,
+    });
+    expect(parseTitle('ПРОБНИК: MGM Tapped Ed. 6% 330ml')).toEqual({
+      brewery: 'MGM',
+      name: 'Tapped Ed.',
+      abv: 6,
+    });
+  });
+
+  it('recognizes colon-separated producer headers (#481, #558)', () => {
+    expect(parseTitle('Berryland: Cidre Cuvee 6% 0.75l')).toEqual({
+      brewery: 'BERRYLAND',
+      name: 'Cidre Cuvee',
+      abv: 6,
+    });
+    expect(parseTitle('DE ZWARTE REGEL: Tweede Kring 8% 330ml')).toEqual({
+      brewery: 'DE ZWARTE REGEL',
+      name: 'Tweede Kring',
+      abv: 8,
+    });
+    expect(parseTitle('The Lost Philosopher: 3rd Night 10% 330ml')).toEqual({
+      brewery: 'The Lost Philosopher',
+      name: '3rd Night',
+      abv: 10,
+    });
+  });
+
+  it('extracts multi-word craft breweries (#579, #566, #558)', () => {
+    expect(parseTitle('EvilTwin Imperial Doughnut Break 11.5% 330ml')).toEqual({
+      brewery: 'Evil Twin Brewing',
+      name: 'Imperial Doughnut Break',
+      abv: 11.5,
+    });
+    expect(parseTitle('Evil Twin Imperial Doughnut Break 11.5% 330ml')).toEqual({
+      brewery: 'Evil Twin Brewing',
+      name: 'Imperial Doughnut Break',
+      abv: 11.5,
+    });
+    expect(parseTitle('Ten Men Rubis Strong ALE 8% 330ml')).toEqual({
+      brewery: 'Ten Men Brewery',
+      name: 'Rubis Strong ALE',
+      abv: 8,
+    });
+    expect(parseTitle('Holy Brew Cherry Poppy Pie Stout 7% 330ml')).toEqual({
+      brewery: 'Holy Brewery',
+      name: 'Cherry Poppy Pie Stout',
+      abv: 7,
+    });
+    expect(parseTitle('Hrew Brew Paranoia Milk Stout 7% 330ml')).toEqual({
+      brewery: 'HREW BREW',
+      name: 'Paranoia Milk Stout',
+      abv: 7,
+    });
+  });
+});
+
