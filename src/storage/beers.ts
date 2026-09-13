@@ -559,7 +559,7 @@ export function listRatingHydrationCandidates(
   // count = 0 і at = NULL, тож на решту рядків фільтр не діє.
   return rows
     .filter((r) => isEligible(now, r.rating_refresh_at, r.rating_refresh_count))
-    .slice(0, limit);
+    .slice(0, Math.max(0, limit));   // від'ємний limit у slice означав би «усі, крім останніх»
 }
 
 export interface HydratedRatingFacts {
@@ -660,10 +660,14 @@ export function recordProfileBeer(
   const source = strongerSource(before.untappd_id_source, 'checkin');
   if (facts.global_rating_shown) {
     db.prepare(
+      // Рейтинг звірено — бекоф «Algolia не знає bid» скидається: сторінка довела, що bid живий, тож
+      // вичерпаний бекоф не має назавжди виключати рядок із гідратора (рев'ю #625).
       `UPDATE beers SET
          rating_global = ?,
          abv = COALESCE(?, abv),
          rating_checked_at = ?,
+         rating_refresh_at = NULL,
+         rating_refresh_count = 0,
          untappd_id_source = ?
        WHERE id = ?`,
     ).run(facts.global_rating, facts.abv, nowIso, source, beerId);
