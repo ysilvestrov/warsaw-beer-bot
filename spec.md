@@ -2494,11 +2494,19 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   за published bid (#384, вище) виправляє це напряму по bid і обходить name-stage
   цілком; для товарів без bid компроміс і далі чинний);
   відомий display-prefix brewery видаляється з name;
-  volume-gate: пиво завжди містить об'єм в ml/л/l, non-beer без об'єму
-  відкидається; ABV із `%` у title; для кожної ще не кешованої картки `loadCardDetails`
-  довантажує сторінку товару (#384: до `MAX_DETAIL_FETCHES_PER_PASS = 20` запитів за
-  прохід, дедуп за URL, помилки проковтуються — картка лишається на даних із title).
-  Звідти читаються два сигнали: JSON-LD `brand` (покриття **45/45**, але для імпорту
+  найраніший volume або ABV-маркер задає межу brewery/name; картка без обох маркерів,
+  але з product URL, лишається classification-only (`skip`) і не потрапляє в matching.
+  Для **всіх** Flasker-карток із product URL `loadCardDetails` довантажує сторінку
+  товару **до** читання match-кешу, без загального ліміту на кількість карток за
+  прохід і з дедуплікацією за URL. WooCommerce category читається тільки з
+  `.posted_in a[href*="/product-category/"]`, щоб brand-посилання з того самого
+  контейнера не стало category. Non-beer category ставить confirmed `nonBeer`;
+  parsed provisional картка допускається до matching лише після успішної відповіді
+  з usable category без non-beer veto. Fetch failure лишає established beer
+  fail-open, а provisional/classification-only — fail-closed. Listing identity
+  фіксується до hydration і лишається ключем cache read/write, навіть коли detail
+  уточнює brewery. З тієї самої відповіді читаються JSON-LD `brand` (покриття
+  **45/45**, але для імпорту
   це службове `Імпортне пиво`, а не назва броварні) — мапиться через
   `BREWERY_RULES`/реєстр (`canonicalizeBrand`) **до** заміни розпізнаної з title
   пивоварні, бо сирий `brand` це відображуване ім'я магазину, а `canonical` реєстру —
@@ -2549,7 +2557,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
 - **Потік:** content script парсить видиму сітку → short-TTL кеш
   (`chrome.storage.local`) → промахи йдуть у background service worker, який
   тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
-  бейдж ✅+оцінка на випитих. **Re-render однаковий для всіх адаптерів:** overlay
+  бейдж ✅+оцінка на випитих. Вузький Flasker opt-in змінює лише порядок detail-кроку:
+  всі картки гідруються й класифікуються до кешу; решта адаптерів лишається на
+  cache-first, miss-only detail hydration. **Re-render однаковий для всіх адаптерів:** overlay
   позначає оброблені картки (`data-beerseen`), а спостерігач на `document.body`
   перезапускає `runOverlay` щойно серед розпарсених карток з'являється непозначена
   (навігація / SPA ре-маунт / infinite-scroll); кеш дедуплікує повторні матчі.
@@ -2619,8 +2629,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   Білд — `vite build`.
   Плюс **кейс фільтрації не-пива**: кожен адаптер має `tests/fixtures/<id>.nonbeer.html`
   (тільки не-пиво) і `parseCards` на ньому МУСИТЬ дати `[]`; або `<id>.nonbeer.json`
-  `{none:true, reason}` (виняток із обовʼязковою причиною). `isNonBeerPage` і FP-гарди
-  (MAGIC ROAD) — у bespoke-тестах адаптера. Відсутність фікстури/винятку = червоний CI.
+  `{none:true, reason}` (виняток із обовʼязковою причиною). Тимчасовий виняток #615:
+  Flasker має видати provisional-картки, гідрувати їх і підтвердити `nonBeer`; #623
+  переносить цей явний стан на інші адаптери. `isNonBeerPage` і FP-гарди (MAGIC ROAD)
+  — у bespoke-тестах адаптера. Відсутність фікстури/винятку = червоний CI.
 
 ### 6.1 Бейджі та збірка розширення
 > Рунбук релізу: `docs/extension-release.md`. Дистрибуція — §6.4.
@@ -2629,7 +2641,10 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   користувач ще не пив і мають `untappd_id`, — `⭐` + глобальна оцінка Untappd, якщо
   вона доступна; без глобальної оцінки показується bare `⭐`. Fuzzy-матч пива з
   drunk-set (`drunk_uncertain: true`) — `❓` +
-  глобальний рейтинг (якщо є; «ймовірно випите, без певності»). Усі бейджі клікабельні: `✅`/`❓`/`⭐` ведуть на сторінку беври в Untappd
+  глобальний рейтинг (якщо є; «ймовірно випите, без певності»). На Flasker товар,
+  який успішно підтверджено product category як не-пиво, показує червоний `✕` без
+  посилання, focus target або click/auxclick дії. Бейджі результатів пива клікабельні:
+  `✅`/`❓`/`⭐` ведуть на сторінку беври в Untappd
   (`https://untappd.com/beer/<untappd_id>`), а якщо `untappd_id` ще немає —
   на пошук Untappd із підставленою назвою (`brewery name`). Зматчені орфани
   (без `untappd_id`) показуються як `⚪` і ведуть на той самий пошук.
