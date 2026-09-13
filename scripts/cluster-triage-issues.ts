@@ -114,7 +114,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     idSet.add(id);
   }
 
-  const shop = detectShop(combinedText, scope?.where as any);
+  const shop = detectShop(issue.title, scope?.where as any) ?? detectShop(combinedText);
   const titleLower = issue.title.toLowerCase();
 
   let locus: ArchitecturalLocus = 'other';
@@ -392,7 +392,7 @@ export function formatClusterReportMarkdown(clusters: IssueCluster[]): string {
 }
 
 // CLI runner when executed directly
-if (process.argv[1]?.endsWith('cluster-triage-issues.ts') || process.argv[1]?.endsWith('cluster-triage-issues')) {
+if (process.argv[1] && /cluster-triage-issues(?:\.[cm]?[jt]s)?$/i.test(process.argv[1])) {
   try {
     const issues = fetchOpenOrphanIssues();
     const classified = issues.map(classifyIssue);
