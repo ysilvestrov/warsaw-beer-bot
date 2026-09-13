@@ -4,7 +4,7 @@
 
 **Goal:** Resolve orphan 36588 to Untappd bid 6852067 when a shop welds a collaboration brand into one beer-name token, without weakening ordinary name matching.
 
-**Architecture:** Add one strict rescue at fuzzy Stage 2b's existing terminal refusal inside `lookupBeer`. It compares a complete single-token collaboration part from the input brewery with an exact concatenation of adjacent candidate-name tokens, then requires the same explicit year, matching known ABV, and one unique bid. Existing stages, normalizers, fuzzy thresholds, and selection rules remain unchanged.
+**Architecture:** Add one strict rescue at the strict-only near-name stage's existing terminal refusal inside `lookupBeer`. It compares a complete single-token collaboration part from the input brewery with an exact concatenation of adjacent candidate-name tokens, then requires the same explicit year, matching known ABV, and one unique bid. Existing stages, normalizers, fuzzy thresholds, and selection rules remain unchanged.
 
 **Tech Stack:** TypeScript, Vitest, `fast-fuzzy`-based existing matcher, live Untappd Algolia replay.
 
@@ -14,7 +14,7 @@
 
 - Work only in the existing `fix-613-collab-token-rescue` isolated worktree.
 - Do not change `normalizeName`, `nameKeys`, fuzzy thresholds, popularity selection, storage, APIs, or extension code.
-- The rescue runs only after Stage 2b has candidates but its current score/popularity resolver declines to choose one and would return terminal `not_found`.
+- The rescue runs only after the strict-only near-name stage has candidates but its current score/popularity resolver declines to choose one and would return terminal `not_found`.
 - Require strict brewery evidence, a complete single-token collab part, exact token-boundary repair, equal explicit four-digit years, known ABV within `ABV_TOLERANCE`, and one distinct bid.
 - Missing evidence or ambiguity remains `not_found`.
 - Add no dependency and perform no unrelated refactor.
@@ -264,14 +264,14 @@ function collabTokenBoundaryRescue(
 }
 ```
 
-- [ ] **Step 5: Refine Stage 2b's existing terminal refusal**
+- [ ] **Step 5: Refine the near-name stage's existing terminal refusal**
 
-In Stage 2b's `matches.length > 0` block, preserve an existing `fuzzyHit` exactly as today. Only
+In the near-name stage's `nearMatches.length > 0` block, preserve an existing `nearHit` exactly as today. Only
 when `pickScoredCandidate` returns no winner, try the strict boundary rescue before returning the
 same terminal `not_found`:
 
 ```ts
-if (fuzzyHit) return { kind: 'matched', result: fuzzyHit };
+if (nearHit) return { kind: 'matched', result: nearHit };
 const boundaryHit = collabTokenBoundaryRescue(
   { brewery, name, abv },
   strictPool,
@@ -279,7 +279,7 @@ const boundaryHit = collabTokenBoundaryRescue(
 return boundaryHit ? { kind: 'matched', result: boundaryHit } : notFound();
 ```
 
-Do not run the rescue before `pickScoredCandidate`, and do not move Stage 2b's refusal to a later
+Do not run the rescue before `pickScoredCandidate`, and do not move the near-name refusal to a later
 stage. The current pipeline already terminates here for an unresolved scored cohort; the rescue may
 refine only that refusal and must never second-guess an existing winner.
 
