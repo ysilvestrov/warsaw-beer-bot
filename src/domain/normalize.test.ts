@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, numericNameTokens, numericTokensCompatible } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -569,5 +569,44 @@ describe('searchQueryLadder', () => {
   test('homoglyph repair reaches both rungs', () => {
     expect(searchQueryLadder('Malle', 'Belgian Сhristmas Ale'))
       .toEqual(['Malle Belgian Christmas Ale']);
+  });
+});
+
+describe('numericNameTokens (#617)', () => {
+  test('keeps pure-digit tokens that normalizeName drops as noise', () => {
+    expect(numericNameTokens('Juicy Trap #19 18°')).toEqual(['19']);
+    expect(numericNameTokens('Trappistes Rochefort 10 (2015)')).toEqual(['10', '2015']);
+  });
+
+  test('spec strings are not tokens: degrees and ABV are stripped first', () => {
+    expect(numericNameTokens('Kronenbourg 1664 Blanc 12,5°')).toEqual(['1664']);
+    expect(numericNameTokens('La Chouffe 0.4%')).toEqual([]);
+  });
+
+  test('a decimal identifier is one non-digit token, not two digit tokens', () => {
+    expect(numericNameTokens('Ambrosia 10.0 18°')).toEqual([]);
+  });
+});
+
+describe('numericTokensCompatible (#617)', () => {
+  test.each([
+    // виміряні хибні пари зі спеки — мусять розрізнятися
+    ['Juicy Trap #19 18°', 'Juicy Trap #20', false],
+    ['Trappistes Rochefort 8', 'Trappistes Rochefort 10', false],
+    ['Grodziskie Piwobraniowe 2024', 'Piwobranie 2026: Suska sechlońska i cascara', false],
+    ['Trappistes Rochefort 10 (2015)', 'Trappistes Rochefort 10 (2017)', false],
+    ['Svijanský Máz 11', 'Svijanský Máz', false],
+    // однакові пива — мусять збігатися
+    ['Kronenbourg 1664 Blanc 12,5°', '1664 Blanc', true],
+    ['AMBROSIA 10.0 18°', 'Ambrosia 10.0', true],
+    ['Juicy Trap #20 18°', 'Juicy Trap #20', true],
+    // рік лише в одній назві — сумісно, як у матчері (extractYear)
+    ['Krzyż Południa 13°', 'Krzyż Południa (2026)', true],
+    ['ROTATION 12°', 'Rotation (2026)', true],
+    // відоме обмеження зі спеки: різниця лише в ABV не видима, бо stripSearchNoise прибирає ABV
+    ['La Chouffe 16°', 'La Chouffe 0.4%', true],
+  ])('%s ↔ %s → %s', (a, b, expected) => {
+    expect(numericTokensCompatible(a, b)).toBe(expected);
+    expect(numericTokensCompatible(b, a)).toBe(expected);
   });
 });
