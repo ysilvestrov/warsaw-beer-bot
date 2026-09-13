@@ -24,13 +24,13 @@ The product pages carry the missing evidence. A live probe of all seven reported
 
 | Product | Product categories | JSON-LD brand | Untappd link |
 |---|---|---|---|
-| `КРАКЕН з Васабі` | `Томатне`, `Vibrant Pour` | `Vibrant Pour` | yes |
-| `КРАКЕН Tom Yum` | `Томатне`, `Vibrant Pour` | `Vibrant Pour` | no |
-| `КРАКЕН у власному чорнилі` | `Томатне`, `Vibrant Pour` | `Vibrant Pour` | no |
-| `Сало з часником та перцем` | `Томатне`, `Vibrant Pour` | `Vibrant Pour` | yes |
-| `Real Smoothie Ale: Mango, Passion Fruit` | `САУРИ`, `Vibrant Pour` | `Vibrant Pour` | no |
-| `LardoMato/Сало з часником` | `Томатне`, `Vibrant Pour` | `Vibrant Pour` | yes |
-| `Термос для пляшки` | `Сувеніри`, `Flasker` | `Flasker` | no |
+| `КРАКЕН з Васабі` | `Томатне` | `Vibrant Pour` | yes |
+| `КРАКЕН Tom Yum` | `Томатне` | `Vibrant Pour` | no |
+| `КРАКЕН у власному чорнилі` | `Томатне` | `Vibrant Pour` | no |
+| `Сало з часником та перцем` | `Томатне` | `Vibrant Pour` | yes |
+| `Real Smoothie Ale: Mango, Passion Fruit` | `САУРИ` | `Vibrant Pour` | no |
+| `LardoMato/Сало з часником` | `Томатне` | `Vibrant Pour` | yes |
+| `Термос для пляшки` | `Сувеніри` | `Flasker` | no |
 
 The current `spec.md` statement that a beer always contains volume and merchandise never does is
 therefore false in both directions. Product category is the shop's explicit classification and is
@@ -78,8 +78,10 @@ classification adds no second request per product.
 
 ### 3. Classify from product categories
 
-`parseProductDetail` extracts WooCommerce product categories from `.posted_in a` in addition to the
-existing brand and Untappd-link fields.
+`parseProductDetail` extracts WooCommerce product categories only from
+`.posted_in a[href*="/product-category/"]` in addition to the existing brand and Untappd-link
+fields. Flasker also renders brand links inside `.posted_in`; the URL constraint prevents a brewery
+such as `Vibrant Pour` from being mistaken for a product category.
 
 - Any explicit Flasker non-beer category (`Сувеніри`, accessories, merch, snacks, gifts and the
   existing localized category vocabulary) makes the card confirmed non-beer.
