@@ -219,6 +219,27 @@ describe('hydrateByBid (#384)', () => {
     const search = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl, minGapMs: 0 });
     await expect(search.hydrateByBid([1])).rejects.toMatchObject({ name: 'HttpError', status: 403 });
   });
+
+  // #616: гідратор пише бекоф «Algolia не знає bid» за відсутнім записом. Тому відповідь, де позиції
+  // не зіставляються з запитом, мусить бути помилкою, а не «усі bid невідомі».
+  const hit = (bid: number) => ({ bid, beer_name: 'B', brewery_name: 'Br', brewery_alias: [], beer_slug: null,
+    type_name: 'IPA', beer_abv: 5, rating_score: 4 });
+
+  it('a 200 without results, or with a different number of results, is a failure (#616)', async () => {
+    for (const body of [{ message: 'oops' }, { results: [hit(1)] }]) {
+      const fetchImpl = (async () => new Response(JSON.stringify(body), { status: 200 })) as unknown as typeof fetch;
+      const search = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl, minGapMs: 0 });
+      await expect(search.hydrateByBid([1, 2])).rejects.toThrow(/hydrate/);
+    }
+  });
+
+  it('a record at a position that is not the requested bid is a failure (#616)', async () => {
+    for (const second of [{ ...hit(3) }, { objectID: '2', beer_name: 'No bid field', brewery_name: 'Br' }]) {
+      const fetchImpl = (async () => new Response(JSON.stringify({ results: [hit(1), second] }), { status: 200 })) as unknown as typeof fetch;
+      const search = createAlgoliaSearch({ appId: 'A', searchKey: 'K', fetchImpl, minGapMs: 0 });
+      await expect(search.hydrateByBid([1, 2])).rejects.toThrow(/hydrate/);
+    }
+  });
 });
 
 describe('rating_count (#487)', () => {

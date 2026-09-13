@@ -47,7 +47,7 @@ export async function hydrateRatings(deps: HydrateRatingsDeps): Promise<HydrateR
     return { ...EMPTY };
   }
 
-  const limit = Math.min(deps.limit ?? RATING_HYDRATION_BATCH, RATING_HYDRATION_BATCH);
+  const limit = Math.max(0, Math.min(deps.limit ?? RATING_HYDRATION_BATCH, RATING_HYDRATION_BATCH));
   const candidates = listRatingHydrationCandidates(deps.db, limit, tickNow);
   if (candidates.length === 0) {
     deps.log.info({ ...EMPTY }, 'hydrate-ratings done');

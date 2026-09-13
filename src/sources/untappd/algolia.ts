@@ -177,12 +177,23 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
     lastAt = Date.now();
     if (!res.ok) throw new HttpError(res.status, url);
     // Results are positionally aligned with the requests; unknown objectIDs come back null.
+    // #616: відсутність bid у мапі гідратор читає як «Algolia цього bid не знає» і пише бекоф, тож
+    // зіставлення йде за позицією, а відповідь, де позиції не сходяться з запитом, — помилка
+    // (транзієнт для гідратора, `hydrate-failed` для bid-identity), а не «усі bid невідомі».
     const json = (await res.json()) as { results?: (Record<string, unknown> | null)[] };
-    const out = new Map<number, HydratedBeer>();
-    for (const raw of json.results ?? []) {
-      const parsed = parseHydratedBeer(raw);
-      if (parsed) out.set(parsed.bid, parsed);
+    const results = json.results;
+    if (!Array.isArray(results) || results.length !== bids.length) {
+      throw new Error(`algolia hydrate: expected ${bids.length} results, got ${Array.isArray(results) ? results.length : 'none'}`);
     }
+    const out = new Map<number, HydratedBeer>();
+    results.forEach((raw, i) => {
+      if (raw === null) return;
+      const parsed = parseHydratedBeer(raw);
+      if (!parsed || parsed.bid !== bids[i]) {
+        throw new Error(`algolia hydrate: result ${i} is not bid ${bids[i]}`);
+      }
+      out.set(parsed.bid, parsed);
+    });
     return out;
   }
 
