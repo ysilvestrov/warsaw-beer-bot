@@ -12,6 +12,8 @@ export interface Card {
   /** Product-page brand used to verify a published bid; may differ from parsed brewery. */
   brand?: string;
   skip?: boolean;
+  /** Shop-confirmed non-beer; renders a status badge and never reaches /match. */
+  nonBeer?: boolean;
 }
 
 export interface SiteAdapter {
@@ -27,9 +29,12 @@ export interface SiteAdapter {
   isNonBeerPage?(url: URL): boolean;
   /** Optional: resolve once the (client-rendered) grid has painted cards. */
   waitForGrid?(root: ParentNode): Promise<void>;
+  /** Hydrate all cards before cache lookup when details determine eligibility. */
+  loadDetailsBeforeCache?: boolean;
   /**
    * Optional bounded detail hydration for fields that are absent from listing cards.
-   * Called only for uncached cards before they are sent to /match.
+   * Called for all cards before cache lookup when loadDetailsBeforeCache is true;
+   * otherwise called only for uncached cards before they are sent to /match.
    */
   loadCardDetails?(cards: Card[]): Promise<void>;
   /**

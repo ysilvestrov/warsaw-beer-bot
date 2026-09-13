@@ -3,7 +3,7 @@ import type { MatchResult, RawBeer } from '../api/types';
 import { getCached, setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
 import { usableAbv } from '../shared/abv';
-import { renderBadge, markSeen } from './badge';
+import { renderBadge, markSeen, setNonBeer } from './badge';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
 
@@ -33,21 +33,42 @@ export async function runOverlay(
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
     const cards = adapter.parseCards(doc);
+    const keyedCards = cards.map((card) => ({
+      el: card.el,
+      key: normalizeKey(card.brewery, card.name),
+      card,
+    }));
+
+    if (adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
+      await adapter.loadCardDetails(cards);
+    }
 
     const misses: { el: HTMLElement; key: string; card: Card }[] = [];
-    for (const card of cards) {
-      const key = normalizeKey(card.brewery, card.name);
-      const cached = await getCached(key);
+    for (const entry of keyedCards) {
+      const { card } = entry;
+      if (card.nonBeer) {
+        setNonBeer(card.el);
+        markSeen(card.el);
+        continue;
+      }
+      if (adapter.loadDetailsBeforeCache && card.skip) {
+        markSeen(card.el);
+        continue;
+      }
+
+      const cached = await getCached(entry.key);
       if (cached?.matched_beer != null) {
         renderBadge(card.el, cached);
         markSeen(card.el);
       } else {
-        misses.push({ el: card.el, key, card });
+        misses.push(entry);
       }
     }
     if (misses.length === 0) return;
 
-    if (adapter.loadCardDetails) await adapter.loadCardDetails(misses.map((m) => m.card));
+    if (!adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
+      await adapter.loadCardDetails(misses.map((m) => m.card));
+    }
 
     // `abv` is sanitized once, here, where a card's shop-published value first enters a
     // payload — that covers every adapter and both the /match and /enrich/* paths (#369).
