@@ -64,7 +64,7 @@ function brewerySearchParts(brewery: string): string[] {
 // " #<n>". Deliberately EXCLUDES the " - " dash (often a real sub-edition) and any token cap, both
 // of which risk truncating a legitimate name. Returns null when there is no such delimiter or the
 // head is empty / equal to the whole name.
-const TAIL_LIST_DELIMITER = /,(?!\d)|(?<!\d),|\s#\d/;
+const TAIL_LIST_DELIMITER = /,(?!\d)|\s#\d/;
 function headBeforeTail(name: string): string | null {
   const m = TAIL_LIST_DELIMITER.exec(name);
   if (!m) return null;

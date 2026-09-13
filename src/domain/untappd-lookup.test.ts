@@ -545,6 +545,18 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('matched');
   });
 
+  test('#271: comma immediately followed by a digit is not treated as a list delimiter (Foo,2)', async () => {
+    let calls = 0;
+    const search: BeerSearch = {
+      search: async () => {
+        calls++;
+        return [];
+      },
+    };
+    await lookupBeer({ brewery: 'Example', name: 'Foo,2', search });
+    expect(calls).toBe(1); // exactly 1 query, no head-retry with 'Foo'
+  });
+
   test('#321 grade: single same-grade lager candidate (Desitka → Kamenická 10)', async () => {
     const search = fakeSearch(() => [
       { bid: 12141, beer_name: 'Kamenická 10', brewery_name: 'Pivovar Kamenice nad Lipou', style: 'Czech Pale Lager', abv: 4.2, global_rating: 3.3 },
