@@ -10,7 +10,7 @@ import {
   intersects,
   stripBreweryFromName,
 } from './matcher';
-import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder } from './normalize';
+import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
@@ -64,12 +64,30 @@ function brewerySearchParts(brewery: string): string[] {
 // " #<n>". Deliberately EXCLUDES the " - " dash (often a real sub-edition) and any token cap, both
 // of which risk truncating a legitimate name. Returns null when there is no such delimiter or the
 // head is empty / equal to the whole name.
-const TAIL_LIST_DELIMITER = /,|\s#\d/;
+const TAIL_LIST_DELIMITER = /(?<!\d),(?!\d)|\s#\d/;
 function headBeforeTail(name: string): string | null {
   const m = TAIL_LIST_DELIMITER.exec(name);
   if (!m) return null;
   const head = name.slice(0, m.index).trim();
   return head && head !== name.trim() ? head : null;
+}
+
+// #353: Guards on the descriptor-retry path. An input with a non-alcoholic descriptor or ABV <= 0.7
+// must never match an alcoholic candidate (>= 2.0%) and vice versa.
+const NON_ALCOHOLIC_REGEX = /\b(?:bezalkoholowe|non-?alcoholic|alkofrei|alkoholfrei|nealko|0[,.]0%?|zero)\b/i;
+
+function isAlcoholClassMismatch(inputAbv: number | null | undefined, rawName: string, cand: SearchResult): boolean {
+  const isInputNonAlco = (inputAbv != null && inputAbv <= 0.7) || NON_ALCOHOLIC_REGEX.test(rawName);
+  const isCandNonAlco = (cand.abv != null && cand.abv <= 0.7) || (cand.style != null && /non-alcoholic/i.test(cand.style));
+
+  if (isInputNonAlco && cand.abv != null && cand.abv >= 2.0) return true;
+  if (!isInputNonAlco && inputAbv != null && inputAbv >= 2.0 && isCandNonAlco) return true;
+  return false;
+}
+
+function isDescriptorAbvMismatch(inputAbv: number | null | undefined, candAbv: number | null | undefined): boolean {
+  if (inputAbv == null || candAbv == null) return false;
+  return Math.abs(inputAbv - candAbv) > ABV_TOLERANCE;
 }
 
 function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
@@ -402,7 +420,11 @@ function swappedBrandNameScore(
   return null;
 }
 
-export async function lookupBeer(args: LookupArgs, headRetried = false): Promise<LookupOutcome> {
+export async function lookupBeer(
+  args: LookupArgs,
+  headRetried = false,
+  descriptorRetried = false,
+): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
   const normalizedInputName = baseNormalize(name);
@@ -763,7 +785,7 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
   if (!headRetried && seenCandidates.length === 0) {
     const head = headBeforeTail(name);
     if (head) {
-      const retry = await lookupBeer({ ...args, name: head }, true);
+      const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried);
       if (retry.kind === 'not_found') {
         return {
           kind: 'not_found',
@@ -774,5 +796,37 @@ export async function lookupBeer(args: LookupArgs, headRetried = false): Promise
       return retry;
     }
   }
+
+  // #353 fallback: the search returned zero candidates across every brewery part due to
+  // trailing style descriptors or packaging/format tokens over-constraining Algolia's AND-query.
+  // Retry once with descriptors/packaging stripped, protected by alcohol-class and ABV guards.
+  if (!descriptorRetried && seenCandidates.length === 0) {
+    const stripped = stripDescriptorAndPackaging(name);
+    if (stripped) {
+      const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true);
+      if (retry.kind === 'matched') {
+        if (
+          isAlcoholClassMismatch(abv, name, retry.result) ||
+          isDescriptorAbvMismatch(abv, retry.result.abv)
+        ) {
+          return {
+            kind: 'not_found',
+            searchUrls: triedUrls,
+            candidates: [retry.result],
+          };
+        }
+        return retry;
+      }
+      if (retry.kind === 'not_found') {
+        return {
+          kind: 'not_found',
+          searchUrls: [...triedUrls, ...retry.searchUrls],
+          candidates: retry.candidates,
+        };
+      }
+      return retry;
+    }
+  }
+
   return notFound();
 }
