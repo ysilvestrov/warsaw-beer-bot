@@ -127,41 +127,66 @@ function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_sou
 
 // #617: ідентичність за Untappd bid — для синку чекінів, /import і refresh-untappd.
 // Рядок шукається за bid; не знайдено — серед сиріт (resolvableOrphan); інакше новий рядок.
-// Злінкованого рядка з іншим bid не торкається ніколи. Факти лише заповнюють порожнє, назва й
-// броварня не змінюються (#618), провенанс лише посилюється.
+// Злінкованого рядка з іншим bid не торкається ніколи. Назва й броварня не змінюються (#618),
+// провенанс лише посилюється. Пошук і запис — одна транзакція.
 export function upsertBeerByBid(db: DB, b: BidBeerInput): number {
-  const byBid = db
-    .prepare('SELECT id, untappd_id_source FROM beers WHERE untappd_id = ?')
-    .get(b.untappd_id) as { id: number; untappd_id_source: UntappdIdSource | null } | undefined;
-  const target = byBid ?? resolvableOrphan(db, b);
+  return db.transaction((): number => {
+    const byBid = db
+      .prepare('SELECT id, untappd_id_source FROM beers WHERE untappd_id = ?')
+      .get(b.untappd_id) as { id: number; untappd_id_source: UntappdIdSource | null } | undefined;
 
-  if (target) {
-    db.prepare(
-      `UPDATE beers SET
-         untappd_id = ?,
-         style = COALESCE(style, ?),
-         abv = COALESCE(abv, ?),
-         rating_global = COALESCE(rating_global, ?),
-         untappd_id_source = ?
-       WHERE id = ?`,
+    if (byBid) {
+      // Рядок уже злінкований цим bid: факти лише заповнюють порожнє. Синк передає null, і
+      // саме тут старий upsertBeer стирав рейтинг/стиль/ABV.
+      db.prepare(
+        `UPDATE beers SET
+           style = COALESCE(style, ?),
+           abv = COALESCE(abv, ?),
+           rating_global = COALESCE(rating_global, ?),
+           untappd_id_source = ?
+         WHERE id = ?`,
+      ).run(
+        b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+        strongerSource(byBid.untappd_id_source, b.untappd_id_source), byBid.id,
+      );
+      bumpCatalogVersion();
+      return byBid.id;
+    }
+
+    const orphan = resolvableOrphan(db, b);
+    if (orphan) {
+      // Факти сироти прийшли з тексту крана/крамниці, а той ABV «буває помилковим» (spec.md
+      // §/newbeers) — Untappd переважає, як у recordLookupSuccess; порожній вхід лишає факти
+      // сироти. Разом із лінком іде й стан сироти: listUntriagedFailures і listLockedRows не
+      // фільтрують untappd_id IS NULL, тож він тріажив би вже злінковане пиво.
+      db.prepare(
+        `UPDATE beers SET
+           untappd_id = ?,
+           style = COALESCE(?, style),
+           abv = COALESCE(?, abv),
+           rating_global = COALESCE(?, rating_global),
+           untappd_id_source = ?
+         WHERE id = ?`,
+      ).run(
+        b.untappd_id, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+        strongerSource(orphan.untappd_id_source, b.untappd_id_source), orphan.id,
+      );
+      db.prepare('DELETE FROM enrich_failures WHERE beer_id = ?').run(orphan.id);
+      bumpCatalogVersion();
+      return orphan.id;
+    }
+
+    const res = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global,
+         normalized_name, normalized_brewery, untappd_id_source)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ).run(
-      b.untappd_id, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
-      strongerSource(target.untappd_id_source, b.untappd_id_source), target.id,
+      b.untappd_id, b.name, b.brewery, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
+      b.normalized_name, b.normalized_brewery, b.untappd_id_source,
     );
     bumpCatalogVersion();
-    return target.id;
-  }
-
-  const res = db.prepare(
-    `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global,
-       normalized_name, normalized_brewery, untappd_id_source)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    b.untappd_id, b.name, b.brewery, b.style ?? null, b.abv ?? null, b.rating_global ?? null,
-    b.normalized_name, b.normalized_brewery, b.untappd_id_source,
-  );
-  bumpCatalogVersion();
-  return Number(res.lastInsertRowid);
+    return Number(res.lastInsertRowid);
+  })();
 }
 
 export interface OrphanBeerInput {

@@ -605,6 +605,17 @@ describe('numericTokensCompatible (#617)', () => {
     ['ROTATION 12°', 'Rotation (2026)', true],
     // відоме обмеження зі спеки: різниця лише в ABV не видима, бо stripSearchNoise прибирає ABV
     ['La Chouffe 16°', 'La Chouffe 0.4%', true],
+    // рев'ю ядра: чотирицифрове число поза 19xx/20xx — не рік
+    ['Kronenbourg 1664', 'Kronenbourg', false],
+    // рев'ю ядра: мультимножини, порядок токенів не важить
+    ['Beer 12 x 3', 'Beer 3 x 12', true],
+    ['Vintage (2016) 2015', 'Vintage 2015 2016', true],
+    // відоме обмеження: роки порівнюються набором, зайвий рік в одній назві розводить
+    ['Vintage 2015 2016', 'Vintage 2016', false],
+    // відоме обмеження: число, схоже на рік, — рік (той самий регекс, що в матчері)
+    ['Anniversary 2000', 'Anniversary', true],
+    // відоме обмеження: цифри в некомпактних дужках невидимі — stripSearchNoise прибирає групу
+    ['Imperial Stout (Batch 12)', 'Imperial Stout (Batch 13)', true],
   ])('%s ↔ %s → %s', (a, b, expected) => {
     expect(numericTokensCompatible(a, b)).toBe(expected);
     expect(numericTokensCompatible(b, a)).toBe(expected);
