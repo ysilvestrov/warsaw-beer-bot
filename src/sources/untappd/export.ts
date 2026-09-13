@@ -7,6 +7,7 @@ import { parse as csvParse } from 'csv-parse';
 const { streamArray }: typeof import('stream-json/streamers/stream-array.js') =
   require('stream-json/streamers/stream-array.js');
 import yauzl from 'yauzl';
+import { untappdRating } from './rating';
 
 export interface Checkin {
   checkin_id: string;
@@ -70,7 +71,7 @@ function mapCsv(r: Record<string, string>): Checkin {
     beer_type: blankNull(r['beer_type']),
     beer_abv: numOrNull(r['beer_abv']),
     rating_score: numOrNull(r['rating_score']),
-    global_rating: numOrNull(r['global_weighted_rating_score']),
+    global_rating: untappdRating(r['global_weighted_rating_score']),
     created_at: r['created_at'],
     venue_name: blankNull(r['venue_name']),
   };
@@ -85,7 +86,7 @@ function mapJson(r: Record<string, unknown>): Checkin {
     beer_type: blankNull(r['beer_type']),
     beer_abv: numOrNull(r['beer_abv']),
     rating_score: numOrNull(r['rating_score']),
-    global_rating: numOrNull(r['global_weighted_rating_score']),
+    global_rating: untappdRating(r['global_weighted_rating_score']),
     created_at: String(r['created_at'] ?? ''),
     venue_name: blankNull(r['venue_name']),
   };

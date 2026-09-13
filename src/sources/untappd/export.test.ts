@@ -76,3 +76,25 @@ test('captures global_weighted_rating_score from JSON', async () => {
   expect(rows[0].global_rating).toBe(3.85);
   expect(rows[1].global_rating).toBeNull();
 });
+
+test('global_weighted_rating_score 0 is no rating, others round to 2 decimals — CSV (#616)', async () => {
+  const header = 'beer_name,brewery_name,beer_type,beer_abv,rating_score,created_at,venue_name,checkin_id,bid,global_weighted_rating_score';
+  const rows = await collectBuffer('csv', Buffer.from(
+    `${header}\nPrototype,Funky Fluid,IPA,6,4.25,2026-09-01,,1,6869890,0\nAtak Chmielu,Pinta,AIPA,6.1,4.25,2024-01-01,Cuda,2,567,3.84713\n`,
+    'utf8',
+  ));
+  expect(rows[0].global_rating).toBeNull();
+  expect(rows[0].rating_score).toBe(4.25);
+  expect(rows[1].global_rating).toBe(3.85);
+});
+
+test('global_weighted_rating_score 0 is no rating — JSON (#616)', async () => {
+  const json = JSON.stringify([
+    { checkin_id: '1', bid: 6869890, beer_name: 'Prototype', brewery_name: 'Funky Fluid', beer_type: 'IPA', beer_abv: 6,
+      rating_score: 4.25, global_weighted_rating_score: 0, created_at: '2026-09-01', venue_name: null },
+  ]);
+  const out = [];
+  for await (const r of iterExport(Readable.from(Buffer.from(json, 'utf8')), 'json')) out.push(r);
+  expect(out[0].global_rating).toBeNull();
+  expect(out[0].rating_score).toBe(4.25);
+});

@@ -42,7 +42,7 @@ export interface ResolveByBidArgs {
   /** Shop page URL. Placeholder-brand handling is restricted to Flasker. */
   sourceUrl?: string;
   /** Absent when no Algolia client is wired — the local-catalog path still works. */
-  hydrate?: (bids: number[]) => Promise<Map<number, HydratedBeer>>;
+  hydrate?: (bids: number[]) => Promise<Map<number, HydratedBeer | null>>;
 }
 
 interface Candidate {
@@ -142,7 +142,8 @@ export async function resolveByBid(args: ResolveByBidArgs): Promise<BidResolutio
     if (!args.hydrate) return { kind: 'rejected', reason: 'not-hydrated' };
     let hydrated: HydratedBeer | undefined;
     try {
-      hydrated = (await args.hydrate([bid])).get(bid);
+      // #616: невідомий bid — явний null, недовірений запис — відсутній ключ; для лінка обидва = «немає запису».
+      hydrated = (await args.hydrate([bid])).get(bid) ?? undefined;
     } catch (e: unknown) {
       return { kind: 'rejected', reason: 'hydrate-failed', error: e };
     }

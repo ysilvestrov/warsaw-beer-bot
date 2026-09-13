@@ -87,6 +87,39 @@ describe('parseUserBeersPage', () => {
     expect(it.their_rating).toBe(4.5);
   });
 
+  function userBeerCard(globalLabel: string, globalRating: string): string {
+    return `
+      <div class="beer-item" data-bid="6869890">
+        <div class="beer-details">
+          <p class="name"><a href="/b/funky-fluid-prototype/6869890">Prototype</a></p>
+          <p class="brewery"><a href="/FunkyFluid">Funky Fluid</a></p>
+          <p class="style">IPA - New England / Hazy</p>
+          <div class="ratings">
+            <div class="you">
+              <p>Their Rating (4.5)</p>
+              <div class="caps" data-rating="4.5"></div>
+            </div>
+            <div class="you">
+              <p>Global Rating (${globalLabel})</p>
+              <div class="caps" data-rating="${globalRating}"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  test('Global Rating (N/A) rendered as data-rating="0" is no rating; Their Rating is untouched (#616)', () => {
+    const [it] = parseUserBeersPage(userBeerCard('N/A', '0'));
+    expect(it.bid).toBe(6869890);
+    expect(it.global_rating).toBeNull();
+    expect(it.their_rating).toBe(4.5);
+  });
+
+  test('Global Rating keeps 2 decimals like Algolia (#616)', () => {
+    const [it] = parseUserBeersPage(userBeerCard('3.30', '3.29971'));
+    expect(it.global_rating).toBe(3.3);
+  });
+
   test('skips item with non-numeric data-bid; keeps siblings', () => {
     const html = `
       <div class="beer-item" data-bid="abc">
@@ -164,5 +197,46 @@ describe('parseUserBeersPage', () => {
       </div>`;
     const [it] = parseUserBeersPage(html);
     expect(it.style).toBeNull();
+  });
+});
+
+describe('parseUserBeersPage — Global Rating block (#616)', () => {
+  const fixture = (name: string) =>
+    fs.readFileSync(path.join(__dirname, '../../../tests/fixtures/untappd', name), 'utf8');
+
+  test('a number, «N/A» and a missing block are three different states', () => {
+    const items = parseUserBeersPage(fixture('user-beers-na.html'));
+    expect(items.map((b) => ({ bid: b.bid, shown: b.global_rating_shown, rating: b.global_rating }))).toEqual([
+      { bid: 6869890, shown: true, rating: null },
+      { bid: 39819, shown: true, rating: 3.3 },
+      { bid: 100001, shown: false, rating: null },
+    ]);
+  });
+
+  test('a Global Rating label without a readable data-rating proves nothing; an explicit «(N/A)» label does (review #625)', () => {
+    const card = (label: string, caps: string) => `
+      <div class="beer-item" data-bid="777">
+        <div class="beer-details">
+          <p class="name"><a href="/b/x/777">Quiet Page</a></p>
+          <p class="brewery"><a href="/x">Silent Brewery</a></p>
+          <p class="style">Lager</p>
+          <div class="ratings"><div class="you"><p>${label}</p>${caps}</div></div>
+        </div>
+      </div>`;
+    for (const caps of [
+      '', '<div class="caps"></div>', '<div class="caps" data-rating="soon"></div>',
+      '<div class="caps" data-rating="3.72soon"></div>',   // числовий префікс — ще не число (рев'ю #625)
+    ]) {
+      const [it] = parseUserBeersPage(card('Global Rating (3.72)', caps));
+      expect(it).toMatchObject({ global_rating: null, global_rating_shown: false });
+    }
+    const [na] = parseUserBeersPage(card('Global Rating (N/A)', '<div class="caps" data-rating="N/A"></div>'));
+    expect(na).toMatchObject({ global_rating: null, global_rating_shown: true });
+  });
+
+  test('the captured profile page shows the block on every card', () => {
+    const items = parseUserBeersPage(fixture('user-beers.html'));
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((b) => b.global_rating_shown)).toBe(true);
   });
 });

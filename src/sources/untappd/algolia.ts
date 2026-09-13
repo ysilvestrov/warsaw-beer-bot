@@ -2,6 +2,7 @@ import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { HttpError, normalizeProxyUrl } from '../http';
 import type { FetchInitLike, FetchLike } from '../fetch-like';
 import type { BeerSearch, SearchResult, HydratedBeer } from './search';
+import { untappdRating } from './rating';
 
 interface AlgoliaHit {
   bid?: unknown;
@@ -58,7 +59,7 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
       brewery_name: str(h.brewery_name),
       style: style.length > 0 ? style : null,
       abv: num(h.beer_abv),
-      global_rating: num(h.rating_score),
+      global_rating: untappdRating(h.rating_score),
       brewery_alias: strList(h.brewery_alias),
       alias_alt: strList(h.alias_alt),
       rating_count: ratingCount(h.rating_count),
@@ -84,7 +85,7 @@ export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBe
     brewery_name: str(h.brewery_name),
     style: style.length > 0 ? style : null,
     abv: num(h.beer_abv),
-    global_rating: num(h.rating_score),
+    global_rating: untappdRating(h.rating_score),
     beer_slug: slug.length > 0 ? slug : null,
     brewery_alias: strList(h.brewery_alias),
     rating_count: ratingCount(h.rating_count),
@@ -156,7 +157,7 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
     return parseAlgoliaResponse((await res.json()) as AlgoliaResponse);
   }
 
-  async function rawHydrate(bids: number[], useProxy: boolean): Promise<Map<number, HydratedBeer>> {
+  async function rawHydrate(bids: number[], useProxy: boolean): Promise<Map<number, HydratedBeer | null>> {
     const wait = Math.max(0, lastAt + gap - Date.now());
     if (wait > 0) await new Promise((r) => setTimeout(r, wait));
     const init: FetchInitLike = {
@@ -176,12 +177,27 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
     lastAt = Date.now();
     if (!res.ok) throw new HttpError(res.status, url);
     // Results are positionally aligned with the requests; unknown objectIDs come back null.
+    // #616: зіставлення за позицією. `null` на позиції — Algolia цього bid не знає: явний `null` у мапі
+    // (гідратор пише бекоф). Запис, що не розібрався або належить іншому bid, нічого не доводить — bid
+    // лишається без ключа (гідратор пропускає його без записів), а решта пачки звіряється. Відповідь без
+    // `results` або з іншою кількістю — позиціям не можна вірити взагалі: помилка (транзієнт для
+    // гідратора, `hydrate-failed` для bid-identity).
     const json = (await res.json()) as { results?: (Record<string, unknown> | null)[] };
-    const out = new Map<number, HydratedBeer>();
-    for (const raw of json.results ?? []) {
-      const parsed = parseHydratedBeer(raw);
-      if (parsed) out.set(parsed.bid, parsed);
+    const results = json.results;
+    if (!Array.isArray(results) || results.length !== bids.length) {
+      throw new Error(`algolia hydrate: expected ${bids.length} results, got ${Array.isArray(results) ? results.length : 'none'}`);
     }
+    const out = new Map<number, HydratedBeer | null>();
+    results.forEach((raw, i) => {
+      const bid = bids[i];
+      if (raw === null) {
+        out.set(bid, null);
+        return;
+      }
+      const parsed = parseHydratedBeer(raw);
+      if (!parsed || parsed.bid !== bid) return;
+      out.set(bid, parsed);
+    });
     return out;
   }
 
@@ -211,7 +227,7 @@ export function createAlgoliaSearch(opts: AlgoliaSearchOpts) {
   return {
     search: (query: string) => withRecovery((useProxy) => rawSearch(query, useProxy)),
     async hydrateByBid(bids: number[]) {
-      if (bids.length === 0) return new Map<number, HydratedBeer>();
+      if (bids.length === 0) return new Map<number, HydratedBeer | null>();
       return withRecovery((useProxy) => rawHydrate(bids, useProxy));
     },
   } satisfies BeerSearch;

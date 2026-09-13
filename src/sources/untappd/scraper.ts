@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { untappdRating } from './rating';
 
 export interface ScrapedBeer {
   bid: number;
@@ -8,6 +9,8 @@ export interface ScrapedBeer {
   abv: number | null;
   their_rating: number | null;
   global_rating: number | null;
+  /** #616: блок «Global Rating» на картці знайдено — з числом або «N/A». Без блоку сторінка про рейтинг нічого не каже. */
+  global_rating_shown: boolean;
 }
 
 const MAX_ITEMS = 25;
@@ -49,14 +52,25 @@ export function parseUserBeersPage(html: string): ScrapedBeer[] {
 
     let their_rating: number | null = null;
     let global_rating: number | null = null;
+    let global_rating_shown = false;
     details.find('.ratings .you').each((_, you) => {
       const label = $(you).find('p').first().text().trim();
-      const value = parseRating($(you).find('.caps[data-rating]').first().attr('data-rating'));
-      if (/^Their Rating/i.test(label)) their_rating = value;
-      else if (/^Global Rating/i.test(label)) global_rating = value;
+      const raw = $(you).find('.caps[data-rating]').first().attr('data-rating');
+      if (/^Their Rating/i.test(label)) their_rating = parseRating(raw);
+      // #616: глобальний рейтинг Untappd — «0/N/A = менш ніж 10 оцінок», округлення до 2 знаків.
+      else if (/^Global Rating/i.test(label)) {
+        // Відповідь Untappd — лише читабельне число в data-rating (0 = менш ніж 10 оцінок) або явний
+        // підпис «(N/A)». Підпис без читабельного значення нічого не доводить: як блоку немає (рев'ю #625).
+        // Суворо: parseFloat('3.72soon') скінченне, а це ще не число.
+        const readable = raw !== undefined && /^\s*\d+(?:\.\d+)?\s*$/.test(raw);
+        if (readable || /\(N\/A\)/i.test(label)) {
+          global_rating = untappdRating(raw);
+          global_rating_shown = true;
+        }
+      }
     });
 
-    out.push({ bid, beer_name, brewery_name, style, abv, their_rating, global_rating });
+    out.push({ bid, beer_name, brewery_name, style, abv, their_rating, global_rating, global_rating_shown });
   });
 
   return out;

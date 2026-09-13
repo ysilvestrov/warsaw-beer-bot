@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { isBlockPage } from './block';
 import { HttpError } from '../http';
+import { untappdRating } from './rating';
 
 export interface SearchResult {
   bid: number;
@@ -27,17 +28,15 @@ export interface HydratedBeer extends SearchResult {
 // errors for transient failures; resolves [] for a genuine no-result query.
 export interface BeerSearch {
   search(query: string): Promise<SearchResult[]>;
-  /** #384: fetch full records by bid (objectID === bid). Missing bids are absent from the map. */
-  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer>>;
+  /**
+   * #384: fetch full records by bid (objectID === bid).
+   * #616: a bid Algolia does not know maps to an explicit `null`; a bid whose record could not be
+   * trusted (unparsable, or another bid at its position) is absent from the map — no proof either way.
+   */
+  hydrateByBid?(bids: number[]): Promise<Map<number, HydratedBeer | null>>;
 }
 
 const MAX_ITEMS = 5;
-
-function parseRating(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : null;
-}
 
 function parseAbv(raw: string): number | null {
   const m = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
@@ -94,7 +93,7 @@ export function parseSearchPage(html: string): SearchResult[] {
     const abvText = detailsBeer.find('.abv').first().text().trim();
     const abv = abvText ? parseAbv(abvText) : null;
 
-    const global_rating = parseRating(
+    const global_rating = untappdRating(
       detailsBeer.find('.rating .caps[data-rating]').first().attr('data-rating'),
     );
 

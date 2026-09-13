@@ -5,8 +5,7 @@ import { CookieExpiredError, HttpError } from '../sources/http';
 import { isBlockPage, isBlockStatus } from '../sources/untappd/block';
 import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles } from '../storage/user_profiles';
-import { upsertBeerByBid } from '../storage/beers';
-import { bumpCatalogVersion } from '../storage/catalog-version';
+import { upsertBeerByBid, recordProfileBeer } from '../storage/beers';
 import { markHad } from '../storage/untappd_had';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
@@ -51,11 +50,6 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
   const rotatedBefore = http.rotations?.() ?? 0;
   await onProgress(`👤 untappd: 0/${profiles.length} профілів`, { force: true });
 
-  // Refresh the rating and backfill abv when Untappd has it; COALESCE keeps an
-  // existing abv if this scrape didn't surface one (don't wipe known values).
-  const updateRatingAndAbv = db.prepare(
-    'UPDATE beers SET rating_global = ?, abv = COALESCE(?, abv) WHERE id = ?',
-  );
   // #617: рядок шукається за bid зі сторінки, а не за нормалізованою назвою: normalizeName викидає
   // цифри, тож «Rochefort 8» і «Rochefort 10» мають одну назву, і рейтинг та позначка «пив»
   // лягали б на вінтаж-близнюка.
@@ -82,8 +76,9 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
         const existing = findByBid.get(it.bid) as { id: number } | undefined;
         let beerId: number;
         if (existing) {
-          updateRatingAndAbv.run(it.global_rating, it.abv, existing.id);
-          bumpCatalogVersion();
+          // #616: рейтинг зі сторінки — лише коли блок «Global Rating» знайдено (число або «N/A»);
+          // штамп звірки, провенанс 'checkin' і бамп кешу лише при зміні — у recordProfileBeer.
+          recordProfileBeer(db, existing.id, it, tickNow.toISOString());
           beerId = existing.id;
         } else {
           beerId = upsertBeerByBid(db, {

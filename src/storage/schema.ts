@@ -485,6 +485,21 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE api_usage ADD COLUMN mcp_beers INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 31,
+    // #616: «рейтинг звірено з Untappd у момент T». Без бекфілу: доказу звірки немає ні в кого —
+    // стара джоба рейтингів не штампувала, а синк чекінів до #617 рейтинги стирав.
+    // rating_refresh_* відтепер — бекоф лише для bid, якого Algolia не знає; значення старої
+    // HTML-джоби («на сторінці немає рейтингу», транзієнт) цього не стверджують, тож скидаються.
+    // Рейтинг 0 за правилом межі парсерів означає «менше 10 оцінок» = немає рейтингу; без цього
+    // UPDATE нулі на bid, яких Algolia не знає, лишилися б назавжди (гідратор їх не звіряє).
+    sql: `
+      ALTER TABLE beers ADD COLUMN rating_checked_at TEXT;
+      UPDATE beers SET rating_refresh_at = NULL, rating_refresh_count = 0
+        WHERE rating_refresh_at IS NOT NULL OR rating_refresh_count <> 0;
+      UPDATE beers SET rating_global = NULL WHERE rating_global = 0;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

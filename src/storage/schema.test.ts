@@ -334,6 +334,8 @@ describe('schema migrations', () => {
       // api_usage — скидаємо з тієї ж причини, що й рядки вище.
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
+      // v31 (#616) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо з тієї ж причини.
+      db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
       db.prepare('DELETE FROM schema_version WHERE version >= 22').run();
 
       // Two beers: one pinned via match_links, one not.
@@ -386,6 +388,8 @@ describe('schema migrations', () => {
       // api_usage — скидаємо з тієї ж причини, що й рядки вище.
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
+      // v31 (#616) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо з тієї ж причини.
+      db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
       db.prepare('DELETE FROM schema_version WHERE version >= 23').run();
 
       db.prepare(
@@ -482,6 +486,8 @@ describe('schema migrations', () => {
       // api_usage — скидаємо з тієї ж причини, що й рядки вище.
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_requests');
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
+      // v31 (#616) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо з тієї ж причини.
+      db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
       db.exec(`
         DROP TABLE enrich_failures;
         CREATE TABLE enrich_failures (
@@ -527,9 +533,9 @@ describe('schema migrations', () => {
       expect(kept.r).not.toBeNull();
 
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1: this rewind starts from v23 and runs migrate() to
-      // completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(30);
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616: this rewind starts from v23 and runs
+      // migrate() to completion, so the reachable head moves whenever a later migration is added.
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(31);
     });
   });
 
@@ -576,9 +582,42 @@ describe('schema migrations', () => {
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1: a fresh DB's reachable head moves whenever a later
-      // migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(30);
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616: a fresh DB's reachable head moves
+      // whenever a later migration is added; this still proves v25 wasn't lost along the way.
+      expect(version.v).toBe(31);
     });
+  });
+});
+
+describe('v31 rating_checked_at (#616)', () => {
+  it('adds a nullable beers.rating_checked_at with no backfill', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = db.prepare('PRAGMA table_info(beers)').all() as { name: string; notnull: number; dflt_value: unknown }[];
+    const col = cols.find((c) => c.name === 'rating_checked_at');
+    expect(col).toBeDefined();
+    expect(col!.notnull).toBe(0);
+    expect(col!.dflt_value).toBeNull();
+    db.prepare(`INSERT INTO beers (untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery)
+                VALUES (4473, 'Guinness Draught', 'Guinness', 3.77, 'guinness draught', 'guinness')`).run();
+    const row = db.prepare('SELECT rating_checked_at FROM beers WHERE untappd_id = 4473').get() as { rating_checked_at: string | null };
+    expect(row.rating_checked_at).toBeNull();
+  });
+
+  it('resets the legacy HTML-job backoff and turns stored zeros into NULL', () => {
+    // Рядки, записані до v31: бекоф старої джоби (count/at мали інший зміст) і рейтинг 0.
+    const db = openDb(':memory:');
+    migrate(db);
+    db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
+    db.prepare('DELETE FROM schema_version WHERE version >= 31').run();
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery, rating_refresh_at, rating_refresh_count)
+                VALUES (1, 6869890, 'Prototype', 'Funky Fluid', 0, 'prototype', 'funky fluid', '2026-09-12T01:30:00.000Z', 4),
+                       (2, 4473, 'Guinness Draught', 'Guinness', 3.77, 'guinness draught', 'guinness', '2026-09-12T01:30:00.000Z', 0)`).run();
+    migrate(db);
+    const rows = db.prepare('SELECT id, rating_global, rating_refresh_at, rating_refresh_count FROM beers ORDER BY id').all();
+    expect(rows).toEqual([
+      { id: 1, rating_global: null, rating_refresh_at: null, rating_refresh_count: 0 },
+      { id: 2, rating_global: 3.77, rating_refresh_at: null, rating_refresh_count: 0 },
+    ]);
   });
 });

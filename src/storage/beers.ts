@@ -42,6 +42,7 @@ export interface BeerRow extends BeerInput {
   untappd_lookup_count: number;
   rating_refresh_at: string | null;
   rating_refresh_count: number;
+  rating_checked_at: string | null;
   web_tried_at: string | null;
 }
 
@@ -522,74 +523,162 @@ export function listRelayLookupCandidates(
   return eligible.slice(0, limit);
 }
 
-export function recordRatingSuccess(
-  db: DB,
-  beerId: number,
-  rating: number,
-): void {
-  // Success overwrites whatever rating_global was there. Count not touched —
-  // the beer leaves the candidate pool naturally (rating_global IS NOT NULL).
-  db.prepare('UPDATE beers SET rating_global = ? WHERE id = ?')
-    .run(rating, beerId);
-  bumpCatalogVersion();
-}
+// #616: звірка рейтингу злінкованого пива з Untappd (Algolia getObjects за bid). На відміну від
+// колишньої HTML-джоби — без гейту «на крані» і з повторною звіркою наявних рейтингів.
+export const RATING_RECHECK_DAYS = 30;
 
-export function recordRatingNotFound(
-  db: DB,
-  beerId: number,
-  at: string,
-): void {
-  db.prepare(
-    `UPDATE beers SET
-       rating_refresh_at = ?,
-       rating_refresh_count = rating_refresh_count + 1
-     WHERE id = ?`,
-  ).run(at, beerId);
-}
-
-export function recordRatingTransient(
-  db: DB,
-  beerId: number,
-  at: string,
-): void {
-  db.prepare(
-    'UPDATE beers SET rating_refresh_at = ? WHERE id = ?',
-  ).run(at, beerId);
-}
-
-export interface RatingRefreshCandidate {
+export interface RatingHydrationCandidate {
   id: number;
   untappd_id: number;
   rating_refresh_at: string | null;
   rating_refresh_count: number;
 }
 
-export function listRatingRefreshCandidates(
+export function listRatingHydrationCandidates(
   db: DB,
   limit: number,
   now: Date,
-): RatingRefreshCandidate[] {
-  // SQL pre-filter: beers WITH untappd_id but NO rating, currently on tap.
-  // #486: uses onLatestTapPredicate, the same on-tap definition listLookupCandidates
-  // interpolates positively — not a hand-kept copy of its join.
+): RatingHydrationCandidate[] {
+  const cutoff = new Date(now.getTime() - RATING_RECHECK_DAYS * 86_400_000).toISOString();
+  // Порядок: спершу рядки без рейтингу (0 — наслідок старих записів до межі парсерів, #616),
+  // далі ніколи не звірені, далі найдавніше звірені. «Ніколи не звірені» окремого ключа не мають:
+  // у SQLite NULL при ASC іде першим. Штампи пишуться toISOString(), тож лексикографічне
+  // порівняння рядків = хронологічне.
   const rows = db
     .prepare(
-      `SELECT b.id, b.untappd_id,
-              b.rating_refresh_at, b.rating_refresh_count
-       FROM beers b
-       WHERE b.untappd_id IS NOT NULL
-         AND b.rating_global IS NULL
-         AND ${onLatestTapPredicate}
-       ORDER BY b.rating_refresh_count ASC, b.id ASC`,
+      `SELECT id, untappd_id, rating_refresh_at, rating_refresh_count
+       FROM beers
+       WHERE untappd_id IS NOT NULL
+         AND (rating_checked_at IS NULL OR rating_checked_at < ?)
+       ORDER BY (rating_global IS NULL OR rating_global = 0) DESC,
+                rating_checked_at ASC,
+                id ASC`,
     )
-    .all() as RatingRefreshCandidate[];
+    .all(cutoff) as RatingHydrationCandidate[];
+  // rating_refresh_* тепер — бекоф лише для bid, якого Algolia не знає; після успішної звірки
+  // count = 0 і at = NULL, тож на решту рядків фільтр не діє.
+  return rows
+    .filter((r) => isEligible(now, r.rating_refresh_at, r.rating_refresh_count))
+    .slice(0, Math.max(0, limit));   // від'ємний limit у slice означав би «усі, крім останніх»
+}
 
-  // JS-side backoff filter using the shared lookup-backoff module.
-  const eligible = rows.filter((r) =>
-    isEligible(now, r.rating_refresh_at, r.rating_refresh_count),
+export interface HydratedRatingFacts {
+  global_rating: number | null;
+  style: string | null;
+  abv: number | null;
+}
+
+export interface RatingHydrationOutcome {
+  updated: number;
+  changed: number;
+  unknown: number;
+  skipped: number;
+}
+
+export function applyHydratedRatings(
+  db: DB,
+  hits: Map<number, HydratedRatingFacts | null>,
+  bids: number[],
+  nowIso: string,
+): RatingHydrationOutcome {
+  const read = db.prepare('SELECT rating_global, style, abv FROM beers WHERE untappd_id = ?');
+  // Рейтинг — перезапис (зокрема NULL: Untappd не показує рейтинг до 10 оцінок); стиль і ABV лише
+  // заповнюють порожнє. Пошук за untappd_id (UNIQUE), а не за id вибірки: рядок, злитий між
+  // вибіркою й записом, дає 0 змінених рядків, а не запис у чужий рядок.
+  const write = db.prepare(
+    `UPDATE beers SET
+       rating_global = ?,
+       style = COALESCE(style, ?),
+       abv = COALESCE(abv, ?),
+       rating_checked_at = ?,
+       rating_refresh_at = NULL,
+       rating_refresh_count = 0
+     WHERE untappd_id = ?`,
   );
+  const backoff = db.prepare(
+    `UPDATE beers SET
+       rating_refresh_at = ?,
+       rating_refresh_count = rating_refresh_count + 1
+     WHERE untappd_id = ?`,
+  );
+  const out: RatingHydrationOutcome = { updated: 0, changed: 0, unknown: 0, skipped: 0 };
+  db.transaction(() => {
+    for (const bid of bids) {
+      const before = read.get(bid) as
+        | { rating_global: number | null; style: string | null; abv: number | null }
+        | undefined;
+      if (!before) continue;
+      // #616: відсутній ключ — відповідь нічого не довела про цей bid (запис не розібрався або належить
+      // іншому bid): ні штампа, ні бекофу. Явний null — Algolia цього bid не знає: лише бекоф.
+      if (!hits.has(bid)) {
+        out.skipped++;
+        continue;
+      }
+      const hit = hits.get(bid);
+      if (!hit) {
+        backoff.run(nowIso, bid);
+        out.unknown++;
+        continue;
+      }
+      write.run(hit.global_rating, hit.style, hit.abv, nowIso, bid);
+      out.updated++;
+      const style = before.style ?? hit.style;
+      const abv = before.abv ?? hit.abv;
+      if (before.rating_global !== hit.global_rating || style !== before.style || abv !== before.abv) {
+        out.changed++;
+      }
+    }
+  })();
+  // Кеш /match залежить від рейтингу/стилю/ABV, не від штампа: без змін — без перебудови.
+  if (out.changed > 0) bumpCatalogVersion();
+  return out;
+}
 
-  return eligible.slice(0, limit);
+export interface ProfileBeerFacts {
+  global_rating: number | null;
+  global_rating_shown: boolean;
+  abv: number | null;
+}
+
+// #616: рядок, знайдений за bid зі сторінки `/beers` профілю (refreshAllUntappd). Блок «Global Rating»
+// (число або «N/A») — пряма відповідь Untappd про рейтинг: перезапис і штамп звірки. Без блоку
+// сторінка про рейтинг нічого не каже — рейтинг і штамп не чіпаються. ABV сторінки перемагає, коли
+// він є (як і до #616). Сторінка — власний запис Untappd про те, що користувач пив цей bid, тож
+// провенанс лінка посилюється до 'checkin' ('curated' лишається).
+export function recordProfileBeer(
+  db: DB,
+  beerId: number,
+  facts: ProfileBeerFacts,
+  nowIso: string,
+): void {
+  const before = db
+    .prepare('SELECT rating_global, abv, untappd_id_source FROM beers WHERE id = ?')
+    .get(beerId) as
+    | { rating_global: number | null; abv: number | null; untappd_id_source: UntappdIdSource | null }
+    | undefined;
+  if (!before) return;
+  const source = strongerSource(before.untappd_id_source, 'checkin');
+  if (facts.global_rating_shown) {
+    db.prepare(
+      // Рейтинг звірено — бекоф «Algolia не знає bid» скидається: сторінка довела, що bid живий, тож
+      // вичерпаний бекоф не має назавжди виключати рядок із гідратора (рев'ю #625).
+      `UPDATE beers SET
+         rating_global = ?,
+         abv = COALESCE(?, abv),
+         rating_checked_at = ?,
+         rating_refresh_at = NULL,
+         rating_refresh_count = 0,
+         untappd_id_source = ?
+       WHERE id = ?`,
+    ).run(facts.global_rating, facts.abv, nowIso, source, beerId);
+  } else {
+    db.prepare('UPDATE beers SET abv = COALESCE(?, abv), untappd_id_source = ? WHERE id = ?')
+      .run(facts.abv, source, beerId);
+  }
+  const abvChanged = facts.abv !== null && facts.abv !== before.abv;
+  const ratingChanged = facts.global_rating_shown && facts.global_rating !== before.rating_global;
+  // Кеш /match залежить від рейтингу й ABV, не від штампа чи провенансу.
+  if (abvChanged || ratingChanged) bumpCatalogVersion();
 }
 
 export function readWebTriedAt(db: DB, beerId: number): string | null {
