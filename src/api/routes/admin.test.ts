@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { recordEnrichFailure } from '../../storage/enrich_failures';
 import { adminMiddleware } from '../middleware/admin';
@@ -18,7 +18,7 @@ function setup() {
   const app = new Hono<ApiEnv>();
   app.use('/admin/*', adminMiddleware(env));
   adminRoute(app, { db, env, log });
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     untappd_id: null, name: 'Taking Shape', brewery: 'Track', style: null, abv: null, rating_global: null,
     normalized_name: normalizeName('Taking Shape'), normalized_brewery: normalizeBrewery('Track'),
   });

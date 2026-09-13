@@ -3,7 +3,7 @@ import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { markHad } from '../../storage/untappd_had';
 import { mergeCheckin } from '../../storage/checkins';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
@@ -31,13 +31,13 @@ function setup(catalogOverride?: CatalogCache) {
   migrate(db);
   ensureProfile(db, 1);
   ensureProfile(db, 2);
-  const panIpani = upsertBeer(db, {
+  const panIpani = seedBeer(db, {
     untappd_id: 9001, name: 'Pan IPAni', brewery: 'Trzech Kumpli',
     style: 'IPA', abv: 6.0, rating_global: 3.85,
     normalized_name: normalizeName('Pan IPAni'),
     normalized_brewery: normalizeBrewery('Trzech Kumpli'),
   });
-  const atakChmielu = upsertBeer(db, {
+  const atakChmielu = seedBeer(db, {
     untappd_id: 9002, name: 'Atak Chmielu', brewery: 'PINTA',
     style: 'IPA', abv: 6.1, rating_global: 3.7,
     normalized_name: normalizeName('Atak Chmielu'),

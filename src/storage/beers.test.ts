@@ -1,6 +1,7 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer, upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
+import { upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 function fresh() {
@@ -9,100 +10,8 @@ function fresh() {
   return db;
 }
 
-test('upsertBeer inserts then updates by normalized key', () => {
-  const db = fresh();
-  const id1 = upsertBeer(db, {
-    name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA',
-    abv: 6.1, rating_global: 3.9,
-    normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
-  });
-  const id2 = upsertBeer(db, {
-    name: 'Atak Chmielu', brewery: 'Pinta', style: 'IPA',
-    abv: 6.2, rating_global: 3.95,
-    normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
-  });
-  expect(id1).toBe(id2);
-  const row = findBeerByNormalized(db, 'pinta', 'atak chmielu');
-  expect(row?.abv).toBeCloseTo(6.2);
-});
-
 test('findBeerByNormalized returns null when absent', () => {
   expect(findBeerByNormalized(fresh(), 'x', 'y')).toBeNull();
-});
-
-test('upsertBeer matches by untappd_id when normalization drifts', () => {
-  // Simulates the production state where a row was stored under one
-  // normalized form (e.g. legacy "captain hazy foreign legion" without
-  // numeric tokens) and re-import passes a different normalized form
-  // (current "captain hazy foreign legion 2025"). Without the
-  // untappd_id-first lookup, the SELECT misses, INSERT fires, and the
-  // UNIQUE constraint on beers.untappd_id throws.
-  const db = fresh();
-  const oldId = upsertBeer(db, {
-    untappd_id: 6455502,
-    name: 'Captain Hazy - Foreign Legion 2025',
-    brewery: 'KOMPAAN Dutch Craft Beer Company',
-    style: null, abv: null, rating_global: null,
-    normalized_name: 'captain hazy foreign legion',
-    normalized_brewery: 'kompaan dutch craft beer',
-  });
-  const newId = upsertBeer(db, {
-    untappd_id: 6455502,
-    name: 'Captain Hazy - Foreign Legion 2025',
-    brewery: 'KOMPAAN Dutch Craft Beer Company',
-    style: 'Bock - Doppelbock', abv: 8.0, rating_global: 3.55,
-    normalized_name: 'captain hazy foreign legion 2025',
-    normalized_brewery: 'kompaan dutch craft beer',
-  });
-  expect(newId).toBe(oldId);
-  const row = db
-    .prepare('SELECT name, style, abv, rating_global, normalized_name FROM beers WHERE id = ?')
-    .get(oldId) as { name: string; style: string; abv: number; rating_global: number; normalized_name: string };
-  expect(row.rating_global).toBeCloseTo(3.55);
-  expect(row.style).toBe('Bock - Doppelbock');
-  expect(row.normalized_name).toBe('captain hazy foreign legion 2025');
-});
-
-test('upsertBeer falls back to (normalized_brewery, normalized_name) when untappd_id is null', () => {
-  const db = fresh();
-  const id1 = upsertBeer(db, {
-    untappd_id: null, name: 'Foo', brewery: 'Bar',
-    style: null, abv: null, rating_global: null,
-    normalized_name: 'foo', normalized_brewery: 'bar',
-  });
-  const id2 = upsertBeer(db, {
-    untappd_id: null, name: 'Foo', brewery: 'Bar',
-    style: null, abv: 5.0, rating_global: null,
-    normalized_name: 'foo', normalized_brewery: 'bar',
-  });
-  expect(id2).toBe(id1);
-});
-
-test('upsertBeer prefers untappd_id row over a normalized-only match', () => {
-  // A canonical Untappd-side row exists with bid=42; an orphan ontap-side
-  // row exists with same normalized but null bid. Re-importing the bid'd
-  // beer must update the canonical, not the orphan.
-  const db = fresh();
-  const canonId = upsertBeer(db, {
-    untappd_id: 42, name: 'Foo', brewery: 'Bar',
-    style: null, abv: null, rating_global: null,
-    normalized_name: 'foo', normalized_brewery: 'bar',
-  });
-  const orphanId = upsertBeer(db, {
-    untappd_id: null, name: 'Foo', brewery: 'Bar',
-    style: null, abv: null, rating_global: null,
-    normalized_name: 'foo extra', normalized_brewery: 'bar',
-  });
-  expect(orphanId).not.toBe(canonId);
-  // Re-import: bid=42, but the data lookup happens to also match orphan by normalized
-  const updatedId = upsertBeer(db, {
-    untappd_id: 42, name: 'Foo Renamed', brewery: 'Bar',
-    style: null, abv: null, rating_global: 4.0,
-    normalized_name: 'foo extra', normalized_brewery: 'bar',
-  });
-  expect(updatedId).toBe(canonId);
-  const orphan = db.prepare('SELECT name FROM beers WHERE id = ?').get(orphanId) as { name: string };
-  expect(orphan.name).toBe('Foo'); // orphan untouched
 });
 
 // ---------------------------------------------------------------------------
@@ -120,7 +29,7 @@ import {
 describe('getBeer', () => {
   test('returns full row including new lookup_at + lookup_count columns', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -140,7 +49,7 @@ describe('getBeer', () => {
 describe('recordLookupSuccess', () => {
   test('sets untappd_id, style, abv, rating_global from SearchResult', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -157,7 +66,7 @@ describe('recordLookupSuccess', () => {
 
   test('NULL rating_global does NOT overwrite existing non-null rating', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: 'Lager', abv: 5.0, rating_global: 3.5,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -172,7 +81,7 @@ describe('recordLookupSuccess', () => {
 
   test('NULL abv does NOT overwrite existing non-null abv', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: 4.6, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -187,7 +96,7 @@ describe('recordLookupSuccess', () => {
 describe('recordLookupNotFound', () => {
   test('increments count + sets lookup_at', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -206,7 +115,7 @@ describe('recordLookupNotFound', () => {
 describe('recordLookupTransient', () => {
   test('updates lookup_at but does NOT increment count', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -234,7 +143,7 @@ describe('listLookupCandidates', () => {
     opts: { brewery: string; name: string; untappdId?: number | null;
             lookupAt?: string | null; lookupCount?: number },
   ): number {
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: opts.untappdId ?? null,
       name: opts.name, brewery: opts.brewery,
       style: null, abv: null, rating_global: null,
@@ -274,7 +183,7 @@ describe('listLookupCandidates', () => {
 
   test('omits orphans not on any current tap', () => {
     const db = fresh();
-    upsertBeer(db, {
+    seedBeer(db, {
       name: 'Ghost', brewery: 'Old', style: null, abv: null, rating_global: null,
       normalized_name: 'ghost', normalized_brewery: 'old',
     });
@@ -497,7 +406,7 @@ describe('listLookupCandidates', () => {
   // 462 of 911 live orphans sitting in it, 376 never queried once.
   test('#486: a beer whose tap left the latest snapshot is in exactly one pool', () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: null, name: 'Dunkelweizen', brewery: 'Weihenstephaner',
       style: null, abv: null, rating_global: null,
       normalized_name: 'dunkelweizen', normalized_brewery: 'weihenstephaner',
@@ -538,7 +447,7 @@ describe('listRelayLookupCandidates', () => {
     opts: { brewery: string; name: string; untappdId?: number | null;
             lookupAt?: string | null; lookupCount?: number },
   ): number {
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: opts.untappdId ?? null,
       name: opts.name, brewery: opts.brewery,
       style: null, abv: null, rating_global: null,
@@ -559,7 +468,7 @@ describe('listRelayLookupCandidates', () => {
     db: ReturnType<typeof fresh>,
     opts: { brewery: string; name: string },
   ): number {
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: null,
       name: opts.name, brewery: opts.brewery,
       style: null, abv: null, rating_global: null,
@@ -803,7 +712,7 @@ import {
 describe('recordRatingSuccess', () => {
   test('sets rating_global from the parsed beer-page rating', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 6645513,
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
@@ -816,7 +725,7 @@ describe('recordRatingSuccess', () => {
 
   test('overwrites a stale existing rating', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 100,
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: 3.5,
       normalized_name: 'x', normalized_brewery: 'y',
@@ -829,7 +738,7 @@ describe('recordRatingSuccess', () => {
 describe('recordRatingNotFound', () => {
   test('increments count + sets refresh_at', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 100,
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
@@ -849,7 +758,7 @@ describe('recordRatingNotFound', () => {
 describe('recordRatingTransient', () => {
   test('updates refresh_at but does NOT increment count', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 100,
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
@@ -871,7 +780,7 @@ describe('listRatingRefreshCandidates', () => {
       refreshCount?: number;
     },
   ): number {
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: opts.untappdId,
       name: opts.name, brewery: opts.brewery,
       style: null, abv: null,
@@ -915,7 +824,7 @@ describe('listRatingRefreshCandidates', () => {
 
   test('omits orphan beers (untappd_id NULL — those are PR-D2 territory)', () => {
     const db = fresh();
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       name: 'X', brewery: 'Y', style: null, abv: null, rating_global: null,
       normalized_name: 'x', normalized_brewery: 'y',
     });
@@ -934,7 +843,7 @@ describe('listRatingRefreshCandidates', () => {
 
   test('omits beers not on any current tap', () => {
     const db = fresh();
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 100,
       name: 'Ghost', brewery: 'Old', style: null, abv: null, rating_global: null,
       normalized_name: 'ghost', normalized_brewery: 'old',
@@ -997,7 +906,7 @@ describe('loadCatalog', () => {
   it('returns id, brewery, name, abv, rating_global for every beer', () => {
     const db = openDb(':memory:');
     migrate(db);
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 9001, name: 'Pan IPAni', brewery: 'Trzech Kumpli',
       style: 'IPA', abv: 6.0, rating_global: 3.85,
       normalized_name: normalizeName('Pan IPAni'),
@@ -1015,7 +924,7 @@ describe('web_tried_at', () => {
   it('is null until stamped, then reads back the stamp', () => {
     const db = openDb(':memory:');
     migrate(db);
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       name: 'X', brewery: 'Y', normalized_name: 'x', normalized_brewery: 'y',
     });
     expect(readWebTriedAt(db, id)).toBeNull();
@@ -1027,12 +936,12 @@ describe('web_tried_at', () => {
 
 function mergeFixture() {
   const db = fresh();
-  const canonicalId = upsertBeer(db, {
+  const canonicalId = seedBeer(db, {
     untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
     style: null, abv: null, rating_global: null,
     normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
   });
-  const orphanId = upsertBeer(db, {
+  const orphanId = seedBeer(db, {
     name: 'Deep Sea Diver', brewery: 'Moon Lark Brewery',
     style: null, abv: null, rating_global: null,
     normalized_name: normalizeName('Deep Sea Diver'),
@@ -1109,7 +1018,7 @@ describe('sanitizeAbv', () => {
 });
 
 function orphanRow(db: ReturnType<typeof openDb>, over: { abv?: number | null; style?: string | null } = {}) {
-  return upsertBeer(db, {
+  return seedBeer(db, {
     untappd_id: null, name: 'Kwas Chlebowy Jasny', brewery: 'AleBrowar',
     style: over.style ?? null, abv: over.abv ?? null, rating_global: null,
     normalized_name: 'kwas chlebowy jasny', normalized_brewery: 'alebrowar',
@@ -1139,7 +1048,7 @@ describe('fillOrphanFacts', () => {
 
   test('leaves matched rows untouched', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 5489374, name: 'Kwas Chlebowy Bright', brewery: 'AleBrowar',
       style: null, abv: null, rating_global: null,
       normalized_name: 'kwas chlebowy bright', normalized_brewery: 'alebrowar',
@@ -1186,7 +1095,7 @@ describe('fillOrphanFacts', () => {
 // owning issue. Asserts the seed write actually landed — a silently no-op'd seed would
 // produce a green test that proves nothing (see seedLocked in unlock-fixed-orphans.test.ts).
 function orphanWithIssue(db: ReturnType<typeof openDb>, beerId: number, issue: number): void {
-  upsertBeer(db, {
+  seedBeer(db, {
     untappd_id: null, name: `n${beerId}`, brewery: `b${beerId}`,
     normalized_name: `n${beerId}`, normalized_brewery: `b${beerId}`,
   });
@@ -1226,39 +1135,13 @@ describe('rearmLookup', () => {
 describe('#384 provenance', () => {
   it('recordLookupSuccess stamps search', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: null, name: 'N', brewery: 'B',
       normalized_name: 'n', normalized_brewery: 'b',
     });
     recordLookupSuccess(db, id, { bid: 900, style: null, abv: null, global_rating: null }, '2026-08-09T00:00:00Z');
     const row = db.prepare('SELECT untappd_id, untappd_id_source FROM beers WHERE id = ?').get(id);
     expect(row).toEqual({ untappd_id: 900, untappd_id_source: 'search' });
-  });
-
-  it('upsertBeer records the source it is given', () => {
-    const db = fresh();
-    const id = upsertBeer(db, {
-      untappd_id: 901, name: 'N', brewery: 'B',
-      normalized_name: 'n', normalized_brewery: 'b',
-      untappd_id_source: 'checkin',
-    });
-    const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(id);
-    expect(row).toEqual({ untappd_id_source: 'checkin' });
-  });
-
-  it('upsertBeer leaves the source alone when not given one', () => {
-    const db = fresh();
-    const id = upsertBeer(db, {
-      untappd_id: 902, name: 'N', brewery: 'B',
-      normalized_name: 'n', normalized_brewery: 'b',
-      untappd_id_source: 'checkin',
-    });
-    upsertBeer(db, {
-      untappd_id: 902, name: 'N2', brewery: 'B',
-      normalized_name: 'n2', normalized_brewery: 'b',
-    });
-    const row = db.prepare('SELECT untappd_id_source FROM beers WHERE id = ?').get(id);
-    expect(row).toEqual({ untappd_id_source: 'checkin' });
   });
 });
 
@@ -1274,7 +1157,7 @@ describe('#486 pool partition', () => {
     const oldSnap = createSnapshot(db, pubId, '2026-05-01T12:00:00Z');
     const newSnap = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
 
-    const mk = (name: string): number => upsertBeer(db, {
+    const mk = (name: string): number => seedBeer(db, {
       untappd_id: null, name, brewery: 'Br', style: null, abv: null, rating_global: null,
       normalized_name: name.toLowerCase(), normalized_brewery: 'br',
     });
@@ -1351,7 +1234,7 @@ describe('upsertBeerByBid (#617)', () => {
     };
   }
 
-  // Сирота напряму, в обхід upsertBeer: той зливає дві сироти з однаковою нормалізованою парою.
+  // Сирота напряму, в обхід seedBeer: той зливає дві сироти з однаковою нормалізованою парою.
   function insertOrphanRaw(db: ReturnType<typeof fresh>, name: string, brewery: string, abv: number): number {
     const res = db.prepare(
       `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery)
@@ -1362,7 +1245,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test('fills only empty facts on the row found by bid', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: null, abv: 9.2, rating_global: null,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1382,7 +1265,7 @@ describe('upsertBeerByBid (#617)', () => {
   // (рев'ю ядра: мутація порядку для style і rating_global виживала).
   test('stored facts on the row found by bid are never overwritten by incoming ones', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1399,7 +1282,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test('empty input never wipes stored facts (the sync wipe)', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1416,7 +1299,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test('never renames the row found by bid (#618 owns Untappd names)', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 6700001, name: "Don't Shoot", brewery: 'Inne Beczki Brewery',
       style: 'IPA', abv: 5.8, rating_global: 3.8,
       normalized_name: normalizeName("Don't Shoot"), normalized_brewery: normalizeBrewery('Inne Beczki Brewery'),
@@ -1438,7 +1321,7 @@ describe('upsertBeerByBid (#617)', () => {
     ['curated', 'bid', 'curated'],
   ] as const)('provenance only strengthens: stored %s + incoming %s → %s', (stored, incoming, expected) => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: 'Quad', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1450,7 +1333,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test('a row with no provenance takes the incoming one', () => {
     const db = fresh();
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: 'Quad', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1461,7 +1344,7 @@ describe('upsertBeerByBid (#617)', () => {
 
   test('a vintage twin with another bid is never touched: a new row is inserted', () => {
     const db = fresh();
-    const eight = upsertBeer(db, {
+    const eight = seedBeer(db, {
       untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: ROCHEFORT,
       style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
       normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery(ROCHEFORT),
@@ -1494,7 +1377,7 @@ describe('upsertBeerByBid (#617)', () => {
   // умову не ловить: там 8 ≠ 10 і фільтр чисел відсіює рядок сам.
   test('a linked row with the same name and numbers but another bid is never taken over', () => {
     const db = fresh();
-    const linked = upsertBeer(db, {
+    const linked = seedBeer(db, {
       untappd_id: 111, name: 'Juicy Trap #20', brewery: PP,
       style: 'Sour', abv: 6.5, rating_global: 3.9,
       normalized_name: normalizeName('Juicy Trap #20'), normalized_brewery: normalizeBrewery(PP),
@@ -1606,7 +1489,7 @@ describe('ensureOrphan (#617)', () => {
 
   test('inserts a new orphan beside a linked vintage with the same normalized name', () => {
     const db = fresh();
-    const linked = upsertBeer(db, {
+    const linked = seedBeer(db, {
       untappd_id: 6300175, name: 'O Tiole Mio! 2026 15°', brewery: MONSTERS,
       style: 'Pastry Sour', abv: 6.0, rating_global: 3.7,
       normalized_name: normalizeName('O Tiole Mio! 2026 15°'), normalized_brewery: normalizeBrewery(MONSTERS),

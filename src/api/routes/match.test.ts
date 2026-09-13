@@ -3,7 +3,7 @@ import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { mergeCheckin } from '../../storage/checkins';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
@@ -19,7 +19,7 @@ function setup(log?: pino.Logger) {
   migrate(db);
   ensureProfile(db, 1);
   ensureProfile(db, 2);
-  const panIpani = upsertBeer(db, {
+  const panIpani = seedBeer(db, {
     untappd_id: 9001, name: 'Pan IPAni', brewery: 'Trzech Kumpli',
     style: 'IPA', abv: 6.0, rating_global: 3.85,
     normalized_name: normalizeName('Pan IPAni'),

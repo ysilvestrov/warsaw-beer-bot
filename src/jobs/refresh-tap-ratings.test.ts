@@ -1,7 +1,8 @@
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer, getBeer } from '../storage/beers';
+import { getBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch } from '../storage/match_links';
@@ -33,7 +34,7 @@ function seedIdBeerOnTap(
   db: ReturnType<typeof fresh>,
   brewery: string, name: string, untappdId: number,
 ): number {
-  const beerId = upsertBeer(db, {
+  const beerId = seedBeer(db, {
     untappd_id: untappdId,
     name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: name.toLowerCase(), normalized_brewery: brewery.toLowerCase(),

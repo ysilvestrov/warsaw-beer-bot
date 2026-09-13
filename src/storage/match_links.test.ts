@@ -1,11 +1,11 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { upsertMatch, getMatch, listUnreviewedBelow } from './match_links';
 
 function setup() {
   const db = openDb(':memory:'); migrate(db);
-  const id = upsertBeer(db, {
+  const id = seedBeer(db, {
     name: 'X', brewery: 'B', style: null, abv: null, rating_global: null,
     normalized_name: 'x', normalized_brewery: 'b',
   });

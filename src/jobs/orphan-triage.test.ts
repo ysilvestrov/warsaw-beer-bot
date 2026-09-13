@@ -2,7 +2,7 @@ import pino from 'pino';
 import { expect, test, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { upsertBeer } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import { parseScopeBlock } from '../domain/triage-scope';
 import { getJobState, setJobState } from '../storage/job_state';
@@ -33,7 +33,7 @@ const BEER_WORDS = ['one', 'two', 'three', 'four', 'five', 'six'];
 function insertBeer(d: ReturnType<typeof db>, n: number) {
   const name = `Beer ${BEER_WORDS[n - 1]}`;
   const brewery = `Craft ${BEER_WORDS[n - 1]}`;
-  return upsertBeer(d, {
+  return seedBeer(d, {
     untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
     normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
   });
@@ -1046,7 +1046,7 @@ test('a throwing archive cannot cost the day: state is written before the archiv
 //
 // The names must be word-distinct. `insertBeer`/`BEER_WORDS` in this file only covers
 // six, and normalization strips numeric suffixes — so `Beer 7`..`Beer 18` would all
-// normalize identically and upsertBeer would collapse twelve seeds into ONE row. The
+// normalize identically and seedBeer would collapse twelve seeds into ONE row. The
 // count would then sit at 1, the threshold would never be crossed, and the test would
 // be asserting nothing. Hence a separate word list, and a non-vacuity assertion at the
 // end that is the real point of this helper.
@@ -1059,9 +1059,9 @@ function seedReviewedRows(d: ReturnType<typeof db>, issueNumber: number, count: 
     const word = LABEL_WORDS[i];
     const name = `Beer ${word}`;
     const brewery = `Craft ${word}`;
-    // Use the id upsertBeer RETURNS — never a guessed sequential id, which silently
+    // Use the id seedBeer RETURNS — never a guessed sequential id, which silently
     // aliases onto whatever the other seeds already inserted.
-    const beerId = upsertBeer(d, {
+    const beerId = seedBeer(d, {
       untappd_id: null, name, brewery, style: null, abv: null, rating_global: null,
       normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
     });

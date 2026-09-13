@@ -1,6 +1,6 @@
 import { openDb } from './db';
 import { migrate } from './schema';
-import { upsertBeer } from './beers';
+import { seedBeer } from './seed-beer.testing';
 import { mergeCheckin } from './checkins';
 import { markHad, hadBeerIds, triedBeerIds } from './untappd_had';
 
@@ -10,8 +10,8 @@ function fresh() {
   return db;
 }
 
-function seedBeer(db: ReturnType<typeof fresh>, name: string): number {
-  return upsertBeer(db, {
+function seedNamedBeer(db: ReturnType<typeof fresh>, name: string): number {
+  return seedBeer(db, {
     untappd_id: null,
     name,
     brewery: 'Anon',
@@ -26,7 +26,7 @@ function seedBeer(db: ReturnType<typeof fresh>, name: string): number {
 describe('markHad', () => {
   test('inserts a new (user, beer) pair', () => {
     const db = fresh();
-    const beerId = seedBeer(db, 'Atak');
+    const beerId = seedNamedBeer(db, 'Atak');
     markHad(db, 42, beerId, '2026-05-12T10:00:00Z');
 
     const row = db
@@ -41,7 +41,7 @@ describe('markHad', () => {
 
   test('upserts: same pair twice updates last_seen_at, no duplicate row', () => {
     const db = fresh();
-    const beerId = seedBeer(db, 'Atak');
+    const beerId = seedNamedBeer(db, 'Atak');
     markHad(db, 42, beerId, '2026-05-12T10:00:00Z');
     markHad(db, 42, beerId, '2026-05-12T11:00:00Z');
 
@@ -54,7 +54,7 @@ describe('markHad', () => {
 
   test('different users for same beer get separate rows', () => {
     const db = fresh();
-    const beerId = seedBeer(db, 'Atak');
+    const beerId = seedNamedBeer(db, 'Atak');
     markHad(db, 42, beerId, '2026-05-12T10:00:00Z');
     markHad(db, 99, beerId, '2026-05-12T10:00:00Z');
 
@@ -71,9 +71,9 @@ describe('hadBeerIds', () => {
 
   test('returns just the beer_ids for the given user', () => {
     const db = fresh();
-    const a = seedBeer(db, 'A');
-    const b = seedBeer(db, 'B');
-    const c = seedBeer(db, 'C');
+    const a = seedNamedBeer(db, 'A');
+    const b = seedNamedBeer(db, 'B');
+    const c = seedNamedBeer(db, 'C');
     markHad(db, 42, a, '2026-05-12T10:00:00Z');
     markHad(db, 42, b, '2026-05-12T10:00:00Z');
     markHad(db, 99, c, '2026-05-12T10:00:00Z');
@@ -86,9 +86,9 @@ describe('hadBeerIds', () => {
 describe('triedBeerIds', () => {
   test('returns union of drunkBeerIds and hadBeerIds', () => {
     const db = fresh();
-    const checkedIn = seedBeer(db, 'Checked-in');
-    const had = seedBeer(db, 'Had');
-    const both = seedBeer(db, 'Both');
+    const checkedIn = seedNamedBeer(db, 'Checked-in');
+    const had = seedNamedBeer(db, 'Had');
+    const both = seedNamedBeer(db, 'Both');
 
     mergeCheckin(db, {
       checkin_id: 'ci-1',
@@ -114,8 +114,8 @@ describe('triedBeerIds', () => {
 
   test('does not leak across users', () => {
     const db = fresh();
-    const a = seedBeer(db, 'A');
-    const b = seedBeer(db, 'B');
+    const a = seedNamedBeer(db, 'A');
+    const b = seedNamedBeer(db, 'B');
     mergeCheckin(db, {
       checkin_id: 'ci-1',
       telegram_id: 42,

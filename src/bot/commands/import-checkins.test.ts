@@ -6,7 +6,8 @@ import { countCheckins } from '../../storage/checkins';
 import { coverageFor } from '../../storage/checkin_coverage';
 import { importCheckins } from './import-checkins';
 import type { Checkin } from '../../sources/untappd/export';
-import { upsertBeer, getBeer } from '../../storage/beers';
+import { getBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 
 function row(over: Partial<Checkin>): Checkin {
@@ -49,7 +50,7 @@ describe('importCheckins', () => {
 
   // #617: рядок експорту без bid не має ідентичності — він сирота й злінкованого пива не торкається.
   it('a row without bid becomes an orphan and leaves a linked beer of the same name alone', () => {
-    const linked = upsertBeer(db, {
+    const linked = seedBeer(db, {
       untappd_id: 7, name: 'Some IPA', brewery: 'Some Brewery',
       style: 'IPA', abv: 6, rating_global: 3.9,
       normalized_name: normalizeName('Some IPA'), normalized_brewery: normalizeBrewery('Some Brewery'),
@@ -66,7 +67,7 @@ describe('importCheckins', () => {
   });
 
   it('import fills empty facts of a beer found by bid but never overwrites stored ones', () => {
-    const id = upsertBeer(db, {
+    const id = seedBeer(db, {
       untappd_id: 42, name: 'Some IPA', brewery: 'Some Brewery',
       style: 'IPA', abv: null, rating_global: 3.9,
       normalized_name: normalizeName('Some IPA'), normalized_brewery: normalizeBrewery('Some Brewery'),

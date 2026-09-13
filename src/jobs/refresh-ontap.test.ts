@@ -6,7 +6,8 @@ import { HttpError, type Http } from '../sources/http';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { latestSnapshot, tapsForSnapshot } from '../storage/snapshots';
-import { listLookupCandidates, upsertBeer, ensureOrphan } from '../storage/beers';
+import { listLookupCandidates, ensureOrphan } from '../storage/beers';
+import { seedBeer } from '../storage/seed-beer.testing';
 import { CITIES } from '../domain/cities';
 import { listPubs } from '../storage/pubs';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
@@ -130,7 +131,7 @@ describe('refreshOntap non-beer filtering', () => {
 
     // Canonical target beer (already matched) + a curated pin whose ontap_ref does NOT
     // describe it, so normal matching would re-orphan the tap and clobber the link.
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 6614460, name: 'Banany Na Rauszu 2026', brewery: 'ReCraft',
       style: null, abv: null, rating_global: 4.1,
       normalized_name: normalizeName('Banany Na Rauszu 2026'),
@@ -612,7 +613,7 @@ describe('refreshOntap multi-city', () => {
 
   test('#617: a tap of another vintage becomes an orphan instead of renaming the linked row', async () => {
     const db = openDb(':memory:'); migrate(db);
-    const linked = upsertBeer(db, {
+    const linked = seedBeer(db, {
       untappd_id: 6300175, name: 'O Tiole Mio! 2026', brewery: 'Monsters Brewery',
       style: 'Pastry Sour', abv: 6.0, rating_global: 3.7,
       normalized_name: normalizeName('O Tiole Mio! 2026'), normalized_brewery: normalizeBrewery('Monsters Brewery'),
@@ -643,7 +644,7 @@ describe('refreshOntap multi-city', () => {
   test('a fresh orphan merged by inline enrich in one pub does not FK-crash a later pub', async () => {
     const db = openDb(':memory:'); migrate(db);
     // Canonical beer already owns untappd_id 999.
-    upsertBeer(db, {
+    seedBeer(db, {
       untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
@@ -685,7 +686,7 @@ describe('refreshOntap multi-city', () => {
     const db = openDb(':memory:'); migrate(db);
     // The canonical row the tap really is. Its name does NOT match the tap text, so the matcher
     // cannot get there — exactly the situation a merge resolves.
-    const canonicalId = upsertBeer(db, {
+    const canonicalId = seedBeer(db, {
       untappd_id: 999, name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
@@ -726,7 +727,7 @@ describe('refreshOntap multi-city', () => {
   test('#366: a stamped link whose target is not canonical is not trusted', async () => {
     const db = openDb(':memory:'); migrate(db);
     // Stamped link pointing at a row with NO untappd_id (e.g. a target that lost its match).
-    const staleId = upsertBeer(db, {
+    const staleId = seedBeer(db, {
       name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
@@ -757,13 +758,13 @@ describe('refreshOntap multi-city', () => {
   test('#366: a matcher hit retargets the link and clears the stamp', async () => {
     const db = openDb(':memory:'); migrate(db);
     // Stamped link points at one canonical row…
-    const rememberedId = upsertBeer(db, {
+    const rememberedId = seedBeer(db, {
       untappd_id: 888, name: 'Marine', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
     });
     // …while the catalog now also holds a row the matcher can reach by name.
-    const exactId = upsertBeer(db, {
+    const exactId = seedBeer(db, {
       untappd_id: 999, name: 'Deep Sea Diver', brewery: 'Moon Lark Brewery',
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Deep Sea Diver'),

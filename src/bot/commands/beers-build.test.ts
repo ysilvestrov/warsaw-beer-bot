@@ -2,7 +2,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertPub } from '../../storage/pubs';
 import { createSnapshot, insertTaps } from '../../storage/snapshots';
-import { upsertBeer } from '../../storage/beers';
+import { seedBeer } from '../../storage/seed-beer.testing';
 import { upsertMatch } from '../../storage/match_links';
 import { mergeCheckin } from '../../storage/checkins';
 import { createTranslator } from '../../i18n';
@@ -78,7 +78,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: 'Foo 1', lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 1, name: 'Atak Chmielu', brewery: 'Pinta', style: 'AIPA',
       abv: 6.1, rating_global: 3.85,
       normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
@@ -112,7 +112,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
-    const orphanId = upsertBeer(db, {
+    const orphanId = seedBeer(db, {
       untappd_id: null, name: 'Wocky Talky', brewery: 'JBW Brewery', style: null,
       abv: 4.2, rating_global: null,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
@@ -168,7 +168,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
     // Orphan beers row: created from ontap, no untappd_id yet, but match_links
     // points the ontap_ref at this row's own id (as refreshOntap does).
-    const orphanId = upsertBeer(db, {
+    const orphanId = seedBeer(db, {
       untappd_id: null, name: 'Wocky Talky', brewery: 'JBW Brewery', style: null,
       abv: 4.2, rating_global: null,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
@@ -190,7 +190,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 6172039, name: 'Wocky Talky', brewery: 'JBW Browar', style: null,
       abv: 4.2, rating_global: 3.18,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
@@ -212,7 +212,7 @@ describe('buildBeersMessage — ok rendering', () => {
     const db = fresh();
     const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
     const snap = createSnapshot(db, pubId, '2026-05-25T12:00:00Z');
-    const beerId = upsertBeer(db, {
+    const beerId = seedBeer(db, {
       untappd_id: 6172039, name: 'Wocky Talky', brewery: 'JBW Browar', style: null,
       abv: 5, rating_global: 4.1,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
