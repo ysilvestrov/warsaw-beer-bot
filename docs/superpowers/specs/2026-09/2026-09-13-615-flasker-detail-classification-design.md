@@ -1,8 +1,8 @@
 # #615 — Flasker detail-page classification and explicit non-beer badge
 
-**Date:** 2026-09-13  
-**Status:** approved  
-**Issue:** [#615](https://github.com/ysilvestrov/warsaw-beer-bot/issues/615)  
+**Date:** 2026-09-13
+**Status:** approved
+**Issue:** [#615](https://github.com/ysilvestrov/warsaw-beer-bot/issues/615)
 **Follow-up:** [#623](https://github.com/ysilvestrov/warsaw-beer-bot/issues/623) — extend the explicit non-beer state to the other shop adapters
 
 ## Problem and live evidence
