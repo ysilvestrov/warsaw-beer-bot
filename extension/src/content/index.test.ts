@@ -185,6 +185,29 @@ describe('runOverlay', () => {
     expect(chrome.storage.local.set).not.toHaveBeenCalled();
   });
 
+  it('renders an already-confirmed non-beer before identity or cache work', async () => {
+    vi.mocked(chrome.storage.local.get).mockClear();
+    vi.mocked(chrome.storage.local.set).mockClear();
+    const card: Card = {
+      el: cardEl(),
+      brewery: undefined as unknown as string,
+      name: undefined as unknown as string,
+      nonBeer: true,
+      skip: true,
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapterFor([card]), sendMatch, enrich);
+
+    expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('✕');
+    expect(isSeen(card.el)).toBe(true);
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+    expect(chrome.storage.local.set).not.toHaveBeenCalled();
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(enrich).not.toHaveBeenCalled();
+  });
+
   it('awaits waitForGrid before parsing when the adapter defines it', async () => {
     const order: string[] = [];
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };

@@ -33,19 +33,17 @@ export async function runOverlay(
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
     const cards = adapter.parseCards(doc);
-    const keyedCards = cards.map((card) => ({
-      el: card.el,
-      key: normalizeKey(card.brewery, card.name),
-      card,
-    }));
+    const keyByCard = new Map<Card, string>();
+    for (const card of cards) {
+      if (!card.nonBeer) keyByCard.set(card, normalizeKey(card.brewery, card.name));
+    }
 
     if (adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
       await adapter.loadCardDetails(cards);
     }
 
     const misses: { el: HTMLElement; key: string; card: Card }[] = [];
-    for (const entry of keyedCards) {
-      const { card } = entry;
+    for (const card of cards) {
       if (card.nonBeer) {
         setNonBeer(card.el);
         markSeen(card.el);
@@ -56,12 +54,14 @@ export async function runOverlay(
         continue;
       }
 
-      const cached = await getCached(entry.key);
+      const key = keyByCard.get(card);
+      if (key === undefined) continue;
+      const cached = await getCached(key);
       if (cached?.matched_beer != null) {
         renderBadge(card.el, cached);
         markSeen(card.el);
       } else {
-        misses.push(entry);
+        misses.push({ el: card.el, key, card });
       }
     }
     if (misses.length === 0) return;
