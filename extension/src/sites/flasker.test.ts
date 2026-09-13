@@ -423,14 +423,19 @@ describe('flasker adapter', () => {
     });
   });
 
-  it('drops every product on a non-beer page', () => {
-    expect(flasker.parseCards(load('flasker.nonbeer.html'))).toEqual([]);
+  it('keeps non-beer-page products as fail-closed classification candidates', () => {
+    const cards = flasker.parseCards(load('flasker.nonbeer.html'));
+    expect(cards).toHaveLength(4);
+    expect(cards.every((card) => card.skip === true)).toBe(true);
   });
 
-  it('does not emit glassware/opener merch from the block view', () => {
-    const brands = flasker.parseCards(load('flasker.block.html')).map((c) => c.brewery);
-    expect(brands).not.toContain('Склянка');
-    expect(brands).not.toContain('Відкривачка');
+  it('keeps block-view glassware and openers fail-closed for detail classification', () => {
+    const cards = flasker.parseCards(load('flasker.block.html'));
+    for (const marker of ['Склянка', 'Відкривачка']) {
+      const merchandise = cards.filter((card) => card.el.textContent?.includes(marker));
+      expect(merchandise.length).toBeGreaterThan(0);
+      expect(merchandise.every((card) => card.skip === true)).toBe(true);
+    }
   });
 });
 
@@ -503,7 +508,19 @@ describe('#384 product-detail parsing', () => {
       bid: 6648348,
       bidSlug: 'mad-brew-tomatol-buldak-bulgogi',
       brand: 'Mad Brew',
+      categories: ['Томатне'],
     });
+  });
+
+  it('reads product categories without treating the posted brand row as a category', () => {
+    const productHtml = `
+      <span class="posted_in">Категорія:
+        <a href="https://flasker.com.ua/product-category/styles/tomatne/">Томатне</a>
+      </span>
+      <span class="posted_in">Бренд:
+        <a href="https://flasker.com.ua/brand/ukraine/vibrant-pour/">Vibrant Pour</a>
+      </span>`;
+    expect(parseProductDetail(productHtml)).toEqual({ categories: ['Томатне'] });
   });
 
   it('returns the brand alone when the page publishes no Untappd link', () => {
@@ -540,7 +557,133 @@ function archiveCard(url: string, title: string): string {
   </li>`;
 }
 
+function blockCard(url: string, title: string): string {
+  return `<li class="wc-block-grid__product">
+    <h2 class="wc-block-grid__product-title"><a href="${url}">${title}</a></h2>
+  </li>`;
+}
+
+const issue615Beers = [
+  ['vibrantpour-kraken-wasabi', 'VibrantPour КРАКЕН з Васабі Gose 4%', 'КРАКЕН з Васабі Gose', 4],
+  ['vibrantpour-kraken-tom-yum', 'VibrantPour КРАКЕН Tom Yum 4%', 'КРАКЕН Tom Yum', 4],
+  ['vibrantpour-kraken-ink', 'VibrantPour КРАКЕН у власному чорнилі 4%', 'КРАКЕН у власному чорнилі', 4],
+  ['vibrantpour-salo-pepper', 'VibrantPour Сало з часником та перцем Gose 4.5%', 'Сало з часником та перцем Gose', 4.5],
+  ['vibrantpour-real-smoothie', 'VibrantPour Real Smoothie Ale: Mango, Passion Fruit 6.9%', 'Real Smoothie Ale: Mango, Passion Fruit', 6.9],
+  ['vibrantpour-lardomato', 'VibrantPour LardoMato/Сало з часником Gose 4%', 'LardoMato/Сало з часником Gose', 4],
+] as const;
+
 describe('#384 flasker.loadCardDetails', () => {
+  it('keeps all six #615 beers provisional until beer-category details confirm them', async () => {
+    const html = issue615Beers.map(([slug, title]) =>
+      blockCard(`https://flasker.com.ua/product/${slug}/`, title)).join('');
+    const doc = new DOMParser().parseFromString(`<ul>${html}</ul>`, 'text/html');
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () =>
+        '<span class="posted_in">Категорія: ' +
+        '<a href="https://flasker.com.ua/product-category/styles/tomatne/">Томатне</a></span>' +
+        '<script>{"brand":{"@type":"Brand","name":"Vibrant Pour"}}</script>',
+    } as Response);
+
+    const cards = flasker.parseCards(doc);
+    expect(cards).toHaveLength(6);
+    expect(cards.every((card) => card.skip === true)).toBe(true);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards.map(({ brewery, name, abv, skip, nonBeer }) =>
+      ({ brewery, name, abv, skip, nonBeer }))).toEqual(
+      issue615Beers.map(([, , name, abv]) => ({
+        brewery: 'VibrantPour', name, abv, skip: false, nonBeer: undefined,
+      })),
+    );
+    expect(fetchSpy).toHaveBeenCalledTimes(6);
+    fetchSpy.mockRestore();
+  });
+
+  it('marks volume-bearing and markerless merchandise non-beer from Сувеніри', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>
+        ${blockCard(
+          'https://flasker.com.ua/product/термос-для-пляшки-033мл/',
+          'Термос для пляшки 0,33мл',
+        )}
+        ${blockCard(
+          'https://flasker.com.ua/product/келих-flasker-teku/',
+          'Келих Flasker Teku',
+        )}
+      </ul>`,
+      'text/html',
+    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () =>
+        '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
+    } as Response);
+    const cards = flasker.parseCards(doc);
+
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => card.skip === true)).toBe(true);
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards.every((card) => card.skip && card.nonBeer)).toBe(true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    fetchSpy.mockRestore();
+  });
+
+  it('fails closed for provisional cards and open for established beers when details fail', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>
+        ${blockCard(
+          'https://flasker.com.ua/product/vibrantpour-mystery-gose-4-fails/',
+          'VibrantPour Mystery Gose 4%',
+        )}
+        ${blockCard(
+          'https://flasker.com.ua/product/burgomistr-ipa-6-500ml-fails/',
+          'Burgomistr IPA 6% 500ml',
+        )}
+      </ul>`,
+      'text/html',
+    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('network down'));
+    const cards = flasker.parseCards(doc);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards).toHaveLength(2);
+    expect(cards[0]).toMatchObject({
+      brewery: 'VibrantPour', name: 'Mystery Gose', abv: 4, skip: true,
+    });
+    expect(cards[0].nonBeer).toBeUndefined();
+    expect(cards[1]).toMatchObject({ brewery: 'Burgomistr', name: 'IPA', abv: 6 });
+    expect(cards[1].skip).toBeUndefined();
+    expect(cards[1].nonBeer).toBeUndefined();
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    fetchSpy.mockRestore();
+  });
+
+  it('keeps a provisional card fail-closed when a successful detail page has no category', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${blockCard(
+        'https://flasker.com.ua/product/vibrantpour-category-missing-4/',
+        'VibrantPour Category Missing 4%',
+      )}</ul>`,
+      'text/html',
+    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<html><body>category metadata missing</body></html>',
+    } as Response);
+    const cards = flasker.parseCards(doc);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards).toHaveLength(1);
+    expect(cards[0].skip).toBe(true);
+    expect(cards[0].nonBeer).toBeUndefined();
+    fetchSpy.mockRestore();
+  });
+
   it('overrides the heuristic brewery with the JSON-LD brand and sets bid/bidSlug', async () => {
     const doc = new DOMParser().parseFromString(
       `<ul>${archiveCard('https://flasker.com.ua/product/foo-bar-5-330ml/', 'Foo Bar 5% 330ml')}</ul>`,
@@ -637,23 +780,29 @@ describe('#384 flasker.loadCardDetails', () => {
     fetchSpy.mockRestore();
   });
 
-  it('caps detail fetches at MAX_DETAIL_FETCHES_PER_PASS (20) per pass', async () => {
-    const items = Array.from({ length: 21 }, (_, i) =>
+  it('hydrates all 24 unique Flasker cards in one pass, including a markerless product', async () => {
+    const items = Array.from({ length: 23 }, (_, i) =>
       archiveCard(`https://flasker.com.ua/product/beer-${i}-5-330ml/`, `Beer${i} Name 5% 330ml`));
+    items.push(archiveCard(
+      'https://flasker.com.ua/product/markerless-glass/',
+      'Келих Flasker Teku',
+    ));
     const doc = new DOMParser().parseFromString(`<ul>${items.join('')}</ul>`, 'text/html');
     const cards = flasker.parseCards(doc);
-    expect(cards.length).toBe(21);
 
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
-      text: async () => '<script>{"brand":{"@type":"Brand","name":"Capped Brand"}}</script>',
+      text: async () =>
+        '<span class="posted_in"><a href="https://flasker.com.ua/product-category/ipa/">IPA</a></span>' +
+        '<script>{"brand":{"@type":"Brand","name":"Hydrated Brand"}}</script>',
     } as Response);
 
     await flasker.loadCardDetails?.(cards);
 
-    expect(fetchSpy).toHaveBeenCalledTimes(20);
-    expect(cards.slice(0, 20).every((c) => c.brewery === 'Capped Brand')).toBe(true);
-    expect(cards[20].brewery).not.toBe('Capped Brand');
+    expect(cards).toHaveLength(24);
+    expect(fetchSpy).toHaveBeenCalledTimes(24);
+    expect(cards.slice(0, 23).every((card) => card.brewery === 'Hydrated Brand')).toBe(true);
+    expect(cards[23].skip).toBe(true);
     fetchSpy.mockRestore();
   });
 
@@ -808,4 +957,3 @@ describe('Flasker cluster extraction regressions (#558, #579, #566, #481)', () =
     });
   });
 });
-

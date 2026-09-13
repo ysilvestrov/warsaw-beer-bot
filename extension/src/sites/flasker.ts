@@ -4,8 +4,8 @@ import { isNonBeerName, isNonAlcoholicSoftDrinkFamily } from './non-beer';
 import { FLASKER_BREWERIES, type FlaskerBrewery } from './flasker-breweries.generated';
 
 // --- volume / abv --------------------------------------------------------
-// Beers always quote a volume; snacks/merch never do. Volume is both the primary
-// non-beer gate and the marker for where the beer name ends.
+// Volume or ABV marks where the beer name ends. Product-category detail evidence
+// decides whether Flasker candidates are beer or merchandise (#615).
 const VOLUME_UNIT_RE = /\d+(?:[.,]\d+)?\s*(?:ml|мл|l|л)(?![\p{L}])/iu; // 330ml, 0.33л, 500 мл, 1l
 const VOLUME_BARE_RE = /\b0[.,]\d+\b(?!\s*(?:кг|kg))/iu;              // bare litre decimal, not a weight (kg)
 const ABV_RE = /(\d+(?:[.,]\d+)?)\s*%/u;
@@ -268,11 +268,11 @@ export function stripMerchandisingPrefix(name: string): string {
 // never fire inside a beer name (e.g. "Sunset"); the Cyrillic merch/snack stems are
 // unambiguous. isNonBeerName supplies the shared multi-word phrases (gift set,
 // "+ келих", набір, сертифікат, …).
-const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|\bsnack\b|zestaw|сет|келих|склянк|відкривач|сувенір|мерч|соус|сало|гриб|шкварк|снек|закуск|подарунк)/iu;
+const NONBEER_TITLE_RE = /(?:\bset\b|\bglass\b|\bmerch\b|\bsouvenir\b|\bgift\b|\bsnack\b|zestaw|сет|келих|склянк|відкривач|сувенір|термос|мерч|соус|сало|гриб|шкварк|снек|закуск|подарунк)/iu;
 
 // Category hint (Barn2 table data-product_cat). Category names are safe for
 // broader snack/merch tokens since they are not beer names.
-const NONBEER_CATEGORY_RE = /(?:снек|снэк|закуск|набор|набір|сет|\bset\b|аксесуар|мерч|merch|подарунк|snack|\bglass\b|\bgift\b)/iu;
+const NONBEER_CATEGORY_RE = /(?:снек|снэк|закуск|набор|набір|сет|\bset\b|аксесуар|сувенір|мерч|merch|подарунк|snack|\bglass\b|\bgift\b)/iu;
 
 export function isNonBeerTitle(title: string): boolean {
   return isNonBeerName(title) || NONBEER_TITLE_RE.test(title);
@@ -282,7 +282,7 @@ export function isNonBeerCategory(cat: string): boolean {
   return NONBEER_CATEGORY_RE.test(cat);
 }
 
-// Returns null when the title carries no volume token → treat as non-beer.
+// Returns null when the title carries neither a volume nor an ABV marker.
 export function parseTitle(
   rawTitle: string,
   evidence: FlaskerEvidence = {},
@@ -291,11 +291,11 @@ export function parseTitle(
   if (!title) return null;
 
   const volAt = volumeIndex(title);
-  if (volAt < 0) return null;                         // primary positive gate
-
   const abvMatch = title.match(ABV_RE);
   const abvAt = abvMatch?.index ?? -1;
-  const headEnd = abvAt >= 0 ? Math.min(abvAt, volAt) : volAt;
+  const headMarkers = [volAt, abvAt].filter((index) => index >= 0);
+  if (headMarkers.length === 0) return null;
+  const headEnd = Math.min(...headMarkers);
   // The banner must go BEFORE the split: otherwise splitBreweryName takes "ПРЕДРЕЛІЗ"
   // as the brewery and the later name-side strip has nothing left to clean (#376).
   const head = stripMerchandisingPrefix(title.slice(0, headEnd).trim());
@@ -328,24 +328,25 @@ export function parseTitle(
 }
 
 // --- product-detail fetch (#384) ------------------------------------------
-// Bounded detail hydration for fields absent from every listing grid: the shop
-// publishes a JSON-LD `brand` and (on most products) a direct Untappd beer link
-// only on the product detail page. Mirrors the beerfreak.ts precedent.
-const MAX_DETAIL_FETCHES_PER_PASS = 20;
+// Detail hydration for fields absent from every listing grid: the shop publishes
+// product category, JSON-LD `brand` and (on most products) a direct Untappd beer
+// link only on the product detail page. Mirrors the beerfreak.ts precedent.
 const detailUrls = new WeakMap<HTMLElement, string>();
-const detailByUrl = new Map<string, Promise<ProductDetail>>();
+const detailProofRequired = new WeakSet<HTMLElement>();
+const detailByUrl = new Map<string, Promise<ProductDetail | null>>();
 
 export interface ProductDetail {
   bid?: number;
   bidSlug?: string;
   brand?: string;
+  categories?: string[];
 }
 
 const UNTAPPD_BEER_RE = /untappd\.com\/b\/([a-z0-9-]+)\/(\d+)/i;
 const LD_BRAND_RE = /"brand"\s*:\s*\{[^}]*?"name"\s*:\s*"([^"]{1,80})"/;
 const IMPORTED_BEER_PLACEHOLDER = 'Імпортне пиво';
 
-// Pure string parsing so it is testable against a captured fixture without a DOM.
+// Parses a captured HTML string without depending on the live product document.
 export function parseProductDetail(html: string): ProductDetail {
   const out: ProductDetail = {};
   const link = html.match(UNTAPPD_BEER_RE);
@@ -369,19 +370,26 @@ export function parseProductDetail(html: string): ProductDetail {
       // leave brand unset rather than surface a raw, still-escaped string
     }
   }
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const categories = Array.from(
+    doc.querySelectorAll<HTMLAnchorElement>('.posted_in a[href*="/product-category/"]'),
+  )
+    .map((categoryLink) => text(categoryLink))
+    .filter(Boolean);
+  if (categories.length > 0) out.categories = [...new Set(categories)];
   return out;
 }
 
-async function loadDetail(url: string): Promise<ProductDetail> {
+async function loadDetail(url: string): Promise<ProductDetail | null> {
   const cached = detailByUrl.get(url);
   if (cached) return cached;
   const p = (async () => {
     try {
       const res = await fetch(url, { credentials: 'omit' });
-      if (!res.ok) return {};
+      if (!res.ok) return null;
       return parseProductDetail(await res.text());
     } catch {
-      return {}; // a failed detail fetch must never be worse than not fetching
+      return null;
     }
   })();
   detailByUrl.set(url, p);
@@ -462,6 +470,7 @@ function tableEntries(root: ParentNode): RawEntry[] {
 export const flasker: SiteAdapter = {
   id: 'flasker',
   hostMatch: (url) => url.hostname === 'flasker.com.ua' || url.hostname.endsWith('.flasker.com.ua'),
+  loadDetailsBeforeCache: true,
 
   async waitForGrid(root) {
     await waitForSelector(root, GRID_SELECTOR, { timeoutMs: 8000 });
@@ -472,32 +481,49 @@ export const flasker: SiteAdapter = {
     const cards: Card[] = [];
     for (const e of entries) {
       if (!e.title) continue;
-      if (isNonBeerTitle(e.title)) continue;
-      if (e.categoryHint && isNonBeerCategory(e.categoryHint)) continue;
+      const titleNonBeer = isNonBeerTitle(e.title);
+      const categoryNonBeer = Boolean(e.categoryHint && isNonBeerCategory(e.categoryHint));
       const parsed = parseTitle(e.title, {
         productTags: e.productTags,
         productUrl: e.productUrl,
       });
-      if (!parsed) continue;
+      if (!parsed) {
+        if (!e.productUrl) continue;
+        detailUrls.set(e.el, e.productUrl);
+        cards.push({ el: e.el, brewery: '', name: e.title, skip: true });
+        continue;
+      }
       // Match the family against brewery+name together: splitBreweryName can hand the
       // leading brand token ("Ginger") to the brewery, leaving "Beer" alone in the name,
       // which would otherwise escape the gate (#376 follow-up).
       if (isNonAlcoholicSoftDrinkFamily({ name: `${parsed.brewery} ${parsed.name}`, abv: parsed.abv })) continue;
+      const requiresDetail = volumeIndex(e.title) < 0 || titleNonBeer || categoryNonBeer;
+      if (requiresDetail && !e.productUrl) continue;
       if (e.productUrl) detailUrls.set(e.el, e.productUrl);
-      cards.push({ el: e.el, ...parsed });
+      if (requiresDetail) detailProofRequired.add(e.el);
+      cards.push({ el: e.el, ...parsed, ...(requiresDetail ? { skip: true } : {}) });
     }
     return cards;
   },
 
   async loadCardDetails(cards) {
-    const limited = cards
-      .filter((card) => detailUrls.has(card.el))
-      .slice(0, MAX_DETAIL_FETCHES_PER_PASS);
+    const withDetails = cards.filter((card) => detailUrls.has(card.el));
 
-    await Promise.all(limited.map(async (card) => {
+    await Promise.all(withDetails.map(async (card) => {
       const url = detailUrls.get(card.el);
       if (!url) return;
       const detail = await loadDetail(url);
+      if (!detail) return;
+      const categories = detail.categories ?? [];
+      if (categories.some(isNonBeerCategory)) {
+        card.nonBeer = true;
+        card.skip = true;
+        return;
+      }
+      if (detailProofRequired.has(card.el)) {
+        if (categories.length === 0) return;
+        card.skip = false;
+      }
       // The JSON-LD brand has 100% coverage and resolves series names the title
       // never reveals — but it is the shop's own display string, not a canonical
       // one, so it must be mapped through the registry/rules first (canonicalizeBrand)
