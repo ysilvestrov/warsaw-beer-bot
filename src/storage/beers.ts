@@ -158,17 +158,21 @@ export interface OrphanBeerInput {
 }
 
 // #617: рядок без bid — для гілки сироти refresh-ontap і рядків /import без bid. Шукає лише серед
-// сиріт; знайдену повертає без перезапису. Злінкованого рядка не торкається ніколи: сирота поряд
-// зі злінкованим вінтажем тієї ж назви — нормальний стан (UNIQUE лише на untappd_id).
-// Відоме обмеження: сироти з однаковою нормалізованою назвою злипаються — як і до #617.
+// сиріт із сумісними цифровими токенами назви; знайдену (найстарішу) повертає без перезапису.
+// Злінкованого рядка не торкається ніколи: сирота поряд зі злінкованим вінтажем тієї ж назви —
+// нормальний стан (UNIQUE лише на untappd_id). Фільтр цифр — з рев'ю гілки: у гілці сироти
+// refresh-ontap сирота з тією ж парою досяжна лише коли матчер відкинув її як інший рік, тож без
+// фільтра кран «2025» прилипав би до сироти «2024».
+// Відоме обмеження: сироти з однаковою парою й сумісними цифрами злипаються (напр. різниця лише в ABV).
 export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
-  const existing = db
+  const orphans = db
     .prepare(
-      `SELECT id FROM beers
+      `SELECT id, name FROM beers
         WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?
-        ORDER BY id LIMIT 1`,
+        ORDER BY id`,
     )
-    .get(b.normalized_brewery, b.normalized_name) as { id: number } | undefined;
+    .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string }[];
+  const existing = orphans.find((o) => numericTokensCompatible(o.name, b.name));
   if (existing) return existing.id;
 
   const res = db.prepare(

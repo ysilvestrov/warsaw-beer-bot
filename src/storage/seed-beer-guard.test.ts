@@ -2,6 +2,10 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve, relative } from 'node:path';
 
 const SRC = resolve(__dirname, '..');
+// Рев'ю гілки #617: `scripts/` rsync-иться в прод і запускається там (`npm run …`), тож він такий
+// самий продакшн-код, як `src/`, і страж дивиться в обидва.
+const SCRIPTS = resolve(__dirname, '..', '..', 'scripts');
+const ROOT = resolve(__dirname, '..', '..');
 
 function tsFiles(dir: string): string[] {
   const out: string[] = [];
@@ -32,10 +36,10 @@ function stripComments(text: string): string {
 // лише в тестовому сіді. Шостий викликач, що відродить її, мусить впасти тут, а не в проді.
 test('no production module imports the test seed or revives upsertBeer (#617)', () => {
   const offenders: string[] = [];
-  for (const file of tsFiles(SRC)) {
+  for (const file of [...tsFiles(SRC), ...tsFiles(SCRIPTS)]) {
     const code = stripComments(readFileSync(file, 'utf8'));
     if (/seed-beer\.testing/.test(code) || /\b(?:upsertBeer|seedBeer)\b/.test(code)) {
-      offenders.push(relative(SRC, file));
+      offenders.push(relative(ROOT, file));
     }
   }
   expect(offenders).toEqual([]);
