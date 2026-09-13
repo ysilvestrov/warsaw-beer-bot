@@ -87,6 +87,39 @@ describe('parseUserBeersPage', () => {
     expect(it.their_rating).toBe(4.5);
   });
 
+  function userBeerCard(globalLabel: string, globalRating: string): string {
+    return `
+      <div class="beer-item" data-bid="6869890">
+        <div class="beer-details">
+          <p class="name"><a href="/b/funky-fluid-prototype/6869890">Prototype</a></p>
+          <p class="brewery"><a href="/FunkyFluid">Funky Fluid</a></p>
+          <p class="style">IPA - New England / Hazy</p>
+          <div class="ratings">
+            <div class="you">
+              <p>Their Rating (4.5)</p>
+              <div class="caps" data-rating="4.5"></div>
+            </div>
+            <div class="you">
+              <p>Global Rating (${globalLabel})</p>
+              <div class="caps" data-rating="${globalRating}"></div>
+            </div>
+          </div>
+        </div>
+      </div>`;
+  }
+
+  test('Global Rating (N/A) rendered as data-rating="0" is no rating; Their Rating is untouched (#616)', () => {
+    const [it] = parseUserBeersPage(userBeerCard('N/A', '0'));
+    expect(it.bid).toBe(6869890);
+    expect(it.global_rating).toBeNull();
+    expect(it.their_rating).toBe(4.5);
+  });
+
+  test('Global Rating keeps 2 decimals like Algolia (#616)', () => {
+    const [it] = parseUserBeersPage(userBeerCard('3.30', '3.29971'));
+    expect(it.global_rating).toBe(3.3);
+  });
+
   test('skips item with non-numeric data-bid; keeps siblings', () => {
     const html = `
       <div class="beer-item" data-bid="abc">

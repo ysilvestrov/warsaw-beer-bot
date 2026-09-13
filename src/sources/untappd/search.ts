@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import { isBlockPage } from './block';
 import { HttpError } from '../http';
+import { untappdRating } from './rating';
 
 export interface SearchResult {
   bid: number;
@@ -32,12 +33,6 @@ export interface BeerSearch {
 }
 
 const MAX_ITEMS = 5;
-
-function parseRating(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : null;
-}
 
 function parseAbv(raw: string): number | null {
   const m = raw.match(/(\d+(?:[.,]\d+)?)\s*%/);
@@ -94,7 +89,7 @@ export function parseSearchPage(html: string): SearchResult[] {
     const abvText = detailsBeer.find('.abv').first().text().trim();
     const abv = abvText ? parseAbv(abvText) : null;
 
-    const global_rating = parseRating(
+    const global_rating = untappdRating(
       detailsBeer.find('.rating .caps[data-rating]').first().attr('data-rating'),
     );
 

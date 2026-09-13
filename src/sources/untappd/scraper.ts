@@ -1,4 +1,5 @@
 import * as cheerio from 'cheerio';
+import { untappdRating } from './rating';
 
 export interface ScrapedBeer {
   bid: number;
@@ -51,9 +52,10 @@ export function parseUserBeersPage(html: string): ScrapedBeer[] {
     let global_rating: number | null = null;
     details.find('.ratings .you').each((_, you) => {
       const label = $(you).find('p').first().text().trim();
-      const value = parseRating($(you).find('.caps[data-rating]').first().attr('data-rating'));
-      if (/^Their Rating/i.test(label)) their_rating = value;
-      else if (/^Global Rating/i.test(label)) global_rating = value;
+      const raw = $(you).find('.caps[data-rating]').first().attr('data-rating');
+      if (/^Their Rating/i.test(label)) their_rating = parseRating(raw);
+      // #616: глобальний рейтинг Untappd — «0/N/A = менш ніж 10 оцінок», округлення до 2 знаків.
+      else if (/^Global Rating/i.test(label)) global_rating = untappdRating(raw);
     });
 
     out.push({ bid, beer_name, brewery_name, style, abv, their_rating, global_rating });

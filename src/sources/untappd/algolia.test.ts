@@ -256,3 +256,23 @@ describe('rating_count (#487)', () => {
     expect(out?.rating_count).toBe(992660);
   });
 });
+
+describe('rating boundary (#616)', () => {
+  it('parseAlgoliaResponse: rating_score 0 (<10 ratings) is no rating; others round to 2 decimals', () => {
+    const out = parseAlgoliaResponse({
+      hits: [
+        { bid: 6869890, beer_name: 'Prototype', brewery_name: 'Funky Fluid', type_name: 'IPA', beer_abv: 6, rating_score: 0, rating_count: 4 },
+        { bid: 39819, beer_name: 'X', brewery_name: 'Y', type_name: 'IPA', beer_abv: 5, rating_score: 3.29971, rating_count: 71802 },
+      ],
+    });
+    expect(out[0].global_rating).toBeNull();
+    expect(out[1].global_rating).toBe(3.3);
+  });
+
+  it('parseHydratedBeer: rating_score 0 is no rating', () => {
+    const out = parseHydratedBeer({
+      bid: 6869890, beer_name: 'Prototype', brewery_name: 'Funky Fluid', type_name: 'IPA', beer_abv: 6, rating_score: 0, rating_count: 4,
+    });
+    expect(out?.global_rating).toBeNull();
+  });
+});
