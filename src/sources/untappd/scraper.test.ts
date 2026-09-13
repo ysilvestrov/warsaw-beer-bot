@@ -223,7 +223,10 @@ describe('parseUserBeersPage — Global Rating block (#616)', () => {
           <div class="ratings"><div class="you"><p>${label}</p>${caps}</div></div>
         </div>
       </div>`;
-    for (const caps of ['', '<div class="caps"></div>', '<div class="caps" data-rating="soon"></div>']) {
+    for (const caps of [
+      '', '<div class="caps"></div>', '<div class="caps" data-rating="soon"></div>',
+      '<div class="caps" data-rating="3.72soon"></div>',   // числовий префікс — ще не число (рев'ю #625)
+    ]) {
       const [it] = parseUserBeersPage(card('Global Rating (3.72)', caps));
       expect(it).toMatchObject({ global_rating: null, global_rating_shown: false });
     }

@@ -61,8 +61,9 @@ export function parseUserBeersPage(html: string): ScrapedBeer[] {
       else if (/^Global Rating/i.test(label)) {
         // Відповідь Untappd — лише читабельне число в data-rating (0 = менш ніж 10 оцінок) або явний
         // підпис «(N/A)». Підпис без читабельного значення нічого не доводить: як блоку немає (рев'ю #625).
-        const n = raw === undefined ? Number.NaN : parseFloat(raw);
-        if (Number.isFinite(n) || /\(N\/A\)/i.test(label)) {
+        // Суворо: parseFloat('3.72soon') скінченне, а це ще не число.
+        const readable = raw !== undefined && /^\s*\d+(?:\.\d+)?\s*$/.test(raw);
+        if (readable || /\(N\/A\)/i.test(label)) {
           global_rating = untappdRating(raw);
           global_rating_shown = true;
         }
