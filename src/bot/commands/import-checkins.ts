@@ -1,6 +1,6 @@
 import type { DB } from '../../storage/db';
 import type { Checkin } from '../../sources/untappd/export';
-import { upsertBeer } from '../../storage/beers';
+import { upsertBeerByBid, ensureOrphan } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
 import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 
@@ -17,8 +17,9 @@ import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 export function importCheckins(db: DB, telegramId: number, rows: Checkin[]): void {
   db.transaction(() => {
     for (const r of rows) {
-      const beerId = upsertBeer(db, {
-        untappd_id: r.bid ?? null,
+      // #617: рядок із bid — ідентичність за bid (лише заповнення фактів, без перейменування);
+      // без bid ідентичності немає — сирота, яка злінкованого пива не торкається.
+      const facts = {
         name: r.beer_name,
         brewery: r.brewery_name,
         style: r.beer_type,
@@ -26,8 +27,10 @@ export function importCheckins(db: DB, telegramId: number, rows: Checkin[]): voi
         rating_global: r.global_rating,
         normalized_name: normalizeName(r.beer_name),
         normalized_brewery: normalizeBrewery(r.brewery_name),
-        untappd_id_source: 'checkin',
-      });
+      };
+      const beerId = r.bid != null
+        ? upsertBeerByBid(db, { ...facts, untappd_id: r.bid, untappd_id_source: 'checkin' })
+        : ensureOrphan(db, facts);
       mergeCheckin(db, {
         checkin_id: r.checkin_id,
         telegram_id: telegramId,
