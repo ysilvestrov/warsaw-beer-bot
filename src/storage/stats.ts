@@ -18,6 +18,8 @@ export interface StatusMetrics {
   // (замок і вичерпаний backoff — окремі, свідомі фільтри поверх неї).
   orphansRelayQueue: number;
   ratingsMissing: number;
+  /** #616: злінковані рядки зі штампом звірки рейтингу, свіжішим за 30 днів — покриття циклу гідратора. */
+  ratingsChecked30d: number;
   snapshots: number;
   taps: number;
   dbSizeMb: number | null;
@@ -81,6 +83,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
   const nowMs = now.getTime();
   const cutoff24 = new Date(nowMs - 24 * 3600 * 1000).toISOString();
   const cutoff7d = new Date(nowMs - 7 * 24 * 3600 * 1000).toISOString();
+  const cutoff30d = new Date(nowMs - 30 * 24 * 3600 * 1000).toISOString();
 
   const count = (sql: string, params: unknown[] = []): number =>
     (db.prepare(sql).get(...params) as { c: number }).c;
@@ -205,6 +208,10 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
       [cutoff7d],
     ),
     ratingsMissing: count('SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_global IS NULL'),
+    ratingsChecked30d: count(
+      'SELECT COUNT(*) AS c FROM beers WHERE untappd_id IS NOT NULL AND rating_checked_at >= ?',
+      [cutoff30d],
+    ),
     snapshots: count('SELECT COUNT(*) AS c FROM tap_snapshots'),
     taps: count('SELECT COUNT(*) AS c FROM taps'),
     dbSizeMb,
