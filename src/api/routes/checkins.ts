@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import { getProfile } from '../../storage/user_profiles';
-import { upsertBeer } from '../../storage/beers';
+import { upsertBeerByBid } from '../../storage/beers';
 import { mergeCheckin, countCheckins, checkinExists, oldestCheckinId } from '../../storage/checkins';
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
 import { addCoverage, rangeContaining, coverageFor } from '../../storage/checkin_coverage';
@@ -108,7 +108,9 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     deps.db.transaction(() => {
       for (const ci of page.checkins) {
         const existed = checkinExists(deps.db, telegramId, ci.checkin_id);
-        const beerId = upsertBeer(deps.db, {
+        // #617: ідентичність за bid. Стрічка фактів не несе (null), а upsertBeerByBid порожнім
+        // значенням нічого не стирає, не перейменовує рядок і лише посилює провенанс.
+        const beerId = upsertBeerByBid(deps.db, {
           untappd_id: ci.bid,
           name: ci.beer_name,
           brewery: ci.brewery_name,

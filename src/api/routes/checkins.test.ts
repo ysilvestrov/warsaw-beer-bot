@@ -14,6 +14,8 @@ import {
   CHECKINS_HTML_LIMIT_CHARS,
   CHECKINS_SYNC_BODY_LIMIT_BYTES,
 } from '../middleware/payload-limit';
+import { upsertBeer } from '../../storage/beers';
+import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 
 // Synthetic feed pages verified against parseCheckinFeedPage's real selectors.
 
@@ -37,6 +39,21 @@ const PAGE_ONE = `
 // dead (#587 — feed bottom is not assertable); the walk stops on zero items, not on
 // the absence of a Show More button.
 const PAGE_BOTTOM = `<html><body></body></html>`;
+
+// #617: сторінка стрічки з одним чекіном — та сама розмітка, що PAGE_ONE, але з довільним пивом.
+const feedPage = (checkinId: string, bid: number, beer: string, brewery: string) => `
+<html><body>
+  <div class="stats"><a><span class="stat">1</span><span class="title">Total</span></a></div>
+  <div class="item" data-checkin-id="${checkinId}">
+    <a href="/b/x/${bid}" class="label"><img></a>
+    <p class="text">
+      <a href="/user/bob" class="user">Bob</a> is drinking an <a href="/b/x/${bid}">${beer}</a>
+      by <a href="/Brewery">${brewery}</a> at <a href="/v/some-bar/7">Some Bar</a>
+    </p>
+    <div class="caps " data-rating="4"></div>
+    <a href="/user/bob/checkin/${checkinId}" class="time timezoner">Mon, 15 Jun 2026 18:00:00 +0000</a>
+  </div>
+</body></html>`;
 
 const RAW_TOKEN = 'test-checkins-token-abc';
 const RAW_TOKEN_NO_USER = 'test-checkins-token-no-user';
@@ -417,5 +434,67 @@ describe('POST /checkins/sync — покриття і nextCursor (#587)', () => 
     const res = await post(app, '/checkins/sync', { html: pageOf([580]), maxId: '580' }, RAW_TOKEN);
     expect(res.status).toBe(200);
     expect((await res.json()).nextCursor).toBeNull();
+  });
+});
+
+describe('POST /checkins/sync — beer identity (#617)', () => {
+  type Row = {
+    id: number; untappd_id: number | null; name: string; style: string | null;
+    abv: number | null; rating_global: number | null; untappd_id_source: string | null;
+  };
+  const beerById = (db: ReturnType<typeof openDb>, id: number) =>
+    db.prepare('SELECT * FROM beers WHERE id = ?').get(id) as Row;
+
+  function seed(
+    db: ReturnType<typeof openDb>,
+    bid: number, name: string, brewery: string,
+    over: Partial<Parameters<typeof upsertBeer>[1]> = {},
+  ): number {
+    return upsertBeer(db, {
+      untappd_id: bid, name, brewery,
+      style: 'Belgian Strong Dark Ale', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+      untappd_id_source: 'search',
+      ...over,
+    });
+  }
+
+  it('a linked beer keeps its rating, style and ABV (the sync wipe)', async () => {
+    const { db, app } = setup();
+    const id = seed(db, 42, 'Some IPA', 'Some Brewery');
+    expect((await post(app, '/checkins/sync', { html: PAGE_ONE, maxId: null }, RAW_TOKEN)).status).toBe(200);
+    const row = beerById(db, id);
+    expect(row.style).toBe('Belgian Strong Dark Ale');
+    expect(row.abv).toBeCloseTo(9.2);
+    expect(row.rating_global).toBeCloseTo(3.95);
+    expect(row.untappd_id_source).toBe('checkin');
+  });
+
+  it('a vintage twin is never re-pointed to the synced bid', async () => {
+    const { db, app } = setup();
+    const eight = seed(db, 1001, 'Trappistes Rochefort 8', 'Rochefort');
+    const html = feedPage('777', 2002, 'Trappistes Rochefort 10', 'Rochefort');
+    expect((await post(app, '/checkins/sync', { html, maxId: null }, RAW_TOKEN)).status).toBe(200);
+    const e = beerById(db, eight);
+    expect(e.untappd_id).toBe(1001);
+    expect(e.name).toBe('Trappistes Rochefort 8');
+    expect(e.rating_global).toBeCloseTo(3.95);
+    const ck = db.prepare("SELECT beer_id FROM checkins WHERE checkin_id = '777'").get() as { beer_id: number };
+    expect(ck.beer_id).not.toBe(eight);
+    expect(beerById(db, ck.beer_id).untappd_id).toBe(2002);
+  });
+
+  it('a curated link stays curated', async () => {
+    const { db, app } = setup();
+    const id = seed(db, 42, 'Some IPA', 'Some Brewery', { untappd_id_source: 'curated' });
+    await post(app, '/checkins/sync', { html: PAGE_ONE, maxId: null }, RAW_TOKEN);
+    expect(beerById(db, id).untappd_id_source).toBe('curated');
+  });
+
+  it('the synced name does not rename the stored beer (#618 owns Untappd names)', async () => {
+    const { db, app } = setup();
+    const id = seed(db, 42, 'Some IPA (old shop name)', 'Some Brewery');
+    await post(app, '/checkins/sync', { html: PAGE_ONE, maxId: null }, RAW_TOKEN);
+    expect(beerById(db, id).name).toBe('Some IPA (old shop name)');
   });
 });
