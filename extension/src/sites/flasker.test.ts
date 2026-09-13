@@ -664,6 +664,33 @@ describe('#384 flasker.loadCardDetails', () => {
     fetchSpy.mockRestore();
   });
 
+  it('retries a transient detail failure on a later hydration pass', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${blockCard(
+        'https://flasker.com.ua/product/vibrantpour-retry-gose-4/',
+        'VibrantPour Retry Gose 4%',
+      )}</ul>`,
+      'text/html',
+    );
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () =>
+          '<span class="posted_in"><a href="https://flasker.com.ua/product-category/gose/">Gose</a></span>',
+      } as Response);
+    const cards = flasker.parseCards(doc);
+
+    await flasker.loadCardDetails?.(cards);
+    expect(cards[0].skip).toBe(true);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards[0].skip).toBe(false);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    fetchSpy.mockRestore();
+  });
+
   it('keeps a provisional card fail-closed when a successful detail page has no category', async () => {
     const doc = new DOMParser().parseFromString(
       `<ul>${blockCard(

@@ -393,6 +393,9 @@ async function loadDetail(url: string): Promise<ProductDetail | null> {
     }
   })();
   detailByUrl.set(url, p);
+  void p.then((detail) => {
+    if (detail === null && detailByUrl.get(url) === p) detailByUrl.delete(url);
+  });
   return p;
 }
 
