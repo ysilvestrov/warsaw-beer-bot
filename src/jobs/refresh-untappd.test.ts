@@ -8,6 +8,7 @@ import { HttpError, type Http } from '../sources/http';
 import { refreshAllUntappd } from './refresh-untappd';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 import { catalogVersion } from '../storage/catalog-version';
+import { normalizeName, normalizeBrewery } from '../domain/normalize';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -25,6 +26,15 @@ function fakeHttp(htmlByUrl: Record<string, string>): Http {
       return v;
     },
   };
+}
+
+// #617: сід напряму — upsertBeer злив би два рядки з однаковою нормалізованою назвою в один
+// (саме той дефект, який тут перевіряється).
+function insertBeer(db: ReturnType<typeof fresh>, bid: number, name: string, brewery: string, rating: number): number {
+  return Number(db.prepare(
+    `INSERT INTO beers (untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(bid, name, brewery, rating, normalizeName(name), normalizeBrewery(brewery)).lastInsertRowid);
 }
 
 const PAGE_ONE_BEER = (bid: number, name: string, brewery: string, global: string) => `
@@ -137,7 +147,7 @@ describe('refreshAllUntappd', () => {
     expect(row.rating_global).toBe(3.90);
   });
 
-  test('matches existing row by normalized name+brewery; updates rating_global only', async () => {
+  test('#617: resolves a same-name orphan by the scraped bid and takes Untappd facts over its own', async () => {
     const db = fresh();
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
@@ -163,21 +173,22 @@ describe('refreshAllUntappd', () => {
 
     const row = findBeerByNormalized(db, 'pinta', 'atak chmielu')!;
     expect(row.id).toBe(seededId);
+    expect(row.untappd_id).toBe(101);
+    expect(row.untappd_id_source).toBe('checkin');
     expect(row.rating_global).toBe(4.20);
-    expect(row.style).toBe('NEIPA — Hazy');
-    expect(row.abv).toBe(6.5);
+    expect(row.style).toBe('IPA');         // Untappd переважає факт сироти (spec §/newbeers)
+    expect(row.abv).toBe(6.5);             // сторінка без ABV → лишається ABV сироти
     expect(row.name).toBe('Atak Chmielu');
     expect(row.brewery).toBe('Pinta');
-    expect(row.untappd_id).toBeNull();
   });
 
-  test('global_rating null on /beers → row.rating_global set to NULL (idempotent re-read)', async () => {
+  test('global_rating null on /beers → rating_global of the row found by bid set to NULL (idempotent re-read)', async () => {
     const db = fresh();
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
 
     const seededId = upsertBeer(db, {
-      untappd_id: null,
+      untappd_id: 555,
       name: 'Brand New Release',
       brewery: 'New Brews',
       style: 'Lager',
@@ -409,6 +420,26 @@ describe('refreshAllUntappd', () => {
     const atak = findBeerByNormalized(db, 'pinta', 'atak chmielu')!;
     const buty = findBeerByNormalized(db, 'stu mostow', 'buty skejta')!;
     expect(new Set(rows.map((r) => r.beer_id))).toEqual(new Set([atak.id, buty.id]));
+  });
+
+  test('#617: updates and marks the row with the scraped bid, not a same-name vintage twin', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const eight = insertBeer(db, 1001, 'Trappistes Rochefort 8', 'Rochefort', 3.95);
+    const ten = insertBeer(db, 2002, 'Trappistes Rochefort 10', 'Rochefort', 3.8);
+
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(2002, 'Trappistes Rochefort 10', 'Rochefort', '4.05'),
+    });
+    await refreshAllUntappd({ db, log: silentLog, http });
+
+    const rating = (id: number) =>
+      (db.prepare('SELECT rating_global FROM beers WHERE id = ?').get(id) as { rating_global: number }).rating_global;
+    expect(rating(ten)).toBe(4.05);
+    expect(rating(eight)).toBe(3.95);
+    const had = db.prepare('SELECT beer_id FROM untappd_had WHERE telegram_id = 1').all() as { beer_id: number }[];
+    expect(had.map((h) => h.beer_id)).toEqual([ten]);
   });
 
   test('CookieExpiredError: calls notifyAdmin once and stops processing further users', async () => {
