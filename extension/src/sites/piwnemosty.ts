@@ -8,6 +8,8 @@ interface ItemMeta {
   item_category?: string;
   item_category2?: string;
   item_category3?: string;
+  item_category4?: string;
+  item_category5?: string;
 }
 
 const CARD_SELECTOR = '.product[data-product_id]';
@@ -99,7 +101,7 @@ function splitVisibleTitle(rawTitle: string): { brewery: string; name: string } 
 function classifyCard(title: string, meta: ItemMeta | undefined): 'beer' | 'nonBeer' | 'unknown' {
   if (isNonBeerName(title) || NON_BEER_TITLE_RE.test(title)) return 'nonBeer';
   if (!meta) return 'beer';
-  const categories = [meta.item_category, meta.item_category2, meta.item_category3]
+  const categories = [meta.item_category, meta.item_category2, meta.item_category3, meta.item_category4, meta.item_category5]
     .map((c) => normalize(c ?? ''))
     .filter(Boolean);
   if (categories.length === 0) return 'unknown';
