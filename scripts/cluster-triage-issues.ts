@@ -83,8 +83,11 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
           opNormalized === '<>' ||
           opNormalized.startsWith('!') ||
           opNormalized.startsWith('not_') ||
+          opNormalized.startsWith('non_') ||
           opNormalized.includes('_not_') ||
-          opNormalized.endsWith('_not'));
+          opNormalized.includes('_non_') ||
+          opNormalized.endsWith('_not') ||
+          opNormalized.endsWith('_non'));
       if (term.col === 'source_url' && isNegative) {
         const val = term.value.toLowerCase();
         for (const s of [
