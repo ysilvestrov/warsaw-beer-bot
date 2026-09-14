@@ -4,6 +4,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
 import { seedBeer } from '../../storage/seed-beer.testing';
+import { mergeIntoCanonical } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
@@ -42,7 +43,7 @@ function setup(log?: pino.Logger) {
     matchRoute(app, { db, env: {} as never, log: appLog }, catalog);
     return app;
   }
-  return { appAs, appAnon, panIpani, warn };
+  return { appAs, appAnon, panIpani, warn, db };
 }
 
 function post(app: Hono<ApiEnv>, body: unknown) {
@@ -117,6 +118,30 @@ describe('POST /match', () => {
     const body = await res.json();
     expect(body.results[0]).toMatchObject({
       matched_beer: { name: 'Pan IPAni', rating_global: 3.85 },
+      is_drunk: true,
+      user_rating: 4.0,
+    });
+  });
+
+  it('#614 answers a merged shop card exactly, with the caller\'s drunk status and rating', async () => {
+    const { appAs, panIpani, db } = setup();
+    const orphanId = seedBeer(db, {
+      name: 'PAN IPANI Tropical Edition', brewery: 'Browar Trzech Kumpli',
+      style: 'IPA', abv: 6.0, rating_global: null,
+      normalized_name: normalizeName('PAN IPANI Tropical Edition'),
+      normalized_brewery: normalizeBrewery('Browar Trzech Kumpli'),
+    });
+    mergeIntoCanonical(db, orphanId, panIpani, '2026-09-14T07:13:20Z');
+    // Передумова: злиття справді записало аліас — інакше тест нічого не доводить.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+
+    const res = await post(appAs(1), {
+      beers: [{ brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' }],
+    });
+    const body = await res.json();
+    expect(body.results[0]).toMatchObject({
+      matched_beer: { id: panIpani, name: 'Pan IPAni', rating_global: 3.85 },
+      source: 'exact',
       is_drunk: true,
       user_rating: 4.0,
     });

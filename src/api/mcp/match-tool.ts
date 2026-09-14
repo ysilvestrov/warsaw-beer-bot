@@ -76,10 +76,10 @@ export async function runMatchTool(
   telegramId: number,
   beers: MatchInput[],
 ): Promise<MatchToolRun> {
-  const { prepared, byId } = await catalog.get();
+  const { prepared, byId, aliases } = await catalog.get();
   const drunkSet = triedBeerIds(db, telegramId);       // two-source model: checkins ∪ untappd_had
   const ratings = latestRatingsByBeer(db, telegramId);
-  const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers);
+  const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
   const drunkSetEmpty = drunkSet.size === 0;
 
   return {
