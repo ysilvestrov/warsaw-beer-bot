@@ -133,8 +133,8 @@ describe('pinMatch', () => {
       normalized_name: 'red mexican spicy edition', normalized_brewery: 'copper head beer workshop',
     });
     db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
-       VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', 'copper head', 'red mexican tomato gose', '', ?)`,
+      `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
+       VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', 'copper head', 'red mexican tomato gose', ?)`,
     ).run(rowId, AT);
 
     const res = pinMatch(db, rowId, 5120103, AT);

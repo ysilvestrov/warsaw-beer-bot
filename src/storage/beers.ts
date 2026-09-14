@@ -1,6 +1,7 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
-import { nameDigits, normalizeBrewery, normalizeName, numericTokensCompatible } from '../domain/normalize';
+import { numericTokensCompatible } from '../domain/normalize';
+import { cardText } from '../domain/card-text';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
 
@@ -274,48 +275,24 @@ export function loadCatalog(db: DB): CatalogRow[] {
     .all() as CatalogRow[];
 }
 
-// #614: аліаси пам'яті злиття для перевірки перед матчером (matchBeerList). Не читаються:
-// - аліас рядка без untappd_id — та сама жива перевірка, що й isRememberedMerge (#366);
-// - аліас, чий ключ тримає рядок beers — та сама нормалізована пара І ті самі цифри назви (пізніша
-//   сирота кранів; сирота, яку репарація #384 зробила рядком нового bid): рядок важить більше.
-//   SQL цифр не рахує, тож назви таких рядків приходять LEFT JOIN, а порівнює nameDigits.
+// #614: аліаси пам'яті злиття для перевірки перед матчером. Аліас рядка без untappd_id не читається —
+// та сама жива перевірка, що й isRememberedMerge (#366). Правило «рядок каталогу з тим самим текстом
+// важить більше» застосовує buildAliasIndex, бо кеш і так має весь каталог.
 export interface AliasRow {
   beer_id: number;
-  name: string;
-  normalized_brewery: string;
-  normalized_name: string;
-  name_digits: string;
+  brewery_text: string;
+  name_text: string;
 }
 
 export function loadAliases(db: DB): AliasRow[] {
-  const rows = db
+  return db
     .prepare(
-      `SELECT a.id AS alias_id, a.beer_id, a.name, a.normalized_brewery, a.normalized_name, a.name_digits,
-              x.name AS holder_name
-         FROM beer_aliases a
-         JOIN beers b ON b.id = a.beer_id
-         LEFT JOIN beers x
-           ON x.normalized_brewery = a.normalized_brewery
-          AND x.normalized_name = a.normalized_name
-          AND x.id <> a.beer_id
+      `SELECT a.beer_id, a.brewery_text, a.name_text
+         FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
         WHERE b.untappd_id IS NOT NULL
         ORDER BY a.id`,
     )
-    .all() as (AliasRow & { alias_id: number; holder_name: string | null })[];
-  const held = new Set(
-    rows
-      .filter((r) => r.holder_name !== null && nameDigits(r.holder_name) === r.name_digits)
-      .map((r) => r.alias_id),
-  );
-  const out = new Map<number, AliasRow>();
-  for (const r of rows) {
-    if (held.has(r.alias_id) || out.has(r.alias_id)) continue;
-    out.set(r.alias_id, {
-      beer_id: r.beer_id, name: r.name,
-      normalized_brewery: r.normalized_brewery, normalized_name: r.normalized_name, name_digits: r.name_digits,
-    });
-  }
-  return [...out.values()];
+    .all() as AliasRow[];
 }
 
 export function findBeerByNormalized(
@@ -415,28 +392,23 @@ export function mergeIntoCanonical(
     // текст записав би аліас на пиво, якого пошук для неї не доводив.
     const source = aliasSource ?? orphan;
     if (source) {
-      const normalizedBrewery = normalizeBrewery(source.brewery);
-      const normalizedName = normalizeName(source.name);
-      const digits = nameDigits(source.name);
-      // Ключ, який уже тримає інший рядок beers (та сама пара і ті самі цифри), аліасом не робимо: той
-      // рядок сам відповідає цій картці. Близнюк з іншими цифрами («Rochefort 8» для «Rochefort 10»)
-      // запис не блокує — ключ аліасу від нього відрізняється.
-      const holders = db
-        .prepare('SELECT name FROM beers WHERE normalized_brewery = ? AND normalized_name = ? AND id <> ?')
-        .all(normalizedBrewery, normalizedName, orphanId) as { name: string }[];
-      if (!holders.some((h) => nameDigits(h.name) === digits)) {
-        // Той самий ключ уже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
-        // найсвіжіший доказ.
+      const breweryText = cardText(source.brewery);
+      const nameText = cardText(source.name);
+      // Порожній текст не прив'язаний ні до крамниці, ні до пива: доказ злиття на ньому ділився б між
+      // картками (рев'ю 3: «Browar», «2085 Brewery» і '' зводились в один ключ нормалізатора).
+      if (breweryText !== '' && nameText !== '') {
+        // Той самий текст уже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
+        // найсвіжіший доказ. Рядок каталогу з тим самим текстом вимикає аліас під час читання
+        // (buildAliasIndex), тож перевірки власника під час запису немає.
         db.prepare(
-          `INSERT INTO beer_aliases
-             (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(normalized_brewery, normalized_name, name_digits) DO UPDATE SET
+          `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(brewery_text, name_text) DO UPDATE SET
              beer_id = excluded.beer_id,
              brewery = excluded.brewery,
              name = excluded.name,
              created_at = excluded.created_at`,
-        ).run(canonicalId, source.brewery, source.name, normalizedBrewery, normalizedName, digits, at);
+        ).run(canonicalId, source.brewery, source.name, breweryText, nameText, at);
       }
     }
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
