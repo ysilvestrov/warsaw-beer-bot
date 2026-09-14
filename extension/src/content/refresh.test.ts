@@ -69,6 +69,21 @@ describe('refreshCards', () => {
     expect(isSeen(host)).toBe(false);
   });
 
+  it('does not return a cache key for a detail-skipped card', async () => {
+    const host = cardEl();
+    const adapter = {
+      id: 'fake',
+      hostMatch: () => true,
+      loadDetailsBeforeCache: true,
+      parseCards: () => [{ el: host, brewery: 'Flasker', name: 'Unverified item', skip: true }],
+      loadCardDetails: async () => {},
+    } as SiteAdapter;
+
+    expect(await refreshCards(document, adapter)).toEqual([]);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(isSeen(host)).toBe(false);
+  });
+
   it('returns a fresh beer key when a reused card still has a non-beer badge', async () => {
     const host = cardEl();
     setNonBeer(host);

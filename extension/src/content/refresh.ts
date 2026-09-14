@@ -13,7 +13,7 @@ export async function refreshCards(doc: Document, adapter: SiteAdapter): Promise
     await adapter.loadCardDetails(cards);
   }
   for (const card of cards) {
-    if (!card.nonBeer) keys.push(normalizeKey(card.brewery, card.name));
+    if (!card.nonBeer && !card.skip) keys.push(normalizeKey(card.brewery, card.name));
     resetCard(card.el);
   }
   return keys;
