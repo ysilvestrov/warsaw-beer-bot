@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { matchBeerList, buildAliasIndex, type CatalogBeerWithRating } from './match-list';
-import { nameDigits, normalizeBrewery, normalizeName } from './normalize';
+import { cardText } from './card-text';
 import { matchBeer, prepareCatalog, FULL_FALLBACK_BUDGET } from './matcher';
 
 // The route now hands matchBeerList an already-prepared catalog + id index; tests
@@ -223,74 +223,51 @@ describe('matchBeerList aliases (#614)', () => {
     { id: 10, brewery: 'Brasserie de Rochefort', name: 'Trappistes Rochefort 10', abv: 11.3, rating_global: 4.2, untappd_id: 2002 },
   ];
   const alias = (beerId: number, brewery: string, name: string) => ({
-    beer_id: beerId,
-    normalized_brewery: normalizeBrewery(brewery),
-    normalized_name: normalizeName(name),
-    name_digits: nameDigits(name),
+    beer_id: beerId, brewery_text: cardText(brewery), name_text: cardText(name),
   });
   const noYield = { yield: async () => {} };
+  const run = async (catalog: CatalogBeerWithRating[], aliasRows: ReturnType<typeof alias>[], card: { brewery: string; name: string; abv?: number }, drunkId: number) => {
+    const { prepared, byId } = prep(catalog);
+    const aliases = buildAliasIndex(aliasRows, catalog);
+    return matchBeerList(prepared, byId, new Set([drunkId]), new Map([[drunkId, 4.0]]), [card], { ...noYield, aliases });
+  };
 
-  it('a merged shop pair matches its canonical row exactly, with drunk status and rating, without the fallback', async () => {
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')]);
-    const res = await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2 }],
-      { ...noYield, aliases },
-    );
+  it('a merged card text matches its canonical row exactly, with drunk status and rating, without the fallback', async () => {
+    const res = await run(rochefort, [alias(8, 'ROCH', 'Trappistes Rochefort 8')], { brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2 }, 8);
     expect(res.results).toEqual([{
       raw: { brewery: 'ROCH', name: 'Trappistes Rochefort 8' },
       matched_beer: { id: 8, name: 'Trappistes Rochefort 8', brewery: 'Brasserie de Rochefort', rating_global: 3.95, untappd_id: 1001 },
-      is_drunk: true,
-      drunk_uncertain: false,
-      user_rating: 4.0,
-      source: 'exact',
-      searched: true,
+      is_drunk: true, drunk_uncertain: false, user_rating: 4.0, source: 'exact', searched: true,
     }]);
     expect(res.fallback.attempts).toBe(0);
   });
 
-  it('a card with different digits never rides another vintage\'s alias', async () => {
-    // Без цієї передумови тест нічого б не доводив: ключ аліасу рівний для обох вінтажів.
-    expect(normalizeName('Trappistes Rochefort 10')).toBe(normalizeName('Trappistes Rochefort 8'));
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')]);
-    const [r] = (await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 10', abv: 11.3 }],
-      { ...noYield, aliases },
-    )).results;
+  it('case and whitespace of the same text still hit the alias', async () => {
+    const [r] = (await run(rochefort, [alias(8, 'ROCH', 'Trappistes Rochefort 8')], { brewery: ' roch ', name: 'trappistes  ROCHEFORT 8' }, 8)).results;
+    expect([r.source, r.matched_beer?.id, r.is_drunk]).toEqual(['exact', 8, true]);
+  });
+
+  // Сценарії трьох рев'ю: жоден інший зміст не дістає аліасу.
+  it.each([
+    ['other digits', { brewery: 'ROCH', name: 'Trappistes Rochefort 10', abv: 11.3 }, alias(8, 'ROCH', 'Trappistes Rochefort 8')],
+    ['a year only on the card', { brewery: 'ROCH', name: 'Trappistes Rochefort 8 2023' }, alias(8, 'ROCH', 'Trappistes Rochefort 8')],
+    ['another year inside parentheses', { brewery: 'ROCH', name: 'Rochefort (2024 Extra Vanilla)' }, alias(8, 'ROCH', 'Rochefort (2023 Banana Pudding)')],
+  ])('%s never rides the alias', async (_label, card, aliasRow) => {
+    const [r] = (await run(rochefort, [aliasRow], card, 8)).results;
     expect(r.is_drunk).toBe(false);
-    expect(r.user_rating).toBeNull();
     expect(r.source === 'exact' && r.matched_beer?.id === 8).toBe(false);
   });
 
-  it('an alias without digits never claims a numbered card', async () => {
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort')]);
-    const [r] = (await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 10', abv: 11.3 }],
-      { ...noYield, aliases },
-    )).results;
-    expect(r.is_drunk).toBe(false);
-    expect(r.user_rating).toBeNull();
-    expect(r.source === 'exact' && r.matched_beer?.id === 8).toBe(false);
+  it('a card with an empty brewery text never looks up an alias', async () => {
+    const [r] = (await run(rochefort, [alias(8, '', 'Trappistes Rochefort 8')], { brewery: '  ', name: 'Trappistes Rochefort 8' }, 8)).results;
+    expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
   });
 
-  it('a card with a year never rides an alias without one onto another vintage', async () => {
-    const mjod: CatalogBeerWithRating[] = [
-      { id: 21, brewery: 'Varvar Brew', name: 'Mjød (2021)', abv: 13, rating_global: 4.1, untappd_id: 3001 },
-      { id: 23, brewery: 'Varvar Brew', name: 'Mjød (2023)', abv: 13, rating_global: 4.2, untappd_id: 3003 },
-    ];
-    const { prepared, byId } = prep(mjod);
-    const aliases = buildAliasIndex([alias(21, 'VARVAR', 'MJØD IS')]);
-    const [r] = (await matchBeerList(
-      prepared, byId, new Set([21]), new Map([[21, 4.0]]),
-      [{ brewery: 'VARVAR', name: 'MJØD IS 2023' }],
-      { ...noYield, aliases },
-    )).results;
-    expect(r.is_drunk).toBe(false);
-    expect(r.source === 'exact' && r.matched_beer?.id === 21).toBe(false);
+  it('buildAliasIndex drops an alias whose exact text another catalog row holds — the row wins', () => {
+    const catalog = [...rochefort, { id: 77, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: null, untappd_id: null }];
+    expect(buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')], catalog).size).toBe(0);
+    // Той самий текст лише в самій цілі — аліас лишається.
+    const selfHeld = [{ id: 8, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: 3.95, untappd_id: 1001 }];
+    expect([...buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')], selfHeld).values()]).toEqual([8]);
   });
 });

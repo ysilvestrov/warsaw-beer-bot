@@ -138,8 +138,8 @@ describe('applyLookupOutcome merge', () => {
     );
 
     expect(kind).toBe('merged');
-    expect(db.prepare('SELECT beer_id, name, name_digits FROM beer_aliases').all())
-      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_digits: '7' }]);
+    expect(db.prepare('SELECT beer_id, name, name_text FROM beer_aliases').all())
+      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_text: 'ґвара #7' }]);
     db.close();
   });
 });

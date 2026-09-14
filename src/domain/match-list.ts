@@ -5,7 +5,7 @@ import {
   type PreparedCatalog,
   type FallbackBudget,
 } from './matcher';
-import { nameDigits, normalizeBrewery, normalizeName } from './normalize';
+import { cardText } from './card-text';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
@@ -26,37 +26,53 @@ export interface MatchedBeer {
   untappd_id: number | null;
 }
 
-/** #614: аліас із пам'яті злиття — ключ картки крамниці → канонічний рядок. */
+/** #614: аліас із пам'яті злиття — точний текст картки крамниці → канонічний рядок. */
 export interface AliasSource {
   beer_id: number;
-  normalized_brewery: string;
-  normalized_name: string;
-  /** nameDigits(назва): числові токени, які normalizeName відкидає. */
-  name_digits: string;
+  brewery_text: string;
+  name_text: string;
 }
 
 export type AliasIndex = ReadonlyMap<string, number>;
 
-// Роздільник `|`, а не пробіл: нормалізовані рядки складаються з літер, цифр і пробілів, тож
-// пробіл склеїв би «a b» + «c» і «a» + «b c» в один ключ.
-const aliasKey = (normalizedBrewery: string, normalizedName: string, digits: string): string =>
-  `${normalizedBrewery}|${normalizedName}|${digits}`;
+// Роздільник `|`: cardText зберігає пробіли, тож пробіл склеїв би «a b» + «c» і «a» + «b c».
+const aliasKey = (breweryText: string, nameText: string): string => `${breweryText}|${nameText}`;
 
-export function buildAliasIndex(rows: readonly AliasSource[]): AliasIndex {
-  return new Map(rows.map((r) => [aliasKey(r.normalized_brewery, r.normalized_name, r.name_digits), r.beer_id]));
+// #614: рядок каталогу з тим самим точним текстом важить більше за аліас (пізніша сирота кранів;
+// сирота, яку репарація #384 зробила рядком нового bid) — картку тоді відповідає матчер. Той самий
+// текст у самій цілі аліас не вимикає.
+export function buildAliasIndex(
+  aliases: readonly AliasSource[],
+  catalog: readonly { id: number; brewery: string; name: string }[],
+): AliasIndex {
+  const holders = new Map<string, Set<number>>();
+  for (const row of catalog) {
+    const key = aliasKey(cardText(row.brewery), cardText(row.name));
+    (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
+  }
+  const index = new Map<string, number>();
+  for (const a of aliases) {
+    const key = aliasKey(a.brewery_text, a.name_text);
+    const held = holders.get(key);
+    if (held && [...held].some((id) => id !== a.beer_id)) continue;
+    index.set(key, a.beer_id);
+  }
+  return index;
 }
 
-// #614: ключ — ті самі normalizeBrewery/normalizeName, якими ensureBeerRow рахує пару з сирого тексту
-// картки, плюс nameDigits: нормалізація відкидає цифри, а «…8» і «…10», «Mjød» і «Mjød 2023» — різні
-// пива. Рівність ключа точна, жодних «сумісних» цифр. Рядок, якого немає в цьому знімку каталогу, —
-// не влучання.
+// #614: ключ — точний текст картки (cardText): нічого зі змісту не губиться, тож картка з іншими
+// цифрами, роком у дужках чи іншою броварнею аліасу не дістає. Порожній текст аліасу не має.
+// Рядок, якого немає в цьому знімку каталогу, — не влучання.
 function aliasTarget(
   aliases: AliasIndex | undefined,
   item: MatchInput,
   byId: Map<number, CatalogBeerWithRating>,
 ): CatalogBeerWithRating | null {
   if (!aliases || aliases.size === 0) return null;
-  const beerId = aliases.get(aliasKey(normalizeBrewery(item.brewery), normalizeName(item.name), nameDigits(item.name)));
+  const breweryText = cardText(item.brewery);
+  const nameText = cardText(item.name);
+  if (breweryText === '' || nameText === '') return null;
+  const beerId = aliases.get(aliasKey(breweryText, nameText));
   return beerId === undefined ? null : (byId.get(beerId) ?? null);
 }
 
