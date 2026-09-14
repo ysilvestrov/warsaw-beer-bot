@@ -12,6 +12,7 @@ interface ItemMeta {
 const CARD_SELECTOR = '.product[data-product_id]';
 const NON_BEER_PAGE_RE = /\/pol_m_(?:PRZEKASKI|SZKLO-I-MERCH)(?:[-_/]|$)/i;
 const NON_BEER_TITLE_RE = /\b(?:bon podarunkowy|chipsy|orzeszki|paluchy|plecak|shaker|szkło|t-shirt|torba)\b/i;
+const NON_BEER_CATEGORY_RE = /\bakcesoria\b/i;
 const PACKAGING_SUFFIX_RE = /\s+-\s+(?:butelka|puszka)\s+\d+\s*ml\s*$/i;
 const BROWAR_PREFIX_RE = /^browar\s+/i;
 const OUT_OF_STOCK_MARKER_RE = /\bchwilowy\s+brak\s*:?\s*\(?|\bwypite\b/gi;
@@ -99,6 +100,7 @@ function classifyCard(title: string, meta: ItemMeta | undefined): 'beer' | 'nonB
   if (!meta) return 'beer';
   const categories = [meta.item_category, meta.item_category2].map((c) => normalize(c ?? '')).filter(Boolean);
   if (categories.length === 0) return 'unknown';
+  if (categories.some((c) => NON_BEER_CATEGORY_RE.test(c))) return 'nonBeer';
   return categories.some((c) => c.includes('piwo') || c.includes('napoje')) ? 'beer' : 'nonBeer';
 }
 
