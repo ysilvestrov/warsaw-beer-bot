@@ -335,6 +335,40 @@ export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number
     // checkins.beer_id → beers(id) has NO ON DELETE CASCADE and foreign_keys=ON, so a check-in
     // on the orphan would abort the DELETE. Point it at the canonical row first (as pinMatch does).
     db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
+    // #614: злиття — єдиний момент, коли відомо «пара броварня + назва цієї сироти = канонічний
+    // рядок». DELETE нижче знищив би це знання, і /match на кожне завантаження сторінки знову не
+    // впізнавав би ту саму картку крамниці. Спершу аліаси самої сироти переходять на канонічний
+    // рядок, інакше ON DELETE CASCADE забрав би пам'ять давніших злиттів.
+    db.prepare('UPDATE beer_aliases SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
+    const orphan = db
+      .prepare('SELECT brewery, name, normalized_brewery, normalized_name FROM beers WHERE id = ?')
+      .get(orphanId) as
+      | { brewery: string; name: string; normalized_brewery: string; normalized_name: string }
+      | undefined;
+    if (orphan) {
+      // Пару, яку тримає інший рядок, аліасом не робимо: normalizeName відкидає числові токени,
+      // тож ontap-сирота «Rochefort 10» має пару злінкованого близнюка «Rochefort 8», і аліас дав би
+      // /match для «Rochefort 8» другого точного кандидата з id іншого вінтажу.
+      const claimed = db
+        .prepare('SELECT 1 FROM beers WHERE normalized_brewery = ? AND normalized_name = ? AND id <> ?')
+        .get(orphan.normalized_brewery, orphan.normalized_name, orphanId);
+      if (!claimed) {
+        // Та сама пара вже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
+        // найсвіжіший доказ.
+        db.prepare(
+          `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(normalized_brewery, normalized_name) DO UPDATE SET
+             beer_id = excluded.beer_id,
+             brewery = excluded.brewery,
+             name = excluded.name,
+             created_at = excluded.created_at`,
+        ).run(
+          canonicalId, orphan.brewery, orphan.name,
+          orphan.normalized_brewery, orphan.normalized_name, at,
+        );
+      }
+    }
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
   })();
   bumpCatalogVersion();
