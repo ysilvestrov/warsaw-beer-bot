@@ -3,7 +3,6 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
-  deleteAlias,
   findAliasTarget,
   findBeerByNormalized,
   getBeer,
@@ -262,15 +261,15 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           'enrich: identity from shop-published bid',
         );
         // Reuses the shared writer: UNIQUE clash → merge into the canonical row.
-        // #614: на картці з аліасом прийнятий bid спростовує аліас, а не канонічний рядок: аліас видаляється, bid
-        // пишеться на нову сироту цієї картки (злиття у власника bid або новий лінк). Рядка з нормалізованою парою
-        // картки немає — інакше ensureBeerRow не дійшов би до аліасу. Одна транзакція: без проміжного стану
-        // «аліасу вже немає, сироти ще немає». Відхилений bid сюди не доходить і нічого не змінює.
+        // #614: на картці з аліасом прийнятий bid стосується картки, а не канонічного рядка: bid пишеться на нову
+        // сироту цієї картки, і аліас ключа переходить туди разом із доказом (злиття — ON CONFLICT у
+        // mergeIntoCanonical; новий лінк — recordLookupSuccess). Рядка з нормалізованою парою картки немає — інакше
+        // ensureBeerRow не дійшов би до аліасу. Одна транзакція: збій запису лінка не лишає сироти з текстом картки.
+        // Відхилений bid сюди не доходить і нічого не змінює.
         const outcome = { kind: 'matched' as const, result: resolved.result };
         const input = { brewery, name, abv, sourceUrl: pageUrl };
         const kind = row.viaAlias
           ? deps.db.transaction(() => {
-              deleteAlias(deps.db, brewery, name, abv);
               const cardRowId = ensureOrphan(deps.db, {
                 name, brewery,
                 style: style ?? null, abv: sanitizeAbv(abv ?? undefined) ?? null,
