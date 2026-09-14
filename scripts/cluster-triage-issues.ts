@@ -114,8 +114,15 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     idSet.add(id);
   }
 
-  const shop = detectShop(issue.title, scope?.where as any);
+  const shopInTitle = detectShop(issue.title);
+  const shop = shopInTitle ?? detectShop(issue.title, scope?.where as any) ?? detectShop(issue.body);
   const titleLower = issue.title.toLowerCase();
+  const isParserBug =
+    labels.includes('parser-bug') ||
+    labels.includes('extension-bug') ||
+    titleLower.includes('parser-bug') ||
+    titleLower.includes('adapter');
+  const hasShopInTitle = Boolean(shopInTitle || titleLower.includes('internal-cron'));
 
   let locus: ArchitecturalLocus = 'other';
   let clusterKey = 'misc';
@@ -145,8 +152,11 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/untappd-lookup.ts',
     ];
   }
-  // Shop Adapters (check normalized shop detection or title)
-  else if (shop === 'flasker' || titleLower.includes('flasker')) {
+  // Shop Adapters (title-specified shop or explicit parser/adapter bug)
+  else if (
+    (hasShopInTitle || isParserBug) &&
+    (shop === 'flasker' || titleLower.includes('flasker'))
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'flasker-adapter';
     clusterTitle = 'Flasker Shop Adapter & Scraper Extraction';
@@ -155,27 +165,42 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'extension/scripts/gen-flasker-breweries.ts',
       'extension/src/sites/flasker-breweries.generated.ts',
     ];
-  } else if (shop === 'winetime' || titleLower.includes('winetime')) {
+  } else if (
+    (hasShopInTitle || isParserBug) &&
+    (shop === 'winetime' || titleLower.includes('winetime'))
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'winetime-adapter';
     clusterTitle = 'WineTime Shop Adapter';
     targetFiles = ['extension/src/sites/winetime.ts'];
-  } else if (shop === 'beershop' || titleLower.includes('beershop')) {
+  } else if (
+    (hasShopInTitle || isParserBug) &&
+    (shop === 'beershop' || titleLower.includes('beershop'))
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'beershop-adapter';
     clusterTitle = 'BeerShop.eu Series & Title Banner Splitting';
     targetFiles = ['extension/src/sites/beershop.ts'];
-  } else if (shop === 'beerfreak' || titleLower.includes('beerfreak')) {
+  } else if (
+    (hasShopInTitle || isParserBug) &&
+    (shop === 'beerfreak' || titleLower.includes('beerfreak'))
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'beerfreak-adapter';
     clusterTitle = 'BeerFreak Shop Adapter';
     targetFiles = ['extension/src/sites/beerfreak.ts'];
-  } else if (shop === 'onemorebeer' || titleLower.includes('onemorebeer')) {
+  } else if (
+    (hasShopInTitle || isParserBug) &&
+    (shop === 'onemorebeer' || titleLower.includes('onemorebeer'))
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'onemorebeer-adapter';
     clusterTitle = 'OneMoreBeer Shop Adapter';
     targetFiles = ['extension/src/sites/onemorebeer.ts'];
-  } else if (titleLower.includes('internal-cron')) {
+  } else if (
+    (hasShopInTitle || isParserBug) &&
+    titleLower.includes('internal-cron')
+  ) {
     locus = 'adapter_bug';
     clusterKey = 'internal-cron-parser';
     clusterTitle = 'Internal-cron Scraper Tap Placeholders';
@@ -245,6 +270,42 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/normalize.ts',
       'src/domain/matcher.ts',
     ];
+  }
+  // Fallback Shop Adapters (shop detected in body/scope, no specific matcher category claimed it)
+  else if (shop === 'flasker' || titleLower.includes('flasker')) {
+    locus = 'adapter_bug';
+    clusterKey = 'flasker-adapter';
+    clusterTitle = 'Flasker Shop Adapter & Scraper Extraction';
+    targetFiles = [
+      'extension/src/sites/flasker.ts',
+      'extension/scripts/gen-flasker-breweries.ts',
+      'extension/src/sites/flasker-breweries.generated.ts',
+    ];
+  } else if (shop === 'winetime' || titleLower.includes('winetime')) {
+    locus = 'adapter_bug';
+    clusterKey = 'winetime-adapter';
+    clusterTitle = 'WineTime Shop Adapter';
+    targetFiles = ['extension/src/sites/winetime.ts'];
+  } else if (shop === 'beershop' || titleLower.includes('beershop')) {
+    locus = 'adapter_bug';
+    clusterKey = 'beershop-adapter';
+    clusterTitle = 'BeerShop.eu Series & Title Banner Splitting';
+    targetFiles = ['extension/src/sites/beershop.ts'];
+  } else if (shop === 'beerfreak' || titleLower.includes('beerfreak')) {
+    locus = 'adapter_bug';
+    clusterKey = 'beerfreak-adapter';
+    clusterTitle = 'BeerFreak Shop Adapter';
+    targetFiles = ['extension/src/sites/beerfreak.ts'];
+  } else if (shop === 'onemorebeer' || titleLower.includes('onemorebeer')) {
+    locus = 'adapter_bug';
+    clusterKey = 'onemorebeer-adapter';
+    clusterTitle = 'OneMoreBeer Shop Adapter';
+    targetFiles = ['extension/src/sites/onemorebeer.ts'];
+  } else if (titleLower.includes('internal-cron')) {
+    locus = 'adapter_bug';
+    clusterKey = 'internal-cron-parser';
+    clusterTitle = 'Internal-cron Scraper Tap Placeholders';
+    targetFiles = ['src/jobs/enrich.ts'];
   }
 
   return {

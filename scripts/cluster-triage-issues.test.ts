@@ -67,6 +67,38 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.sourceShop).toBeNull();
   });
 
+  it('clusters into shop adapter when shop is identified in body and issue is not a specific matcher bug', () => {
+    const issueWithShopInBody: RawIssue = {
+      number: 999,
+      title: '[matcher-bug] rows: brewery token concatenated with style (EvilTwinImperial)',
+      body: 'Flasker rows show EvilTwinImperial concatenated with beer style.\n```triage-scope\n{"beer_ids":[34250],"where":[]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithShopInBody);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('flasker-adapter');
+    expect(classified.sourceShop).toBe('flasker');
+  });
+
+  it('prioritizes specific matcher categories over shop adapter when issue is not a parser bug', () => {
+    const parentBrandIssue: RawIssue = {
+      number: 545,
+      title: '[matcher-bug] Beer registered on Untappd under a producer/parent brewer different from the shop brand token',
+      body: 'Beershop.pl rows label a beer with the consumer brand...\n```triage-scope\n{"beer_ids":[35147],"where":[]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(parentBrandIssue);
+    expect(classified.locus).toBe('entity_alias_bug');
+    expect(classified.clusterKey).toBe('parent-portfolio-brand');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
