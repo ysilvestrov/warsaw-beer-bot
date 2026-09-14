@@ -43,14 +43,16 @@ const aliasKey = (breweryText: string, nameText: string, abvKey: string): string
 
 const ALIAS_CATALOG_CHUNK = 2000;
 
-// #614: рядок каталогу з тим самим точним текстом важить більше за аліас (пізніша сирота кранів;
-// сирота, яку репарація #384 зробила рядком нового bid) — картку тоді відповідає матчер з його вибором
-// за ABV. ABV тут не порівнюється: зайве вимкнення дає лише промах, не хибний ✅. Той самий текст у
-// самій цілі аліас не вимикає. cardText на ~33.6k рядках одним шматком блокував цикл подій на
-// 74–113 мс (рев'ю 4), тож поступаємося циклу кожні 2000 рядків, як prepareCatalogChunked.
+// #614: ЗЛІНКОВАНИЙ рядок каталогу з тим самим точним текстом важить більше за аліас (сирота, яку репарація
+// #384 зробила рядком нового bid; кран з тим самим текстом) — картку тоді відповідає матчер з його вибором
+// за ABV. Сирота з тим самим текстом аліас НЕ вимикає: це наш незакритий плейсхолдер (/enrich/candidates для
+// ABV-близнюка), і /match віддав би на неї exact без untappd_id і без статусу «пив» (проби periph-*). ABV тут
+// не порівнюється: зайве вимкнення дає лише промах, не хибний ✅. Той самий текст у самій цілі аліас не
+// вимикає. cardText на ~33.6k рядках одним шматком блокував цикл подій на 74–113 мс (рев'ю 4), тож
+// поступаємося циклу кожні 2000 рядків, як prepareCatalogChunked.
 export async function buildAliasIndex(
   aliases: readonly AliasSource[],
-  catalog: readonly { id: number; brewery: string; name: string }[],
+  catalog: readonly { id: number; brewery: string; name: string; untappd_id?: number | null }[],
   yield_: () => Promise<void> = yieldToEventLoop,
 ): Promise<AliasIndex> {
   const holders = new Map<string, Set<number>>();
@@ -58,6 +60,7 @@ export async function buildAliasIndex(
     const end = Math.min(i + ALIAS_CATALOG_CHUNK, catalog.length);
     for (let j = i; j < end; j++) {
       const row = catalog[j];
+      if (row.untappd_id == null) continue;
       const key = textKey(cardText(row.brewery), cardText(row.name));
       (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
     }
