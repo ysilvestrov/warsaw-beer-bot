@@ -69,7 +69,7 @@ describe('refreshCards', () => {
     expect(isSeen(host)).toBe(false);
   });
 
-  it('does not return a cache key for a detail-skipped card', async () => {
+  it('returns a cache key for a detail-skipped card with an existing identity', async () => {
     const host = cardEl();
     const adapter = {
       id: 'fake',
@@ -79,7 +79,7 @@ describe('refreshCards', () => {
       loadCardDetails: async () => {},
     } as SiteAdapter;
 
-    expect(await refreshCards(document, adapter)).toEqual([]);
+    expect(await refreshCards(document, adapter)).toEqual([normalizeKey('Flasker', 'Unverified item')]);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
     expect(isSeen(host)).toBe(false);
   });
