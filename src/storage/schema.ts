@@ -508,6 +508,8 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // Аліас зберігає сиру пару (для матчера: nameKeys, breweryAliases і рік читаються з сирого
     // тексту) і нормалізовану (унікальність і пошук). Без бекфілу: сирота видаляється при злитті,
     // тож відновлювати пару нема з чого — таблиця заповнюється першим же злиттям (як merged_at, #366).
+    // name_digits — числові токени назви (nameDigits): normalizeName їх відкидає, а «Rochefort 8» і
+    // «Rochefort 10» — різні пива, тож без них у ключі аліас однієї картки відповідав би за іншу.
     // IF NOT EXISTS — бо тести відкату в schema.test.ts перезапускають усі міграції від v22.
     sql: `
       CREATE TABLE IF NOT EXISTS beer_aliases (
@@ -517,8 +519,9 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         name               TEXT NOT NULL,
         normalized_brewery TEXT NOT NULL,
         normalized_name    TEXT NOT NULL,
+        name_digits        TEXT NOT NULL,
         created_at         TEXT NOT NULL,
-        UNIQUE (normalized_brewery, normalized_name)
+        UNIQUE (normalized_brewery, normalized_name, name_digits)
       );
       CREATE INDEX IF NOT EXISTS idx_beer_aliases_beer ON beer_aliases(beer_id);
     `,

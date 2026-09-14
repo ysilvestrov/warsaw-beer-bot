@@ -122,7 +122,7 @@ describe('createCatalogCache', () => {
 
   it('#614 builds the alias index from loadAliases and keeps aliases out of the matcher catalog', async () => {
     const aliasRows = [
-      { beer_id: 1, name: 'Atak Chmielu IPA', normalized_brewery: 'pinta', normalized_name: 'atak chmielu ipa' },
+      { beer_id: 1, name: 'Atak Chmielu IPA', normalized_brewery: 'pinta', normalized_name: 'atak chmielu ipa', name_digits: '' },
     ];
     const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliasRows });
     const { prepared, byId, aliases } = await cache.get();
