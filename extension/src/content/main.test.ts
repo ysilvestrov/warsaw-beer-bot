@@ -24,6 +24,34 @@ function fakeAdapter(over: Partial<SiteAdapter> = {}): SiteAdapter {
 }
 
 describe('startOverlay', () => {
+  it('does not cascade failed beer retries from an existing non-beer badge', async () => {
+    document.body.innerHTML = '<div id="nonbeer"></div><div id="beer"></div>';
+    const nonBeer = document.getElementById('nonbeer')!;
+    const beer = document.getElementById('beer')!;
+    // BeerRepublic returns confirmed cards again, even after they are marked seen.
+    const adapter = fakeAdapter({
+      parseCards: () => [
+        { el: nonBeer, brewery: '', name: '', nonBeer: true, skip: true },
+        { el: beer, brewery: 'PINTA', name: 'Hazy Morning' },
+      ],
+    });
+    const sendMatch = vi.fn().mockRejectedValue(new Error('match unavailable'));
+    const stop = startOverlay(document, adapter, sendMatch);
+    try {
+      await tick(0); // first pass finishes and attaches the normal observer
+      expect(sendMatch).toHaveBeenCalledTimes(1);
+      document.body.appendChild(document.createElement('aside')); // one unrelated mutation
+      await tick(1400); // first retry plus several default 250ms debounce intervals
+
+      expect(sendMatch).toHaveBeenCalledTimes(2);
+      expect(nonBeer.querySelectorAll('[data-beerbadge]')).toHaveLength(1);
+      expect(nonBeer.querySelector('[data-beerbadge]')?.textContent).toBe('✕');
+      expect(isSeen(beer)).toBe(false);
+    } finally {
+      stop();
+    }
+  });
+
   it('badges the first pass and re-badges after the grid is replaced', async () => {
     document.body.innerHTML = '<div class="grid"><div class="card">One</div></div>';
     const sendMatch = vi.fn(async () => [drunk()]);
