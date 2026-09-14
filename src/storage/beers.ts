@@ -280,8 +280,7 @@ export function loadCatalog(db: DB): CatalogRow[] {
 }
 
 // #614: аліаси пам'яті злиття для перевірки перед матчером. Аліас рядка без untappd_id не читається —
-// та сама жива перевірка, що й isRememberedMerge (#366). Правило «рядок каталогу з тим самим текстом
-// важить більше» застосовує buildAliasIndex, бо кеш і так має весь каталог.
+// та сама жива перевірка, що й isRememberedMerge (#366).
 export interface AliasRow {
   beer_id: number;
   brewery_text: string;
@@ -464,8 +463,8 @@ export function mergeIntoCanonical(
       // картками (рев'ю 3: «Browar», «2085 Brewery» і '' зводились в один ключ нормалізатора).
       if (breweryText !== '' && nameText !== '') {
         // Той самий текст уже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
-        // найсвіжіший доказ. Рядок каталогу з тим самим текстом вимикає аліас під час читання
-        // (buildAliasIndex), тож перевірки власника під час запису немає.
+        // найсвіжіший доказ. Новіший лінк рядка самої картки переносить аліас так само
+        // (recordLookupSuccess).
         db.prepare(
           `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?)

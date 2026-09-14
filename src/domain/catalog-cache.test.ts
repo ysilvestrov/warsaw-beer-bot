@@ -130,22 +130,6 @@ describe('createCatalogCache', () => {
     expect(byId.size).toBe(2);
     expect([...aliases.values()]).toEqual([1]);
   });
-
-  it('#614 hands the catalog to buildAliasIndex: a linked row with the same exact text switches the alias off, an orphan does not', async () => {
-    const aliasRows = [{ beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa', abv_key: '6.1' }];
-    const linkedSameText: CatalogBeerWithRating[] = [
-      ...rows,
-      { id: 3, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: 3.6, untappd_id: 3003 },
-    ];
-    const orphanSameText: CatalogBeerWithRating[] = [
-      ...rows,
-      { id: 3, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: null, untappd_id: null },
-    ];
-    const linked = await make({ getVersion: () => 0, load: () => linkedSameText, loadAliases: () => aliasRows }).get();
-    expect(linked.aliases.size).toBe(0);
-    const orphan = await make({ getVersion: () => 0, load: () => orphanSameText, loadAliases: () => aliasRows }).get();
-    expect([...orphan.aliases.values()]).toEqual([1]);
-  });
 });
 
 describe('prepareCatalogChunked', () => {

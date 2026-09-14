@@ -41,40 +41,13 @@ const textKey = (breweryText: string, nameText: string): string => `${breweryTex
 const aliasKey = (breweryText: string, nameText: string, abvKey: string): string =>
   `${textKey(breweryText, nameText)}|${abvKey}`;
 
-const ALIAS_CATALOG_CHUNK = 2000;
-
-// #614: ЗЛІНКОВАНИЙ рядок каталогу з тим самим ключем картки — точний текст І cardAbv(abv), рівний abv_key
-// аліасу, — важить більше за аліас: це конфлікт двох доказів для тієї самої картки, і картку тоді відповідає
-// матчер. Сирота з тим самим текстом аліас НЕ вимикає: це наш незакритий плейсхолдер (/enrich/candidates для
-// ABV-близнюка), і /match віддав би на неї exact без untappd_id і без статусу «пив» (проби periph-*).
-// Злінкований близнюк з ІНШИМ ABV теж не вимикає (рев'ю 9, M1): матчер віддавав картці його рядок як exact,
-// розширення бачило суперечливий bid, і репарація #384 зливала рядок близнюка в канонічний — пінг-понг на кожному
-// завантаженні з переїздом чекінів. Той самий ключ у самій цілі аліас не вимикає. cardText на ~33.6k рядках
-// одним шматком блокував цикл подій на 74–113 мс (рев'ю 4), тож поступаємося циклу кожні 2000 рядків, як
-// prepareCatalogChunked.
-export async function buildAliasIndex(
-  aliases: readonly AliasSource[],
-  catalog: readonly { id: number; brewery: string; name: string; abv?: number | null; untappd_id?: number | null }[],
-  yield_: () => Promise<void> = yieldToEventLoop,
-): Promise<AliasIndex> {
-  const holders = new Map<string, Set<number>>();
-  for (let i = 0; i < catalog.length; i += ALIAS_CATALOG_CHUNK) {
-    const end = Math.min(i + ALIAS_CATALOG_CHUNK, catalog.length);
-    for (let j = i; j < end; j++) {
-      const row = catalog[j];
-      if (row.untappd_id == null) continue;
-      const key = aliasKey(cardText(row.brewery), cardText(row.name), cardAbv(row.abv));
-      (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
-    }
-    await yield_();
-  }
-  const index = new Map<string, number>();
-  for (const a of aliases) {
-    const held = holders.get(aliasKey(a.brewery_text, a.name_text, a.abv_key));
-    if (held && [...held].some((id) => id !== a.beer_id)) continue;
-    index.set(aliasKey(a.brewery_text, a.name_text, a.abv_key), a.beer_id);
-  }
-  return index;
+// #614: індекс пам'яті злиття — «ключ картки → рядок». Аліас відповідає за свій точний ключ завжди; конфлікт
+// доказів для тієї самої картки розв'язує запис (ON CONFLICT у mergeIntoCanonical, recordLookupSuccess переносить
+// аліас ключа на рядок самої картки), а не вгадування під час читання. Три версії правила «рядок каталогу важить
+// більше» (за текстом; лише злінковані; з ABV рядка) кожна давала хибну ідентичність, бо порівнювали поля різного
+// походження: ABV злінкованого рядка — з Untappd, ключ аліасу — з картки крамниці (рев'ю 8–10).
+export function buildAliasIndex(aliases: readonly AliasSource[]): AliasIndex {
+  return new Map(aliases.map((a) => [aliasKey(a.brewery_text, a.name_text, a.abv_key), a.beer_id]));
 }
 
 // #614: ключ — точний текст картки (cardText): нічого зі змісту не губиться, тож картка з іншими
