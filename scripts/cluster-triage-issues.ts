@@ -114,7 +114,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     idSet.add(id);
   }
 
-  const shop = detectShop(issue.title, scope?.where as any) ?? detectShop(combinedText);
+  const shop = detectShop(issue.title, scope?.where as any);
   const titleLower = issue.title.toLowerCase();
 
   let locus: ArchitecturalLocus = 'other';

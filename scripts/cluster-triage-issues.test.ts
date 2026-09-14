@@ -45,6 +45,28 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.targetFiles).toContain('extension/src/sites/flasker.ts');
   });
 
+  it('does not misclassify issues into shop adapters when a shop is only mentioned in comments', () => {
+    const typoIssueWithCommentMentioningShop: RawIssue = {
+      number: 476,
+      title: '[matcher-bug] Bounded brewery-typo rescue (#472) misses when the registered brewery carries extra tokens',
+      body: 'Scope: beer_ids 12345\n```triage-scope\n{"beer_ids":[12345],"where":[{"col":"candidates_count","op":">","value":0}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-08-20T00:00:00Z',
+      updatedAt: '2026-08-20T00:00:00Z',
+      comments: [
+        {
+          body: 'We noticed a similar pattern on flasker or onemorebeer with some beers.',
+          createdAt: '2026-08-21T00:00:00Z',
+        },
+      ],
+    };
+
+    const classified = classifyIssue(typoIssueWithCommentMentioningShop);
+    expect(classified.locus).toBe('matcher_gate_bug');
+    expect(classified.clusterKey).toBe('typo-fuzzy-rescue');
+    expect(classified.sourceShop).toBeNull();
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
