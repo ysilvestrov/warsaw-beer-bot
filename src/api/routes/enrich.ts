@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
+  findAliasTarget,
   findBeerByNormalized,
   getBeer,
   ensureOrphan,
@@ -11,6 +12,7 @@ import {
   refusesBidOverride,
   sanitizeAbv,
   stampBidProvenance,
+  type BeerRow,
   type OrphanFacts,
 } from '../../storage/beers';
 import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
@@ -123,22 +125,30 @@ function withRelayQuery(
 // #369: `facts` are shop-published abv/style relayed by the extension. On insert
 // they seed the row; on an existing orphan they fill NULL columns only. A newly
 // gained ABV re-arms the lookup backoff, because the previous attempt ran blind.
-function ensureBeerRow(db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {}) {
+// #614: між рядком з нормалізованою парою і новою сиротою — аліас картки (той самий ключ, що в /match,
+// з СИРИМ ABV). Без цього кроку картка, яку /match уже відповідає через аліас, на повторному раунді
+// (SWR-null кешу, суперечливий bid) отримувала сироту зі своїм текстом, і /match віддавав її exact без ✅.
+// viaAlias каже викликачеві, що рядок — канонічний, а не рядок цієї картки.
+function ensureBeerRow(
+  db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {},
+): BeerRow & { viaAlias: boolean } {
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
   const existing = findBeerByNormalized(db, normalized_brewery, normalized_name);
   if (existing) {
     const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
     if (abvGained) rearmLookup(db, existing.id);
-    return abvGained || changed ? getBeer(db, existing.id)! : existing;
+    return { ...(abvGained || changed ? getBeer(db, existing.id)! : existing), viaAlias: false };
   }
+  const aliased = findAliasTarget(db, brewery, name, facts.abv);
+  if (aliased) return { ...aliased, viaAlias: true };
   // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
   const id = ensureOrphan(db, {
     name, brewery,
     style: facts.style ?? null, abv: sanitizeAbv(facts.abv) ?? null,
     rating_global: null, normalized_name, normalized_brewery,
   });
-  return getBeer(db, id)!;
+  return { ...getBeer(db, id)!, viaAlias: false };
 }
 
 export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
@@ -167,9 +177,12 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // never re-offered, so a rejected bid costs one search slot per ~8h per browser.
         const contradicts =
           b.bid !== undefined && row.untappd_id != null && row.untappd_id !== b.bid;
+        // #614: суперечливий bid на картці з аліасом стосується лише аліасу, а не провенансу канонічного
+        // рядка (канонічний рядок випитого пива зазвичай 'checkin'), тож refusesBidOverride його не блокує.
+        // Вето not_a_beer і бекоф канонічного рядка діють, як для репарації злінкованого рядка.
         const eligible =
           (row.untappd_id == null ||
-            (contradicts && !refusesBidOverride(row.untappd_id_source))) &&
+            (contradicts && (row.viaAlias || !refusesBidOverride(row.untappd_id_source)))) &&
           !isNotABeer(deps.db, row.id) &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count,
             RECURRING_CLASSES.includes(reviewClassOf(deps.db, row.id) ?? ''));

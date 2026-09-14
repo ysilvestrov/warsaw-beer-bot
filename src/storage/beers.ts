@@ -296,6 +296,39 @@ export function loadAliases(db: DB): AliasRow[] {
     .all() as AliasRow[];
 }
 
+// #614: ключ аліасу картки — той самий, що в /match (aliasTarget): cardText броварні й назви і cardAbv
+// СИРОГО ABV картки. Порожній текст ключа не має.
+function cardAliasKey(brewery: string, name: string, abv: number | null | undefined) {
+  const breweryText = cardText(brewery);
+  const nameText = cardText(name);
+  if (breweryText === '' || nameText === '') return null;
+  return { breweryText, nameText, abvKey: cardAbv(abv) };
+}
+
+// #614: рядок, який довело злиття для цієї картки. Лише злінкований — та сама жива перевірка, що в loadAliases.
+export function findAliasTarget(
+  db: DB, brewery: string, name: string, abv: number | null | undefined,
+): BeerRow | null {
+  const key = cardAliasKey(brewery, name, abv);
+  if (!key) return null;
+  const row = db
+    .prepare(
+      `SELECT b.* FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
+        WHERE a.brewery_text = ? AND a.name_text = ? AND a.abv_key = ? AND b.untappd_id IS NOT NULL`,
+    )
+    .get(key.breweryText, key.nameText, key.abvKey) as BeerRow | undefined;
+  return row ?? null;
+}
+
+// #614: прийнятий суперечливий bid спростовує аліас саме цієї картки; інші ключі того самого рядка лишаються.
+export function deleteAlias(db: DB, brewery: string, name: string, abv: number | null | undefined): void {
+  const key = cardAliasKey(brewery, name, abv);
+  if (!key) return;
+  db.prepare('DELETE FROM beer_aliases WHERE brewery_text = ? AND name_text = ? AND abv_key = ?')
+    .run(key.breweryText, key.nameText, key.abvKey);
+  bumpCatalogVersion();
+}
+
 export function findBeerByNormalized(
   db: DB, normBrewery: string, normName: string,
 ): BeerRow | null {

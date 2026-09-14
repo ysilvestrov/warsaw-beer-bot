@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { findBeerByNormalized, getBeer } from '../../storage/beers';
+import { findBeerByNormalized, getBeer, mergeIntoCanonical } from '../../storage/beers';
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
@@ -35,6 +35,29 @@ function post(app: Hono<ApiEnv>, path: string, body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+// #614: картка Flasker з аліасом на канонічний рядок — стан після першого злиття петлі.
+const BLACK_BEAN_CARD = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
+const FLASKER_PAGE = 'https://flasker.pl/pl/p/VARVAR-BLACK-BEAN-IS-11-0.33l/1234';
+
+function aliasedBlackBean(db: ReturnType<typeof setup>['db'], source: 'search' | 'checkin' = 'checkin') {
+  const canonical = seedBeer(db, {
+    untappd_id: 3548624, untappd_id_source: source, name: 'Black Bean', brewery: 'Varvar Brew',
+    style: 'Stout', abv: 11, rating_global: 4.14,
+    normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+  });
+  const orphan = seedBeer(db, {
+    name: BLACK_BEAN_CARD.name, brewery: BLACK_BEAN_CARD.brewery, style: null, abv: 11, rating_global: null,
+    normalized_name: normalizeName(BLACK_BEAN_CARD.name), normalized_brewery: normalizeBrewery(BLACK_BEAN_CARD.brewery),
+  });
+  mergeIntoCanonical(db, orphan, canonical, '2026-09-14T12:00:00Z', BLACK_BEAN_CARD);
+  // Передумова: аліас записано — інакше тести нижче нічого не доводять.
+  expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+  return canonical;
+}
+
+const beerCount = (db: ReturnType<typeof setup>['db']) =>
+  (db.prepare('SELECT COUNT(*) AS n FROM beers').get() as { n: number }).n;
 
 describe('POST /enrich/candidates', () => {
   it('rejects a raw body over the route byte limit', async () => {
@@ -303,6 +326,32 @@ describe('POST /enrich/candidates', () => {
     linkedRow(db, 6708599, 'search');
     const body = await (await candidatesForMadBrew(app)).json();
     expect(body.candidates[0].eligible).toBe(false);
+  });
+
+  it('#614 answers a card with an alias with its canonical row and mints no orphan', async () => {
+    const { db, app } = setup();
+    aliasedBlackBean(db);
+    const body = await (await post(app, '/enrich/candidates', { beers: [BLACK_BEAN_CARD] })).json();
+    expect(body.candidates[0].eligible).toBe(false);
+    // Сирота з текстом картки підмінила б аліас у /match (проба periph-e2e, кроки 5–6).
+    expect(beerCount(db)).toBe(1);
+  });
+
+  it('#614 a card whose ABV differs from the alias key still gets its own orphan', async () => {
+    const { db, app } = setup();
+    aliasedBlackBean(db);
+    const body = await (await post(app, '/enrich/candidates', { beers: [{ ...BLACK_BEAN_CARD, abv: 9.5 }] })).json();
+    expect(body.candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
+  });
+
+  it('#614 a contradicting bid on an alias is eligible even when the canonical link is a check-in', async () => {
+    const { db, app } = setup();
+    aliasedBlackBean(db, 'checkin');
+    const body = await (await post(app, '/enrich/candidates', { beers: [{ ...BLACK_BEAN_CARD, bid: 5555 }] })).json();
+    // Суперечність стосується аліасу, а не провенансу канонічного рядка; сироти все одно немає.
+    expect(body.candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(1);
   });
 
   // The backoff still gates a contradicted link — for rows that have a recorded lookup
