@@ -306,6 +306,21 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.sourceShop).toBe('flasker');
   });
 
+  it('treats negative operators starting with non_ like non_contains as exclusions', () => {
+    const issueWithNonContainsOp: RawIssue = {
+      number: 985,
+      title: '[parser-bug] catalogue layout failure',
+      body: 'Flasker mentioned in body.\n```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"non_contains","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithNonContainsOp);
+    expect(classified.sourceShop).toBeNull();
+    expect(classified.clusterKey).toBe('misc');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
