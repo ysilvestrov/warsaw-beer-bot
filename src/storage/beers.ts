@@ -305,6 +305,17 @@ export function getBeer(db: DB, beerId: number): BeerRow | null {
   return row ?? null;
 }
 
+// #614: аліас доводить «пара = пиво з цим bid». Коли в рядка змінюється untappd_id, його аліаси
+// втрачають доказ і видаляються. Для сироти (untappd_id IS NULL) і для того самого bid умова
+// `untappd_id <> ?` не виконується, тож нічого не відбувається.
+export function dropAliasesOnRelink(db: DB, beerId: number, newBid: number): void {
+  db.prepare(
+    `DELETE FROM beer_aliases
+      WHERE beer_id = ?
+        AND EXISTS (SELECT 1 FROM beers WHERE id = ? AND untappd_id <> ?)`,
+  ).run(beerId, beerId, newBid);
+}
+
 export function recordLookupSuccess(
   db: DB,
   beerId: number,
@@ -316,16 +327,21 @@ export function recordLookupSuccess(
   },
   at: string,
 ): void {
-  db.prepare(
-    `UPDATE beers SET
-       untappd_id = ?,
-       untappd_id_source = 'search',
-       style = COALESCE(?, style),
-       abv = COALESCE(?, abv),
-       rating_global = COALESCE(?, rating_global),
-       untappd_lookup_at = ?
-     WHERE id = ?`,
-  ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
+  // #614: транзакція — якщо UPDATE впаде на UNIQUE (bid уже має власника), аліаси не стираються
+  // наполовину: applyLookupOutcome далі зливає рядок, і їх забирає каскад.
+  db.transaction(() => {
+    dropAliasesOnRelink(db, beerId, r.bid);
+    db.prepare(
+      `UPDATE beers SET
+         untappd_id = ?,
+         untappd_id_source = 'search',
+         style = COALESCE(?, style),
+         abv = COALESCE(?, abv),
+         rating_global = COALESCE(?, rating_global),
+         untappd_lookup_at = ?
+       WHERE id = ?`,
+    ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
+  })();
   bumpCatalogVersion();
 }
 
@@ -352,9 +368,10 @@ export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number
     db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
     // #614: злиття — єдиний момент, коли відомо «пара броварня + назва цієї сироти = канонічний
     // рядок». DELETE нижче знищив би це знання, і /match на кожне завантаження сторінки знову не
-    // впізнавав би ту саму картку крамниці. Спершу аліаси самої сироти переходять на канонічний
-    // рядок, інакше ON DELETE CASCADE забрав би пам'ять давніших злиттів.
-    db.prepare('UPDATE beer_aliases SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
+    // впізнавав би ту саму картку крамниці. Власні аліаси рядка, що зливається, НЕ переносяться —
+    // їх забирає ON DELETE CASCADE. Крон і пошуковий шлях /enrich/result збагачують лише сироти, а
+    // сирота аліасів не має; рядок з аліасами доходить сюди лише через репарацію #384, тобто коли
+    // його bid виявився хибним — а аліаси доводили саме той bid.
     const orphan = db
       .prepare('SELECT brewery, name, normalized_brewery, normalized_name FROM beers WHERE id = ?')
       .get(orphanId) as

@@ -835,17 +835,31 @@ test('#614 mergeIntoCanonical remembers the orphan\'s shop pair as an alias of t
   }]);
 });
 
-test('#614 mergeIntoCanonical carries a merged row\'s own aliases over instead of cascading them away', () => {
-  const { db, canonicalId, orphanId } = aliasFixture();
-  // Сирота сама вже була ціллю давнішого злиття іншої картки.
+test('#614 mergeIntoCanonical lets a merged linked row\'s aliases go instead of moving them to the new bid\'s owner', () => {
+  const db = fresh();
+  // Злінкований рядок з хибним bid (пошук угадав Spicy Edition) і аліас, записаний під цим bid.
+  const wrongId = seedBeer(db, {
+    untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5.4, rating_global: 3.61,
+    normalized_name: normalizeName('Red Mexican Spicy Edition'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
+  const ownerId = seedBeer(db, {
+    untappd_id: 5120103, name: 'Red Mexican', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5, rating_global: 3.72,
+    normalized_name: normalizeName('Red Mexican'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
   db.prepare(
     `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-     VALUES (?, 'Varvar', 'Black Bean Tonka', ?, ?, '2026-09-01T10:00:00Z')`,
-  ).run(orphanId, normalizeBrewery('Varvar'), normalizeName('Black Bean Tonka'));
+     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
+  ).run(wrongId, normalizeBrewery('Copper Head'), normalizeName('RED MEXICAN Tomato Gose'));
 
-  mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T07:13:20Z');
+  // Репарація #384: крамниця опублікувала bid 5120103 для рядка wrongId, власник уже є → злиття.
+  mergeIntoCanonical(db, wrongId, ownerId, '2026-09-14T07:11:40Z');
 
-  expect(aliasesOf(db, canonicalId).map((a) => a.name)).toEqual(['Black Bean Tonka', 'BLACK BEAN IS']);
+  // Пара самого рядка доведена прийнятим bid і стає аліасом; «Tomato Gose» доводив 6037305 і зникає.
+  expect(aliasesOf(db, ownerId).map((a) => a.name)).toEqual(['Red Mexican Spicy Edition']);
 });
 
 test('#614 mergeIntoCanonical writes no alias for a pair another beer row already holds (vintage twin)', () => {
@@ -904,6 +918,58 @@ test('#614 mergeIntoCanonical re-points an existing alias of the same pair to th
 
   const rows = db.prepare('SELECT beer_id, created_at FROM beer_aliases').all();
   expect(rows).toEqual([{ beer_id: newTarget, created_at: '2026-09-14T07:11:40Z' }]);
+});
+
+function linkedRowWithAlias(db: ReturnType<typeof fresh>) {
+  const rowId = seedBeer(db, {
+    untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5.4, rating_global: 3.61,
+    normalized_name: normalizeName('Red Mexican Spicy Edition'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
+  db.prepare(
+    `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
+  ).run(rowId, normalizeBrewery('Copper Head'), normalizeName('RED MEXICAN Tomato Gose'));
+  return rowId;
+}
+
+test('#614 recordLookupSuccess drops a linked row\'s aliases when its bid is rewritten', () => {
+  const db = fresh();
+  const rowId = linkedRowWithAlias(db);
+
+  recordLookupSuccess(db, rowId, { bid: 5120103, style: 'Gose', abv: 5, global_rating: 3.72 }, '2026-09-14T07:11:40Z');
+
+  expect(getBeer(db, rowId)?.untappd_id).toBe(5120103);
+  expect(aliasesOf(db, rowId)).toEqual([]);
+});
+
+test('#614 recordLookupSuccess keeps aliases when the same bid is confirmed', () => {
+  const db = fresh();
+  const rowId = linkedRowWithAlias(db);
+
+  recordLookupSuccess(db, rowId, { bid: 6037305, style: 'Gose', abv: 5.4, global_rating: 3.61 }, '2026-09-14T07:11:40Z');
+
+  expect(aliasesOf(db, rowId).map((a) => a.name)).toEqual(['RED MEXICAN Tomato Gose']);
+});
+
+test('#614 recordLookupSuccess leaves aliases alone when the rewrite hits UNIQUE — the merge that follows decides', () => {
+  const db = fresh();
+  const rowId = linkedRowWithAlias(db);
+  seedBeer(db, {
+    untappd_id: 5120103, name: 'Red Mexican', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5, rating_global: 3.72,
+    normalized_name: normalizeName('Red Mexican'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
+
+  expect(() => recordLookupSuccess(
+    db, rowId, { bid: 5120103, style: 'Gose', abv: 5, global_rating: 3.72 }, '2026-09-14T07:11:40Z',
+  )).toThrow(/UNIQUE/);
+
+  // Відкат транзакції: частковий стан (аліаси стерто, bid ні) не лишається.
+  expect(aliasesOf(db, rowId).map((a) => a.name)).toEqual(['RED MEXICAN Tomato Gose']);
+  expect(getBeer(db, rowId)?.untappd_id).toBe(6037305);
 });
 
 // --- #369: relayed shop facts (abv/style) -----------------------------------
