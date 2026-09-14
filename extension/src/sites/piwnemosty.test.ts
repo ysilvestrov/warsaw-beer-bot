@@ -60,6 +60,32 @@ beforeAll(() => {
 });
 
 describe('piwnemosty adapter', () => {
+  it.each(['', ', "item_category": "  ", "item_category2": ""'])(
+    'keeps identity-only analytics metadata silent until a beer category is published (%s)',
+    (categories) => {
+      const source = productHtml({ id: '623', title: 'PINTA: Hazy Morning', brand: 'PINTA' })
+        .replace(',\n            "item_category": "Piwo"', categories);
+      const doc = new DOMParser().parseFromString(source, 'text/html');
+      expect(piwnemosty.parseCards(doc)).toEqual([]);
+
+      const beerSource = productHtml({ id: '623', title: 'PINTA: Hazy Morning', brand: 'PINTA' })
+        .replace('"item_category": "Piwo"', '"item_category": "Piwo kraftowe"');
+      const beerDoc = new DOMParser().parseFromString(beerSource, 'text/html');
+      expect(piwnemosty.parseCards(beerDoc)).toEqual([
+        { el: beerDoc.querySelector('.product'), brewery: 'PINTA', name: 'Hazy Morning' },
+      ]);
+    },
+  );
+
+  it.each(['Chipsy', 'Gift set'])('keeps the local non-beer title rule affirmative without categories: %s', (title) => {
+    const source = productHtml({ id: '623', title, brand: 'PINTA' })
+      .replace(',\n            "item_category": "Piwo"', '');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true, skip: true },
+    ]);
+  });
+
   it('matches Piwne Mosty hosts', () => {
     expect(piwnemosty.hostMatch(new URL('https://piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(true);
     expect(piwnemosty.hostMatch(new URL('https://www.piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(true);

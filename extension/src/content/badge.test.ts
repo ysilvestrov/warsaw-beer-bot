@@ -197,12 +197,41 @@ describe('orphan + enrichment badge states', () => {
 });
 
 describe('non-beer badge (#615)', () => {
+  it('preserves an already-correct non-beer badge element', () => {
+    const host = el();
+    setNonBeer(host);
+    const badge = host.querySelector(`[${BADGE_MARKER}]`);
+
+    setNonBeer(host);
+
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBe(badge);
+    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
+  });
+
+  it.each(['text', 'role', 'label'])('replaces a badge with incorrect %s', (field) => {
+    const host = el();
+    setNonBeer(host);
+    const previous = host.querySelector(`[${BADGE_MARKER}]`)!;
+    if (field === 'text') previous.textContent = '⚪';
+    if (field === 'role') previous.removeAttribute('role');
+    if (field === 'label') previous.setAttribute('aria-label', 'Other');
+
+    setNonBeer(host);
+
+    const badge = host.querySelector(`[${BADGE_MARKER}]`)!;
+    expect(badge).not.toBe(previous);
+    expect(badge.textContent).toBe('✕');
+    expect(badge.getAttribute('role')).toBe('img');
+    expect(badge.getAttribute('aria-label')).toBe('Не пиво');
+    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
+  });
+
   it('renders a red accessible ✕ without an Untappd action', () => {
     const host = el();
     const open = vi.spyOn(window, 'open').mockReturnValue(null);
 
     setNonBeer(host);
-    setNonBeer(host); // replacement stays idempotent
+    setNonBeer(host); // repeated rendering stays idempotent
 
     const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
     expect(badge.textContent).toBe('✕');

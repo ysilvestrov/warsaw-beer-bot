@@ -109,6 +109,11 @@ export function setOrphan(host: HTMLElement, brewery: string, name: string): voi
 
 /** Show that the shop explicitly classified this card as not beer. */
 export function setNonBeer(host: HTMLElement): void {
+  const existing = host.querySelector(`[${BADGE_MARKER}]`);
+  if (existing?.textContent === '✕'
+    && existing.getAttribute('role') === 'img'
+    && existing.getAttribute('aria-label') === 'Не пиво') return;
+
   const badge = makeBadge('✕', null);
   badge.style.color = '#ff6b6b';
   badge.setAttribute('role', 'img');

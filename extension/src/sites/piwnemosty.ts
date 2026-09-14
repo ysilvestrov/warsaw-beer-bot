@@ -94,15 +94,12 @@ function splitVisibleTitle(rawTitle: string): { brewery: string; name: string } 
   return { brewery, name: cleanTitle(title, brewery) };
 }
 
-function isBeerMeta(meta: ItemMeta | undefined): boolean {
-  if (!meta) return true;
-  const categories = [meta.item_category, meta.item_category2].filter(Boolean).map((c) => normalize(c!));
-  return categories.some((c) => c.includes('piwo') || c.includes('napoje'));
-}
-
-function isNonBeerCard(title: string, meta: ItemMeta | undefined): boolean {
-  if (!isBeerMeta(meta)) return true;
-  return isNonBeerName(title) || NON_BEER_TITLE_RE.test(title);
+function classifyCard(title: string, meta: ItemMeta | undefined): 'beer' | 'nonBeer' | 'unknown' {
+  if (isNonBeerName(title) || NON_BEER_TITLE_RE.test(title)) return 'nonBeer';
+  if (!meta) return 'beer';
+  const categories = [meta.item_category, meta.item_category2].map((c) => normalize(c ?? '')).filter(Boolean);
+  if (categories.length === 0) return 'unknown';
+  return categories.some((c) => c.includes('piwo') || c.includes('napoje')) ? 'beer' : 'nonBeer';
 }
 
 export const piwnemosty: SiteAdapter = {
@@ -126,7 +123,9 @@ export const piwnemosty: SiteAdapter = {
       const rawTitle = item?.item_name?.trim() || text(el.querySelector('.product__name'));
       const title = stripOutOfStockMarkers(rawTitle);
       if (!title) continue;
-      if (isNonBeerCard(title, item)) {
+      const classification = classifyCard(title, item);
+      if (classification === 'unknown') continue;
+      if (classification === 'nonBeer') {
         cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
         continue;
       }
