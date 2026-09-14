@@ -118,7 +118,7 @@ describe('applyLookupOutcome merge', () => {
     db.close();
   });
 
-  test('#614 records the alias from the text the caller searched, not from an orphan another card created', () => {
+  test('#614 records no alias when the merged orphan was created by another card', () => {
     const { db, log } = fresh();
     const g7 = seedBeer(db, {
       untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
@@ -138,8 +138,8 @@ describe('applyLookupOutcome merge', () => {
     );
 
     expect(kind).toBe('merged');
-    expect(db.prepare('SELECT beer_id, name, name_text, abv_key FROM beer_aliases').all())
-      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_text: 'ґвара #7', abv_key: '7' }]);
+    // Сирота «#6» — не картка «#7»: доказ міг стосуватися будь-якої з них, тож аліасу немає.
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
     db.close();
   });
 });

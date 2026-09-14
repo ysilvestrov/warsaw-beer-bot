@@ -565,6 +565,36 @@ describe('POST /enrich/result', () => {
     expect(getBeer(db, row.id)!.untappd_id).toBe(5158585);
   });
 
+  it('#614 writes no alias when the web fallback searched with the text of an orphan another card created', async () => {
+    const seed = (bid: number, name: string) => seedBeer(db, {
+      untappd_id: bid, name, brewery: 'Browar PINTA', style: 'IPA', abv: 6, rating_global: 3.5,
+      normalized_name: `untappd-${bid}`, normalized_brewery: normalizeBrewery('Browar PINTA'),
+    });
+    // Справжній веб-фолбек (src/index.ts) шукає текстом рядка: для сироти «Gwara #6» він знаходить #6.
+    const webFallback = vi.fn(async (beerId: number) => (getBeer(db, beerId)!.name === 'Gwara #6'
+      ? { bid: 106, beer_name: 'Gwara #6', brewery_name: 'PINTA', style: null, abv: 6, global_rating: null }
+      : null));
+    const { db, app } = setup({ webFallback });
+    seed(106, 'Gwara #6');
+    seed(107, 'Gwara #7');
+    // Сирота картки «#6»; ensureBeerRow цифр не бачить і віддає її запиту картки «#7».
+    const orphan = seedBeer(db, {
+      name: 'Gwara #6', brewery: 'PINTA', style: null, abv: 6, rating_global: null,
+      normalized_name: normalizeName('Gwara #6'), normalized_brewery: normalizeBrewery('PINTA'),
+    });
+    expect(normalizeName('Gwara #7')).toBe(normalizeName('Gwara #6'));
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA', name: 'Gwara #7', abv: 6, algolia: { hits: [], nbHits: 0 },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 106 });
+    expect(webFallback).toHaveBeenCalledWith(orphan);
+    expect(getBeer(db, orphan)).toBeNull();
+    // Аліас «PINTA / Gwara #7» → #6 дав би картці #7 точний збіг і ✅ на пиво, яке пив лише #6.
+    expect(db.prepare('SELECT beer_id FROM beer_aliases').all()).toEqual([]);
+  });
+
   it('reports matched with the canonical bid when the relay result merges a duplicate', async () => {
     const { db, app } = setup();
     // A different row already owns bid 5469263 → recordLookupSuccess will hit the

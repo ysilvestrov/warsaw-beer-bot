@@ -896,7 +896,7 @@ test('#614 mergeIntoCanonical re-points an existing alias of the same card to th
   expect(rows).toEqual([{ beer_id: newTarget, created_at: '2026-09-14T07:11:40Z' }]);
 });
 
-test('#614 mergeIntoCanonical writes the alias from the searched text, not from an orphan another card created', () => {
+test('#614 mergeIntoCanonical writes no alias when the merged orphan was created by another card', () => {
   const db = fresh();
   const g7 = seedBeer(db, {
     untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
@@ -911,7 +911,10 @@ test('#614 mergeIntoCanonical writes the alias from the searched text, not from 
 
   mergeIntoCanonical(db, orphanId, g7, '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' });
 
-  expect(aliasesOf(db, g7).map((a) => [a.brewery, a.name, a.brewery_text, a.name_text, a.abv_key])).toEqual([['Ґвара', 'Ґвара #7', 'ґвара', 'ґвара #7', '']]);
+  // Частину доказу могли зібрати з полів сироти «#6» (веб-фолбек шукає текстом рядка): невідомо, яку картку
+  // довів пошук, тож аліасу немає — ні на «#7», ні на «#6». Злиття саме відбулося.
+  expect(getBeer(db, orphanId)).toBeNull();
+  expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
 });
 
 test('#614 twin cards of one shop keep one alias each', () => {

@@ -388,11 +388,15 @@ export function mergeIntoCanonical(
     const orphan = db
       .prepare('SELECT brewery, name, abv FROM beers WHERE id = ?')
       .get(orphanId) as { brewery: string; name: string; abv: number | null } | undefined;
-    // #614: текст аліасу — той, який шукав виклик (applyLookupOutcome передає свій input). ensureBeerRow
-    // цифр не бачить, тож сирота могла прийти від іншої картки («Ґвара #6» для запиту «Ґвара #7»), і її
-    // текст записав би аліас на пиво, якого пошук для неї не доводив.
+    // #614: аліас — лише коли злита сирота і є цією карткою. ensureBeerRow цифр не бачить, тож сирота могла
+    // прийти від іншої картки («Ґвара #6» для запиту «Ґвара #7»), а частину доказу зібрано з полів рядка, а не
+    // картки: веб-фолбек шукає текстом і ABV рядка, lookupBeer — з його ABV. Тоді невідомо, яку з двох карток
+    // довів пошук, і промах безпечніший за аліас. ABV не порівнюється: шлях пошуку передає row.abv, а доказ
+    // шляху bid узятий з полів картки, тоді як репарація #384 зливає рядок з ABV з Untappd.
     const source = aliasSource ?? orphan;
-    if (source) {
+    const sameCard = source !== undefined && orphan !== undefined
+      && cardText(source.brewery) === cardText(orphan.brewery) && cardText(source.name) === cardText(orphan.name);
+    if (source && sameCard) {
       const breweryText = cardText(source.brewery);
       const nameText = cardText(source.name);
       const abvKey = cardAbv(source.abv);
