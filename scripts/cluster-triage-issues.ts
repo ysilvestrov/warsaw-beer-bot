@@ -74,12 +74,14 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
   if (!scopeWhere) return excluded;
   for (const term of scopeWhere) {
     if (term && typeof term === 'object' && typeof term.value === 'string') {
-      const opLower = term.op?.toLowerCase() ?? '';
+      const opLower = term.op?.toLowerCase().trim() ?? '';
       const isNegative =
-        opLower.startsWith('not') ||
+        opLower.startsWith('not_') ||
+        opLower.startsWith('not-') ||
+        opLower.startsWith('not ') ||
+        opLower === 'not' ||
         opLower === '!=' ||
-        opLower === '<>' ||
-        opLower.includes('not');
+        opLower === '<>';
       if (term.col === 'source_url' && isNegative) {
         const val = term.value.toLowerCase();
         for (const s of [
@@ -146,8 +148,12 @@ export function parseScopeBlockLenient(body: string): {
     if (raw && typeof raw === 'object') {
       const beerIds = Array.isArray(raw.beer_ids)
         ? (raw.beer_ids
-            .map((id: unknown) => (typeof id === 'number' ? id : parseInt(String(id), 10)))
-            .filter((id: number) => !isNaN(id) && id > 0) as number[])
+            .map((id: unknown) => {
+              if (typeof id === 'number' && Number.isInteger(id)) return id;
+              if (typeof id === 'string' && /^\d+$/.test(id.trim())) return parseInt(id.trim(), 10);
+              return null;
+            })
+            .filter((id: number | null): id is number => id !== null && id > 0))
         : undefined;
 
       const whereTerms = Array.isArray(raw.where)

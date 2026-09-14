@@ -241,11 +241,11 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.clusterKey).toBe('misc');
   });
 
-  it('sanitizes string beer_ids in lenient scope to numbers', () => {
+  it('sanitizes string beer_ids in lenient scope to numbers and rejects partial/float tokens', () => {
     const issueWithStringBeerIds: RawIssue = {
       number: 989,
       title: '[parser-bug] banner parsing failure',
-      body: '```triage-scope\n{"beer_ids":["34250", 34251, "invalid"],"where":[]}\n```',
+      body: '```triage-scope\n{"beer_ids":["34250", 34251, "invalid", "34250abc", "34251.9"], "where":[]}\n```',
       labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
       createdAt: '2026-09-01T00:00:00Z',
       updatedAt: '2026-09-01T00:00:00Z',
@@ -255,7 +255,24 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.beerIds).toEqual([34250, 34251]);
     for (const id of classified.beerIds) {
       expect(typeof id).toBe('number');
+      expect(Number.isInteger(id)).toBe(true);
     }
+  });
+
+  it('does not treat non-negative operators containing not substring like annotation as exclusions', () => {
+    const issueWithAnnotationOp: RawIssue = {
+      number: 988,
+      title: '[parser-bug] flasker adapter needs update',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"annotation","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithAnnotationOp);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('flasker-adapter');
+    expect(classified.sourceShop).toBe('flasker');
   });
 
   it('classifies sinkholes and catch-all issues correctly', () => {
