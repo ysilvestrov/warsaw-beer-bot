@@ -193,6 +193,12 @@ export function numericTokensCompatible(a: string, b: string): boolean {
   return rest(ta) === rest(tb);
 }
 
+// #614: цифрова частина ключа аліасу пам'яті злиття — рівно те, що normalizeName відкидає. Токени
+// відсортовані, тож порядок слів не важить; ключ порівнюється на точну рівність, без «сумісних» цифр.
+export function nameDigits(s: string): string {
+  return numericNameTokens(s).sort().join(' ');
+}
+
 export function normalizeBrewery(s: string): string {
   const tokens = baseNormalize(
     stripLegalForm(canonicalizeBreweryBrand(s)).replace(SUPERSCRIPT_FOOTNOTE, ''),
