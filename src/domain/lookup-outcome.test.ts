@@ -117,6 +117,31 @@ describe('applyLookupOutcome merge', () => {
     expect(link.untappd_beer_id).toBe(canonicalId);  // match_links redirected to the canonical row
     db.close();
   });
+
+  test('#614 records the alias from the text the caller searched, not from an orphan another card created', () => {
+    const { db, log } = fresh();
+    const g7 = seedBeer(db, {
+      untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
+      style: 'Stout', abv: 7, rating_global: 3.9,
+      normalized_name: normalizeName('Ґвара Series Seven'), normalized_brewery: normalizeBrewery('Gvara Brewery'),
+    });
+    // Сирота картки «#6»; ensureBeerRow цифр не бачить і віддає її запиту картки «#7».
+    const orphanId = seedBeer(db, {
+      name: 'Ґвара #6', brewery: 'Ґвара', style: null, abv: 7, rating_global: null,
+      normalized_name: normalizeName('Ґвара #6'), normalized_brewery: normalizeBrewery('Ґвара'),
+    });
+
+    const kind = applyLookupOutcome(
+      { db, log }, orphanId,
+      { kind: 'matched', result: cand({ bid: 4007 }) },
+      '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' },
+    );
+
+    expect(kind).toBe('merged');
+    expect(db.prepare('SELECT beer_id, name, name_digits FROM beer_aliases').all())
+      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_digits: '7' }]);
+    db.close();
+  });
 });
 
 describe('#430 post-search non-beer enforcer', () => {
