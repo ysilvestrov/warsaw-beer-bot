@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, numericNameTokens, numericTokensCompatible, stripDescriptorAndPackaging } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, numericNameTokens, numericTokensCompatible, nameDigits, stripDescriptorAndPackaging } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -655,5 +655,19 @@ describe('stripDescriptorAndPackaging (#353)', () => {
   test('returns null when stripping would leave an empty name', () => {
     expect(stripDescriptorAndPackaging('IPA')).toBeNull();
     expect(stripDescriptorAndPackaging('CAN')).toBeNull();
+  });
+});
+
+describe('nameDigits (#614)', () => {
+  test('keeps the numeric tokens normalizeName drops, sorted so word order does not matter', () => {
+    expect(nameDigits('Ґвара #6')).toBe('6');
+    expect(nameDigits('MJØD IS 2023')).toBe('2023');
+    expect(nameDigits('Batch 12 Vol 3')).toBe('12 3');
+    expect(nameDigits('Vol 3 Batch 12')).toBe('12 3');
+  });
+
+  test('is empty without digits, and a pack spec is not a digit of the name', () => {
+    expect(nameDigits('MJØD IS')).toBe('');
+    expect(nameDigits('Pils 0,5 L 12°')).toBe('');
   });
 });
