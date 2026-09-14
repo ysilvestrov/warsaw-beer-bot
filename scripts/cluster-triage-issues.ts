@@ -74,13 +74,17 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
   if (!scopeWhere) return excluded;
   for (const term of scopeWhere) {
     if (term && typeof term === 'object' && typeof term.value === 'string') {
-      const opLower = term.op?.toLowerCase().trim() ?? '';
+      const opNormalized = term.op?.toLowerCase().trim().replace(/[- ]/g, '_') ?? '';
+      // Null and empty checks assert presence rather than value exclusion
+      const isPresenceCheck = opNormalized.includes('null') || opNormalized.includes('empty');
       const isNegative =
-        /(?:^|[_ -])not(?:$|[_ -])/.test(opLower) ||
-        opLower.startsWith('!') ||
-        opLower === '<>' ||
-        opLower.startsWith('non_') ||
-        opLower.startsWith('non-');
+        !isPresenceCheck &&
+        (opNormalized === '!=' ||
+          opNormalized === '<>' ||
+          opNormalized.startsWith('!') ||
+          opNormalized.startsWith('not_') ||
+          opNormalized.includes('_not_') ||
+          opNormalized.endsWith('_not'));
       if (term.col === 'source_url' && isNegative) {
         const val = term.value.toLowerCase();
         for (const s of [

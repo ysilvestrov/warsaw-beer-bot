@@ -290,6 +290,22 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.clusterKey).toBe('misc');
   });
 
+  it('does not treat presence operators like is_not_null or non_empty as shop exclusions', () => {
+    const issueWithNotNullOp: RawIssue = {
+      number: 986,
+      title: '[parser-bug] flasker adapter needs update',
+      body: 'Flasker mentioned in body.\n```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"is_not_null","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithNotNullOp);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('flasker-adapter');
+    expect(classified.sourceShop).toBe('flasker');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
