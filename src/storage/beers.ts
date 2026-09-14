@@ -1,6 +1,6 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
-import { numericTokensCompatible } from '../domain/normalize';
+import { nameDigits, normalizeBrewery, normalizeName, numericTokensCompatible } from '../domain/normalize';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
 
@@ -276,29 +276,46 @@ export function loadCatalog(db: DB): CatalogRow[] {
 
 // #614: аліаси пам'яті злиття для перевірки перед матчером (matchBeerList). Не читаються:
 // - аліас рядка без untappd_id — та сама жива перевірка, що й isRememberedMerge (#366);
-// - аліас, чию нормалізовану пару тепер тримає рядок beers (пізніша сирота кранів, сирота, яку
-//   репарація #384 зробила рядком нового bid) — рядок важить більше, картку відповідає матчер.
+// - аліас, чий ключ тримає рядок beers — та сама нормалізована пара І ті самі цифри назви (пізніша
+//   сирота кранів; сирота, яку репарація #384 зробила рядком нового bid): рядок важить більше.
+//   SQL цифр не рахує, тож назви таких рядків приходять LEFT JOIN, а порівнює nameDigits.
 export interface AliasRow {
   beer_id: number;
   name: string;
   normalized_brewery: string;
   normalized_name: string;
+  name_digits: string;
 }
 
 export function loadAliases(db: DB): AliasRow[] {
-  return db
+  const rows = db
     .prepare(
-      `SELECT a.beer_id, a.name, a.normalized_brewery, a.normalized_name
-         FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
+      `SELECT a.id AS alias_id, a.beer_id, a.name, a.normalized_brewery, a.normalized_name, a.name_digits,
+              x.name AS holder_name
+         FROM beer_aliases a
+         JOIN beers b ON b.id = a.beer_id
+         LEFT JOIN beers x
+           ON x.normalized_brewery = a.normalized_brewery
+          AND x.normalized_name = a.normalized_name
+          AND x.id <> a.beer_id
         WHERE b.untappd_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM beers x
-             WHERE x.normalized_brewery = a.normalized_brewery
-               AND x.normalized_name = a.normalized_name
-               AND x.id <> a.beer_id)
         ORDER BY a.id`,
     )
-    .all() as AliasRow[];
+    .all() as (AliasRow & { alias_id: number; holder_name: string | null })[];
+  const held = new Set(
+    rows
+      .filter((r) => r.holder_name !== null && nameDigits(r.holder_name) === r.name_digits)
+      .map((r) => r.alias_id),
+  );
+  const out = new Map<number, AliasRow>();
+  for (const r of rows) {
+    if (held.has(r.alias_id) || out.has(r.alias_id)) continue;
+    out.set(r.alias_id, {
+      beer_id: r.beer_id, name: r.name,
+      normalized_brewery: r.normalized_brewery, normalized_name: r.normalized_name, name_digits: r.name_digits,
+    });
+  }
+  return [...out.values()];
 }
 
 export function findBeerByNormalized(
@@ -360,7 +377,13 @@ export function recordLookupSuccess(
 // Merges an orphan beer into a canonical catalog entry by redirecting all match_links and
 // deleting the orphan. Called when recordLookupSuccess hits a UNIQUE constraint (the found
 // untappd_id already belongs to another row).
-export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number, at: string): void {
+export function mergeIntoCanonical(
+  db: DB,
+  orphanId: number,
+  canonicalId: number,
+  at: string,
+  aliasSource?: { brewery: string; name: string },
+): void {
   db.transaction(() => {
     // #366: the merge is the only moment we learn "this ontap_ref is that canonical beer".
     // The stamp keeps that knowledge past the next ingest; without it refreshOntap recomputes,
@@ -385,32 +408,35 @@ export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number
     // сирота аліасів не має; рядок з аліасами доходить сюди лише через репарацію #384, тобто коли
     // його bid виявився хибним — а аліаси доводили саме той bid.
     const orphan = db
-      .prepare('SELECT brewery, name, normalized_brewery, normalized_name FROM beers WHERE id = ?')
-      .get(orphanId) as
-      | { brewery: string; name: string; normalized_brewery: string; normalized_name: string }
-      | undefined;
-    if (orphan) {
-      // Пару, яку тримає інший рядок, аліасом не робимо: normalizeName відкидає числові токени,
-      // тож ontap-сирота «Rochefort 10» має пару злінкованого близнюка «Rochefort 8», і аліас дав би
-      // /match для «Rochefort 8» другого точного кандидата з id іншого вінтажу.
-      const claimed = db
-        .prepare('SELECT 1 FROM beers WHERE normalized_brewery = ? AND normalized_name = ? AND id <> ?')
-        .get(orphan.normalized_brewery, orphan.normalized_name, orphanId);
-      if (!claimed) {
-        // Та сама пара вже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
+      .prepare('SELECT brewery, name FROM beers WHERE id = ?')
+      .get(orphanId) as { brewery: string; name: string } | undefined;
+    // #614: текст аліасу — той, який шукав виклик (applyLookupOutcome передає свій input). ensureBeerRow
+    // цифр не бачить, тож сирота могла прийти від іншої картки («Ґвара #6» для запиту «Ґвара #7»), і її
+    // текст записав би аліас на пиво, якого пошук для неї не доводив.
+    const source = aliasSource ?? orphan;
+    if (source) {
+      const normalizedBrewery = normalizeBrewery(source.brewery);
+      const normalizedName = normalizeName(source.name);
+      const digits = nameDigits(source.name);
+      // Ключ, який уже тримає інший рядок beers (та сама пара і ті самі цифри), аліасом не робимо: той
+      // рядок сам відповідає цій картці. Близнюк з іншими цифрами («Rochefort 8» для «Rochefort 10»)
+      // запис не блокує — ключ аліасу від нього відрізняється.
+      const holders = db
+        .prepare('SELECT name FROM beers WHERE normalized_brewery = ? AND normalized_name = ? AND id <> ?')
+        .all(normalizedBrewery, normalizedName, orphanId) as { name: string }[];
+      if (!holders.some((h) => nameDigits(h.name) === digits)) {
+        // Той самий ключ уже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
         // найсвіжіший доказ.
         db.prepare(
-          `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(normalized_brewery, normalized_name) DO UPDATE SET
+          `INSERT INTO beer_aliases
+             (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(normalized_brewery, normalized_name, name_digits) DO UPDATE SET
              beer_id = excluded.beer_id,
              brewery = excluded.brewery,
              name = excluded.name,
              created_at = excluded.created_at`,
-        ).run(
-          canonicalId, orphan.brewery, orphan.name,
-          orphan.normalized_brewery, orphan.normalized_name, at,
-        );
+        ).run(canonicalId, source.brewery, source.name, normalizedBrewery, normalizedName, digits, at);
       }
     }
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);

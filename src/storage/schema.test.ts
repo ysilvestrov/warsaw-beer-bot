@@ -623,23 +623,26 @@ describe('v31 rating_checked_at (#616)', () => {
 });
 
 describe('v32 beer_aliases (#614)', () => {
-  it('creates beer_aliases with the spec columns and one alias per normalized pair', () => {
+  it('creates beer_aliases keyed by the normalized pair plus the name digits', () => {
     const db = openDb(':memory:');
     migrate(db);
     const cols = (db.prepare('PRAGMA table_info(beer_aliases)').all() as { name: string }[])
       .map((c) => c.name);
     expect(cols).toEqual([
-      'id', 'beer_id', 'brewery', 'name', 'normalized_brewery', 'normalized_name', 'created_at',
+      'id', 'beer_id', 'brewery', 'name', 'normalized_brewery', 'normalized_name', 'name_digits', 'created_at',
     ]);
     db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
-                VALUES (2815, 3548624, 'Black Bean', 'Varvar Brew', 'black bean', 'varvar brew')`).run();
+                VALUES (8, 1001, 'Trappistes Rochefort 8', 'Brasserie de Rochefort', 'trappistes rochefort', 'rochefort'),
+                       (10, 2002, 'Trappistes Rochefort 10', 'Brasserie de Rochefort', 'trappistes rochefort', 'rochefort')`).run();
     const insert = db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '2026-09-14T07:13:20Z')`,
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+       VALUES (?, 'ROCH', ?, 'roch', 'rochefort', ?, '2026-09-14T07:13:20Z')`,
     );
-    insert.run();
-    // Одна пара з картки означає одне пиво: друга така сама пара відмовляється.
-    expect(() => insert.run()).toThrow(/UNIQUE constraint failed/);
+    insert.run(8, 'Rochefort 8 IS', '8');
+    // Та сама пара з іншими цифрами — інший ключ: близнюки однієї крамниці живуть поруч.
+    insert.run(10, 'Rochefort 10 IS', '10');
+    // Той самий ключ удруге відмовляється.
+    expect(() => insert.run(10, 'Rochefort 8 IS', '8')).toThrow(/UNIQUE constraint failed/);
   });
 
   it('drops a beer row\'s aliases together with the row', () => {
@@ -648,8 +651,8 @@ describe('v32 beer_aliases (#614)', () => {
     db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
                 VALUES (2815, 3548624, 'Black Bean', 'Varvar Brew', 'black bean', 'varvar brew')`).run();
     db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '2026-09-14T07:13:20Z')`,
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '', '2026-09-14T07:13:20Z')`,
     ).run();
     db.prepare('DELETE FROM beers WHERE id = 2815').run();
     const left = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
