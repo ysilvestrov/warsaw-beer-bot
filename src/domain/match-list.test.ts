@@ -268,12 +268,20 @@ describe('matchBeerList aliases (#614)', () => {
     expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
   });
 
-  it('buildAliasIndex drops an alias whose exact text another catalog row holds — the row wins', async () => {
-    const catalog = [...rochefort, { id: 77, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: null, untappd_id: null }];
+  it('buildAliasIndex drops an alias whose exact text another LINKED catalog row holds — the row wins', async () => {
+    const catalog = [...rochefort, { id: 77, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: 3.1, untappd_id: 7777 }];
     expect((await buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')], catalog)).size).toBe(0);
     // Той самий текст лише в самій цілі — аліас лишається.
     const selfHeld = [{ id: 8, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: 3.95, untappd_id: 1001 }];
     expect([...(await buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')], selfHeld)).values()]).toEqual([8]);
+  });
+
+  it('#614 an orphan with the same exact text does not switch the alias off', async () => {
+    // Сирота з текстом картки — наш плейсхолдер (/enrich/candidates для ABV-близнюка), а не доказ: без аліасу
+    // /match віддав би на неї exact без untappd_id і без статусу «пив» (проба periph-abvtwin).
+    const withOrphan = [...rochefort, { id: 77, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: null, untappd_id: null }];
+    const [r] = (await run(withOrphan, [alias(8, 'ROCH', 'Trappistes Rochefort 8', 9.2)], { brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2 }, 8)).results;
+    expect([r.source, r.matched_beer?.id, r.is_drunk]).toEqual(['exact', 8, true]);
   });
 
   it('an ABV twin never rides the alias of the other ABV', async () => {
