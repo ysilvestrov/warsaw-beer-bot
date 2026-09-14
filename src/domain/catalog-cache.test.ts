@@ -2,6 +2,12 @@ import { vi } from 'vitest';
 import { createCatalogCache, prepareCatalogChunked, type CatalogCache } from './catalog-cache';
 import type { CatalogBeerWithRating } from './match-list';
 import type { DB } from '../storage/db';
+import { openDb } from '../storage/db';
+import { migrate } from '../storage/schema';
+import { seedBeer } from '../storage/seed-beer.testing';
+import { mergeIntoCanonical } from '../storage/beers';
+import { normalizeBrewery, normalizeName } from './normalize';
+import { matchBeerList } from './match-list';
 
 const rows: CatalogBeerWithRating[] = [
   { id: 1, brewery: 'Pinta', name: 'Atak Chmielu', abv: 6.1, rating_global: 3.7, untappd_id: 111 },
@@ -15,9 +21,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-// Minimal cache under test with injected seams. `db` is never touched (load is injected).
+// Minimal cache under test with injected seams. `db` is never touched (load and loadAliases are
+// injected); a test may still override loadAliases through opts.
 function make(opts: Parameters<typeof createCatalogCache>[1]): CatalogCache {
-  return createCatalogCache({} as DB, opts);
+  return createCatalogCache({} as DB, { loadAliases: () => [], ...opts });
 }
 
 describe('createCatalogCache', () => {
@@ -112,6 +119,19 @@ describe('createCatalogCache', () => {
     const { prepared } = await cache.get();
     expect(prepared.beers.length).toBe(2);
   });
+
+  it('#614 matches aliases but keeps byId to the real rows, so the answer shows the canonical name', async () => {
+    const aliases: CatalogBeerWithRating[] = [
+      { id: 1, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: 3.7, untappd_id: 111 },
+    ];
+    const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliases });
+    const { prepared, byId } = await cache.get();
+    expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual([
+      '1 Atak Chmielu', '2 Buty Skejta', '1 Atak Chmielu IPA',
+    ]);
+    expect(byId.size).toBe(2);
+    expect(byId.get(1)?.name).toBe('Atak Chmielu');
+  });
 });
 
 describe('prepareCatalogChunked', () => {
@@ -123,5 +143,43 @@ describe('prepareCatalogChunked', () => {
     const prepared = await prepareCatalogChunked(big, yieldSpy);
     expect(prepared.beers.length).toBe(2001);
     expect(yieldSpy.mock.calls.length).toBe(2); // ceil(2001/2000)
+  });
+});
+
+describe('#614 merge memory reaches /match', () => {
+  it('after a merge the same shop card matches the canonical row exactly, with the drinker\'s status', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const canonicalId = seedBeer(db, {
+      untappd_id: 3548624, name: 'Black Bean', brewery: 'Varvar Brew',
+      style: 'Stout - Imperial / Double Pastry', abv: 11, rating_global: 4.14,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    const orphanId = seedBeer(db, {
+      name: 'BLACK BEAN IS', brewery: 'VARVAR', style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('BLACK BEAN IS'), normalized_brewery: normalizeBrewery('VARVAR'),
+    });
+    mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T07:13:20Z');
+
+    const card = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
+    const drunk = new Set([canonicalId]);
+    const ratings = new Map([[canonicalId, 4.5]]);
+    const noYield = { yield: async () => {} };
+
+    // Контроль на тій самій БД без аліасів: картка НЕ дає точного збігу — інакше тест нічого б
+    // не доводив (прод-реплей 2026-09-14: null).
+    const blind = await createCatalogCache(db, { loadAliases: () => [] }).get();
+    const { results: [control] } = await matchBeerList(blind.prepared, blind.byId, drunk, ratings, [card], noYield);
+    expect(control.source).not.toBe('exact');
+    expect(control.is_drunk).toBe(false);
+
+    const { prepared, byId } = await createCatalogCache(db).get();
+    const { results: [r] } = await matchBeerList(prepared, byId, drunk, ratings, [card], noYield);
+    expect(r.matched_beer).toEqual({
+      id: canonicalId, name: 'Black Bean', brewery: 'Varvar Brew', rating_global: 4.14, untappd_id: 3548624,
+    });
+    expect(r.source).toBe('exact');
+    expect(r.is_drunk).toBe(true);
+    expect(r.user_rating).toBe(4.5);
   });
 });

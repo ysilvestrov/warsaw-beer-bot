@@ -1,5 +1,5 @@
 import type { DB } from '../storage/db';
-import { loadCatalog } from '../storage/beers';
+import { loadAliasCatalog, loadCatalog } from '../storage/beers';
 import { catalogVersion } from '../storage/catalog-version';
 import { prepareBeer, makePreparedCatalog, type PreparedCatalog, type CatalogBeer } from './matcher';
 import { yieldToEventLoop, type CatalogBeerWithRating } from './match-list';
@@ -24,6 +24,7 @@ export interface CatalogCache {
 export interface CatalogCacheOptions {
   getVersion?: () => number;                                        // default: catalogVersion
   load?: () => CatalogBeerWithRating[];                             // default: loadCatalog(db)
+  loadAliases?: () => CatalogBeerWithRating[];                      // default: loadAliasCatalog(db) (#614)
   prepare?: (rows: CatalogBeerWithRating[]) => Promise<PreparedCatalog>; // default: chunked
   now?: () => number;                                               // default: Date.now
   ttlMs?: number;                                                   // default: 5 min
@@ -49,6 +50,7 @@ export async function prepareCatalogChunked(
 export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): CatalogCache {
   const getVersion = opts.getVersion ?? catalogVersion;
   const load = opts.load ?? (() => loadCatalog(db));
+  const loadAliases = opts.loadAliases ?? (() => loadAliasCatalog(db));
   const prepare = opts.prepare ?? prepareCatalogChunked;
   const now = opts.now ?? Date.now;
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
@@ -69,7 +71,11 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
     const version = getVersion();
     rebuilding = (async () => {
       const rows = load();
-      const prepared = await prepare(rows);
+      // #614: аліаси матчаться як звичайні записи з id канонічного рядка, але byId будується лише
+      // з рядків beers — інакше аліас з тим самим id переписав би канонічну назву й рейтинг у
+      // відповіді /match назвою з картки крамниці.
+      const aliases = loadAliases();
+      const prepared = await prepare([...rows, ...aliases]);
       const byId = new Map(rows.map((r) => [r.id, r]));
       const value: CachedCatalog = { prepared, byId };
       current = { value, version, builtAt: now() };

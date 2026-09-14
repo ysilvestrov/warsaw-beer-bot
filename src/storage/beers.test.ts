@@ -1759,3 +1759,42 @@ describe('recordProfileBeer (#616)', () => {
     expect(catalogVersion()).toBe(v0);
   });
 });
+
+// --- #614: аліаси в каталозі матчера ------------------------------------------------------------
+import { loadAliasCatalog } from './beers';
+
+describe('loadAliasCatalog (#614)', () => {
+  test('returns each alias as a catalog row of its canonical beer: shop text, canonical facts', () => {
+    const db = fresh();
+    const canonicalId = seedBeer(db, {
+      untappd_id: 3548624, name: 'Black Bean', brewery: 'Varvar Brew',
+      style: 'Stout - Imperial / Double Pastry', abv: 11, rating_global: 4.14,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
+    ).run(canonicalId, normalizeBrewery('VARVAR'), normalizeName('BLACK BEAN IS'));
+
+    // ABV канонічного рядка: точна стадія спершу обирає за ABV, і аліас без ABV програв би
+    // іншому точному кандидату з ABV.
+    expect(loadAliasCatalog(db)).toEqual([{
+      id: canonicalId, brewery: 'VARVAR', name: 'BLACK BEAN IS',
+      abv: 11, rating_global: 4.14, untappd_id: 3548624,
+    }]);
+  });
+
+  test('skips an alias whose canonical row has lost its untappd_id', () => {
+    const db = fresh();
+    const unlinkedId = seedBeer(db, {
+      name: 'Black Bean', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.14,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
+    ).run(unlinkedId, normalizeBrewery('VARVAR'), normalizeName('BLACK BEAN IS'));
+
+    expect(loadAliasCatalog(db)).toEqual([]);
+  });
+});
