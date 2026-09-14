@@ -96,6 +96,16 @@ describe('piwnemosty adapter', () => {
     ]);
   });
 
+  it('marks an accessory in a deeper analytics category even when its parent says beer', () => {
+    const source = productHtml({ id: '623', title: 'PINTA: Hazy Morning', brand: 'PINTA' })
+      .replace('"item_category": "Piwo"', '"item_category": "Piwo", "item_category3": "Akcesoria"');
+    const doc = new DOMParser().parseFromString(source, 'text/html');
+
+    expect(piwnemosty.parseCards(doc)).toEqual([
+      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true, skip: true },
+    ]);
+  });
+
   it('matches Piwne Mosty hosts', () => {
     expect(piwnemosty.hostMatch(new URL('https://piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(true);
     expect(piwnemosty.hostMatch(new URL('https://www.piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(true);
