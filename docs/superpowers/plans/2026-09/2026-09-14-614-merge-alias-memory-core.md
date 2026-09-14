@@ -1,21 +1,21 @@
-# Пам'ять злиття для назв з крамниць — план ядра (#614), переглянутий після рев'ю
+# Пам'ять злиття для назв з крамниць — план ядра (#614), третій раунд після двох рев'ю
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development
 > (recommended) or superpowers:executing-plans to implement this plan task-by-task.
 > Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** злиття сироти в канонічний рядок запам'ятовує пару «броварня + назва» сироти як аліас.
-`/match` і MCP перевіряють аліас **перед** матчером, з правилом цифр, і дають `exact` з особистим
-статусом «пив» і оцінкою. Аліаси відкидаються, коли bid їхнього рядка змінюється.
+**Goal:** злиття сироти в канонічний рядок запам'ятовує **текст, який перевірив пошук**, як аліас з
+ключем «нормалізована броварня | нормалізована назва | числові токени назви». `/match` і MCP
+перевіряють аліас перед матчером за **точною** рівністю ключа й дають `exact` з особистим статусом
+«пив» і оцінкою. Аліаси відкидаються, коли bid їхнього рядка змінюється.
 
-**Architecture:** **ядро** стадійної зміни. Перша версія ядра (коміти `9325d68`, `67bacfe`)
-додавала аліаси в каталог матчера і переносила аліаси рядка, що зливається. Наскрізне рев'ю
-знайшло хибний ✅ для числових близнюків і аліаси, що йдуть за переписаним bid (спека, розділ
-«Рев'ю ядра»). Цей план переробляє ядро **новими комітами поверх** гілки. Задача 1 (міграція v32,
-`111828b`) лишається як є.
+**Architecture:** **ядро** стадійної зміни. Задачі 1–6 уже в гілці. Друге наскрізне рев'ю знайшло,
+що ключ аліасу без цифр і текст сироти замість тексту запиту все ще дають хибний ✅ (сценарії B і
+C) і петлю для близнюків (A) — спека, «Рев'ю ядра → Друге рев'ю». Задачі 7–10 виправляють **ключ і
+джерело**, а не порівняння. Міграція v32 ще ніде не застосована, тож змінюється на місці.
 
-**Периферія йде окремим планом після повторного наскрізного рев'ю ядра:**
-- аліасне влучання в `ensureBeerRow`;
+**Периферія йде окремим планом після третього наскрізного рев'ю ядра:**
+- `ensureBeerRow`: сирота лише з сумісними цифрами; аліасне влучання;
 - репарація #384 через аліас;
 - наскрізний API-тест `/enrich/*` → `/match`;
 - `spec.md`.
@@ -27,844 +27,578 @@
 ## Global Constraints
 
 - **Коментарі українською, ідентифікатори англійською**, як у решті репо.
-- **Повний гейт після КОЖНОЇ задачі** (`npm test && npm run typecheck`), ніколи не звужений до
+- **Повний гейт після КОЖНОЇ задачі** (`npm test` і `npm run typecheck`), ніколи не звужений до
   своїх файлів. Розширення (`extension/`) ця зміна не зачіпає.
-- **Кожен тест мутаційно доведений.** У кроці «мутація» прибери або зміни названий рядок
-  реалізації: тест має впасти. Потім поверни рядок. Тест, що лишається зеленим без реалізації, у
-  мердж не йде.
+- **Кожен тест мутаційно доведений.** Прибери або зміни названий рядок реалізації — тест має
+  впасти; поверни рядок.
 - **Сіди з видимими значеннями**, не `null` (пам'ять `feedback_stub_defaults_hide_mutations`).
-- **Два рядки з однаковою нормалізованою парою сідуються лише сирим `INSERT`**: `seedBeer` шукає
-  наявний рядок за парою і переписав би перший рядок другим.
+- **Два рядки з однаковою нормалізованою парою сідуються лише сирим `INSERT`** (`seedBeer`
+  переписав би перший рядок другим).
 - **Ніяких `as unknown as` кастів.**
-- **Поза ядром:** `ensureBeerRow`, `/enrich/*`, `refresh-ontap`, `ensureOrphan` і `spec.md`.
-- **Код важить більше за цей план.** Якщо сигнатура, імпорт чи назва в репо розходиться з текстом
-  плану, іди за кодом і назви розбіжність у звіті задачі.
-- **Виконання інлайн.** Задачі 2–6 дрібні за правилом CLAUDE.md (повний код у тексті, ≤2 файли +
-  тести, без нових рішень). Контролер виконує їх інлайн; усі називаються в диспатчі повторного
-  наскрізного рев'ю.
-- **Git в ізольованій сесії worktree** — лише прості окремі команди (`git add …`, `git commit …`),
-  без ланцюжків з npm і без змінних.
-
-## Файлова структура
-
-| Файл | Відповідальність |
-|---|---|
-| `src/storage/beers.ts` | запис аліасу в `mergeIntoCanonical` без перенесення; `dropAliasesOnRelink`; `recordLookupSuccess` відкидає аліаси при зміні bid; `loadAliases` замість `loadAliasCatalog` |
-| `src/domain/pin-match.ts` | пін на інший bid відкидає аліаси рядка |
-| `src/domain/match-list.ts` | `AliasIndex`, `buildAliasIndex`, аліас перед матчером з правилом цифр |
-| `src/domain/catalog-cache.ts` | індекс аліасів у `CachedCatalog`; каталог матчера без аліасів |
-| `src/api/routes/match.ts`, `src/api/mcp/match-tool.ts` | передати `aliases` у `matchBeerList` |
-| тести поруч з кожним файлом | див. задачі |
+- **Поза ядром:** `ensureBeerRow`, `/enrich/*`, `refresh-ontap`, `ensureOrphan`, `spec.md`.
+- **Код важить більше за цей план.** Розбіжність сигнатури чи назви — іди за кодом і назви її.
+- **Виконання інлайн** (кожна задача: повний код у тексті, ≤2 файли коду + тести, без нових
+  рішень). Усі задачі 2–10 називаються в диспатчі третього наскрізного рев'ю.
+- **Git в ізольованій сесії worktree** — лише прості окремі команди. Шаблонні рядки з `|` писати
+  звичайним символом; перевіряти файли на NUL-байти (одного разу `Write` поклав `\x00`).
 
 ---
 
-### Task 1: міграція v32 — таблиця `beer_aliases` — ✅ ЗРОБЛЕНО (`111828b`)
+### Задачі 1–6 — ✅ ЗРОБЛЕНО
+
+| Задача | Коміт | Що |
+|---|---|---|
+| 1 | `111828b` | міграція v32 `beer_aliases` (змінюється в задачі 8) |
+| — | `9325d68` | запис аліасу в `mergeIntoCanonical` (переписується в задачі 8) |
+| — | `67bacfe` | аліаси в каталозі матчера (скасовано задачею 5) |
+| 2 | `7301421` | злиття не переносить аліаси; `dropAliasesOnRelink` у `recordLookupSuccess` |
+| 3 | `cc798e4` | `pinMatch` на новий bid відкидає аліаси |
+| 4 | `c6f149e` | аліас перед матчером у `matchBeerList` (правило цифр змінюється в задачі 9) |
+| 5 | `44f7916` | `loadAliases`, індекс у кеші, каталог матчера без аліасів (змінюється в задачі 8) |
+| 6 | `0285628` | `/match` і MCP передають `aliases` |
 
 ---
 
-### Task 2: злиття не переносить аліаси; зміна bid їх відкидає
+### Task 7: `nameDigits` — цифрова частина ключа
 
 **Files:**
-- Modify: `src/storage/beers.ts` — `mergeIntoCanonical` (блок `#614` перед `DELETE`), нова
-  `dropAliasesOnRelink` одразу перед `recordLookupSuccess`, тіло `recordLookupSuccess`
-- Test: `src/storage/beers.test.ts` — блок `#614: пам'ять злиття для назв з крамниць`
+- Modify: `src/domain/normalize.ts` (одразу після `numericTokensCompatible`)
+- Test: `src/domain/normalize.test.ts` (імпорт у рядку 1; новий `describe` у кінці)
 
 **Interfaces:**
-- Consumes: таблиця `beer_aliases` (Task 1).
-- Produces: `export function dropAliasesOnRelink(db: DB, beerId: number, newBid: number): void` —
-  видаляє аліаси `beerId`, лише якщо його поточний `untappd_id` не `NULL` і не дорівнює `newBid`.
-  Task 3 викликає її з `pinMatch`.
-
-- [ ] **Step 1: Write the failing tests**
-
-У `src/storage/beers.test.ts` **заміни цілком** тест
-`#614 mergeIntoCanonical carries a merged row's own aliases over instead of cascading them away` на:
-
-```ts
-test('#614 mergeIntoCanonical lets a merged linked row\'s aliases go instead of moving them to the new bid\'s owner', () => {
-  const db = fresh();
-  // Злінкований рядок з хибним bid (пошук угадав Spicy Edition) і аліас, записаний під цим bid.
-  const wrongId = seedBeer(db, {
-    untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
-    style: 'Gose', abv: 5.4, rating_global: 3.61,
-    normalized_name: normalizeName('Red Mexican Spicy Edition'),
-    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
-  });
-  const ownerId = seedBeer(db, {
-    untappd_id: 5120103, name: 'Red Mexican', brewery: 'Copper Head. Beer Workshop',
-    style: 'Gose', abv: 5, rating_global: 3.72,
-    normalized_name: normalizeName('Red Mexican'),
-    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
-  });
-  db.prepare(
-    `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
-  ).run(wrongId, normalizeBrewery('Copper Head'), normalizeName('RED MEXICAN Tomato Gose'));
-
-  // Репарація #384: крамниця опублікувала bid 5120103 для рядка wrongId, власник уже є → злиття.
-  mergeIntoCanonical(db, wrongId, ownerId, '2026-09-14T07:11:40Z');
-
-  // Пара самого рядка доведена прийнятим bid і стає аліасом; «Tomato Gose» доводив 6037305 і зникає.
-  expect(aliasesOf(db, ownerId).map((a) => a.name)).toEqual(['Red Mexican Spicy Edition']);
-});
-```
-
-Одразу після тесту
-`#614 mergeIntoCanonical re-points an existing alias of the same pair to the newest merge target`
-додай:
-
-```ts
-function linkedRowWithAlias(db: ReturnType<typeof fresh>) {
-  const rowId = seedBeer(db, {
-    untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
-    style: 'Gose', abv: 5.4, rating_global: 3.61,
-    normalized_name: normalizeName('Red Mexican Spicy Edition'),
-    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
-  });
-  db.prepare(
-    `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
-  ).run(rowId, normalizeBrewery('Copper Head'), normalizeName('RED MEXICAN Tomato Gose'));
-  return rowId;
-}
-
-test('#614 recordLookupSuccess drops a linked row\'s aliases when its bid is rewritten', () => {
-  const db = fresh();
-  const rowId = linkedRowWithAlias(db);
-
-  recordLookupSuccess(db, rowId, { bid: 5120103, style: 'Gose', abv: 5, global_rating: 3.72 }, '2026-09-14T07:11:40Z');
-
-  expect(getBeer(db, rowId)?.untappd_id).toBe(5120103);
-  expect(aliasesOf(db, rowId)).toEqual([]);
-});
-
-test('#614 recordLookupSuccess keeps aliases when the same bid is confirmed', () => {
-  const db = fresh();
-  const rowId = linkedRowWithAlias(db);
-
-  recordLookupSuccess(db, rowId, { bid: 6037305, style: 'Gose', abv: 5.4, global_rating: 3.61 }, '2026-09-14T07:11:40Z');
-
-  expect(aliasesOf(db, rowId).map((a) => a.name)).toEqual(['RED MEXICAN Tomato Gose']);
-});
-
-test('#614 recordLookupSuccess leaves aliases alone when the rewrite hits UNIQUE — the merge that follows decides', () => {
-  const db = fresh();
-  const rowId = linkedRowWithAlias(db);
-  seedBeer(db, {
-    untappd_id: 5120103, name: 'Red Mexican', brewery: 'Copper Head. Beer Workshop',
-    style: 'Gose', abv: 5, rating_global: 3.72,
-    normalized_name: normalizeName('Red Mexican'),
-    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
-  });
-
-  expect(() => recordLookupSuccess(
-    db, rowId, { bid: 5120103, style: 'Gose', abv: 5, global_rating: 3.72 }, '2026-09-14T07:11:40Z',
-  )).toThrow(/UNIQUE/);
-
-  // Відкат транзакції: частковий стан (аліаси стерто, bid ні) не лишається.
-  expect(aliasesOf(db, rowId).map((a) => a.name)).toEqual(['RED MEXICAN Tomato Gose']);
-  expect(getBeer(db, rowId)?.untappd_id).toBe(6037305);
-});
-```
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `npx vitest run src/storage/beers.test.ts -t "#614"`
-Expected: FAIL — `lets a merged linked row's aliases go…` (зайвий `RED MEXICAN Tomato Gose`, бо
-аліаси ще переносяться) і `drops a linked row's aliases when its bid is rewritten` (аліас лишився).
-Два інші нові тести проходять уже зараз; їх доводять мутації 3 і 4.
-
-- [ ] **Step 3: Implement**
-
-У `mergeIntoCanonical` заміни блок
-
-```ts
-    // #614: злиття — єдиний момент, коли відомо «пара броварня + назва цієї сироти = канонічний
-    // рядок». DELETE нижче знищив би це знання, і /match на кожне завантаження сторінки знову не
-    // впізнавав би ту саму картку крамниці. Спершу аліаси самої сироти переходять на канонічний
-    // рядок, інакше ON DELETE CASCADE забрав би пам'ять давніших злиттів.
-    db.prepare('UPDATE beer_aliases SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
-```
-
-на
-
-```ts
-    // #614: злиття — єдиний момент, коли відомо «пара броварня + назва цієї сироти = канонічний
-    // рядок». DELETE нижче знищив би це знання, і /match на кожне завантаження сторінки знову не
-    // впізнавав би ту саму картку крамниці. Власні аліаси рядка, що зливається, НЕ переносяться —
-    // їх забирає ON DELETE CASCADE. Крон і пошуковий шлях /enrich/result збагачують лише сироти, а
-    // сирота аліасів не має; рядок з аліасами доходить сюди лише через репарацію #384, тобто коли
-    // його bid виявився хибним — а аліаси доводили саме той bid.
-```
-
-Одразу **перед** `export function recordLookupSuccess(` додай:
-
-```ts
-// #614: аліас доводить «пара = пиво з цим bid». Коли в рядка змінюється untappd_id, його аліаси
-// втрачають доказ і видаляються. Для сироти (untappd_id IS NULL) і для того самого bid умова
-// `untappd_id <> ?` не виконується, тож нічого не відбувається.
-export function dropAliasesOnRelink(db: DB, beerId: number, newBid: number): void {
-  db.prepare(
-    `DELETE FROM beer_aliases
-      WHERE beer_id = ?
-        AND EXISTS (SELECT 1 FROM beers WHERE id = ? AND untappd_id <> ?)`,
-  ).run(beerId, beerId, newBid);
-}
-```
-
-У `recordLookupSuccess` заміни виклик `db.prepare(\`UPDATE beers SET …\`).run(…);` на ту саму
-інструкцію, загорнуту в транзакцію разом з видаленням аліасів (текст `UPDATE` і аргументи
-`.run(...)` не змінюються):
-
-```ts
-  // #614: транзакція — якщо UPDATE впаде на UNIQUE (bid уже має власника), аліаси не стираються
-  // наполовину: applyLookupOutcome далі зливає рядок, і їх забирає каскад.
-  db.transaction(() => {
-    dropAliasesOnRelink(db, beerId, r.bid);
-    db.prepare(
-      `UPDATE beers SET
-         untappd_id = ?,
-         untappd_id_source = 'search',
-         style = COALESCE(?, style),
-         abv = COALESCE(?, abv),
-         rating_global = COALESCE(?, rating_global),
-         untappd_lookup_at = ?
-       WHERE id = ?`,
-    ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
-  })();
-  bumpCatalogVersion();
-```
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `npx vitest run src/storage/beers.test.ts src/domain/lookup-outcome.test.ts src/api/routes/enrich.test.ts`
-Expected: PASS (зокрема наявні тести UNIQUE-злиття в `lookup-outcome` і `enrich`: помилка з
-`code: 'SQLITE_CONSTRAINT_UNIQUE'` пробивається крізь транзакцію без змін).
-
-- [ ] **Step 5: Mutations** (кожну поверни)
-
-1. Поверни рядок `UPDATE beer_aliases SET beer_id = ? WHERE beer_id = ?` у `mergeIntoCanonical`
-   → має впасти `lets a merged linked row's aliases go…`.
-2. Прибери виклик `dropAliasesOnRelink(db, beerId, r.bid);` → має впасти `drops a linked row's
-   aliases when its bid is rewritten`.
-3. У `dropAliasesOnRelink` прибери `AND untappd_id <> ?` і третій аргумент `.run` → має впасти
-   `keeps aliases when the same bid is confirmed`.
-4. Прибери обгортку `db.transaction(() => {` … `})();` (лиши обидві інструкції) → має впасти
-   `leaves aliases alone when the rewrite hits UNIQUE`.
-
-- [ ] **Step 6: Full gate** — `npm test` і `npm run typecheck`, обидва зелені.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/storage/beers.ts src/storage/beers.test.ts
-git commit -m "fix(#614): drop aliases when their row's bid changes instead of moving them"
-```
-
----
-
-### Task 3: пін на інший bid відкидає аліаси
-
-**Files:**
-- Modify: `src/domain/pin-match.ts` — гілка «новий bid» (перед `UPDATE beers SET untappd_id = ?,
-  untappd_id_source = 'curated'…`)
-- Test: `src/domain/pin-match.test.ts` — у `describe('pinMatch', …)`
-
-**Interfaces:**
-- Consumes: `dropAliasesOnRelink` (Task 2).
-- Produces: нічого нового.
+- Produces: `export function nameDigits(s: string): string` — `numericNameTokens(s)`, відсортовані
+  й склеєні пробілом; `''` без цифр. Задачі 8 і 9 будують з неї ключ.
 
 - [ ] **Step 1: Write the failing test**
 
-Додай у кінець `describe('pinMatch', …)`:
+У рядку 1 `normalize.test.ts` додай `nameDigits` до імпорту з `./normalize`. У кінець файлу:
 
 ```ts
-  test('#614: pinning a linked row to a different bid drops the aliases proven for the old one', () => {
-    const db = newDb();
-    const rowId = seedBeer(db, {
-      untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
-      style: 'Gose', abv: 5.4, rating_global: 3.61,
-      normalized_name: 'red mexican spicy edition', normalized_brewery: 'copper head beer workshop',
-    });
-    db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-       VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', 'copper head', 'red mexican tomato gose', ?)`,
-    ).run(rowId, AT);
-
-    const res = pinMatch(db, rowId, 5120103, AT);
-
-    expect(res).toEqual({ kind: 'set', beerId: rowId });
-    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
-  });
-```
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run src/domain/pin-match.test.ts -t "#614"`
-Expected: FAIL — `expected { n: 1 } to deeply equal { n: 0 }`.
-
-- [ ] **Step 3: Implement**
-
-У `src/domain/pin-match.ts` додай `dropAliasesOnRelink` до імпорту з `'../storage/beers'` (якщо
-такого імпорту немає — новий рядок `import { dropAliasesOnRelink } from '../storage/beers';`).
-У гілці «новий bid» одразу **перед**
-`db.prepare(\`UPDATE beers SET untappd_id = ?, untappd_id_source = 'curated', untappd_lookup_at = ? WHERE id = ?\`)`
-додай:
-
-```ts
-    // #614: людина пінить рядок на інший bid — аліаси, записані під старим bid, втрачають доказ.
-    dropAliasesOnRelink(db, beerId, untappdId);
-```
-
-- [ ] **Step 4: Run tests** — `npx vitest run src/domain/pin-match.test.ts` → PASS.
-
-- [ ] **Step 5: Mutation** — прибери доданий виклик → тест `#614` падає. Поверни.
-
-- [ ] **Step 6: Full gate** — `npm test` і `npm run typecheck`.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/domain/pin-match.ts src/domain/pin-match.test.ts
-git commit -m "fix(#614): drop a row's aliases when a pin moves it to another bid"
-```
-
----
-
-### Task 4: аліас перед матчером у `matchBeerList`
-
-**Files:**
-- Modify: `src/domain/match-list.ts`
-- Test: `src/domain/match-list.test.ts` (імпорти в рядках 1–3; новий `describe` у кінці)
-
-**Interfaces:**
-- Consumes: `normalizeBrewery`, `normalizeName`, `numericTokensCompatible` з `./normalize`.
-- Produces (Task 5 і 6 спираються на ці назви):
-  - `export interface AliasSource { beer_id: number; name: string; normalized_brewery: string; normalized_name: string }`
-  - `export type AliasIndex = ReadonlyMap<string, { beerId: number; name: string }>`
-  - `export function buildAliasIndex(rows: readonly AliasSource[]): AliasIndex`
-  - `MatchListOptions.aliases?: AliasIndex`
-
-- [ ] **Step 1: Write the failing tests**
-
-У `src/domain/match-list.test.ts` заміни рядок імпорту `match-list` і додай імпорт нормалізації:
-
-```ts
-import { matchBeerList, buildAliasIndex, type CatalogBeerWithRating } from './match-list';
-import { normalizeBrewery, normalizeName } from './normalize';
-```
-
-У кінець файлу:
-
-```ts
-describe('matchBeerList aliases (#614)', () => {
-  const rochefort: CatalogBeerWithRating[] = [
-    { id: 8, brewery: 'Brasserie de Rochefort', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: 3.95, untappd_id: 1001 },
-    { id: 10, brewery: 'Brasserie de Rochefort', name: 'Trappistes Rochefort 10', abv: 11.3, rating_global: 4.2, untappd_id: 2002 },
-  ];
-  const alias = (beerId: number, brewery: string, name: string) => ({
-    beer_id: beerId, name, normalized_brewery: normalizeBrewery(brewery), normalized_name: normalizeName(name),
-  });
-  const noYield = { yield: async () => {} };
-
-  it('a merged shop pair matches its canonical row exactly, with drunk status and rating, without the fallback', async () => {
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')]);
-    const res = await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2 }],
-      { ...noYield, aliases },
-    );
-    expect(res.results).toEqual([{
-      raw: { brewery: 'ROCH', name: 'Trappistes Rochefort 8' },
-      matched_beer: { id: 8, name: 'Trappistes Rochefort 8', brewery: 'Brasserie de Rochefort', rating_global: 3.95, untappd_id: 1001 },
-      is_drunk: true,
-      drunk_uncertain: false,
-      user_rating: 4.0,
-      source: 'exact',
-      searched: true,
-    }]);
-    expect(res.fallback.attempts).toBe(0);
+describe('nameDigits (#614)', () => {
+  test('keeps the numeric tokens normalizeName drops, sorted so word order does not matter', () => {
+    expect(nameDigits('Ґвара #6')).toBe('6');
+    expect(nameDigits('MJØD IS 2023')).toBe('2023');
+    expect(nameDigits('Batch 12 Vol 3')).toBe('12 3');
+    expect(nameDigits('Vol 3 Batch 12')).toBe('12 3');
   });
 
-  it('a card with different digits never rides another vintage\'s alias', async () => {
-    // Без цієї передумови тест нічого б не доводив: ключ аліасу рівний для обох вінтажів.
-    expect(normalizeName('Trappistes Rochefort 10')).toBe(normalizeName('Trappistes Rochefort 8'));
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')]);
-    const [r] = (await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 10', abv: 11.3 }],
-      { ...noYield, aliases },
-    )).results;
-    expect(r.is_drunk).toBe(false);
-    expect(r.user_rating).toBeNull();
-  });
-
-  it('an alias without digits never claims a numbered card', async () => {
-    const { prepared, byId } = prep(rochefort);
-    const aliases = buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort')]);
-    const [r] = (await matchBeerList(
-      prepared, byId, new Set([8]), new Map([[8, 4.0]]),
-      [{ brewery: 'ROCH', name: 'Trappistes Rochefort 10', abv: 11.3 }],
-      { ...noYield, aliases },
-    )).results;
-    expect(r.is_drunk).toBe(false);
-    expect(r.user_rating).toBeNull();
+  test('is empty without digits, and a pack spec is not a digit of the name', () => {
+    expect(nameDigits('MJØD IS')).toBe('');
+    expect(nameDigits('Pils 0,5 L 12°')).toBe('');
   });
 });
 ```
 
+- [ ] **Step 2:** `npx vitest run src/domain/normalize.test.ts -t "nameDigits"` → FAIL (`nameDigits is not a function`).
+
+- [ ] **Step 3: Implement** — після `numericTokensCompatible` у `normalize.ts`:
+
+```ts
+// #614: цифрова частина ключа аліасу пам'яті злиття — рівно те, що normalizeName відкидає. Токени
+// відсортовані, тож порядок слів не важить; ключ порівнюється на точну рівність, без «сумісних» цифр.
+export function nameDigits(s: string): string {
+  return numericNameTokens(s).sort().join(' ');
+}
+```
+
+- [ ] **Step 4:** той самий запуск → PASS.
+- [ ] **Step 5: Mutation** — прибери `.sort()` → має впасти перший тест (`Vol 3 Batch 12` → `3 12`). Поверни.
+- [ ] **Step 6: Full gate.**
+- [ ] **Step 7: Commit** — `git add src/domain/normalize.ts src/domain/normalize.test.ts`, потім
+  `git commit -m "feat(#614): nameDigits, the digit part of a merge alias key"`.
+
+---
+
+### Task 8: цифри в ключі аліасу; аліас пише текст запиту
+
+**Files:**
+- Modify: `src/storage/schema.ts` — SQL міграції v32
+- Modify: `src/storage/beers.ts` — імпорт з `../domain/normalize`; `mergeIntoCanonical`; `AliasRow` і `loadAliases`
+- Test: `src/storage/schema.test.ts` (`describe('v32 beer_aliases (#614)')`)
+- Test: `src/storage/beers.test.ts` (блоки `#614`)
+- Test (сирі `INSERT` отримують нову колонку): `src/domain/pin-match.test.ts` (тест `#614`),
+  `src/domain/catalog-cache.test.ts` (юніт `#614 builds the alias index…` — літерал `aliasRows`)
+
+**Interfaces:**
+- Consumes: `nameDigits` (Task 7).
+- Produces:
+  - колонка `beer_aliases.name_digits TEXT NOT NULL`, `UNIQUE (normalized_brewery, normalized_name, name_digits)`;
+  - `mergeIntoCanonical(db, orphanId, canonicalId, at, aliasSource?: { brewery: string; name: string })`;
+  - `AliasRow = { beer_id; name; normalized_brewery; normalized_name; name_digits }` (Task 9 читає `name_digits`).
+
+- [ ] **Step 1: Write the failing tests**
+
+**(a) `schema.test.ts`**, `describe('v32 beer_aliases (#614)')` — заміни обидва тести:
+
+```ts
+  it('creates beer_aliases keyed by the normalized pair plus the name digits', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = (db.prepare('PRAGMA table_info(beer_aliases)').all() as { name: string }[])
+      .map((c) => c.name);
+    expect(cols).toEqual([
+      'id', 'beer_id', 'brewery', 'name', 'normalized_brewery', 'normalized_name', 'name_digits', 'created_at',
+    ]);
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+                VALUES (8, 1001, 'Trappistes Rochefort 8', 'Brasserie de Rochefort', 'trappistes rochefort', 'rochefort'),
+                       (10, 2002, 'Trappistes Rochefort 10', 'Brasserie de Rochefort', 'trappistes rochefort', 'rochefort')`).run();
+    const insert = db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+       VALUES (?, 'ROCH', ?, 'roch', 'rochefort', ?, '2026-09-14T07:13:20Z')`,
+    );
+    insert.run(8, 'Rochefort 8 IS', '8');
+    // Та сама пара з іншими цифрами — інший ключ: близнюки однієї крамниці живуть поруч.
+    insert.run(10, 'Rochefort 10 IS', '10');
+    // Той самий ключ удруге відмовляється.
+    expect(() => insert.run(10, 'Rochefort 8 IS', '8')).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it('drops a beer row\'s aliases together with the row', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+                VALUES (2815, 3548624, 'Black Bean', 'Varvar Brew', 'black bean', 'varvar brew')`).run();
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '', '2026-09-14T07:13:20Z')`,
+    ).run();
+    db.prepare('DELETE FROM beers WHERE id = 2815').run();
+    const left = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
+    expect(left.n).toBe(0);
+  });
+```
+
+**(b) `beers.test.ts`:**
+1. Імпорт нормалізації (рядок 5) доповни: `import { normalizeName, normalizeBrewery, nameDigits } from '../domain/normalize';`
+2. `type AliasRow` у блоці `#614` отримує поле `name_digits: string`; SELECT в `aliasesOf` — колонку `name_digits` після `normalized_name`.
+3. Тест `#614 mergeIntoCanonical remembers the orphan's shop pair as an alias of the canonical row` — в очікуваний об'єкт додай `name_digits: ''` після `normalized_name`.
+4. У **кожному** сирому `INSERT INTO beer_aliases` цього файлу (тести `lets a merged linked row's aliases go…`, `re-points an existing alias…`, хелпер `linkedRowWithAlias`, хелпер `canonicalWithAlias` у `loadAliases (#614)`) додай колонку `name_digits` зі значенням `''` (у цих назвах цифр немає).
+5. Тест `#614 mergeIntoCanonical writes no alias for a pair another beer row already holds (vintage twin)` **заміни цілком** на два:
+
+```ts
+test('#614 mergeIntoCanonical writes no alias for a key another beers row already holds — same pair AND same digits', () => {
+  const db = fresh();
+  const pairName = normalizeName('Trappistes Rochefort 10');
+  const pairBrewery = normalizeBrewery('Abbaye de Rochefort');
+  // Сирий INSERT: seedBeer злив би рядки з однаковою парою в один.
+  db.prepare(
+    `INSERT INTO beers (id, untappd_id, name, brewery, abv, normalized_name, normalized_brewery)
+     VALUES (10, 2002, 'Rochefort 10', 'Brasserie Rochefort', 11.3, ?, ?),
+            (11, 2010, 'Trappistes Rochefort 10', 'Abbaye de Rochefort', 11.3, ?, ?),
+            (77, NULL, 'Trappistes Rochefort 10', 'Abbaye de Rochefort', 11.3, ?, ?)`,
+  ).run(
+    normalizeName('Rochefort 10'), normalizeBrewery('Brasserie Rochefort'),
+    pairName, pairBrewery,
+    pairName, pairBrewery,
+  );
+
+  mergeIntoCanonical(db, 77, 10, '2026-09-14T00:03:58Z');
+
+  // Рядок 11 сам відповідає картці з цим ключем; аліас дав би /match другу відповідь.
+  const n = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
+  expect(n.n).toBe(0);
+});
+
+test('#614 mergeIntoCanonical is not blocked by a twin that differs only in digits', () => {
+  const db = fresh();
+  // Без цієї передумови тест нічого б не доводив: пара близнюків однакова.
+  expect(normalizeName('Trappistes Rochefort 10')).toBe(normalizeName('Trappistes Rochefort 8'));
+  const pairName = normalizeName('Trappistes Rochefort 10');
+  const pairBrewery = normalizeBrewery('Abbaye de Rochefort');
+  db.prepare(
+    `INSERT INTO beers (id, untappd_id, name, brewery, abv, normalized_name, normalized_brewery)
+     VALUES (10, 2002, 'Rochefort 10', 'Brasserie Rochefort', 11.3, ?, ?),
+            (8, 1001, 'Trappistes Rochefort 8', 'Abbaye de Rochefort', 9.2, ?, ?),
+            (77, NULL, 'Trappistes Rochefort 10', 'Abbaye de Rochefort', 11.3, ?, ?)`,
+  ).run(
+    normalizeName('Rochefort 10'), normalizeBrewery('Brasserie Rochefort'),
+    pairName, pairBrewery,
+    pairName, pairBrewery,
+  );
+
+  mergeIntoCanonical(db, 77, 10, '2026-09-14T00:03:58Z');
+
+  expect(aliasesOf(db, 10).map((a) => [a.name, a.name_digits])).toEqual([['Trappistes Rochefort 10', '10']]);
+});
+```
+
+6. Після тесту `#614 mergeIntoCanonical re-points an existing alias of the same pair to the newest merge target` додай:
+
+```ts
+test('#614 mergeIntoCanonical writes the alias from the searched text, not from an orphan another card created', () => {
+  const db = fresh();
+  const g7 = seedBeer(db, {
+    untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
+    style: 'Stout', abv: 7, rating_global: 3.9,
+    normalized_name: normalizeName('Ґвара Series Seven'), normalized_brewery: normalizeBrewery('Gvara Brewery'),
+  });
+  // Сирота картки «#6»; ensureBeerRow цифр не бачить і віддає її картці «#7», чий пошук знайшов bid 4007.
+  const orphanId = seedBeer(db, {
+    name: 'Ґвара #6', brewery: 'Ґвара', style: null, abv: 7, rating_global: null,
+    normalized_name: normalizeName('Ґвара #6'), normalized_brewery: normalizeBrewery('Ґвара'),
+  });
+
+  mergeIntoCanonical(db, orphanId, g7, '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' });
+
+  expect(aliasesOf(db, g7).map((a) => [a.brewery, a.name, a.name_digits])).toEqual([['Ґвара', 'Ґвара #7', '7']]);
+});
+
+test('#614 twin cards of one shop keep one alias each', () => {
+  const db = fresh();
+  const pairName = normalizeName('Trappistes Rochefort 8');
+  const pairBrewery = normalizeBrewery('Brasserie de Rochefort');
+  db.prepare(
+    `INSERT INTO beers (id, untappd_id, name, brewery, abv, normalized_name, normalized_brewery)
+     VALUES (8, 1001, 'Trappistes Rochefort 8', 'Brasserie de Rochefort', 9.2, ?, ?),
+            (10, 2002, 'Trappistes Rochefort 10', 'Brasserie de Rochefort', 11.3, ?, ?)`,
+  ).run(pairName, pairBrewery, pairName, pairBrewery);
+  const card8 = seedBeer(db, {
+    name: 'Rochefort 8 IS', brewery: 'ROCH', style: null, abv: 9.2, rating_global: null,
+    normalized_name: normalizeName('Rochefort 8 IS'), normalized_brewery: normalizeBrewery('ROCH'),
+  });
+  mergeIntoCanonical(db, card8, 8, '2026-09-14T07:10:00Z');
+  const card10 = seedBeer(db, {
+    name: 'Rochefort 10 IS', brewery: 'ROCH', style: null, abv: 11.3, rating_global: null,
+    normalized_name: normalizeName('Rochefort 10 IS'), normalized_brewery: normalizeBrewery('ROCH'),
+  });
+  mergeIntoCanonical(db, card10, 10, '2026-09-14T07:11:00Z');
+
+  const rows = db.prepare('SELECT beer_id, name_digits FROM beer_aliases ORDER BY beer_id').all();
+  expect(rows).toEqual([{ beer_id: 8, name_digits: '8' }, { beer_id: 10, name_digits: '10' }]);
+});
+```
+
+7. У `describe('loadAliases (#614)')`: очікуваний об'єкт першого тесту доповни `name_digits: ''` після
+   `normalized_name`. Після тесту `skips an alias whose pair a beers row now holds — the row wins` додай:
+
+```ts
+  test('keeps an alias when the pair holder is a twin with different digits', () => {
+    const db = fresh();
+    const canonicalId = seedBeer(db, {
+      untappd_id: 1001, name: 'Trappistes Rochefort 8', brewery: 'Brasserie de Rochefort',
+      style: 'Quadrupel', abv: 9.2, rating_global: 3.95,
+      normalized_name: normalizeName('Trappistes Rochefort 8'), normalized_brewery: normalizeBrewery('Brasserie de Rochefort'),
+    });
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+       VALUES (?, 'ROCH', 'Rochefort 8 IS', ?, ?, ?, '2026-09-14T07:10:00Z')`,
+    ).run(canonicalId, normalizeBrewery('ROCH'), normalizeName('Rochefort 8 IS'), nameDigits('Rochefort 8 IS'));
+    // Сирота картки-близнюка «10» з тією самою парою.
+    seedBeer(db, {
+      name: 'Rochefort 10 IS', brewery: 'ROCH', style: null, abv: 11.3, rating_global: null,
+      normalized_name: normalizeName('Rochefort 10 IS'), normalized_brewery: normalizeBrewery('ROCH'),
+    });
+
+    expect(loadAliases(db).map((a) => [a.beer_id, a.name_digits])).toEqual([[canonicalId, '8']]);
+  });
+```
+
+**(c) `pin-match.test.ts`** — у тесті `#614` сирий `INSERT` отримує колонку `name_digits` зі значенням `''`.
+
+**(d) `catalog-cache.test.ts`** — у юніті `#614 builds the alias index…` літерал `aliasRows` отримує `name_digits: ''`.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npx vitest run src/domain/match-list.test.ts -t "#614"`
-Expected: FAIL на імпорті (`buildAliasIndex` не експортується / `is not a function`).
+Run: `npx vitest run src/storage/schema.test.ts src/storage/beers.test.ts src/domain/pin-match.test.ts src/domain/catalog-cache.test.ts`
+Expected: FAIL — `table beer_aliases has no column named name_digits`; колонки v32 без `name_digits`.
 
 - [ ] **Step 3: Implement**
 
-У `src/domain/match-list.ts` після імпорту з `./matcher`:
+**(a) `schema.ts`, v32** — у SQL після рядка `normalized_name    TEXT NOT NULL,` додай
+`        name_digits        TEXT NOT NULL,`; рядок `UNIQUE (normalized_brewery, normalized_name)`
+заміни на `UNIQUE (normalized_brewery, normalized_name, name_digits)`. Останній рядок коментаря
+міграції допиши:
 
 ```ts
-import { normalizeBrewery, normalizeName, numericTokensCompatible } from './normalize';
+    // name_digits — числові токени назви (nameDigits): normalizeName їх відкидає, а «Rochefort 8» і
+    // «Rochefort 10» — різні пива, тож без них у ключі аліас однієї картки відповідав би за іншу.
 ```
 
-Після `interface MatchedBeer` додай:
+**(b) `beers.ts`** — імпорт у рядку 3:
 
 ```ts
-/** #614: аліас із пам'яті злиття — нормалізована пара картки крамниці → канонічний рядок. */
-export interface AliasSource {
+import { nameDigits, normalizeBrewery, normalizeName, numericTokensCompatible } from '../domain/normalize';
+```
+
+Сигнатура: `export function mergeIntoCanonical(db: DB, orphanId: number, canonicalId: number, at: string, aliasSource?: { brewery: string; name: string }): void {`
+
+Усередині транзакції заміни блок від `const orphan = db` до закриваючої `}` блоку `if (orphan) { … }` на:
+
+```ts
+    const orphan = db
+      .prepare('SELECT brewery, name FROM beers WHERE id = ?')
+      .get(orphanId) as { brewery: string; name: string } | undefined;
+    // #614: текст аліасу — той, який шукав виклик (applyLookupOutcome передає свій input). ensureBeerRow
+    // цифр не бачить, тож сирота могла прийти від іншої картки («Ґвара #6» для запиту «Ґвара #7»), і її
+    // текст записав би аліас на пиво, якого пошук для неї не доводив.
+    const source = aliasSource ?? orphan;
+    if (source) {
+      const normalizedBrewery = normalizeBrewery(source.brewery);
+      const normalizedName = normalizeName(source.name);
+      const digits = nameDigits(source.name);
+      // Ключ, який уже тримає інший рядок beers (та сама пара і ті самі цифри), аліасом не робимо: той
+      // рядок сам відповідає цій картці. Близнюк з іншими цифрами («Rochefort 8» для «Rochefort 10»)
+      // запис не блокує — ключ аліасу від нього відрізняється.
+      const holders = db
+        .prepare('SELECT name FROM beers WHERE normalized_brewery = ? AND normalized_name = ? AND id <> ?')
+        .all(normalizedBrewery, normalizedName, orphanId) as { name: string }[];
+      if (!holders.some((h) => nameDigits(h.name) === digits)) {
+        // Той самий ключ уже вказує на інший рядок → переходить на новий: найсвіжіше злиття має
+        // найсвіжіший доказ.
+        db.prepare(
+          `INSERT INTO beer_aliases
+             (beer_id, brewery, name, normalized_brewery, normalized_name, name_digits, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(normalized_brewery, normalized_name, name_digits) DO UPDATE SET
+             beer_id = excluded.beer_id,
+             brewery = excluded.brewery,
+             name = excluded.name,
+             created_at = excluded.created_at`,
+        ).run(canonicalId, source.brewery, source.name, normalizedBrewery, normalizedName, digits, at);
+      }
+    }
+```
+
+`AliasRow` і `loadAliases` заміни на:
+
+```ts
+// #614: аліаси пам'яті злиття для перевірки перед матчером (matchBeerList). Не читаються:
+// - аліас рядка без untappd_id — та сама жива перевірка, що й isRememberedMerge (#366);
+// - аліас, чий ключ тримає рядок beers — та сама нормалізована пара І ті самі цифри назви (пізніша
+//   сирота кранів; сирота, яку репарація #384 зробила рядком нового bid): рядок важить більше.
+//   SQL цифр не рахує, тож назви таких рядків приходять LEFT JOIN, а порівнює nameDigits.
+export interface AliasRow {
   beer_id: number;
-  /** Сира назва картки: числові токени, які normalizeName відкидає, порівнюються лише з неї. */
   name: string;
   normalized_brewery: string;
   normalized_name: string;
+  name_digits: string;
 }
 
-export type AliasIndex = ReadonlyMap<string, { beerId: number; name: string }>;
+export function loadAliases(db: DB): AliasRow[] {
+  const rows = db
+    .prepare(
+      `SELECT a.id AS alias_id, a.beer_id, a.name, a.normalized_brewery, a.normalized_name, a.name_digits,
+              x.name AS holder_name
+         FROM beer_aliases a
+         JOIN beers b ON b.id = a.beer_id
+         LEFT JOIN beers x
+           ON x.normalized_brewery = a.normalized_brewery
+          AND x.normalized_name = a.normalized_name
+          AND x.id <> a.beer_id
+        WHERE b.untappd_id IS NOT NULL
+        ORDER BY a.id`,
+    )
+    .all() as (AliasRow & { alias_id: number; holder_name: string | null })[];
+  const held = new Set(
+    rows
+      .filter((r) => r.holder_name !== null && nameDigits(r.holder_name) === r.name_digits)
+      .map((r) => r.alias_id),
+  );
+  const out = new Map<number, AliasRow>();
+  for (const r of rows) {
+    if (held.has(r.alias_id) || out.has(r.alias_id)) continue;
+    out.set(r.alias_id, {
+      beer_id: r.beer_id, name: r.name,
+      normalized_brewery: r.normalized_brewery, normalized_name: r.normalized_name, name_digits: r.name_digits,
+    });
+  }
+  return [...out.values()];
+}
+```
+
+- [ ] **Step 4:** `npx vitest run src/storage/schema.test.ts src/storage/beers.test.ts src/domain/pin-match.test.ts src/domain/catalog-cache.test.ts src/domain/lookup-outcome.test.ts src/api/routes/match.test.ts src/api/routes/mcp.test.ts` → PASS.
+
+- [ ] **Step 5: Mutations** (кожну поверни)
+1. `UNIQUE (…, name_digits)` → `UNIQUE (normalized_brewery, normalized_name)` у v32 → має впасти `creates beer_aliases keyed by…` (другий `insert` відмовить) і `twin cards of one shop keep one alias each` (ON CONFLICT не знайде обмеження).
+2. `const source = aliasSource ?? orphan;` → `const source = orphan;` → має впасти `writes the alias from the searched text…`.
+3. `nameDigits(h.name) === digits` → `true` → має впасти `is not blocked by a twin that differs only in digits`.
+4. Прибери `if (!holders.some(…))` (лиши сам `INSERT`) → має впасти `writes no alias for a key another beers row already holds…`.
+5. У `loadAliases` фільтр `held` → `r.holder_name !== null` (без порівняння цифр) → має впасти `keeps an alias when the pair holder is a twin with different digits`.
+
+- [ ] **Step 6: Full gate.** Перевір файли на NUL-байти.
+- [ ] **Step 7: Commit** — прості команди `git add` (усі шість файлів) і
+  `git commit -m "fix(#614): key merge aliases by digits too and record the searched text"`.
+
+---
+
+### Task 9: ключ аліасу з цифрами в `matchBeerList`, рівність точна
+
+**Files:**
+- Modify: `src/domain/match-list.ts`
+- Test: `src/domain/match-list.test.ts` (блок `matchBeerList aliases (#614)`), `src/domain/catalog-cache.test.ts` (очікування юніта `#614 builds the alias index…`)
+
+**Interfaces:**
+- Consumes: `nameDigits` (Task 7), `AliasRow.name_digits` (Task 8).
+- Produces: `AliasSource = { beer_id; normalized_brewery; normalized_name; name_digits }`,
+  `AliasIndex = ReadonlyMap<string, number>` (ключ → `beerId`).
+
+- [ ] **Step 1: Write the failing tests**
+
+У `match-list.test.ts` імпорт нормалізації: `import { nameDigits, normalizeBrewery, normalizeName } from './normalize';`
+
+У блоці `matchBeerList aliases (#614)` хелпер `alias` заміни на:
+
+```ts
+  const alias = (beerId: number, brewery: string, name: string) => ({
+    beer_id: beerId,
+    normalized_brewery: normalizeBrewery(brewery),
+    normalized_name: normalizeName(name),
+    name_digits: nameDigits(name),
+  });
+```
+
+У двох тестах цифр (`a card with different digits never rides…`, `an alias without digits never
+claims…`) після `expect(r.user_rating).toBeNull();` додай
+`expect(r.source === 'exact' && r.matched_beer?.id === 8).toBe(false);`. У кінець блоку додай:
+
+```ts
+  it('a card with a year never rides an alias without one onto another vintage', async () => {
+    const mjod: CatalogBeerWithRating[] = [
+      { id: 21, brewery: 'Varvar Brew', name: 'Mjød (2021)', abv: 13, rating_global: 4.1, untappd_id: 3001 },
+      { id: 23, brewery: 'Varvar Brew', name: 'Mjød (2023)', abv: 13, rating_global: 4.2, untappd_id: 3003 },
+    ];
+    const { prepared, byId } = prep(mjod);
+    const aliases = buildAliasIndex([alias(21, 'VARVAR', 'MJØD IS')]);
+    const [r] = (await matchBeerList(
+      prepared, byId, new Set([21]), new Map([[21, 4.0]]),
+      [{ brewery: 'VARVAR', name: 'MJØD IS 2023' }],
+      { ...noYield, aliases },
+    )).results;
+    expect(r.is_drunk).toBe(false);
+    expect(r.source === 'exact' && r.matched_beer?.id === 21).toBe(false);
+  });
+```
+
+У `catalog-cache.test.ts`, юніт `#614 builds the alias index…`: очікування
+`expect([...aliases.values()]).toEqual([{ beerId: 1, name: 'Atak Chmielu IPA' }]);` заміни на
+`expect([...aliases.values()]).toEqual([1]);`.
+
+- [ ] **Step 2:** `npx vitest run src/domain/match-list.test.ts src/domain/catalog-cache.test.ts` → FAIL: новий тест року (`is_drunk: true` на 21) і юніт кешу (значення індексу — об'єкт, не число).
+
+- [ ] **Step 3: Implement** — у `match-list.ts`:
+
+Імпорт: `import { nameDigits, normalizeBrewery, normalizeName } from './normalize';`
+
+Блок від `/** #614: аліас із пам'яті злиття …` до кінця функції `aliasTarget` заміни на:
+
+```ts
+/** #614: аліас із пам'яті злиття — ключ картки крамниці → канонічний рядок. */
+export interface AliasSource {
+  beer_id: number;
+  normalized_brewery: string;
+  normalized_name: string;
+  /** nameDigits(назва): числові токени, які normalizeName відкидає. */
+  name_digits: string;
+}
+
+export type AliasIndex = ReadonlyMap<string, number>;
 
 // Роздільник `|`, а не пробіл: нормалізовані рядки складаються з літер, цифр і пробілів, тож
 // пробіл склеїв би «a b» + «c» і «a» + «b c» в один ключ.
-const aliasKey = (normalizedBrewery: string, normalizedName: string): string =>
-  `${normalizedBrewery}|${normalizedName}`;
+const aliasKey = (normalizedBrewery: string, normalizedName: string, digits: string): string =>
+  `${normalizedBrewery}|${normalizedName}|${digits}`;
 
 export function buildAliasIndex(rows: readonly AliasSource[]): AliasIndex {
-  return new Map(rows.map((r) => [
-    aliasKey(r.normalized_brewery, r.normalized_name),
-    { beerId: r.beer_id, name: r.name },
-  ]));
+  return new Map(rows.map((r) => [aliasKey(r.normalized_brewery, r.normalized_name, r.name_digits), r.beer_id]));
 }
 
-// #614: ключ — ті самі normalizeBrewery/normalizeName, якими ensureBeerRow рахував пару сироти з
-// того самого сирого тексту картки. Цифри нормалізація відкидає, тож аліас картки «…8» мав би той
-// самий ключ, що й картка «…10»; numericTokensCompatible (#617) не пускає таку картку на чужий
-// аліас. Рядок, якого немає в цьому знімку каталогу, — не влучання.
+// #614: ключ — ті самі normalizeBrewery/normalizeName, якими ensureBeerRow рахує пару з сирого тексту
+// картки, плюс nameDigits: нормалізація відкидає цифри, а «…8» і «…10», «Mjød» і «Mjød 2023» — різні
+// пива. Рівність ключа точна, жодних «сумісних» цифр. Рядок, якого немає в цьому знімку каталогу, —
+// не влучання.
 function aliasTarget(
   aliases: AliasIndex | undefined,
   item: MatchInput,
   byId: Map<number, CatalogBeerWithRating>,
 ): CatalogBeerWithRating | null {
   if (!aliases || aliases.size === 0) return null;
-  const hit = aliases.get(aliasKey(normalizeBrewery(item.brewery), normalizeName(item.name)));
-  if (!hit || !numericTokensCompatible(item.name, hit.name)) return null;
-  return byId.get(hit.beerId) ?? null;
+  const beerId = aliases.get(aliasKey(normalizeBrewery(item.brewery), normalizeName(item.name), nameDigits(item.name)));
+  return beerId === undefined ? null : (byId.get(beerId) ?? null);
 }
-
-const toMatchedBeer = (beer: CatalogBeerWithRating): MatchedBeer => ({
-  id: beer.id,
-  name: beer.name,
-  brewery: beer.brewery,
-  rating_global: beer.rating_global,
-  untappd_id: beer.untappd_id ?? null,
-});
 ```
 
-У `interface MatchListOptions` додай:
-
-```ts
-  // #614: пам'ять злиття. Перевіряється до матчера; без неї — поведінка як до #614.
-  aliases?: AliasIndex;
-```
-
-У циклі `matchBeerList` одразу після `const raw = { brewery: item.brewery, name: item.name };`:
-
-```ts
-    const viaAlias = aliasTarget(opts.aliases, item, byId);
-    if (viaAlias) {
-      out.push({
-        raw,
-        matched_beer: toMatchedBeer(viaAlias),
-        is_drunk: drunkSet.has(viaAlias.id),
-        drunk_uncertain: false,
-        user_rating: ratingByBeerId.get(viaAlias.id) ?? null,
-        source: 'exact',
-        searched: true,
-      });
-      await yield_();
-      continue;
-    }
-```
-
-І в наявній гілці збігу заміни об'єкт `matched_beer: { id: beer.id, … }` на
-`matched_beer: toMatchedBeer(beer),`.
-
-- [ ] **Step 4: Run tests** — `npx vitest run src/domain/match-list.test.ts` → PASS.
-
+- [ ] **Step 4:** `npx vitest run src/domain/match-list.test.ts src/domain/catalog-cache.test.ts src/api/routes/match.test.ts src/api/routes/mcp.test.ts` → PASS.
 - [ ] **Step 5: Mutations** (кожну поверни)
-
-1. Прибери блок `if (viaAlias) { … }` → має впасти `a merged shop pair matches…` (матчер дає
-   `fuzzy`, без ✅).
-2. Прибери `|| !numericTokensCompatible(item.name, hit.name)` → мають упасти обидва тести цифр.
-
-- [ ] **Step 6: Full gate** — `npm test` і `npm run typecheck`.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/domain/match-list.ts src/domain/match-list.test.ts
-git commit -m "feat(#614): check merge aliases before the matcher, digits must agree"
-```
+1. `nameDigits(item.name)` → `''` в `aliasTarget` → мають упасти тести цифр і року.
+2. Прибери блок `if (viaAlias) { … }` → має впасти `a merged shop pair matches…`.
+- [ ] **Step 6: Full gate.** Перевір `match-list.ts` на NUL-байти.
+- [ ] **Step 7: Commit** — `git add src/domain/match-list.ts src/domain/match-list.test.ts src/domain/catalog-cache.test.ts`, потім
+  `git commit -m "fix(#614): match an alias only on an exact key that includes the name digits"`.
 
 ---
 
-### Task 5: кеш каталогу будує індекс аліасів; каталог матчера без аліасів
+### Task 10: `applyLookupOutcome` передає текст запиту в злиття
 
 **Files:**
-- Modify: `src/storage/beers.ts` — заміни `loadAliasCatalog` на `AliasRow` + `loadAliases`
-- Modify: `src/domain/catalog-cache.ts`
-- Test: `src/storage/beers.test.ts` (блок `loadAliasCatalog (#614)`), `src/domain/catalog-cache.test.ts`
-- Test stubs: `src/api/routes/match.test.ts:68`, `src/api/mcp/match-tool.test.ts:18`
+- Modify: `src/domain/lookup-outcome.ts` (виклик `mergeIntoCanonical`)
+- Test: `src/domain/lookup-outcome.test.ts` (`describe('applyLookupOutcome merge')`)
 
-**Interfaces:**
-- Consumes: `buildAliasIndex`, `AliasIndex` (Task 4).
-- Produces:
-  - `export interface AliasRow { beer_id: number; name: string; normalized_brewery: string; normalized_name: string }` (структурно = `AliasSource`)
-  - `export function loadAliases(db: DB): AliasRow[]`
-  - `CachedCatalog.aliases: AliasIndex` (обов'язкове поле)
-  - `CatalogCacheOptions.loadAliases?: () => AliasRow[]`
-
-- [ ] **Step 1: Write the failing tests**
-
-**(a)** У `src/storage/beers.test.ts` заміни рядок `import { loadAliasCatalog } from './beers';` на
-`import { loadAliases } from './beers';` і **цілком** заміни `describe('loadAliasCatalog (#614)', …)`:
+- [ ] **Step 1: Write the failing test** — у кінець `describe('applyLookupOutcome merge', …)`:
 
 ```ts
-describe('loadAliases (#614)', () => {
-  function canonicalWithAlias(db: ReturnType<typeof fresh>, untappdId: number | null) {
-    const canonicalId = seedBeer(db, {
-      untappd_id: untappdId, name: 'Black Bean', brewery: 'Varvar Brew',
-      style: 'Stout - Imperial / Double Pastry', abv: 11, rating_global: 4.14,
-      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+  test('#614 records the alias from the text the caller searched, not from an orphan another card created', () => {
+    const { db, log } = fresh();
+    const g7 = seedBeer(db, {
+      untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
+      style: 'Stout', abv: 7, rating_global: 3.9,
+      normalized_name: normalizeName('Ґвара Series Seven'), normalized_brewery: normalizeBrewery('Gvara Brewery'),
     });
-    db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
-    ).run(canonicalId, normalizeBrewery('VARVAR'), normalizeName('BLACK BEAN IS'));
-    return canonicalId;
-  }
-
-  test('returns each alias of a linked row with its raw name and normalized pair', () => {
-    const db = fresh();
-    const canonicalId = canonicalWithAlias(db, 3548624);
-    expect(loadAliases(db)).toEqual([{
-      beer_id: canonicalId, name: 'BLACK BEAN IS',
-      normalized_brewery: normalizeBrewery('VARVAR'), normalized_name: normalizeName('BLACK BEAN IS'),
-    }]);
-  });
-
-  test('skips an alias whose canonical row has no untappd_id', () => {
-    const db = fresh();
-    canonicalWithAlias(db, null);
-    expect(loadAliases(db)).toEqual([]);
-  });
-
-  test('skips an alias whose pair a beers row now holds — the row wins', () => {
-    const db = fresh();
-    canonicalWithAlias(db, 3548624);
-    // Пізніша сирота з тією самою парою (кран; сирота, яку репарація #384 зробила рядком нового bid).
-    seedBeer(db, {
-      name: 'BLACK BEAN IS', brewery: 'VARVAR', style: null, abv: 11, rating_global: null,
-      normalized_name: normalizeName('BLACK BEAN IS'), normalized_brewery: normalizeBrewery('VARVAR'),
-    });
-    expect(loadAliases(db)).toEqual([]);
-  });
-});
-```
-
-**(b)** У `src/domain/catalog-cache.test.ts` **цілком** заміни тест
-`#614 matches aliases but keeps byId to the real rows, so the answer shows the canonical name` на:
-
-```ts
-  it('#614 builds the alias index from loadAliases and keeps aliases out of the matcher catalog', async () => {
-    const aliasRows = [
-      { beer_id: 1, name: 'Atak Chmielu IPA', normalized_brewery: 'pinta', normalized_name: 'atak chmielu ipa' },
-    ];
-    const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliasRows });
-    const { prepared, byId, aliases } = await cache.get();
-    expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual(['1 Atak Chmielu', '2 Buty Skejta']);
-    expect(byId.size).toBe(2);
-    expect([...aliases.values()]).toEqual([{ beerId: 1, name: 'Atak Chmielu IPA' }]);
-  });
-```
-
-У тому самому файлі в інтеграційному тесті `after a merge the same shop card matches the canonical
-row exactly, with the drinker's status` заміни все від рядка `// Контроль на тій самій БД без
-аліасів…` до кінця тесту на:
-
-```ts
-    const { prepared, byId, aliases } = await createCatalogCache(db).get();
-
-    // Контроль: без аліасів картка НЕ дає точного збігу — інакше тест нічого б не доводив
-    // (прод-реплей 2026-09-14: null).
-    const { results: [control] } = await matchBeerList(prepared, byId, drunk, ratings, [card], noYield);
-    expect(control.source).not.toBe('exact');
-    expect(control.is_drunk).toBe(false);
-
-    const { results: [r] } = await matchBeerList(prepared, byId, drunk, ratings, [card], { ...noYield, aliases });
-    expect(r.matched_beer).toEqual({
-      id: canonicalId, name: 'Black Bean', brewery: 'Varvar Brew', rating_global: 4.14, untappd_id: 3548624,
-    });
-    expect(r.source).toBe('exact');
-    expect(r.is_drunk).toBe(true);
-    expect(r.user_rating).toBe(4.5);
-  });
-```
-
-**(c)** Заглушки кешу отримують обов'язкове поле:
-- `src/api/routes/match.test.ts:68` —
-  `get: async () => ({ prepared: prepareCatalog([ghost]), byId: new Map([[777, ghost]]), aliases: new Map() }),`
-- `src/api/mcp/match-tool.test.ts:18` —
-  `get: async () => ({ prepared: prepareCatalog(rows), byId: new Map(rows.map((r) => [r.id, r])), aliases: new Map() }),`
-
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `npx vitest run src/storage/beers.test.ts src/domain/catalog-cache.test.ts`
-Expected: FAIL — `loadAliases is not a function`; `aliases` undefined у кеші; інтеграційний тест
-(у `prepared` ще є аліаси, тож контроль дає `exact`).
-
-- [ ] **Step 3: Implement**
-
-**(a)** `src/storage/beers.ts` — заміни функцію `loadAliasCatalog` разом з її коментарем на:
-
-```ts
-// #614: аліаси пам'яті злиття для перевірки перед матчером (matchBeerList). Не читаються:
-// - аліас рядка без untappd_id — та сама жива перевірка, що й isRememberedMerge (#366);
-// - аліас, чию нормалізовану пару тепер тримає рядок beers (пізніша сирота кранів, сирота, яку
-//   репарація #384 зробила рядком нового bid) — рядок важить більше, картку відповідає матчер.
-export interface AliasRow {
-  beer_id: number;
-  name: string;
-  normalized_brewery: string;
-  normalized_name: string;
-}
-
-export function loadAliases(db: DB): AliasRow[] {
-  return db
-    .prepare(
-      `SELECT a.beer_id, a.name, a.normalized_brewery, a.normalized_name
-         FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
-        WHERE b.untappd_id IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM beers x
-             WHERE x.normalized_brewery = a.normalized_brewery
-               AND x.normalized_name = a.normalized_name
-               AND x.id <> a.beer_id)
-        ORDER BY a.id`,
-    )
-    .all() as AliasRow[];
-}
-```
-
-**(b)** `src/domain/catalog-cache.ts`:
-- імпорт з `'../storage/beers'`: `import { loadAliases, loadCatalog, type AliasRow } from '../storage/beers';`
-- імпорт з `'./match-list'`: `import { buildAliasIndex, yieldToEventLoop, type AliasIndex, type CatalogBeerWithRating } from './match-list';`
-- `interface CachedCatalog` — додай поле:
-
-  ```ts
-    // #614: пам'ять злиття; matchBeerList перевіряє її до матчера.
-    aliases: AliasIndex;
-  ```
-- у `CatalogCacheOptions` рядок `loadAliases?: …` заміни на
-  `loadAliases?: () => AliasRow[];                                  // default: loadAliases(db) (#614)`
-- у `createCatalogCache` рядок `const loadAliases = opts.loadAliases ?? (() => loadAliasCatalog(db));`
-  заміни на `const loadAliasRows = opts.loadAliases ?? (() => loadAliases(db));`
-- у `rebuild` заміни блок від `const rows = load();` до `const value: CachedCatalog = { prepared, byId };` на:
-
-  ```ts
-      const rows = load();
-      const prepared = await prepare(rows);
-      const byId = new Map(rows.map((r) => [r.id, r]));
-      // #614: аліаси — окремий індекс, а не записи каталогу матчера: matchBeerList перевіряє їх до
-      // матчера з правилом цифр, тож матчер не бачить дублікатів id і не звужує пул броварні.
-      const aliases = buildAliasIndex(loadAliasRows());
-      const value: CachedCatalog = { prepared, byId, aliases };
-  ```
-
-- [ ] **Step 4: Run tests**
-
-Run: `npx vitest run src/storage/beers.test.ts src/domain/catalog-cache.test.ts src/api/routes/match.test.ts src/api/mcp/match-tool.test.ts src/api/routes/mcp.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Mutations** (кожну поверни)
-
-1. Прибери `WHERE b.untappd_id IS NOT NULL` (лиши `AND NOT EXISTS` як `WHERE NOT EXISTS`) → має
-   впасти `skips an alias whose canonical row has no untappd_id`.
-2. Прибери блок `AND NOT EXISTS (…)` → має впасти `skips an alias whose pair a beers row now holds`.
-3. `buildAliasIndex(loadAliasRows())` → `buildAliasIndex([])` → мають упасти `#614 builds the alias
-   index…` та інтеграційний тест.
-
-- [ ] **Step 6: Full gate** — `npm test` і `npm run typecheck`.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/storage/beers.ts src/storage/beers.test.ts src/domain/catalog-cache.ts src/domain/catalog-cache.test.ts src/api/routes/match.test.ts src/api/mcp/match-tool.test.ts
-git commit -m "fix(#614): keep merge aliases out of the matcher catalog, a beers row outranks an alias"
-```
-
----
-
-### Task 6: `/match` і MCP передають аліаси
-
-**Files:**
-- Modify: `src/api/routes/match.ts` (рядки ~46, ~53), `src/api/mcp/match-tool.ts` (рядки ~79, ~82)
-- Test: `src/api/routes/match.test.ts`, `src/api/routes/mcp.test.ts`
-
-**Interfaces:**
-- Consumes: `CachedCatalog.aliases` (Task 5), `MatchListOptions.aliases` (Task 4).
-- Produces: нічого нового.
-
-- [ ] **Step 1: Write the failing tests**
-
-**(a)** `src/api/routes/match.test.ts`:
-- додай імпорт `import { mergeIntoCanonical } from '../../storage/beers';`
-- у `setup` заміни `return { appAs, appAnon, panIpani, warn };` на
-  `return { appAs, appAnon, panIpani, warn, db };`
-- після тесту `isolates users — user 2 has not drunk the beer` додай:
-
-```ts
-  it('#614 answers a merged shop card exactly, with the caller\'s drunk status and rating', async () => {
-    const { appAs, panIpani, db } = setup();
+    // Сирота картки «#6»; ensureBeerRow цифр не бачить і віддає її запиту картки «#7».
     const orphanId = seedBeer(db, {
-      name: 'PAN IPANI Tropical Edition', brewery: 'Browar Trzech Kumpli',
-      style: 'IPA', abv: 6.0, rating_global: null,
-      normalized_name: normalizeName('PAN IPANI Tropical Edition'),
-      normalized_brewery: normalizeBrewery('Browar Trzech Kumpli'),
+      name: 'Ґвара #6', brewery: 'Ґвара', style: null, abv: 7, rating_global: null,
+      normalized_name: normalizeName('Ґвара #6'), normalized_brewery: normalizeBrewery('Ґвара'),
     });
-    mergeIntoCanonical(db, orphanId, panIpani, '2026-09-14T07:13:20Z');
-    // Передумова: злиття справді записало аліас — інакше тест нічого не доводить.
-    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
 
-    const res = await post(appAs(1), {
-      beers: [{ brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' }],
-    });
-    const body = await res.json();
-    expect(body.results[0]).toMatchObject({
-      matched_beer: { id: panIpani, name: 'Pan IPAni', rating_global: 3.85 },
-      source: 'exact',
-      is_drunk: true,
-      user_rating: 4.0,
-    });
+    const kind = applyLookupOutcome(
+      { db, log }, orphanId,
+      { kind: 'matched', result: cand({ bid: 4007 }) },
+      '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' },
+    );
+
+    expect(kind).toBe('merged');
+    expect(db.prepare('SELECT beer_id, name, name_digits FROM beer_aliases').all())
+      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_digits: '7' }]);
+    db.close();
   });
 ```
 
-**(b)** `src/api/routes/mcp.test.ts`:
-- додай імпорт `import { mergeIntoCanonical } from '../../storage/beers';`
-- після тесту `calls match_beers and returns structured results` додай:
+- [ ] **Step 2:** `npx vitest run src/domain/lookup-outcome.test.ts -t "#614"` → FAIL (аліас `Ґвара #6`, digits `6`).
+- [ ] **Step 3: Implement** — у `lookup-outcome.ts`
+  `mergeIntoCanonical(deps.db, beerId, canonical.id, nowIso);` →
+  `mergeIntoCanonical(deps.db, beerId, canonical.id, nowIso, input);` і над ним коментар:
 
 ```ts
-  it('#614 match_beers answers a merged shop card exactly', async () => {
-    const { app, db, panIpani } = setup();
-    const orphanId = seedBeer(db, {
-      name: 'PAN IPANI Tropical Edition', brewery: 'Browar Trzech Kumpli',
-      style: 'IPA', abv: 6.0, rating_global: null,
-      normalized_name: normalizeName('PAN IPANI Tropical Edition'),
-      normalized_brewery: normalizeBrewery('Browar Trzech Kumpli'),
-    });
-    mergeIntoCanonical(db, orphanId, panIpani, '2026-09-14T07:13:20Z');
-    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
-
-    await rpc(app, INIT);
-    const res = await rpc(app, {
-      jsonrpc: '2.0', id: 3, method: 'tools/call',
-      params: { name: 'match_beers', arguments: { beers: [
-        { brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' },
-      ] } },
-    });
-    const body = await res.json() as {
-      result: { structuredContent: { results: { status: string; confidence: string }[] } };
-    };
-    expect(body.result.structuredContent.results[0]).toMatchObject({ status: 'drunk', confidence: 'exact' });
-  });
+          // #614: input — текст, який шукав цей виклик; аліас пам'яті злиття пишеться з нього, а не з
+          // рядка-сироти, який могла створити інша картка з тією самою парою без цифр.
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
-
-Run: `npx vitest run src/api/routes/match.test.ts src/api/routes/mcp.test.ts -t "#614"`
-Expected: FAIL в обох — без передачі `aliases` матчер не дає `exact` зі статусом «пив». Якщо
-передумова `{ n: 1 }` падає (нормалізація зробила пару рівною канонічній), заміни назву картки на
-іншу, чия нормалізована пара відрізняється від `Trzech Kumpli / Pan IPAni`, і назви заміну у звіті.
-
-- [ ] **Step 3: Implement**
-
-`src/api/routes/match.ts`:
-
-```ts
-    const { prepared, byId, aliases } = await cache.get();
-```
-
-```ts
-    const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
-```
-
-`src/api/mcp/match-tool.ts`:
-
-```ts
-  const { prepared, byId, aliases } = await catalog.get();
-```
-
-```ts
-  const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
-```
-
-- [ ] **Step 4: Run tests** — `npx vitest run src/api/routes/match.test.ts src/api/routes/mcp.test.ts src/api/mcp/match-tool.test.ts` → PASS.
-
-- [ ] **Step 5: Mutations** (кожну поверни)
-
-1. У `match.ts` прибери `, { aliases }` → має впасти тест `#614` у `match.test.ts`.
-2. У `match-tool.ts` прибери `, { aliases }` → має впасти тест `#614` у `mcp.test.ts`.
-
-- [ ] **Step 6: Full gate** — `npm test` і `npm run typecheck`.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add src/api/routes/match.ts src/api/mcp/match-tool.ts src/api/routes/match.test.ts src/api/routes/mcp.test.ts
-git commit -m "feat(#614): pass merge aliases to /match and the MCP match tool"
-```
+- [ ] **Step 4:** `npx vitest run src/domain/lookup-outcome.test.ts src/api/routes/enrich.test.ts` → PASS.
+- [ ] **Step 5: Mutation** — прибери `, input` → тест `#614` падає. Поверни.
+- [ ] **Step 6: Full gate.**
+- [ ] **Step 7: Commit** — `git add src/domain/lookup-outcome.ts src/domain/lookup-outcome.test.ts`, потім
+  `git commit -m "fix(#614): merge aliases record the text the lookup searched"`.
 
 ---
 
 ## Після ядра
 
-1. **Повторне наскрізне рев'ю ядра**, окремий диспатч. Назвати всі інлайнові задачі 2–6 і коміти.
-   Попросити перевірити, що закриті знахідки першого рев'ю:
-   - числові близнюки (реплей `ROCH / Trappistes Rochefort 10` після злиття «…8» — не `exact`);
-   - аліаси після зміни bid (злиття злінкованого рядка, `recordLookupSuccess`, `pinMatch`);
-   - «мертвий» аліас поруч зі свіжим рядком тієї самої пари;
-   - матчер більше не бачить аліасів.
-2. **Лише після рев'ю** — план периферії.
+1. **Реплей сценаріїв A–C** рецензента (`scratchpad/probe.mts`, оновлений під нові сигнатури: у C
+   злиття з `aliasSource` картки «#7») — очікування: A — аліаси «8» і «10» поруч, картка 8 ✅ після
+   злиття 10; B — `MJØD IS 2023` не `exact`; C — «#6» не `exact`, «#7» `exact` ✅.
+2. **Третє наскрізне рев'ю ядра**, окремий диспатч; назвати задачі 2–10 і коміти; попросити спробувати
+   зламати ключ і джерело аліасу.
+3. **Лише після рев'ю** — план периферії.
 
 ## Самоперевірка плану проти спеки
 
 | Розділ спеки | Де в плані |
 |---|---|
-| Дані: таблиця, унікальна пара, каскад, без бекфілу | Task 1 (зроблено) |
-| Запис: пара сироти → аліас; правило близнюків; `ON CONFLICT` | коміт `9325d68` (тести лишаються) |
-| Запис: аліаси рядка, що зливається, не переносяться | Task 2, тест 1 |
-| Зміна `untappd_id` відкидає аліаси: `recordLookupSuccess` | Task 2, тести 2–4 |
-| Зміна `untappd_id` відкидає аліаси: `pinMatch` | Task 3 |
-| Читання: жива перевірка лінку; рядок важить більше за аліас | Task 5 (a) |
-| Індекс у кеші; каталог матчера без аліасів | Task 5 (b) |
-| Аліас перед матчером; правило цифр; бюджет фолбеку не чіпається | Task 4 |
-| `/match` і MCP передають аліаси | Task 6 |
-| `ensureBeerRow`, `/enrich/*`, репарація #384, API-тест петлі, `spec.md` | **периферія** |
+| `name_digits` у ключі й унікальності | Task 7, Task 8 (a) |
+| Текст аліасу = `aliasSource` / текст сироти | Task 8 (b), Task 10 |
+| «Ключ тримає інший рядок» — пара й цифри (запис) | Task 8, тести 5 |
+| «Рядок важить більше» з цифрами (читання) | Task 8, `loadAliases` |
+| Близнюки однієї крамниці — окремі аліаси | Task 8, `twin cards of one shop…` |
+| Точна рівність ключа з цифрами в `/match` | Task 9 |
+| Злиття без перенесення; відкидання при зміні bid; `pinMatch`; `/match` і MCP | задачі 2, 3, 6 (зроблено) |
+| `ensureBeerRow` з цифрами, `/enrich/*`, репарація #384, API-тест, `spec.md` | **периферія** |
