@@ -2026,4 +2026,39 @@ describe('#614 findAliasTarget / deleteAlias', () => {
     deleteAlias(db, 'varvar', 'black bean is', 11);
     expect(db.prepare('SELECT abv_key FROM beer_aliases').all()).toEqual([{ abv_key: '9.5' }]);
   });
+
+  test('recordLookupSuccess moves the card key alias onto the card\'s own row it links', () => {
+    const db = fresh();
+    aliased(db);
+    // Власний рядок картки (сирота раунду без ABV): доказ новішого bid саме для цієї картки.
+    const own = seedBeer(db, {
+      name: CARD.name, brewery: CARD.brewery, style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
+    });
+    recordLookupSuccess(db, own, { bid: 2002, style: 'Stout', abv: 10.8, global_rating: 4.3 }, '2026-09-14T12:05:00Z', CARD);
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: own, abv_key: '11' }]);
+  });
+
+  test('recordLookupSuccess leaves the alias when the linked row is another card', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    // Інша нормалізована пара, ніж у CARD, — інакше seedBeer повернув би той самий рядок.
+    const other = seedBeer(db, {
+      name: 'BLACK BEAN IS COFFEE', brewery: CARD.brewery, style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('BLACK BEAN IS COFFEE'), normalized_brewery: normalizeBrewery(CARD.brewery),
+    });
+    recordLookupSuccess(db, other, { bid: 2002, style: 'Stout', abv: 11, global_rating: 4.3 }, '2026-09-14T12:05:00Z', CARD);
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, abv_key: '11' }]);
+  });
+
+  test('recordLookupSuccess moves only the key with the card ABV and never creates an alias', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    const own = seedBeer(db, {
+      name: CARD.name, brewery: CARD.brewery, style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
+    });
+    recordLookupSuccess(db, own, { bid: 2002, style: 'Stout', abv: 9.5, global_rating: 4.3 }, '2026-09-14T12:05:00Z', { ...CARD, abv: 9.5 });
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, abv_key: '11' }]);
+  });
 });

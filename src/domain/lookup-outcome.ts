@@ -28,7 +28,8 @@ export function applyLookupOutcome(
   switch (outcome.kind) {
     case 'matched':
       try {
-        recordLookupSuccess(deps.db, beerId, outcome.result, nowIso);
+        // #614 (рев'ю 10): input — картка цього доказу; лінк рядка самої картки переносить наявний аліас її ключа.
+        recordLookupSuccess(deps.db, beerId, outcome.result, nowIso, input);
         clearEnrichFailure(deps.db, beerId);
         return 'matched';
       } catch (e: unknown) {

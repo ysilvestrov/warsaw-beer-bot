@@ -370,6 +370,7 @@ export function recordLookupSuccess(
     global_rating: number | null;
   },
   at: string,
+  aliasSource?: { brewery: string; name: string; abv?: number | null },
 ): void {
   // #614: транзакція — якщо UPDATE впаде на UNIQUE (bid уже має власника), аліаси не стираються
   // наполовину: applyLookupOutcome далі зливає рядок, і їх забирає каскад.
@@ -385,8 +386,30 @@ export function recordLookupSuccess(
          untappd_lookup_at = ?
        WHERE id = ?`,
     ).run(r.bid, r.style, r.abv, r.global_rating, at, beerId);
+    if (aliasSource) moveCardAlias(db, beerId, aliasSource, at);
   })();
   bumpCatalogVersion();
+}
+
+// #614 (рев'ю 10): лінк рядка самої картки — новіший доказ для її ключа, ніж давнє злиття: наявний аліас ключа
+// переходить на цей рядок, як ON CONFLICT у mergeIntoCanonical. Так конфлікт доказів розв'язує запис, а не
+// вгадування під час читання (три версії правила «рядок важить більше» порівнювали поля різного походження —
+// ABV злінкованого рядка з Untappd проти ABV картки). Лише коли рядок і є цією карткою (той самий cardText
+// броварні й назви): інакше доказ міг стосуватися іншої картки з тією самою нормалізованою парою (рев'ю 6). Нового
+// аліасу не створює: без давнього злиття картку й так відповідає рядок з її текстом.
+function moveCardAlias(
+  db: DB, rowId: number, card: { brewery: string; name: string; abv?: number | null }, at: string,
+): void {
+  const key = cardAliasKey(card.brewery, card.name, card.abv);
+  if (!key) return;
+  const row = db.prepare('SELECT brewery, name FROM beers WHERE id = ?').get(rowId) as
+    | { brewery: string; name: string }
+    | undefined;
+  if (!row || cardText(row.brewery) !== key.breweryText || cardText(row.name) !== key.nameText) return;
+  db.prepare(
+    `UPDATE beer_aliases SET beer_id = ?, brewery = ?, name = ?, created_at = ?
+      WHERE brewery_text = ? AND name_text = ? AND abv_key = ? AND beer_id != ?`,
+  ).run(rowId, card.brewery, card.name, at, key.breweryText, key.nameText, key.abvKey, rowId);
 }
 
 // Merges an orphan beer into a canonical catalog entry by redirecting all match_links and
