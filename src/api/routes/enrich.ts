@@ -294,7 +294,10 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       query,
     );
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
-    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, abv, sourceUrl: pageUrl });
+    // #614: аліас пам'яті злиття отримує ABV, з яким реально йшов пошук (row.abv), а не ABV з тіла запиту.
+    // Сирота могла взяти ABV іншої картки з тим самим текстом (близнюк 6.1% і 0.5% на одній сторінці), і
+    // пошук довів «текст + ABV рядка»; ключ з ABV тіла записав би аліас, якого пошук не доводив.
+    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, abv: row.abv, sourceUrl: pageUrl });
     // A merge is a success: the bid is real and already owned by a canonical row,
     // so answer like a match instead of the old not_found. `outcome.result` still
     // holds the bid — nothing needs plumbing through applyLookupOutcome. The

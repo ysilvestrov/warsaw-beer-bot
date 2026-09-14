@@ -41,7 +41,7 @@ export function applyLookupOutcome(
           // CASCADE-removed; this is a success, not a failure. Reported as its own
           // kind so it stops being counted (and answered) as not_found (#351).
           // #614: input — текст, який шукав цей виклик; аліас пам'яті злиття пишеться з нього, а не з
-          // рядка-сироти, який могла створити інша картка з тією самою парою без цифр.
+          // рядка-сироти, який могла створити інша картка з тією самою нормалізованою парою (ensureBeerRow шукає нормалізатором).
           mergeIntoCanonical(deps.db, beerId, canonical.id, nowIso, input);
           deps.log.warn(
             { beerId, canonicalId: canonical.id, bid: outcome.result.bid },

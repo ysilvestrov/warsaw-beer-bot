@@ -73,12 +73,14 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
     const version = getVersion();
     rebuilding = (async () => {
       const rows = load();
+      // #614: аліаси читаються одразу за рядками каталогу — один знімок для правила «рядок важить більше».
+      const aliasRows = loadAliasRows();
       const prepared = await prepare(rows);
       const byId = new Map(rows.map((r) => [r.id, r]));
       // #614: аліаси — окремий індекс, а не записи каталогу матчера: matchBeerList перевіряє їх до
       // матчера за точним текстом картки, тож матчер не бачить дублікатів id і не звужує пул броварні. Рядки
       // каталогу потрібні для правила «рядок з тим самим текстом важить більше».
-      const aliases = await buildAliasIndex(loadAliasRows(), rows);
+      const aliases = await buildAliasIndex(aliasRows, rows);
       const value: CachedCatalog = { prepared, byId, aliases };
       current = { value, version, builtAt: now() };
       return value;

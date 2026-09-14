@@ -604,6 +604,35 @@ describe('POST /enrich/result', () => {
     expect(db.prepare('SELECT brewery_text, name_text, abv_key FROM beer_aliases').all()).toEqual([{ brewery_text: 'pinta barrel brewing', name_text: 'after hours: rose wild ale', abv_key: '5.7' }]);
   });
 
+  it('#614 keys a search-path alias by the ABV the search ran with, not a later card ABV for the same text', async () => {
+    const { db, app } = setup();
+    const alco = seedBeer(db, {
+      untappd_id: 1, name: 'Atak Chmielu Original', brewery: 'Browar PINTA', style: 'IPA', abv: 6.1, rating_global: 3.5,
+      normalized_name: normalizeName('Atak Chmielu Original'), normalized_brewery: normalizeBrewery('Browar PINTA'),
+    });
+    seedBeer(db, {
+      untappd_id: 2, name: 'Atak Chmielu Light', brewery: 'Browar PINTA', style: 'IPA', abv: 0.5, rating_global: 3.5,
+      normalized_name: normalizeName('Atak Chmielu Light'), normalized_brewery: normalizeBrewery('Browar PINTA'),
+    });
+    // Сирота з ABV першої картки з цим текстом (6.1%); результат приходить з карткою-близнюком 0.5%.
+    seedBeer(db, {
+      name: 'Atak Chmielu', brewery: 'PINTA', style: null, abv: 6.1, rating_global: null,
+      normalized_name: normalizeName('Atak Chmielu'), normalized_brewery: normalizeBrewery('PINTA'),
+    });
+    const hit = (bid: number, abv: number) =>
+      ({ bid, beer_name: 'Atak Chmielu', brewery_name: 'PINTA', type_name: 'IPA', beer_abv: abv, rating_score: 3.5 });
+
+    const res = await post(app, '/enrich/result', {
+      brewery: 'PINTA', name: 'Atak Chmielu', abv: 0.5,
+      algolia: { hits: [hit(1, 6.1), hit(2, 0.5)], nbHits: 2 },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 1 });
+    // Пошук ішов з ABV сироти (6.1) і довів алкогольне пиво; аліас «PINTA / Atak Chmielu, 0.5» → алкогольний
+    // рядок дав би ✅ картці 0.5% на пиво, якого вона не стосується.
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: alco, abv_key: '6.1' }]);
+  });
+
   it('reports blocked without mutating backoff when Untappd serves a block page', async () => {
     const { db, app } = setup();
     // Cloudflare "Just a moment..." interstitial — isBlockPage flags this.
