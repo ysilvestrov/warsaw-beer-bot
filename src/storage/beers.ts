@@ -115,6 +115,10 @@ export function upsertBeerByBid(db: DB, b: BidBeerInput): number {
 
     const orphan = resolvableOrphan(db, b);
     if (orphan) {
+      // #614: «сирота» тут може бути рядком з обнуленим вручну bid, чиї аліаси доводили старий bid; без скидання
+      // синк чекінів чи /import оживляв би їх під новим bid (рев'ю 9, M2). Та сама умова IS NOT, що й у
+      // recordLookupSuccess і pinMatch.
+      dropAliasesOnRelink(db, orphan.id, b.untappd_id);
       // Факти сироти прийшли з тексту крана/крамниці, а той ABV «буває помилковим» (spec.md
       // §/newbeers) — Untappd переважає, як у recordLookupSuccess; порожній вхід лишає факти
       // сироти. Разом із лінком іде й стан сироти: listUntriagedFailures і listLockedRows не

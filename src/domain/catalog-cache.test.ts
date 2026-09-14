@@ -132,7 +132,7 @@ describe('createCatalogCache', () => {
   });
 
   it('#614 hands the catalog to buildAliasIndex: a linked row with the same exact text switches the alias off, an orphan does not', async () => {
-    const aliasRows = [{ beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa', abv_key: '' }];
+    const aliasRows = [{ beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa', abv_key: '6.1' }];
     const linkedSameText: CatalogBeerWithRating[] = [
       ...rows,
       { id: 3, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: 3.6, untappd_id: 3003 },

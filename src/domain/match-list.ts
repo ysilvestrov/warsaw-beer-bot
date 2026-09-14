@@ -43,16 +43,18 @@ const aliasKey = (breweryText: string, nameText: string, abvKey: string): string
 
 const ALIAS_CATALOG_CHUNK = 2000;
 
-// #614: ЗЛІНКОВАНИЙ рядок каталогу з тим самим точним текстом важить більше за аліас (сирота, яку репарація
-// #384 зробила рядком нового bid; кран з тим самим текстом) — картку тоді відповідає матчер з його вибором
-// за ABV. Сирота з тим самим текстом аліас НЕ вимикає: це наш незакритий плейсхолдер (/enrich/candidates для
-// ABV-близнюка), і /match віддав би на неї exact без untappd_id і без статусу «пив» (проби periph-*). ABV тут
-// не порівнюється: зайве вимкнення дає лише промах, не хибний ✅. Той самий текст у самій цілі аліас не
-// вимикає. cardText на ~33.6k рядках одним шматком блокував цикл подій на 74–113 мс (рев'ю 4), тож
-// поступаємося циклу кожні 2000 рядків, як prepareCatalogChunked.
+// #614: ЗЛІНКОВАНИЙ рядок каталогу з тим самим ключем картки — точний текст І cardAbv(abv), рівний abv_key
+// аліасу, — важить більше за аліас: це конфлікт двох доказів для тієї самої картки, і картку тоді відповідає
+// матчер. Сирота з тим самим текстом аліас НЕ вимикає: це наш незакритий плейсхолдер (/enrich/candidates для
+// ABV-близнюка), і /match віддав би на неї exact без untappd_id і без статусу «пив» (проби periph-*).
+// Злінкований близнюк з ІНШИМ ABV теж не вимикає (рев'ю 9, M1): матчер віддавав картці його рядок як exact,
+// розширення бачило суперечливий bid, і репарація #384 зливала рядок близнюка в канонічний — пінг-понг на кожному
+// завантаженні з переїздом чекінів. Той самий ключ у самій цілі аліас не вимикає. cardText на ~33.6k рядках
+// одним шматком блокував цикл подій на 74–113 мс (рев'ю 4), тож поступаємося циклу кожні 2000 рядків, як
+// prepareCatalogChunked.
 export async function buildAliasIndex(
   aliases: readonly AliasSource[],
-  catalog: readonly { id: number; brewery: string; name: string; untappd_id?: number | null }[],
+  catalog: readonly { id: number; brewery: string; name: string; abv?: number | null; untappd_id?: number | null }[],
   yield_: () => Promise<void> = yieldToEventLoop,
 ): Promise<AliasIndex> {
   const holders = new Map<string, Set<number>>();
@@ -61,14 +63,14 @@ export async function buildAliasIndex(
     for (let j = i; j < end; j++) {
       const row = catalog[j];
       if (row.untappd_id == null) continue;
-      const key = textKey(cardText(row.brewery), cardText(row.name));
+      const key = aliasKey(cardText(row.brewery), cardText(row.name), cardAbv(row.abv));
       (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
     }
     await yield_();
   }
   const index = new Map<string, number>();
   for (const a of aliases) {
-    const held = holders.get(textKey(a.brewery_text, a.name_text));
+    const held = holders.get(aliasKey(a.brewery_text, a.name_text, a.abv_key));
     if (held && [...held].some((id) => id !== a.beer_id)) continue;
     index.set(aliasKey(a.brewery_text, a.name_text, a.abv_key), a.beer_id);
   }
