@@ -2520,7 +2520,9 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   (Piwne Mosty IdoSell SSR — `.product`, brewery/title з GA
   `view_item_list` metadata keyed by `data-product_id`, fallback на visible title
   `"{brewery}: {name} - puszka/butelka N ml"`; категорії `/pol_m_PRZEKASKI*` і
-  `/pol_m_SZKLO-I-MERCH*` є whole-page non-beer gate), домен `piwnemosty.pl`),
+  `/pol_m_SZKLO-I-MERCH*` є whole-page non-beer gate). Неповні GA metadata без
+  позитивного per-card сигналу лишають картку тихим unknown-пропуском, а не non-beer.
+  Домен `piwnemosty.pl`),
   `funkyshop` (Funkyshop PrestaShop SSR — `article.product-miniature`, назва з
   `.product-title`, brewery з `.manufacturer-product` або bounded detail-page fallback,
   ABV із `.product-description-short`, trailing package volume/format прибирається з name;
@@ -2554,11 +2556,19 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   на перетині нуля з родиною `ginger beer`/`root beer`. FP-гарди: банка з заставою
   (`MAGIC ROAD … PUSZKA … KAUCJA`) і kvass лишаються пивом. Форситься конформанс-тестом
   (див. **Тести**).
-- **Потік:** content script парсить видиму сітку → short-TTL кеш
+  Кожен позитивний per-card non-beer сигнал повертає `Card.nonBeer + skip`: overlay
+  малює неклікабельний червоний `✕`, ставить `data-beerseen` і не читає/пише match-кеш,
+  не викликає `/match` та enrichment. Відсутня або неповна beer identity без позитивного
+  non-beer сигналу лишається тихим пропуском. `isNonBeerPage(url)` та еквівалентні
+  whole-page metadata gates лишають усю сторінку без overlay та без `✕`.
+- **Потік:** content script парсить видиму сітку. Для вже підтверджених карток
+  `nonBeer` overlay діє до побудови cache-key: малює `✕`, ставить `data-beerseen` і
+  пропускає cache та `/match`; для звичайних карток будується cache-key → short-TTL кеш
   (`chrome.storage.local`) → промахи йдуть у background service worker, який
   тримає Bearer-токен (**ніколи** не в контексті сторінки) і б'є `POST /match` →
   бейдж ✅+оцінка на випитих. Вузький Flasker opt-in змінює лише порядок detail-кроку:
-  всі картки гідруються й класифікуються до кешу; решта адаптерів лишається на
+  він захоплює ключі звичайних карток до detail hydration, а потім усі картки
+  гідруються й класифікуються до кешу; решта адаптерів лишається на
   cache-first, miss-only detail hydration. **Re-render однаковий для всіх адаптерів:** overlay
   позначає оброблені картки (`data-beerseen`), а спостерігач на `document.body`
   перезапускає `runOverlay` щойно серед розпарсених карток з'являється непозначена
@@ -2627,12 +2637,16 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   `onemorebeer` — headless-Playwright рендер-дамп зі scroll. Плюс unit-тести
   кеша/normalize/client/worker/badge/grid-ready/re-render observer/startOverlay.
   Білд — `vite build`.
-  Плюс **кейс фільтрації не-пива**: кожен адаптер має `tests/fixtures/<id>.nonbeer.html`
-  (тільки не-пиво) і `parseCards` на ньому МУСИТЬ дати `[]`; або `<id>.nonbeer.json`
-  `{none:true, reason}` (виняток із обовʼязковою причиною). Тимчасовий виняток #615:
-  Flasker має видати provisional-картки, гідрувати їх і підтвердити `nonBeer`; #623
-  переносить цей явний стан на інші адаптери. `isNonBeerPage` і FP-гарди (MAGIC ROAD)
-  — у bespoke-тестах адаптера. Відсутність фікстури/винятку = червоний CI.
+  Плюс **кейс фільтрації не-пива**: кожен адаптер має
+  `tests/fixtures/<id>.nonbeer.html` (тільки не-пиво), і `parseCards` на ньому
+  МУСИТЬ дати одну або більше підтверджених карток із `nonBeer: true, skip: true`;
+  або `<id>.nonbeer.json` `{none:true, reason}` (виняток із обовʼязковою причиною).
+  Навмисний виняток — Beershop: його category-fixture може вправляти whole-page gate,
+  тому bespoke-тест МУСИТЬ перевірити змішану сітку щоразу, коли фікстура вправляє
+  такий gate. Тимчасовий виняток #615: Flasker має видати provisional-картки,
+  гідрувати їх і підтвердити `nonBeer`; #623 переносить цей явний стан на інші
+  адаптери. `isNonBeerPage` і FP-гарди (MAGIC ROAD) — у bespoke-тестах адаптера.
+  Відсутність фікстури/винятку = червоний CI.
 
 ### 6.1 Бейджі та збірка розширення
 > Рунбук релізу: `docs/extension-release.md`. Дистрибуція — §6.4.
