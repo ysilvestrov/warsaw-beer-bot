@@ -507,6 +507,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // не впізнає картку, розширення знову шукає в сесії Untappd і сервер знову зливає нову сироту.
     // Аліас зберігає сиру пару (аудит і рецепт скасування) і ключ — cardText броварні й назви картки
     // (#614): лише представлення тексту, без нормалізатора кандидатів, який зводить різні пива (#636).
+    // abv_key — cardAbv картки: крамниця друкує однаковий текст для 0%- і алкогольної версії.
     // Без бекфілу: сирота видаляється при злитті, тож відновлювати пару нема з чого — таблиця
     // заповнюється першим же злиттям (як merged_at, #366).
     // IF NOT EXISTS — бо тести відкату в schema.test.ts перезапускають усі міграції від v22.
@@ -518,8 +519,9 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         name         TEXT NOT NULL,
         brewery_text TEXT NOT NULL,
         name_text    TEXT NOT NULL,
+        abv_key      TEXT NOT NULL,
         created_at   TEXT NOT NULL,
-        UNIQUE (brewery_text, name_text)
+        UNIQUE (brewery_text, name_text, abv_key)
       );
       CREATE INDEX IF NOT EXISTS idx_beer_aliases_beer ON beer_aliases(beer_id);
     `,

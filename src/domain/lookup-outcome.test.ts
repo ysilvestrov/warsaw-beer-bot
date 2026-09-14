@@ -134,12 +134,12 @@ describe('applyLookupOutcome merge', () => {
     const kind = applyLookupOutcome(
       { db, log }, orphanId,
       { kind: 'matched', result: cand({ bid: 4007 }) },
-      '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' },
+      '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7', abv: 7 },
     );
 
     expect(kind).toBe('merged');
-    expect(db.prepare('SELECT beer_id, name, name_text FROM beer_aliases').all())
-      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_text: 'ґвара #7' }]);
+    expect(db.prepare('SELECT beer_id, name, name_text, abv_key FROM beer_aliases').all())
+      .toEqual([{ beer_id: g7, name: 'Ґвара #7', name_text: 'ґвара #7', abv_key: '7' }]);
     db.close();
   });
 });

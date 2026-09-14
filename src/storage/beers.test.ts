@@ -3,7 +3,7 @@ import { migrate } from './schema';
 import { upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
 import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
-import { cardText } from '../domain/card-text';
+import { cardAbv, cardText } from '../domain/card-text';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -795,12 +795,12 @@ test('mergeIntoCanonical redirects check-ins instead of FK-crashing on the delet
 
 type AliasRow = {
   beer_id: number; brewery: string; name: string;
-  brewery_text: string; name_text: string; created_at: string;
+  brewery_text: string; name_text: string; abv_key: string; created_at: string;
 };
 
 function aliasesOf(db: ReturnType<typeof fresh>, beerId: number): AliasRow[] {
   return db.prepare(
-    `SELECT beer_id, brewery, name, brewery_text, name_text, created_at
+    `SELECT beer_id, brewery, name, brewery_text, name_text, abv_key, created_at
        FROM beer_aliases WHERE beer_id = ? ORDER BY id`,
   ).all(beerId) as AliasRow[];
 }
@@ -832,6 +832,7 @@ test('#614 mergeIntoCanonical remembers the orphan\'s shop pair as an alias of t
     name: 'BLACK BEAN IS',
     brewery_text: 'varvar',
     name_text: 'black bean is',
+    abv_key: '11',
     created_at: '2026-09-14T07:13:20Z',
   }]);
 });
@@ -852,8 +853,8 @@ test('#614 mergeIntoCanonical lets a merged linked row\'s aliases go instead of 
     normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
   });
   db.prepare(
-    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
-     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
+    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
+     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '', '2026-09-02T10:00:00Z')`,
   ).run(wrongId, cardText('Copper Head'), cardText('RED MEXICAN Tomato Gose'));
 
   // Репарація #384: крамниця опублікувала bid 5120103 для рядка wrongId, власник уже є → злиття.
@@ -880,9 +881,9 @@ test('#614 mergeIntoCanonical re-points an existing alias of the same pair to th
   const cardBrewery = 'Copper Head';
   const cardName = 'RED MEXICAN Tomato Gose';
   db.prepare(
-    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
-     VALUES (?, ?, ?, ?, ?, '2026-09-02T10:00:00Z')`,
-  ).run(oldTarget, cardBrewery, cardName, cardText(cardBrewery), cardText(cardName));
+    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, '2026-09-02T10:00:00Z')`,
+  ).run(oldTarget, cardBrewery, cardName, cardText(cardBrewery), cardText(cardName), cardAbv(5));
   // Нова сирота тієї самої картки (досяжно зі шляху кранів або з репарації #384).
   const orphanId = seedBeer(db, {
     name: cardName, brewery: cardBrewery, style: 'Gose', abv: 5, rating_global: null,
@@ -910,7 +911,7 @@ test('#614 mergeIntoCanonical writes the alias from the searched text, not from 
 
   mergeIntoCanonical(db, orphanId, g7, '2026-09-14T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7' });
 
-  expect(aliasesOf(db, g7).map((a) => [a.brewery, a.name, a.brewery_text, a.name_text])).toEqual([['Ґвара', 'Ґвара #7', 'ґвара', 'ґвара #7']]);
+  expect(aliasesOf(db, g7).map((a) => [a.brewery, a.name, a.brewery_text, a.name_text, a.abv_key])).toEqual([['Ґвара', 'Ґвара #7', 'ґвара', 'ґвара #7', '']]);
 });
 
 test('#614 twin cards of one shop keep one alias each', () => {
@@ -935,6 +936,34 @@ test('#614 twin cards of one shop keep one alias each', () => {
 
   const rows = db.prepare('SELECT beer_id, name_text FROM beer_aliases ORDER BY beer_id').all();
   expect(rows).toEqual([{ beer_id: 8, name_text: 'rochefort 8 is' }, { beer_id: 10, name_text: 'rochefort 10 is' }]);
+});
+
+test('#614 ABV twins of one shop text keep one alias each: the 0% card never shares a key with the alcoholic one', () => {
+  const db = fresh();
+  const zeroId = seedBeer(db, {
+    untappd_id: 2948556, name: 'Leffe Blonde / Blond 0,0%', brewery: 'Abbaye de Leffe',
+    style: 'Non-Alcoholic Beer', abv: 0, rating_global: 3.2,
+    normalized_name: normalizeName('Leffe Blonde / Blond 0,0%'), normalized_brewery: normalizeBrewery('Abbaye de Leffe'),
+  });
+  const alcId = seedBeer(db, {
+    untappd_id: 5940, name: 'Leffe Blonde / Blond', brewery: 'Abbaye de Leffe',
+    style: 'Belgian Blonde', abv: 6.6, rating_global: 3.5,
+    normalized_name: normalizeName('Leffe Blonde / Blond'), normalized_brewery: normalizeBrewery('Abbaye de Leffe'),
+  });
+  // Flasker обрізає назву на маркері ABV: обидва товари приходять як LEFFE / BLONDE.
+  const card0 = seedBeer(db, {
+    name: 'BLONDE', brewery: 'LEFFE', style: null, abv: 0, rating_global: null,
+    normalized_name: normalizeName('BLONDE'), normalized_brewery: normalizeBrewery('LEFFE'),
+  });
+  mergeIntoCanonical(db, card0, zeroId, '2026-09-14T10:00:00Z', { brewery: 'LEFFE', name: 'BLONDE', abv: 0 });
+  const card66 = seedBeer(db, {
+    name: 'BLONDE', brewery: 'LEFFE', style: null, abv: 6.6, rating_global: null,
+    normalized_name: normalizeName('BLONDE'), normalized_brewery: normalizeBrewery('LEFFE'),
+  });
+  mergeIntoCanonical(db, card66, alcId, '2026-09-14T10:01:00Z', { brewery: 'LEFFE', name: 'BLONDE', abv: 6.6 });
+
+  const rows = db.prepare('SELECT beer_id, abv_key FROM beer_aliases ORDER BY abv_key').all();
+  expect(rows).toEqual([{ beer_id: zeroId, abv_key: '0' }, { beer_id: alcId, abv_key: '6.6' }]);
 });
 
 test('#614 mergeIntoCanonical writes no alias for a card whose brewery text is empty', () => {
@@ -981,8 +1010,8 @@ function linkedRowWithAlias(db: ReturnType<typeof fresh>) {
     normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
   });
   db.prepare(
-    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
-     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '2026-09-02T10:00:00Z')`,
+    `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
+     VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', ?, ?, '', '2026-09-02T10:00:00Z')`,
   ).run(rowId, cardText('Copper Head'), cardText('RED MEXICAN Tomato Gose'));
   return rowId;
 }
@@ -1890,8 +1919,8 @@ describe('loadAliases (#614)', () => {
       normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
     });
     db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
-       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
+      `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
+       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '', '2026-09-14T07:13:20Z')`,
     ).run(canonicalId, cardText('VARVAR'), cardText('BLACK BEAN IS'));
     return canonicalId;
   }
@@ -1899,7 +1928,7 @@ describe('loadAliases (#614)', () => {
   test('returns each alias of a linked row with its exact card text', () => {
     const db = fresh();
     const canonicalId = canonicalWithAlias(db, 3548624);
-    expect(loadAliases(db)).toEqual([{ beer_id: canonicalId, brewery_text: 'varvar', name_text: 'black bean is' }]);
+    expect(loadAliases(db)).toEqual([{ beer_id: canonicalId, brewery_text: 'varvar', name_text: 'black bean is', abv_key: '' }]);
   });
 
   test('skips an alias whose canonical row has no untappd_id', () => {

@@ -78,7 +78,7 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
       // #614: аліаси — окремий індекс, а не записи каталогу матчера: matchBeerList перевіряє їх до
       // матчера за точним текстом картки, тож матчер не бачить дублікатів id і не звужує пул броварні. Рядки
       // каталогу потрібні для правила «рядок з тим самим текстом важить більше».
-      const aliases = buildAliasIndex(loadAliasRows(), rows);
+      const aliases = await buildAliasIndex(loadAliasRows(), rows);
       const value: CachedCatalog = { prepared, byId, aliases };
       current = { value, version, builtAt: now() };
       return value;

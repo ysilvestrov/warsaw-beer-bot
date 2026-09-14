@@ -136,7 +136,7 @@ describe('POST /match', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
 
     const res = await post(appAs(1), {
-      beers: [{ brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' }],
+      beers: [{ brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition', abv: 6.0 }],
     });
     const body = await res.json();
     expect(body.results[0]).toMatchObject({

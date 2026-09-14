@@ -141,7 +141,7 @@ describe('enrichOneOrphan', () => {
     // Orphan for the same Untappd beer (collab ontap name, no untappd_id).
     const orphanId = seedBeer(db, {
       name: 'Marine', brewery: 'Moon Lark & AleBrowar Brewery',
-      style: null, abv: null, rating_global: null,
+      style: null, abv: 5.1, rating_global: null,
       normalized_name: 'marine', normalized_brewery: 'moon lark alebrowar',
     });
     db.prepare('INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence) VALUES (?,?,1)')
@@ -161,6 +161,7 @@ describe('enrichOneOrphan', () => {
     const ml = db.prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
       .get('Marine ontap') as { untappd_beer_id: number } | undefined;
     expect(ml?.untappd_beer_id).toBe(canonicalId);
+    expect(db.prepare('SELECT beer_id, name_text, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, name_text: 'marine', abv_key: '5.1' }]);
   });
 
   test('skipped: beer does not exist (defensive)', async () => {

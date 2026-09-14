@@ -1,4 +1,4 @@
-import { cardText } from './card-text';
+import { cardAbv, cardText } from './card-text';
 
 describe('cardText (#614)', () => {
   test('equal representations of the same text are equal: NFC, whitespace, case', () => {
@@ -14,5 +14,20 @@ describe('cardText (#614)', () => {
     expect(cardText('MJØD IS 2023')).not.toBe(cardText('MJØD IS'));
     expect(cardText('Leffe Blonde 0,0%')).not.toBe(cardText('Leffe Blonde'));
     expect(cardText('Browar')).toBe('browar');
+  });
+});
+
+describe('cardAbv (#614)', () => {
+  test('keeps the card ABV to hundredths; 0 is a real ABV', () => {
+    expect(cardAbv(6.6)).toBe('6.6');
+    expect(cardAbv(0)).toBe('0');
+    expect(cardAbv(4.25)).toBe('4.25');
+    expect(cardAbv(6.6000000001)).toBe('6.6');
+  });
+
+  test('a card without an ABV has its own empty key', () => {
+    expect(cardAbv(null)).toBe('');
+    expect(cardAbv(undefined)).toBe('');
+    expect(cardAbv(Number.NaN)).toBe('');
   });
 });

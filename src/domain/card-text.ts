@@ -5,3 +5,11 @@
 export function cardText(s: string): string {
   return s.normalize('NFC').replace(/\s+/gu, ' ').trim().toLowerCase();
 }
+
+// #614: ABV картки — друга половина її ідентичності: крамниця може надрукувати однаковий текст для 0%- і
+// алкогольної версії (Flasker обрізає назву на маркері ABV). До сотих, щоб похибка float не давала
+// різних ключів; відсутній ABV — окреме порожнє значення (NULL у UNIQUE SQLite не рівний сам собі).
+// 0 — справжній ABV (#322), не «відсутній».
+export function cardAbv(abv: number | null | undefined): string {
+  return abv == null || !Number.isFinite(abv) ? '' : String(Math.round(abv * 100) / 100);
+}

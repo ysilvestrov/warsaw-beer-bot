@@ -249,7 +249,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         const kind = applyLookupOutcome(
           { db: deps.db, log: deps.log }, row.id,
           { kind: 'matched', result: resolved.result }, nowIso,
-          { brewery, name, sourceUrl: pageUrl },
+          { brewery, name, abv, sourceUrl: pageUrl },
         );
         if (kind === 'matched' || kind === 'merged') {
           stampBidProvenance(deps.db, resolved.result.bid);
@@ -294,7 +294,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       query,
     );
     // pageUrl (the shop page the beer was scraped from) becomes the failure row's sourceUrl.
-    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, sourceUrl: pageUrl });
+    const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, abv, sourceUrl: pageUrl });
     // A merge is a success: the bid is real and already owned by a canonical row,
     // so answer like a match instead of the old not_found. `outcome.result` still
     // holds the bid — nothing needs plumbing through applyLookupOutcome. The

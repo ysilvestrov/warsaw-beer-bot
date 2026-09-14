@@ -579,6 +579,7 @@ describe('POST /enrich/result', () => {
     const res = await post(app, '/enrich/result', {
       brewery: 'PINTA Barrel Brewing',
       name: 'After Hours: Rose Wild Ale',
+      abv: 5.7,
       algolia: {
         hits: [{
           bid: 5469263,
@@ -600,6 +601,7 @@ describe('POST /enrich/result', () => {
     expect(findBeerByNormalized(
       db, normalizeBrewery('PINTA Barrel Brewing'), normalizeName('After Hours: Rose Wild Ale'),
     )).toBeNull();
+    expect(db.prepare('SELECT brewery_text, name_text, abv_key FROM beer_aliases').all()).toEqual([{ brewery_text: 'pinta barrel brewing', name_text: 'after hours: rose wild ale', abv_key: '5.7' }]);
   });
 
   it('reports blocked without mutating backoff when Untappd serves a block page', async () => {
@@ -765,6 +767,7 @@ describe('POST /enrich/result — published bid (#384)', () => {
     expect(info.mock.calls.map((c) => c[0])).toContainEqual(
       expect.objectContaining({ bid: 6648348, source: 'local', replaced: 6708599 }),
     );
+    expect(db.prepare('SELECT beer_id, name_text, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonical, name_text: 'tomatol bulgogi', abv_key: '3.8' }]);
   });
 
   it.each(['curated', 'checkin'] as const)('refuses to override a %s link', async (source) => {

@@ -23,7 +23,7 @@ export function applyLookupOutcome(
   beerId: number,
   outcome: LookupOutcome,
   nowIso: string,
-  input: { brewery: string; name: string; sourceUrl?: string },
+  input: { brewery: string; name: string; abv?: number | null; sourceUrl?: string },
 ): EnrichOutcomeKind {
   switch (outcome.kind) {
     case 'matched':
