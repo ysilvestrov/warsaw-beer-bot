@@ -274,6 +274,21 @@ export function loadCatalog(db: DB): CatalogRow[] {
     .all() as CatalogRow[];
 }
 
+// #614: кожен аліас — ще один запис каталогу матчера з id канонічного рядка. Текст — з картки
+// крамниці (саме його надішле /match), факти — канонічного рядка: ABV потрібен точній стадії, яка
+// спершу обирає за ABV. Аліас на рядок без untappd_id не читається — та сама жива перевірка, що й
+// isRememberedMerge (#366): пам'ять про злиття має сенс лише поки ціль справді злінкована.
+export function loadAliasCatalog(db: DB): CatalogRow[] {
+  return db
+    .prepare(
+      `SELECT a.beer_id AS id, a.brewery, a.name, b.abv, b.rating_global, b.untappd_id
+         FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
+        WHERE b.untappd_id IS NOT NULL
+        ORDER BY a.id`,
+    )
+    .all() as CatalogRow[];
+}
+
 export function findBeerByNormalized(
   db: DB, normBrewery: string, normName: string,
 ): BeerRow | null {
