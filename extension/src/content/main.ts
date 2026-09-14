@@ -110,7 +110,7 @@ if (adapter && !adapter.isNonBeerPage?.(pageUrl)) {
     if ((message as { type?: unknown }).type !== 'refresh-page') return undefined;
     void (async () => {
       try {
-        const keys = refreshCards(document, adapter);
+        const keys = await refreshCards(document, adapter);
         await clearKeys(keys);
         await runOverlay(document, adapter, sendMatch, enrichOrphans);
         sendResponse({ ok: true, cleared: keys.length });
