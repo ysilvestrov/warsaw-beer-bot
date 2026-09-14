@@ -263,6 +263,11 @@ describe('matchBeerList aliases (#614)', () => {
     expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
   });
 
+  it('a card with an empty name text never looks up an alias', async () => {
+    const [r] = (await run(rochefort, [alias(8, 'ROCH', '')], { brewery: 'ROCH', name: '  ' }, 8)).results;
+    expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
+  });
+
   it('buildAliasIndex drops an alias whose exact text another catalog row holds — the row wins', () => {
     const catalog = [...rochefort, { id: 77, brewery: 'ROCH', name: 'Trappistes Rochefort 8', abv: 9.2, rating_global: null, untappd_id: null }];
     expect(buildAliasIndex([alias(8, 'ROCH', 'Trappistes Rochefort 8')], catalog).size).toBe(0);
