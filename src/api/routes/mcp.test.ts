@@ -4,6 +4,7 @@ import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { ensureProfile } from '../../storage/user_profiles';
 import { seedBeer } from '../../storage/seed-beer.testing';
+import { mergeIntoCanonical } from '../../storage/beers';
 import { markHad } from '../../storage/untappd_had';
 import { mergeCheckin } from '../../storage/checkins';
 import { rotateToken, hashToken } from '../../storage/api_tokens';
@@ -115,6 +116,30 @@ describe('POST /mcp', () => {
     expect(body.result.structuredContent.results[0].confidence).toBe('exact');
     // A text mirror must be present for clients that render only text.
     expect(body.result.content[0].text).toContain('Pan IPAni');
+  });
+
+  it('#614 match_beers answers a merged shop card exactly', async () => {
+    const { app, db, panIpani } = setup();
+    const orphanId = seedBeer(db, {
+      name: 'PAN IPANI Tropical Edition', brewery: 'Browar Trzech Kumpli',
+      style: 'IPA', abv: 6.0, rating_global: null,
+      normalized_name: normalizeName('PAN IPANI Tropical Edition'),
+      normalized_brewery: normalizeBrewery('Browar Trzech Kumpli'),
+    });
+    mergeIntoCanonical(db, orphanId, panIpani, '2026-09-14T07:13:20Z');
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+
+    await rpc(app, INIT);
+    const res = await rpc(app, {
+      jsonrpc: '2.0', id: 3, method: 'tools/call',
+      params: { name: 'match_beers', arguments: { beers: [
+        { brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' },
+      ] } },
+    });
+    const body = await res.json() as {
+      result: { structuredContent: { results: { status: string; confidence: string }[] } };
+    };
+    expect(body.result.structuredContent.results[0]).toMatchObject({ status: 'drunk', confidence: 'exact' });
   });
 
   it('records MCP usage for a tool call, and not for the handshake', async () => {

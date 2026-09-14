@@ -43,14 +43,14 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
       deps.log.warn({ err: e }, 'api_usage record failed');
     }
 
-    const { prepared, byId } = await cache.get();
+    const { prepared, byId, aliases } = await cache.get();
     // Anonymous callers get global-only results: empty drunk/ratings sets mean
     // is_drunk=false, user_rating=null, but matched_beer still carries the global
     // rating + untappd_id (⭐/⚪ badges render unchanged).
     const drunkSet = telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId);
     const ratings = telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId);
 
-    const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers);
+    const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
     deps.log.info(
       {
         channel: 'extension',
