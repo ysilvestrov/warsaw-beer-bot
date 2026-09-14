@@ -25,6 +25,8 @@ import {
   recordLookupNotFound,
   recordLookupTransient,
   mergeIntoCanonical,
+  findAliasTarget,
+  deleteAlias,
 } from './beers';
 
 describe('getBeer', () => {
@@ -1949,5 +1951,56 @@ describe('loadAliases (#614)', () => {
     const db = fresh();
     canonicalWithAlias(db, null);
     expect(loadAliases(db)).toEqual([]);
+  });
+});
+
+describe('#614 findAliasTarget / deleteAlias', () => {
+  const CARD = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
+  function aliased(db: ReturnType<typeof fresh>) {
+    const canonicalId = seedBeer(db, {
+      untappd_id: 3548624, name: 'Black Bean', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.14,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    const orphanId = seedBeer(db, {
+      name: CARD.name, brewery: CARD.brewery, style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
+    });
+    mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T12:00:00Z', CARD);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+    return canonicalId;
+  }
+
+  test('finds the canonical row by the exact card key, whitespace and case aside', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    expect(findAliasTarget(db, ' varvar ', 'Black  Bean IS', 11)?.id).toBe(canonicalId);
+  });
+
+  test('misses another ABV, a card without ABV, other text and empty text', () => {
+    const db = fresh();
+    aliased(db);
+    expect(findAliasTarget(db, 'VARVAR', 'BLACK BEAN IS', 9.5)).toBeNull();
+    expect(findAliasTarget(db, 'VARVAR', 'BLACK BEAN IS', undefined)).toBeNull();
+    expect(findAliasTarget(db, 'VARVAR', 'BLACK BEAN', 11)).toBeNull();
+    expect(findAliasTarget(db, '  ', 'BLACK BEAN IS', 11)).toBeNull();
+  });
+
+  test('never returns a target whose untappd_id was cleared', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    db.prepare('UPDATE beers SET untappd_id = NULL WHERE id = ?').run(canonicalId);
+    expect(findAliasTarget(db, 'VARVAR', 'BLACK BEAN IS', 11)).toBeNull();
+  });
+
+  test('deleteAlias removes only the key of that card', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    const twin = seedBeer(db, {
+      name: CARD.name, brewery: CARD.brewery, style: null, abv: 9.5, rating_global: null,
+      normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
+    });
+    mergeIntoCanonical(db, twin, canonicalId, '2026-09-14T12:01:00Z', { ...CARD, abv: 9.5 });
+    deleteAlias(db, 'varvar', 'black bean is', 11);
+    expect(db.prepare('SELECT abv_key FROM beer_aliases').all()).toEqual([{ abv_key: '9.5' }]);
   });
 });
