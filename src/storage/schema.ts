@@ -500,6 +500,29 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       UPDATE beers SET rating_global = NULL WHERE rating_global = 0;
     `,
   },
+  {
+    version: 32,
+    // #614: злиття сироти в канонічний рядок видаляє єдиний запис того, що пара «броварня + назва»
+    // з картки крамниці — це саме це пиво. Без нього `/match` на кожне завантаження сторінки знову
+    // не впізнає картку, розширення знову шукає в сесії Untappd і сервер знову зливає нову сироту.
+    // Аліас зберігає сиру пару (для матчера: nameKeys, breweryAliases і рік читаються з сирого
+    // тексту) і нормалізовану (унікальність і пошук). Без бекфілу: сирота видаляється при злитті,
+    // тож відновлювати пару нема з чого — таблиця заповнюється першим же злиттям (як merged_at, #366).
+    // IF NOT EXISTS — бо тести відкату в schema.test.ts перезапускають усі міграції від v22.
+    sql: `
+      CREATE TABLE IF NOT EXISTS beer_aliases (
+        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+        beer_id            INTEGER NOT NULL REFERENCES beers(id) ON DELETE CASCADE,
+        brewery            TEXT NOT NULL,
+        name               TEXT NOT NULL,
+        normalized_brewery TEXT NOT NULL,
+        normalized_name    TEXT NOT NULL,
+        created_at         TEXT NOT NULL,
+        UNIQUE (normalized_brewery, normalized_name)
+      );
+      CREATE INDEX IF NOT EXISTS idx_beer_aliases_beer ON beer_aliases(beer_id);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

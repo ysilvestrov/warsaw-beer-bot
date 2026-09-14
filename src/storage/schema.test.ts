@@ -533,9 +533,9 @@ describe('schema migrations', () => {
       expect(kept.r).not.toBeNull();
 
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616: this rewind starts from v23 and runs
-      // migrate() to completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(31);
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614: this rewind starts from v23
+      // and runs migrate() to completion, so the reachable head moves whenever a later migration is added.
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(32);
     });
   });
 
@@ -582,9 +582,9 @@ describe('schema migrations', () => {
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616: a fresh DB's reachable head moves
-      // whenever a later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(31);
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614: a fresh DB's reachable head
+      // moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
+      expect(version.v).toBe(32);
     });
   });
 });
@@ -619,5 +619,40 @@ describe('v31 rating_checked_at (#616)', () => {
       { id: 1, rating_global: null, rating_refresh_at: null, rating_refresh_count: 0 },
       { id: 2, rating_global: 3.77, rating_refresh_at: null, rating_refresh_count: 0 },
     ]);
+  });
+});
+
+describe('v32 beer_aliases (#614)', () => {
+  it('creates beer_aliases with the spec columns and one alias per normalized pair', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const cols = (db.prepare('PRAGMA table_info(beer_aliases)').all() as { name: string }[])
+      .map((c) => c.name);
+    expect(cols).toEqual([
+      'id', 'beer_id', 'brewery', 'name', 'normalized_brewery', 'normalized_name', 'created_at',
+    ]);
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+                VALUES (2815, 3548624, 'Black Bean', 'Varvar Brew', 'black bean', 'varvar brew')`).run();
+    const insert = db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '2026-09-14T07:13:20Z')`,
+    );
+    insert.run();
+    // Одна пара з картки означає одне пиво: друга така сама пара відмовляється.
+    expect(() => insert.run()).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it('drops a beer row\'s aliases together with the row', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery)
+                VALUES (2815, 3548624, 'Black Bean', 'Varvar Brew', 'black bean', 'varvar brew')`).run();
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+       VALUES (2815, 'VARVAR', 'BLACK BEAN IS', 'varvar', 'black bean is', '2026-09-14T07:13:20Z')`,
+    ).run();
+    db.prepare('DELETE FROM beers WHERE id = 2815').run();
+    const left = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
+    expect(left.n).toBe(0);
   });
 });
