@@ -323,15 +323,6 @@ export function findAliasTarget(
   return row ?? null;
 }
 
-// #614: прийнятий суперечливий bid спростовує аліас саме цієї картки; інші ключі того самого рядка лишаються.
-export function deleteAlias(db: DB, brewery: string, name: string, abv: number | null | undefined): void {
-  const key = cardAliasKey(brewery, name, abv);
-  if (!key) return;
-  db.prepare('DELETE FROM beer_aliases WHERE brewery_text = ? AND name_text = ? AND abv_key = ?')
-    .run(key.breweryText, key.nameText, key.abvKey);
-  bumpCatalogVersion();
-}
-
 export function findBeerByNormalized(
   db: DB, normBrewery: string, normName: string,
 ): BeerRow | null {

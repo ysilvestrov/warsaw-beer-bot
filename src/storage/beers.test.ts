@@ -26,7 +26,6 @@ import {
   recordLookupTransient,
   mergeIntoCanonical,
   findAliasTarget,
-  deleteAlias,
 } from './beers';
 
 describe('getBeer', () => {
@@ -1977,7 +1976,7 @@ describe('loadAliases (#614)', () => {
   });
 });
 
-describe('#614 findAliasTarget / deleteAlias', () => {
+describe('#614 findAliasTarget / card alias move', () => {
   const CARD = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
   function aliased(db: ReturnType<typeof fresh>) {
     const canonicalId = seedBeer(db, {
@@ -2015,17 +2014,6 @@ describe('#614 findAliasTarget / deleteAlias', () => {
     expect(findAliasTarget(db, 'VARVAR', 'BLACK BEAN IS', 11)).toBeNull();
   });
 
-  test('deleteAlias removes only the key of that card', () => {
-    const db = fresh();
-    const canonicalId = aliased(db);
-    const twin = seedBeer(db, {
-      name: CARD.name, brewery: CARD.brewery, style: null, abv: 9.5, rating_global: null,
-      normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
-    });
-    mergeIntoCanonical(db, twin, canonicalId, '2026-09-14T12:01:00Z', { ...CARD, abv: 9.5 });
-    deleteAlias(db, 'varvar', 'black bean is', 11);
-    expect(db.prepare('SELECT abv_key FROM beer_aliases').all()).toEqual([{ abv_key: '9.5' }]);
-  });
 
   test('recordLookupSuccess moves the card key alias onto the card\'s own row it links', () => {
     const db = fresh();
