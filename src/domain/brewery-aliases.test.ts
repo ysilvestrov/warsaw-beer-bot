@@ -3,7 +3,14 @@ import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 
 // Forms that are deliberately hubs (>1 curated partner). Everything else in every
 // batch must stay a 1:1 equivalence — that is what keeps the table non-transitive.
-const KNOWN_HUBS = new Set(['lobkowicz', 'jihlava', 'mad brew', 'arcyksiazecy zamkowy cieszyn']);
+const KNOWN_HUBS = new Set([
+  'lobkowicz',
+  'jihlava',
+  'mad brew',
+  'arcyksiazecy zamkowy cieszyn',
+  'tradicni v rakovniku',
+  'kauno alus',
+]);
 
 // KNOWN_HUBS is the single exemption authority for all three batch blocks below —
 // a form added here without a matching toEqual would go silently unconstrained
@@ -181,5 +188,51 @@ describe('#347 gate-miss alias batch', () => {
     expect(aliasNeighbors('jezek kwasnicowy')).not.toContain('lobkowicz');
     expect(aliasNeighbors('tomatol')).not.toContain('smoothiemaker');
     expect(aliasNeighbors('cieszyn')).not.toContain('bracki zamkowy w cieszynie');
+  });
+});
+
+describe('Cluster 4 parent/portfolio brand alias batch', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['kaunas alus', 'kauno alus'],
+    ['tradycynis', 'kauno alus'],
+    ['cydr flirt tradycynis', 'kauno alus'],
+    ['cydr flirt', 'kauno alus'],
+    ['flirt', 'kauno alus'],
+    ['rakovnik', 'tradicni v rakovniku'],
+    ['dobruska', 'rodinny rampusak'],
+    ['jablecznik trzebnicki', 'cydr tradycyjny trzebnica'],
+    ['edelweiss', 'brau union osterreich'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+
+  test('tradicni v rakovniku is a hub over both Bakalář and Rakovník labels', () => {
+    expect(aliasNeighbors('tradicni v rakovniku').sort()).toEqual(['bakalar', 'rakovnik']);
+  });
+
+  test('kauno alus is a hub over all Lithuanian brand/spelling variants', () => {
+    expect(aliasNeighbors('kauno alus').sort()).toEqual([
+      'cydr flirt',
+      'cydr flirt tradycynis',
+      'flirt',
+      'kaunas alus',
+      'tradycynis',
+    ]);
+  });
+
+  test('spokes of kauno alus are not neighbours of each other', () => {
+    expect(aliasNeighbors('flirt')).not.toContain('tradycynis');
+    expect(aliasNeighbors('tradycynis')).not.toContain('kaunas alus');
+    expect(aliasNeighbors('cydr flirt')).not.toContain('cydr flirt tradycynis');
   });
 });
