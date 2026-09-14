@@ -72,7 +72,9 @@ export function extractBeerIds(text: string): number[] {
 export function detectShop(text: string, scopeWhere?: { col: string; op: string; value?: unknown }[]): string | null {
   if (scopeWhere) {
     for (const term of scopeWhere) {
-      if (term.col === 'source_url' && typeof term.value === 'string') {
+      const isPositiveMatch =
+        term.op === 'contains' || term.op === '=' || term.op === 'eq' || term.op === 'like';
+      if (term.col === 'source_url' && isPositiveMatch && typeof term.value === 'string') {
         const val = term.value.toLowerCase();
         if (val.includes('flasker')) return 'flasker';
         if (val.includes('winetime')) return 'winetime';
@@ -119,13 +121,20 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
   const shop = shopFromScope ?? shopFromTitle ?? detectShop(issue.body);
   const titleLower = issue.title.toLowerCase();
   const isParserBug =
-    labels.includes('parser-bug') ||
-    labels.includes('adapter-bug') ||
-    labels.includes('adapter_bug') ||
-    labels.includes('extension-bug') ||
+    labels.some((l) =>
+      [
+        'parser-bug',
+        'parser_bug',
+        'adapter-bug',
+        'adapter_bug',
+        'extension-bug',
+        'extension_bug',
+      ].includes(l)
+    ) ||
     titleLower.includes('parser-bug') ||
+    titleLower.includes('parser_bug') ||
     titleLower.includes('adapter');
-  const hasExplicitShop = Boolean(shopFromScope || shopFromTitle || titleLower.includes('internal-cron'));
+  const hasShopInTitle = Boolean(shopFromTitle || titleLower.includes('internal-cron'));
 
   let locus: ArchitecturalLocus = 'other';
   let clusterKey = 'misc';
@@ -157,7 +166,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
   }
   // Shop Adapters (title-specified shop or explicit parser/adapter bug)
   else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     shop === 'flasker'
   ) {
     locus = 'adapter_bug';
@@ -169,7 +178,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'extension/src/sites/flasker-breweries.generated.ts',
     ];
   } else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     shop === 'winetime'
   ) {
     locus = 'adapter_bug';
@@ -177,7 +186,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     clusterTitle = 'WineTime Shop Adapter';
     targetFiles = ['extension/src/sites/winetime.ts'];
   } else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     shop === 'beershop'
   ) {
     locus = 'adapter_bug';
@@ -185,7 +194,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     clusterTitle = 'BeerShop.eu Series & Title Banner Splitting';
     targetFiles = ['extension/src/sites/beershop.ts'];
   } else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     shop === 'beerfreak'
   ) {
     locus = 'adapter_bug';
@@ -193,7 +202,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     clusterTitle = 'BeerFreak Shop Adapter';
     targetFiles = ['extension/src/sites/beerfreak.ts'];
   } else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     shop === 'onemorebeer'
   ) {
     locus = 'adapter_bug';
@@ -201,7 +210,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     clusterTitle = 'OneMoreBeer Shop Adapter';
     targetFiles = ['extension/src/sites/onemorebeer.ts'];
   } else if (
-    (hasExplicitShop || isParserBug) &&
+    (hasShopInTitle || isParserBug) &&
     (shop === 'internal-cron' || titleLower.includes('internal-cron'))
   ) {
     locus = 'adapter_bug';

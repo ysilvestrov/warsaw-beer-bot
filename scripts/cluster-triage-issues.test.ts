@@ -131,6 +131,54 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.sourceShop).toBe('beershop');
   });
 
+  it('does not preempt matcher categories with shop from scope when issue is a matcher bug', () => {
+    const matcherIssue: RawIssue = {
+      number: 996,
+      title: '[matcher-bug] Beer registered under a producer/parent brewer different from shop brand token',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"contains","value":"beershop"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(matcherIssue);
+    expect(classified.locus).toBe('entity_alias_bug');
+    expect(classified.clusterKey).toBe('parent-portfolio-brand');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
+  it('ignores negative operators in scope.where when detecting shop', () => {
+    const issueWithNegativeScope: RawIssue = {
+      number: 995,
+      title: '[parser-bug] beershop banner parsing failure',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"not_contains","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithNegativeScope);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('beershop-adapter');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
+  it('recognizes underscored parser_bug and extension_bug labels', () => {
+    const parserBugIssue: RawIssue = {
+      number: 994,
+      title: '[matcher-bug] parent brand token split incorrectly',
+      body: 'Beershop rows have brand in brewery.\n```triage-scope\n{"beer_ids":[35147],"where":[]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser_bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(parserBugIssue);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('beershop-adapter');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
