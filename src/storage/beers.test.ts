@@ -955,6 +955,24 @@ test('#614 mergeIntoCanonical writes no alias for a card whose brewery text is e
   expect(n.n).toBe(0);
 });
 
+test('#614 mergeIntoCanonical writes no alias for a card whose name text is empty', () => {
+  const db = fresh();
+  const canonicalId = seedBeer(db, {
+    untappd_id: 6810840, name: 'Amigo Mate Bananowe', brewery: 'Amigo Mate',
+    style: 'Mate', abv: 0, rating_global: 3.4,
+    normalized_name: normalizeName('Amigo Mate Bananowe'), normalized_brewery: normalizeBrewery('Amigo Mate'),
+  });
+  const orphanId = seedBeer(db, {
+    name: 'Amigo Mate Bananowe Cydr', brewery: 'Amigo Mate', style: null, abv: 0, rating_global: null,
+    normalized_name: normalizeName('Amigo Mate Bananowe Cydr'), normalized_brewery: normalizeBrewery('Amigo Mate'),
+  });
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T10:00:00Z', { brewery: 'Amigo Mate', name: ' \t ' });
+
+  const n = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
+  expect(n.n).toBe(0);
+});
+
 function linkedRowWithAlias(db: ReturnType<typeof fresh>) {
   const rowId = seedBeer(db, {
     untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
