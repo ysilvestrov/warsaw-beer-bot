@@ -65,7 +65,7 @@ describe('POST /match', () => {
       abv: 5.0, rating_global: 4.2, untappd_id: 4242,
     };
     const stub: CatalogCache = {
-      get: async () => ({ prepared: prepareCatalog([ghost]), byId: new Map([[777, ghost]]) }),
+      get: async () => ({ prepared: prepareCatalog([ghost]), byId: new Map([[777, ghost]]), aliases: new Map() }),
       idle: async () => {},
     };
     const app = new Hono<ApiEnv>();

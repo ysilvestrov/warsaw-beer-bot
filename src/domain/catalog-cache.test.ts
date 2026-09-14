@@ -120,17 +120,15 @@ describe('createCatalogCache', () => {
     expect(prepared.beers.length).toBe(2);
   });
 
-  it('#614 matches aliases but keeps byId to the real rows, so the answer shows the canonical name', async () => {
-    const aliases: CatalogBeerWithRating[] = [
-      { id: 1, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: 3.7, untappd_id: 111 },
+  it('#614 builds the alias index from loadAliases and keeps aliases out of the matcher catalog', async () => {
+    const aliasRows = [
+      { beer_id: 1, name: 'Atak Chmielu IPA', normalized_brewery: 'pinta', normalized_name: 'atak chmielu ipa' },
     ];
-    const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliases });
-    const { prepared, byId } = await cache.get();
-    expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual([
-      '1 Atak Chmielu', '2 Buty Skejta', '1 Atak Chmielu IPA',
-    ]);
+    const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliasRows });
+    const { prepared, byId, aliases } = await cache.get();
+    expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual(['1 Atak Chmielu', '2 Buty Skejta']);
     expect(byId.size).toBe(2);
-    expect(byId.get(1)?.name).toBe('Atak Chmielu');
+    expect([...aliases.values()]).toEqual([{ beerId: 1, name: 'Atak Chmielu IPA' }]);
   });
 });
 
@@ -166,15 +164,15 @@ describe('#614 merge memory reaches /match', () => {
     const ratings = new Map([[canonicalId, 4.5]]);
     const noYield = { yield: async () => {} };
 
-    // Контроль на тій самій БД без аліасів: картка НЕ дає точного збігу — інакше тест нічого б
-    // не доводив (прод-реплей 2026-09-14: null).
-    const blind = await createCatalogCache(db, { loadAliases: () => [] }).get();
-    const { results: [control] } = await matchBeerList(blind.prepared, blind.byId, drunk, ratings, [card], noYield);
+    const { prepared, byId, aliases } = await createCatalogCache(db).get();
+
+    // Контроль: без аліасів картка НЕ дає точного збігу — інакше тест нічого б не доводив
+    // (прод-реплей 2026-09-14: null).
+    const { results: [control] } = await matchBeerList(prepared, byId, drunk, ratings, [card], noYield);
     expect(control.source).not.toBe('exact');
     expect(control.is_drunk).toBe(false);
 
-    const { prepared, byId } = await createCatalogCache(db).get();
-    const { results: [r] } = await matchBeerList(prepared, byId, drunk, ratings, [card], noYield);
+    const { results: [r] } = await matchBeerList(prepared, byId, drunk, ratings, [card], { ...noYield, aliases });
     expect(r.matched_beer).toEqual({
       id: canonicalId, name: 'Black Bean', brewery: 'Varvar Brew', rating_global: 4.14, untappd_id: 3548624,
     });
