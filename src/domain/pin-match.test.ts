@@ -124,6 +124,24 @@ describe('pinMatch', () => {
     const res = pinMatch(db, 99999, 1093012, AT);
     expect(res.kind).toBe('noop');
   });
+
+  test('#614: pinning a linked row to a different bid drops the aliases proven for the old one', () => {
+    const db = newDb();
+    const rowId = seedBeer(db, {
+      untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
+      style: 'Gose', abv: 5.4, rating_global: 3.61,
+      normalized_name: 'red mexican spicy edition', normalized_brewery: 'copper head beer workshop',
+    });
+    db.prepare(
+      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+       VALUES (?, 'Copper Head', 'RED MEXICAN Tomato Gose', 'copper head', 'red mexican tomato gose', ?)`,
+    ).run(rowId, AT);
+
+    const res = pinMatch(db, rowId, 5120103, AT);
+
+    expect(res).toEqual({ kind: 'set', beerId: rowId });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
+  });
 });
 
 describe('unpin & list', () => {
