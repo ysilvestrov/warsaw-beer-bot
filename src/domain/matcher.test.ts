@@ -1124,3 +1124,26 @@ describe('#347 alias hubs', () => {
     )).toBe(false);
   });
 });
+
+describe('Cluster 5 brewery alias matching', () => {
+  test('new pairs pass the brewery gate', () => {
+    expect(breweryAliasesMatch(
+      breweryAliases('Racbórz Brewery'),
+      breweryAliases('Browar Zamkowy Racibórz'),
+    )).toBe(true);
+    expect(breweryAliasesMatch(
+      breweryAliases('Bayerischer Banhof Brewery'),
+      breweryAliases('Bayerischer Bahnhof Gasthaus & Gosebrauerei'),
+    )).toBe(true);
+  });
+
+  test('Racbórz Brewery / Raciborskie Klasyczne matches catalog id 386 (exact)', () => {
+    const cat: CatalogBeer[] = [
+      { id: 386, brewery: 'Browar Zamkowy Racibórz', name: 'Raciborskie Klasyczne', abv: 5.0 },
+    ];
+    expect(matchBeer({ brewery: 'Racbórz Brewery', name: 'Raciborskie Klasyczne', abv: 5.0 }, cat))
+      .toMatchObject({ id: 386, source: 'exact' });
+  });
+});
+
+
