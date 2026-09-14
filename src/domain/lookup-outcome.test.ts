@@ -1,7 +1,7 @@
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { getBeer } from '../storage/beers';
+import { getBeer, mergeIntoCanonical } from '../storage/beers';
 import { seedBeer } from '../storage/seed-beer.testing';
 import { normalizeName, normalizeBrewery } from './normalize';
 import { applyLookupOutcome } from './lookup-outcome';
@@ -140,6 +140,32 @@ describe('applyLookupOutcome merge', () => {
     expect(kind).toBe('merged');
     // Сирота «#6» — не картка «#7»: доказ міг стосуватися будь-якої з них, тож аліасу немає.
     expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
+    db.close();
+  });
+
+  test('#614 a link of the card\'s own row moves the card key alias onto it', () => {
+    const { db, log } = fresh();
+    const card = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
+    const old = seedBeer(db, {
+      untappd_id: 1001, name: 'Black Bean', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.1,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    const first = seedBeer(db, {
+      name: card.name, brewery: card.brewery, style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName(card.name), normalized_brewery: normalizeBrewery(card.brewery),
+    });
+    mergeIntoCanonical(db, first, old, '2026-09-14T12:00:00Z', card);
+    const own = seedBeer(db, {
+      name: card.name, brewery: card.brewery, style: null, abv: null, rating_global: null,
+      normalized_name: normalizeName(card.name), normalized_brewery: normalizeBrewery(card.brewery),
+    });
+
+    const kind = applyLookupOutcome(
+      { db, log }, own, { kind: 'matched', result: cand({ bid: 2002, abv: 10.8 }) }, '2026-09-14T12:05:00Z', card,
+    );
+
+    expect(kind).toBe('matched');
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: own, abv_key: '11' }]);
     db.close();
   });
 });
