@@ -76,12 +76,11 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
     if (term && typeof term === 'object' && typeof term.value === 'string') {
       const opLower = term.op?.toLowerCase().trim() ?? '';
       const isNegative =
-        opLower.startsWith('not_') ||
-        opLower.startsWith('not-') ||
-        opLower.startsWith('not ') ||
-        opLower === 'not' ||
-        opLower === '!=' ||
-        opLower === '<>';
+        /(?:^|[_ -])not(?:$|[_ -])/.test(opLower) ||
+        opLower.startsWith('!') ||
+        opLower === '<>' ||
+        opLower.startsWith('non_') ||
+        opLower.startsWith('non-');
       if (term.col === 'source_url' && isNegative) {
         const val = term.value.toLowerCase();
         for (const s of [
