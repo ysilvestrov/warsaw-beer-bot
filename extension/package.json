@@ -18,11 +18,11 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.7.1",
-    "@types/chrome": "^0.2.8",
+    "@types/chrome": "^0.2.9",
     "@types/jsdom": "^30.0.0",
     "@types/node": "^26.4.1",
     "jsdom": "^30.0.1",
-    "playwright": "^1.62.1",
+    "playwright": "^1.63.0",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.2.2",
