@@ -1827,13 +1827,12 @@ describe('recordProfileBeer (#616)', () => {
 });
 
 // --- #614: аліаси в каталозі матчера ------------------------------------------------------------
-import { loadAliasCatalog } from './beers';
+import { loadAliases } from './beers';
 
-describe('loadAliasCatalog (#614)', () => {
-  test('returns each alias as a catalog row of its canonical beer: shop text, canonical facts', () => {
-    const db = fresh();
+describe('loadAliases (#614)', () => {
+  function canonicalWithAlias(db: ReturnType<typeof fresh>, untappdId: number | null) {
     const canonicalId = seedBeer(db, {
-      untappd_id: 3548624, name: 'Black Bean', brewery: 'Varvar Brew',
+      untappd_id: untappdId, name: 'Black Bean', brewery: 'Varvar Brew',
       style: 'Stout - Imperial / Double Pastry', abv: 11, rating_global: 4.14,
       normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
     });
@@ -1841,26 +1840,32 @@ describe('loadAliasCatalog (#614)', () => {
       `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
        VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
     ).run(canonicalId, normalizeBrewery('VARVAR'), normalizeName('BLACK BEAN IS'));
+    return canonicalId;
+  }
 
-    // ABV канонічного рядка: точна стадія спершу обирає за ABV, і аліас без ABV програв би
-    // іншому точному кандидату з ABV.
-    expect(loadAliasCatalog(db)).toEqual([{
-      id: canonicalId, brewery: 'VARVAR', name: 'BLACK BEAN IS',
-      abv: 11, rating_global: 4.14, untappd_id: 3548624,
+  test('returns each alias of a linked row with its raw name and normalized pair', () => {
+    const db = fresh();
+    const canonicalId = canonicalWithAlias(db, 3548624);
+    expect(loadAliases(db)).toEqual([{
+      beer_id: canonicalId, name: 'BLACK BEAN IS',
+      normalized_brewery: normalizeBrewery('VARVAR'), normalized_name: normalizeName('BLACK BEAN IS'),
     }]);
   });
 
-  test('skips an alias whose canonical row has lost its untappd_id', () => {
+  test('skips an alias whose canonical row has no untappd_id', () => {
     const db = fresh();
-    const unlinkedId = seedBeer(db, {
-      name: 'Black Bean', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.14,
-      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
-    });
-    db.prepare(
-      `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
-       VALUES (?, 'VARVAR', 'BLACK BEAN IS', ?, ?, '2026-09-14T07:13:20Z')`,
-    ).run(unlinkedId, normalizeBrewery('VARVAR'), normalizeName('BLACK BEAN IS'));
+    canonicalWithAlias(db, null);
+    expect(loadAliases(db)).toEqual([]);
+  });
 
-    expect(loadAliasCatalog(db)).toEqual([]);
+  test('skips an alias whose pair a beers row now holds — the row wins', () => {
+    const db = fresh();
+    canonicalWithAlias(db, 3548624);
+    // Пізніша сирота з тією самою парою (кран; сирота, яку репарація #384 зробила рядком нового bid).
+    seedBeer(db, {
+      name: 'BLACK BEAN IS', brewery: 'VARVAR', style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('BLACK BEAN IS'), normalized_brewery: normalizeBrewery('VARVAR'),
+    });
+    expect(loadAliases(db)).toEqual([]);
   });
 });

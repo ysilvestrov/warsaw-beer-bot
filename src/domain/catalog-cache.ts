@@ -1,8 +1,8 @@
 import type { DB } from '../storage/db';
-import { loadAliasCatalog, loadCatalog } from '../storage/beers';
+import { loadAliases, loadCatalog, type AliasRow } from '../storage/beers';
 import { catalogVersion } from '../storage/catalog-version';
 import { prepareBeer, makePreparedCatalog, type PreparedCatalog, type CatalogBeer } from './matcher';
-import { yieldToEventLoop, type CatalogBeerWithRating } from './match-list';
+import { buildAliasIndex, yieldToEventLoop, type AliasIndex, type CatalogBeerWithRating } from './match-list';
 
 // ~0.027 ms/row on the prod catalog → 2000 rows ≈ ≤60 ms of normalization per chunk.
 const PREP_CHUNK = 2000;
@@ -11,6 +11,8 @@ const DEFAULT_TTL_MS = 5 * 60_000;
 export interface CachedCatalog {
   prepared: PreparedCatalog;
   byId: Map<number, CatalogBeerWithRating>;
+  // #614: пам'ять злиття; matchBeerList перевіряє її до матчера.
+  aliases: AliasIndex;
 }
 
 export interface CatalogCache {
@@ -24,7 +26,7 @@ export interface CatalogCache {
 export interface CatalogCacheOptions {
   getVersion?: () => number;                                        // default: catalogVersion
   load?: () => CatalogBeerWithRating[];                             // default: loadCatalog(db)
-  loadAliases?: () => CatalogBeerWithRating[];                      // default: loadAliasCatalog(db) (#614)
+  loadAliases?: () => AliasRow[];                                   // default: loadAliases(db) (#614)
   prepare?: (rows: CatalogBeerWithRating[]) => Promise<PreparedCatalog>; // default: chunked
   now?: () => number;                                               // default: Date.now
   ttlMs?: number;                                                   // default: 5 min
@@ -50,7 +52,7 @@ export async function prepareCatalogChunked(
 export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): CatalogCache {
   const getVersion = opts.getVersion ?? catalogVersion;
   const load = opts.load ?? (() => loadCatalog(db));
-  const loadAliases = opts.loadAliases ?? (() => loadAliasCatalog(db));
+  const loadAliasRows = opts.loadAliases ?? (() => loadAliases(db));
   const prepare = opts.prepare ?? prepareCatalogChunked;
   const now = opts.now ?? Date.now;
   const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
@@ -71,13 +73,12 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
     const version = getVersion();
     rebuilding = (async () => {
       const rows = load();
-      // #614: аліаси матчаться як звичайні записи з id канонічного рядка, але byId будується лише
-      // з рядків beers — інакше аліас з тим самим id переписав би канонічну назву й рейтинг у
-      // відповіді /match назвою з картки крамниці.
-      const aliases = loadAliases();
-      const prepared = await prepare([...rows, ...aliases]);
+      const prepared = await prepare(rows);
       const byId = new Map(rows.map((r) => [r.id, r]));
-      const value: CachedCatalog = { prepared, byId };
+      // #614: аліаси — окремий індекс, а не записи каталогу матчера: matchBeerList перевіряє їх до
+      // матчера з правилом цифр, тож матчер не бачить дублікатів id і не звужує пул броварні.
+      const aliases = buildAliasIndex(loadAliasRows());
+      const value: CachedCatalog = { prepared, byId, aliases };
       current = { value, version, builtAt: now() };
       return value;
     })()
