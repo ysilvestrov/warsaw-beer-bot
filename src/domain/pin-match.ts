@@ -1,5 +1,6 @@
 import type { DB } from '../storage/db';
 import { bumpCatalogVersion } from '../storage/catalog-version';
+import { dropAliasesOnRelink } from '../storage/beers';
 
 export type PinResult =
   | { kind: 'merged'; canonicalId: number; redirected: number }
@@ -40,6 +41,8 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
       return { kind: 'merged', canonicalId: canonical.id, redirected: info.changes as number };
     }
     // New bid (or already this bid) → set on the orphan's own row and pin its links.
+    // #614: людина пінить рядок на інший bid — аліаси, записані під старим bid, втрачають доказ.
+    dropAliasesOnRelink(db, beerId, untappdId);
     db.prepare(`UPDATE beers SET untappd_id = ?, untappd_id_source = 'curated', untappd_lookup_at = ? WHERE id = ?`)
       .run(untappdId, at, beerId);
     db.prepare('UPDATE match_links SET reviewed_by_user = 1 WHERE untappd_beer_id = ?').run(beerId);
