@@ -351,6 +351,20 @@ test('#614 recordLookupSuccess drops the aliases of a row whose bid was cleared 
 
 ---
 
+### Task 16: шлях пошуку `/enrich/result` — ABV аліасу = ABV пошуку (після п'ятого рев'ю, інлайн)
+
+П'яте рев'ю відтворило через справжні роути: `lookupBeer` на шляху пошуку йде з `row.abv` (ABV сироти), а
+`applyLookupOutcome` отримував ABV з тіла запиту. Сирота з ABV першої картки-близнюка (6.1%) і запит другої
+(0.5%) давали аліас «`PINTA / Atak Chmielu`, 0.5» → алкогольне пиво, ✅ картці 0.5%.
+
+- `src/api/routes/enrich.ts`: пошуковий виклик `applyLookupOutcome` передає `abv: row.abv`; шлях bid — ABV тіла.
+- `src/api/routes/enrich.test.ts`: `#614 keys a search-path alias by the ABV the search ran with…` — сирота 6.1,
+  запит 0.5 → аліас `abv_key: '6.1'` на алкогольний рядок. Мутація «ABV з тіла» ламає тест.
+- `src/domain/catalog-cache.ts`: аліаси читаються одразу після `load()` (один знімок з рядками каталогу).
+- `src/domain/lookup-outcome.ts`: застарілий коментар «пара без цифр».
+
+---
+
 ## Після ядра
 
 1. **Реплей** `scratchpad/replay-round4.mts`, доповнений карткою ABV-близнюка (Leffe 0% / 6.6% через
