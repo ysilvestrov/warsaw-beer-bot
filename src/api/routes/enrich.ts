@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
+  deleteAlias,
   findAliasTarget,
   findBeerByNormalized,
   getBeer,
@@ -230,8 +231,10 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // unreachable here and can never be repaired. Inert for every client that
     // sends no bid — i.e. everything in production today.
     const stored = row.untappd_id ?? null;
+    // #614: на картці з аліасом суперечливий bid стосується лише аліасу — refusesBidOverride канонічного
+    // рядка його не блокує (див. /enrich/candidates).
     const mayOverride =
-      bid !== undefined && stored !== bid && !refusesBidOverride(row.untappd_id_source);
+      bid !== undefined && stored !== bid && (row.viaAlias || !refusesBidOverride(row.untappd_id_source));
     if (stored != null && !mayOverride) {
       return c.json({ status: 'matched', untappd_id: stored, rating_global: row.rating_global });
     }
@@ -259,11 +262,24 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           'enrich: identity from shop-published bid',
         );
         // Reuses the shared writer: UNIQUE clash → merge into the canonical row.
-        const kind = applyLookupOutcome(
-          { db: deps.db, log: deps.log }, row.id,
-          { kind: 'matched', result: resolved.result }, nowIso,
-          { brewery, name, abv, sourceUrl: pageUrl },
-        );
+        // #614: на картці з аліасом прийнятий bid спростовує аліас, а не канонічний рядок: аліас видаляється, bid
+        // пишеться на нову сироту цієї картки (злиття у власника bid або новий лінк). Рядка з нормалізованою парою
+        // картки немає — інакше ensureBeerRow не дійшов би до аліасу. Одна транзакція: без проміжного стану
+        // «аліасу вже немає, сироти ще немає». Відхилений bid сюди не доходить і нічого не змінює.
+        const outcome = { kind: 'matched' as const, result: resolved.result };
+        const input = { brewery, name, abv, sourceUrl: pageUrl };
+        const kind = row.viaAlias
+          ? deps.db.transaction(() => {
+              deleteAlias(deps.db, brewery, name, abv);
+              const cardRowId = ensureOrphan(deps.db, {
+                name, brewery,
+                style: style ?? null, abv: sanitizeAbv(abv ?? undefined) ?? null,
+                rating_global: null,
+                normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+              });
+              return applyLookupOutcome({ db: deps.db, log: deps.log }, cardRowId, outcome, nowIso, input);
+            })()
+          : applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, input);
         if (kind === 'matched' || kind === 'merged') {
           stampBidProvenance(deps.db, resolved.result.bid);
           return c.json({

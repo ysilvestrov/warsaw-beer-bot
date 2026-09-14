@@ -1088,6 +1088,57 @@ describe('POST /enrich/result — published bid (#384)', () => {
       expect(res.status).toBe(400);
     }
   });
+
+  it('#614 an accepted contradicting bid on an alias moves the card, not the canonical row', async () => {
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map()) });
+    const blackBean = aliasedBlackBean(db, 'checkin');
+    const coffee = seedBeer(db, {
+      untappd_id: 5555, name: 'Black Bean Coffee', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.0,
+      normalized_name: normalizeName('Black Bean Coffee'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 5555, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 5555 });
+    // Канонічний рядок і його лінк не змінились; картка тепер пам'ятає власника опублікованого bid.
+    expect(sourceOf(db, blackBean)!.untappd_id).toBe(3548624);
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: coffee, abv_key: '11' }]);
+    expect(beerCount(db)).toBe(2);
+  });
+
+  it('#614 an accepted bid nobody owns links a fresh row for the card and drops the alias', async () => {
+    const hydrated = {
+      bid: 7777, beer_name: 'Black Bean IS', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
+      beer_slug: 'varvar-black-bean-is', style: 'Stout', abv: 11, global_rating: 4.2,
+    };
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map([[hydrated.bid, hydrated]])) });
+    const blackBean = aliasedBlackBean(db);
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 7777, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 7777 });
+    expect(sourceOf(db, blackBean)!.untappd_id).toBe(3548624);
+    expect(db.prepare('SELECT untappd_id, brewery, name FROM beers WHERE id != ?').all(blackBean))
+      .toEqual([{ untappd_id: 7777, brewery: 'VARVAR', name: 'BLACK BEAN IS' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
+  });
+
+  it('#614 a rejected contradicting bid on an alias keeps the alias and mints no orphan', async () => {
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map()) });
+    const blackBean = aliasedBlackBean(db);
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 9999, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 3548624 });
+    expect(beerCount(db)).toBe(1);
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: blackBean, abv_key: '11' }]);
+  });
 });
 
 // #369 review follow-up: one malformed card must never 400 a 200-beer batch. JSON
