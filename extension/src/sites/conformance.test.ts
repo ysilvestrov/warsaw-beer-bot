@@ -3,11 +3,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ADAPTERS } from './registry';
 import { startOverlay } from '../content/main';
+import { runOverlay } from '../content/index';
 import type { MatchResult, RawBeer } from '../api/types';
 
 const fixturePath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.html`);
 const nonBeerHtmlPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.html`);
-const nonBeerJsonPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.json`);
 const waitForBadge = () => vi.waitFor(
   () => expect(document.querySelector('[data-beerbadge]')).not.toBeNull(),
   { timeout: 5_000 },
@@ -49,8 +49,13 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     const parsed = new DOMParser().parseFromString(readFileSync(fixturePath(id), 'utf8'), 'text/html');
     const cards = adapter.parseCards(parsed);
     expect(cards.length).toBeGreaterThan(0);
+    expect(cards.some((card) => !card.nonBeer && card.name.length > 0)).toBe(true);
     for (const c of cards) {
-      expect(c.name.length).toBeGreaterThan(0);
+      if (c.nonBeer) {
+        expect(c.skip).toBe(true);
+      } else {
+        expect(c.name.length).toBeGreaterThan(0);
+      }
       expect(c.el).toBeInstanceOf(HTMLElement); // global; jsdom shares one realm
     }
   });
@@ -61,31 +66,48 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     expect(parsed.querySelector(adapter.reRenderContainerSelector)).not.toBeNull();
   });
 
-  it('handles non-beer products according to the adapter contract (or is exempt)', async () => {
-    // Exemption: a shop with verified-zero non-beers ships {none:true, reason}. Reason required so
-    // an exemption is a deliberate, documented choice — not a silently skipped obligation.
-    if (existsSync(nonBeerJsonPath(id))) {
-      const meta = JSON.parse(readFileSync(nonBeerJsonPath(id), 'utf8')) as { none?: boolean; reason?: string };
-      if (meta.none) {
-        expect(typeof meta.reason === 'string' && meta.reason.trim().length).toBeTruthy();
-        return;
-      }
-    }
+  it('returns confirmed per-card non-beer products (or preserves a whole-page exception)', async () => {
     expect(existsSync(nonBeerHtmlPath(id))).toBe(true);
     const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+
+    if (id === 'beershop') {
+      expect(adapter.parseCards(doc)).toEqual([]);
+      return;
+    }
+
+    const cards = adapter.parseCards(doc);
     if (id === 'flasker') {
       vi.mocked(fetch).mockResolvedValue({
         ok: true,
         text: async () =>
           '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
       } as Response);
-      const cards = adapter.parseCards(doc);
       await adapter.loadCardDetails?.(cards);
-      expect(cards.length).toBeGreaterThan(0);
-      expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
-      return;
     }
-    expect(adapter.parseCards(doc)).toEqual([]);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+  });
+
+  it('renders confirmed non-beer cards without matching them', async () => {
+    if (id === 'beershop') return;
+    const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+    const match = vi.fn(sendMatch);
+
+    if (id === 'flasker') {
+      vi.mocked(fetch).mockResolvedValue({
+        ok: true,
+        text: async () =>
+          '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
+      } as Response);
+    }
+
+    await runOverlay(doc, adapter, match);
+
+    const cards = adapter.parseCards(doc);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((card) => card.el.querySelector('[data-beerbadge]')?.textContent === '✕')).toBe(true);
+    expect(cards.every((card) => card.el.hasAttribute('data-beerseen'))).toBe(true);
+    expect(match).not.toHaveBeenCalled();
   });
 
   it('re-badges after the grid is replaced with fresh nodes', async () => {

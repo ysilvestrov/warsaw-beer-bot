@@ -144,7 +144,11 @@ export const beershop: SiteAdapter = {
       const title = text(header);
       const titleName = brewery && title.startsWith(brewery) ? title.slice(brewery.length).trim() : title;
       const name = beerNameFromTitle(titleName, header);
-      if (!name || isNonBeerName(`${brewery} ${name}`)) continue;
+      if (!name) continue;
+      if (isNonBeerName(`${brewery} ${name}`)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
       cards.push({ el, brewery, name });
     }
     return cards;

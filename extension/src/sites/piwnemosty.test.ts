@@ -197,8 +197,10 @@ describe('piwnemosty adapter', () => {
     expect(piwnemosty.isNonBeerPage?.(new URL('https://www.piwnemosty.pl/pol_m_PIWO-KRAFTOWE-100.html'))).toBe(false);
   });
 
-  it('drops non-beer products from the non-beer fixture', () => {
+  it('returns confirmed non-beer products from the non-beer fixture', () => {
     const doc = new DOMParser().parseFromString(nonBeerHtml, 'text/html');
-    expect(piwnemosty.parseCards(doc)).toEqual([]);
+    const cards = piwnemosty.parseCards(doc);
+    expect(cards.length).toBeGreaterThan(0);
+    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
   });
 });
