@@ -236,3 +236,23 @@ describe('Cluster 4 parent/portfolio brand alias batch', () => {
     expect(aliasNeighbors('cydr flirt')).not.toContain('cydr flirt tradycynis');
   });
 });
+
+describe('Cluster 5 bounded brewery-typo alias batch', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['racborz', 'zamkowy raciborz'],
+    ['bayerischer banhof', 'bayerischer bahnhof gasthaus gosebrauerei'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+});
+

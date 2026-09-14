@@ -103,6 +103,10 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['dobruska', 'rodinny rampusak'],                       // 11949 DOBRUŠSKÁ -> bid 654837 (4.4%), 11951 Rampusak 12 -> bid 445768 (4.9%)
   ['jablecznik trzebnicki', 'cydr tradycyjny trzebnica'], // 30135 Cydr tradycyjny -> bid 2132069, 5.2% vs 4.7%
   ['edelweiss', 'brau union osterreich'],                 // 35120 12° Hefetrüb -> bid 93420, 5.1%
+  // Cluster 5 batch: bounded brewery-typo rescue (#476).
+  // Each pair is proven against an orphan in enrich_failures and rescues it live.
+  ['racborz', 'zamkowy raciborz'],                                    // 386 Raciborskie Klasyczne -> bid 4525184, 5.0% = 5.0%
+  ['bayerischer banhof', 'bayerischer bahnhof gasthaus gosebrauerei'], // 30145 Oryginal Leipziger Gose -> bid 19030, 4.6% = 4.6%
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
