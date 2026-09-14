@@ -821,7 +821,7 @@ function aliasFixture() {
   return { db, canonicalId, orphanId };
 }
 
-test('#614 mergeIntoCanonical remembers the orphan\'s shop pair as an alias of the canonical row', () => {
+test('#614 mergeIntoCanonical remembers the searched card as an alias of the canonical row', () => {
   const { db, canonicalId, orphanId } = aliasFixture();
 
   mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T07:13:20Z');
@@ -864,7 +864,7 @@ test('#614 mergeIntoCanonical lets a merged linked row\'s aliases go instead of 
   expect(aliasesOf(db, ownerId).map((a) => a.name)).toEqual(['Red Mexican Spicy Edition']);
 });
 
-test('#614 mergeIntoCanonical re-points an existing alias of the same pair to the newest merge target', () => {
+test('#614 mergeIntoCanonical re-points an existing alias of the same card to the newest merge target', () => {
   const db = fresh();
   const oldTarget = seedBeer(db, {
     untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
@@ -916,13 +916,13 @@ test('#614 mergeIntoCanonical writes the alias from the searched text, not from 
 
 test('#614 twin cards of one shop keep one alias each', () => {
   const db = fresh();
-  const pairName = normalizeName('Trappistes Rochefort 8');
-  const pairBrewery = normalizeBrewery('Brasserie de Rochefort');
+  const twinName = normalizeName('Trappistes Rochefort 8');
+  const twinBrewery = normalizeBrewery('Brasserie de Rochefort');
   db.prepare(
     `INSERT INTO beers (id, untappd_id, name, brewery, abv, normalized_name, normalized_brewery)
      VALUES (8, 1001, 'Trappistes Rochefort 8', 'Brasserie de Rochefort', 9.2, ?, ?),
             (10, 2002, 'Trappistes Rochefort 10', 'Brasserie de Rochefort', 11.3, ?, ?)`,
-  ).run(pairName, pairBrewery, pairName, pairBrewery);
+  ).run(twinName, twinBrewery, twinName, twinBrewery);
   const card8 = seedBeer(db, {
     name: 'Rochefort 8 IS', brewery: 'ROCH', style: null, abv: 9.2, rating_global: null,
     normalized_name: normalizeName('Rochefort 8 IS'), normalized_brewery: normalizeBrewery('ROCH'),
@@ -1033,6 +1033,17 @@ test('#614 recordLookupSuccess keeps aliases when the same bid is confirmed', ()
   recordLookupSuccess(db, rowId, { bid: 6037305, style: 'Gose', abv: 5.4, global_rating: 3.61 }, '2026-09-14T07:11:40Z');
 
   expect(aliasesOf(db, rowId).map((a) => a.name)).toEqual(['RED MEXICAN Tomato Gose']);
+});
+
+test('#614 recordLookupSuccess drops the aliases of a row whose bid was cleared by hand', () => {
+  const db = fresh();
+  const rowId = linkedRowWithAlias(db);
+  // Ручний SQL обнулив bid; жоден записувач у коді цього не робить, але аліаси вже не мають доказу.
+  db.prepare('UPDATE beers SET untappd_id = NULL WHERE id = ?').run(rowId);
+
+  recordLookupSuccess(db, rowId, { bid: 5120103, style: 'Gose', abv: 5, global_rating: 3.72 }, '2026-09-14T07:11:40Z');
+
+  expect(aliasesOf(db, rowId)).toEqual([]);
 });
 
 test('#614 recordLookupSuccess leaves aliases alone when the rewrite hits UNIQUE — the merge that follows decides', () => {
@@ -1908,7 +1919,7 @@ describe('recordProfileBeer (#616)', () => {
   });
 });
 
-// --- #614: аліаси в каталозі матчера ------------------------------------------------------------
+// --- #614: аліаси для /match ------------------------------------------------------------
 import { loadAliases } from './beers';
 
 describe('loadAliases (#614)', () => {

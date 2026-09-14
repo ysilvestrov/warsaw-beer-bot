@@ -312,14 +312,14 @@ export function getBeer(db: DB, beerId: number): BeerRow | null {
   return row ?? null;
 }
 
-// #614: аліас доводить «пара = пиво з цим bid». Коли в рядка змінюється untappd_id, його аліаси
-// втрачають доказ і видаляються. Для сироти (untappd_id IS NULL) і для того самого bid умова
-// `untappd_id <> ?` не виконується, тож нічого не відбувається.
+// #614: аліас доводить «картка = пиво з цим bid». Коли в рядка змінюється untappd_id — зокрема з NULL,
+// обнуленого вручну, — його аліаси втрачають доказ і видаляються. Для того самого bid умова
+// `untappd_id IS NOT ?` не виконується, тож нічого не відбувається.
 export function dropAliasesOnRelink(db: DB, beerId: number, newBid: number): void {
   db.prepare(
     `DELETE FROM beer_aliases
       WHERE beer_id = ?
-        AND EXISTS (SELECT 1 FROM beers WHERE id = ? AND untappd_id <> ?)`,
+        AND EXISTS (SELECT 1 FROM beers WHERE id = ? AND untappd_id IS NOT ?)`,
   ).run(beerId, beerId, newBid);
 }
 
@@ -379,7 +379,7 @@ export function mergeIntoCanonical(
     // checkins.beer_id → beers(id) has NO ON DELETE CASCADE and foreign_keys=ON, so a check-in
     // on the orphan would abort the DELETE. Point it at the canonical row first (as pinMatch does).
     db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonicalId, orphanId);
-    // #614: злиття — єдиний момент, коли відомо «пара броварня + назва цієї сироти = канонічний
+    // #614: злиття — єдиний момент, коли відомо «картка, яку перевірив пошук, = канонічний
     // рядок». DELETE нижче знищив би це знання, і /match на кожне завантаження сторінки знову не
     // впізнавав би ту саму картку крамниці. Власні аліаси рядка, що зливається, НЕ переносяться —
     // їх забирає ON DELETE CASCADE. Крон і пошуковий шлях /enrich/result збагачують лише сироти, а
