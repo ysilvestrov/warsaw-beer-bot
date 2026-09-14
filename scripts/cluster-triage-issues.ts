@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { parseScopeBlock } from '../src/domain/triage-scope';
+import { parseScopeBlock, stripScopeBlocks } from '../src/domain/triage-scope';
 
 export type ArchitecturalLocus =
   | 'adapter_bug'
@@ -69,21 +69,51 @@ export function extractBeerIds(text: string): number[] {
   return Array.from(ids);
 }
 
+export function getExcludedShops(scopeWhere?: { col: string; op: string; value?: unknown }[]): Set<string> {
+  const excluded = new Set<string>();
+  if (!scopeWhere) return excluded;
+  for (const term of scopeWhere) {
+    if (typeof term.value === 'string') {
+      const opLower = term.op?.toLowerCase() ?? '';
+      const isNegative = opLower.startsWith('not') || opLower === '!=';
+      if (term.col === 'source_url' && isNegative) {
+        const val = term.value.toLowerCase();
+        for (const s of [
+          'flasker',
+          'winetime',
+          'beershop',
+          'beerfreak',
+          'onemorebeer',
+          'bierloods22',
+          'hoptimaal',
+          'funkyshop',
+        ]) {
+          if (val.includes(s)) excluded.add(s);
+        }
+      }
+    }
+  }
+  return excluded;
+}
+
 export function detectShop(text: string, scopeWhere?: { col: string; op: string; value?: unknown }[]): string | null {
   if (scopeWhere) {
     for (const term of scopeWhere) {
-      const isPositiveMatch =
-        term.op === 'contains' || term.op === '=' || term.op === 'eq' || term.op === 'like';
-      if (term.col === 'source_url' && isPositiveMatch && typeof term.value === 'string') {
-        const val = term.value.toLowerCase();
-        if (val.includes('flasker')) return 'flasker';
-        if (val.includes('winetime')) return 'winetime';
-        if (val.includes('beershop')) return 'beershop';
-        if (val.includes('beerfreak')) return 'beerfreak';
-        if (val.includes('onemorebeer')) return 'onemorebeer';
-        if (val.includes('bierloods22')) return 'bierloods22';
-        if (val.includes('hoptimaal')) return 'hoptimaal';
-        if (val.includes('funkyshop')) return 'funkyshop';
+      if (typeof term.value === 'string') {
+        const opLower = term.op?.toLowerCase() ?? '';
+        const isPositiveMatch =
+          opLower === 'contains' || opLower === '=' || opLower === 'eq' || opLower === 'like';
+        if (term.col === 'source_url' && isPositiveMatch) {
+          const val = term.value.toLowerCase();
+          if (val.includes('flasker')) return 'flasker';
+          if (val.includes('winetime')) return 'winetime';
+          if (val.includes('beershop')) return 'beershop';
+          if (val.includes('beerfreak')) return 'beerfreak';
+          if (val.includes('onemorebeer')) return 'onemorebeer';
+          if (val.includes('bierloods22')) return 'bierloods22';
+          if (val.includes('hoptimaal')) return 'hoptimaal';
+          if (val.includes('funkyshop')) return 'funkyshop';
+        }
       }
     }
   }
@@ -99,10 +129,32 @@ export function detectShop(text: string, scopeWhere?: { col: string; op: string;
   return null;
 }
 
+export function parseScopeBlockLenient(body: string): {
+  beer_ids?: number[];
+  where?: { col: string; op: string; value?: unknown }[];
+} | null {
+  const strict = parseScopeBlock(body);
+  if (strict) return strict;
+  const m = /```triage-scope\s*\n([\s\S]*?)\n?```/.exec(body);
+  if (!m) return null;
+  try {
+    const raw = JSON.parse(m[1]);
+    if (raw && typeof raw === 'object') {
+      return {
+        beer_ids: Array.isArray(raw.beer_ids) ? raw.beer_ids : undefined,
+        where: Array.isArray(raw.where) ? raw.where : undefined,
+      };
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
 export function classifyIssue(issue: RawIssue): ClassifiedIssue {
   const labels = issue.labels.map((l) => l.name);
   const isSaturated = labels.includes('saturated');
-  const scope = parseScopeBlock(issue.body);
+  const scope = parseScopeBlockLenient(issue.body);
 
   const combinedText = [
     issue.title,
@@ -116,9 +168,21 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     idSet.add(id);
   }
 
+  const excludedShops = getExcludedShops(scope?.where as any);
   const shopFromScope = detectShop('', scope?.where as any);
   const shopFromTitle = detectShop(issue.title);
-  const shop = shopFromScope ?? shopFromTitle ?? detectShop(issue.body);
+  const cleanBody = stripScopeBlocks(issue.body);
+  const shopFromBody = detectShop(cleanBody);
+
+  let shop: string | null = null;
+  if (shopFromScope && !excludedShops.has(shopFromScope)) {
+    shop = shopFromScope;
+  } else if (shopFromTitle && !excludedShops.has(shopFromTitle)) {
+    shop = shopFromTitle;
+  } else if (shopFromBody && !excludedShops.has(shopFromBody)) {
+    shop = shopFromBody;
+  }
+
   const titleLower = issue.title.toLowerCase();
   const isParserBug =
     labels.some((l) =>
@@ -134,7 +198,9 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     titleLower.includes('parser-bug') ||
     titleLower.includes('parser_bug') ||
     titleLower.includes('adapter');
-  const hasShopInTitle = Boolean(shopFromTitle || titleLower.includes('internal-cron'));
+  const hasShopInTitle = Boolean(
+    (shopFromTitle && !excludedShops.has(shopFromTitle)) || titleLower.includes('internal-cron')
+  );
 
   let locus: ArchitecturalLocus = 'other';
   let clusterKey = 'misc';

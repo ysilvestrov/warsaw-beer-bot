@@ -179,6 +179,52 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.sourceShop).toBe('beershop');
   });
 
+  it('does not match shop mentioned only inside triage-scope block with negative operator', () => {
+    const issueWithOnlyNegativeScope: RawIssue = {
+      number: 993,
+      title: '[parser-bug] banner parsing failure',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"not_contains","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithOnlyNegativeScope);
+    expect(classified.sourceShop).toBeNull();
+    expect(classified.clusterKey).toBe('misc');
+  });
+
+  it('handles case-insensitive operators in scope.where like LIKE or CONTAINS', () => {
+    const issueWithUppercaseOp: RawIssue = {
+      number: 992,
+      title: '[parser-bug] comparison with flasker catalogue grid layout',
+      body: '```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"LIKE","value":"beershop"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithUppercaseOp);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('beershop-adapter');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
+  it('blocks shop when scope.where explicitly excludes it even if mentioned in body prose', () => {
+    const issueWithNegativeScopeAndBodyProse: RawIssue = {
+      number: 991,
+      title: '[parser-bug] banner parsing failure',
+      body: 'We checked flasker but this is not flasker.\n```triage-scope\n{"beer_ids":[],"where":[{"col":"source_url","op":"!=","value":"flasker"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithNegativeScopeAndBodyProse);
+    expect(classified.sourceShop).toBeNull();
+    expect(classified.clusterKey).toBe('misc');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
