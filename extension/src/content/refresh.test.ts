@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { refreshCards } from './refresh';
-import { renderBadge, markSeen, isSeen, BADGE_MARKER } from './badge';
+import { renderBadge, markSeen, isSeen, BADGE_MARKER, setNonBeer } from './badge';
 import { normalizeKey } from '../shared/normalize';
 import type { SiteAdapter } from '../sites/types';
 
@@ -50,6 +50,21 @@ describe('refreshCards', () => {
     const keys = refreshCards(document, adapter);
 
     expect(keys).toEqual([]);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(isSeen(host)).toBe(false);
+  });
+
+  it('does not return a cache key for a detail-classified non-beer', () => {
+    const host = cardEl();
+    setNonBeer(host);
+    const adapter = {
+      id: 'fake',
+      hostMatch: () => true,
+      loadDetailsBeforeCache: true,
+      parseCards: () => [{ el: host, brewery: 'Flasker', name: 'Gift set' }],
+    } as SiteAdapter;
+
+    expect(refreshCards(document, adapter)).toEqual([]);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
     expect(isSeen(host)).toBe(false);
   });

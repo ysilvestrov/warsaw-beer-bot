@@ -152,4 +152,3 @@ git log --oneline origin/main..HEAD
 ```
 
 Expected: clean working tree; commits cover only the approved design, plans, shared overlay, nine adapters and focused tests, conformance, specification, adapter guide, Ukrainian install guide, and extension changelog. No manifest, server, database, dependency, version, or release-store file changes appear.
-
