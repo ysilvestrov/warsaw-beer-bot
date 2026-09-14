@@ -163,6 +163,7 @@ describe('runOverlay', () => {
       normalizeKey(card.brewery, card.name),
       drunkResult(card.brewery, card.name),
     );
+    vi.mocked(chrome.storage.local.get).mockClear();
     vi.mocked(chrome.storage.local.set).mockClear();
     const adapter: SiteAdapter = {
       ...adapterFor([card]),
@@ -182,6 +183,7 @@ describe('runOverlay', () => {
     expect(isSeen(card.el)).toBe(true);
     expect(sendMatch).not.toHaveBeenCalled();
     expect(enrich).not.toHaveBeenCalled();
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
     expect(chrome.storage.local.set).not.toHaveBeenCalled();
   });
 

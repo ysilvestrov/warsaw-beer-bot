@@ -1,5 +1,5 @@
 import { normalizeKey } from '../shared/normalize';
-import { resetCard } from './badge';
+import { BADGE_MARKER, resetCard } from './badge';
 import type { SiteAdapter } from '../sites/types';
 
 // Resets every parsed card on the page (removes badge + seen marker) and returns
@@ -9,7 +9,8 @@ import type { SiteAdapter } from '../sites/types';
 export function refreshCards(doc: Document, adapter: SiteAdapter): string[] {
   const keys: string[] = [];
   for (const card of adapter.parseCards(doc)) {
-    if (!card.nonBeer) keys.push(normalizeKey(card.brewery, card.name));
+    const wasConfirmedNonBeer = card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent === '✕';
+    if (!card.nonBeer && !wasConfirmedNonBeer) keys.push(normalizeKey(card.brewery, card.name));
     resetCard(card.el);
   }
   return keys;
