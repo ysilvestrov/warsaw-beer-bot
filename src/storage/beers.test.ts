@@ -1478,6 +1478,29 @@ describe('upsertBeerByBid (#617)', () => {
     expect(row.rating_global).toBeCloseTo(4.1);
   });
 
+  test('#614 linking a row whose bid was cleared drops its merge aliases', () => {
+    // Рев'ю 9, M2: аліаси доводили старий bid; без скидання синк оживляв їх під новим bid (хибний ✅).
+    const db = fresh();
+    const row = seedBeer(db, {
+      untappd_id: 111, name: 'Juicy Trap #20', brewery: PP, style: 'Sour', abv: 6.5, rating_global: 3.9,
+      normalized_name: normalizeName('Juicy Trap #20'), normalized_brewery: normalizeBrewery(PP),
+    });
+    // Інша нормалізована пара, ніж у рядка: seedBeer зливає сіди з тією самою парою в один рядок.
+    const card = { brewery: 'PIWNE PODZIEMIE', name: 'JUICY TRAP NEON MANGO', abv: 6.5 };
+    const orphan = seedBeer(db, {
+      name: card.name, brewery: card.brewery, style: null, abv: 6.5, rating_global: null,
+      normalized_name: normalizeName(card.name), normalized_brewery: normalizeBrewery(card.brewery),
+    });
+    mergeIntoCanonical(db, orphan, row, '2026-09-14T12:00:00Z', card);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+    db.prepare('UPDATE beers SET untappd_id = NULL WHERE id = ?').run(row);
+
+    const got = upsertBeerByBid(db, bidInput(333, 'Juicy Trap #20', PP));
+
+    expect(got).toBe(row);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
+  });
+
   // Рев'ю ядра: факти сироти прийшли з тексту крана/крамниці, а той ABV «буває помилковим,
   // тож авторитетний Untappd-ABV переважає» (spec.md §/newbeers) — як і в recordLookupSuccess.
   test("a resolved orphan takes Untappd's facts over its own", () => {

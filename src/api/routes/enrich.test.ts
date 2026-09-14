@@ -1139,6 +1139,27 @@ describe('POST /enrich/result — published bid (#384)', () => {
     expect(beerCount(db)).toBe(1);
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: blackBean, abv_key: '11' }]);
   });
+
+  it('#614 the alias repair is one transaction: a failure after deleteAlias keeps the alias and leaves no orphan', async () => {
+    const hydrated = {
+      bid: 4444, beer_name: 'Black Bean IS', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
+      beer_slug: 'varvar-black-bean-is', style: 'Stout', abv: 11, global_rating: 4.2,
+    };
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map([[hydrated.bid, hydrated]])) });
+    const blackBean = aliasedBlackBean(db);
+    // Збій уже після deleteAlias і ensureOrphan: запис лінка на сироту картки падає не-UNIQUE помилкою.
+    db.exec(`CREATE TRIGGER boom BEFORE UPDATE OF untappd_id ON beers WHEN NEW.untappd_id = 4444
+             BEGIN SELECT RAISE(ABORT, 'boom'); END;`);
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 4444, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(res.status).toBe(500);
+    // Без транзакції лишився б напівстан: аліасу немає, а сирота з текстом картки перебирає /match без ✅.
+    expect(beerCount(db)).toBe(1);
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: blackBean, abv_key: '11' }]);
+  });
 });
 
 // #369 review follow-up: one malformed card must never 400 a 200-beer batch. JSON
