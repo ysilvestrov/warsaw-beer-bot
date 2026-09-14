@@ -99,6 +99,38 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.sourceShop).toBe('beershop');
   });
 
+  it('prefers structured scope.where source_url shop over incidental title shop mention', () => {
+    const issueWithConflictingTitle: RawIssue = {
+      number: 998,
+      title: '[parser-bug] comparison with flasker catalogue grid layout',
+      body: '```triage-scope\n{"beer_ids":[35147],"where":[{"col":"source_url","op":"contains","value":"beershop"}]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithConflictingTitle);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('beershop-adapter');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
+  it('recognizes adapter-bug label to prioritize adapter classification over matcher categories', () => {
+    const adapterLabeledIssue: RawIssue = {
+      number: 997,
+      title: '[matcher-bug] parent brand token split incorrectly',
+      body: 'Beershop rows have brand in brewery.\n```triage-scope\n{"beer_ids":[35147],"where":[]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'adapter-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(adapterLabeledIssue);
+    expect(classified.locus).toBe('adapter_bug');
+    expect(classified.clusterKey).toBe('beershop-adapter');
+    expect(classified.sourceShop).toBe('beershop');
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,
