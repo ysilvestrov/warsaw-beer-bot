@@ -125,7 +125,11 @@ export const piwnemosty: SiteAdapter = {
       const item = meta.get(id);
       const rawTitle = item?.item_name?.trim() || text(el.querySelector('.product__name'));
       const title = stripOutOfStockMarkers(rawTitle);
-      if (!title || isNonBeerCard(title, item)) continue;
+      if (!title) continue;
+      if (isNonBeerCard(title, item)) {
+        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        continue;
+      }
 
       const visible = splitVisibleTitle(title);
       const brewery = cleanBrewery(item?.item_brand) || visible.brewery;

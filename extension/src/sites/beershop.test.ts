@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pickAdapter } from './registry';
+import { runOverlay } from '../content/index';
 
 const beerHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/beershop.html'), 'utf8');
 const nonBeerHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/beershop.nonbeer.html'), 'utf8');
@@ -156,11 +157,29 @@ describe('beershop adapter', () => {
     expect(adapter.parseCards(doc)).toEqual([]);
   });
 
-  it('drops shared non-beer pack names from otherwise eligible grids', () => {
+  it('returns confirmed shared non-beer packs from otherwise eligible grids', () => {
     const adapter = adapterFor();
     if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(156, 'Beershop', 'World Beer Gift Pack'), 'text/html');
-    expect(adapter.parseCards(doc)).toEqual([]);
+    expect(adapter.parseCards(doc)).toEqual([
+      expect.objectContaining({ nonBeer: true, skip: true }),
+    ]);
+  });
+
+  it('renders a non-clickable status for a shared non-beer pack in a mixed grid', async () => {
+    const adapter = adapterFor();
+    if (!adapter) return;
+    const doc = new DOMParser().parseFromString(
+      productHtml(156, 'Beershop', 'World Beer Gift Pack'),
+      'text/html',
+    );
+    const sendMatch = vi.fn(async () => []);
+
+    await runOverlay(doc, adapter, sendMatch);
+
+    expect(doc.querySelector('[data-beerbadge]')?.textContent).toBe('✕');
+    expect(doc.querySelector('[data-beerseen]')).not.toBeNull();
+    expect(sendMatch).not.toHaveBeenCalled();
   });
 
   it.each([
