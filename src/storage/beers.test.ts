@@ -790,6 +790,122 @@ test('mergeIntoCanonical redirects check-ins instead of FK-crashing on the delet
   expect(getBeer(db, orphanId)).toBeNull();
 });
 
+// --- #614: пам'ять злиття для назв з крамниць -------------------------------------------------
+
+type AliasRow = {
+  beer_id: number; brewery: string; name: string;
+  normalized_brewery: string; normalized_name: string; created_at: string;
+};
+
+function aliasesOf(db: ReturnType<typeof fresh>, beerId: number): AliasRow[] {
+  return db.prepare(
+    `SELECT beer_id, brewery, name, normalized_brewery, normalized_name, created_at
+       FROM beer_aliases WHERE beer_id = ? ORDER BY id`,
+  ).all(beerId) as AliasRow[];
+}
+
+// Випадок користувача 2026-09-14: картка Flasker «VARVAR BLACK BEAN IS 11% 0.33л» проти
+// каталожного «Varvar Brew / Black Bean» (bid 3548624).
+function aliasFixture() {
+  const db = fresh();
+  const canonicalId = seedBeer(db, {
+    untappd_id: 3548624, name: 'Black Bean', brewery: 'Varvar Brew',
+    style: 'Stout - Imperial / Double Pastry', abv: 11, rating_global: 4.14,
+    normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+  });
+  const orphanId = seedBeer(db, {
+    name: 'BLACK BEAN IS', brewery: 'VARVAR', style: null, abv: 11, rating_global: null,
+    normalized_name: normalizeName('BLACK BEAN IS'), normalized_brewery: normalizeBrewery('VARVAR'),
+  });
+  return { db, canonicalId, orphanId };
+}
+
+test('#614 mergeIntoCanonical remembers the orphan\'s shop pair as an alias of the canonical row', () => {
+  const { db, canonicalId, orphanId } = aliasFixture();
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T07:13:20Z');
+
+  expect(aliasesOf(db, canonicalId)).toEqual([{
+    beer_id: canonicalId,
+    brewery: 'VARVAR',
+    name: 'BLACK BEAN IS',
+    normalized_brewery: normalizeBrewery('VARVAR'),
+    normalized_name: normalizeName('BLACK BEAN IS'),
+    created_at: '2026-09-14T07:13:20Z',
+  }]);
+});
+
+test('#614 mergeIntoCanonical carries a merged row\'s own aliases over instead of cascading them away', () => {
+  const { db, canonicalId, orphanId } = aliasFixture();
+  // Сирота сама вже була ціллю давнішого злиття іншої картки.
+  db.prepare(
+    `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+     VALUES (?, 'Varvar', 'Black Bean Tonka', ?, ?, '2026-09-01T10:00:00Z')`,
+  ).run(orphanId, normalizeBrewery('Varvar'), normalizeName('Black Bean Tonka'));
+
+  mergeIntoCanonical(db, orphanId, canonicalId, '2026-09-14T07:13:20Z');
+
+  expect(aliasesOf(db, canonicalId).map((a) => a.name)).toEqual(['Black Bean Tonka', 'BLACK BEAN IS']);
+});
+
+test('#614 mergeIntoCanonical writes no alias for a pair another beer row already holds (vintage twin)', () => {
+  const db = fresh();
+  // normalizeName відкидає числові токени, тож «… 10» і «… 8» мають одну пару. Без цієї
+  // передумови тест нічого б не доводив.
+  expect(normalizeName('Trappistes Rochefort 10')).toBe(normalizeName('Trappistes Rochefort 8'));
+  const pairName = normalizeName('Trappistes Rochefort 10');
+  const pairBrewery = normalizeBrewery('Abbaye de Rochefort');
+  // Сирий INSERT: seedBeer злив би двох близнюків з однаковою парою в один рядок.
+  db.prepare(
+    `INSERT INTO beers (id, untappd_id, name, brewery, abv, normalized_name, normalized_brewery)
+     VALUES (10, 2002, 'Rochefort 10', 'Brasserie Rochefort', 11.3, ?, ?),
+            (8, 1001, 'Trappistes Rochefort 8', 'Abbaye de Rochefort', 9.2, ?, ?),
+            (77, NULL, 'Trappistes Rochefort 10', 'Abbaye de Rochefort', 11.3, ?, ?)`,
+  ).run(
+    normalizeName('Rochefort 10'), normalizeBrewery('Brasserie Rochefort'),
+    pairName, pairBrewery,
+    pairName, pairBrewery,
+  );
+
+  mergeIntoCanonical(db, 77, 10, '2026-09-14T00:03:58Z');
+
+  // Аліас на пару близнюка 8 дав би /match для «Rochefort 8» другого точного кандидата з id 10.
+  const n = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
+  expect(n.n).toBe(0);
+});
+
+test('#614 mergeIntoCanonical re-points an existing alias of the same pair to the newest merge target', () => {
+  const db = fresh();
+  const oldTarget = seedBeer(db, {
+    untappd_id: 6037305, name: 'Red Mexican Spicy Edition', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5.4, rating_global: 3.61,
+    normalized_name: normalizeName('Red Mexican Spicy Edition'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
+  const newTarget = seedBeer(db, {
+    untappd_id: 5120103, name: 'Red Mexican', brewery: 'Copper Head. Beer Workshop',
+    style: 'Gose', abv: 5, rating_global: 3.72,
+    normalized_name: normalizeName('Red Mexican'),
+    normalized_brewery: normalizeBrewery('Copper Head. Beer Workshop'),
+  });
+  const cardBrewery = 'Copper Head';
+  const cardName = 'RED MEXICAN Tomato Gose';
+  db.prepare(
+    `INSERT INTO beer_aliases (beer_id, brewery, name, normalized_brewery, normalized_name, created_at)
+     VALUES (?, ?, ?, ?, ?, '2026-09-02T10:00:00Z')`,
+  ).run(oldTarget, cardBrewery, cardName, normalizeBrewery(cardBrewery), normalizeName(cardName));
+  // Нова сирота тієї самої картки (досяжно зі шляху кранів або з репарації #384).
+  const orphanId = seedBeer(db, {
+    name: cardName, brewery: cardBrewery, style: 'Gose', abv: 5, rating_global: null,
+    normalized_name: normalizeName(cardName), normalized_brewery: normalizeBrewery(cardBrewery),
+  });
+
+  mergeIntoCanonical(db, orphanId, newTarget, '2026-09-14T07:11:40Z');
+
+  const rows = db.prepare('SELECT beer_id, created_at FROM beer_aliases').all();
+  expect(rows).toEqual([{ beer_id: newTarget, created_at: '2026-09-14T07:11:40Z' }]);
+});
+
 // --- #369: relayed shop facts (abv/style) -----------------------------------
 import { sanitizeAbv, fillOrphanFacts, rearmLookup, getBeer as getBeerRow } from './beers';
 import { catalogVersion } from './catalog-version';
