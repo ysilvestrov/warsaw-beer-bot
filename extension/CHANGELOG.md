@@ -23,6 +23,10 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
+## [Unreleased]
+
+- Products that a supported shop identifies as not beer now show a red, non-clickable `✕` when they appear alongside beer, instead of looking as if the extension missed them.
+
 ## [0.18.0] - 2026-09-13
 
 - Fixed Flasker beers with no volume listed showing no badge. They now show their usual rating or drinking-status badge. Flasker glasses, souvenirs, and other merchandise now show a non-clickable red ✕ instead of looking unrated or receiving a beer badge.
