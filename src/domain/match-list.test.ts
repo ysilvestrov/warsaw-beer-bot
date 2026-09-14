@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { matchBeerList, buildAliasIndex, type CatalogBeerWithRating } from './match-list';
-import { normalizeBrewery, normalizeName } from './normalize';
+import { nameDigits, normalizeBrewery, normalizeName } from './normalize';
 import { matchBeer, prepareCatalog, FULL_FALLBACK_BUDGET } from './matcher';
 
 // The route now hands matchBeerList an already-prepared catalog + id index; tests
@@ -223,7 +223,10 @@ describe('matchBeerList aliases (#614)', () => {
     { id: 10, brewery: 'Brasserie de Rochefort', name: 'Trappistes Rochefort 10', abv: 11.3, rating_global: 4.2, untappd_id: 2002 },
   ];
   const alias = (beerId: number, brewery: string, name: string) => ({
-    beer_id: beerId, name, normalized_brewery: normalizeBrewery(brewery), normalized_name: normalizeName(name),
+    beer_id: beerId,
+    normalized_brewery: normalizeBrewery(brewery),
+    normalized_name: normalizeName(name),
+    name_digits: nameDigits(name),
   });
   const noYield = { yield: async () => {} };
 
@@ -259,6 +262,7 @@ describe('matchBeerList aliases (#614)', () => {
     )).results;
     expect(r.is_drunk).toBe(false);
     expect(r.user_rating).toBeNull();
+    expect(r.source === 'exact' && r.matched_beer?.id === 8).toBe(false);
   });
 
   it('an alias without digits never claims a numbered card', async () => {
@@ -271,5 +275,22 @@ describe('matchBeerList aliases (#614)', () => {
     )).results;
     expect(r.is_drunk).toBe(false);
     expect(r.user_rating).toBeNull();
+    expect(r.source === 'exact' && r.matched_beer?.id === 8).toBe(false);
+  });
+
+  it('a card with a year never rides an alias without one onto another vintage', async () => {
+    const mjod: CatalogBeerWithRating[] = [
+      { id: 21, brewery: 'Varvar Brew', name: 'Mjød (2021)', abv: 13, rating_global: 4.1, untappd_id: 3001 },
+      { id: 23, brewery: 'Varvar Brew', name: 'Mjød (2023)', abv: 13, rating_global: 4.2, untappd_id: 3003 },
+    ];
+    const { prepared, byId } = prep(mjod);
+    const aliases = buildAliasIndex([alias(21, 'VARVAR', 'MJØD IS')]);
+    const [r] = (await matchBeerList(
+      prepared, byId, new Set([21]), new Map([[21, 4.0]]),
+      [{ brewery: 'VARVAR', name: 'MJØD IS 2023' }],
+      { ...noYield, aliases },
+    )).results;
+    expect(r.is_drunk).toBe(false);
+    expect(r.source === 'exact' && r.matched_beer?.id === 21).toBe(false);
   });
 });

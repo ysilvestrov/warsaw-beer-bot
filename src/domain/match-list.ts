@@ -5,7 +5,7 @@ import {
   type PreparedCatalog,
   type FallbackBudget,
 } from './matcher';
-import { normalizeBrewery, normalizeName, numericTokensCompatible } from './normalize';
+import { nameDigits, normalizeBrewery, normalizeName } from './normalize';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
@@ -26,42 +26,38 @@ export interface MatchedBeer {
   untappd_id: number | null;
 }
 
-/** #614: аліас із пам'яті злиття — нормалізована пара картки крамниці → канонічний рядок. */
+/** #614: аліас із пам'яті злиття — ключ картки крамниці → канонічний рядок. */
 export interface AliasSource {
   beer_id: number;
-  /** Сира назва картки: числові токени, які normalizeName відкидає, порівнюються лише з неї. */
-  name: string;
   normalized_brewery: string;
   normalized_name: string;
+  /** nameDigits(назва): числові токени, які normalizeName відкидає. */
+  name_digits: string;
 }
 
-export type AliasIndex = ReadonlyMap<string, { beerId: number; name: string }>;
+export type AliasIndex = ReadonlyMap<string, number>;
 
 // Роздільник `|`, а не пробіл: нормалізовані рядки складаються з літер, цифр і пробілів, тож
 // пробіл склеїв би «a b» + «c» і «a» + «b c» в один ключ.
-const aliasKey = (normalizedBrewery: string, normalizedName: string): string =>
-  `${normalizedBrewery}|${normalizedName}`;
+const aliasKey = (normalizedBrewery: string, normalizedName: string, digits: string): string =>
+  `${normalizedBrewery}|${normalizedName}|${digits}`;
 
 export function buildAliasIndex(rows: readonly AliasSource[]): AliasIndex {
-  return new Map(rows.map((r) => [
-    aliasKey(r.normalized_brewery, r.normalized_name),
-    { beerId: r.beer_id, name: r.name },
-  ]));
+  return new Map(rows.map((r) => [aliasKey(r.normalized_brewery, r.normalized_name, r.name_digits), r.beer_id]));
 }
 
-// #614: ключ — ті самі normalizeBrewery/normalizeName, якими ensureBeerRow рахував пару сироти з
-// того самого сирого тексту картки. Цифри нормалізація відкидає, тож аліас картки «…8» мав би той
-// самий ключ, що й картка «…10»; numericTokensCompatible (#617) не пускає таку картку на чужий
-// аліас. Рядок, якого немає в цьому знімку каталогу, — не влучання.
+// #614: ключ — ті самі normalizeBrewery/normalizeName, якими ensureBeerRow рахує пару з сирого тексту
+// картки, плюс nameDigits: нормалізація відкидає цифри, а «…8» і «…10», «Mjød» і «Mjød 2023» — різні
+// пива. Рівність ключа точна, жодних «сумісних» цифр. Рядок, якого немає в цьому знімку каталогу, —
+// не влучання.
 function aliasTarget(
   aliases: AliasIndex | undefined,
   item: MatchInput,
   byId: Map<number, CatalogBeerWithRating>,
 ): CatalogBeerWithRating | null {
   if (!aliases || aliases.size === 0) return null;
-  const hit = aliases.get(aliasKey(normalizeBrewery(item.brewery), normalizeName(item.name)));
-  if (!hit || !numericTokensCompatible(item.name, hit.name)) return null;
-  return byId.get(hit.beerId) ?? null;
+  const beerId = aliases.get(aliasKey(normalizeBrewery(item.brewery), normalizeName(item.name), nameDigits(item.name)));
+  return beerId === undefined ? null : (byId.get(beerId) ?? null);
 }
 
 const toMatchedBeer = (beer: CatalogBeerWithRating): MatchedBeer => ({

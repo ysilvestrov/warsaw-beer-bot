@@ -128,7 +128,7 @@ describe('createCatalogCache', () => {
     const { prepared, byId, aliases } = await cache.get();
     expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual(['1 Atak Chmielu', '2 Buty Skejta']);
     expect(byId.size).toBe(2);
-    expect([...aliases.values()]).toEqual([{ beerId: 1, name: 'Atak Chmielu IPA' }]);
+    expect([...aliases.values()]).toEqual([1]);
   });
 });
 
