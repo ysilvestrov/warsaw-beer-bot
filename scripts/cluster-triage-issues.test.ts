@@ -225,6 +225,39 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.clusterKey).toBe('misc');
   });
 
+  it('handles malformed where array containing null without throwing', () => {
+    const issueWithNullWhere: RawIssue = {
+      number: 990,
+      title: '[parser-bug] banner parsing failure',
+      body: '```triage-scope\n{"beer_ids":[],"where":[null]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    expect(() => classifyIssue(issueWithNullWhere)).not.toThrow();
+    const classified = classifyIssue(issueWithNullWhere);
+    expect(classified.sourceShop).toBeNull();
+    expect(classified.clusterKey).toBe('misc');
+  });
+
+  it('sanitizes string beer_ids in lenient scope to numbers', () => {
+    const issueWithStringBeerIds: RawIssue = {
+      number: 989,
+      title: '[parser-bug] banner parsing failure',
+      body: '```triage-scope\n{"beer_ids":["34250", 34251, "invalid"],"where":[]}\n```',
+      labels: [{ name: 'orphan-triage' }, { name: 'parser-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issueWithStringBeerIds);
+    expect(classified.beerIds).toEqual([34250, 34251]);
+    for (const id of classified.beerIds) {
+      expect(typeof id).toBe('number');
+    }
+  });
+
   it('classifies sinkholes and catch-all issues correctly', () => {
     const sinkholeIssue: RawIssue = {
       number: 334,

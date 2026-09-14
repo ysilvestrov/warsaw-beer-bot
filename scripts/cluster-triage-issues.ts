@@ -73,9 +73,13 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
   const excluded = new Set<string>();
   if (!scopeWhere) return excluded;
   for (const term of scopeWhere) {
-    if (typeof term.value === 'string') {
+    if (term && typeof term === 'object' && typeof term.value === 'string') {
       const opLower = term.op?.toLowerCase() ?? '';
-      const isNegative = opLower.startsWith('not') || opLower === '!=';
+      const isNegative =
+        opLower.startsWith('not') ||
+        opLower === '!=' ||
+        opLower === '<>' ||
+        opLower.includes('not');
       if (term.col === 'source_url' && isNegative) {
         const val = term.value.toLowerCase();
         for (const s of [
@@ -99,7 +103,7 @@ export function getExcludedShops(scopeWhere?: { col: string; op: string; value?:
 export function detectShop(text: string, scopeWhere?: { col: string; op: string; value?: unknown }[]): string | null {
   if (scopeWhere) {
     for (const term of scopeWhere) {
-      if (typeof term.value === 'string') {
+      if (term && typeof term === 'object' && typeof term.value === 'string') {
         const opLower = term.op?.toLowerCase() ?? '';
         const isPositiveMatch =
           opLower === 'contains' || opLower === '=' || opLower === 'eq' || opLower === 'like';
@@ -140,9 +144,27 @@ export function parseScopeBlockLenient(body: string): {
   try {
     const raw = JSON.parse(m[1]);
     if (raw && typeof raw === 'object') {
+      const beerIds = Array.isArray(raw.beer_ids)
+        ? (raw.beer_ids
+            .map((id: unknown) => (typeof id === 'number' ? id : parseInt(String(id), 10)))
+            .filter((id: number) => !isNaN(id) && id > 0) as number[])
+        : undefined;
+
+      const whereTerms = Array.isArray(raw.where)
+        ? raw.where.filter(
+            (t: unknown): t is { col: string; op: string; value?: unknown } =>
+              Boolean(
+                t &&
+                  typeof t === 'object' &&
+                  typeof (t as any).col === 'string' &&
+                  typeof (t as any).op === 'string',
+              ),
+          )
+        : undefined;
+
       return {
-        beer_ids: Array.isArray(raw.beer_ids) ? raw.beer_ids : undefined,
-        where: Array.isArray(raw.where) ? raw.where : undefined,
+        beer_ids: beerIds,
+        where: whereTerms,
       };
     }
   } catch {
