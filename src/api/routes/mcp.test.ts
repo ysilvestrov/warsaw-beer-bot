@@ -133,7 +133,7 @@ describe('POST /mcp', () => {
     const res = await rpc(app, {
       jsonrpc: '2.0', id: 3, method: 'tools/call',
       params: { name: 'match_beers', arguments: { beers: [
-        { brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition' },
+        { brewery: 'Browar Trzech Kumpli', name: 'PAN IPANI Tropical Edition', abv: 6.0 },
       ] } },
     });
     const body = await res.json() as {

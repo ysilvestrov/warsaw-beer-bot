@@ -122,13 +122,24 @@ describe('createCatalogCache', () => {
 
   it('#614 builds the alias index from loadAliases and keeps aliases out of the matcher catalog', async () => {
     const aliasRows = [
-      { beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa' },
+      { beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa', abv_key: '' },
     ];
     const cache = make({ getVersion: () => 0, load: () => rows, loadAliases: () => aliasRows });
     const { prepared, byId, aliases } = await cache.get();
     expect(prepared.beers.map((b) => `${b.id} ${b.name}`)).toEqual(['1 Atak Chmielu', '2 Buty Skejta']);
     expect(byId.size).toBe(2);
     expect([...aliases.values()]).toEqual([1]);
+  });
+
+  it('#614 hands the catalog to buildAliasIndex: a row with the same exact text switches the alias off', async () => {
+    const withSameText: CatalogBeerWithRating[] = [
+      ...rows,
+      { id: 3, brewery: 'PINTA', name: 'Atak Chmielu IPA', abv: 6.1, rating_global: null, untappd_id: null },
+    ];
+    const aliasRows = [{ beer_id: 1, brewery_text: 'pinta', name_text: 'atak chmielu ipa', abv_key: '' }];
+    const cache = make({ getVersion: () => 0, load: () => withSameText, loadAliases: () => aliasRows });
+    const { aliases } = await cache.get();
+    expect(aliases.size).toBe(0);
   });
 });
 

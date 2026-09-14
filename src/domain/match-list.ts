@@ -5,7 +5,7 @@ import {
   type PreparedCatalog,
   type FallbackBudget,
 } from './matcher';
-import { cardText } from './card-text';
+import { cardAbv, cardText } from './card-text';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
@@ -26,43 +26,56 @@ export interface MatchedBeer {
   untappd_id: number | null;
 }
 
-/** #614: аліас із пам'яті злиття — точний текст картки крамниці → канонічний рядок. */
+/** #614: аліас із пам'яті злиття — точний текст і ABV картки крамниці → канонічний рядок. */
 export interface AliasSource {
   beer_id: number;
   brewery_text: string;
   name_text: string;
+  abv_key: string;
 }
 
 export type AliasIndex = ReadonlyMap<string, number>;
 
 // Роздільник `|`: cardText зберігає пробіли, тож пробіл склеїв би «a b» + «c» і «a» + «b c».
-const aliasKey = (breweryText: string, nameText: string): string => `${breweryText}|${nameText}`;
+const textKey = (breweryText: string, nameText: string): string => `${breweryText}|${nameText}`;
+const aliasKey = (breweryText: string, nameText: string, abvKey: string): string =>
+  `${textKey(breweryText, nameText)}|${abvKey}`;
+
+const ALIAS_CATALOG_CHUNK = 2000;
 
 // #614: рядок каталогу з тим самим точним текстом важить більше за аліас (пізніша сирота кранів;
-// сирота, яку репарація #384 зробила рядком нового bid) — картку тоді відповідає матчер. Той самий
-// текст у самій цілі аліас не вимикає.
-export function buildAliasIndex(
+// сирота, яку репарація #384 зробила рядком нового bid) — картку тоді відповідає матчер з його вибором
+// за ABV. ABV тут не порівнюється: зайве вимкнення дає лише промах, не хибний ✅. Той самий текст у
+// самій цілі аліас не вимикає. cardText на ~33.6k рядках одним шматком блокував цикл подій на
+// 74–113 мс (рев'ю 4), тож поступаємося циклу кожні 2000 рядків, як prepareCatalogChunked.
+export async function buildAliasIndex(
   aliases: readonly AliasSource[],
   catalog: readonly { id: number; brewery: string; name: string }[],
-): AliasIndex {
+  yield_: () => Promise<void> = yieldToEventLoop,
+): Promise<AliasIndex> {
   const holders = new Map<string, Set<number>>();
-  for (const row of catalog) {
-    const key = aliasKey(cardText(row.brewery), cardText(row.name));
-    (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
+  for (let i = 0; i < catalog.length; i += ALIAS_CATALOG_CHUNK) {
+    const end = Math.min(i + ALIAS_CATALOG_CHUNK, catalog.length);
+    for (let j = i; j < end; j++) {
+      const row = catalog[j];
+      const key = textKey(cardText(row.brewery), cardText(row.name));
+      (holders.get(key) ?? holders.set(key, new Set()).get(key)!).add(row.id);
+    }
+    await yield_();
   }
   const index = new Map<string, number>();
   for (const a of aliases) {
-    const key = aliasKey(a.brewery_text, a.name_text);
-    const held = holders.get(key);
+    const held = holders.get(textKey(a.brewery_text, a.name_text));
     if (held && [...held].some((id) => id !== a.beer_id)) continue;
-    index.set(key, a.beer_id);
+    index.set(aliasKey(a.brewery_text, a.name_text, a.abv_key), a.beer_id);
   }
   return index;
 }
 
 // #614: ключ — точний текст картки (cardText): нічого зі змісту не губиться, тож картка з іншими
 // цифрами, роком у дужках чи іншою броварнею аліасу не дістає. Порожній текст аліасу не має.
-// Рядок, якого немає в цьому знімку каталогу, — не влучання.
+// Рядок, якого немає в цьому знімку каталогу, — не влучання. ABV картки — частина ключа: 0%-аліас не
+// дістається алкогольній картці з тим самим текстом.
 function aliasTarget(
   aliases: AliasIndex | undefined,
   item: MatchInput,
@@ -72,7 +85,7 @@ function aliasTarget(
   const breweryText = cardText(item.brewery);
   const nameText = cardText(item.name);
   if (breweryText === '' || nameText === '') return null;
-  const beerId = aliases.get(aliasKey(breweryText, nameText));
+  const beerId = aliases.get(aliasKey(breweryText, nameText, cardAbv(item.abv)));
   return beerId === undefined ? null : (byId.get(beerId) ?? null);
 }
 

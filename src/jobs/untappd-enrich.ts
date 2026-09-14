@@ -43,5 +43,5 @@ export async function enrichOneOrphan(
   );
 
   const nowIso = now.toISOString();
-  return applyLookupOutcome(deps, beerId, outcome, nowIso, { brewery: beer.brewery, name: beer.name });
+  return applyLookupOutcome(deps, beerId, outcome, nowIso, { brewery: beer.brewery, name: beer.name, abv: beer.abv });
 }

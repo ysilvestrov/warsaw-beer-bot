@@ -1,7 +1,7 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
 import { numericTokensCompatible } from '../domain/normalize';
-import { cardText } from '../domain/card-text';
+import { cardAbv, cardText } from '../domain/card-text';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
 
@@ -282,12 +282,13 @@ export interface AliasRow {
   beer_id: number;
   brewery_text: string;
   name_text: string;
+  abv_key: string;
 }
 
 export function loadAliases(db: DB): AliasRow[] {
   return db
     .prepare(
-      `SELECT a.beer_id, a.brewery_text, a.name_text
+      `SELECT a.beer_id, a.brewery_text, a.name_text, a.abv_key
          FROM beer_aliases a JOIN beers b ON b.id = a.beer_id
         WHERE b.untappd_id IS NOT NULL
         ORDER BY a.id`,
@@ -359,7 +360,7 @@ export function mergeIntoCanonical(
   orphanId: number,
   canonicalId: number,
   at: string,
-  aliasSource?: { brewery: string; name: string },
+  aliasSource?: { brewery: string; name: string; abv?: number | null },
 ): void {
   db.transaction(() => {
     // #366: the merge is the only moment we learn "this ontap_ref is that canonical beer".
@@ -385,8 +386,8 @@ export function mergeIntoCanonical(
     // сирота аліасів не має; рядок з аліасами доходить сюди лише через репарацію #384, тобто коли
     // його bid виявився хибним — а аліаси доводили саме той bid.
     const orphan = db
-      .prepare('SELECT brewery, name FROM beers WHERE id = ?')
-      .get(orphanId) as { brewery: string; name: string } | undefined;
+      .prepare('SELECT brewery, name, abv FROM beers WHERE id = ?')
+      .get(orphanId) as { brewery: string; name: string; abv: number | null } | undefined;
     // #614: текст аліасу — той, який шукав виклик (applyLookupOutcome передає свій input). ensureBeerRow
     // цифр не бачить, тож сирота могла прийти від іншої картки («Ґвара #6» для запиту «Ґвара #7»), і її
     // текст записав би аліас на пиво, якого пошук для неї не доводив.
@@ -394,6 +395,7 @@ export function mergeIntoCanonical(
     if (source) {
       const breweryText = cardText(source.brewery);
       const nameText = cardText(source.name);
+      const abvKey = cardAbv(source.abv);
       // Порожній текст не прив'язаний ні до крамниці, ні до пива: доказ злиття на ньому ділився б між
       // картками (рев'ю 3: «Browar», «2085 Brewery» і '' зводились в один ключ нормалізатора).
       if (breweryText !== '' && nameText !== '') {
@@ -401,14 +403,14 @@ export function mergeIntoCanonical(
         // найсвіжіший доказ. Рядок каталогу з тим самим текстом вимикає аліас під час читання
         // (buildAliasIndex), тож перевірки власника під час запису немає.
         db.prepare(
-          `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, created_at)
-             VALUES (?, ?, ?, ?, ?, ?)
-           ON CONFLICT(brewery_text, name_text) DO UPDATE SET
+          `INSERT INTO beer_aliases (beer_id, brewery, name, brewery_text, name_text, abv_key, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(brewery_text, name_text, abv_key) DO UPDATE SET
              beer_id = excluded.beer_id,
              brewery = excluded.brewery,
              name = excluded.name,
              created_at = excluded.created_at`,
-        ).run(canonicalId, source.brewery, source.name, breweryText, nameText, at);
+        ).run(canonicalId, source.brewery, source.name, breweryText, nameText, abvKey, at);
       }
     }
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
