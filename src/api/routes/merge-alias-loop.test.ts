@@ -86,9 +86,10 @@ describe('#614 merge memory closes the extension loop', () => {
   it('a twin linked by its own bid does not switch the alias off, so the card never contradicts its bid', async () => {
     // Рев'ю 9, M1: вимкнений аліас віддавав картці 11% рядок близнюка як exact → суперечливий bid → репарація #384
     // зливала рядок близнюка в Black Bean → пінг-понг на кожному завантаженні з переїздом чекінів.
+    // Рев'ю 10, N2: Untappd-ABV близнюка (11) дорівнює ABV іншої картки — правило читання з ABV рядка знову вимикало аліас.
     const twinBeer = {
       bid: 777, beer_name: 'Black Bean Light', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
-      beer_slug: 'varvar-black-bean-light', style: 'Stout', abv: 9.5, global_rating: 4.0,
+      beer_slug: 'varvar-black-bean-light', style: 'Stout', abv: 11, global_rating: 4.0,
     };
     const { db, blackBean, post, match } = loop(async () => new Map([[twinBeer.bid, twinBeer]]));
     await post('/enrich/candidates', { beers: [{ ...CARD, bid: 3548624 }] });
@@ -104,5 +105,29 @@ describe('#614 merge memory closes the extension loop', () => {
       matched_beer: { id: blackBean, untappd_id: 3548624 }, source: 'exact', is_drunk: true,
     });
     expect(await match(twin)).toMatchObject({ matched_beer: { id: twinRow, untappd_id: 777 }, source: 'exact', is_drunk: false });
+  });
+
+  it('a shop bid accepted on the card\'s own row moves the card off an older alias, even when Untappd\'s ABV differs', async () => {
+    // Рев'ю 10, N1: ABV рядка після лінка — з Untappd (10.8), ключ аліасу — з картки (11). Правило читання з ABV
+    // рядка лишало давній аліас, і картка назавжди показувала ✅ на пиві, яке суперечить bid крамниці.
+    const corrected = {
+      bid: 2002, beer_name: 'Black Bean IS', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
+      beer_slug: 'varvar-black-bean-is', style: 'Stout', abv: 10.8, global_rating: 4.3,
+    };
+    const { db, blackBean, post, match } = loop(async () => new Map([[corrected.bid, corrected]]));
+    // Раунд 1: картка злита в Black Bean за bid крамниці — аліас (текст, 11) → Black Bean.
+    await post('/enrich/candidates', { beers: [{ ...CARD, bid: 3548624 }] });
+    expect(await post('/enrich/result', RESULT)).toMatchObject({ status: 'matched', untappd_id: 3548624 });
+    // Раунд 2: та сама картка без ABV (деталі товару не завантажились) — власна сирота з текстом картки.
+    const noAbv = { brewery: CARD.brewery, name: CARD.name };
+    expect((await post('/enrich/candidates', { beers: [noAbv] })).candidates[0].eligible).toBe(true);
+    // Раунд 3: картка з ABV і правильним bid крамниці — ensureBeerRow знаходить власну сироту за парою.
+    await post('/enrich/candidates', { beers: [{ ...CARD, bid: 2002 }] });
+    expect(await post('/enrich/result', { ...CARD, bid: 2002, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [], nbHits: 0 } }))
+      .toMatchObject({ status: 'matched', untappd_id: 2002 });
+    const own = (db.prepare('SELECT id FROM beers WHERE untappd_id = 2002').get() as { id: number }).id;
+
+    expect(own).not.toBe(blackBean);
+    expect(await match(CARD)).toMatchObject({ matched_beer: { id: own, untappd_id: 2002 }, source: 'exact', is_drunk: false });
   });
 });
