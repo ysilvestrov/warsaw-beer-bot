@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { seedBeer } from '../storage/seed-beer.testing';
-import { resolveByBid } from './bid-identity';
+import { resolveByBid, bidBreweryAgrees, FLASKER_IMPORTED_BEER_PLACEHOLDER } from './bid-identity';
 import type { HydratedBeer } from '../sources/untappd/search';
 
 const BULGOGI: HydratedBeer = {
@@ -215,5 +215,26 @@ describe('resolveByBid', () => {
     expect(out).toEqual({
       kind: 'rejected', reason: 'brewery-mismatch', recordBrewery: 'Mad Brew',
     });
+  });
+});
+
+describe('bidBreweryAgrees', () => {
+  it('agrees on the same brewery and on a record alias', () => {
+    expect(bidBreweryAgrees('Mad Brew', 'Mad Brew')).toBe(true);
+    expect(bidBreweryAgrees('madbrew', 'Mad Brew', ['madbrew'])).toBe(true);
+  });
+
+  it('disagrees when the shop names another brewery', () => {
+    expect(bidBreweryAgrees('Mad Brew', 'pHormula')).toBe(false);
+  });
+
+  it('disagrees when either side normalizes to nothing (digit-only brewery, #636)', () => {
+    // normalizeBrewery('1952') === '' — the gate must not treat two empty keys as a match.
+    expect(bidBreweryAgrees('1952', '1952')).toBe(false);
+    expect(bidBreweryAgrees('', 'Mad Brew')).toBe(false);
+  });
+
+  it('exports the Flasker placeholder brand as a shared constant', () => {
+    expect(FLASKER_IMPORTED_BEER_PLACEHOLDER).toBe('Імпортне пиво');
   });
 });

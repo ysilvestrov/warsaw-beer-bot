@@ -81,16 +81,28 @@ function fromLocal(db: DB, bid: number): Candidate | null {
 // The normal veto. The shop can link someone else's beer; it cannot plausibly link a
 // beer by a different brewery than the one it names on the same page. Flasker's known
 // imported-beer placeholder is handled separately below because it names no brewery.
-function breweryAgrees(brand: string, c: Candidate): boolean {
-  const shop = breweryAliases(brand);
+//
+// #633: exported as a pure function because /match applies the SAME decision to a catalog
+// row (no DB, no hydration). One definition, so the read path and the write path can never
+// drift apart.
+export function bidBreweryAgrees(
+  shopBrewery: string,
+  recordBrewery: string,
+  recordAliases: readonly string[] = [],
+): boolean {
+  const shop = breweryAliases(shopBrewery);
   const record = [
-    ...breweryAliases(c.result.brewery_name),
-    ...c.aliases.flatMap((a) => breweryAliases(a)),
+    ...breweryAliases(recordBrewery),
+    ...recordAliases.flatMap((a) => breweryAliases(a)),
   ];
   return breweryAliasesMatch(shop, record);
 }
 
-const FLASKER_IMPORTED_BEER_PLACEHOLDER = 'Імпортне пиво';
+function breweryAgrees(brand: string, c: Candidate): boolean {
+  return bidBreweryAgrees(brand, c.result.brewery_name, c.aliases);
+}
+
+export const FLASKER_IMPORTED_BEER_PLACEHOLDER = 'Імпортне пиво';
 
 function isFlaskerSource(sourceUrl: string | undefined): boolean {
   if (!sourceUrl) return false;
