@@ -121,7 +121,7 @@ describe('#614 merge memory closes the extension loop', () => {
     // Раунд 2: та сама картка без ABV (деталі товару не завантажились) — власна сирота з текстом картки.
     const noAbv = { brewery: CARD.brewery, name: CARD.name };
     expect((await post('/enrich/candidates', { beers: [noAbv] })).candidates[0].eligible).toBe(true);
-    // Раунд 3: картка з ABV і правильним bid крамниці — ensureBeerRow знаходить власну сироту за парою.
+    // Раунд 3: картка з ABV і правильним bid крамниці — аліас → репарація; ensureOrphan повертає власну сироту картки.
     await post('/enrich/candidates', { beers: [{ ...CARD, bid: 2002 }] });
     expect(await post('/enrich/result', { ...CARD, bid: 2002, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [], nbHits: 0 } }))
       .toMatchObject({ status: 'matched', untappd_id: 2002 });
@@ -129,5 +129,34 @@ describe('#614 merge memory closes the extension loop', () => {
 
     expect(own).not.toBe(blackBean);
     expect(await match(CARD)).toMatchObject({ matched_beer: { id: own, untappd_id: 2002 }, source: 'exact', is_drunk: false });
+  });
+
+  it('a shop bid changing twice on the card never relinks the linked ABV twin of its pair — no bid ping-pong', async () => {
+    // Рев'ю 11, R3 (проба review10/writetime, PD): ensureBeerRow брав пару раніше за аліас — рядок близнюка з тим
+    // самим текстом. Суперечливий bid картки перелінковував його, bid близнюка — назад, на кожному завантаженні.
+    const beer = (bid: number, beer_name: string, abv: number) => ({
+      bid, beer_name, brewery_name: 'Varvar Brew', brewery_alias: ['varvar'], beer_slug: null, style: 'Stout', abv, global_rating: 4.0,
+    });
+    const hydrated = new Map([
+      [777, beer(777, 'Black Bean Light', 9.5)], [7777, beer(7777, 'Black Bean IS', 10.8)], [8888, beer(8888, 'Black Bean IS v2', 10.8)],
+    ]);
+    const { db, post, match } = loop(async () => hydrated);
+    const page = (card: typeof CARD, bid: number) => ({ ...card, bid, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [], nbHits: 0 } });
+    const bidOf = (id: number) => (db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(id) as { untappd_id: number }).untappd_id;
+
+    await post('/enrich/candidates', { beers: [{ ...CARD, bid: 3548624 }] });
+    expect(await post('/enrich/result', RESULT)).toMatchObject({ status: 'matched', untappd_id: 3548624 });
+    const twin = { ...CARD, abv: 9.5 };
+    await post('/enrich/candidates', { beers: [{ ...twin, bid: 777 }] });
+    expect(await post('/enrich/result', page(twin, 777))).toMatchObject({ status: 'matched', untappd_id: 777 });
+    const twinRow = (db.prepare('SELECT id FROM beers WHERE untappd_id = 777').get() as { id: number }).id;
+
+    for (const bid of [7777, 8888, 8888]) {
+      await post('/enrich/candidates', { beers: [{ ...CARD, bid }, { ...twin, bid: 777 }] });
+      expect(await post('/enrich/result', page(CARD, bid))).toMatchObject({ status: 'matched', untappd_id: bid });
+      expect(await post('/enrich/result', page(twin, 777))).toMatchObject({ status: 'matched', untappd_id: 777 });
+      expect(bidOf(twinRow)).toBe(777);
+    }
+    expect(await match(CARD)).toMatchObject({ matched_beer: { untappd_id: 8888 }, source: 'exact' });
   });
 });

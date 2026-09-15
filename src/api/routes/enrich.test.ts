@@ -345,6 +345,19 @@ describe('POST /enrich/candidates', () => {
     expect(beerCount(db)).toBe(2);
   });
 
+  it('#614 a card with an alias is answered by the alias even when an orphan of its pair is spelled differently', async () => {
+    const { db, app } = setup();
+    aliasedBlackBean(db);
+    seedBeer(db, {
+      name: 'Black Bean IS', brewery: 'Browar Varvar', style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('Black Bean IS'), normalized_brewery: normalizeBrewery('Browar Varvar'),
+    });
+    const body = await (await post(app, '/enrich/candidates', { beers: [BLACK_BEAN_CARD] })).json();
+    // Рев'ю 11, R3: /match відповідає аліасом першим, тож і /enrich/* бере аліас раніше за пару; сирота пари — крону.
+    expect(body.candidates[0].eligible).toBe(false);
+    expect(beerCount(db)).toBe(2);
+  });
+
   it('#614 a contradicting bid on an alias is eligible even when the canonical link is a check-in', async () => {
     const { db, app } = setup();
     aliasedBlackBean(db, 'checkin');
@@ -1172,6 +1185,30 @@ describe('POST /enrich/result — published bid (#384)', () => {
     expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 5555 });
     expect(getBeer(db, spelled)).toBeNull();
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: coffee, abv_key: '11' }]);
+  });
+
+  it('#614 an accepted contradicting bid on an alias never relinks a linked ABV twin of the card pair', async () => {
+    const hydrated = {
+      bid: 7777, beer_name: 'Black Bean IS', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
+      beer_slug: 'varvar-black-bean-is', style: 'Stout', abv: 10.8, global_rating: 4.2,
+    };
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map([[hydrated.bid, hydrated]])) });
+    aliasedBlackBean(db);
+    const twin = seedBeer(db, {
+      untappd_id: 777, untappd_id_source: 'bid', name: BLACK_BEAN_CARD.name, brewery: BLACK_BEAN_CARD.brewery,
+      style: 'Stout', abv: 9.5, rating_global: 4.0,
+      normalized_name: normalizeName(BLACK_BEAN_CARD.name), normalized_brewery: normalizeBrewery(BLACK_BEAN_CARD.brewery),
+    });
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 7777, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 7777 });
+    // Рев'ю 11, R3: пара раніше за аліас віддавала картці рядок близнюка, і bid картки його перелінковував.
+    expect(sourceOf(db, twin)!.untappd_id).toBe(777);
+    const cardRow = (db.prepare('SELECT id FROM beers WHERE untappd_id = 7777').get() as { id: number }).id;
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: cardRow, abv_key: '11' }]);
   });
 
   it('#614 a rejected contradicting bid on an alias keeps the alias and mints no orphan', async () => {

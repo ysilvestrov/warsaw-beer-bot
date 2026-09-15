@@ -125,13 +125,16 @@ function withRelayQuery(
 // #369: `facts` are shop-published abv/style relayed by the extension. On insert
 // they seed the row; on an existing orphan they fill NULL columns only. A newly
 // gained ABV re-arms the lookup backoff, because the previous attempt ran blind.
-// #614: між рядком з нормалізованою парою і новою сиротою — аліас картки (той самий ключ, що в /match,
-// з СИРИМ ABV). Без цього кроку картка, яку /match уже відповідає через аліас, на повторному раунді
-// (SWR-null кешу, суперечливий bid) отримувала сироту зі своїм текстом, і /match віддавав її exact без ✅.
+// #614: першим — аліас картки (той самий ключ, що в /match, з СИРИМ ABV). Без нього перед сиротою картка, яку /match
+// уже відповідає через аліас, на повторному раунді (SWR-null кешу, суперечливий bid) отримувала сироту зі своїм
+// текстом, і /match віддавав її exact без ✅. Без нього перед парою картка отримувала рядок близнюка тієї самої пари
+// (інше написання чи ABV-близнюк), і її суперечливий bid перелінковував рядок близнюка — пінг-понг (рев'ю 11, R3).
 // viaAlias каже викликачеві, що рядок — канонічний, а не рядок цієї картки.
 function ensureBeerRow(
   db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {},
 ): BeerRow & { viaAlias: boolean } {
+  const aliased = findAliasTarget(db, brewery, name, facts.abv);
+  if (aliased) return { ...aliased, viaAlias: true };
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
   const existing = findBeerByNormalized(db, normalized_brewery, normalized_name);
@@ -140,8 +143,6 @@ function ensureBeerRow(
     if (abvGained) rearmLookup(db, existing.id);
     return { ...(abvGained || changed ? getBeer(db, existing.id)! : existing), viaAlias: false };
   }
-  const aliased = findAliasTarget(db, brewery, name, facts.abv);
-  if (aliased) return { ...aliased, viaAlias: true };
   // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
   const id = ensureOrphan(db, {
     name, brewery,
@@ -261,10 +262,11 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           'enrich: identity from shop-published bid',
         );
         // Reuses the shared writer: UNIQUE clash → merge into the canonical row.
-        // #614: на картці з аліасом прийнятий bid стосується картки, а не канонічного рядка: bid пишеться на нову
+        // #614: на картці з аліасом прийнятий bid стосується картки, а не канонічного рядка: bid пишеться на
         // сироту цієї картки, і аліас ключа переходить туди разом із доказом (злиття — ON CONFLICT у
-        // mergeIntoCanonical; новий лінк — recordLookupSuccess). Рядка з нормалізованою парою картки немає — інакше
-        // ensureBeerRow не дійшов би до аліасу. Одна транзакція: збій запису лінка не лишає сироти з текстом картки.
+        // mergeIntoCanonical; новий лінк — recordLookupSuccess). ensureOrphan повертає лише сироту пари картки (з іншим
+        // написанням — bid ляже на неї, #636) або нову: злінкований рядок пари, як-от ABV-близнюк, не переписується
+        // ніколи (рев'ю 11, R3). Одна транзакція: збій запису лінка не лишає сироти з текстом картки.
         // Відхилений bid сюди не доходить і нічого не змінює.
         const outcome = { kind: 'matched' as const, result: resolved.result };
         // #614 (рев'ю 11, R1): byBid — доказ узято лише з полів цієї картки (resolveByBid), тож аліас переходить і
