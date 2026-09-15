@@ -204,4 +204,44 @@ describe('POST /match', () => {
     expect(stat.items).toBe(1);
     expect(stat.fullFallback).toEqual({ attempts: 0, hits: 0, budgetSkipped: 0 });
   });
+
+  it('answers by the shop-published bid when the brand agrees (#633)', async () => {
+    const { appAs, db } = setup();
+    // A second, wrong row that wins on name alone: same name, different brewery, no link.
+    seedBeer(db, {
+      untappd_id: null, name: 'Pan IPAni', brewery: 'Inny Browar',
+      style: 'IPA', abv: 6.0, rating_global: null,
+      normalized_name: normalizeName('Pan IPAni'),
+      normalized_brewery: normalizeBrewery('Inny Browar'),
+    });
+    const res = await post(appAs(1), {
+      beers: [{ brewery: 'Inny Browar', name: 'Pan IPAni', bid: 9001, brand: 'Trzech Kumpli' }],
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.results[0].matched_beer.untappd_id).toBe(9001);
+    expect(body.results[0].source).toBe('exact');
+    expect(body.results[0].is_drunk).toBe(true);
+  });
+
+  it('logs bid counters on the fallback stats line (#633)', async () => {
+    const info = vi.fn();
+    const log = { ...pino({ level: 'silent' }), info, warn: vi.fn() } as never;
+    const { appAs } = setup(log);
+    await post(appAs(1), {
+      beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni', bid: 9001, brand: 'Trzech Kumpli' }],
+    });
+    const stats = info.mock.calls.find(([, msg]) => msg === 'match fallback stats');
+    expect(stats?.[0].bid).toEqual({ sent: 1, exact: 1, conflict: 0 });
+  });
+
+  it('rejects a malformed bid but keeps brand optional (#633)', async () => {
+    const { appAs } = setup();
+    expect((await post(appAs(1), {
+      beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni', bid: -5 }],
+    })).status).toBe(400);
+    expect((await post(appAs(1), {
+      beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni', bid: 9001 }],
+    })).status).toBe(200);
+  });
 });
