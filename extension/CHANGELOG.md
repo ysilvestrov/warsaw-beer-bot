@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed Flasker beers showing no badge or the wrong one when the product title starts with the beer name rather than the brewery. The full name is now checked, so releases such as “Love on Tap” match correctly.
 - Fixed Flasker Imperial Stouts and vintage editions showing no badge when the shop shortened the style to “IS” or put the year after the strength. Their usual rating or drinking-status badge now appears.
 - Products that a supported shop identifies as not beer now show a red, non-clickable `✕` when they appear alongside beer, instead of looking as if the extension missed them.
 
