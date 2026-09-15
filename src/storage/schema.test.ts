@@ -611,8 +611,11 @@ describe('schema migrations', () => {
 
       const pubA = upsertPub(db, { slug: 'a', name: 'A', address: null, lat: null, lon: null, city: 'warszawa' });
       const pubB = upsertPub(db, { slug: 'b', name: 'B', address: null, lat: null, lon: null, city: 'warszawa' });
+      const pubC = upsertPub(db, { slug: 'c', name: 'C', address: null, lat: null, lon: null, city: 'warszawa' });
       const tap = (beer_ref: string, brewery_ref: string | null) =>
         ({ tap_number: 1, beer_ref, brewery_ref, abv: null, ibu: null, style: null, u_rating: null });
+      // Сплячий паб: його останній знімок старший за вікно збереження (MAX 09-02 − 14 днів = 08-19) — ретеншн лишає такі назавжди.
+      insertTaps(db, createSnapshot(db, pubC, '2026-04-27T00:00:00Z'), [tap('Dormant', 'Dormant Brewery')]);
       insertTaps(db, createSnapshot(db, pubA, '2026-09-01T00:00:00Z'), [
         tap('Solo', 'Solo Brewery'), tap('Hefeweizen', 'Friedenfelser Brewery'), tap('No Brewery', null),
       ]);
@@ -625,7 +628,8 @@ describe('schema migrations', () => {
            ('Old Stamp', 2, 1.0, 0, '2026-08-01T00:00:00Z'),
            ('Hefeweizen', 3, 1.0, 1, '2026-09-05T00:00:00Z'),
            ('No Brewery', 4, 0.9, 0, NULL),
-           ('Dead', 1, 1.0, 1, '2026-09-05T00:00:00Z')`,
+           ('Dead', 1, 1.0, 1, '2026-09-05T00:00:00Z'),
+           ('Dormant', 2, 1.0, 1, '2026-06-01T00:00:00Z')`,
       ).run();
 
       migrate(db);
@@ -634,6 +638,8 @@ describe('schema migrations', () => {
         `SELECT ontap_ref, brewery_ref, untappd_beer_id, confidence, reviewed_by_user, merged_at
            FROM match_links ORDER BY ontap_ref, brewery_ref`,
       ).all()).toEqual([
+        // Штамп старший за вікно і пін без знімка у вікні: доказ броварні міг бути видалений — обидва скидаються, хоча merged_at новіший за перший знімок назви.
+        { ontap_ref: 'Dormant', brewery_ref: 'Dormant Brewery', untappd_beer_id: 2, confidence: 1, reviewed_by_user: 0, merged_at: null },
         // Кілька броварень: копія на кожну пару, без піна й штампа — інжест перерахує.
         { ontap_ref: 'Hefeweizen', brewery_ref: 'Brauerei Rittmayer Hallerndorf Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
         { ontap_ref: 'Hefeweizen', brewery_ref: 'Friedenfelser Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
