@@ -1129,6 +1129,51 @@ describe('POST /enrich/result — published bid (#384)', () => {
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: cardRow, abv_key: '11' }]);
   });
 
+  // Рев'ю 11, R1: сирота тієї самої нормалізованої пари з іншим написанням (кран чи інша крамниця).
+  const spelledOrphan = (db: ReturnType<typeof setup>['db']) => seedBeer(db, {
+    name: 'Black Bean IS', brewery: 'Browar Varvar', style: null, abv: 11, rating_global: null,
+    normalized_name: normalizeName('Black Bean IS'), normalized_brewery: normalizeBrewery('Browar Varvar'),
+  });
+
+  it('#614 an accepted bid nobody owns moves the card alias onto a same-pair orphan spelled differently', async () => {
+    const hydrated = {
+      bid: 2002, beer_name: 'Black Bean IS', brewery_name: 'Varvar Brew', brewery_alias: ['varvar'],
+      beer_slug: 'varvar-black-bean-is', style: 'Stout', abv: 10.8, global_rating: 4.3,
+    };
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map([[hydrated.bid, hydrated]])) });
+    const blackBean = aliasedBlackBean(db);
+    const spelled = spelledOrphan(db);
+    expect(spelled).not.toBe(blackBean);
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 2002, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 2002 });
+    expect(sourceOf(db, spelled)!.untappd_id).toBe(2002);
+    expect(sourceOf(db, blackBean)!.untappd_id).toBe(3548624);
+    // Без перенесення аліас лишався на 3548624, а bid картки — на сироті: назавжди хибний ✅.
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: spelled, abv_key: '11' }]);
+  });
+
+  it('#614 an accepted bid someone owns, landing on a same-pair orphan spelled differently, moves the alias to the owner', async () => {
+    const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map()) });
+    aliasedBlackBean(db);
+    const coffee = seedBeer(db, {
+      untappd_id: 5555, name: 'Black Bean Coffee', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.0,
+      normalized_name: normalizeName('Black Bean Coffee'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    const spelled = spelledOrphan(db);
+
+    const res = await post(app, '/enrich/result', {
+      ...BLACK_BEAN_CARD, bid: 5555, brand: 'VARVAR', pageUrl: FLASKER_PAGE, algolia: { hits: [] },
+    });
+
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 5555 });
+    expect(getBeer(db, spelled)).toBeNull();
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: coffee, abv_key: '11' }]);
+  });
+
   it('#614 a rejected contradicting bid on an alias keeps the alias and mints no orphan', async () => {
     const { db, app } = setup({ hydrateByBid: vi.fn(async () => new Map()) });
     const blackBean = aliasedBlackBean(db);

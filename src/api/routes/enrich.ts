@@ -267,7 +267,9 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // ensureBeerRow не дійшов би до аліасу. Одна транзакція: збій запису лінка не лишає сироти з текстом картки.
         // Відхилений bid сюди не доходить і нічого не змінює.
         const outcome = { kind: 'matched' as const, result: resolved.result };
-        const input = { brewery, name, abv, sourceUrl: pageUrl };
+        // #614 (рев'ю 11, R1): byBid — доказ узято лише з полів цієї картки (resolveByBid), тож аліас переходить і
+        // пишеться, хоч би яке написання мав рядок пари, на який ліг bid. Шлях пошуку нижче byBid не ставить.
+        const input = { brewery, name, abv, sourceUrl: pageUrl, byBid: true };
         const kind = row.viaAlias
           ? deps.db.transaction(() => {
               const cardRowId = ensureOrphan(deps.db, {
