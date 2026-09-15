@@ -122,6 +122,18 @@ describe('parseTitle', () => {
     })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve [2025]', abv: 10 });
   });
 
+  it('keeps a parenthesized vintage after ABV', () => {
+    expect(parseTitle('Trappistes Rochefort 8 9.2% (2025) 330ml'))
+      .toEqual({ brewery: 'Trappistes', name: 'Rochefort 8 (2025)', abv: 9.2 });
+  });
+
+  it('drops malformed vintage brackets after ABV', () => {
+    expect(parseTitle('Brewery Lager 5% [2025 330ml'))
+      .toEqual({ brewery: 'Brewery', name: 'Lager', abv: 5 });
+    expect(parseTitle('Brewery Lager 5% 2025] 330ml'))
+      .toEqual({ brewery: 'Brewery', name: 'Lager', abv: 5 });
+  });
+
   it('removes Imperial Stout shorthand before preserving a vintage', () => {
     expect(parseTitle('VARVAR BLACK BEAN IS 11% [2025] 0.33л'))
       .toEqual({ brewery: 'VARVAR', name: 'BLACK BEAN [2025]', abv: 11 });
