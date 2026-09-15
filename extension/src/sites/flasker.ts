@@ -174,18 +174,18 @@ function stripTitleAlias(head: string, aliases: string[]): string {
   return head;
 }
 
-function splitBreweryName(head: string): { brewery: string; name: string } {
+function splitBreweryName(head: string): { brewery: string; name: string; usedFallback: boolean } {
   const colonIdx = head.indexOf(':');
   if (colonIdx > 0 && colonIdx < head.length - 1) {
     const candidateBrewery = head.slice(0, colonIdx).trim();
     const candidateName = head.slice(colonIdx + 1).replace(/^[\s:–—-]+/u, '').trim();
     if (candidateBrewery && candidateName) {
-      return { brewery: candidateBrewery, name: candidateName };
+      return { brewery: candidateBrewery, name: candidateName, usedFallback: false };
     }
   }
 
   const tokens = head.split(/\s+/).filter(Boolean);
-  if (tokens.length <= 1) return { brewery: head, name: head };
+  if (tokens.length <= 1) return { brewery: head, name: head, usedFallback: false };
 
   const firstThree = tokens.length >= 3 ? `${tokens[0]} ${tokens[1]} ${tokens[2]}`.toLowerCase() : '';
   const firstTwo = `${tokens[0]} ${tokens[1]}`.toLowerCase();
@@ -200,7 +200,7 @@ function splitBreweryName(head: string): { brewery: string; name: string } {
   const breweryTokens = tokens.slice(0, takeTokens);
   const brewery = breweryTokens.join(' ').replace(/:$/u, '');
   const name = tokens.slice(breweryTokens.length).join(' ').trim();
-  return { brewery, name: name || brewery };
+  return { brewery, name: name || brewery, usedFallback: true };
 }
 
 // Registry path: resolve a brewery from the product's own tags. Returns null when
@@ -293,10 +293,12 @@ export function isNonBeerCategory(cat: string): boolean {
 }
 
 // Returns null when the title carries neither a volume nor an ABV marker.
-export function parseTitle(
+type ParsedTitle = { brewery: string; name: string; abv?: number };
+
+function parseTitleWithProvenance(
   rawTitle: string,
   evidence: FlaskerEvidence = {},
-): { brewery: string; name: string; abv?: number } | null {
+): { parsed: ParsedTitle; usedFallback: boolean } | null {
   const title = rawTitle.replace(/\s+/g, ' ').trim();
   if (!title) return null;
 
@@ -322,6 +324,7 @@ export function parseTitle(
 
   let brewery: string;
   let nameBeforeCleanup: string;
+  let usedFallback = false;
   if (rule) {
     brewery = rule.canonical;
     nameBeforeCleanup = stripTitleAlias(head, rule.titleAliases);
@@ -335,10 +338,19 @@ export function parseTitle(
     const fallback = splitBreweryName(head);
     brewery = fallback.brewery;
     nameBeforeCleanup = fallback.name;
+    usedFallback = fallback.usedFallback;
   }
   const nameHead = stripFlaskerImperialStoutSuffix(stripMerchandisingPrefix(nameBeforeCleanup));
   const name = [nameHead, identityTail].filter(Boolean).join(' ');
-  return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
+  const parsed = abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
+  return { parsed, usedFallback };
+}
+
+export function parseTitle(
+  rawTitle: string,
+  evidence: FlaskerEvidence = {},
+): ParsedTitle | null {
+  return parseTitleWithProvenance(rawTitle, evidence)?.parsed ?? null;
 }
 
 // --- product-detail fetch (#384) ------------------------------------------
@@ -347,6 +359,7 @@ export function parseTitle(
 // link only on the product detail page. Mirrors the beerfreak.ts precedent.
 const detailUrls = new WeakMap<HTMLElement, string>();
 const detailProofRequired = new WeakSet<HTMLElement>();
+const fallbackTitleHeads = new WeakSet<HTMLElement>();
 const detailByUrl = new Map<string, Promise<ProductDetail | null>>();
 
 export interface ProductDetail {
@@ -500,10 +513,11 @@ export const flasker: SiteAdapter = {
       if (!e.title) continue;
       const titleNonBeer = isNonBeerTitle(e.title);
       const categoryNonBeer = Boolean(e.categoryHint && isNonBeerCategory(e.categoryHint));
-      const parsed = parseTitle(e.title, {
+      const parsedWithProvenance = parseTitleWithProvenance(e.title, {
         productTags: e.productTags,
         productUrl: e.productUrl,
       });
+      const parsed = parsedWithProvenance?.parsed;
       if (!parsed) {
         if (!e.productUrl) continue;
         detailUrls.set(e.el, e.productUrl);
@@ -518,6 +532,7 @@ export const flasker: SiteAdapter = {
       if (requiresDetail && !e.productUrl) continue;
       if (e.productUrl) detailUrls.set(e.el, e.productUrl);
       if (requiresDetail) detailProofRequired.add(e.el);
+      if (parsedWithProvenance.usedFallback) fallbackTitleHeads.add(e.el);
       cards.push({ el: e.el, ...parsed, ...(requiresDetail ? { skip: true } : {}) });
     }
     return cards;
@@ -549,7 +564,10 @@ export const flasker: SiteAdapter = {
         const brand = canonicalizeBrand(detail.brand);
         card.brand = brand;
         // This is a storefront section shared by foreign beers, not a brewery.
-        if (brand !== IMPORTED_BEER_PLACEHOLDER) card.brewery = brand;
+        if (brand !== IMPORTED_BEER_PLACEHOLDER) {
+          if (fallbackTitleHeads.delete(card.el)) card.name = `${card.brewery} ${card.name}`.trim();
+          card.brewery = brand;
+        }
       }
       if (detail.bid !== undefined) {
         card.bid = detail.bid;
