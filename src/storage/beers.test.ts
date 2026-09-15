@@ -183,6 +183,30 @@ describe('listLookupCandidates', () => {
     expect(ids.length).toBe(1);
   });
 
+  test('#632 an orphan whose brewery pair is off tap is not on tap because another brewery pours the same name', () => {
+    const db = fresh();
+    const offTap = seedBeer(db, {
+      untappd_id: null, name: 'Hefeweizen', brewery: 'Friedenfelser Brewery', style: null, abv: null, rating_global: null,
+      normalized_name: 'hefeweizen', normalized_brewery: 'friedenfelser',
+    });
+    const onTap = seedBeer(db, {
+      untappd_id: null, name: 'Hefeweizen Rittmayer', brewery: 'Rittmayer', style: null, abv: null, rating_global: null,
+      normalized_name: 'hefeweizen rittmayer', normalized_brewery: 'rittmayer',
+    });
+    upsertMatch(db, 'Friedenfelser Brewery', 'Hefeweizen', offTap, 1.0);
+    upsertMatch(db, 'Rittmayer Brewery', 'Hefeweizen', onTap, 1.0);
+    // Зараз назву «Hefeweizen» наливає лише Rittmayer.
+    const pubId = upsertPub(db, { slug: 'pub-632', name: 'Pub 632', address: null, lat: null, lon: null, city: 'warszawa' });
+    insertTaps(db, createSnapshot(db, pubId, '2026-05-26T12:00:00Z'), [{
+      tap_number: 1, beer_ref: 'Hefeweizen', brewery_ref: 'Rittmayer Brewery',
+      abv: null, ibu: null, style: null, u_rating: null,
+    }]);
+
+    const ids = listLookupCandidates(db, 10, new Date('2026-05-26T12:00:00Z')).map((c) => c.id);
+    expect(ids).toContain(onTap);
+    expect(ids).not.toContain(offTap);
+  });
+
   test('omits orphans not on any current tap', () => {
     const db = fresh();
     seedBeer(db, {
