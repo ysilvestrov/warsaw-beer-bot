@@ -1,6 +1,7 @@
 import type { DB } from '../storage/db';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 import { dropAliasesOnRelink } from '../storage/beers';
+import { tapBreweryKey } from '../storage/match_links';
 
 export type PinResult =
   | { kind: 'merged'; canonicalId: number; redirected: number }
@@ -54,21 +55,32 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
 
 export interface PinRow {
   ontap_ref: string;
+  brewery_ref: string;
   beer_id: number;
   brewery: string;
   name: string;
   untappd_id: number | null;
 }
 
-// Undo a pin by its ontap_ref (reliable for merged pins whose orphan row is gone).
+// Undo a pin by its tap (reliable for merged pins whose orphan row is gone).
 // #366: also clears merged_at — unpinning means "recompute this tap", and a surviving merge
 // stamp would make ingest reuse the very target the human just rejected.
-export function unpinByRef(db: DB, ontapRef: string): number {
+// #632: лінк крана — пара броварні й назви. З броварнею знімається пін лише цієї пари; без неї — піни всіх пар цієї
+// назви (людина, яка знає лише назву крана, не мусить вгадувати написання броварні).
+export function unpinByRef(db: DB, ontapRef: string, breweryRef?: string | null): number {
+  if (breweryRef === undefined) {
+    return db
+      .prepare(
+        'UPDATE match_links SET reviewed_by_user = 0, merged_at = NULL WHERE ontap_ref = ? AND reviewed_by_user = 1',
+      )
+      .run(ontapRef).changes as number;
+  }
   return db
     .prepare(
-      'UPDATE match_links SET reviewed_by_user = 0, merged_at = NULL WHERE ontap_ref = ? AND reviewed_by_user = 1',
+      `UPDATE match_links SET reviewed_by_user = 0, merged_at = NULL
+        WHERE ontap_ref = ? AND brewery_ref = ? AND reviewed_by_user = 1`,
     )
-    .run(ontapRef).changes as number;
+    .run(ontapRef, tapBreweryKey(breweryRef)).changes as number;
 }
 
 // Undo a pin by the beer it points at (natural for same-row pins whose orphan survives).
@@ -83,12 +95,14 @@ export function unpinByBeer(db: DB, beerId: number): number {
 export function listPins(db: DB): PinRow[] {
   return db
     .prepare(
-      `SELECT ml.ontap_ref AS ontap_ref, ml.untappd_beer_id AS beer_id,
+      `SELECT ml.ontap_ref AS ontap_ref,
+              ml.brewery_ref AS brewery_ref,
+              ml.untappd_beer_id AS beer_id,
               b.brewery AS brewery, b.name AS name, b.untappd_id AS untappd_id
          FROM match_links ml
          JOIN beers b ON b.id = ml.untappd_beer_id
         WHERE ml.reviewed_by_user = 1
-        ORDER BY ml.ontap_ref`,
+        ORDER BY ml.ontap_ref, ml.brewery_ref`,
     )
     .all() as PinRow[];
 }
