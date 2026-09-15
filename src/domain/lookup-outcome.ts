@@ -5,6 +5,7 @@ import {
   recordLookupNotFound,
   recordLookupSuccess,
   recordLookupTransient,
+  type AliasCard,
 } from '../storage/beers';
 import { recordEnrichFailure, clearEnrichFailure, setEnrichFailureReview, reviewClassOf } from '../storage/enrich_failures';
 import { getBeer } from '../storage/beers';
@@ -23,7 +24,7 @@ export function applyLookupOutcome(
   beerId: number,
   outcome: LookupOutcome,
   nowIso: string,
-  input: { brewery: string; name: string; abv?: number | null; sourceUrl?: string },
+  input: AliasCard & { sourceUrl?: string },
 ): EnrichOutcomeKind {
   switch (outcome.kind) {
     case 'matched':
