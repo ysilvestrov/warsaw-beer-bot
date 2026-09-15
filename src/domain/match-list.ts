@@ -36,10 +36,11 @@ export interface AliasSource {
 
 export type AliasIndex = ReadonlyMap<string, number>;
 
-// Роздільник `|`: cardText зберігає пробіли, тож пробіл склеїв би «a b» + «c» і «a» + «b c».
-const textKey = (breweryText: string, nameText: string): string => `${breweryText}|${nameText}`;
+// Ключ — JSON-масив полів, а не склейка роздільником: cardText зберігає будь-який символ картки, тож і пробіл, і `|`
+// склеїли б «a|b» + «c» з «a» + «b|c» в один ключ, і картка отримала б чужий аліас (AI-рев'ю PR #644). У JSON межі
+// полів однозначні за побудовою.
 const aliasKey = (breweryText: string, nameText: string, abvKey: string): string =>
-  `${textKey(breweryText, nameText)}|${abvKey}`;
+  JSON.stringify([breweryText, nameText, abvKey]);
 
 // #614: індекс пам'яті злиття — «ключ картки → рядок». Аліас відповідає за свій точний ключ завжди; конфлікт
 // доказів для тієї самої картки розв'язує запис (ON CONFLICT у mergeIntoCanonical, recordLookupSuccess переносить
