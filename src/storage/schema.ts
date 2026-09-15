@@ -533,14 +533,17 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     // а паб, де промахувався, щоцикла створював і зливав сироту заново; показ пабу брав пиво останнього паба циклу.
     // Ключ — пара точного тексту броварні крана (NULL → '') і назви крана. Наявні лінки розкладаються за броварнями
     // зі збережених знімків:
-    // - одна броварня → пара; пін лишається; штамп — лише якщо не старший за перший знімок цієї назви (інакше в
-    //   момент злиття могла бути інша броварня);
+    // - одна броварня → пара; пін — лише якщо назва є в знімку всередині вікна збереження (останній знімок − 14 днів,
+    //   SNAPSHOT_RETENTION_DAYS за замовчуванням); штамп — лише якщо merged_at всередині цього вікна. Поза вікном
+    //   cleanup-old-snapshots лишає тільки останній знімок кожного паба, тож знімок броварні, що дала злиття, міг
+    //   зникнути, а стара броварня сплячого паба — лишитися єдиною (рев'ю Task 1).
     // - кілька броварень → копія на кожну пару без піна й штампа: котрій броварні належить ціль, невідомо, тож
     //   показ до інжесту не змінюється, а інжест перераховує;
     // - жодної → видалення: ні показ, ні #486 такий лінк не читають.
-    // Dry-run на байтовій копії прод-БД 2026-09-15: 5408 → 1680 лінків, 7 пінів, 22 штампи; показ 1692 кранів не змінився.
+    // Dry-run на байтовій копії прод-БД 2026-09-15: 5408 → 1680 лінків, 7 пінів, 20 штампів; показ 1692 кранів не змінився.
     // Перебудова, а не ALTER: SQLite не змінює UNIQUE на місці. Повторний прогін (тести відкату в schema.test.ts)
-    // безпечний: SELECT читає лише ontap_ref, який є в обох формах таблиці.
+    // безпечний лише над таблицею, де на назву один рядок: SELECT читає тільки ontap_ref, а дві броварні однієї
+    // назви дали б дублікати пари.
     sql: `
       CREATE TABLE match_links_v33 (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -559,18 +562,22 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
              counts AS (
                SELECT beer_ref, COUNT(*) AS n FROM pairs GROUP BY beer_ref
              ),
-             first_seen AS (
-               SELECT t.beer_ref, MIN(s.snapshot_at) AS at
-                 FROM taps t JOIN tap_snapshots s ON s.id = t.snapshot_id
-                GROUP BY t.beer_ref
+             retained AS (
+               SELECT strftime('%Y-%m-%dT%H:%M:%fZ', MAX(snapshot_at), '-14 days') AS since FROM tap_snapshots
+             ),
+             recent AS (
+               SELECT DISTINCT t.beer_ref
+                 FROM taps t JOIN tap_snapshots s ON s.id = t.snapshot_id CROSS JOIN retained r
+                WHERE s.snapshot_at >= r.since
              )
         SELECT ml.ontap_ref, p.brewery_ref, ml.untappd_beer_id, ml.confidence,
-               CASE WHEN c.n = 1 THEN ml.reviewed_by_user ELSE 0 END,
-               CASE WHEN c.n = 1 AND ml.merged_at >= f.at THEN ml.merged_at ELSE NULL END
+               CASE WHEN c.n = 1 AND rc.beer_ref IS NOT NULL THEN ml.reviewed_by_user ELSE 0 END,
+               CASE WHEN c.n = 1 AND ml.merged_at >= r.since THEN ml.merged_at ELSE NULL END
           FROM match_links ml
           JOIN pairs p ON p.beer_ref = ml.ontap_ref
           JOIN counts c ON c.beer_ref = ml.ontap_ref
-          JOIN first_seen f ON f.beer_ref = ml.ontap_ref;
+          CROSS JOIN retained r
+          LEFT JOIN recent rc ON rc.beer_ref = ml.ontap_ref;
       DROP TABLE match_links;
       ALTER TABLE match_links_v33 RENAME TO match_links;
     `,
