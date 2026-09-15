@@ -15,7 +15,12 @@ const CATALOG: CatalogBeerWithRating[] = [
 
 function cacheOf(rows: CatalogBeerWithRating[]): CatalogCache {
   return {
-    get: async () => ({ prepared: prepareCatalog(rows), byId: new Map(rows.map((r) => [r.id, r])), aliases: new Map() }),
+    get: async () => ({
+      prepared: prepareCatalog(rows),
+      byId: new Map(rows.map((r) => [r.id, r])),
+      byUntappdId: new Map(rows.filter((r) => r.untappd_id != null).map((r) => [r.untappd_id!, r])),
+      aliases: new Map(),
+    }),
     idle: async () => {},
   };
 }

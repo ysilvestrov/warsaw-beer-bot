@@ -11,6 +11,9 @@ const DEFAULT_TTL_MS = 5 * 60_000;
 export interface CachedCatalog {
   prepared: PreparedCatalog;
   byId: Map<number, CatalogBeerWithRating>;
+  // #633: untappd_id → рядок, з ТОГО САМОГО знімка, що byId: відповідь за опублікованим bid
+  // не має права вказувати на рядок, якого в цьому знімку немає.
+  byUntappdId: ReadonlyMap<number, CatalogBeerWithRating>;
   // #614: пам'ять злиття; matchBeerList перевіряє її до матчера.
   aliases: AliasIndex;
 }
@@ -77,10 +80,13 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
       const aliasRows = loadAliasRows();
       const prepared = await prepare(rows);
       const byId = new Map(rows.map((r) => [r.id, r]));
+      // #633: індекс за опублікованим bid будується з ТИХ САМИХ рядків, що byId — один знімок.
+      const byUntappdId = new Map<number, CatalogBeerWithRating>();
+      for (const r of rows) if (r.untappd_id != null) byUntappdId.set(r.untappd_id, r);
       // #614: аліаси — окремий індекс, а не записи каталогу матчера: matchBeerList перевіряє їх до
       // матчера за точним текстом картки, тож матчер не бачить дублікатів id і не звужує пул броварні.
       const aliases = buildAliasIndex(aliasRows);
-      const value: CachedCatalog = { prepared, byId, aliases };
+      const value: CachedCatalog = { prepared, byId, byUntappdId, aliases };
       current = { value, version, builtAt: now() };
       return value;
     })()

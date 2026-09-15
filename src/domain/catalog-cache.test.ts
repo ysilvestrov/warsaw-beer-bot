@@ -37,6 +37,14 @@ describe('createCatalogCache', () => {
     expect(byId.get(1)?.name).toBe('Atak Chmielu');
   });
 
+  it('byUntappdId indexes only linked rows, from the same snapshot as byId (#633)', async () => {
+    const cache = make({ getVersion: () => 0, load: () => rows });
+    const { byId, byUntappdId } = await cache.get();
+    // row 1 is linked (untappd_id 111), row 2 is an orphan (untappd_id null)
+    expect(byUntappdId.get(111)).toBe(byId.get(1));
+    expect(byUntappdId.size).toBe(1);
+  });
+
   it('warm get reuses the cache — no second load while version is unchanged', async () => {
     const load = vi.fn(() => rows);
     const cache = make({ getVersion: () => 0, load });
