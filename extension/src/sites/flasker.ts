@@ -8,7 +8,7 @@ import { FLASKER_BREWERIES, type FlaskerBrewery } from './flasker-breweries.gene
 // decides whether Flasker candidates are beer or merchandise (#615).
 const VOLUME_UNIT_RE = /\d+(?:[.,]\d+)?\s*(?:ml|мл|l|л)(?![\p{L}])/iu; // 330ml, 0.33л, 500 мл, 1l
 const VOLUME_BARE_RE = /\b0[.,]\d+\b(?!\s*(?:кг|kg))/iu;              // bare litre decimal, not a weight (kg)
-const ABV_RE = /(\d+(?:[.,]\d+)?)\s*%/u;
+const ABV_RE = /(\d+(?:[.,]\d+)?)\s*%(?:\s*ABV)?/iu;
 
 function firstIndex(s: string, re: RegExp): number {
   const m = s.match(re);
@@ -261,6 +261,15 @@ export function stripMerchandisingPrefix(name: string): string {
   return stripped || name;
 }
 
+const GENUINE_TERMINAL_IS_NAME_RE = /^love is$/iu;
+const TERMINAL_IMPERIAL_STOUT_RE = /\s+IS$/iu;
+
+function stripFlaskerImperialStoutSuffix(name: string): string {
+  const trimmed = name.trim();
+  if (GENUINE_TERMINAL_IS_NAME_RE.test(trimmed)) return trimmed;
+  return trimmed.replace(TERMINAL_IMPERIAL_STOUT_RE, '').trim();
+}
+
 // --- non-beer gates ------------------------------------------------------
 // Secondary gate: catches sets/glassware/snacks/vouchers that DO quote a volume
 // (the volume gate alone would let them through — e.g. a multi-beer set or a sauce
@@ -296,6 +305,10 @@ export function parseTitle(
   const headMarkers = [volAt, abvAt].filter((index) => index >= 0);
   if (headMarkers.length === 0) return null;
   const headEnd = Math.min(...headMarkers);
+  const tailStart = abvMatch && abvAt >= 0 ? abvAt + abvMatch[0].length : -1;
+  const identityTail = tailStart >= 0 && volAt > tailStart
+    ? title.slice(tailStart, volAt).trim()
+    : '';
   // The banner must go BEFORE the split: otherwise splitBreweryName takes "ПРЕДРЕЛІЗ"
   // as the brewery and the later name-side strip has nothing left to clean (#376).
   const head = stripMerchandisingPrefix(title.slice(0, headEnd).trim());
@@ -323,7 +336,9 @@ export function parseTitle(
     brewery = fallback.brewery;
     nameBeforeCleanup = fallback.name;
   }
-  const name = stripMerchandisingPrefix(nameBeforeCleanup);
+  const name = stripFlaskerImperialStoutSuffix(
+    [stripMerchandisingPrefix(nameBeforeCleanup), identityTail].filter(Boolean).join(' '),
+  );
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
 

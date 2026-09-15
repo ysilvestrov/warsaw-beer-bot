@@ -113,7 +113,31 @@ describe('parseTitle', () => {
 
     expect(parseTitle('The Lost Philosopher Xmas Eve 10% [2025] 330ml', {
       productTags: ['mad brew'],
-    })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve', abv: 10 });
+    })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve [2025]', abv: 10 });
+  });
+
+  it('keeps a vintage written after ABV and before the package volume', () => {
+    expect(parseTitle('The Lost Philosopher Xmas Eve 10% [2025] 0.75л', {
+      productTags: ['mad brew'],
+    })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve [2025]', abv: 10 });
+  });
+
+  it('does not retain an ABV label as identity text', () => {
+    expect(parseTitle('LEFFE BLONDE 6.6% ABV 0.33л'))
+      .toEqual({ brewery: 'LEFFE', name: 'BLONDE', abv: 6.6 });
+  });
+
+  it('removes Flasker terminal Imperial Stout shorthand', () => {
+    expect(parseTitle('VARVAR BLACK BEAN IS 11% 0.33л'))
+      .toEqual({ brewery: 'VARVAR', name: 'BLACK BEAN', abv: 11 });
+    expect(parseTitle('Vibrant Pour CherryEmber IS 8% 330ml', {
+      productTags: ['vibrant pour'],
+    })).toEqual({ brewery: 'VibrantPour', name: 'CherryEmber', abv: 8 });
+  });
+
+  it('preserves the only verified genuine terminal IS name', () => {
+    expect(parseTitle('REBREW LOVE IS 8% 330ml', { productTags: ['rebrew'] }))
+      .toEqual({ brewery: 'Rebrew', name: 'LOVE IS', abv: 8 });
   });
 
   it('uses the explicit Copper Head rule instead of splitting the first word', () => {
@@ -125,7 +149,7 @@ describe('parseTitle', () => {
   it('uses Hoppy Hog product slugs when tags are missing', () => {
     expect(parseTitle('Hoppy Hog Charred Memory IS 10% 330ml', {
       productUrl: 'https://flasker.com.ua/product/hoppy-hog-charred-memory-is-10-330ml/',
-    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory IS', abv: 10 });
+    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory', abv: 10 });
   });
 
   it('uses known Mad Brew product-family slugs over misleading generic tags', () => {
@@ -138,7 +162,7 @@ describe('parseTitle', () => {
   it('resolves the Morava series to VibrantPour without dropping the series name', () => {
     expect(parseTitle('ПРЕДРЕЛІЗ: Morava Winter Flow IS 10% 0.33', {
       productUrl: 'https://flasker.com.ua/product/предреліз-morava-winter-flow-is-10-0-33/',
-    })).toEqual({ brewery: 'VibrantPour', name: 'Morava Winter Flow IS', abv: 10 });
+    })).toEqual({ brewery: 'VibrantPour', name: 'Morava Winter Flow', abv: 10 });
   });
 
   // #385: Tomatøl is a Mad Brew series, and the title carries only the series
@@ -173,7 +197,7 @@ describe('parseTitle', () => {
   it('sees through the ПРЕДРЕЛІЗ slug banner to a plain brewery prefix', () => {
     expect(parseTitle('Hoppy Hog Charred Memory IS 10% 330ml', {
       productUrl: 'https://flasker.com.ua/product/предреліз-hoppy-hog-charred-memory-is-10-330ml/',
-    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory IS', abv: 10 });
+    })).toEqual({ brewery: 'Hoppy Hog Family Brewery', name: 'Charred Memory', abv: 10 });
   });
 
   it('no abv → volume marks the head end', () => {
@@ -981,7 +1005,7 @@ describe('Flasker cluster extraction regressions (#558, #579, #566, #481)', () =
       }),
     ).toEqual({
       brewery: 'VibrantPour',
-      name: 'Morava Winter Flow IS',
+      name: 'Morava Winter Flow',
       abv: 10,
     });
   });
