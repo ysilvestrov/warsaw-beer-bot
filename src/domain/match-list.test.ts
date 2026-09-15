@@ -315,3 +315,122 @@ describe('matchBeerList aliases (#614)', () => {
     expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
   });
 });
+
+const bidCatalog: CatalogBeerWithRating[] = [
+  { id: 300, brewery: 'pHormula', name: 'Bosbes', abv: 6.0, rating_global: 4.1, untappd_id: 4333527 },
+  { id: 301, brewery: 'Mad Brew', name: 'Bosbes', abv: 6.0, rating_global: 3.2, untappd_id: 999001 },
+  { id: 302, brewery: 'Mad Brew', name: 'Harissa', abv: 5.0, rating_global: 3.9, untappd_id: 999002 },
+];
+
+function prepBid() {
+  const byId = new Map(bidCatalog.map((c) => [c.id, c]));
+  const byUntappdId = new Map(bidCatalog.filter((c) => c.untappd_id != null).map((c) => [c.untappd_id!, c]));
+  return { prepared: prepareCatalog(bidCatalog), byId, byUntappdId };
+}
+
+describe('matchBeerList — published bid (#633)', () => {
+  it('a bid whose brewery agrees wins over an exact name match on another row', async () => {
+    const { prepared, byId, byUntappdId } = prepBid();
+    const res = await matchBeerList(
+      prepared, byId, new Set([300]), new Map([[300, 4.5]]),
+      [{ brewery: 'Mad Brew', name: 'Bosbes', bid: 4333527, brand: 'pHormula' }],
+      { byUntappdId },
+    );
+    // name alone would give 301 (Mad Brew / Bosbes); the bid names 300 and its brand agrees.
+    expect(res.results[0].matched_beer?.id).toBe(300);
+    expect(res.results[0].source).toBe('exact');
+    expect(res.results[0].is_drunk).toBe(true);
+    expect(res.results[0].user_rating).toBe(4.5);
+    expect(res.bid).toEqual({ sent: 1, exact: 1, conflict: 0 });
+  });
+
+  it('a placeholder brand falls back to the card brewery as evidence', async () => {
+    const { prepared, byId, byUntappdId } = prepBid();
+    const res = await matchBeerList(
+      prepared, byId, new Set(), new Map(),
+      [{ brewery: 'pHormula', name: 'Something Else', bid: 4333527, brand: 'Імпортне пиво' }],
+      { byUntappdId },
+    );
+    expect(res.results[0].matched_beer?.id).toBe(300);
+    expect(res.results[0].source).toBe('exact');
+  });
+
+  it('a conflicting brewery still gives exact when the name landed on the bid row', async () => {
+    // The name must reach the bid row through FUZZY ("Bosbe" is a typo), otherwise the name
+    // route already returns exact and the upgrade under test would be a no-op — a vacuous
+    // test that survives deleting the rule (caught by mutation, 2026-09-15).
+    const { prepared, byId, byUntappdId } = prepBid();
+    const res = await matchBeerList(
+      prepared, byId, new Set([301]), new Map([[301, 3.0]]),
+      [{ brewery: 'Mad Brew', name: 'Bosbe', bid: 999001, brand: 'VibrantPour' }],
+      { byUntappdId },
+    );
+    // brand VibrantPour disagrees with Mad Brew, but the name route reached row 301 itself,
+    // so two independent witnesses agree and the answer is exact — with the drunk status a
+    // fuzzy match would never assert.
+    expect(res.results[0].matched_beer?.id).toBe(301);
+    expect(res.results[0].source).toBe('exact');
+    expect(res.results[0].is_drunk).toBe(true);
+    expect(res.results[0].user_rating).toBe(3.0);
+    expect(res.results[0].drunk_uncertain).toBe(false);
+    expect(res.bid).toEqual({ sent: 1, exact: 1, conflict: 0 });
+  });
+
+  it('a conflicting brewery with a different name match reads as fuzzy on the bid row', async () => {
+    const { prepared, byId, byUntappdId } = prepBid();
+    const res = await matchBeerList(
+      prepared, byId, new Set([302]), new Map([[302, 4.2]]),
+      [{ brewery: 'Mad Brew', name: 'Bosbes', bid: 999002, brand: 'Pastry Mastery' }],
+      { byUntappdId },
+    );
+    expect(res.results[0].matched_beer?.id).toBe(302);
+    expect(res.results[0].source).toBe('fuzzy');
+    expect(res.results[0].is_drunk).toBe(false);
+    expect(res.results[0].user_rating).toBeNull();
+    expect(res.results[0].drunk_uncertain).toBe(true); // 302 is in the drunk set
+    expect(res.bid).toEqual({ sent: 1, exact: 0, conflict: 1 });
+  });
+
+  it('a bid outside the snapshot changes nothing', async () => {
+    const { prepared, byId, byUntappdId } = prepBid();
+    const withBid = await matchBeerList(
+      prepared, byId, new Set(), new Map(),
+      [{ brewery: 'Mad Brew', name: 'Bosbes', bid: 123456, brand: 'Mad Brew' }],
+      { byUntappdId },
+    );
+    const without = await matchBeerList(
+      prepared, byId, new Set(), new Map(),
+      [{ brewery: 'Mad Brew', name: 'Bosbes' }],
+      { byUntappdId },
+    );
+    expect(withBid.results).toEqual(without.results);
+    expect(withBid.bid).toEqual({ sent: 1, exact: 0, conflict: 0 });
+  });
+
+  it('an agreeing bid beats the #614 alias for the same card', async () => {
+    const { prepared, byId, byUntappdId } = prepBid();
+    const aliases = buildAliasIndex([
+      { beer_id: 302, brewery_text: cardText('Mad Brew'), name_text: cardText('Bosbes'), abv_key: cardAbv(6) },
+    ]);
+    const res = await matchBeerList(
+      prepared, byId, new Set(), new Map(),
+      [{ brewery: 'Mad Brew', name: 'Bosbes', abv: 6, bid: 999001, brand: 'Mad Brew' }],
+      { byUntappdId, aliases },
+    );
+    expect(res.results[0].matched_beer?.id).toBe(301); // the bid row, not the alias target 302
+    expect(res.results[0].source).toBe('exact');
+  });
+
+  it('an agreeing bid spends no full-catalog fallback budget', async () => {
+    // The card text matches NOTHING in this catalog, so without the bid rule every item
+    // would spend a full-catalog fallback attempt — that is what keeps this test honest.
+    const { prepared, byId, byUntappdId } = prepBid();
+    const items = Array.from({ length: FULL_FALLBACK_BUDGET + 5 }, () => ({
+      brewery: 'Zzz Unknown Brewing', name: 'Qqq Nothing Like It', bid: 4333527, brand: 'pHormula',
+    }));
+    const res = await matchBeerList(prepared, byId, new Set(), new Map(), items, { byUntappdId });
+    expect(res.fallback.attempts).toBe(0);
+    expect(res.fallback.budgetSkipped).toBe(0);
+    expect(res.results.every((r) => r.matched_beer?.id === 300)).toBe(true);
+  });
+});

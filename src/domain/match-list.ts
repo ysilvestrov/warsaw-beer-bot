@@ -6,6 +6,7 @@ import {
   type FallbackBudget,
 } from './matcher';
 import { cardAbv, cardText } from './card-text';
+import { bidBreweryAgrees, FLASKER_IMPORTED_BEER_PLACEHOLDER } from './bid-identity';
 
 export interface CatalogBeerWithRating extends CatalogBeer {
   rating_global: number | null;
@@ -16,6 +17,10 @@ export interface MatchInput {
   brewery: string;
   name: string;
   abv?: number | null;
+  /** #633: Untappd id, який крамниця публікує на сторінці товару. */
+  bid?: number;
+  /** #633: brand зі сторінки товару — доказ броварні, проти якого перевіряється bid. */
+  brand?: string;
 }
 
 export interface MatchedBeer {
@@ -102,11 +107,29 @@ export interface MatchListOptions {
   yield?: () => Promise<void>;
   // #614: пам'ять злиття. Перевіряється до матчера; без неї — поведінка як до #614.
   aliases?: AliasIndex;
+  // #633: untappd_id → рядок того самого знімка каталогу. Без нього bid ігнорується.
+  byUntappdId?: ReadonlyMap<number, CatalogBeerWithRating>;
+}
+
+/** #633: скільки карток несли опублікований bid і чим це скінчилося — для лічильників у лозі роуту. */
+export interface BidStats {
+  sent: number;
+  exact: number;
+  conflict: number;
 }
 
 export interface MatchListOutcome {
   results: MatchListResult[];
   fallback: FallbackBudget;
+  bid: BidStats;
+}
+
+// #633: доказ броварні для опублікованого bid — brand зі сторінки товару. Заглушка Flasker
+// «Імпортне пиво» — не броварня, а розділ вітрини, тож для неї (і для порожнього brand) доказом
+// стає броварня самої картки, яку клієнт і так надсилає.
+function bidEvidenceBrewery(item: MatchInput): string {
+  const brand = (item.brand ?? '').trim();
+  return brand === '' || brand === FLASKER_IMPORTED_BEER_PLACEHOLDER ? item.brewery : brand;
 }
 
 export async function matchBeerList(
@@ -119,46 +142,87 @@ export async function matchBeerList(
 ): Promise<MatchListOutcome> {
   const yield_ = opts.yield ?? yieldToEventLoop;
   const budget = createFallbackBudget();
+  const bid: BidStats = { sent: 0, exact: 0, conflict: 0 };
   const out: MatchListResult[] = [];
   for (const item of items) {
     const raw = { brewery: item.brewery, name: item.name };
-    const viaAlias = aliasTarget(opts.aliases, item, byId);
-    if (viaAlias) {
-      out.push({
-        raw,
-        matched_beer: toMatchedBeer(viaAlias),
-        is_drunk: drunkSet.has(viaAlias.id),
-        drunk_uncertain: false,
-        user_rating: ratingByBeerId.get(viaAlias.id) ?? null,
-        source: 'exact',
-        searched: true,
-      });
+    const exactOn = (beer: CatalogBeerWithRating): MatchListResult => ({
+      raw,
+      matched_beer: toMatchedBeer(beer),
+      is_drunk: drunkSet.has(beer.id),
+      drunk_uncertain: false,
+      user_rating: ratingByBeerId.get(beer.id) ?? null,
+      source: 'exact',
+      searched: true,
+    });
+
+    // #633: рядок опублікованого bid — лише з цього знімка каталогу.
+    const bidRow = item.bid === undefined ? null : (opts.byUntappdId?.get(item.bid) ?? null);
+    if (item.bid !== undefined) bid.sent++;
+
+    // Крок 2: броварня картки підтверджує bid — відповідь готова, матчер не потрібен,
+    // бюджет фолбеку не витрачається.
+    if (bidRow && bidBreweryAgrees(bidEvidenceBrewery(item), bidRow.brewery)) {
+      bid.exact++;
+      out.push(exactOn(bidRow));
       await yield_();
       continue;
     }
-    // The budget is shared across the batch, so per-item "was it searched" is read as a
-    // delta on the shared counter — no change to matcher.ts is needed.
-    const skippedBefore = budget.budgetSkipped;
-    const m = matchPrepared(item, prepared, budget);
-    const searched = budget.budgetSkipped === skippedBefore;
-    if (!m) {
-      out.push({
-        raw, matched_beer: null, is_drunk: false, drunk_uncertain: false,
-        user_rating: null, source: null, searched,
-      });
+
+    const viaAlias = aliasTarget(opts.aliases, item, byId);
+    let result: MatchListResult;
+    if (viaAlias) {
+      result = exactOn(viaAlias);
     } else {
-      const beer = byId.get(m.id)!;
-      out.push({
-        raw,
-        matched_beer: toMatchedBeer(beer),
-        is_drunk: m.source === 'exact' && drunkSet.has(m.id),
-        drunk_uncertain: m.source === 'fuzzy' && drunkSet.has(m.id),
-        user_rating: m.source === 'exact' ? (ratingByBeerId.get(m.id) ?? null) : null,
-        source: m.source,
-        searched,
-      });
+      // The budget is shared across the batch, so per-item "was it searched" is read as a
+      // delta on the shared counter — no change to matcher.ts is needed.
+      const skippedBefore = budget.budgetSkipped;
+      const m = matchPrepared(item, prepared, budget);
+      const searched = budget.budgetSkipped === skippedBefore;
+      if (!m) {
+        result = {
+          raw, matched_beer: null, is_drunk: false, drunk_uncertain: false,
+          user_rating: null, source: null, searched,
+        };
+      } else {
+        const beer = byId.get(m.id)!;
+        result = {
+          raw,
+          matched_beer: toMatchedBeer(beer),
+          is_drunk: m.source === 'exact' && drunkSet.has(m.id),
+          drunk_uncertain: m.source === 'fuzzy' && drunkSet.has(m.id),
+          user_rating: m.source === 'exact' ? (ratingByBeerId.get(m.id) ?? null) : null,
+          source: m.source,
+          searched,
+        };
+      }
     }
+
+    if (bidRow) {
+      if (result.matched_beer?.id === bidRow.id) {
+        // Крок 3: bid і назва вказали на один рядок — два незалежні докази, тож exact
+        // (назва могла дійти туди fuzzy: броварня з самих цифр, заглушка вітрини).
+        bid.exact++;
+        result = exactOn(bidRow);
+      } else {
+        // Крок 4: броварня суперечить bid, і назва повела в інший бік. Пиво ми знайшли, але
+        // впевненості немає: рядок bid віддається як fuzzy — ✅ не ставиться ніколи, а ❓
+        // з'являється рівно за наявним правилом (fuzzy + випите).
+        bid.conflict++;
+        result = {
+          raw,
+          matched_beer: toMatchedBeer(bidRow),
+          is_drunk: false,
+          drunk_uncertain: drunkSet.has(bidRow.id),
+          user_rating: null,
+          source: 'fuzzy',
+          searched: true,
+        };
+      }
+    }
+
+    out.push(result);
     await yield_();
   }
-  return { results: out, fallback: budget };
+  return { results: out, fallback: budget, bid };
 }
