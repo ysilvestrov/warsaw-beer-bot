@@ -1,5 +1,7 @@
 import { openDb } from './db';
 import { migrate, V24_NOT_A_BEER_IDS } from './schema';
+import { upsertPub } from './pubs';
+import { createSnapshot, insertTaps } from './snapshots';
 
 // Minimal beer row so the enrich_failures FK (beer_id -> beers.id) is satisfiable.
 // normalized_name/normalized_brewery are NOT NULL on beers (migration v1) even though
@@ -533,9 +535,9 @@ describe('schema migrations', () => {
       expect(kept.r).not.toBeNull();
 
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614: this rewind starts from v23
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: this rewind starts from v23
       // and runs migrate() to completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(32);
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(33);
     });
   });
 
@@ -582,9 +584,71 @@ describe('schema migrations', () => {
       migrate(db);
       const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614: a fresh DB's reachable head
-      // moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(32);
+      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: a fresh DB's
+      // reachable head moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
+      expect(version.v).toBe(33);
+    });
+  });
+
+  describe('migration v33 — match_links keyed by the tap brewery + name pair (#632)', () => {
+    it('splits links by the breweries seen in snapshots, keeps only proven pins and stamps, drops dead links', () => {
+      const db = openDb(':memory:');
+      migrate(db);
+      // Відкат лише v33: стара форма таблиці (ключ — сама назва), дані — поверх неї, далі справжня міграція.
+      db.exec(`
+        DROP TABLE match_links;
+        CREATE TABLE match_links (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          ontap_ref TEXT NOT NULL UNIQUE,
+          untappd_beer_id INTEGER REFERENCES beers(id),
+          confidence REAL NOT NULL,
+          reviewed_by_user INTEGER NOT NULL DEFAULT 0,
+          merged_at TEXT
+        );
+      `);
+      db.prepare('DELETE FROM schema_version WHERE version >= 33').run();
+      for (const id of [1, 2, 3, 4]) seedBeer(db, id);
+
+      const pubA = upsertPub(db, { slug: 'a', name: 'A', address: null, lat: null, lon: null, city: 'warszawa' });
+      const pubB = upsertPub(db, { slug: 'b', name: 'B', address: null, lat: null, lon: null, city: 'warszawa' });
+      const tap = (beer_ref: string, brewery_ref: string | null) =>
+        ({ tap_number: 1, beer_ref, brewery_ref, abv: null, ibu: null, style: null, u_rating: null });
+      insertTaps(db, createSnapshot(db, pubA, '2026-09-01T00:00:00Z'), [
+        tap('Solo', 'Solo Brewery'), tap('Hefeweizen', 'Friedenfelser Brewery'), tap('No Brewery', null),
+      ]);
+      insertTaps(db, createSnapshot(db, pubB, '2026-09-02T00:00:00Z'), [
+        tap('Hefeweizen', 'Brauerei Rittmayer Hallerndorf Brewery'), tap('Old Stamp', 'Old Brewery'),
+      ]);
+      db.prepare(
+        `INSERT INTO match_links (ontap_ref, untappd_beer_id, confidence, reviewed_by_user, merged_at) VALUES
+           ('Solo', 1, 1.0, 1, '2026-09-05T00:00:00Z'),
+           ('Old Stamp', 2, 1.0, 0, '2026-08-01T00:00:00Z'),
+           ('Hefeweizen', 3, 1.0, 1, '2026-09-05T00:00:00Z'),
+           ('No Brewery', 4, 0.9, 0, NULL),
+           ('Dead', 1, 1.0, 1, '2026-09-05T00:00:00Z')`,
+      ).run();
+
+      migrate(db);
+
+      expect(db.prepare(
+        `SELECT ontap_ref, brewery_ref, untappd_beer_id, confidence, reviewed_by_user, merged_at
+           FROM match_links ORDER BY ontap_ref, brewery_ref`,
+      ).all()).toEqual([
+        // Кілька броварень: копія на кожну пару, без піна й штампа — інжест перерахує.
+        { ontap_ref: 'Hefeweizen', brewery_ref: 'Brauerei Rittmayer Hallerndorf Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
+        { ontap_ref: 'Hefeweizen', brewery_ref: 'Friedenfelser Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
+        // Кран без броварні — пара з порожнім текстом.
+        { ontap_ref: 'No Brewery', brewery_ref: '', untappd_beer_id: 4, confidence: 0.9, reviewed_by_user: 0, merged_at: null },
+        // Штамп старший за перший знімок назви: броварня в момент злиття не доведена.
+        { ontap_ref: 'Old Stamp', brewery_ref: 'Old Brewery', untappd_beer_id: 2, confidence: 1, reviewed_by_user: 0, merged_at: null },
+        // Одна броварня: пін і доведений штамп лишаються. 'Dead' (жодного крана) видалено разом із піном.
+        { ontap_ref: 'Solo', brewery_ref: 'Solo Brewery', untappd_beer_id: 1, confidence: 1, reviewed_by_user: 1, merged_at: '2026-09-05T00:00:00Z' },
+      ]);
+
+      // Ключ — пара: та сама пара вдруге падає, та сама назва іншої броварні — ні.
+      const insert = db.prepare('INSERT INTO match_links (ontap_ref, brewery_ref, untappd_beer_id, confidence) VALUES (?, ?, 1, 1.0)');
+      expect(() => insert.run('Solo', 'Solo Brewery')).toThrow(/UNIQUE/);
+      expect(() => insert.run('Solo', 'Another Brewery')).not.toThrow();
     });
   });
 });

@@ -30,9 +30,9 @@ describe('pinMatch', () => {
       style: null, abv: null, rating_global: 4.1,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
     });
-    upsertMatch(db, 'Banany Na Rauszu', canonicalId, 1.0);
+    upsertMatch(db, null, 'Banany Na Rauszu', canonicalId, 1.0);
     const orphanId = orphan(db, 'Recraft / Z INNEJ BECZKI Brewery', 'Urodzinowe');
-    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    upsertMatch(db, null, 'Urodzinowe', orphanId, 1.0);
     recordEnrichFailure(db, {
       beer_id: orphanId, brewery: 'Recraft', name: 'Urodzinowe', search_url: '',
       source_url: '', outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: AT,
@@ -42,10 +42,10 @@ describe('pinMatch', () => {
 
     expect(res).toEqual({ kind: 'merged', canonicalId, redirected: 1 });
     expect(getBeer(db, orphanId)).toBeNull();
-    const link = getMatch(db, 'Urodzinowe');
+    const link = getMatch(db, null, 'Urodzinowe');
     expect(link?.untappd_beer_id).toBe(canonicalId);
     expect(link?.reviewed_by_user).toBe(1);
-    expect(getMatch(db, 'Banany Na Rauszu')?.reviewed_by_user).toBe(0);
+    expect(getMatch(db, null, 'Banany Na Rauszu')?.reviewed_by_user).toBe(0);
     expect(db.prepare('SELECT COUNT(*) AS n FROM enrich_failures').get()).toEqual({ n: 0 });
   });
 
@@ -56,9 +56,9 @@ describe('pinMatch', () => {
       style: null, abv: null, rating_global: 4.1,
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
     });
-    upsertMatch(db, 'Banany Na Rauszu', canonicalId, 1.0);
+    upsertMatch(db, null, 'Banany Na Rauszu', canonicalId, 1.0);
     const orphanId = orphan(db, 'Recraft / Z INNEJ BECZKI Brewery', 'Urodzinowe');
-    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    upsertMatch(db, null, 'Urodzinowe', orphanId, 1.0);
 
     pinMatch(db, orphanId, 6614460, AT);
 
@@ -74,7 +74,7 @@ describe('pinMatch', () => {
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
     });
     const orphanId = orphan(db, 'Recraft', 'Urodzinowe');
-    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    upsertMatch(db, null, 'Urodzinowe', orphanId, 1.0);
     // checkins.beer_id → beers(id) has NO CASCADE; a checkin on the orphan would abort
     // the DELETE with foreign_keys=ON unless pinMatch redirects it first.
     db.prepare(
@@ -92,7 +92,7 @@ describe('pinMatch', () => {
   test('new-bid case: sets untappd_id on the orphan row, pins its link, clears failure', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
-    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    upsertMatch(db, null, 'Pear taste', orphanId, 1.0);
     recordEnrichFailure(db, {
       beer_id: orphanId, brewery: 'CYDR Fizz', name: 'Pear taste', search_url: '',
       source_url: '', outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: AT,
@@ -102,21 +102,21 @@ describe('pinMatch', () => {
 
     expect(res).toEqual({ kind: 'set', beerId: orphanId });
     expect(getBeer(db, orphanId)?.untappd_id).toBe(1093012);
-    expect(getMatch(db, 'Pear taste')?.reviewed_by_user).toBe(1);
+    expect(getMatch(db, null, 'Pear taste')?.reviewed_by_user).toBe(1);
     expect(db.prepare('SELECT COUNT(*) AS n FROM enrich_failures').get()).toEqual({ n: 0 });
   });
 
   test('idempotent: re-pinning an already-pinned beer is a no-op that keeps the flag', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
-    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    upsertMatch(db, null, 'Pear taste', orphanId, 1.0);
     pinMatch(db, orphanId, 1093012, AT);
 
     const res = pinMatch(db, orphanId, 1093012, AT);
 
     expect(res).toEqual({ kind: 'set', beerId: orphanId });
     expect(getBeer(db, orphanId)?.untappd_id).toBe(1093012);
-    expect(getMatch(db, 'Pear taste')?.reviewed_by_user).toBe(1);
+    expect(getMatch(db, null, 'Pear taste')?.reviewed_by_user).toBe(1);
   });
 
   test('unknown beer: returns noop without throwing', () => {
@@ -153,28 +153,28 @@ describe('unpin & list', () => {
       normalized_name: 'banany na rauszu 2026', normalized_brewery: 'recraft',
     });
     const orphanId = orphan(db, 'Recraft', 'Urodzinowe');
-    upsertMatch(db, 'Urodzinowe', orphanId, 1.0);
+    upsertMatch(db, null, 'Urodzinowe', orphanId, 1.0);
     pinMatch(db, orphanId, 6614460, AT); // merges → 'Urodzinowe' pinned to canonicalId
 
     expect(unpinByRef(db, 'Urodzinowe')).toBe(1);
-    expect(getMatch(db, 'Urodzinowe')?.reviewed_by_user).toBe(0);
-    expect(getMatch(db, 'Urodzinowe')?.untappd_beer_id).toBe(canonicalId);
+    expect(getMatch(db, null, 'Urodzinowe')?.reviewed_by_user).toBe(0);
+    expect(getMatch(db, null, 'Urodzinowe')?.untappd_beer_id).toBe(canonicalId);
   });
 
   test('unpinByBeer clears the flag for a same-row pin', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
-    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    upsertMatch(db, null, 'Pear taste', orphanId, 1.0);
     pinMatch(db, orphanId, 1093012, AT);
 
     expect(unpinByBeer(db, orphanId)).toBe(1);
-    expect(getMatch(db, 'Pear taste')?.reviewed_by_user).toBe(0);
+    expect(getMatch(db, null, 'Pear taste')?.reviewed_by_user).toBe(0);
   });
 
   test('#366: unpinning also clears a merge stamp, so the tap is really recomputed', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
-    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    upsertMatch(db, null, 'Pear taste', orphanId, 1.0);
     // The link was first established automatically by a merge, then pinned by a human.
     db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Pear taste'").run();
     pinMatch(db, orphanId, 1093012, AT);
@@ -183,13 +183,13 @@ describe('unpin & list', () => {
 
     // Unpinning means "this link is wrong, work it out again". A surviving stamp would make
     // ingest reuse the same rejected target forever.
-    expect(getMatch(db, 'Pear taste')?.merged_at).toBeNull();
+    expect(getMatch(db, null, 'Pear taste')?.merged_at).toBeNull();
   });
 
   test('listPins returns all pinned links with their beer + untappd_id', () => {
     const db = newDb();
     const orphanId = orphan(db, 'CYDR Fizz', 'Pear taste');
-    upsertMatch(db, 'Pear taste', orphanId, 1.0);
+    upsertMatch(db, null, 'Pear taste', orphanId, 1.0);
     pinMatch(db, orphanId, 1093012, AT);
 
     expect(listPins(db)).toEqual([

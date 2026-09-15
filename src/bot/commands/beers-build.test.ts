@@ -83,7 +83,7 @@ describe('buildBeersMessage — ok rendering', () => {
       abv: 6.1, rating_global: 3.85,
       normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
     });
-    upsertMatch(db, 'PINTA Atak Chmielu', beerId, 1.0);
+    upsertMatch(db, 'PINTA', 'PINTA Atak Chmielu', beerId, 1.0);
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'PINTA Atak Chmielu', brewery_ref: 'PINTA',
         abv: 6.1, ibu: null, style: 'AIPA & <Ale>', u_rating: 3.9 },
@@ -117,7 +117,7 @@ describe('buildBeersMessage — ok rendering', () => {
       abv: 4.2, rating_global: null,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
     });
-    upsertMatch(db, 'JBW Brewery Wocky Talky', orphanId, 1.0);
+    upsertMatch(db, 'JBW Brewery', 'JBW Brewery Wocky Talky', orphanId, 1.0);
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
         abv: 4.2, ibu: null, style: null, u_rating: null },
@@ -173,7 +173,7 @@ describe('buildBeersMessage — ok rendering', () => {
       abv: 4.2, rating_global: null,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
     });
-    upsertMatch(db, 'JBW Brewery Wocky Talky', orphanId, 1.0);
+    upsertMatch(db, 'JBW Brewery', 'JBW Brewery Wocky Talky', orphanId, 1.0);
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
         abv: 4.2, ibu: null, style: null, u_rating: null },
@@ -195,7 +195,7 @@ describe('buildBeersMessage — ok rendering', () => {
       abv: 4.2, rating_global: 3.18,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
     });
-    upsertMatch(db, 'JBW Brewery Wocky Talky', beerId, 1.0);
+    upsertMatch(db, 'JBW Brewery', 'JBW Brewery Wocky Talky', beerId, 1.0);
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: 'JBW Brewery',
         abv: 4.2, ibu: null, style: null, u_rating: null },
@@ -217,7 +217,7 @@ describe('buildBeersMessage — ok rendering', () => {
       abv: 5, rating_global: 4.1,
       normalized_name: 'wocky talky', normalized_brewery: 'jbw',
     });
-    upsertMatch(db, 'JBW Brewery Wocky Talky', beerId, 1.0);
+    upsertMatch(db, null, 'JBW Brewery Wocky Talky', beerId, 1.0);
     insertTaps(db, snap, [
       { tap_number: 1, beer_ref: 'JBW Brewery Wocky Talky', brewery_ref: null,
         abv: 5, ibu: null, style: null, u_rating: null },

@@ -184,7 +184,7 @@ it('orphansRelayQueue includes orphans not on a tap right now (with or without a
     name: 'Old Growler', brewery: 'Departed', style: null, abv: null, rating_global: null,
     normalized_name: 'old growler', normalized_brewery: 'departed',
   });
-  upsertMatch(db, 'ref-no-tap-anywhere', danglingLink, 1.0);
+  upsertMatch(db, null, 'ref-no-tap-anywhere', danglingLink, 1.0);
   // 2) relay-orphan, протриажений як not_a_beer → НЕ рахується
   const notABeer = seedBeer(db, {
     name: 'Kelih Fino 545', brewery: 'Stoelzle', style: null, abv: null, rating_global: null,
@@ -205,7 +205,7 @@ it('orphansRelayQueue includes orphans not on a tap right now (with or without a
     normalized_name: 'clementine', normalized_brewery: 'magic road',
   });
   const ref = 'Magic Road Clementine';
-  upsertMatch(db, ref, linked, 1.0);
+  upsertMatch(db, null, ref, linked, 1.0);
   const linkedPub = upsertPub(db, {
     slug: 'linked-pub', name: 'Linked Pub', address: null, lat: null, lon: null, city: 'warszawa',
   });

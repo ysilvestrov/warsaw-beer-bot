@@ -163,7 +163,7 @@ describe('listLookupCandidates', () => {
     });
     const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
     const ref = `${opts.brewery} ${opts.name}`;
-    upsertMatch(db, ref, beerId, 1.0);
+    upsertMatch(db, opts.brewery, ref, beerId, 1.0);
     insertTaps(db, snapId, [{
       tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
       abv: null, ibu: null, style: null, u_rating: null,
@@ -420,7 +420,7 @@ describe('listLookupCandidates', () => {
 
     // The beer was poured on an older snapshot...
     const oldSnap = createSnapshot(db, pubId, '2026-05-01T12:00:00Z');
-    upsertMatch(db, ref, beerId, 1.0);
+    upsertMatch(db, 'Weihenstephaner', ref, beerId, 1.0);
     insertTaps(db, oldSnap, [{
       tap_number: 1, beer_ref: ref, brewery_ref: 'Weihenstephaner',
       abv: null, ibu: null, style: null, u_rating: null,
@@ -483,7 +483,7 @@ describe('listRelayLookupCandidates', () => {
     });
     const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
     const ref = `${opts.brewery} ${opts.name}`;
-    upsertMatch(db, ref, beerId, 1.0);
+    upsertMatch(db, opts.brewery, ref, beerId, 1.0);
     insertTaps(db, snapId, [{
       tap_number: 1, beer_ref: ref, brewery_ref: opts.brewery,
       abv: null, ibu: null, style: null, u_rating: null,
@@ -1258,7 +1258,7 @@ describe('#486 pool partition', () => {
 
     // 1. on a tap on the latest snapshot
     const current = mk('Current');
-    upsertMatch(db, 'ref-current', current, 1.0);
+    upsertMatch(db, 'Br', 'ref-current', current, 1.0);
     insertTaps(db, newSnap, [{
       tap_number: 1, beer_ref: 'ref-current', brewery_ref: 'Br',
       abv: null, ibu: null, style: null, u_rating: null,
@@ -1266,7 +1266,7 @@ describe('#486 pool partition', () => {
 
     // 2. link + tap, but only on the OLDER snapshot (the #486 gap)
     const rotatedOff = mk('RotatedOff');
-    upsertMatch(db, 'ref-rotated', rotatedOff, 1.0);
+    upsertMatch(db, 'Br', 'ref-rotated', rotatedOff, 1.0);
     insertTaps(db, oldSnap, [{
       tap_number: 2, beer_ref: 'ref-rotated', brewery_ref: 'Br',
       abv: null, ibu: null, style: null, u_rating: null,
@@ -1274,7 +1274,7 @@ describe('#486 pool partition', () => {
 
     // 3. link whose ref matches no tap at all (retention deleted them)
     const deadLink = mk('DeadLink');
-    upsertMatch(db, 'ref-dead-no-tap-anywhere', deadLink, 1.0);
+    upsertMatch(db, null, 'ref-dead-no-tap-anywhere', deadLink, 1.0);
 
     // 4. no link at all (shop-sourced relay orphan)
     const noLink = mk('NoLink');

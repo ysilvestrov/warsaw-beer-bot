@@ -526,6 +526,55 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_beer_aliases_beer ON beer_aliases(beer_id);
     `,
   },
+  {
+    version: 33,
+    // #632: `ontap_ref` — лише текст назви крана. Один рядок лінку ділили крани різних броварень з однаковою назвою
+    // («Hefeweizen» Friedenfelser і Rittmayer): паб, де матчер влучав, переписував лінк і стирав штамп злиття (#366),
+    // а паб, де промахувався, щоцикла створював і зливав сироту заново; показ пабу брав пиво останнього паба циклу.
+    // Ключ — пара точного тексту броварні крана (NULL → '') і назви крана. Наявні лінки розкладаються за броварнями
+    // зі збережених знімків:
+    // - одна броварня → пара; пін лишається; штамп — лише якщо не старший за перший знімок цієї назви (інакше в
+    //   момент злиття могла бути інша броварня);
+    // - кілька броварень → копія на кожну пару без піна й штампа: котрій броварні належить ціль, невідомо, тож
+    //   показ до інжесту не змінюється, а інжест перераховує;
+    // - жодної → видалення: ні показ, ні #486 такий лінк не читають.
+    // Dry-run на байтовій копії прод-БД 2026-09-15: 5408 → 1680 лінків, 7 пінів, 22 штампи; показ 1692 кранів не змінився.
+    // Перебудова, а не ALTER: SQLite не змінює UNIQUE на місці. Повторний прогін (тести відкату в schema.test.ts)
+    // безпечний: SELECT читає лише ontap_ref, який є в обох формах таблиці.
+    sql: `
+      CREATE TABLE match_links_v33 (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        ontap_ref        TEXT NOT NULL,
+        brewery_ref      TEXT NOT NULL DEFAULT '',
+        untappd_beer_id  INTEGER REFERENCES beers(id),
+        confidence       REAL NOT NULL,
+        reviewed_by_user INTEGER NOT NULL DEFAULT 0,
+        merged_at        TEXT,
+        UNIQUE (ontap_ref, brewery_ref)
+      );
+      INSERT INTO match_links_v33 (ontap_ref, brewery_ref, untappd_beer_id, confidence, reviewed_by_user, merged_at)
+        WITH pairs AS (
+               SELECT DISTINCT beer_ref, coalesce(brewery_ref, '') AS brewery_ref FROM taps
+             ),
+             counts AS (
+               SELECT beer_ref, COUNT(*) AS n FROM pairs GROUP BY beer_ref
+             ),
+             first_seen AS (
+               SELECT t.beer_ref, MIN(s.snapshot_at) AS at
+                 FROM taps t JOIN tap_snapshots s ON s.id = t.snapshot_id
+                GROUP BY t.beer_ref
+             )
+        SELECT ml.ontap_ref, p.brewery_ref, ml.untappd_beer_id, ml.confidence,
+               CASE WHEN c.n = 1 THEN ml.reviewed_by_user ELSE 0 END,
+               CASE WHEN c.n = 1 AND ml.merged_at >= f.at THEN ml.merged_at ELSE NULL END
+          FROM match_links ml
+          JOIN pairs p ON p.beer_ref = ml.ontap_ref
+          JOIN counts c ON c.beer_ref = ml.ontap_ref
+          JOIN first_seen f ON f.beer_ref = ml.ontap_ref;
+      DROP TABLE match_links;
+      ALTER TABLE match_links_v33 RENAME TO match_links;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
