@@ -122,6 +122,16 @@ describe('parseTitle', () => {
     })).toEqual({ brewery: 'Mad Brew', name: 'The Lost Philosopher Xmas Eve [2025]', abv: 10 });
   });
 
+  it('removes Imperial Stout shorthand before preserving a vintage', () => {
+    expect(parseTitle('VARVAR BLACK BEAN IS 11% [2025] 0.33л'))
+      .toEqual({ brewery: 'VARVAR', name: 'BLACK BEAN [2025]', abv: 11 });
+  });
+
+  it('does not retain packaging text between ABV and volume', () => {
+    expect(parseTitle('Brewery Lager 5% can 330ml'))
+      .toEqual({ brewery: 'Brewery', name: 'Lager', abv: 5 });
+  });
+
   it('does not retain an ABV label as identity text', () => {
     expect(parseTitle('LEFFE BLONDE 6.6% ABV 0.33л'))
       .toEqual({ brewery: 'LEFFE', name: 'BLONDE', abv: 6.6 });
