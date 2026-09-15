@@ -109,7 +109,8 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           // Curated pin: a human fixed this tap's Untappd link (reviewed_by_user = 1).
           // Never recompute it — the tap row is already persisted by insertTaps above,
           // and the pinned target beer stays in the catalog for other taps to match.
-          const link = getMatch(db, t.beer_ref);
+          // #632: лінк — пара броварні й назви крана; кран іншої броварні з тією самою назвою його не переписує.
+          const link = getMatch(db, t.brewery_ref, t.beer_ref);
           if (link?.reviewed_by_user) continue;
           const identity = resolveTapIdentity(t.brewery_ref, t.beer_ref);
           if (identity.kind === 'drop') {
@@ -121,7 +122,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           let beerId: number;
           let isFreshOrphan = false;
           if (m) {
-            upsertMatch(db, t.beer_ref, m.id, m.confidence);
+            upsertMatch(db, t.brewery_ref, t.beer_ref, m.id, m.confidence);
             beerId = m.id;
           } else if (isRememberedMerge(db, link)) {
             // #366: a previous enrich already resolved this tap and merged it into the canonical
@@ -142,7 +143,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
               normalized_name: normalizeName(name),
               normalized_brewery: normalizeBrewery(brewery),
             });
-            upsertMatch(db, t.beer_ref, beerId, 1.0);
+            upsertMatch(db, t.brewery_ref, t.beer_ref, beerId, 1.0);
             isFreshOrphan = true;
           }
 

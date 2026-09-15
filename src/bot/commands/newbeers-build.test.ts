@@ -35,8 +35,8 @@ function seedTwoPubs(db: ReturnType<typeof fresh>) {
     abv: 5.0, rating_global: 3.5,
     normalized_name: 'buty skejta', normalized_brewery: 'stu mostow',
   });
-  upsertMatch(db, 'PINTA Atak Chmielu', beerA, 1.0);
-  upsertMatch(db, 'Stu Mostow Buty Skejta', beerB, 1.0);
+  upsertMatch(db, 'PINTA', 'PINTA Atak Chmielu', beerA, 1.0);
+  upsertMatch(db, 'Stu Mostow', 'Stu Mostow Buty Skejta', beerB, 1.0);
   insertTaps(db, snapA, [{
     tap_number: 1, beer_ref: 'PINTA Atak Chmielu', brewery_ref: 'PINTA',
     abv: 6.1, ibu: null, style: 'AIPA', u_rating: 3.9,
@@ -61,8 +61,8 @@ function seedOrphanAndEmptyTap(db: ReturnType<typeof fresh>) {
     name: 'N/A', brewery: 'N/A', style: null, abv: null, rating_global: null,
     normalized_name: 'n a', normalized_brewery: 'n a',
   });
-  upsertMatch(db, 'Mystery Beer', mysteryId, 1);
-  upsertMatch(db, 'N/A', emptyId, 1);
+  upsertMatch(db, 'Mystery Brewery', 'Mystery Beer', mysteryId, 1);
+  upsertMatch(db, null, 'N/A', emptyId, 1);
   insertTaps(db, snapId, [
     { tap_number: 1, beer_ref: 'Mystery Beer', brewery_ref: 'Mystery Brewery', abv: 6, ibu: null, style: 'IPA', u_rating: null },
     { tap_number: 2, beer_ref: 'N/A', brewery_ref: null, abv: null, ibu: null, style: null, u_rating: null },
@@ -134,7 +134,7 @@ describe('buildNewbeersMessage', () => {
       abv: 5.0, rating_global: 3.5,
       normalized_name: 'buty skejta', normalized_brewery: 'stu mostow',
     });
-    upsertMatch(db, 'Stu Mostow Buty Skejta', beerId, 1.0);
+    upsertMatch(db, 'Stu Mostow', 'Stu Mostow Buty Skejta', beerId, 1.0);
     insertTaps(db, snapId, [{
       tap_number: 1, beer_ref: 'Stu Mostow Buty Skejta', brewery_ref: 'Stu Mostow',
       abv: 5.0, ibu: null, style: 'Pils', u_rating: 3.7,
@@ -170,7 +170,7 @@ describe('buildNewbeersMessage', () => {
       abv: 6.0, rating_global: 3.7,
       normalized_name: 'shared brew', normalized_brewery: 'co op',
     });
-    upsertMatch(db, 'Co-op Shared Brew', beer, 1.0);
+    upsertMatch(db, 'Co-op', 'Co-op Shared Brew', beer, 1.0);
     for (const snapId of [snapX, snapY]) {
       insertTaps(db, snapId, [{
         tap_number: 1, beer_ref: 'Co-op Shared Brew', brewery_ref: 'Co-op',
@@ -241,7 +241,7 @@ describe('buildNewbeersMessage', () => {
         abv: 6, rating_global: 4, normalized_name: row.ref.toLowerCase(),
         normalized_brewery: 'test',
       });
-      upsertMatch(db, row.ref, beerId, 1);
+      upsertMatch(db, 'Test', row.ref, beerId, 1);
       insertTaps(db, snap, [{
         tap_number: 1, beer_ref: row.ref, brewery_ref: 'Test', abv: 6,
         ibu: null, style: 'IPA', u_rating: 4,

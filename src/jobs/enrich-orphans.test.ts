@@ -42,7 +42,7 @@ function seedOrphanOnTap(
   });
   const snapId = createSnapshot(db, pubId, '2026-05-26T12:00:00Z');
   const ref = `${brewery} ${name}`;
-  upsertMatch(db, ref, beerId, 1.0);
+  upsertMatch(db, brewery, ref, beerId, 1.0);
   insertTaps(db, snapId, [{
     tap_number: 1, beer_ref: ref, brewery_ref: brewery,
     abv: null, ibu: null, style: null, u_rating: null,

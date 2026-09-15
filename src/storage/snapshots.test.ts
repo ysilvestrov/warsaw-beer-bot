@@ -59,7 +59,7 @@ describe('tapsForSnapshotWithBeer', () => {
       normalized_name: 'atak chmielu',
       normalized_brewery: 'pinta',
     });
-    upsertMatch(db, 'PINTA Atak Chmielu', beerId, 1.0);
+    upsertMatch(db, 'PINTA', 'PINTA Atak Chmielu', beerId, 1.0);
     insertTaps(db, snapId, [
       { tap_number: 1, beer_ref: 'PINTA Atak Chmielu', brewery_ref: 'PINTA', abv: 6.1, ibu: null, style: 'AIPA', u_rating: null },
     ]);
@@ -80,7 +80,7 @@ describe('tapsForSnapshotWithBeer', () => {
       normalized_name: 'buty skejta',
       normalized_brewery: 'stu mostow',
     });
-    upsertMatch(db, 'Stu Mostow Buty Skejta', beerId, 1.0);
+    upsertMatch(db, 'Stu Mostow', 'Stu Mostow Buty Skejta', beerId, 1.0);
     insertTaps(db, snapId, [
       { tap_number: 1, beer_ref: 'Stu Mostow Buty Skejta', brewery_ref: 'Stu Mostow', abv: 5.0, ibu: null, style: 'Pilsner', u_rating: 3.7 },
     ]);
@@ -101,7 +101,7 @@ describe('tapsForSnapshotWithBeer', () => {
       normalized_name: 'new release',
       normalized_brewery: 'new brews',
     });
-    upsertMatch(db, 'New Brews New Release', beerId, 1.0);
+    upsertMatch(db, 'New Brews', 'New Brews New Release', beerId, 1.0);
     insertTaps(db, snapId, [
       { tap_number: 1, beer_ref: 'New Brews New Release', brewery_ref: 'New Brews', abv: 5.0, ibu: null, style: 'Lager', u_rating: null },
     ]);
@@ -132,7 +132,7 @@ describe('tapsForSnapshotWithBeer', () => {
       normalized_name: 'gardees ii',
       normalized_brewery: 'brasserie la malpolon',
     });
-    upsertMatch(db, 'GARDEES II - 2025', beerId, 1.0);
+    upsertMatch(db, 'Brasserie La Malpolon Brewery', 'GARDEES II - 2025', beerId, 1.0);
     insertTaps(db, snapId, [
       { tap_number: 24, beer_ref: 'GARDEES II - 2025', brewery_ref: 'Brasserie La Malpolon Brewery', abv: 40, ibu: 8.4, style: null, u_rating: null },
     ]);
@@ -153,7 +153,7 @@ describe('tapsForSnapshotWithBeer', () => {
       normalized_name: 'no abv beer',
       normalized_brewery: 'x',
     });
-    upsertMatch(db, 'X No Abv Beer', beerId, 1.0);
+    upsertMatch(db, 'X', 'X No Abv Beer', beerId, 1.0);
     insertTaps(db, snapId, [
       { tap_number: 1, beer_ref: 'X No Abv Beer', brewery_ref: 'X', abv: 5.2, ibu: null, style: null, u_rating: null },
     ]);

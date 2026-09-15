@@ -137,7 +137,7 @@ describe('refreshOntap non-beer filtering', () => {
       normalized_name: normalizeName('Banany Na Rauszu 2026'),
       normalized_brewery: normalizeBrewery('ReCraft'),
     });
-    upsertMatch(db, 'Urodzinowe', canonicalId, 1.0);
+    upsertMatch(db, 'Recraft', 'Urodzinowe', canonicalId, 1.0);
     db.prepare("UPDATE match_links SET reviewed_by_user = 1 WHERE ontap_ref = 'Urodzinowe'").run();
 
     const indexHtml = `
@@ -162,7 +162,7 @@ describe('refreshOntap non-beer filtering', () => {
       lookupEnabled: false, cities: CITIES.filter((c) => c.slug === 'warszawa'),
     });
 
-    const link = getMatch(db, 'Urodzinowe');
+    const link = getMatch(db, 'Recraft', 'Urodzinowe');
     expect(link?.untappd_beer_id).toBe(canonicalId);
     expect(link?.reviewed_by_user).toBe(1);
     expect(db.prepare("SELECT COUNT(*) AS n FROM beers WHERE name = 'Urodzinowe'").get()).toEqual({ n: 0 });
@@ -691,7 +691,7 @@ describe('refreshOntap multi-city', () => {
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
     });
-    upsertMatch(db, 'Deep Sea Diver', canonicalId, 1.0);
+    upsertMatch(db, 'Moon Lark Brewery', 'Deep Sea Diver', canonicalId, 1.0);
     db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
 
     const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
@@ -719,7 +719,7 @@ describe('refreshOntap multi-city', () => {
     expect(beerCount(db)).toBe(1);        // no fresh orphan
     expect(searches).toBe(0);             // and therefore no Untappd lookup
     expect(lines.find((l) => l.msg === 'ontap merged links reused')).toMatchObject({ reused: 1 });
-    const link = getMatch(db, 'Deep Sea Diver');
+    const link = getMatch(db, 'Moon Lark Brewery', 'Deep Sea Diver');
     expect(link?.untappd_beer_id).toBe(canonicalId);
     expect(link?.merged_at).toBe('2026-07-30T00:00:00Z');
   });
@@ -732,7 +732,7 @@ describe('refreshOntap multi-city', () => {
       style: null, abv: null, rating_global: null,
       normalized_name: normalizeName('Marine'), normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
     });
-    upsertMatch(db, 'Deep Sea Diver', staleId, 1.0);
+    upsertMatch(db, 'Moon Lark Brewery', 'Deep Sea Diver', staleId, 1.0);
     db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
 
     const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
@@ -770,7 +770,7 @@ describe('refreshOntap multi-city', () => {
       normalized_name: normalizeName('Deep Sea Diver'),
       normalized_brewery: normalizeBrewery('Moon Lark Brewery'),
     });
-    upsertMatch(db, 'Deep Sea Diver', rememberedId, 1.0);
+    upsertMatch(db, 'Moon Lark Brewery', 'Deep Sea Diver', rememberedId, 1.0);
     db.prepare("UPDATE match_links SET merged_at = '2026-07-30T00:00:00Z' WHERE ontap_ref = 'Deep Sea Diver'").run();
 
     const index = `<div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>`;
@@ -789,8 +789,79 @@ describe('refreshOntap multi-city', () => {
       cities: oneCity, lookupEnabled: false,
     });
 
-    const link = getMatch(db, 'Deep Sea Diver');
+    const link = getMatch(db, 'Moon Lark Brewery', 'Deep Sea Diver');
     expect(link?.untappd_beer_id).toBe(exactId);   // matcher overrules the memory
     expect(link?.merged_at).toBeNull();
+  });
+
+  test('#632: the same tap name of two breweries in two pubs never re-merges on the next cycle', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    // Прод 2026-09-15: паб A (Friedenfelser) влучає у свою сироту, паб B (Rittmayer) промахується повз канонічний
+    // рядок і доходить до нього лише злиттям. До #632 обидва крани ділили лінк `Hefeweizen`: паб A стирав штамп, і паб B
+    // щоцикла створював і зливав сироту заново.
+    const friedenfelser = seedBeer(db, {
+      name: 'Hefeweizen', brewery: 'Friedenfelser Brewery', style: null, abv: 5.2, rating_global: null,
+      normalized_name: normalizeName('Hefeweizen'), normalized_brewery: normalizeBrewery('Friedenfelser Brewery'),
+    });
+    const rittmayer = seedBeer(db, {
+      untappd_id: 129947, name: 'Hallerndorfer Hefeweizen', brewery: 'Brauerei Rittmayer Hallerndorf',
+      style: null, abv: 5.0, rating_global: 3.8,
+      normalized_name: normalizeName('Hallerndorfer Hefeweizen'),
+      normalized_brewery: normalizeBrewery('Brauerei Rittmayer Hallerndorf'),
+    });
+    // Прод-каталог 2026-09-15: у броварні Rittmayer ще «1422 - Festbier» (id 24094). Без нього пул нечіткого пошуку броварні —
+    // один рядок, і кран паба B нечітко влучає в Hallerndorfer Hefeweizen (0.781); з ним — промах, як на проді.
+    seedBeer(db, {
+      untappd_id: 4754020, name: '1422 - Festbier', brewery: 'Brauerei Rittmayer Hallerndorf',
+      style: null, abv: 5.8, rating_global: null,
+      normalized_name: normalizeName('1422 - Festbier'),
+      normalized_brewery: normalizeBrewery('Brauerei Rittmayer Hallerndorf'),
+    });
+    const index = `
+      <div onclick="location.assign('https://puba.ontap.pl/')"><div class="panel-body">A 1 taps</div></div>
+      <div onclick="location.assign('https://pubb.ontap.pl/')"><div class="panel-body">B 1 taps</div></div>`;
+    const page = (brewery: string, h4: string) =>
+      `<html><head><meta property="og:title" content="P / ontap.pl"></head><body>${panel(1, brewery, h4, 'Hefeweizen')}</body></html>`;
+    const http: Http = {
+      async get(url: string): Promise<string> {
+        if (url === 'https://ontap.pl/warszawa') return index;
+        if (url === 'https://puba.ontap.pl/') return page('Friedenfelser Brewery', 'Hefeweizen 5,2%');
+        if (url === 'https://pubb.ontap.pl/') return page('Brauerei Rittmayer Hallerndorf Brewery', 'Hefeweizen 5%');
+        return '';
+      },
+    };
+    let searches = 0;
+    const search: BeerSearch = {
+      search: async () => {
+        searches++;
+        return [{
+          bid: 129947, beer_name: 'Hallerndorfer Hefeweizen', brewery_name: 'Brauerei Rittmayer Hallerndorf',
+          style: null, abv: 5, global_rating: 3.8,
+        }];
+      },
+    };
+    const run = () => refreshOntap({
+      db, log: silentLog, http, search, geocoder, cities: oneCity,
+      lookupEnabled: true, inlineEnrichBudget: 5, lookupSleepMs: 0,
+    });
+    const RITTMAYER = 'Brauerei Rittmayer Hallerndorf Brewery';
+
+    await run();
+    // Передумова: перший цикл пройшов механізм #632 — паб A влучив без пошуку, паб B злив свою сироту в Rittmayer.
+    expect(db.prepare('SELECT DISTINCT brewery_ref, beer_ref FROM taps ORDER BY brewery_ref').all()).toEqual([
+      { brewery_ref: RITTMAYER, beer_ref: 'Hefeweizen' },
+      { brewery_ref: 'Friedenfelser Brewery', beer_ref: 'Hefeweizen' },
+    ]);
+    expect(searches).toBe(1);
+    expect(getMatch(db, RITTMAYER, 'Hefeweizen')?.untappd_beer_id).toBe(rittmayer);
+    expect(getMatch(db, RITTMAYER, 'Hefeweizen')?.merged_at).not.toBeNull();
+
+    await run();
+
+    expect(searches).toBe(1);
+    expect(beerCount(db)).toBe(3);
+    expect(getMatch(db, 'Friedenfelser Brewery', 'Hefeweizen')?.untappd_beer_id).toBe(friedenfelser);
+    expect(getMatch(db, RITTMAYER, 'Hefeweizen')?.untappd_beer_id).toBe(rittmayer);
+    expect(getMatch(db, RITTMAYER, 'Hefeweizen')?.merged_at).not.toBeNull();
   });
 });

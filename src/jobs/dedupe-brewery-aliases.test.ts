@@ -47,7 +47,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'juicilicious',
       normalized_brewery: 'piwne podziemie',
     });
-    upsertMatch(db, 'Juicilicious', bId, 1.0);
+    upsertMatch(db, null, 'Juicilicious', bId, 1.0);
 
     // User check-in on canonical row.
     ensureProfile(db, 207079110);
@@ -118,7 +118,7 @@ describe('dedupeBreweryAliases', () => {
       style: null, abv: null, rating_global: null,
       normalized_name: 'son of son', normalized_brewery: 'poppels bryggeri',
     });
-    upsertMatch(db, 'Son Of The Son', bId, 1.0);
+    upsertMatch(db, null, 'Son Of The Son', bId, 1.0);
 
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result.pairsMerged).toBe(1);
@@ -160,7 +160,7 @@ describe('dedupeBreweryAliases', () => {
       style: null, abv: null, rating_global: null,
       normalized_name: 'n', normalized_brewery: 'x',
     });
-    upsertMatch(db, 'N', bId, 1.0);
+    upsertMatch(db, null, 'N', bId, 1.0);
 
     const r1 = dedupeBreweryAliases(db, silentLog);
     expect(r1.pairsMerged).toBe(1);
@@ -192,7 +192,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'stadt land bier',
       normalized_brewery: 'kemker kultuur',
     });
-    upsertMatch(db, 'Stadt Land Bier', bId, 1.0);
+    upsertMatch(db, null, 'Stadt Land Bier', bId, 1.0);
     ensureProfile(db, 42);
     mergeCheckin(db, {
       checkin_id: 'kemker-1',
@@ -248,7 +248,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'midnight mass',
       normalized_brewery: 'sady beer bacon and liberty',
     });
-    upsertMatch(db, 'Midnight Mass', bId, 1.0);
+    upsertMatch(db, null, 'Midnight Mass', bId, 1.0);
 
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
@@ -286,7 +286,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'mexican',
       normalized_brewery: 'nieczajna monsters',
     });
-    upsertMatch(db, 'Mexican', bId, 1.0);
+    upsertMatch(db, null, 'Mexican', bId, 1.0);
 
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
@@ -319,7 +319,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'grodziskie',
       normalized_brewery: 'miejski stargard nieczajna',
     });
-    upsertMatch(db, 'Grodziskie', bId, 1.0);
+    upsertMatch(db, null, 'Grodziskie', bId, 1.0);
 
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 0, beersDeleted: 0 });
@@ -356,7 +356,7 @@ describe('dedupeBreweryAliases', () => {
       normalized_name: 'milo',
       normalized_brewery: 'nepomucen',
     });
-    upsertMatch(db, 'Milo', bId, 1.0);
+    upsertMatch(db, null, 'Milo', bId, 1.0);
 
     const result = dedupeBreweryAliases(db, silentLog);
     expect(result).toEqual({ pairsMerged: 1, beersDeleted: 1 });
