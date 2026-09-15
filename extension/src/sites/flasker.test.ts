@@ -807,6 +807,44 @@ describe('#384 flasker.loadCardDetails', () => {
     fetchSpy.mockRestore();
   });
 
+  it('does not restore a fallback head when the detail brand confirms it as the brewery', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard('https://flasker.com.ua/product/foo-bar-5-330ml-same-brand/', 'Foo Bar 5% 330ml')}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+    expect(cards[0]).toMatchObject({ brewery: 'Foo', name: 'Bar' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<script>{"brand":{"@type":"Brand","name":"Foo"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({ brewery: 'Foo', name: 'Bar' });
+    fetchSpy.mockRestore();
+  });
+
+  it('does not restore a recognized two-word brewery from the title', async () => {
+    const doc = new DOMParser().parseFromString(
+      `<ul>${archiveCard('https://flasker.com.ua/product/safe-circle-blond-ale-5-330ml/', 'Safe Circle Blond Ale 5% 330ml')}</ul>`,
+      'text/html',
+    );
+    const cards = flasker.parseCards(doc);
+    expect(cards[0]).toMatchObject({ brewery: 'Safe Circle', name: 'Blond Ale' });
+
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      text: async () => '<script>{"brand":{"@type":"Brand","name":"Safe Circle"}}</script>',
+    } as Response);
+
+    await flasker.loadCardDetails?.(cards);
+
+    expect(cards[0]).toMatchObject({ brewery: 'Safe Circle', name: 'Blond Ale' });
+    fetchSpy.mockRestore();
+  });
+
   it('does not duplicate a title whose brewery was already recognized before detail hydration', async () => {
     const doc = new DOMParser().parseFromString(
       `<ul>${archiveCard('https://flasker.com.ua/product/vibrant-pour-love-on-tap-6-330ml/', 'Vibrant Pour Love on Tap 6% 330ml')}</ul>`,
