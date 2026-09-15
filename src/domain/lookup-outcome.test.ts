@@ -143,6 +143,29 @@ describe('applyLookupOutcome merge', () => {
     db.close();
   });
 
+  test('#614 a card proved by its published bid keeps its alias through the merge, whatever the orphan text', () => {
+    const { db, log } = fresh();
+    const g7 = seedBeer(db, {
+      untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
+      style: 'Stout', abv: 7, rating_global: 3.9,
+      normalized_name: normalizeName('Ґвара Series Seven'), normalized_brewery: normalizeBrewery('Gvara Brewery'),
+    });
+    const orphanId = seedBeer(db, {
+      name: 'Ґвара #6', brewery: 'Ґвара', style: null, abv: 7, rating_global: null,
+      normalized_name: normalizeName('Ґвара #6'), normalized_brewery: normalizeBrewery('Ґвара'),
+    });
+
+    const kind = applyLookupOutcome(
+      { db, log }, orphanId,
+      { kind: 'matched', result: cand({ bid: 4007 }) },
+      '2026-09-15T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7', abv: 7, byBid: true },
+    );
+
+    expect(kind).toBe('merged');
+    expect(db.prepare('SELECT beer_id, name_text FROM beer_aliases').all()).toEqual([{ beer_id: g7, name_text: 'ґвара #7' }]);
+    db.close();
+  });
+
   test('#614 a link of the card\'s own row moves the card key alias onto it', () => {
     const { db, log } = fresh();
     const card = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
@@ -166,6 +189,33 @@ describe('applyLookupOutcome merge', () => {
 
     expect(kind).toBe('matched');
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: own, abv_key: '11' }]);
+    db.close();
+  });
+
+  test('#614 a bid-proved card moves its alias onto a same-pair row spelled differently', () => {
+    const { db, log } = fresh();
+    const card = { brewery: 'VARVAR', name: 'BLACK BEAN IS', abv: 11 };
+    const old = seedBeer(db, {
+      untappd_id: 1001, name: 'Black Bean', brewery: 'Varvar Brew', style: 'Stout', abv: 11, rating_global: 4.1,
+      normalized_name: normalizeName('Black Bean'), normalized_brewery: normalizeBrewery('Varvar Brew'),
+    });
+    const first = seedBeer(db, {
+      name: card.name, brewery: card.brewery, style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName(card.name), normalized_brewery: normalizeBrewery(card.brewery),
+    });
+    mergeIntoCanonical(db, first, old, '2026-09-15T12:00:00Z', card);
+    const spelled = seedBeer(db, {
+      name: 'Black Bean IS', brewery: 'Browar Varvar', style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('Black Bean IS'), normalized_brewery: normalizeBrewery('Browar Varvar'),
+    });
+
+    const kind = applyLookupOutcome(
+      { db, log }, spelled, { kind: 'matched', result: cand({ bid: 2002, abv: 10.8 }) }, '2026-09-15T12:05:00Z',
+      { ...card, byBid: true },
+    );
+
+    expect(kind).toBe('matched');
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: spelled, abv_key: '11' }]);
     db.close();
   });
 });

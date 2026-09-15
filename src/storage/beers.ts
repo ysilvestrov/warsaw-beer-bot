@@ -350,6 +350,16 @@ export function dropAliasesOnRelink(db: DB, beerId: number, newBid: number): voi
   ).run(beerId, beerId, newBid);
 }
 
+// #614: картка, для якої записано доказ ідентичності. byBid — доказ дав опублікований bid крамниці, а resolveByBid
+// читає лише поля цієї картки з тіла запиту: текст рядка, що лінкується чи зливається, у доказ не входить (рев'ю 11,
+// R1). Ставить його лише шлях bid /enrich/result; крон і шлях пошуку шукають полями рядка.
+export interface AliasCard {
+  brewery: string;
+  name: string;
+  abv?: number | null;
+  byBid?: boolean;
+}
+
 export function recordLookupSuccess(
   db: DB,
   beerId: number,
@@ -360,7 +370,7 @@ export function recordLookupSuccess(
     global_rating: number | null;
   },
   at: string,
-  aliasSource?: { brewery: string; name: string; abv?: number | null },
+  aliasSource?: AliasCard,
 ): void {
   // #614: транзакція — якщо UPDATE впаде на UNIQUE (bid уже має власника), аліаси не стираються
   // наполовину: applyLookupOutcome далі зливає рядок, і їх забирає каскад.
@@ -385,17 +395,20 @@ export function recordLookupSuccess(
 // переходить на цей рядок, як ON CONFLICT у mergeIntoCanonical. Так конфлікт доказів розв'язує запис, а не
 // вгадування під час читання (три версії правила «рядок важить більше» порівнювали поля різного походження —
 // ABV злінкованого рядка з Untappd проти ABV картки). Лише коли рядок і є цією карткою (той самий cardText
-// броварні й назви): інакше доказ міг стосуватися іншої картки з тією самою нормалізованою парою (рев'ю 6). Нового
-// аліасу не створює: без давнього злиття картку й так відповідає рядок з її текстом.
+// броварні й назви): інакше доказ пошуку міг стосуватися іншої картки з тією самою нормалізованою парою (рев'ю 6).
+// Доказ bid (byBid) цієї умови не має. Нового аліасу не створює: без давнього злиття картку й так відповідає рядок з
+// її текстом.
 function moveCardAlias(
-  db: DB, rowId: number, card: { brewery: string; name: string; abv?: number | null }, at: string,
+  db: DB, rowId: number, card: AliasCard, at: string,
 ): void {
   const key = cardAliasKey(card.brewery, card.name, card.abv);
   if (!key) return;
   const row = db.prepare('SELECT brewery, name FROM beers WHERE id = ?').get(rowId) as
     | { brewery: string; name: string }
     | undefined;
-  if (!row || cardText(row.brewery) !== key.breweryText || cardText(row.name) !== key.nameText) return;
+  if (!row) return;
+  // Доказ bid узято з полів самої картки — написання рядка тоді не важить (рев'ю 11, R1).
+  if (!card.byBid && (cardText(row.brewery) !== key.breweryText || cardText(row.name) !== key.nameText)) return;
   db.prepare(
     `UPDATE beer_aliases SET beer_id = ?, brewery = ?, name = ?, created_at = ?
       WHERE brewery_text = ? AND name_text = ? AND abv_key = ? AND beer_id != ?`,
@@ -410,7 +423,7 @@ export function mergeIntoCanonical(
   orphanId: number,
   canonicalId: number,
   at: string,
-  aliasSource?: { brewery: string; name: string; abv?: number | null },
+  aliasSource?: AliasCard,
 ): void {
   db.transaction(() => {
     // #366: the merge is the only moment we learn "this ontap_ref is that canonical beer".
@@ -443,9 +456,12 @@ export function mergeIntoCanonical(
     // картки: веб-фолбек шукає текстом і ABV рядка, lookupBeer — з його ABV. Тоді невідомо, яку з двох карток
     // довів пошук, і промах безпечніший за аліас. ABV не порівнюється: шлях пошуку передає row.abv, а доказ
     // шляху bid узятий з полів картки, тоді як репарація #384 зливає рядок з ABV з Untappd.
+    // Виняток — доказ bid (byBid): resolveByBid бере лише поля картки з тіла запиту, тож текст сироти в доказ не входить
+    // (рев'ю 11, R1).
     const source = aliasSource ?? orphan;
     const sameCard = source !== undefined && orphan !== undefined
-      && cardText(source.brewery) === cardText(orphan.brewery) && cardText(source.name) === cardText(orphan.name);
+      && (aliasSource?.byBid === true
+        || (cardText(source.brewery) === cardText(orphan.brewery) && cardText(source.name) === cardText(orphan.name)));
     if (source && sameCard) {
       const breweryText = cardText(source.brewery);
       const nameText = cardText(source.name);

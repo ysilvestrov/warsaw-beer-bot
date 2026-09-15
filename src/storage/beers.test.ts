@@ -918,6 +918,25 @@ test('#614 mergeIntoCanonical writes no alias when the merged orphan was created
   expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
 });
 
+test('#614 mergeIntoCanonical writes the alias of a card proved by its published bid, whatever text the merged orphan has', () => {
+  const db = fresh();
+  const g7 = seedBeer(db, {
+    untappd_id: 4007, name: 'Ґвара Series Seven', brewery: 'Gvara Brewery',
+    style: 'Stout', abv: 7, rating_global: 3.9,
+    normalized_name: normalizeName('Ґвара Series Seven'), normalized_brewery: normalizeBrewery('Gvara Brewery'),
+  });
+  const orphanId = seedBeer(db, {
+    name: 'Ґвара #6', brewery: 'Ґвара', style: null, abv: 7, rating_global: null,
+    normalized_name: normalizeName('Ґвара #6'), normalized_brewery: normalizeBrewery('Ґвара'),
+  });
+
+  mergeIntoCanonical(db, orphanId, g7, '2026-09-15T07:13:20Z', { brewery: 'Ґвара', name: 'Ґвара #7', abv: 7, byBid: true });
+
+  // Рев'ю 11, R1: доказ bid узято лише з полів картки «#7» (resolveByBid), текст сироти в нього не входить.
+  expect(db.prepare('SELECT beer_id, brewery_text, name_text, abv_key FROM beer_aliases').all())
+    .toEqual([{ beer_id: g7, brewery_text: 'ґвара', name_text: 'ґвара #7', abv_key: '7' }]);
+});
+
 test('#614 twin cards of one shop keep one alias each', () => {
   const db = fresh();
   const twinName = normalizeName('Trappistes Rochefort 8');
@@ -2047,6 +2066,32 @@ describe('#614 findAliasTarget / card alias move', () => {
       normalized_name: normalizeName(CARD.name), normalized_brewery: normalizeBrewery(CARD.brewery),
     });
     recordLookupSuccess(db, own, { bid: 2002, style: 'Stout', abv: 9.5, global_rating: 4.3 }, '2026-09-14T12:05:00Z', { ...CARD, abv: 9.5 });
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, abv_key: '11' }]);
+  });
+
+  // Та сама нормалізована пара, що в CARD, інше написання (кран чи інша крамниця); рядка пари після злиття немає,
+  // тож seedBeer вставляє новий.
+  function spelledOrphan(db: ReturnType<typeof fresh>) {
+    return seedBeer(db, {
+      name: 'Black Bean IS', brewery: 'Browar Varvar', style: null, abv: 11, rating_global: null,
+      normalized_name: normalizeName('Black Bean IS'), normalized_brewery: normalizeBrewery('Browar Varvar'),
+    });
+  }
+
+  test('recordLookupSuccess moves the alias onto a row spelled differently when the card proved it by bid', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    const spelled = spelledOrphan(db);
+    expect(spelled).not.toBe(canonicalId);
+    recordLookupSuccess(db, spelled, { bid: 2002, style: 'Stout', abv: 10.8, global_rating: 4.3 }, '2026-09-15T12:05:00Z', { ...CARD, byBid: true });
+    expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: spelled, abv_key: '11' }]);
+  });
+
+  test('recordLookupSuccess keeps the alias off a row spelled differently when the proof was a search', () => {
+    const db = fresh();
+    const canonicalId = aliased(db);
+    const spelled = spelledOrphan(db);
+    recordLookupSuccess(db, spelled, { bid: 2002, style: 'Stout', abv: 10.8, global_rating: 4.3 }, '2026-09-15T12:05:00Z', CARD);
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, abv_key: '11' }]);
   });
 });
