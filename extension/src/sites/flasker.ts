@@ -263,6 +263,7 @@ export function stripMerchandisingPrefix(name: string): string {
 
 const GENUINE_TERMINAL_IS_NAME_RE = /^love is$/iu;
 const TERMINAL_IMPERIAL_STOUT_RE = /\s+IS$/iu;
+const VINTAGE_TAIL_RE = /^\[?(?:19|20)\d{2}\]?$/u;
 
 function stripFlaskerImperialStoutSuffix(name: string): string {
   const trimmed = name.trim();
@@ -306,9 +307,8 @@ export function parseTitle(
   if (headMarkers.length === 0) return null;
   const headEnd = Math.min(...headMarkers);
   const tailStart = abvMatch && abvAt >= 0 ? abvAt + abvMatch[0].length : -1;
-  const identityTail = tailStart >= 0 && volAt > tailStart
-    ? title.slice(tailStart, volAt).trim()
-    : '';
+  const tail = tailStart >= 0 && volAt > tailStart ? title.slice(tailStart, volAt).trim() : '';
+  const identityTail = VINTAGE_TAIL_RE.test(tail) ? tail : '';
   // The banner must go BEFORE the split: otherwise splitBreweryName takes "ПРЕДРЕЛІЗ"
   // as the brewery and the later name-side strip has nothing left to clean (#376).
   const head = stripMerchandisingPrefix(title.slice(0, headEnd).trim());
@@ -336,9 +336,8 @@ export function parseTitle(
     brewery = fallback.brewery;
     nameBeforeCleanup = fallback.name;
   }
-  const name = stripFlaskerImperialStoutSuffix(
-    [stripMerchandisingPrefix(nameBeforeCleanup), identityTail].filter(Boolean).join(' '),
-  );
+  const nameHead = stripFlaskerImperialStoutSuffix(stripMerchandisingPrefix(nameBeforeCleanup));
+  const name = [nameHead, identityTail].filter(Boolean).join(' ');
   return abv == null || !Number.isFinite(abv) ? { brewery, name } : { brewery, name, abv };
 }
 

@@ -33,9 +33,9 @@ false suffixes such as `Kaska Cherry IS` and `Vibrant Coffee IS`.
 `parseTitle` keeps using the earliest ABV or volume marker as the point where
 the leading brewery/name head ends, so brewery discovery continues to see only
 the stable title head. When ABV comes before a later package-volume marker, it
-also extracts the trimmed intervening text and appends it to the parsed beer
-name. This preserves identity qualifiers such as `[2025]` while still excluding
-the ABV and package volume.
+retains a standalone four-digit vintage between them and appends it to the
+parsed beer name. This preserves identity qualifiers such as `[2025]` while
+excluding the ABV, package volume, and unproven packaging labels such as `can`.
 
 The new tail is accepted only when it is non-empty. A title with volume before
 ABV has no identity tail; a title with only ABV has none either. Packaging text
