@@ -9,13 +9,26 @@ import { matchBeerList } from '../../domain/match-list';
 import { recordMatchUsage } from '../../storage/api_usage';
 import { warsawDateAndHour } from '../../domain/warsaw-time';
 import {
+  BEER_TEXT_LIMIT_CHARS,
   MATCH_BODY_LIMIT_BYTES,
   payloadBodyLimit,
   payloadSizeValidationHook,
 } from '../middleware/payload-limit';
-import { matchBeersArraySchema } from '../match-input';
+import { matchBeerItemSchema } from '../match-input';
 
-const MatchBody = z.object({ beers: matchBeersArraySchema });
+// #633: опубліковані крамницею поля живуть лише тут. `bid` — строго ціле додатне (машинно
+// витягнуте з URL, як в /enrich/*); `brand` — доказ броварні, проти якого його перевіряють.
+const MatchBody = z.object({
+  beers: z
+    .array(
+      matchBeerItemSchema.extend({
+        bid: z.number().int().positive().optional(),
+        brand: z.string().max(BEER_TEXT_LIMIT_CHARS).optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
+});
 
 // Registers POST /match on the given app. Auth is optional here: a missing
 // token yields telegramId===null (anonymous, global-only results); a valid
@@ -43,14 +56,17 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
       deps.log.warn({ err: e }, 'api_usage record failed');
     }
 
-    const { prepared, byId, aliases } = await cache.get();
+    const { prepared, byId, byUntappdId, aliases } = await cache.get();
     // Anonymous callers get global-only results: empty drunk/ratings sets mean
     // is_drunk=false, user_rating=null, but matched_beer still carries the global
     // rating + untappd_id (⭐/⚪ badges render unchanged).
     const drunkSet = telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId);
     const ratings = telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId);
 
-    const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
+    const { results, fallback, bid } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, {
+      aliases,
+      byUntappdId,
+    });
     deps.log.info(
       {
         channel: 'extension',
@@ -60,6 +76,9 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
           hits: fallback.hits,
           budgetSkipped: fallback.budgetSkipped,
         },
+        // #633: скільки карток несли опублікований bid, скільки з них дали exact і скільки —
+        // суперечність броварні. Єдиний спосіб побачити ефект зміни на проді.
+        bid,
       },
       'match fallback stats',
     );
