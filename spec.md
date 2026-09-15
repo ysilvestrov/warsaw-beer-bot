@@ -2555,7 +2555,11 @@ test-БД, §3.2 «no `await` ⇒ no race», §3.3 визначення «extern
   за published bid (#384, вище) виправляє це напряму по bid і обходить name-stage
   цілком; для товарів без bid компроміс і далі чинний);
   відомий display-prefix brewery видаляється з name;
-  найраніший volume або ABV-маркер задає межу brewery/name; картка без обох маркерів,
+  найраніший volume або ABV-маркер задає межу head для brewery/name; коли ABV стоїть раніше за
+  package-volume, текст між ними додається до name як identity-qualifier (наприклад `[2025]`),
+  а текст після package-volume не входить до name. Flasker-скорочення terminal `IS` (Imperial
+  Stout) знімається на adapter boundary; єдиний виміряний виняток — точна назва `LOVE IS` від
+  Rebrew. Картка без обох маркерів,
   але з product URL, лишається classification-only (`skip`) і не потрапляє в matching.
   Для **всіх** Flasker-карток із product URL `loadCardDetails` довантажує сторінку
   товару **до** читання match-кешу, без загального ліміту на кількість карток за
