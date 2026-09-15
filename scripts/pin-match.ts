@@ -23,7 +23,7 @@ function main(argv: string[]): void {
   try {
     if (argv.includes('--list')) {
       for (const p of listPins(db)) {
-        console.log(`${p.ontap_ref}  →  #${p.beer_id} ${p.brewery} / ${p.name}  (untappd ${p.untappd_id})`);
+        console.log(`${p.brewery_ref || '(no brewery)'} | ${p.ontap_ref}  →  #${p.beer_id} ${p.brewery} / ${p.name}  (untappd ${p.untappd_id})`);
       }
       return;
     }
@@ -31,12 +31,13 @@ function main(argv: string[]): void {
     if (argv.includes('--unpin')) {
       const ref = argVal(argv, '--ref');
       const beer = argVal(argv, '--beer');
+      const brewery = argVal(argv, '--brewery');
       if (ref) {
-        console.log(`Unpinned ${unpinByRef(db, ref)} link(s) for ref "${ref}".`);
+        console.log(`Unpinned ${unpinByRef(db, ref, brewery)} link(s) for ref "${ref}"${brewery === undefined ? '' : ` of brewery "${brewery}"`}.`);
       } else if (beer) {
         console.log(`Unpinned ${unpinByBeer(db, parseInt(beer, 10))} link(s) for beer ${beer}.`);
       } else {
-        console.error('--unpin requires --ref <ontap_ref> or --beer <id>');
+        console.error('--unpin requires --ref <ontap_ref> [--brewery <brewery_ref>] or --beer <id>');
         process.exitCode = 1;
       }
       return;
@@ -45,7 +46,7 @@ function main(argv: string[]): void {
     const beer = argVal(argv, '--beer');
     const untappd = argVal(argv, '--untappd');
     if (!beer || !untappd) {
-      console.error('Usage: pin-match --beer <id> --untappd <url|bid> | --unpin (--ref <r> | --beer <id>) | --list');
+      console.error('Usage: pin-match --beer <id> --untappd <url|bid> | --unpin (--ref <r> [--brewery <b>] | --beer <id>) | --list');
       process.exitCode = 1;
       return;
     }

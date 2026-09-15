@@ -193,8 +193,32 @@ describe('unpin & list', () => {
     pinMatch(db, orphanId, 1093012, AT);
 
     expect(listPins(db)).toEqual([
-      { ontap_ref: 'Pear taste', beer_id: orphanId, brewery: 'CYDR Fizz', name: 'Pear taste', untappd_id: 1093012 },
+      { ontap_ref: 'Pear taste', brewery_ref: '', beer_id: orphanId, brewery: 'CYDR Fizz', name: 'Pear taste', untappd_id: 1093012 },
     ]);
+  });
+
+  test('#632 unpinByRef with a brewery unpins only that pair; without one, every pair of the tap name', () => {
+    const db = newDb();
+    const a = orphan(db, 'Friedenfelser', 'Hefeweizen');
+    const b = orphan(db, 'Rittmayer', 'Hefeweizen Rittmayer');
+    upsertMatch(db, 'Friedenfelser Brewery', 'Hefeweizen', a, 1.0);
+    upsertMatch(db, 'Rittmayer Brewery', 'Hefeweizen', b, 1.0);
+    db.prepare('UPDATE match_links SET reviewed_by_user = 1').run();
+
+    expect(unpinByRef(db, 'Hefeweizen', 'Rittmayer Brewery')).toBe(1);
+    expect(getMatch(db, 'Rittmayer Brewery', 'Hefeweizen')?.reviewed_by_user).toBe(0);
+    expect(getMatch(db, 'Friedenfelser Brewery', 'Hefeweizen')?.reviewed_by_user).toBe(1);
+
+    db.prepare('UPDATE match_links SET reviewed_by_user = 1').run();
+    expect(unpinByRef(db, 'Hefeweizen')).toBe(2);
+  });
+
+  test('#632 listPins shows the brewery of each pinned pair', () => {
+    const db = newDb();
+    const a = orphan(db, 'Friedenfelser', 'Hefeweizen');
+    upsertMatch(db, 'Friedenfelser Brewery', 'Hefeweizen', a, 1.0);
+    db.prepare('UPDATE match_links SET reviewed_by_user = 1').run();
+    expect(listPins(db).map((p) => [p.brewery_ref, p.ontap_ref])).toEqual([['Friedenfelser Brewery', 'Hefeweizen']]);
   });
 });
 
