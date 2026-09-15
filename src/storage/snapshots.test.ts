@@ -170,6 +170,52 @@ describe('tapsForSnapshotWithBeer', () => {
     expect(row.abv).toBe(6.6);
   });
 
+  test('#632 two pubs pouring the same tap name from different breweries each show their own beer', () => {
+    const { db, pubId } = setup();
+    const pubB = upsertPub(db, { slug: 'q', name: 'Q', address: null, lat: null, lon: null, city: 'warszawa' });
+    const friedenfelser = seedBeer(db, {
+      name: 'Hefeweizen', brewery: 'Friedenfelser Brewery', style: null, abv: 5.2, rating_global: null,
+      normalized_name: 'hefeweizen', normalized_brewery: 'friedenfelser',
+    });
+    const rittmayer = seedBeer(db, {
+      untappd_id: 129947, name: 'Hallerndorfer Hefeweizen', brewery: 'Brauerei Rittmayer Hallerndorf',
+      style: null, abv: 5.0, rating_global: 3.8,
+      normalized_name: 'hallerndorfer hefeweizen', normalized_brewery: 'rittmayer hallerndorf',
+    });
+    upsertMatch(db, 'Friedenfelser Brewery', 'Hefeweizen', friedenfelser, 1.0);
+    upsertMatch(db, 'Brauerei Rittmayer Hallerndorf Brewery', 'Hefeweizen', rittmayer, 1.0);
+    const snapA = createSnapshot(db, pubId, '2026-09-15T00:01:29Z');
+    insertTaps(db, snapA, [
+      { tap_number: 1, beer_ref: 'Hefeweizen', brewery_ref: 'Friedenfelser Brewery', abv: 5.2, ibu: null, style: null, u_rating: null },
+    ]);
+    const snapB = createSnapshot(db, pubB, '2026-09-15T00:03:44Z');
+    insertTaps(db, snapB, [
+      { tap_number: 1, beer_ref: 'Hefeweizen', brewery_ref: 'Brauerei Rittmayer Hallerndorf Brewery', abv: 5.0, ibu: null, style: null, u_rating: null },
+    ]);
+
+    // До #632 обидва паби показували рядок, записаний останнім (прод: паби 39 і 58 — Rittmayer замість Friedenfelser).
+    expect(tapsForSnapshotWithBeer(db, snapA).map((r) => [r.beer_id, r.untappd_id])).toEqual([[friedenfelser, null]]);
+    expect(tapsForSnapshotWithBeer(db, snapB).map((r) => [r.beer_id, r.untappd_id])).toEqual([[rittmayer, 129947]]);
+  });
+
+  test('#632 a tap without a brewery shows the link of the empty-brewery pair', () => {
+    const { db, snapId } = setupWithBeer();
+    const mine = seedBeer(db, {
+      name: 'Mystery', brewery: 'Anon', style: null, abv: null, rating_global: null,
+      normalized_name: 'mystery', normalized_brewery: 'anon',
+    });
+    const theirs = seedBeer(db, {
+      name: 'Mystery', brewery: 'Someone', style: null, abv: null, rating_global: null,
+      normalized_name: 'mystery', normalized_brewery: 'someone',
+    });
+    upsertMatch(db, null, 'Mystery', mine, 1.0);
+    upsertMatch(db, 'Someone', 'Mystery', theirs, 1.0);
+    insertTaps(db, snapId, [
+      { tap_number: 1, beer_ref: 'Mystery', brewery_ref: null, abv: null, ibu: null, style: null, u_rating: null },
+    ]);
+    expect(tapsForSnapshotWithBeer(db, snapId).map((r) => r.beer_id)).toEqual([mine]);
+  });
+
   test('preserves ORDER BY tap_number', () => {
     const { db, snapId } = setupWithBeer();
     insertTaps(db, snapId, [

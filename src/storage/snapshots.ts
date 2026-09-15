@@ -63,6 +63,7 @@ export interface TapWithBeer extends TapRow {
 }
 
 export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer[] {
+  // #632: лінк крана — пара броварні й назви; інакше всі паби з однією назвою показували б пиво останнього паба циклу.
   return db.prepare(`
     SELECT
       t.id, t.snapshot_id, t.tap_number, t.beer_ref, t.brewery_ref,
@@ -72,7 +73,7 @@ export function tapsForSnapshotWithBeer(db: DB, snapshotId: number): TapWithBeer
       ml.untappd_beer_id AS beer_id,
       b.untappd_id AS untappd_id
     FROM taps t
-    LEFT JOIN match_links ml ON t.beer_ref = ml.ontap_ref
+    LEFT JOIN match_links ml ON ml.ontap_ref = t.beer_ref AND ml.brewery_ref = coalesce(t.brewery_ref, '')
     LEFT JOIN beers b ON ml.untappd_beer_id = b.id
     WHERE t.snapshot_id = ?
     ORDER BY t.tap_number

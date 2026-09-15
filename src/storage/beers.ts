@@ -550,13 +550,13 @@ export const lockedRowPredicate = `EXISTS (
          )`;
 
 // #486: the single definition of "this beer is on a tap right now" — a `match_links` row
-// reaching a tap on some pub's LATEST snapshot. `listLookupCandidates` interpolates it as-is;
+// (#632: keyed by the tap brewery + name pair) reaching a tap on some pub's LATEST snapshot. `listLookupCandidates` interpolates it as-is;
 // `orphanNotOnTapPredicate` below interpolates its negation, which is what makes the two pools
 // a partition rather than two conditions that merely looked complementary. Bakes in the `beers`
 // alias `b`, like the fragments around it; WHERE-clause fragment only.
 export const onLatestTapPredicate = `EXISTS (
            SELECT 1 FROM match_links ml
-           JOIN taps t ON t.beer_ref = ml.ontap_ref
+           JOIN taps t ON t.beer_ref = ml.ontap_ref AND coalesce(t.brewery_ref, '') = ml.brewery_ref
            JOIN tap_snapshots ts ON ts.id = t.snapshot_id
            JOIN (
              SELECT pub_id, MAX(snapshot_at) AS m
