@@ -263,7 +263,7 @@ export function stripMerchandisingPrefix(name: string): string {
 
 const GENUINE_TERMINAL_IS_NAME_RE = /^love is$/iu;
 const TERMINAL_IMPERIAL_STOUT_RE = /\s+IS$/iu;
-const VINTAGE_TAIL_RE = /^\[?(?:19|20)\d{2}\]?$/u;
+const VINTAGE_TAIL_RE = /^(?:19|20)\d{2}$|^\[(?:19|20)\d{2}\]$|^\((?:19|20)\d{2}\)$/u;
 
 function stripFlaskerImperialStoutSuffix(name: string): string {
   const trimmed = name.trim();
