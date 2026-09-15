@@ -200,7 +200,7 @@ function splitBreweryName(head: string): { brewery: string; name: string; usedFa
   const breweryTokens = tokens.slice(0, takeTokens);
   const brewery = breweryTokens.join(' ').replace(/:$/u, '');
   const name = tokens.slice(breweryTokens.length).join(' ').trim();
-  return { brewery, name: name || brewery, usedFallback: true };
+  return { brewery, name: name || brewery, usedFallback: takeTokens === 1 };
 }
 
 // Registry path: resolve a brewery from the product's own tags. Returns null when
@@ -565,7 +565,9 @@ export const flasker: SiteAdapter = {
         card.brand = brand;
         // This is a storefront section shared by foreign beers, not a brewery.
         if (brand !== IMPORTED_BEER_PLACEHOLDER) {
-          if (fallbackTitleHeads.delete(card.el)) card.name = `${card.brewery} ${card.name}`.trim();
+          if (fallbackTitleHeads.delete(card.el) && brand !== card.brewery) {
+            card.name = `${card.brewery} ${card.name}`.trim();
+          }
           card.brewery = brand;
         }
       }
