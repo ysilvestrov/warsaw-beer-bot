@@ -263,6 +263,16 @@ describe('matchBeerList aliases (#614)', () => {
     expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
   });
 
+  it('#614 a `|` inside the card text never makes two cards share one alias key', async () => {
+    // AI-рев'ю PR #644: склейка полів через `|` зводила ('a|b', 'c') і ('a', 'b|c') в один ключ мапи — пізніший аліас
+    // перебивав ранній, і картка отримувала чужий рядок. Обидва аліаси в індексі, кожна картка — свій.
+    const aliasRows = [alias(8, 'ROCH|BREW', 'Rochefort', 9.2), alias(10, 'ROCH', 'BREW|Rochefort', 9.2)];
+    const [r8] = (await run(rochefort, aliasRows, { brewery: 'ROCH|BREW', name: 'Rochefort', abv: 9.2 }, 8)).results;
+    expect([r8.source, r8.matched_beer?.id, r8.is_drunk]).toEqual(['exact', 8, true]);
+    const [r10] = (await run(rochefort, aliasRows, { brewery: 'ROCH', name: 'BREW|Rochefort', abv: 9.2 }, 10)).results;
+    expect([r10.source, r10.matched_beer?.id, r10.is_drunk]).toEqual(['exact', 10, true]);
+  });
+
   it('a card with an empty name text never looks up an alias', async () => {
     const [r] = (await run(rochefort, [alias(8, 'ROCH', '')], { brewery: 'ROCH', name: '  ' }, 8)).results;
     expect(r.source === 'exact' && r.matched_beer?.id === 8 && r.is_drunk).toBe(false);
