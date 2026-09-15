@@ -614,7 +614,7 @@ describe('schema migrations', () => {
       const pubC = upsertPub(db, { slug: 'c', name: 'C', address: null, lat: null, lon: null, city: 'warszawa' });
       const tap = (beer_ref: string, brewery_ref: string | null) =>
         ({ tap_number: 1, beer_ref, brewery_ref, abv: null, ibu: null, style: null, u_rating: null });
-      // Сплячий паб: його останній знімок старший за вікно збереження (MAX 09-02 − 14 днів = 08-19) — ретеншн лишає такі назавжди.
+      // Сплячий паб: його останній знімок старший за вікно збереження (MAX 09-02 − 13 днів = 08-20) — ретеншн лишає такі назавжди.
       insertTaps(db, createSnapshot(db, pubC, '2026-04-27T00:00:00Z'), [tap('Dormant', 'Dormant Brewery')]);
       insertTaps(db, createSnapshot(db, pubA, '2026-09-01T00:00:00Z'), [
         tap('Solo', 'Solo Brewery'), tap('Hefeweizen', 'Friedenfelser Brewery'), tap('No Brewery', null),
@@ -640,12 +640,13 @@ describe('schema migrations', () => {
       ).all()).toEqual([
         // Штамп старший за вікно і пін без знімка у вікні: доказ броварні міг бути видалений — обидва скидаються, хоча merged_at новіший за перший знімок назви.
         { ontap_ref: 'Dormant', brewery_ref: 'Dormant Brewery', untappd_beer_id: 2, confidence: 1, reviewed_by_user: 0, merged_at: null },
-        // Кілька броварень: копія на кожну пару, без піна й штампа — інжест перерахує.
-        { ontap_ref: 'Hefeweizen', brewery_ref: 'Brauerei Rittmayer Hallerndorf Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
-        { ontap_ref: 'Hefeweizen', brewery_ref: 'Friedenfelser Brewery', untappd_beer_id: 3, confidence: 1, reviewed_by_user: 0, merged_at: null },
+        // Кілька броварень: копія на кожну пару, без піна й штампа — інжест перерахує; confidence не вище 0.99, щоб
+        // пізніше злиття сироти лише переспрямувало лінк, а не штампувало (mergeIntoCanonical: WHERE confidence >= 1.0).
+        { ontap_ref: 'Hefeweizen', brewery_ref: 'Brauerei Rittmayer Hallerndorf Brewery', untappd_beer_id: 3, confidence: 0.99, reviewed_by_user: 0, merged_at: null },
+        { ontap_ref: 'Hefeweizen', brewery_ref: 'Friedenfelser Brewery', untappd_beer_id: 3, confidence: 0.99, reviewed_by_user: 0, merged_at: null },
         // Кран без броварні — пара з порожнім текстом.
         { ontap_ref: 'No Brewery', brewery_ref: '', untappd_beer_id: 4, confidence: 0.9, reviewed_by_user: 0, merged_at: null },
-        // Штамп старший за перший знімок назви: броварня в момент злиття не доведена.
+        // Штамп поза вікном збереження (08-01 < 08-20): свідок злиття міг бути видалений.
         { ontap_ref: 'Old Stamp', brewery_ref: 'Old Brewery', untappd_beer_id: 2, confidence: 1, reviewed_by_user: 0, merged_at: null },
         // Одна броварня: пін і доведений штамп лишаються. 'Dead' (жодного крана) видалено разом із піном.
         { ontap_ref: 'Solo', brewery_ref: 'Solo Brewery', untappd_beer_id: 1, confidence: 1, reviewed_by_user: 1, merged_at: '2026-09-05T00:00:00Z' },
