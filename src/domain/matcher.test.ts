@@ -1217,6 +1217,20 @@ describe('#636 exact stage: rows with different digits are not this beer', () =>
       .toEqual({ id: 233, confidence: 1, source: 'exact' });
   });
 
+  test('a dated input with no same-year row picks the undated row whose ABV fits, not the newest', () => {
+    expect(matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, [
+      c({ id: 12, brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 9.9 }),
+      c({ id: 8, brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 7.0 }),
+    ])).toEqual({ id: 8, confidence: 1, source: 'exact' });
+  });
+
+  test('a same-year row with no ABV is not "contradicting" — it is kept over an undated ABV fit', () => {
+    expect(matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, [
+      c({ id: 12, brewery: 'PINTA Barrel Brewing', name: 'Affection (2025)', abv: null }),
+      c({ id: 8, brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 7.0 }),
+    ])).toEqual({ id: 12, confidence: 1, source: 'exact' });
+  });
+
   test('no year in the input still takes the newest vintage over an older undated row', () => {
     expect(matchBeer({ brewery: 'Harpagan', name: 'Buzdygan Rozkoszy' }, [
       c({ id: 5, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.0 }),

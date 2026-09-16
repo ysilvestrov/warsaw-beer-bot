@@ -40,13 +40,24 @@ describe('readNameDigits', () => {
 
 describe('digitIdentity', () => {
   test.each<[string, string, DigitIdentity]>([
-    // ABV in the apostrophe spelling is not a number
+    // ABV in the apostrophe spelling, or labelled without %, is not a number
     ["Gose 4'8%", 'Gose', 'same'],
+    ['Stout 5.3 abv', 'Stout', 'same'],
+    // a volume glued to its unit is not a number
+    ['Lager 0,5l', 'Lager', 'same'],
+    ['Hazy 1.5L', 'Hazy', 'same'],
     // grades are soft: never split on their own …
     ['Pils 12°', 'Pils', 'same'],
     ['Białe IPA 16°', 'Białe IPA 14°', 'same'],
-    // … but confirm a bare number on the other side …
+    // … a soft number equal to the grade is the same beer …
     ['Otakar 11°', 'Otakar 11', 'same'],
+    // … a grade covers a hard number on the other side (17 is outside the soft range) …
+    ['Brutus 17°', 'Brutus 17', 'same'],
+    ['Kamenice 10', 'Kamenice 10 12°', 'same'],
+    // … whatever the grade spelling: `*`, a mid-dot ABV tail, a decimal comma
+    ['Pils 12*', 'Pils 11°', 'same'],
+    ['Pils 12,5°·4', 'Pils', 'same'],
+    ['Kolaż 15,5°', 'Kolaż 15.5', 'same'],
     // … and a soft number that disagrees with the only grade is a different beer
     ['KONRAD 12°', 'Konrad Svetlé Výčepní 10', 'different'],
     // two-digit years
@@ -58,6 +69,14 @@ describe('digitIdentity', () => {
     ['Autonomia (2021/2022)', 'Autonomia (2022/2023)', 'different'],
     ['Affection (2025)', 'Affection 2025', 'same'],
     ['Echo 2026 10th Edition', 'ECHO the 10th Edition', 'year-fallback'],
+    // markers make a number hard even inside the soft range: #, v, leading zero
+    ['Dr.Hazy #12', 'Dr. Hazy', 'different'],
+    ['SPECIMEN 010', 'Specimen', 'different'],
+    ['Porter v10', 'Porter', 'different'],
+    // a marked number is still covered by the same soft number on the other side
+    ['Juicy Trap #12', 'Juicy Trap 12', 'same'],
+    // ordinals are numbers
+    ['Echo 16th Anniversary', 'Echo Anniversary', 'different'],
     // markers and leading zeros
     ['Uwarzone z Wami #3', 'Uwarzone Z Wami vol.3: Polish Black IPA', 'same'],
     ['Barrel Aged Serie No.38', 'Barrel Aged Serie No.35', 'different'],

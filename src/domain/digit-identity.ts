@@ -32,8 +32,10 @@ const GRADE = /(\d+(?:[.,]\d+)?)\s*[°*](?:\s*[·•∙]\s*[<>]?\s*\d+(?:[.,'’
 const YEAR_APOSTROPHE_BEFORE = /(^|[\s(\[:\-]|\p{L})['’](\d{2})(?![\p{L}\p{N}])/gu;
 const YEAR_APOSTROPHE_AFTER = /(?<![\p{L}\p{N}])(\d{2})['’](?=[\s):,\]\-]|$)/gu;
 // A digit run not glued to a letter or digit (`WFP10`, `TAP04` are brand/batch codes, not numbers). A dot
-// or comma before it is fine unless a digit precedes that (`vol.01` reads, `10.5` stays one token).
-const NUMBER = /(?<![\p{L}\p{N}])(?<!\p{N}[.,])(v?)(\d+(?:[.,]\d+)?)(?:st|nd|rd|th)?(?![\p{L}\p{N}])/giu;
+// or comma before it is fine unless a digit precedes that (`vol.01` reads, `10.5` stays one token). A
+// decimal is taken whole or not at all: without `(?![.,]\p{N})` the engine backtracks inside a volume glued
+// to its unit (`0,5l`) and reads the `0`.
+const NUMBER = /(?<![\p{L}\p{N}])(?<!\p{N}[.,])(v?)(\d+(?:[.,]\d+)?)(?![.,]\p{N})(?:st|nd|rd|th)?(?![\p{L}\p{N}])/giu;
 const MARKER_BEFORE = /(?:#|\b(?:no|nr|vol|batch|edition|part)\.?)\s*$/i;
 const YEAR = /^(?:19|20)\d{2}$/;
 const VERSION = /^\d+\.0$/;
