@@ -369,4 +369,27 @@ describe('dedupeBreweryAliases', () => {
       .get('Milo') as { untappd_beer_id: number };
     expect(link.untappd_beer_id).toBe(aId);
   });
+
+  // #636 (final review): the pair is found by normalized_name, which carries no digits. Merging repoints the orphan's
+  // tap links at the canonical row and deletes the orphan — for another number that is a permanent wrong link.
+  test('does not merge an orphan of another number into the canonical row', () => {
+    const db = fresh();
+    const canonical = seedBeer(db, {
+      untappd_id: 6625206, name: 'Juicy Trap #20', brewery: 'Piwne Podziemie / Beer Underground',
+      style: 'NEIPA', abv: 6.5, rating_global: 3.9,
+      normalized_name: 'juicy trap', normalized_brewery: 'piwne podziemie beer underground',
+    });
+    const orphan = seedBeer(db, {
+      untappd_id: null, name: 'Juicy Trap #19', brewery: 'Piwne Podziemie Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'juicy trap', normalized_brewery: 'piwne podziemie',
+    });
+    upsertMatch(db, null, 'Juicy Trap #19', orphan, 1.0);
+
+    expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 0, beersDeleted: 0 });
+    const link = db.prepare('SELECT untappd_beer_id FROM match_links WHERE ontap_ref = ?')
+      .get('Juicy Trap #19') as { untappd_beer_id: number };
+    expect(link.untappd_beer_id).toBe(orphan);
+    expect(canonical).not.toBe(orphan);
+  });
 });
