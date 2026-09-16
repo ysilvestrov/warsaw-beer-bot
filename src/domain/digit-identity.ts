@@ -150,3 +150,15 @@ export function digitIdentity(input: NameDigits, candidate: NameDigits): DigitId
   if ((inputYears === '') !== (candidateYears === '')) return 'year-fallback';
   return 'same';
 }
+
+/**
+ * Two texts of the same kind — a tap name against an existing orphan's tap name (`ensureOrphan`, #617). Neither is
+ * Untappd's, so there are no roles: they are one orphan only if neither direction is `different`. A
+ * `number-fallback` one way is always `different` the other way (its candidate-only number is the reverse
+ * direction's uncovered input number), so no separate check is needed.
+ */
+export function digitsCompatibleAsPeers(a: string, b: string): boolean {
+  const digitsA = readNameDigits(a);
+  const digitsB = readNameDigits(b);
+  return digitIdentity(digitsA, digitsB) !== 'different' && digitIdentity(digitsB, digitsA) !== 'different';
+}

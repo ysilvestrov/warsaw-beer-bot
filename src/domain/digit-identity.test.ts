@@ -1,4 +1,4 @@
-import { digitIdentity, readNameDigits, type DigitIdentity } from './digit-identity';
+import { digitIdentity, digitsCompatibleAsPeers, readNameDigits, type DigitIdentity } from './digit-identity';
 
 // #636. Every pair below is a real catalog or tap name from the prod probe (spec 2026-09-16), so a rule change
 // that "looks harmless" has to explain which measured beer it moves.
@@ -120,5 +120,39 @@ describe('digitIdentity(input, candidate)', () => {
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
     expect(identity(input, candidate)).toBe(forward);
     expect(identity(candidate, input)).toBe(reverse);
+  });
+});
+
+describe('digitsCompatibleAsPeers — ensureOrphan (the #617 numericTokensCompatible table, carried over)', () => {
+  test.each<[string, string, boolean]>([
+    // measured wrong pairs — must stay apart
+    ['Juicy Trap #19 18°', 'Juicy Trap #20', false],
+    ['Trappistes Rochefort 8', 'Trappistes Rochefort 10', false],
+    ['Grodziskie Piwobraniowe 2024', 'Piwobranie 2026: Suska sechlońska i cascara', false],
+    ['Trappistes Rochefort 10 (2015)', 'Trappistes Rochefort 10 (2017)', false],
+    ['Kronenbourg 1664', 'Kronenbourg', false],
+    ['Vintage 2015 2016', 'Vintage 2016', false],
+    ['Piwobranie 2024', 'Piwobranie 2025', false],
+    ['O Tiole Mio! 2026 15°', 'O tiole mio! 2025', false],
+    // the same beer — must stay together
+    ['Kronenbourg 1664 Blanc 12,5°', '1664 Blanc', true],
+    ['AMBROSIA 10.0 18°', 'Ambrosia 10.0', true],
+    ['Juicy Trap #20 18°', 'Juicy Trap #20', true],
+    ['Krzyż Południa 13°', 'Krzyż Południa (2026)', true],
+    ['ROTATION 12°', 'Rotation (2026)', true],
+    ['La Chouffe 16°', 'La Chouffe 0.4%', true],
+    ['Beer 12 x 3', 'Beer 3 x 12', true],
+    ['Vintage (2016) 2015', 'Vintage 2015 2016', true],
+    ['Anniversary 2000', 'Anniversary', true],
+    ['Łan', 'Łan 12°', true],
+    // #636 changes against #617, both from the spec: a bare 8–14 is soft (was apart) …
+    ['Svijanský Máz 11', 'Svijanský Máz', true],
+    // … and digits inside a non-compact bracket are read now (was a documented blind spot: together)
+    ['Imperial Stout (Batch 12)', 'Imperial Stout (Batch 13)', false],
+    // a number only one peer carries is another orphan, whichever side it is on
+    ['Cucumber Gose', '10th Anniversary #6: Cucumber Gose', false],
+  ])('%s  ↔  %s  →  %s', (a, b, expected) => {
+    expect(digitsCompatibleAsPeers(a, b)).toBe(expected);
+    expect(digitsCompatibleAsPeers(b, a)).toBe(expected);
   });
 });
