@@ -21,7 +21,7 @@ import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
-import { digitIdentity, readNameDigits } from './digit-identity';
+import { digitIdentity, readNameDigits, type NameDigits } from './digit-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -459,6 +459,9 @@ export async function lookupBeer(
   args: LookupArgs,
   headRetried = false,
   descriptorRetried = false,
+  // #636: the #271/#353 retries call back with a shortened name (` #N` tail cut, brackets and grades dropped); the
+  // digit filter must keep judging by the digits of the ORIGINAL name, or `Juicy Trap #19` would match `Juicy Trap`.
+  originalDigits?: NameDigits,
 ): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
@@ -472,7 +475,7 @@ export async function lookupBeer(
     }),
   );
   const targetNames = fuzzyTargets(name, brewery);
-  const inputDigits = readNameDigits(name);
+  const inputDigits = originalDigits ?? readNameDigits(name);
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
@@ -860,7 +863,7 @@ export async function lookupBeer(
   if (!headRetried && seenCandidates.length === 0) {
     const head = headBeforeTail(name);
     if (head) {
-      const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried);
+      const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried, inputDigits);
       if (retry.kind === 'not_found') {
         return {
           kind: 'not_found',
@@ -878,7 +881,7 @@ export async function lookupBeer(
   if (!descriptorRetried && seenCandidates.length === 0) {
     const stripped = stripDescriptorAndPackaging(name);
     if (stripped) {
-      const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true);
+      const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true, inputDigits);
       if (retry.kind === 'matched') {
         if (
           isAlcoholClassMismatch(abv, name, retry.result) ||
