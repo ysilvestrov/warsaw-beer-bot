@@ -100,8 +100,9 @@ describe('identityAllowsApprox', () => {
 describe('the vintage partition still sees what it always saw (#505 / #504)', () => {
   test('normalizeName still strips the year, and extractYear still reads the raw name', () => {
     // This test fails the moment someone "simplifies" the identity floor into
-    // normalizeName itself — which would re-poison queries (#295) and move the
-    // input extractYear partitions on (matcher.ts).
+    // normalizeName itself — which would re-poison queries (#295). The matcher no longer
+    // partitions on extractYear (#636 reads years through digit-identity); the collab
+    // rescue in untappd-lookup.ts still does.
     expect(normalizeName('Funky Fluid Tribute To Billie 2024')).toBe('funky fluid tribute to billie');
     expect(extractYear('Funky Fluid Tribute To Billie 2024')).toBe(2024);
   });
