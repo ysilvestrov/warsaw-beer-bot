@@ -163,8 +163,9 @@ Gose`, `Sybilla → 55 Lager Sybilla`, `Blackberry Gose → Sourberry #4`, `Life
 3. **`ensureBeerRow`.** Після аліаса (#614, без змін) — усі рядки пари `(normalized_brewery, normalized_name)`,
    картка — `input`, рядок — `candidate`; відкинути `different`, далі `same` > `year-fallback` > `number-fallback`,
    далі найменший `id` (детермінізм замість
-   порядку `.get()`). Немає сумісного — `ensureOrphan`. `findBeerByNormalized` (єдиний виклик — `enrich.ts`)
-   замінюється на `listBeersByNormalized`, що повертає всі рядки пари; вибір робить `ensureBeerRow`.
+   порядку `.get()`). Немає сумісного — `ensureOrphan`. У `enrich.ts` `findBeerByNormalized` замінюється
+   на `listBeersByNormalized`, що повертає всі рядки пари; вибір робить `ensureBeerRow`. Сама `findBeerByNormalized`
+   лишається — її як помічника читають тести (`enrich.test.ts`, `beers.test.ts`), у продакшн-коді викликів немає.
 4. **`ensureOrphan` / `resolvableOrphan`.** Замість `numericTokensCompatible`:
    - `ensureOrphan` порівнює **рівних** — новий текст крана з текстом наявної сироти (обидва — вхідний текст, жоден не
      з Untappd), тож ролей немає: сумісні, лише якщо `digitIdentity` **в обидва боки** не `different` (номер з
