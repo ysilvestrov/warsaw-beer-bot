@@ -25,7 +25,7 @@ The extension works even **without a token**: shop pages show **global
 Untappd ratings** (⭐ badge) and links to the beer/search. This lets you see
 right away how it works.
 
-On Flasker, products the shop itself files under a "not beer" category also get
+Products that a supported shop itself files under a "not beer" category also get
 a red `✕`; it needs no token and is not a link.
 
 Personal features are unlocked by a **token** (Part 2): a ✅ "you already had
@@ -208,7 +208,7 @@ this guide first.
    | **⭐** (with a rating, e.g. `⭐ 4.1`, or without one) | you haven't had it yet, the beer is on Untappd — shows the **global** rating when it's available; **click opens Untappd** |
    | **⚪** | the beer is matched as an orphan (no Untappd page/rating yet); **click opens an Untappd search** pre-filled with the name |
    | **⏳** | a search on Untappd is in progress (only if "Find missing beers…" is enabled — Part 3, step 4) |
-   | <span style="color:#d32f2f">**✕**</span> | Flasker only: the shop filed the product under a **"not beer"** category; the badge is **not clickable** |
+   | <span style="color:#d32f2f">**✕**</span> | the shop filed the product under a **"not beer"** category in a mixed catalog; the badge is **not clickable** |
    | _(no badge)_ | the beer couldn't be matched to the catalog |
 
 3. This also works with SPA navigation: when the shop re-renders the list
