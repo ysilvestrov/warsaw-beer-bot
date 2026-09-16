@@ -2,7 +2,8 @@ import { digitIdentity, readNameDigits, type DigitIdentity } from './digit-ident
 
 // #636. Every pair below is a real catalog or tap name from the prod probe (spec 2026-09-16), so a rule change
 // that "looks harmless" has to explain which measured beer it moves.
-const identity = (a: string, b: string): DigitIdentity => digitIdentity(readNameDigits(a), readNameDigits(b));
+const identity = (input: string, candidate: string): DigitIdentity =>
+  digitIdentity(readNameDigits(input), readNameDigits(candidate));
 
 describe('readNameDigits', () => {
   test('a hash number is hard, the degree grade is kept apart', () => {
@@ -38,68 +39,80 @@ describe('readNameDigits', () => {
   });
 });
 
-describe('digitIdentity', () => {
-  test.each<[string, string, DigitIdentity]>([
+describe('digitIdentity(input, candidate)', () => {
+  // [input, candidate, input→candidate, candidate→input]. A hard number only the candidate carries is a fallback;
+  // only the input carrying it names another beer — so the two directions differ exactly there.
+  test.each<[string, string, DigitIdentity, DigitIdentity]>([
     // ABV in the apostrophe spelling, or labelled without %, is not a number
-    ["Gose 4'8%", 'Gose', 'same'],
-    ['Stout 5.3 abv', 'Stout', 'same'],
+    ["Gose 4'8%", 'Gose', 'same', 'same'],
+    ['Stout 5.3 abv', 'Stout', 'same', 'same'],
     // a volume glued to its unit is not a number
-    ['Lager 0,5l', 'Lager', 'same'],
-    ['Hazy 1.5L', 'Hazy', 'same'],
+    ['Lager 0,5l', 'Lager', 'same', 'same'],
+    ['Hazy 1.5L', 'Hazy', 'same', 'same'],
     // grades are soft: never split on their own …
-    ['Pils 12°', 'Pils', 'same'],
-    ['Białe IPA 16°', 'Białe IPA 14°', 'same'],
+    ['Pils 12°', 'Pils', 'same', 'same'],
+    ['Białe IPA 16°', 'Białe IPA 14°', 'same', 'same'],
     // … a soft number equal to the grade is the same beer …
-    ['Otakar 11°', 'Otakar 11', 'same'],
+    ['Otakar 11°', 'Otakar 11', 'same', 'same'],
     // … a grade covers a hard number on the other side (17 is outside the soft range) …
-    ['Brutus 17°', 'Brutus 17', 'same'],
-    ['Kamenice 10', 'Kamenice 10 12°', 'same'],
+    ['Brutus 17°', 'Brutus 17', 'same', 'same'],
+    ['Kamenice 10', 'Kamenice 10 12°', 'same', 'same'],
     // … whatever the grade spelling: `*`, a mid-dot ABV tail, a decimal comma
-    ['Pils 12*', 'Pils 11°', 'same'],
-    ['Pils 12,5°·4', 'Pils', 'same'],
-    ['Kolaż 15,5°', 'Kolaż 15.5', 'same'],
+    ['Pils 12*', 'Pils 11°', 'same', 'same'],
+    ['Pils 12,5°·4', 'Pils', 'same', 'same'],
+    ['Kolaż 15,5°', 'Kolaż 15.5', 'same', 'same'],
     // … and a soft number that disagrees with the only grade is a different beer
-    ['KONRAD 12°', 'Konrad Svetlé Výčepní 10', 'different'],
+    ['KONRAD 12°', 'Konrad Svetlé Výčepní 10', 'different', 'different'],
     // two-digit years
-    ["Hoppiness'26", 'Hoppiness 2026', 'same'],
-    ["Open Craft '26", 'Open Craft 2026 18°', 'same'],
+    ["Hoppiness'26", 'Hoppiness 2026', 'same', 'same'],
+    ["Open Craft '26", 'Open Craft 2026 18°', 'same', 'same'],
     // years: equal sets, else different; one side only is a fallback
-    ['Backwoods Bastard (2018)', 'Backwoods Bastard (2019)', 'different'],
-    ['Backwoods Bastard', 'Backwoods Bastard (2018)', 'year-fallback'],
-    ['Autonomia (2021/2022)', 'Autonomia (2022/2023)', 'different'],
-    ['Affection (2025)', 'Affection 2025', 'same'],
-    ['Echo 2026 10th Edition', 'ECHO the 10th Edition', 'year-fallback'],
+    ['Backwoods Bastard (2018)', 'Backwoods Bastard (2019)', 'different', 'different'],
+    ['Backwoods Bastard', 'Backwoods Bastard (2018)', 'year-fallback', 'year-fallback'],
+    ['Autonomia (2021/2022)', 'Autonomia (2022/2023)', 'different', 'different'],
+    ['Affection (2025)', 'Affection 2025', 'same', 'same'],
+    ['Echo 2026 10th Edition', 'ECHO the 10th Edition', 'year-fallback', 'year-fallback'],
     // markers make a number hard even inside the soft range: #, v, leading zero
-    ['Dr.Hazy #12', 'Dr. Hazy', 'different'],
-    ['SPECIMEN 010', 'Specimen', 'different'],
-    ['Porter v10', 'Porter', 'different'],
+    ['Dr.Hazy #12', 'Dr. Hazy', 'different', 'number-fallback'],
+    ['SPECIMEN 010', 'Specimen', 'different', 'number-fallback'],
+    ['Porter v10', 'Porter', 'different', 'number-fallback'],
     // a marked number is still covered by the same soft number on the other side
-    ['Juicy Trap #12', 'Juicy Trap 12', 'same'],
+    ['Juicy Trap #12', 'Juicy Trap 12', 'same', 'same'],
     // ordinals are numbers
-    ['Echo 16th Anniversary', 'Echo Anniversary', 'different'],
+    ['Echo 16th Anniversary', 'Echo Anniversary', 'different', 'number-fallback'],
     // markers and leading zeros
-    ['Uwarzone z Wami #3', 'Uwarzone Z Wami vol.3: Polish Black IPA', 'same'],
-    ['Barrel Aged Serie No.38', 'Barrel Aged Serie No.35', 'different'],
-    ['SPECIMEN 002', 'Specimen 2', 'same'],
-    ['SPECIMEN 002', 'Specimen 001', 'different'],
+    ['Uwarzone z Wami #3', 'Uwarzone Z Wami vol.3: Polish Black IPA', 'same', 'same'],
+    ['Barrel Aged Serie No.38', 'Barrel Aged Serie No.35', 'different', 'different'],
+    ['SPECIMEN 002', 'Specimen 2', 'same', 'same'],
+    ['SPECIMEN 002', 'Specimen 001', 'different', 'different'],
     // versions split only when both sides carry one
-    ['SPOKO CYDR 2.0 (Zweigelt Edition)', 'Spoko Cydr Zweigelt Edition', 'same'],
-    ['Ambrosia 9.0', 'Ambrosia 5.0', 'different'],
+    ['SPOKO CYDR 2.0 (Zweigelt Edition)', 'Spoko Cydr Zweigelt Edition', 'same', 'same'],
+    ['Ambrosia 9.0', 'Ambrosia 5.0', 'different', 'different'],
     // soft 8–14 without a marker
-    ['Svijanský Máz 11', 'Svijanský Máz', 'same'],
-    ['Trappistes Rochefort 8', 'Trappistes Rochefort 10', 'different'],
-    ['Trappistes Rochefort 6', 'Trappistes Rochefort 10', 'different'],
-    // hard numbers on one side only
-    ['Paranormal Activity 2', 'Paranormal Activity', 'different'],
-    ['Kronenbourg 1664', 'Kronenbourg', 'different'],
-    ['Funky Monkey #2 12°', 'Funky Monkey', 'different'],
-    ['Juicy Trap #19 18°', 'Juicy Trap #20', 'different'],
+    ['Svijanský Máz 11', 'Svijanský Máz', 'same', 'same'],
+    ['Trappistes Rochefort 8', 'Trappistes Rochefort 10', 'different', 'different'],
+    ['Trappistes Rochefort 6', 'Trappistes Rochefort 10', 'different', 'different'],
+    // hard numbers on one side only: the input's is decisive, the candidate's is a fallback
+    ['Paranormal Activity 2', 'Paranormal Activity', 'different', 'number-fallback'],
+    ['Kronenbourg 1664', 'Kronenbourg', 'different', 'number-fallback'],
+    ['Funky Monkey #2 12°', 'Funky Monkey', 'different', 'number-fallback'],
+    ['Juicy Trap #19 18°', 'Juicy Trap #20', 'different', 'different'],
     // glued digits are not read (documented limit)
-    ['BA23.03', 'BA23.02', 'same'],
+    ['BA23.03', 'BA23.02', 'same', 'same'],
     // documented cost: the grade does not cover the soft 10 of "10,5/10"
-    ['Polska Desitka 10,5°', 'Polska Desitka 10,5/10', 'different'],
-  ])('%s  ↔  %s  →  %s', (a, b, want) => {
-    expect(identity(a, b)).toBe(want);
-    expect(identity(b, a)).toBe(want); // the rule is symmetric
+    ['Polska Desitka 10,5°', 'Polska Desitka 10,5/10', 'different', 'different'],
+    // Untappd appends numbers shops leave out (measured on search-linked rows and the Few More Beer tap)
+    ['Cucumber Gose', '10th Anniversary #6: Cucumber Gose', 'number-fallback', 'different'],
+    ['Few More Beers 19°', 'Few More Beer 004/108', 'number-fallback', 'different'],
+    // a candidate-only number outranks a one-sided year: it is the weaker fallback
+    ['Life After Death Star', 'Life After Death Star (Batch 7) 2025', 'number-fallback', 'different'],
+    // … unless the input carries its own number the candidate lacks: a soft number or a version
+    ['Trappistes Rochefort 10', 'Trappistes Rochefort 6', 'different', 'different'],
+    ['Potion #2.0', 'Potion #18', 'different', 'different'],
+    // … and never overrides a year conflict
+    ['Abraxas 2024', 'Abraxas (Batch 7) 2025', 'different', 'different'],
+  ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
+    expect(identity(input, candidate)).toBe(forward);
+    expect(identity(candidate, input)).toBe(reverse);
   });
 });

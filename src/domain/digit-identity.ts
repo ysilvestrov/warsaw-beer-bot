@@ -21,7 +21,9 @@ export interface NameDigits {
   years: string[];
 }
 
-export type DigitIdentity = 'same' | 'year-fallback' | 'different';
+// `same` > `year-fallback` > `number-fallback` > `different`. The two fallbacks are "acceptable when nothing better
+// exists": a year only one side carries, or a hard number only the CANDIDATE carries.
+export type DigitIdentity = 'same' | 'year-fallback' | 'number-fallback' | 'different';
 
 // ABV in any spelling, incl. the apostrophe decimal ontap uses (`4'8%`). Removed first, so its digits are
 // never read as numbers.
@@ -103,21 +105,48 @@ function softContradictsGrade(x: NameDigits, y: NameDigits): boolean {
   );
 }
 
-export function digitIdentity(a: NameDigits, b: NameDigits): DigitIdentity {
-  // 1. Hard numbers must pair off; a leftover may be covered by a grade or soft number on the other side.
-  if (minus(minus(a.numbers, b.numbers), [...b.grades, ...b.soft]).length > 0) return 'different';
-  if (minus(minus(b.numbers, a.numbers), [...a.grades, ...a.soft]).length > 0) return 'different';
-  // 2. Grades and soft numbers never split on their own — except where they are the only number carrier.
-  if (a.soft.length > 0 && b.soft.length > 0 && a.soft.join(' ') !== b.soft.join(' ')) return 'different';
-  if (softContradictsGrade(a, b) || softContradictsGrade(b, a)) return 'different';
-  // 3. Versions split only when both sides carry one.
-  if (a.versions.length > 0 && b.versions.length > 0 && a.versions.join(' ') !== b.versions.join(' ')) {
+/**
+ * `input` is the text being matched (a tap, a shop card); `candidate` is a row that might be it (a catalog row, an
+ * Untappd search hit). The roles are not symmetric: Untappd appends numbers shops leave out — batch, anniversary,
+ * collab variant (`Cucumber Gose` → `10th Anniversary #6: Cucumber Gose`, `Few More Beers` → `Few More Beer
+ * 004/108`) — so a number only the candidate carries is a fallback, while a number only the input carries says the
+ * input names another beer (`Funky Monkey #2` is not `Funky Monkey`). Measured on 815 search-linked rows and the live
+ * tap links (spec 2026-09-16-636, «Асиметрія ролей»).
+ */
+export function digitIdentity(input: NameDigits, candidate: NameDigits): DigitIdentity {
+  // 1. Every hard number of the input must pair off with the candidate's numbers, or be covered by its grade or
+  //    soft number.
+  if (minus(minus(input.numbers, candidate.numbers), [...candidate.grades, ...candidate.soft]).length > 0) {
     return 'different';
   }
-  // 4. Years: equal sets on both sides, or acceptable-if-nothing-better when only one side has any.
-  if (a.years.length > 0 && b.years.length > 0) {
-    return a.years.join(' ') === b.years.join(' ') ? 'same' : 'different';
+  const candidateOnly = minus(minus(candidate.numbers, input.numbers), [...input.grades, ...input.soft]);
+  // A candidate-only number is a fallback only while the input carries no number of its own that the candidate
+  // lacks — a soft number (`Trappistes Rochefort 10` is not `Trappistes Rochefort 6`) or a version (`Potion #2.0`
+  // is not `Potion #18`). Grades are extract, not a number.
+  const inputOwnUnmatched = [
+    ...minus(input.soft, [...candidate.numbers, ...candidate.soft, ...candidate.grades]),
+    ...minus(input.versions, candidate.versions),
+  ];
+  if (candidateOnly.length > 0 && inputOwnUnmatched.length > 0) return 'different';
+  // 2. Grades and soft numbers never split on their own — except where they are the only number carrier.
+  if (input.soft.length > 0 && candidate.soft.length > 0 && input.soft.join(' ') !== candidate.soft.join(' ')) {
+    return 'different';
   }
-  if (a.years.length > 0 || b.years.length > 0) return 'year-fallback';
+  if (softContradictsGrade(input, candidate) || softContradictsGrade(candidate, input)) return 'different';
+  // 3. Versions split only when both sides carry one.
+  if (
+    input.versions.length > 0 &&
+    candidate.versions.length > 0 &&
+    input.versions.join(' ') !== candidate.versions.join(' ')
+  ) {
+    return 'different';
+  }
+  // 4. Years on both sides must be equal sets.
+  const inputYears = input.years.join(' ');
+  const candidateYears = candidate.years.join(' ');
+  if (inputYears !== '' && candidateYears !== '' && inputYears !== candidateYears) return 'different';
+  // A number only the candidate carries is the weaker fallback, whatever the years say.
+  if (candidateOnly.length > 0) return 'number-fallback';
+  if ((inputYears === '') !== (candidateYears === '')) return 'year-fallback';
   return 'same';
 }
