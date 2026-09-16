@@ -1682,3 +1682,70 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
     expect(queriesCalled.some((q) => q === 'Mazak Rainbow of Death' || q === 'Mazák Rainbow of Death')).toBe(false);
   });
 });
+
+describe('#405 Sub-cohort A1: empty input brewery candidate stripping', () => {
+  test('matched: empty input brewery strips candidate brewery in exact nameKeys', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 5315178,
+        beer_name: 'Two Keepers',
+        brewery_name: 'Loca Deserta Meadery',
+        style: 'Mead - Session / Short',
+        abv: 6.5,
+        global_rating: 4.0,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: '',
+      name: 'Loca Deserta Meadery Two Keepers',
+      abv: 6.5,
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5315178);
+  });
+
+  test('matched: empty input brewery strips candidate brewery for 1-token beer name', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 123456,
+        beer_name: 'Five',
+        brewery_name: 'Brasserie St-Feuillien',
+        style: 'Belgian Blonde',
+        abv: 5.0,
+        global_rating: 3.6,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: '',
+      name: 'St-Feuillien Five',
+      abv: 5.0,
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(123456);
+  });
+
+  test('not_found: empty input brewery refuses candidate whose brewery is not in name', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 999999,
+        beer_name: 'Two Keepers',
+        brewery_name: 'Unrelated Brewery',
+        style: 'Mead',
+        abv: 6.5,
+        global_rating: 4.0,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: '',
+      name: 'Loca Deserta Meadery Two Keepers',
+      abv: 6.5,
+      search,
+    });
+    expect(out.kind).toBe('not_found');
+  });
+});
+

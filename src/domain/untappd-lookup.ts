@@ -541,9 +541,13 @@ export async function lookupBeer(
     // pickByAbv fallback keeps "strict wins"; with ABV evidence a relaxed exact-key
     // hit can win — intentional, since exact-key+ABV is stronger than exact-key alone.
     const inputKeys = nameKeys(name, brewery);
-    const keyHits = [...strictPool, ...relaxedPool].filter((r) =>
-      intersects(nameKeys(r.beer_name, r.brewery_name), inputKeys),
-    );
+    const keyHits = [...strictPool, ...relaxedPool].filter((r) => {
+      const keys =
+        inputBreweryAliases.length === 0 && r.brewery_name
+          ? nameKeys(name, r.brewery_name)
+          : inputKeys;
+      return intersects(nameKeys(r.beer_name, r.brewery_name), keys);
+    });
     if (keyHits.length > 0) return { kind: 'matched', result: pickByAbv(keyHits, abv) };
 
     // Stage 2a.5: reviewed near-name misses (#234), STRICT brewery only. This is
@@ -614,10 +618,19 @@ export async function lookupBeer(
         .filter((t) => !t.restored || inputBreweryAliases.length > 0)
         .map((t) => t.value),
     );
+    const isRelaxedEmptyBreweryExact = (r: SearchResult): boolean => {
+      if (inputBreweryAliases.length > 0 || !r.brewery_name) return false;
+      const bNorm = normalizeBrewery(r.brewery_name);
+      if (!bNorm) return false;
+      const stripped = stripBreweryFromName(normalizeName(name), bNorm);
+      if (stripped === normalizeName(name)) return false;
+      return stripped === normalizeName(r.beer_name);
+    };
     const relaxedExact = relaxedPool.filter(
       (r) =>
         relaxedTargetValues.has(normalizeName(r.beer_name)) ||
-        relaxedIdentityValues.has(candIdentValue(r)),
+        relaxedIdentityValues.has(candIdentValue(r)) ||
+        isRelaxedEmptyBreweryExact(r),
     );
     if (relaxedExact.length > 0) return { kind: 'matched', result: pickByAbv(relaxedExact, abv) };
 
