@@ -1255,7 +1255,14 @@ describe('#636 asymmetry: a number only the catalog row carries is the weakest a
     ])).toEqual({ id: 10, confidence: 1, source: 'exact' });
   });
 
-  test('an undated row of the year tier beats a numbered row for an undated input', () => {
+  test('a dated input with only a numbered row of its year takes that row (search-link shape, Batch 7)', () => {
+    expect(matchBeer(
+      { brewery: 'Equilibrium', name: 'Life After Death Star 2025' },
+      [c({ id: 7, brewery: 'Equilibrium', name: 'Life After Death Star (Batch 7) 2025' })],
+    )).toEqual({ id: 7, confidence: 1, source: 'exact' });
+  });
+
+  test('a row of the year tier beats a numbered row for an undated input', () => {
     expect(matchBeer({ brewery: 'Piwne Podziemie', name: 'Juicy Trap' }, [
       c({ id: 10, brewery: 'Piwne Podziemie', name: 'Juicy Trap (2024)' }),
       c({ id: 30, brewery: 'Piwne Podziemie', name: 'Juicy Trap #20' }),
