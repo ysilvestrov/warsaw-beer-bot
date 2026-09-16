@@ -88,6 +88,23 @@ describe('evaluateCandidate (stage-returning gate core)', () => {
     };
     expect(evaluateCandidate(input, cand)).toBe('needs-abv');
   });
+
+  // #636 (final review): the name gate reads digit-free names, and the web fallback runs exactly when Algolia found
+  // nothing — the case of a number Untappd search cannot find.
+  it('returns reject:digits for another number of the same series', () => {
+    const cand: ResolvedBeer = { bid: 5899401, beer_name: 'Dr. Hazy #4', brewery_name: 'Piwne Podziemie', abv: null };
+    expect(evaluateCandidate({ brewery: 'Piwne Podziemie', name: 'Dr.Hazy #7', abv: null }, cand)).toBe('reject:digits');
+  });
+
+  it('control: the same number still passes the name gate', () => {
+    const cand: ResolvedBeer = { bid: 5899401, beer_name: 'Dr. Hazy #4', brewery_name: 'Piwne Podziemie', abv: null };
+    expect(evaluateCandidate({ brewery: 'Piwne Podziemie', name: 'Dr.Hazy #4', abv: null }, cand)).toBe('accept');
+  });
+
+  it('a number only the Untappd name carries is accepted, as in lookupBeer (Few More Beer)', () => {
+    const cand: ResolvedBeer = { bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co', abv: 8.4 };
+    expect(evaluateCandidate({ brewery: 'Tankbusters', name: 'Few More Beers', abv: 8.4 }, cand)).toBe('accept');
+  });
 });
 
 function seed(db: ReturnType<typeof openDb>, brewery: string, name: string) {
