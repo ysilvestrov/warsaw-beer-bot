@@ -474,8 +474,9 @@ describe('lookupBeer', () => {
   });
 
   test('#271 head-retry: zero candidates + comma/#N tail retries with the head and matches', async () => {
-    // #636: Untappd's own name carries the number, as in the row #271 was filed for (31170 `Owocowa Fantazja #1 -
-    // Pastry Sour …`). A candidate WITHOUT the number the shop wrote is another beer, even on the head retry.
+    // #636: a candidate WITHOUT the number the shop wrote is another beer, even on the head retry — so the head
+    // retry is exercised with a candidate that carries it. Known cost (spec «Обмеження»): the row #271 was filed for,
+    // 31170, is a shop numbering Untappd does not use, and that real beer is now refused.
     const search = fakeSearch((q) =>
       q === 'Pinta Fantazja'
         ? [{ bid: 7000, beer_name: 'Fantazja #1', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
