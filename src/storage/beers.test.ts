@@ -1672,6 +1672,13 @@ describe('ensureOrphan (#617)', () => {
     expect(plain).not.toBe(numbered);
   });
 
+  test('a number only the new tap carries makes another orphan too (the other direction)', () => {
+    const db = fresh();
+    const plain = ensureOrphan(db, orphanInput('Juicy Trap', 'Piwne Podziemie'));
+    const numbered = ensureOrphan(db, orphanInput('Juicy Trap #20', 'Piwne Podziemie'));
+    expect(numbered).not.toBe(plain);
+  });
+
   // Рев'ю гілки #617: у гілці сироти refresh-ontap наявна сирота з тією ж нормалізованою парою
   // досяжна лише тоді, коли матчер відкинув її як інший рік, — повернути її означало б приліпити
   // кран «2025» до сироти «2024» (і шукати його на Untappd під назвою 2024).
