@@ -6,6 +6,7 @@ import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
 import { isWebFallbackBlocked } from '../storage/enrich_failures';
 import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
+import { digitIdentity, readNameDigits } from './digit-identity';
 import {
   ABV_TOLERANCE,
   breweryAliases,
@@ -57,7 +58,7 @@ function abvCorroborates(a: number | null, b: number | null): boolean {
   return a != null && b != null && Math.abs(a - b) <= ABV_TOLERANCE;
 }
 
-export type GateStage = 'accept' | 'reject:brewery' | 'reject:name-token' | 'needs-abv';
+export type GateStage = 'accept' | 'reject:brewery' | 'reject:digits' | 'reject:name-token' | 'needs-abv';
 
 // The stages a rejected candidate can be logged under (accept/needs-abv never
 // reach the log as a stage: accept returns early, needs-abv resolves to either
@@ -74,6 +75,10 @@ type CallVerdict = 'matched' | 'rejected' | 'no-candidates' | 'error';
 // so runWebFallback can call it before paying for hydrateAbv.
 export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateStage {
   if (!breweryStrict(input, cand)) return 'reject:brewery';
+  // #636: both name signals below read digit-free names, so another number of the series passes them (`Dr.Hazy #7`
+  // → `Dr. Hazy #4`). The input is the orphan's text, the candidate Untappd's; a number only Untappd writes stays
+  // acceptable, as in lookupBeer — this path runs only when the search found nothing, so there is no better tier.
+  if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name)) === 'different') return 'reject:digits';
   if (nameGatePass(input, cand)) return 'accept';
   if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';
   return 'needs-abv';
