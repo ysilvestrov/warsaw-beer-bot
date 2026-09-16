@@ -109,6 +109,12 @@ describe('digitIdentity(input, candidate)', () => {
     // … unless the input carries its own number the candidate lacks: a soft number or a version
     ['Trappistes Rochefort 10', 'Trappistes Rochefort 6', 'different', 'different'],
     ['Potion #2.0', 'Potion #18', 'different', 'different'],
+    // … and the input's soft number counts as matched when the candidate carries it in any bucket
+    ['10TH ANNIVERSARY 11°', '10th Anniversary no.5', 'number-fallback', 'different'], // candidate soft (live tap link)
+    ['Trappistes Rochefort 10', 'Trappistes Rochefort #10 (Batch 3)', 'number-fallback', 'different'], // candidate number
+    ['Svijanský Máz 11', 'Svijanský Máz 11° #2', 'number-fallback', 'different'], // candidate grade
+    // a year the input carries is not part of that guard (documented limit): a one-sided year stays a fallback
+    ['Abraxas 2025', 'Abraxas #3', 'number-fallback', 'different'],
     // … and never overrides a year conflict
     ['Abraxas 2024', 'Abraxas (Batch 7) 2025', 'different', 'different'],
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
