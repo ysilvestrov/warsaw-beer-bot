@@ -396,14 +396,16 @@ describe('matchBeer — vintage year disambiguation', () => {
     expect(m?.id).toBe(8);
   });
 
-  test('year match + ABV mismatch + no noYear → wrongYear ABV hit wins (most recent)', () => {
+  test('year match + ABV mismatch + no noYear → same-year row kept, another vintage never taken (#636)', () => {
+    // Was: the 2024 row with a fitting ABV won. A listing ABV typo is cheaper than another vintage's
+    // rating and drunk state (spec 2026-09-16-636, «Свідома зміна поведінки»).
     const catalog = [
       pinta(10, 'Affection (2025)', 9.9),
       pinta(9,  'Affection (2024)', 7.0),
       pinta(7,  'Affection (2022)', 7.0),
     ];
     const m = matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2025', abv: 7.0 }, catalog);
-    expect(m?.id).toBe(9);
+    expect(m?.id).toBe(10);
   });
 
   test('year match + ABV mismatch + no alternatives → accept ABV error, return yearMatch', () => {
@@ -1180,5 +1182,45 @@ describe('#636 fuzzy stage: the best hit must not carry different digits', () =>
     // Before #636: { id: 45, source: 'fuzzy' } for both spellings.
     expect(matchBeer({ brewery: 'Konrad Brewery', name: 'KONRAD 12°' }, konrad)).toBeNull();
     expect(matchBeer({ brewery: 'Konrad Brewery', name: 'Konrad 12' }, konrad)).toBeNull();
+  });
+});
+
+describe('#636 exact stage: rows with different digits are not this beer', () => {
+  const przetwornia = (id: number, name: string) => c({ id, brewery: 'Przetwórnia Chmielu', name });
+
+  test('its own number wins even when another number has the newer id', () => {
+    // Before #636: 233 — the newest id among rows sharing the digit-free key.
+    expect(matchBeer(
+      { brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwór #4 16°' },
+      [przetwornia(233, 'Przetwór #3'), przetwornia(200, 'Przetwór #4')],
+    )).toEqual({ id: 200, confidence: 1, source: 'exact' });
+  });
+
+  test('its number absent: no link, and the fuzzy stage does not re-link the same row', () => {
+    // Before #636: { id: 233, source: 'exact' }.
+    expect(matchBeer(
+      { brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwór #4 16°' },
+      [przetwornia(233, 'Przetwór #3')],
+    )).toBeNull();
+  });
+
+  test('control: the same number is still an exact match', () => {
+    expect(matchBeer({ brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwór #3' }, [przetwornia(233, 'Przetwór #3')]))
+      .toEqual({ id: 233, confidence: 1, source: 'exact' });
+  });
+
+  test('a mis-split title obeys the same gate', () => {
+    // Before #636: { id: 233, source: 'exact' }.
+    expect(matchBeer({ brewery: 'Przetwórnia', name: 'Chmielu Przetwór #4' }, [przetwornia(233, 'Przetwór #3')]))
+      .toBeNull();
+    expect(matchBeer({ brewery: 'Przetwórnia', name: 'Chmielu Przetwór #3' }, [przetwornia(233, 'Przetwór #3')]))
+      .toEqual({ id: 233, confidence: 1, source: 'exact' });
+  });
+
+  test('no year in the input still takes the newest vintage over an older undated row', () => {
+    expect(matchBeer({ brewery: 'Harpagan', name: 'Buzdygan Rozkoszy' }, [
+      c({ id: 5, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy', abv: 8.0 }),
+      c({ id: 12, brewery: 'Harpagan', name: 'Buzdygan Rozkoszy 2026', abv: 9.5 }),
+    ])).toEqual({ id: 12, confidence: 1, source: 'exact' });
   });
 });

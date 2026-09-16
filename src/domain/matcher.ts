@@ -384,62 +384,43 @@ export function matchPrepared(
   }
 
   if (exacts.length) {
+    // #636: the normalized key carries no digits, so an exact hit may be another number or vintage of
+    // the same series (`Juicy Trap #19` / `#20`). A row whose digits are `different` is never this beer.
+    // exacts is id DESC, so each group below keeps "most recent first".
     const wantAbv = input.abv ?? null;
-    const inputYear = extractYear(input.name);
-
-    if (inputYear === null) {
-      // No year in input — original behaviour: ABV first, else most-recent.
-      if (wantAbv !== null) {
-        const abvHit = exacts.find(
-          (c) => c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE,
-        );
-        if (abvHit) return { id: abvHit.id, confidence: 1, source: 'exact' };
-      }
-      return { id: exacts[0].id, confidence: 1, source: 'exact' };
+    const abvFits = (c: PreparedBeer) =>
+      wantAbv !== null && c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE;
+    const inputDigits = readNameDigits(input.name);
+    const same: PreparedBeer[] = [];
+    const yearFallback: PreparedBeer[] = [];
+    for (const c of exacts) {
+      const identity = digitIdentity(inputDigits, readNameDigits(c.name));
+      if (identity === 'same') same.push(c);
+      else if (identity === 'year-fallback') yearFallback.push(c);
     }
 
-    // Year found in input — partition candidates by vintage relationship.
-    // exacts is already sorted id DESC so each filtered array preserves that order.
-    const yearMatch = exacts.filter((c) => extractYear(c.name) === inputYear);
-    const noYear    = exacts.filter((c) => extractYear(c.name) === null);
-    const wrongYear = exacts.filter(
-      (c) => { const y = extractYear(c.name); return y !== null && y !== inputYear; },
-    );
-
-    if (yearMatch.length > 0) {
-      const candidate = yearMatch[0];
-      const abvMismatch =
-        wantAbv !== null &&
-        candidate.abv !== null &&
-        Math.abs(candidate.abv - wantAbv) > ABV_TOLERANCE;
-
-      if (!abvMismatch) {
-        return { id: candidate.id, confidence: 1, source: 'exact' };
+    if (inputDigits.years.length === 0) {
+      // No year in the input: ABV first, else the most recent row of any vintage.
+      const pool = [...same, ...yearFallback].sort((a, b) => b.id - a.id);
+      if (pool.length) {
+        const hit = pool.find(abvFits) ?? pool[0];
+        return { id: hit.id, confidence: 1, source: 'exact' };
       }
-
-      // ABV mismatch on the year-matching row — likely an ontap data entry error.
-      // Try other candidates that have a matching ABV: noYear first, then wrongYear.
-      const abvHit =
-        noYear.find((c) => c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE) ??
-        wrongYear.find((c) => c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE);
-      if (abvHit) return { id: abvHit.id, confidence: 1, source: 'exact' };
-
-      // Nothing with a better ABV — accept the ontap ABV error, stay on year-match.
-      return { id: candidate.id, confidence: 1, source: 'exact' };
+    } else if (same.length) {
+      // Same-year row. If its ABV contradicts the input, a no-year row with a fitting ABV wins (a listing
+      // ABV typo against an undated vintage); a row of another year never does.
+      const candidate = same[0];
+      const abvContradicts = wantAbv !== null && candidate.abv !== null && !abvFits(candidate);
+      const hit = (abvContradicts ? yearFallback.find(abvFits) : undefined) ?? candidate;
+      return { id: hit.id, confidence: 1, source: 'exact' };
+    } else if (yearFallback.length) {
+      // No same-year row: an undated row, ABV first.
+      const hit = yearFallback.find(abvFits) ?? yearFallback[0];
+      return { id: hit.id, confidence: 1, source: 'exact' };
     }
-
-    // No same-year catalog entry — fall back to no-year entries if any exist.
-    if (noYear.length > 0) {
-      if (wantAbv !== null) {
-        const abvHit = noYear.find(
-          (c) => c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE,
-        );
-        if (abvHit) return { id: abvHit.id, confidence: 1, source: 'exact' };
-      }
-      return { id: noYear[0].id, confidence: 1, source: 'exact' };
-    }
-
-    // Only wrong-year candidates exist — do not cross-match vintages.
+    // Every exact hit carries different digits: the series is here but this number is not. No fall-through
+    // to fuzzy — its best hit is one of these same rows at score 1.0 and the digit gate would refuse it
+    // anyway, while a mis-split input would spend the full-catalog fallback budget for nothing.
     return null;
   }
 
