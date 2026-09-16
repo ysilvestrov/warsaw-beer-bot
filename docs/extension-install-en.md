@@ -221,6 +221,11 @@ this guide first.
 > that's likely from your history, but the match is fuzzy: check it on
 > Untappd (click the badge).
 
+> When a shop's product page links to Untappd itself, the extension follows that link — the
+> badge then shows exactly that beer, even if the shop spells its name differently. When the
+> link disagrees with the brewery the shop names on the same page, the badge stays cautious
+> (**❓** or **⭐**): the beer was found, but we are not certain — click to check.
+
 ### The toolbar button (popup)
 
 Clicking the extension's icon on the browser toolbar opens a small menu. The
