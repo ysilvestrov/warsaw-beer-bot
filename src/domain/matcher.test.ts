@@ -1238,3 +1238,48 @@ describe('#636 exact stage: rows with different digits are not this beer', () =>
     ])).toEqual({ id: 12, confidence: 1, source: 'exact' });
   });
 });
+
+describe('#636 asymmetry: a number only the catalog row carries is the weakest acceptable tier', () => {
+  test('a tap without a number takes the only numbered row of its name', () => {
+    // Symmetric rule: null. Untappd names the series number the tap leaves out.
+    expect(matchBeer(
+      { brewery: 'Zakładowy Brewery', name: 'Owocowa Fantazja 24°' },
+      [c({ id: 50, brewery: 'Zakładowy Brewery', name: 'Owocowa Fantazja #1' })],
+    )).toEqual({ id: 50, confidence: 1, source: 'exact' });
+  });
+
+  test('an unnumbered row beats a newer numbered one', () => {
+    expect(matchBeer({ brewery: 'Piwne Podziemie', name: 'Juicy Trap' }, [
+      c({ id: 10, brewery: 'Piwne Podziemie', name: 'Juicy Trap' }),
+      c({ id: 30, brewery: 'Piwne Podziemie', name: 'Juicy Trap #20' }),
+    ])).toEqual({ id: 10, confidence: 1, source: 'exact' });
+  });
+
+  test('an undated row of the year tier beats a numbered row for an undated input', () => {
+    expect(matchBeer({ brewery: 'Piwne Podziemie', name: 'Juicy Trap' }, [
+      c({ id: 10, brewery: 'Piwne Podziemie', name: 'Juicy Trap (2024)' }),
+      c({ id: 30, brewery: 'Piwne Podziemie', name: 'Juicy Trap #20' }),
+    ])).toEqual({ id: 10, confidence: 1, source: 'exact' });
+  });
+
+  test('among numbered rows only, ABV picks before the newest id', () => {
+    expect(matchBeer({ brewery: 'Piwne Podziemie', name: 'Juicy Trap', abv: 6.0 }, [
+      c({ id: 30, brewery: 'Piwne Podziemie', name: 'Juicy Trap #20', abv: 7.5 }),
+      c({ id: 20, brewery: 'Piwne Podziemie', name: 'Juicy Trap #19', abv: 6.0 }),
+    ])).toEqual({ id: 20, confidence: 1, source: 'exact' });
+  });
+
+  test('a number only the tap carries still refuses the unnumbered row', () => {
+    expect(matchBeer(
+      { brewery: "Hop'n Monkey Brewery", name: 'Funky Monkey #2 12°' },
+      [c({ id: 70, brewery: "Hop'n Monkey", name: 'Funky Monkey' })],
+    )).toBeNull();
+  });
+
+  test('the fuzzy stage accepts a candidate-only number (Few More Beer, live fuzzy link 0.96)', () => {
+    expect(matchBeer(
+      { brewery: 'Tankbusters Brewery', name: 'Few More Beers 19°' },
+      [c({ id: 35283, brewery: 'TankBusters.Co', name: 'Few More Beer 004/108', abv: 8.4 })],
+    )).toMatchObject({ id: 35283 });
+  });
+});
