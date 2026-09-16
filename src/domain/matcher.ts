@@ -1,6 +1,7 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
+import { digitIdentity, readNameDigits } from './digit-identity';
 
 export { COLLAB_SEP } from './normalize';
 
@@ -476,6 +477,8 @@ export function matchPrepared(
   // Reject a fuzzy candidate that diverges from the input on content tokens — a different
   // flavour variant of the same base beer, which must not inherit drunk/rating data.
   if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
+  // #636: the fuzzy key has no digits either — the same series row of another number scores 1.0.
+  if (digitIdentity(readNameDigits(input.name), readNameDigits(best.item.name)) === 'different') return null;
   if (usedFullFallback && budget) budget.hits++;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
 }
