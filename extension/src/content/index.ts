@@ -82,12 +82,17 @@ export async function runOverlay(
       // miss, and freezing the enrichment window on the same first cards forever.
       .map(({ el, key, card }) => {
         const abv = usableAbv(card.abv);
+        // #633: bid and brand travel together or not at all — without a bid the brand proves
+        // nothing to the server, and without a brand the server refuses to act on the bid.
+        const published = card.bid !== undefined
+          ? { bid: card.bid, ...(card.brand !== undefined ? { brand: card.brand } : {}) }
+          : {};
         return {
           el,
           key,
           raw: abv !== undefined
-            ? { brewery: card.brewery, name: card.name, abv }
-            : { brewery: card.brewery, name: card.name },
+            ? { brewery: card.brewery, name: card.name, abv, ...published }
+            : { brewery: card.brewery, name: card.name, ...published },
           card,
           ...(abv !== undefined ? { abv } : {}),
         };

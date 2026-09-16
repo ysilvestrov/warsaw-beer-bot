@@ -2,6 +2,10 @@ export interface RawBeer {
   brewery: string;
   name: string;
   abv?: number;
+  /** #633: the Untappd id the shop publishes on its own product page. */
+  bid?: number;
+  /** #633: the brand from that page — the brewery evidence the server checks the bid against. */
+  brand?: string;
 }
 
 export interface MatchedBeer {

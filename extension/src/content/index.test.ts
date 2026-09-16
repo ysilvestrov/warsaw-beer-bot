@@ -122,6 +122,42 @@ describe('runOverlay', () => {
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FUNKY FLUID', name: 'Ambrosia 9.0', abv: 7.3 }]);
   });
 
+  // #633: the shop's own Untappd link is the strongest identity we have for a card, and the
+  // server can only use it together with the brand it is verified against.
+  it('sends the shop-published bid and brand for a card that has them', async () => {
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].bid = 5081070;
+        cards[0].brand = 'Mad Brew';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([
+      { brewery: 'FLASKER', name: 'Abrikoos', bid: 5081070, brand: 'Mad Brew' },
+    ]);
+  });
+
+  it('never sends a brand without a bid', async () => {
+    // Without a bid the brand proves nothing to the server, so it must not travel at all.
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].brand = 'Mad Brew';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
+  });
+
   // #384: /match sees the hydrated identity, but the cache is keyed on the identity the
   // lookup used (pre-hydration) — see "cache key stability" below for why they must agree.
   it('uses the hydrated brewery identity for matching and the looked-up key for the cache', async () => {
