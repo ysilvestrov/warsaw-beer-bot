@@ -1403,39 +1403,48 @@ describe('lookupBeer — name identity floor (#505)', () => {
       expect(out.kind).toBe('not_found');
     });
 
+    // #636: a competitor of ANOTHER year no longer competes — the digit filter drops it before any stage, and the
+    // right-year candidate alone was always accepted (a lone candidate matches on main too). Each guard below is
+    // therefore tested against a competitor the digit filter keeps, chosen so that disabling exactly that guard turns
+    // the test green-to-red (mutation-checked when #636 was written).
+    const sameYearRival = { ...candidates[1], bid: 6852099, abv: 10, global_rating: 3.9, rating_count: 40 };
+    const undatedRival = { ...sameYearRival, beer_name: 'Birthday Cookie: Multi Qlti', abv: 13 };
+
     test.each([
       {
         label: 'missing input year',
         inputName: 'Birthday Cookie MultiQlti 36°',
         candidateName: 'Birthday Cookie: Multi Qlti 2026',
+        competitor: candidates[0],
       },
       {
         label: 'missing candidate year',
         inputName: 'Birthday Cookie MultiQlti 2026 36°',
         candidateName: 'Birthday Cookie: Multi Qlti',
+        competitor: { ...undatedRival, abv: 10 },
       },
-    ])('refuses $label', async ({ inputName, candidateName }) => {
+    ])('refuses $label', async ({ inputName, candidateName, competitor }) => {
       const target = { ...candidates[1], beer_name: candidateName };
       const out = await lookupBeer({
         brewery: 'Funky Fluid X MultiQlti Brewery',
         name: inputName,
         abv: 13,
-        search: fakeSearch(() => [target, candidates[0]]),
+        search: fakeSearch(() => [target, competitor]),
       });
       expect(out.kind).toBe('not_found');
     });
 
     test.each([
-      { label: 'missing input ABV', inputAbv: null, candidateAbv: 13 },
-      { label: 'missing candidate ABV', inputAbv: 13, candidateAbv: null },
-      { label: 'contradictory ABV', inputAbv: 13, candidateAbv: 12.5 },
-    ])('refuses $label', async ({ inputAbv, candidateAbv }) => {
+      { label: 'missing input ABV', inputAbv: null, candidateAbv: 13, competitor: undatedRival },
+      { label: 'missing candidate ABV', inputAbv: 13, candidateAbv: null, competitor: sameYearRival },
+      { label: 'contradictory ABV', inputAbv: 13, candidateAbv: 12.5, competitor: undatedRival },
+    ])('refuses $label', async ({ inputAbv, candidateAbv, competitor }) => {
       const target = { ...candidates[1], abv: candidateAbv };
       const out = await lookupBeer({
         brewery: 'Funky Fluid X MultiQlti Brewery',
         name: 'Birthday Cookie MultiQlti 2026 36°',
         abv: inputAbv,
-        search: fakeSearch(() => [target, candidates[0]]),
+        search: fakeSearch(() => [target, competitor]),
       });
       expect(out.kind).toBe('not_found');
     });
@@ -1445,7 +1454,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
         brewery: 'Funky Fluid',
         name: 'Birthday Cookie MultiQlti 2026 36°',
         abv: 13,
-        search: fakeSearch(() => [candidates[1], candidates[0]]),
+        search: fakeSearch(() => [candidates[1], sameYearRival]),
       });
       expect(out.kind).toBe('not_found');
     });
@@ -1456,7 +1465,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
         brewery: 'Funky Fluid X MultiQlti Brewery',
         name: 'A Birthday Cookie MultiQlti 2026 36°',
         abv: 13,
-        search: fakeSearch(() => [target, candidates[0]]),
+        search: fakeSearch(() => [target, { ...sameYearRival, beer_name: 'B Birthday Cookie: Multi Qlti 2026' }]),
       });
       expect(out.kind).toBe('not_found');
     });
@@ -1863,4 +1872,63 @@ describe('#405 Sub-cohort A3: swapped brewery and beer name', () => {
   });
 });
 
+describe('#636 lookupBeer drops candidates of another number or vintage before any stage', () => {
+  const PP = 'Piwne Podziemie / Beer Underground';
+  const hit = (bid: number, beer_name: string, abv: number | null = 6): SearchResult =>
+    ({ bid, beer_name, brewery_name: PP, style: 'IPA - New England / Hazy', abv, global_rating: 3.8 });
 
+  test('another number is refused even when it is the only candidate (live replay: #7 → #4)', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #7',
+      search: fakeSearch(() => [hit(5899401, 'Dr. Hazy #4')]),
+    });
+    expect(out.kind).toBe('not_found');
+    if (out.kind !== 'not_found') return;
+    // the refused candidate is still triage evidence
+    expect(out.candidates.map((c) => c.bid)).toEqual([5899401]);
+  });
+
+  test('control: the same number still matches', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #4',
+      search: fakeSearch(() => [hit(5899401, 'Dr. Hazy #4')]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5899401);
+  });
+
+  test('a number only Untappd writes is dropped when an unnumbered candidate exists', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Juicy Trap',
+      search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Juicy Trap')]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5000001);
+  });
+
+  test('a number only Untappd writes is accepted when nothing better exists (Few More Beer)', async () => {
+    const out = await lookupBeer({
+      brewery: 'Tankbusters Brewery', name: 'Few More Beers 19°', abv: 8.4,
+      search: fakeSearch(() => [{
+        bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co',
+        style: 'IPA - Imperial / Double New England / Hazy', abv: 8.4, global_rating: 3.9,
+      }]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6819481);
+  });
+
+  test('another vintage is refused', async () => {
+    const out = await lookupBeer({
+      brewery: 'Ziemia Obiecana', name: 'Stan Umysłu 2027',
+      search: fakeSearch(() => [{
+        bid: 6425121, beer_name: 'Stan Umysłu 2025 (Owsianego Rodzaju)', brewery_name: 'Ziemia Obiecana',
+        style: 'Stout - Imperial / Double Oatmeal', abv: 6, global_rating: 3.9,
+      }]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+});

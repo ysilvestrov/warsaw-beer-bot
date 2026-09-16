@@ -21,6 +21,7 @@ import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
+import { digitIdentity, readNameDigits } from './digit-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
 const NEAR_TOKEN_SIM = 0.75;
@@ -471,6 +472,7 @@ export async function lookupBeer(
     }),
   );
   const targetNames = fuzzyTargets(name, brewery);
+  const inputDigits = readNameDigits(name);
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
@@ -485,7 +487,19 @@ export async function lookupBeer(
   // yields nothing. Extracted from the search loop so the query ladder (#382) can iterate
   // rungs without duplicating 130 lines of staging — and so "no match" is a return value
   // rather than a `continue` whose meaning depends on how many loops happen to enclose it.
-  function matchAgainst(results: SearchResult[]): LookupOutcome | null {
+  function matchAgainst(unfiltered: SearchResult[]): LookupOutcome | null {
+    // #636: every stage below reads a normalized name with no digits, so a candidate of another number or
+    // vintage (`Dr.Hazy #7` → `Dr. Hazy #4`, proved live) would pass them all. One filter here, before any pool:
+    // `different` never; `number-fallback` (a number only Untappd writes) only when no better tier is present —
+    // otherwise the search could pick `Juicy Trap #20` where the matcher takes `Juicy Trap`, and merge memory
+    // would keep the search's choice. The unfiltered list stays in seenCandidates as triage evidence.
+    const judged = unfiltered.map((result) => ({
+      result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name)),
+    }));
+    const betterTier = judged.some((j) => j.identity === 'same' || j.identity === 'year-fallback');
+    const results = judged
+      .filter((j) => j.identity !== 'different' && !(betterTier && j.identity === 'number-fallback'))
+      .map((j) => j.result);
     const identityHits = results.filter((result) =>
       (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
     );
