@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import {
   findAliasTarget,
-  findBeerByNormalized,
+  listBeersByNormalized,
   getBeer,
   ensureOrphan,
   fillOrphanFacts,
@@ -17,6 +17,7 @@ import {
 } from '../../storage/beers';
 import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
+import { digitIdentity, readNameDigits } from '../../domain/digit-identity';
 import { isEligible, RECURRING_CLASSES } from '../../domain/lookup-backoff';
 import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import {
@@ -130,6 +131,21 @@ function withRelayQuery(
 // текстом, і /match віддавав її exact без ✅. Без нього перед парою картка отримувала рядок близнюка тієї самої пари
 // (інше написання чи ABV-близнюк), і її суперечливий bid перелінковував рядок близнюка — пінг-понг (рев'ю 11, R3).
 // viaAlias каже викликачеві, що рядок — канонічний, а не рядок цієї картки.
+// #636: рядок пари, яким може бути картка. Картка — вхід, рядок — кандидат: `different` відкидається, далі
+// `same` > `year-fallback` > `number-fallback`, у межах рівня — найстаріший рядок (детермінізм замість порядку
+// `.get()`, який віддавав картці «Rochefort 10» рядок «Rochefort 6»).
+const ROW_TIERS = ['same', 'year-fallback', 'number-fallback'] as const;
+
+function pickRowByDigits(cardName: string, rows: BeerRow[]): BeerRow | null {
+  const card = readNameDigits(cardName);
+  const judged = rows.map((row) => ({ row, identity: digitIdentity(card, readNameDigits(row.name)) }));
+  for (const tier of ROW_TIERS) {
+    const hit = judged.find((j) => j.identity === tier);
+    if (hit) return hit.row;
+  }
+  return null;
+}
+
 function ensureBeerRow(
   db: ApiDeps['db'], brewery: string, name: string, facts: OrphanFacts = {},
 ): BeerRow & { viaAlias: boolean } {
@@ -137,13 +153,15 @@ function ensureBeerRow(
   if (aliased) return { ...aliased, viaAlias: true };
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
-  const existing = findBeerByNormalized(db, normalized_brewery, normalized_name);
+  const existing = pickRowByDigits(name, listBeersByNormalized(db, normalized_brewery, normalized_name));
   if (existing) {
     const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
     if (abvGained) rearmLookup(db, existing.id);
     return { ...(abvGained || changed ? getBeer(db, existing.id)! : existing), viaAlias: false };
   }
   // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
+  // #636: або коли всі рядки пари мають інші цифри; ensureOrphan тоді не знайде й сумісної сироти (порівняння рівних
+  // суворіше за вибір вище), тож вставить нову.
   const id = ensureOrphan(db, {
     name, brewery,
     style: facts.style ?? null, abv: sanitizeAbv(facts.abv) ?? null,
