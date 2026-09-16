@@ -1490,7 +1490,7 @@ describe('upsertBeerByBid (#617)', () => {
     expect(t.normalized_brewery).toBe(normalizeBrewery(ROCHEFORT));
   });
 
-  // Числа тут однакові, тож numericTokensCompatible злінкований рядок не відсіє — від перехоплення
+  // Числа тут однакові, тож фільтр цифр (#636: `same`) злінкований рядок не відсіє — від перехоплення
   // його береже лише умова `untappd_id IS NULL` у resolvableOrphan. Тест «vintage twin» вище цю
   // умову не ловить: там 8 ≠ 10 і фільтр чисел відсіює рядок сам.
   test('a linked row with the same name and numbers but another bid is never taken over', () => {
@@ -1613,6 +1613,24 @@ describe('upsertBeerByBid (#617)', () => {
     expect(getBeer(db, got)!.untappd_id).toBe(6625206);
   });
 
+  // #636: резолвлення пише bid у рядок, що зберігає текст крана (#618). Номер лише в назві bid — вгадування,
+  // яке наступний інжест прочитав би як `same`, тож сирота його не приймає.
+  test('an orphan without the number the bid carries is not adopted (#636 number-fallback is a guess)', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Juicy Trap 18°', PP, 6.5);
+    const got = upsertBeerByBid(db, bidInput(6625100, 'Juicy Trap #19', PP));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
+  });
+
+  test('an orphan of another batch in brackets is not resolved (#636 reads bracketed digits)', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Imperial Stout (Batch 12)', PP, 10);
+    const got = upsertBeerByBid(db, bidInput(7000013, 'Imperial Stout (Batch 13)', PP));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
+  });
+
   test('bumps the catalog version on insert and on update', () => {
     const db = fresh();
     let v = catalogVersion();
@@ -1627,6 +1645,32 @@ describe('upsertBeerByBid (#617)', () => {
 
 describe('ensureOrphan (#617)', () => {
   const MONSTERS = 'Monsters Brewery';
+
+  const orphanInput = (name: string, brewery: string) => ({
+    name, brewery, style: null, abv: null, rating_global: null,
+    normalized_name: normalizeName(name), normalized_brewery: normalizeBrewery(brewery),
+  });
+
+  test('an orphan of another batch in brackets is not reused (#636)', () => {
+    const db = fresh();
+    const first = ensureOrphan(db, orphanInput('Imperial Stout (Batch 12)', 'Browar Testowy'));
+    const second = ensureOrphan(db, orphanInput('Imperial Stout (Batch 13)', 'Browar Testowy'));
+    expect(second).not.toBe(first);
+  });
+
+  test('a bare Czech grade is soft: the tap reuses the orphan written without it (#636)', () => {
+    const db = fresh();
+    const first = ensureOrphan(db, orphanInput('Svijanský Máz', 'Pivovar Svijany'));
+    const second = ensureOrphan(db, orphanInput('Svijanský Máz 11', 'Pivovar Svijany'));
+    expect(second).toBe(first);
+  });
+
+  test('a number only the existing orphan carries makes another orphan (#636 peers have no roles)', () => {
+    const db = fresh();
+    const numbered = ensureOrphan(db, orphanInput('Juicy Trap #20', 'Piwne Podziemie'));
+    const plain = ensureOrphan(db, orphanInput('Juicy Trap', 'Piwne Podziemie'));
+    expect(plain).not.toBe(numbered);
+  });
 
   // Рев'ю гілки #617: у гілці сироти refresh-ontap наявна сирота з тією ж нормалізованою парою
   // досяжна лише тоді, коли матчер відкинув її як інший рік, — повернути її означало б приліпити

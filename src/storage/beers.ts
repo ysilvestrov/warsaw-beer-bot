@@ -1,6 +1,6 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
-import { numericTokensCompatible } from '../domain/normalize';
+import { digitIdentity, digitsCompatibleAsPeers, readNameDigits } from '../domain/digit-identity';
 import { cardAbv, cardText } from '../domain/card-text';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
@@ -70,8 +70,11 @@ export interface BidBeerInput {
 }
 
 // #617: сирота, яку можна резолвити цим bid — рівно одна з тією самою нормалізованою парою і
-// сумісними цифровими токенами назви. normalizeName викидає цифри, тож без другої умови чекін
+// сумісними цифрами назви. normalizeName викидає цифри, тож без другої умови чекін
 // «Rochefort 10» віддав би bid сироті «Rochefort 8». Двозначність не вирішується вгадуванням.
+// #636: сирота — вхід, назва bid (Untappd) — кандидат; сумісні лише `same` і `year-fallback`.
+// `number-fallback` тут — вгадування («Juicy Trap 18°» — це «#19», бо його чекін синкнувся першим), а
+// резолвлення пише bid у рядок, що зберігає текст крана (#618): наступний інжест прочитав би це як `same`.
 function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_source: UntappdIdSource | null } | null {
   const orphans = db
     .prepare(
@@ -81,7 +84,11 @@ function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_sou
     .all(b.normalized_brewery, b.normalized_name) as {
       id: number; name: string; untappd_id_source: UntappdIdSource | null;
     }[];
-  const compatible = orphans.filter((o) => numericTokensCompatible(o.name, b.name));
+  const bidDigits = readNameDigits(b.name);
+  const compatible = orphans.filter((o) => {
+    const identity = digitIdentity(readNameDigits(o.name), bidDigits);
+    return identity === 'same' || identity === 'year-fallback';
+  });
   return compatible.length === 1 ? compatible[0] : null;
 }
 
@@ -164,7 +171,7 @@ export interface OrphanBeerInput {
 }
 
 // #617: рядок без bid — для гілки сироти refresh-ontap і рядків /import без bid. Шукає лише серед
-// сиріт із сумісними цифровими токенами назви; знайдену (найстарішу) повертає без перезапису.
+// сиріт із сумісними цифрами назви (#636: обидва тексти — вхідні, тож порівняння рівних, `digitsCompatibleAsPeers`); знайдену (найстарішу) повертає без перезапису.
 // Злінкованого рядка не торкається ніколи: сирота поряд зі злінкованим вінтажем тієї ж назви —
 // нормальний стан (UNIQUE лише на untappd_id). Фільтр цифр — з рев'ю гілки: у гілці сироти
 // refresh-ontap сирота з тією ж парою досяжна лише коли матчер відкинув її як інший рік, тож без
@@ -178,7 +185,7 @@ export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
         ORDER BY id`,
     )
     .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string }[];
-  const existing = orphans.find((o) => numericTokensCompatible(o.name, b.name));
+  const existing = orphans.find((o) => digitsCompatibleAsPeers(o.name, b.name));
   if (existing) return existing.id;
 
   const res = db.prepare(
