@@ -639,21 +639,22 @@ describe('POST /enrich/result', () => {
     const { db, app } = setup({ webFallback });
     seed(106, 'Gwara #6');
     seed(107, 'Gwara #7');
-    // Сирота картки «#6»; ensureBeerRow цифр не бачить і віддає її запиту картки «#7».
+    // Сирота картки «Gwara #6». Картка «Gwara #6 IPA» (інший текст картки, та сама нормалізована пара й ті самі цифри) отримує від ensureBeerRow цю сироту:
+    // #636 розводить лише інші цифри (картка «#7» отримала б власну сироту, і сценарій був би недосяжний).
     const orphan = seedBeer(db, {
       name: 'Gwara #6', brewery: 'PINTA', style: null, abv: 6, rating_global: null,
       normalized_name: normalizeName('Gwara #6'), normalized_brewery: normalizeBrewery('PINTA'),
     });
-    expect(normalizeName('Gwara #7')).toBe(normalizeName('Gwara #6'));
+    expect(normalizeName('Gwara #6 IPA')).toBe(normalizeName('Gwara #6'));
 
     const res = await post(app, '/enrich/result', {
-      brewery: 'PINTA', name: 'Gwara #7', abv: 6, algolia: { hits: [], nbHits: 0 },
+      brewery: 'PINTA', name: 'Gwara #6 IPA', abv: 6, algolia: { hits: [], nbHits: 0 },
     });
 
     expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 106 });
     expect(webFallback).toHaveBeenCalledWith(orphan);
     expect(getBeer(db, orphan)).toBeNull();
-    // Аліас «PINTA / Gwara #7» → #6 дав би картці #7 точний збіг і ✅ на пиво, яке пив лише #6.
+    // Фолбек шукав текстом сироти іншої картки, а не «PINTA / Gwara #6 IPA» — доказу для аліасу цієї картки він не дає.
     expect(db.prepare('SELECT beer_id FROM beer_aliases').all()).toEqual([]);
   });
 
@@ -1277,5 +1278,54 @@ describe('enrich payload tolerance', () => {
       brewery: 'PINTA', name: 'Null Abv', abv: null, style: null, algolia: { hits: [], nbHits: 0 },
     });
     expect(res.status).toBe(200);
+  });
+});
+
+describe('#636 ensureBeerRow picks the row of the pair by the digits of the card', () => {
+  const ROCHEFORT = 'Abbaye Notre-Dame de Saint-Rémy';
+  const PP = 'Piwne Podziemie';
+  // Raw insert, not seedBeer: seedBeer falls back to the normalized pair and would OVERWRITE the first row of the
+  // pair with the second — every test below needs both rows of one pair to exist.
+  const linked = (db: ReturnType<typeof setup>['db'], untappd_id: number, name: string, brewery: string) => {
+    const res = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery, untappd_id_source)
+       VALUES (?, ?, ?, NULL, NULL, 3.9, ?, ?, 'checkin')`,
+    ).run(untappd_id, name, brewery, normalizeName(name), normalizeBrewery(brewery));
+    return Number(res.lastInsertRowid);
+  };
+
+  it('a card of one number gets its own row, not the older row of another number', async () => {
+    // Before #636: findBeerByNormalized(...).get() returned the older row — untappd_id 10722.
+    const { db, app } = setup();
+    linked(db, 10722, 'Trappistes Rochefort 6', ROCHEFORT);
+    linked(db, 2002, 'Trappistes Rochefort 10', ROCHEFORT);
+    const res = await post(app, '/enrich/result', { brewery: ROCHEFORT, name: 'Trappistes Rochefort 10', algolia: { hits: [], nbHits: 0 } });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 2002 });
+  });
+
+  it('a card whose number has no row gets a new orphan and is searched', async () => {
+    // Before #636: the card took the linked Rochefort 6 row and was not eligible.
+    const { db, app } = setup();
+    linked(db, 10722, 'Trappistes Rochefort 6', ROCHEFORT);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROCHEFORT, name: 'Trappistes Rochefort 10' }] });
+    expect((await res.json()).candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
+  });
+
+  it('an unnumbered card prefers the unnumbered row over an older numbered one', async () => {
+    // Before #636: the older #20 row — untappd_id 6625206.
+    const { db, app } = setup();
+    linked(db, 6625206, 'Juicy Trap #20', PP);
+    linked(db, 999, 'Juicy Trap', PP);
+    const res = await post(app, '/enrich/result', { brewery: PP, name: 'Juicy Trap', algolia: { hits: [], nbHits: 0 } });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 999 });
+  });
+
+  it('an unnumbered card still takes the only numbered row (number-fallback)', async () => {
+    const { db, app } = setup();
+    linked(db, 6625206, 'Juicy Trap #20', PP);
+    const res = await post(app, '/enrich/result', { brewery: PP, name: 'Juicy Trap', algolia: { hits: [], nbHits: 0 } });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6625206 });
+    expect(beerCount(db)).toBe(1);
   });
 });

@@ -330,6 +330,14 @@ export function findAliasTarget(
   return row ?? null;
 }
 
+// #636: усі рядки нормалізованої пари, найстаріший першим. Нормалізована назва не несе цифр, тож рядків пари може бути
+// кілька (різні номери й вінтажі) — вибір між ними робить викликач за цифрами назви (ensureBeerRow).
+export function listBeersByNormalized(db: DB, normBrewery: string, normName: string): BeerRow[] {
+  return db
+    .prepare('SELECT * FROM beers WHERE normalized_brewery = ? AND normalized_name = ? ORDER BY id')
+    .all(normBrewery, normName) as BeerRow[];
+}
+
 export function findBeerByNormalized(
   db: DB, normBrewery: string, normName: string,
 ): BeerRow | null {
