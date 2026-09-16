@@ -175,6 +175,43 @@ describe('runOverlay', () => {
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
   });
 
+  it('never sends a blank brand as evidence', async () => {
+    // The server trims the brand and treats an empty one as no evidence at all, so sending
+    // it would ship a field that cannot answer anything — the pair is kept whole instead.
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].bid = 5081070;
+        cards[0].brand = '   ';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
+  });
+
+  it('never sends a bid outside the safe integer range', async () => {
+    // An id above 2^53 is already rounded by the time it is a JS number, so sending it would
+    // publish a DIFFERENT id than the shop did. Untappd ids are seven digits — depth, not a
+    // live case (AI review, PR #654).
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].bid = Number.MAX_SAFE_INTEGER + 2;
+        cards[0].brand = 'Mad Brew';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
+  });
+
   it('never sends a malformed bid', async () => {
     // A shop value is sanitised where it first enters a payload — the same rule `abv`
     // follows. One bad id would otherwise 400 the whole page's batch and badge nothing.

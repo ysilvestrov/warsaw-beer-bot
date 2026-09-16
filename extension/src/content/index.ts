@@ -89,8 +89,9 @@ export async function runOverlay(
         // rule `abv` follows: one malformed id would fail schema validation for the whole
         // page's batch, and every uncached card on it would go unbadged (AI review, PR #654).
         const bid = card.bid;
-        const published = bid !== undefined && Number.isInteger(bid) && bid > 0 && card.brand !== undefined
-          ? { bid, brand: card.brand }
+        const brand = card.brand?.trim();
+        const published = bid !== undefined && Number.isSafeInteger(bid) && bid > 0 && brand
+          ? { bid, brand }
           : {};
         return {
           el,
