@@ -158,6 +158,41 @@ describe('runOverlay', () => {
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
   });
 
+  it('never sends a bid without the brand that verifies it', async () => {
+    // The server refuses a bid it has no brewery evidence for, and a bid sent alone would
+    // still reach the "name and bid agree" rule. Keep the pair whole on this side instead.
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].bid = 5081070;
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
+  });
+
+  it('never sends a malformed bid', async () => {
+    // A shop value is sanitised where it first enters a payload — the same rule `abv`
+    // follows. One bad id would otherwise 400 the whole page's batch and badge nothing.
+    const card: Card = { el: cardEl(), brewery: 'FLASKER', name: 'Abrikoos' };
+    const adapter = {
+      ...adapterFor([card]),
+      loadCardDetails: vi.fn(async (cards: Card[]) => {
+        cards[0].bid = 0;
+        cards[0].brand = 'Mad Brew';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('FLASKER', 'Abrikoos')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'FLASKER', name: 'Abrikoos' }]);
+  });
+
   // #384: /match sees the hydrated identity, but the cache is keyed on the identity the
   // lookup used (pre-hydration) — see "cache key stability" below for why they must agree.
   it('uses the hydrated brewery identity for matching and the looked-up key for the cache', async () => {

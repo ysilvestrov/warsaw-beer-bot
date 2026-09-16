@@ -83,9 +83,14 @@ export async function runOverlay(
       .map(({ el, key, card }) => {
         const abv = usableAbv(card.abv);
         // #633: bid and brand travel together or not at all — without a bid the brand proves
-        // nothing to the server, and without a brand the server refuses to act on the bid.
-        const published = card.bid !== undefined
-          ? { bid: card.bid, ...(card.brand !== undefined ? { brand: card.brand } : {}) }
+        // nothing to the server, and a bid with no brand has no brewery evidence behind it
+        // (it would still reach the "name and bid agree" rule, so the pair is kept whole here).
+        // The id is sanitised where a shop-published value first enters a payload, the same
+        // rule `abv` follows: one malformed id would fail schema validation for the whole
+        // page's batch, and every uncached card on it would go unbadged (AI review, PR #654).
+        const bid = card.bid;
+        const published = bid !== undefined && Number.isInteger(bid) && bid > 0 && card.brand !== undefined
+          ? { bid, brand: card.brand }
           : {};
         return {
           el,
