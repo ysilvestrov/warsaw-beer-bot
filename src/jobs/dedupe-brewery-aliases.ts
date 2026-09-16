@@ -1,13 +1,16 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { breweryAliases } from '../domain/matcher';
+import { digitIdentity, readNameDigits } from '../domain/digit-identity';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 
 interface PairCandidate {
   canonical_id: number;
   canonical_brewery: string;
+  canonical_name: string;
   orphan_id: number;
   orphan_brewery: string;
+  orphan_name: string;
 }
 
 export interface DedupeResult {
@@ -27,8 +30,10 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
       `SELECT
          a.id AS canonical_id,
          a.brewery AS canonical_brewery,
+         a.name AS canonical_name,
          b.id AS orphan_id,
-         b.brewery AS orphan_brewery
+         b.brewery AS orphan_brewery,
+         b.name AS orphan_name
        FROM beers a
        JOIN beers b
          ON a.normalized_name = b.normalized_name
@@ -55,6 +60,9 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
     const orphanAliases = breweryAliases(c.orphan_brewery);
     const overlap = orphanAliases.some((x) => canonicalAliases.has(x));
     if (!overlap) continue;
+    // #636: normalized_name carries no digits; merging an orphan of another number would repoint its taps at the
+    // wrong beer for good. The orphan is the tap text (input), the canonical row Untappd's (candidate).
+    if (digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name)) === 'different') continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);
   }
 
