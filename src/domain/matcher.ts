@@ -393,10 +393,12 @@ export function matchPrepared(
     const inputDigits = readNameDigits(input.name);
     const same: PreparedBeer[] = [];
     const yearFallback: PreparedBeer[] = [];
+    const numberFallback: PreparedBeer[] = [];
     for (const c of exacts) {
       const identity = digitIdentity(inputDigits, readNameDigits(c.name));
       if (identity === 'same') same.push(c);
       else if (identity === 'year-fallback') yearFallback.push(c);
+      else if (identity === 'number-fallback') numberFallback.push(c);
     }
 
     if (inputDigits.years.length === 0) {
@@ -416,6 +418,12 @@ export function matchPrepared(
     } else if (yearFallback.length) {
       // No same-year row: an undated row, ABV first.
       const hit = yearFallback.find(abvFits) ?? yearFallback[0];
+      return { id: hit.id, confidence: 1, source: 'exact' };
+    }
+    if (numberFallback.length) {
+      // Only rows with a number the input does not carry (Untappd's batch/anniversary/variant number the tap
+      // leaves out): the weakest acceptable tier, ABV first, else the most recent.
+      const hit = numberFallback.find(abvFits) ?? numberFallback[0];
       return { id: hit.id, confidence: 1, source: 'exact' };
     }
     // Every exact hit carries different digits: the series is here but this number is not. No fall-through
