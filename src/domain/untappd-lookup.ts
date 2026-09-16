@@ -744,8 +744,9 @@ export async function lookupBeer(
           (target) => exactSwappedBrandNameScore(target.value, inputBreweryAliases, r) != null,
         ),
       );
-      if (swappedHits.length === 1) {
-        return { kind: 'matched', result: swappedHits[0] };
+      const uniqueHits = Array.from(new Map(swappedHits.map((r) => [r.bid, r])).values());
+      if (uniqueHits.length === 1) {
+        return { kind: 'matched', result: uniqueHits[0] };
       }
     }
 
