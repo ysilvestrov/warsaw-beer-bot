@@ -232,7 +232,7 @@ describe('POST /match', () => {
       beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni', bid: 9001, brand: 'Trzech Kumpli' }],
     });
     const stats = info.mock.calls.find(([, msg]) => msg === 'match fallback stats');
-    expect(stats?.[0].bid).toEqual({ sent: 1, exact: 1, conflict: 0 });
+    expect(stats?.[0].bid).toEqual({ sent: 1, exact: 1, conflict: 0, aliasKept: 0 });
   });
 
   it('rejects a malformed bid but keeps brand optional (#633)', async () => {

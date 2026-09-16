@@ -116,6 +116,8 @@ export interface BidStats {
   sent: number;
   exact: number;
   conflict: number;
+  /** #614: картка мала аліас пам'яті злиття, а bid суперечив броварні — виграв аліас. */
+  aliasKept: number;
 }
 
 export interface MatchListOutcome {
@@ -127,9 +129,13 @@ export interface MatchListOutcome {
 // #633: доказ броварні для опублікованого bid — brand зі сторінки товару. Заглушка Flasker
 // «Імпортне пиво» — не броварня, а розділ вітрини, тож для неї (і для порожнього brand) доказом
 // стає броварня самої картки, яку клієнт і так надсилає.
-function bidEvidenceBrewery(item: MatchInput): string {
+function bidEvidenceBrewery(item: MatchInput): string | null {
   const brand = (item.brand ?? '').trim();
-  return brand === '' || brand === FLASKER_IMPORTED_BEER_PLACEHOLDER ? item.brewery : brand;
+  // Заглушка Flasker — не броварня, а розділ вітрини: для неї доказом стає броварня картки.
+  if (brand === FLASKER_IMPORTED_BEER_PLACEHOLDER) return item.brewery.trim() || null;
+  // Немає brand — немає чим перевіряти. Броварню картки саму по собі доказом не беремо: у Flasker
+  // вона виводиться з назви товару й для 57 з 709 карток неправильна (#650).
+  return brand === '' ? null : brand;
 }
 
 export async function matchBeerList(
@@ -142,7 +148,7 @@ export async function matchBeerList(
 ): Promise<MatchListOutcome> {
   const yield_ = opts.yield ?? yieldToEventLoop;
   const budget = createFallbackBudget();
-  const bid: BidStats = { sent: 0, exact: 0, conflict: 0 };
+  const bid: BidStats = { sent: 0, exact: 0, conflict: 0, aliasKept: 0 };
   const out: MatchListResult[] = [];
   for (const item of items) {
     const raw = { brewery: item.brewery, name: item.name };
@@ -159,10 +165,13 @@ export async function matchBeerList(
     // #633: рядок опублікованого bid — лише з цього знімка каталогу.
     const bidRow = item.bid === undefined ? null : (opts.byUntappdId?.get(item.bid) ?? null);
     if (item.bid !== undefined) bid.sent++;
+    // Доказ броварні потрібен кроку 2 (прийняти bid) і кроку 4 (віддати рядок bid попри
+    // суперечність). Крок 3 його не питає: там доказ — збіг самої назви.
+    const evidence = bidRow ? bidEvidenceBrewery(item) : null;
 
     // Крок 2: броварня картки підтверджує bid — відповідь готова, матчер не потрібен,
     // бюджет фолбеку не витрачається.
-    if (bidRow && bidBreweryAgrees(bidEvidenceBrewery(item), bidRow.brewery)) {
+    if (bidRow && evidence !== null && bidBreweryAgrees(evidence, bidRow.brewery)) {
       bid.exact++;
       out.push(exactOn(bidRow));
       await yield_();
@@ -204,6 +213,14 @@ export async function matchBeerList(
         // (назва могла дійти туди fuzzy: броварня з самих цифр, заглушка вітрини).
         bid.exact++;
         result = exactOn(bidRow);
+      } else if (evidence === null) {
+        // bid без brand доказу броварні не має — картка лишається на відповіді назви чи аліасу,
+        // так наче bid не надсилали. Суперечність побачить клієнт і поведе її в репарацію #384.
+      } else if (viaAlias) {
+        // Крок 4а (#614): аліас — наш доведений запис саме для цієї картки, а суперечливий bid —
+        // найслабший доказ у цьому правилі. Забирати картку в аліасу він не може; розбіжність
+        // усе одно доїде до /enrich, бо untappd_id відповіді не дорівнює опублікованому bid.
+        bid.aliasKept++;
       } else {
         // Крок 4: броварня суперечить bid, і назва повела в інший бік. Пиво ми знайшли, але
         // впевненості немає: рядок bid віддається як fuzzy — ✅ не ставиться ніколи, а ❓
@@ -216,7 +233,9 @@ export async function matchBeerList(
           drunk_uncertain: drunkSet.has(bidRow.id),
           user_rating: null,
           source: 'fuzzy',
-          searched: true,
+          // Бюджет фолбеку належить матчеру: якщо він цій позиції в пошуку відмовив, відповідь
+          // за bid цього не приховує (spec.md §POST /match).
+          searched: result.searched,
         };
       }
     }
