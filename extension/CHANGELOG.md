@@ -23,7 +23,7 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
-## [Unreleased]
+## [0.19.0] - 2026-09-16
 
 - Beers whose shop page links to Untappd itself now show the right beer straight away: its rating, and whether you have had it. Before, some of these showed no badge, a ⚪, or a different beer by the same brewery.
 - Fixed Flasker beers showing no badge or the wrong one when the product title starts with the beer name rather than the brewery. The full name is now checked, so releases such as “Love on Tap” match correctly.
