@@ -1321,11 +1321,32 @@ describe('#636 ensureBeerRow picks the row of the pair by the digits of the card
     expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 999 });
   });
 
-  it('an unnumbered card still takes the only numbered row (number-fallback)', async () => {
+  // Final review: a row of the pair is where this endpoint WRITES the card's bid (and #384 lets a shop bid repair a
+  // search link), and the row keeps its own text (#618). A number only the row carries is a guess, so it never
+  // becomes the card's row — the card gets its own orphan; the lookup + merge still reach a numbered canonical row.
+  it('an unnumbered card does not take a numbered linked row: it gets its own orphan and is searched', async () => {
     const { db, app } = setup();
     linked(db, 6625206, 'Juicy Trap #20', PP);
-    const res = await post(app, '/enrich/result', { brewery: PP, name: 'Juicy Trap', algolia: { hits: [], nbHits: 0 } });
-    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 6625206 });
-    expect(beerCount(db)).toBe(1);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: PP, name: 'Juicy Trap' }] });
+    expect((await res.json()).candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
+  });
+
+  it("an unnumbered card's bid is never written onto a numbered orphan of the pair", async () => {
+    const { db, app } = setup();
+    const numbered = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery)
+       VALUES (NULL, 'Juicy Trap #20', ?, NULL, 6, NULL, ?, ?)`,
+    ).run(PP, normalizeName('Juicy Trap #20'), normalizeBrewery(PP)).lastInsertRowid;
+    const res = await post(app, '/enrich/result', {
+      brewery: PP, name: 'Juicy Trap', abv: 6,
+      algolia: {
+        hits: [{ bid: 111, beer_name: 'Juicy Trap', brewery_name: PP, type_name: 'IPA', beer_abv: 6, rating_score: 3.8 }],
+        nbHits: 1,
+      },
+    });
+    expect(await res.json()).toMatchObject({ status: 'matched', untappd_id: 111 });
+    // Before the fix: the #20 orphan itself took bid 111, and the next ingest would read tap `Juicy Trap #20` → `same`.
+    expect(getBeer(db, Number(numbered))!.untappd_id).toBeNull();
   });
 });
