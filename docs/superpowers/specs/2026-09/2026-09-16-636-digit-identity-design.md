@@ -161,9 +161,12 @@ Gose`, `Sybilla → 55 Lager Sybilla`, `Blackberry Gose → Sourberry #4`, `Life
 **Обв'язка.**
 
 3. **`ensureBeerRow`.** Після аліаса (#614, без змін) — усі рядки пари `(normalized_brewery, normalized_name)`,
-   картка — `input`, рядок — `candidate`; відкинути `different`, далі `same` > `year-fallback` > `number-fallback`,
-   далі найменший `id` (детермінізм замість
-   порядку `.get()`). Немає сумісного — `ensureOrphan`. У `enrich.ts` `findBeerByNormalized` замінюється
+   картка — `input`, рядок — `candidate`; беруться **лише `same` > `year-fallback`**, далі найменший `id` (детермінізм
+   замість порядку `.get()`). Немає сумісного — `ensureOrphan`. `number-fallback` тут не приймається (фінальне рев'ю,
+   2026-09-17): у рядок пари `/enrich/result` пише bid картки, а репарація #384 — bid крамниці, і рядок зберігає
+   власний текст (#618), тож вгадування «`Juicy Trap` — це `#20`» стало б ідентичністю рядка `#20` — та сама
+   поломка, що й у `resolvableOrphan`. Картка без номера отримує свою сироту, пошук і злиття доходять до нумерованого
+   канонічного рядка (`Few More Beer`). У `enrich.ts` `findBeerByNormalized` замінюється
    на `listBeersByNormalized`, що повертає всі рядки пари; вибір робить `ensureBeerRow`. Сама `findBeerByNormalized`
    лишається — її як помічника читають тести (`enrich.test.ts`, `beers.test.ts`), у продакшн-коді викликів немає.
 4. **`ensureOrphan` / `resolvableOrphan`.** Замість `numericTokensCompatible`:
