@@ -10,7 +10,7 @@ import {
   intersects,
   stripBreweryFromName,
 } from './matcher';
-import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging } from './normalize';
+import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging, stripSearchNoise } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
@@ -401,6 +401,17 @@ function aliasTokensCoveredBy(tokens: string[], aliases: string[]): boolean {
   });
 }
 
+function aliasTokensCoveredTwoWay(tokens: string[], aliases: string[]): boolean {
+  return aliases.some((alias) => {
+    const aliasTokens = nameTokens(alias);
+    if (aliasTokens.length === 0 || tokens.length === 0) return false;
+    return (
+      aliasTokens.every((token) => tokenCovered(token, tokens)) &&
+      tokens.every((token) => tokenCovered(token, aliasTokens))
+    );
+  });
+}
+
 function swappedBrandNameScore(
   targetValue: string,
   inputBreweryAliases: string[],
@@ -414,6 +425,29 @@ function swappedBrandNameScore(
   if (
     aliasTokensCoveredBy(candidateNameTokens, inputBreweryAliases) &&
     aliasTokensCoveredBy(targetTokens, candidateBreweryAliases)
+  ) {
+    return 0.72;
+  }
+  return null;
+}
+
+function exactSwappedBrandNameScore(
+  targetValue: string,
+  inputBreweryAliases: string[],
+  candidate: SearchResult,
+): number | null {
+  const targetTokens = nameTokens(targetValue);
+  if (targetTokens.length === 0) return null;
+  const candidateCleanName = stripBreweryFromName(
+    baseNormalize(stripSearchNoise(candidate.beer_name)),
+    normalizeBrewery(candidate.brewery_name),
+  );
+  const candidateNameTokens = nameTokens(candidateCleanName);
+  const candidateBreweryAliases = breweryAliases(candidate.brewery_name);
+
+  if (
+    aliasTokensCoveredTwoWay(candidateNameTokens, inputBreweryAliases) &&
+    aliasTokensCoveredTwoWay(targetTokens, candidateBreweryAliases)
   ) {
     return 0.72;
   }
@@ -702,14 +736,17 @@ export async function lookupBeer(
     );
     if (brandHits.length > 0) return { kind: 'matched', result: pickByAbv(brandHits, abv) };
 
-    const swappedHits = brandPool.filter((r) =>
-      targetNames.some(
-        (target) => swappedBrandNameScore(target.value, inputBreweryAliases, r) != null,
-      ),
-    );
-    if (swappedHits.length > 0) {
-      const hit = pickUniqueByAbv(swappedHits, abv, true);
-      if (hit) return { kind: 'matched', result: hit };
+    if (abv != null) {
+      const swappedHits = brandPool.filter((r) =>
+        r.abv != null &&
+        Math.abs(r.abv - abv) <= ABV_TOLERANCE &&
+        targetNames.some(
+          (target) => exactSwappedBrandNameScore(target.value, inputBreweryAliases, r) != null,
+        ),
+      );
+      if (swappedHits.length === 1) {
+        return { kind: 'matched', result: swappedHits[0] };
+      }
     }
 
     // Stage 3 (#321): Czech °Plato grade reconciliation. STRICT pool only, last resort (every
