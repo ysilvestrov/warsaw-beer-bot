@@ -474,9 +474,11 @@ describe('lookupBeer', () => {
   });
 
   test('#271 head-retry: zero candidates + comma/#N tail retries with the head and matches', async () => {
+    // #636: Untappd's own name carries the number, as in the row #271 was filed for (31170 `Owocowa Fantazja #1 -
+    // Pastry Sour …`). A candidate WITHOUT the number the shop wrote is another beer, even on the head retry.
     const search = fakeSearch((q) =>
       q === 'Pinta Fantazja'
-        ? [{ bid: 7000, beer_name: 'Fantazja', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
+        ? [{ bid: 7000, beer_name: 'Fantazja #1', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
         : [],
     );
     const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja #1, Pastry Sour z Guavą, Mango', search });
@@ -1930,5 +1932,44 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       }]),
     });
     expect(out.kind).toBe('not_found');
+  });
+
+  // Final review: the #271 head retry cuts ` #N` and the #353 descriptor retry drops brackets and grades, then calls
+  // lookupBeer again with the shortened name. The filter must still judge by the ORIGINAL name — otherwise a number
+  // Algolia cannot find (it ANDs the digit, the query zeroes) is dropped and the unnumbered sibling wins.
+  const zeroOnDigits = (rows: SearchResult[]) => fakeSearch((q) => (/\d/.test(q) ? [] : rows));
+
+  test('a retry keeps the digits of the original name (#19 must not match the unnumbered row)', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Juicy Trap #19',
+      search: zeroOnDigits([hit(5000001, 'Juicy Trap')]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('a retry keeps the digits of the original name (#97 must not match #4)', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #97',
+      search: zeroOnDigits([hit(5899401, 'Dr. Hazy #4')]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('the descriptor retry keeps the digits of the original name (Batch 19 dropped with the brackets)', async () => {
+    // stripDescriptorAndPackaging('Juicy Trap (Batch 19) West Coast IPA') === 'Juicy Trap'. The query already drops
+    // the brackets, so here the descriptor is what zeroes Algolia — the case the #353 retry exists for.
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Juicy Trap (Batch 19) West Coast IPA',
+      search: fakeSearch((q) => (/West/.test(q) ? [] : [hit(5000001, 'Juicy Trap')])),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('control: a retry still matches when the digits agree', async () => {
+    const out = await lookupBeer({
+      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #4',
+      search: zeroOnDigits([hit(5899401, 'Dr. Hazy #4')]),
+    });
+    expect(out.kind).toBe('matched');
   });
 });
