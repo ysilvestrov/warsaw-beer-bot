@@ -1146,4 +1146,39 @@ describe('Cluster 5 brewery alias matching', () => {
   });
 });
 
+describe('#636 fuzzy stage: the best hit must not carry different digits', () => {
+  const przetwornia = (id: number, name: string) => c({ id, brewery: 'Przetwórnia Chmielu', name });
+  const cat = [przetwornia(233, 'Przetwór #3'), przetwornia(900, 'Modernizm')];
 
+  test('another number of the series is refused', () => {
+    // Before #636: { id: 233, source: 'fuzzy' } — "przetwor mango" fuzzes onto "przetwor" at 0.82.
+    expect(matchBeer({ brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwór #4 Mango' }, cat)).toBeNull();
+  });
+
+  test('control: the same number still fuzzes', () => {
+    expect(matchBeer({ brewery: 'Przetwórnia Chmielu Brewery', name: 'Przetwór #3 Mango' }, cat))
+      .toMatchObject({ id: 233, source: 'fuzzy' });
+  });
+
+  test('another vintage is refused', () => {
+    const vintages = [
+      c({ id: 10, brewery: 'PINTA Barrel Brewing', name: 'Affection (2025)', abv: 7.1 }),
+      c({ id: 9, brewery: 'PINTA Barrel Brewing', name: 'Affection (2024)', abv: 6.8 }),
+    ];
+    // Before #636: { id: 10, source: 'fuzzy' }.
+    expect(matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2023 Mango' }, vintages)).toBeNull();
+  });
+
+  test('an undated row is still an acceptable fuzzy hit for a dated input', () => {
+    const undated = [c({ id: 8, brewery: 'PINTA Barrel Brewing', name: 'Affection', abv: 7.0 })];
+    expect(matchBeer({ brewery: 'PINTA Barrel Brewing', name: 'Affection 2023 Mango' }, undated))
+      .toMatchObject({ id: 8, source: 'fuzzy' });
+  });
+
+  test('a Czech grade that disagrees with the only row is refused', () => {
+    const konrad = [c({ id: 45, brewery: 'Pivovar Konrad', name: 'Konrad Svetlé Výčepní 10', abv: 4.2 })];
+    // Before #636: { id: 45, source: 'fuzzy' } for both spellings.
+    expect(matchBeer({ brewery: 'Konrad Brewery', name: 'KONRAD 12°' }, konrad)).toBeNull();
+    expect(matchBeer({ brewery: 'Konrad Brewery', name: 'Konrad 12' }, konrad)).toBeNull();
+  });
+});
