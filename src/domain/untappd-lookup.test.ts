@@ -1749,3 +1749,48 @@ describe('#405 Sub-cohort A1: empty input brewery candidate stripping', () => {
   });
 });
 
+describe('#405 Sub-cohort A3: swapped brewery and beer name', () => {
+  test('matched: swapped brewery and name resolve via swappedBrandNameScore', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6757171,
+        beer_name: 'PŁYNNE ZŁOTO',
+        brewery_name: 'Browar Dziki Wschód',
+        style: 'IPA - Imperial / Double',
+        abv: 7.5,
+        global_rating: 3.7,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: 'Płynne Złoto Brewery',
+      name: 'Dziki Wschód 18,5°',
+      abv: 7.5,
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6757171);
+  });
+
+  test('not_found: swapped resolution refuses incompatible ABV contradiction', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6757171,
+        beer_name: 'PŁYNNE ZŁOTO',
+        brewery_name: 'Browar Dziki Wschód',
+        style: 'IPA - Imperial / Double',
+        abv: 7.5,
+        global_rating: 3.7,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: 'Płynne Złoto Brewery',
+      name: 'Dziki Wschód 18,5°',
+      abv: 4.5, // 3% ABV gap
+      search,
+    });
+    expect(out.kind).toBe('not_found');
+  });
+});
+
+

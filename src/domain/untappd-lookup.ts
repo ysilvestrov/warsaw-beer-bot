@@ -702,6 +702,16 @@ export async function lookupBeer(
     );
     if (brandHits.length > 0) return { kind: 'matched', result: pickByAbv(brandHits, abv) };
 
+    const swappedHits = brandPool.filter((r) =>
+      targetNames.some(
+        (target) => swappedBrandNameScore(target.value, inputBreweryAliases, r) != null,
+      ),
+    );
+    if (swappedHits.length > 0) {
+      const hit = pickUniqueByAbv(swappedHits, abv, true);
+      if (hit) return { kind: 'matched', result: hit };
+    }
+
     // Stage 3 (#321): Czech °Plato grade reconciliation. STRICT pool only, last resort (every
     // name stage above has missed). A shop name that is a Czech grade (bare 8/10/11/12 or spelled
     // desítka/dvanáctka/…) denotes a PALE LAGER — never an ale style. Reconcile it to a same-grade
