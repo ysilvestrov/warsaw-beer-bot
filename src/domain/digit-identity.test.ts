@@ -115,6 +115,10 @@ describe('digitIdentity(input, candidate)', () => {
     ['Svijanský Máz 11', 'Svijanský Máz 11° #2', 'number-fallback', 'different'], // candidate grade
     // a year the input carries is not part of that guard (documented limit): a one-sided year stays a fallback
     ['Abraxas 2025', 'Abraxas #3', 'number-fallback', 'different'],
+    // PR #662 AI review: a '#'/no./nr. marker makes even a year-shaped number a hard number …
+    ['Beer #2024', 'Beer', 'different', 'number-fallback'],
+    // … while a year after other words stays a year
+    ['Anniversary Edition 2024', 'Anniversary Edition', 'year-fallback', 'year-fallback'],
     // … and never overrides a year conflict
     ['Abraxas 2024', 'Abraxas (Batch 7) 2025', 'different', 'different'],
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {

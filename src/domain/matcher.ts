@@ -462,12 +462,25 @@ export function matchPrepared(
   }
   const results = searcher.search(`${seedBrewery} ${nn}`);
   if (!results.length) return null;
-  const best = results[0];
+  // #636: the fuzzy key has no digits either — rows of one series (same digit-free key) tie at the top score, and
+  // the searcher returns them in catalog order. Among THOSE rows, `same`/`year-fallback` beats `number-fallback`;
+  // `different` never wins. A tied row of another name is not considered: which of two different names wins a tie
+  // is not a digit question, and the diverge check below keeps judging the first one, as before.
+  const inputDigits = readNameDigits(input.name);
+  let best: (typeof results)[number] | null = null;
+  let bestRank = Infinity;
+  for (const r of results) {
+    if (r.score !== results[0].score) break;
+    if (r.item.nameNorm !== results[0].item.nameNorm) continue;
+    const identity = digitIdentity(inputDigits, readNameDigits(r.item.name));
+    const rank = identity === 'different' ? Infinity : identity === 'number-fallback' ? 1 : 0;
+    if (rank < bestRank) { best = r; bestRank = rank; }
+    if (bestRank === 0) break;
+  }
+  if (!best) return null;
   // Reject a fuzzy candidate that diverges from the input on content tokens — a different
   // flavour variant of the same base beer, which must not inherit drunk/rating data.
   if (nameTokensDiverge(nn, best.item.nameNorm)) return null;
-  // #636: the fuzzy key has no digits either — the same series row of another number scores 1.0.
-  if (digitIdentity(readNameDigits(input.name), readNameDigits(best.item.name)) === 'different') return null;
   if (usedFullFallback && budget) budget.hits++;
   return { id: best.item.id, confidence: best.score, source: 'fuzzy' };
 }

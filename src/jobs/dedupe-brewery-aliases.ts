@@ -61,8 +61,11 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
     const overlap = orphanAliases.some((x) => canonicalAliases.has(x));
     if (!overlap) continue;
     // #636: normalized_name carries no digits; merging an orphan of another number would repoint its taps at the
-    // wrong beer for good. The orphan is the tap text (input), the canonical row Untappd's (candidate).
-    if (digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name)) === 'different') continue;
+    // wrong beer for good. The orphan is the tap text (input), the canonical row Untappd's (candidate). Only
+    // same/year-fallback merge: the merge deletes the orphan, so a number only the canonical row carries would be
+    // a guess made permanent (as in resolvableOrphan and /enrich).
+    const identity = digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name));
+    if (identity !== 'same' && identity !== 'year-fallback') continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);
   }
 

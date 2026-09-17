@@ -499,7 +499,11 @@ export async function lookupBeer(
     const judged = unfiltered.map((result) => ({
       result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name)),
     }));
-    const betterTier = judged.some((j) => j.identity === 'same' || j.identity === 'year-fallback');
+    // Only a candidate of the input's own brewery counts as the better tier: another brewery's unnumbered beer of
+    // the same name must not push out this brewery's numbered one (PR #662 AI review).
+    const betterTier = judged.some((j) =>
+      (j.identity === 'same' || j.identity === 'year-fallback') &&
+      breweryAliasesMatch(breweryAliases(j.result.brewery_name), inputBreweryAliases));
     const results = judged
       .filter((j) => j.identity !== 'different' && !(betterTier && j.identity === 'number-fallback'))
       .map((j) => j.result);

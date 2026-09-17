@@ -39,6 +39,7 @@ const YEAR_APOSTROPHE_AFTER = /(?<![\p{L}\p{N}])(\d{2})['’](?=[\s):,\]\-]|$)/g
 // to its unit (`0,5l`) and reads the `0`.
 const NUMBER = /(?<![\p{L}\p{N}])(?<!\p{N}[.,])(v?)(\d+(?:[.,]\d+)?)(?![.,]\p{N})(?:st|nd|rd|th)?(?![\p{L}\p{N}])/giu;
 const MARKER_BEFORE = /(?:#|\b(?:no|nr|vol|batch|edition|part)\.?)\s*$/i;
+const HASH_MARKER_BEFORE = /(?:#|\b(?:no|nr)\.?)\s*$/i;
 const YEAR = /^(?:19|20)\d{2}$/;
 const VERSION = /^\d+\.0$/;
 // Measured range for an unmarked grade-like integer. Deliberately NOT czech-grade.ts GRADE_MIN/MAX (7–20):
@@ -69,7 +70,8 @@ export function readNameDigits(name: string): NameDigits {
     const value = canon(m[2]);
     const marked =
       MARKER_BEFORE.test(s.slice(0, m.index)) || /^0\d/.test(m[2]) || m[1] !== '';
-    if (YEAR.test(value)) years.add(value);
+    // A '#', 'no.' or 'nr.' right before a year-shaped value makes it a number (`Beer #2024`), not a vintage.
+    if (YEAR.test(value) && !HASH_MARKER_BEFORE.test(s.slice(0, m.index))) years.add(value);
     else if (VERSION.test(value)) versions.push(value);
     else if (!marked && /^\d+$/.test(value) && +value >= SOFT_MIN && +value <= SOFT_MAX) soft.push(value);
     else numbers.push(value);

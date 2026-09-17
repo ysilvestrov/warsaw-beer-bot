@@ -1289,4 +1289,14 @@ describe('#636 asymmetry: a number only the catalog row carries is the weakest a
       [c({ id: 35283, brewery: 'TankBusters.Co', name: 'Few More Beer 004/108', abv: 8.4 })],
     )).toMatchObject({ id: 35283 });
   });
+
+  test('the fuzzy stage prefers a tied unnumbered row over a numbered row ranked first (PR #662 AI review)', () => {
+    // Both rows score the same on the digit-free key; the searcher returns catalog order, so #20 came first.
+    const rows = [
+      c({ id: 30, brewery: 'Piwne Podziemie', name: 'Juicy Trap #20' }),
+      c({ id: 10, brewery: 'Piwne Podziemie', name: 'Juicy Trap' }),
+    ];
+    expect(matchBeer({ brewery: 'Piwne Podziemie', name: 'Juicy Trap Mango' }, rows))
+      .toMatchObject({ id: 10, source: 'fuzzy' });
+  });
 });
