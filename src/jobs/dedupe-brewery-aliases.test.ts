@@ -392,4 +392,20 @@ describe('dedupeBreweryAliases', () => {
     expect(link.untappd_beer_id).toBe(orphan);
     expect(canonical).not.toBe(orphan);
   });
+
+  test('does not merge an unnumbered orphan into a numbered canonical row (PR #662 AI review)', () => {
+    const db = fresh();
+    seedBeer(db, {
+      untappd_id: 6625206, name: 'Juicy Trap #20', brewery: 'Piwne Podziemie / Beer Underground',
+      style: 'NEIPA', abv: 6.5, rating_global: 3.9,
+      normalized_name: 'juicy trap', normalized_brewery: 'piwne podziemie beer underground',
+    });
+    const orphan = seedBeer(db, {
+      untappd_id: null, name: 'Juicy Trap', brewery: 'Piwne Podziemie Brewery',
+      style: null, abv: null, rating_global: null,
+      normalized_name: 'juicy trap', normalized_brewery: 'piwne podziemie',
+    });
+    upsertMatch(db, null, 'Juicy Trap', orphan, 1.0);
+    expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 0, beersDeleted: 0 });
+  });
 });

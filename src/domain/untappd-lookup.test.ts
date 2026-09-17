@@ -1973,4 +1973,17 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     });
     expect(out.kind).toBe('matched');
   });
+
+  test("another brewery's unnumbered beer does not push out the right brewery's numbered one (PR #662 AI review)", async () => {
+    const out = await lookupBeer({
+      brewery: 'Tankbusters Brewery', name: 'Few More Beers', abv: 8.4,
+      search: fakeSearch(() => [
+        { bid: 1234567, beer_name: 'Few More Beers', brewery_name: 'Other Brewery', style: 'IPA', abv: 5, global_rating: 3.5 },
+        { bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co', style: 'IPA - Imperial / Double New England / Hazy', abv: 8.4, global_rating: 3.9 },
+      ]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6819481);
+  });
 });
