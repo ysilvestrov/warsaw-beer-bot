@@ -1974,6 +1974,18 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.kind).toBe('matched');
   });
 
+  // PR #662 AI review, round 5 claimed #20 wins here because the series key keeps the alias prefix. It does not: the
+  // prefilter keeps both hits, and the exact-name stages pick the unnumbered one. Kept as a regression guard.
+  test('a brewery alias written into the beer name does not let the numbered hit win', async () => {
+    const out = await lookupBeer({
+      brewery: '', name: 'Beer Underground Juicy Trap',
+      search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Beer Underground Juicy Trap')]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5000001);
+  });
+
   test('the series key ignores a brewery Untappd writes into the beer name (PR #662 AI review, round 4)', async () => {
     const out = await lookupBeer({
       brewery: '', name: 'TankBusters.Co Few More Beer', abv: 8.4,
