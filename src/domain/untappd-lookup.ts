@@ -493,21 +493,24 @@ export async function lookupBeer(
   function matchAgainst(unfiltered: SearchResult[]): LookupOutcome | null {
     // #636: every stage below reads a normalized name with no digits, so a candidate of another number or
     // vintage (`Dr.Hazy #7` → `Dr. Hazy #4`, proved live) would pass them all. One filter here, before any pool:
-    // `different` never; `number-fallback` (a number only Untappd writes) only when no better tier is present —
+    // `different` never; `number-fallback` (a number only Untappd writes) only when no better tier of its series —
     // otherwise the search could pick `Juicy Trap #20` where the matcher takes `Juicy Trap`, and merge memory
     // would keep the search's choice. The unfiltered list stays in seenCandidates as triage evidence.
     const judged = unfiltered.map((result) => ({
       result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name)),
     }));
-    // Only a candidate of the input's own brewery counts as the better tier: another brewery's unnumbered beer of
-    // the same name must not push out this brewery's numbered one (PR #662 AI review). With no input brewery there is
-    // nothing to scope by — every candidate is in the relaxed pool — so every same/year candidate counts.
-    const betterTier = judged.some((j) =>
-      (j.identity === 'same' || j.identity === 'year-fallback') &&
-      (inputBreweryAliases.length === 0 ||
-        breweryAliasesMatch(breweryAliases(j.result.brewery_name), inputBreweryAliases)));
+    // A `number-fallback` hit is dropped only when a better-tier hit of the SAME SERIES is present — the same
+    // digit-free name at a matching candidate brewery (`Juicy Trap` beside `Juicy Trap #20`). Another brewery's
+    // beer of the same name, or an unrelated unnumbered beer, is not a better version of this one and must not push
+    // it out (PR #662 AI review, rounds 1–3).
+    const seriesKey = (r: SearchResult) => normalizeName(r.beer_name);
+    const betterSeries = judged.filter((j) => j.identity === 'same' || j.identity === 'year-fallback');
+    const hasBetterOfSameSeries = (r: SearchResult) =>
+      betterSeries.some((b) =>
+        seriesKey(b.result) === seriesKey(r) &&
+        breweryAliasesMatch(breweryAliases(b.result.brewery_name), breweryAliases(r.brewery_name)));
     const results = judged
-      .filter((j) => j.identity !== 'different' && !(betterTier && j.identity === 'number-fallback'))
+      .filter((j) => j.identity !== 'different' && !(j.identity === 'number-fallback' && hasBetterOfSameSeries(j.result)))
       .map((j) => j.result);
     const identityHits = results.filter((result) =>
       (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),

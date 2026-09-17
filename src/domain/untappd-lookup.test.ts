@@ -1974,6 +1974,20 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.kind).toBe('matched');
   });
 
+  test('with no input brewery, an unrelated unnumbered beer does not push out a numbered one (PR #662 AI review, round 3)', async () => {
+    const out = await lookupBeer({
+      brewery: '', name: 'TankBusters.Co Few More Beer', abv: 8.4,
+      search: fakeSearch(() => [
+        // the same brewery, an unrelated name — only the series (digit-free name) tells them apart
+        { bid: 7654321, beer_name: 'Completely Different Beer', brewery_name: 'TankBusters.Co', style: 'IPA', abv: 5, global_rating: 3.5 },
+        { bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co', style: 'IPA - Imperial / Double New England / Hazy', abv: 8.4, global_rating: 3.9 },
+      ]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6819481);
+  });
+
   test('with no input brewery, an unnumbered candidate still pushes out a numbered one (PR #662 AI review, round 2)', async () => {
     const out = await lookupBeer({
       brewery: '', name: 'Juicy Trap',
@@ -1988,7 +2002,8 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     const out = await lookupBeer({
       brewery: 'Tankbusters Brewery', name: 'Few More Beers', abv: 8.4,
       search: fakeSearch(() => [
-        { bid: 1234567, beer_name: 'Few More Beers', brewery_name: 'Other Brewery', style: 'IPA', abv: 5, global_rating: 3.5 },
+        // same digit-free name as the numbered row ('few more beer'), another brewery — only the brewery tells them apart
+        { bid: 1234567, beer_name: 'Few More Beer', brewery_name: 'Other Brewery', style: 'IPA', abv: 5, global_rating: 3.5 },
         { bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co', style: 'IPA - Imperial / Double New England / Hazy', abv: 8.4, global_rating: 3.9 },
       ]),
     });
