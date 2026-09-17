@@ -1974,6 +1974,19 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.kind).toBe('matched');
   });
 
+  test('the series key ignores a brewery Untappd writes into the beer name (PR #662 AI review, round 4)', async () => {
+    const out = await lookupBeer({
+      brewery: '', name: 'TankBusters.Co Few More Beer', abv: 8.4,
+      search: fakeSearch(() => [
+        { bid: 6819481, beer_name: 'Few More Beer 004/108', brewery_name: 'TankBusters.Co', style: 'IPA', abv: 8.4, global_rating: 3.9 },
+        { bid: 6000001, beer_name: 'TankBusters.Co Few More Beer', brewery_name: 'TankBusters.Co', style: 'IPA', abv: 8.4, global_rating: 3.9 },
+      ]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6000001);
+  });
+
   test('with no input brewery, an unrelated unnumbered beer does not push out a numbered one (PR #662 AI review, round 3)', async () => {
     const out = await lookupBeer({
       brewery: '', name: 'TankBusters.Co Few More Beer', abv: 8.4,

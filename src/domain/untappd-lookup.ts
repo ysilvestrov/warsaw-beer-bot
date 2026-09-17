@@ -503,7 +503,10 @@ export async function lookupBeer(
     // digit-free name at a matching candidate brewery (`Juicy Trap` beside `Juicy Trap #20`). Another brewery's
     // beer of the same name, or an unrelated unnumbered beer, is not a better version of this one and must not push
     // it out (PR #662 AI review, rounds 1–3).
-    const seriesKey = (r: SearchResult) => normalizeName(r.beer_name);
+    // The candidate's own brewery is stripped from its name first: Untappd sometimes writes it into the beer name
+    // (`TankBusters.Co Few More Beer`), and the later stages strip it too (PR #662 AI review, round 4).
+    const seriesKey = (r: SearchResult) =>
+      stripBreweryFromName(normalizeName(r.beer_name), normalizeBrewery(r.brewery_name));
     const betterSeries = judged.filter((j) => j.identity === 'same' || j.identity === 'year-fallback');
     const hasBetterOfSameSeries = (r: SearchResult) =>
       betterSeries.some((b) =>
