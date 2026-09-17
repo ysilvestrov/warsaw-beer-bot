@@ -1974,6 +1974,16 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.kind).toBe('matched');
   });
 
+  test('with no input brewery, an unnumbered candidate still pushes out a numbered one (PR #662 AI review, round 2)', async () => {
+    const out = await lookupBeer({
+      brewery: '', name: 'Juicy Trap',
+      search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Juicy Trap')]),
+    });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(5000001);
+  });
+
   test("another brewery's unnumbered beer does not push out the right brewery's numbered one (PR #662 AI review)", async () => {
     const out = await lookupBeer({
       brewery: 'Tankbusters Brewery', name: 'Few More Beers', abv: 8.4,
