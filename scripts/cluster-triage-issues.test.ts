@@ -445,18 +445,20 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.beerIds).toContain(34221);
   });
 
-  it('does not extract 2-3 digit issue references or short table cells as beer IDs', () => {
+  it('does not extract 2-3 digit issue references, backticked #issue numbers, or short table cells as beer IDs', () => {
     const text = `
-Regression introduced by \`#663\` and \`123\`.
+Regression introduced by \`#663\`, \`#1234\`, and \`123\`.
 | count | status |
 |---|---|
 | 25 | live |
-Also mention beer \`31170\` and | **37334** |.
+Also mention bare beer 20804, row \`31170\`, and | **37334** |.
     `;
     const ids = extractBeerIds(text);
     expect(ids).not.toContain(663);
+    expect(ids).not.toContain(1234);
     expect(ids).not.toContain(123);
     expect(ids).not.toContain(25);
+    expect(ids).toContain(20804);
     expect(ids).toContain(31170);
     expect(ids).toContain(37334);
   });

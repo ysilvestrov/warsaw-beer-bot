@@ -46,10 +46,10 @@ export interface IssueCluster {
   recommendedAction: string;
 }
 
-// Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`#34250`", "рядок 31170", "row 31180")
+// Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`34250`", "beer `#34252`", "рядок 31170", "beer 20804")
 const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{4,6})(?:\*{1,2})?\s*\|/g;
-const CODE_BEER_ID_RE = /`#?(\d{4,6})`/g;
-const ROW_BEER_ID_RE = /(?:row|рядок|beer_id|catalog beer)\s*[:#]?\s*(?:\*{1,2}|`?)(\d{4,6})(?:\*{1,2}|`?)/gi;
+const CODE_BEER_ID_RE = /`(\d{4,6})`/g;
+const ROW_BEER_ID_RE = /(?:row|рядок|beer_id|beer)\s*[:#]?\s*(?:\*{1,2}|`?)#?(\d{4,6})(?:\*{1,2}|`?)/gi;
 
 export function extractBeerIds(text: string): number[] {
   const ids = new Set<number>();
@@ -271,7 +271,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/untappd-lookup.ts',
     ];
   }
-  // Search Depth & Pool Saturation
+  // Algolia search depth & pool saturation (placed ahead of shop adapters)
   else if (
     titleLower.includes('hitsperpage') ||
     titleLower.includes('sibling pool') ||
@@ -285,7 +285,7 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/untappd-lookup.ts',
     ];
   }
-  // Empty & Style-Only Name Identity Collapse
+  // Empty & style-only name identity collapse (placed ahead of descriptors and shop adapters)
   else if (
     titleLower.includes('normalizes to empty') ||
     titleLower.includes('нормалізується в порожнечу') ||
