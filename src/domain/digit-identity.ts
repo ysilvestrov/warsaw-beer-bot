@@ -19,6 +19,8 @@ export interface NameDigits {
   versions: string[];
   /** Calendar years, including `'26` / `26'` → `2026` and both ends of `2015-2022`. */
   years: string[];
+  /** #663: Whether the name contains any letter characters outside of stripped ABV/grade/noise. */
+  hasLetters: boolean;
 }
 
 // `same` > `year-fallback` > `number-fallback` > `different`. The two fallbacks are "acceptable when nothing better
@@ -82,6 +84,7 @@ export function readNameDigits(name: string): NameDigits {
     grades: grades.sort(),
     versions: versions.sort(),
     years: [...years].sort(),
+    hasLetters: /\p{L}/u.test(s),
   };
 }
 
@@ -148,7 +151,12 @@ export function digitIdentity(input: NameDigits, candidate: NameDigits): DigitId
   const candidateYears = candidate.years.join(' ');
   if (inputYears !== '' && candidateYears !== '' && inputYears !== candidateYears) return 'different';
   // A number only the candidate carries is the weaker fallback, whatever the years say.
-  if (candidateOnly.length > 0) return 'number-fallback';
+  // #663: Untappd appends numbers to names (batch, edition, variant), but a purely numeric candidate
+  // (e.g. `21`, `15`) has no letters and cannot be an appended variant of an input.
+  if (candidateOnly.length > 0) {
+    if (!candidate.hasLetters) return 'different';
+    return 'number-fallback';
+  }
   if ((inputYears === '') !== (candidateYears === '')) return 'year-fallback';
   return 'same';
 }
