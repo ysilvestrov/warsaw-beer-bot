@@ -40,8 +40,17 @@ export function stateFromMatch(
     };
   }
   if (opts.enrichmentPossible) return { kind: 'queued' };
-  if (matched !== null) return { kind: 'missing', brewery, name, orphan: true };
-  return result.searched
+  // `orphan: true` стверджує «пиво є в каталозі». Для непевного збігу саме це й під
+  // питанням, а варіант `missing` модифікатора непевності не носить — тож на fuzzy
+  // кажемо слабше, а не голосніше.
+  if (matched !== null) return { kind: 'missing', brewery, name, orphan: !unsure };
+  // `!== false`, а не істинність: кеш розширення живе 8 годин і тримає сирі відповіді
+  // `/match`, а записи попередньої версії не мають цього поля взагалі (клієнт його не
+  // оголошував — у цьому й був дефект). `undefined` при перевірці на істинність упав би
+  // на бік `deferred`, і після оновлення кожна незматчена картка до 8 годин казала б
+  // «не встигли, перезавантаж» — причому перезавантаження нічого б не змінило, бо читає
+  // той самий запис. Відсутнє поле має означати найслабше твердження, а не найсильніше.
+  return result.searched !== false
     ? { kind: 'missing', brewery, name, orphan: false }
     : { kind: 'deferred' };
 }

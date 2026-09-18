@@ -30,7 +30,7 @@ describe('#648 stateFromMatch', () => {
     expect(s).toMatchObject({ kind: 'found', unsure: true });
   });
 
-  it('carries the personal rating only, never the global one, when both exist', () => {
+  it('puts the personal rating in `mine` and the global one in `global`, never crossed', () => {
     const s = stateFromMatch(r({ is_drunk: true, user_rating: 4.2 }), withEnrich);
     expect(s).toMatchObject({ kind: 'found', drunk: true, mine: 4.2, global: 4.1 });
   });
@@ -71,5 +71,29 @@ describe('#648 stateFromMatch', () => {
   it('an unsearched card is still queued while enrichment can run', () => {
     expect(stateFromMatch(r({ matched_beer: null, searched: false }), withEnrich))
       .toEqual({ kind: 'queued' });
+  });
+
+  // The 8-hour cache holds raw /match responses, and entries written by the previous
+  // version have no `searched` at all — the client never declared the field. Reading it
+  // for truthiness would put every one of them on the loudest claim we have.
+  it('a cached response from before this version is not accused of "we never looked"', () => {
+    const legacy = {
+      raw: { brewery: 'PINTA', name: 'Hazy Morning' },
+      matched_beer: null,
+      is_drunk: false,
+      drunk_uncertain: false,
+      user_rating: null,
+    } as unknown as MatchResult;
+    expect(stateFromMatch(legacy, noEnrich)).toEqual({
+      kind: 'missing', brewery: 'PINTA', name: 'Hazy Morning', orphan: false,
+    });
+  });
+
+  // "Пиво є в каталозі" is exactly what a fuzzy match has not established.
+  it('does not claim catalogue membership when the row was reached fuzzily', () => {
+    expect(stateFromMatch(r({ matched_beer: orphanRow, source: 'fuzzy' }), noEnrich))
+      .toMatchObject({ kind: 'missing', orphan: false });
+    expect(stateFromMatch(r({ matched_beer: orphanRow, source: 'exact' }), noEnrich))
+      .toMatchObject({ kind: 'missing', orphan: true });
   });
 });

@@ -362,7 +362,9 @@ const baseUncertain: MatchResult = {
   is_drunk: false,
   drunk_uncertain: true,
   user_rating: null,
-  source: 'fuzzy',
+  // `source` is null exactly when matched_beer is; every case spreads a real
+  // matched_beer over this base and sets the fuzzy source along with it.
+  source: null,
   searched: true,
   matched_beer: null,
 };
@@ -416,7 +418,10 @@ describe('❓ uncertain-drunk badge', () => {
       ...baseUncertain,
       is_drunk: true,
       user_rating: 4.2,
-      source: 'exact',
+      // 'fuzzy', never 'exact': exactOn hardcodes drunk_uncertain false, so pairing
+      // 'exact' with drunk_uncertain would put a counterexample to the server invariant
+      // card-state.ts relies on inside our own fixtures.
+      source: 'fuzzy',
       searched: true,
       matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
     };
@@ -475,8 +480,12 @@ describe('#648 renderState', () => {
     ['found, drunk, no rating at all', found({ drunk: true, global: null }), ['check'],
       'Ти це пив. Ані твоєї, ані глобальної оцінки нема', 'https://untappd.com/beer/111'],
     ['found, unsure', found({ drunk: true, unsure: true }), ['check', 'star'],
-      'Непевний збіг. Ти це пив, але оцінки не ставив. Глобальна оцінка 4,1',
+      'Непевний збіг. Схоже, ти це пив. Глобальна оцінка 4,1',
       'https://untappd.com/beer/111'],
+    ['failed network', { kind: 'failed', reason: 'network' }, ['warn'],
+      'Не вдалося перевірити: не було зв\u02bcязку', null],
+    ['failed server', { kind: 'failed', reason: 'server' }, ['warn'],
+      'Не вдалося перевірити: сервер не відповів', null],
     ['found, drunk on an orphan row', found({ drunk: true, untappdId: null, global: null }), ['check'],
       'Ти це пив. Ані твоєї, ані глобальної оцінки нема',
       'https://untappd.com/search?q=PINTA%20Hazy%20Morning&type=beer'],
@@ -520,6 +529,77 @@ describe('#648 renderState', () => {
     expect(badgeOf(host).textContent).toBe('?4.2');
     renderState(host, found({ drunk: true, unsure: true, global: 4.1 }));
     expect(badgeOf(host).textContent).toBe('?4.1');
+  });
+
+  // The server withholds user_rating for every fuzzy match, so a missing number there
+  // is our ignorance, not proof the person never rated it.
+  it('never claims you left a beer unrated when the match itself is unsure', () => {
+    const host = el();
+    renderState(host, found({ drunk: true, unsure: true, global: 4.1 }));
+    expect(badgeOf(host).getAttribute('aria-label'))
+      .toBe('Непевний збіг. Схоже, ти це пив. Глобальна оцінка 4,1');
+    renderState(host, found({ drunk: true, unsure: true, global: null }));
+    expect(badgeOf(host).getAttribute('aria-label'))
+      .toBe('Непевний збіг. Схоже, ти це пив. Оцінок на Untappd поки замало');
+  });
+
+  // §4.1: everything that is not a choice recedes. Nothing asserted the pill itself,
+  // so deleting every `quiet = true` left the suite green.
+  it('keeps the non-signal states quiet: a dimmer pill and dimmer ink', () => {
+    const host = el();
+    const quiet: CardState[] = [
+      { kind: 'queued' }, { kind: 'deferred' }, { kind: 'nonBeer' },
+    ];
+    for (const state of quiet) {
+      renderState(host, state);
+      expect(badgeOf(host).style.background).toBe('rgba(20, 20, 20, 0.62)');
+      expect(badgeOf(host).style.color).toBe('rgb(207, 212, 218)');
+    }
+    renderState(host, found({ global: 4.1 }));
+    expect(badgeOf(host).style.background).toBe('rgba(20, 20, 20, 0.82)');
+    expect(badgeOf(host).style.color).toBe('rgb(255, 255, 255)');
+  });
+
+  // A badge with pointer-events: none is never hovered, so its tooltip never renders —
+  // which would have made `title` dead in exactly the two states that set one.
+  it('lets the states that carry a tooltip actually receive the pointer', () => {
+    const host = el();
+    for (const state of [{ kind: 'deferred' } as CardState, { kind: 'failed', reason: 'network' } as CardState]) {
+      renderState(host, state);
+      const badge = badgeOf(host);
+      expect(badge.getAttribute('title')).toBe(badge.getAttribute('aria-label'));
+      expect(badge.style.pointerEvents).toBe('auto');
+      expect(badge.style.cursor).toBe('default');
+    }
+    renderState(host, { kind: 'queued' });
+    expect(badgeOf(host).getAttribute('title')).toBeNull();
+    expect(badgeOf(host).style.pointerEvents).toBe('none');
+  });
+
+  // Host shops ship resets like `svg { width: 100% }` and `svg path { fill: currentColor }`.
+  // Presentation attributes lose to those; inline styles do not.
+  it('pins icon size and paint in inline style, out of reach of shop CSS', () => {
+    const host = el();
+    renderState(host, { kind: 'queued' });
+    const glyph = badgeOf(host).querySelector('[data-icon="ring"]') as SVGElement;
+    expect(glyph.style.getPropertyValue('width')).toBe('12px');
+    expect(glyph.style.getPropertyPriority('width')).toBe('important');
+    const ring = glyph.firstElementChild as SVGElement;
+    expect(ring.style.getPropertyValue('fill')).toBe('none');
+    expect(ring.style.getPropertyPriority('fill')).toBe('important');
+    expect(ring.getAttribute('fill')).toBeNull();
+  });
+
+  it('cancels the outgoing badge animations instead of leaving them running detached', () => {
+    const host = el();
+    const cancel = vi.fn();
+    withSpinnerEnv(false, () => {
+      renderState(host, { kind: 'working' });
+      const badge = badgeOf(host) as HTMLElement & { getAnimations?: unknown };
+      badge.getAnimations = () => [{ cancel } as unknown as Animation];
+      renderState(host, found({ global: 4.1 }));
+      expect(cancel).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('colours only the check and the star', () => {

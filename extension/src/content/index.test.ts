@@ -452,7 +452,7 @@ describe('runOverlay bid-contradiction orphans (#384)', () => {
   // underneath them is a bigger surprise than one wrong badge.
   it.each([
     ['is_drunk', { is_drunk: true }],
-    ['drunk_uncertain', { drunk_uncertain: true }],
+    ['drunk_uncertain', { drunk_uncertain: true, source: 'fuzzy' as const }],
   ])('never re-links a %s card, contradicting bid or not', async (_label, over) => {
     const a = cardEl();
     const adapter = adapterFor([{ el: a, brewery: 'Mad Brew', name: 'Drunk', bid: 6648348 }]);
