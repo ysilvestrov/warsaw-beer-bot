@@ -452,7 +452,7 @@ This beer 2020 vintage is still orphaned.
 | count | status |
 |---|---|
 | 25 | live |
-Also mention bare catalog beer 20804, beer \`#34252\`, row \`31170\`, and | **37334** |.
+Also mention bare catalog beer 20804, beer 20805 is orphaned, beer \`#34252\`, row \`31170\`, and | **37334** |.
     `;
     const ids = extractBeerIds(text);
     expect(ids).not.toContain(663);
@@ -461,6 +461,7 @@ Also mention bare catalog beer 20804, beer \`#34252\`, row \`31170\`, and | **37
     expect(ids).not.toContain(2020);
     expect(ids).not.toContain(25);
     expect(ids).toContain(20804);
+    expect(ids).toContain(20805);
     expect(ids).toContain(34252);
     expect(ids).toContain(31170);
     expect(ids).toContain(37334);
