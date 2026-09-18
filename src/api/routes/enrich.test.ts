@@ -1350,3 +1350,31 @@ describe('#636 ensureBeerRow picks the row of the pair by the digits of the card
     expect(getBeer(db, Number(numbered))!.untappd_id).toBeNull();
   });
 });
+
+describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', () => {
+  const ROAD = 'Magic Road Brewery';
+  const linked = (db: ReturnType<typeof setup>['db'], untappd_id: number, name: string, brewery: string) => {
+    const res = db.prepare(
+      `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery, untappd_id_source)
+       VALUES (?, ?, ?, NULL, NULL, 3.9, ?, ?, 'checkin')`,
+    ).run(untappd_id, name, brewery, normalizeName(name), normalizeBrewery(brewery));
+    return Number(res.lastInsertRowid);
+  };
+
+  it('a style-only card does not take a linked row of another style even though both normalized_name are empty', async () => {
+    const { db, app } = setup();
+    linked(db, 35687, 'LAGER', ROAD);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROAD, name: 'Stout' }] });
+    expect((await res.json()).candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
+  });
+
+  it('a style-only card matches the linked row of the same style', async () => {
+    const { db, app } = setup();
+    linked(db, 35687, 'LAGER', ROAD);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROAD, name: 'Lager 12°' }] });
+    expect((await res.json()).candidates[0].eligible).toBe(false);
+    expect(beerCount(db)).toBe(1);
+  });
+});
+
