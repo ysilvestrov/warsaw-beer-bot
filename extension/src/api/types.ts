@@ -22,6 +22,15 @@ export interface MatchResult {
   is_drunk: boolean;
   drunk_uncertain: boolean;
   user_rating: number | null;
+  /**
+   * #648: the server has always sent these two — `src/api/routes/match.ts` returns the
+   * full `MatchListResult` — but the client never declared them, so they arrived over
+   * the wire and were dropped on the floor. `source: 'fuzzy'` is the single source of
+   * doubt, and it already carries a shop-published bid that contradicts the brewery (#633).
+   */
+  source: 'exact' | 'fuzzy' | null;
+  /** false — the full-catalog fallback budget (#279) denied this item a search. */
+  searched: boolean;
 }
 
 export interface MatchResponse {

@@ -8,6 +8,8 @@ const result: MatchResult = {
   is_drunk: false,
   drunk_uncertain: false,
   user_rating: null,
+  source: null,
+  searched: true,
 };
 
 afterEach(() => vi.restoreAllMocks());

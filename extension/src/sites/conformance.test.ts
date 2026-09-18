@@ -28,6 +28,8 @@ const sendMatch = (cards: RawBeer[]): Promise<MatchResult[]> =>
       is_drunk: i === 0,
       drunk_uncertain: false,
       user_rating: i === 0 ? 4 : null,
+      source: null,
+      searched: true,
     })),
   );
 
