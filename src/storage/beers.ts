@@ -3,6 +3,7 @@ import { bumpCatalogVersion } from './catalog-version';
 import { digitIdentity, digitsCompatibleAsPeers, readNameDigits } from '../domain/digit-identity';
 import { styleNameIdentity } from '../domain/style-identity';
 import { cardAbv, cardText } from '../domain/card-text';
+import { ABV_TOLERANCE } from '../domain/matcher';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
 
@@ -79,17 +80,20 @@ export interface BidBeerInput {
 function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_source: UntappdIdSource | null } | null {
   const orphans = db
     .prepare(
-      `SELECT id, name, untappd_id_source FROM beers
+      `SELECT id, name, abv, untappd_id_source FROM beers
         WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?`,
     )
     .all(b.normalized_brewery, b.normalized_name) as {
-      id: number; name: string; untappd_id_source: UntappdIdSource | null;
+      id: number; name: string; abv: number | null; untappd_id_source: UntappdIdSource | null;
     }[];
   const bidDigits = readNameDigits(b.name);
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
   const compatible = orphans.filter((o) => {
-    // #663: style-only names must match style identity (or exact name if style identity is empty)
+    // #663: style-only names must match style identity (or exact name if style identity is empty) and be ABV-compatible
     if (b.normalized_name === '') {
+      if (b.abv != null && o.abv != null && Math.abs(b.abv - o.abv) > ABV_TOLERANCE) {
+        return false;
+      }
       const match = inputStyle !== ''
         ? styleNameIdentity(o.name, b.normalized_brewery) === inputStyle
         : o.name.trim().toLowerCase() === b.name.trim().toLowerCase();
@@ -189,15 +193,18 @@ export interface OrphanBeerInput {
 export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
   const orphans = db
     .prepare(
-      `SELECT id, name FROM beers
+      `SELECT id, name, abv FROM beers
         WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?
         ORDER BY id`,
     )
-    .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string }[];
+    .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string; abv: number | null }[];
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
   const existing = orphans.find((o) => {
     if (!digitsCompatibleAsPeers(o.name, b.name)) return false;
     if (b.normalized_name !== '') return true;
+    if (b.abv != null && o.abv != null && Math.abs(b.abv - o.abv) > ABV_TOLERANCE) {
+      return false;
+    }
     return inputStyle !== ''
       ? styleNameIdentity(o.name, b.normalized_brewery) === inputStyle
       : o.name.trim().toLowerCase() === b.name.trim().toLowerCase();

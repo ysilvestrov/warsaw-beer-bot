@@ -1554,6 +1554,15 @@ describe('upsertBeerByBid (#617)', () => {
     expect(getBeer(db, orphan)!.untappd_id).toBe(8888);
   });
 
+  test('#663: style-only orphan is not resolved by a check-in of incompatible ABV', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Lager', 'Magic Road', 4.0);
+    const got = upsertBeerByBid(db, bidInput(9999, 'Lager', 'Magic Road', { abv: 7.5, rating_global: 3.5 }));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
+    expect(getBeer(db, got)!.untappd_id).toBe(9999);
+  });
+
   test('#614 linking a row whose bid was cleared drops its merge aliases', () => {
     // Рев'ю 9, M2: аліаси доводили старий bid; без скидання синк оживляв їх під новим bid (хибний ✅).
     const db = fresh();
@@ -1828,6 +1837,13 @@ describe('ensureOrphan (#617)', () => {
     const deg10a = ensureOrphan(db, orphanInput('10°', 'Magic Road Brewery'));
     const deg10b = ensureOrphan(db, orphanInput('10°', 'Magic Road Brewery'));
     expect(deg10b).toBe(deg10a);
+  });
+
+  test('#663: orphans with normalized_name === empty and same style separate by incompatible ABV', () => {
+    const db = fresh();
+    const light = ensureOrphan(db, { ...orphanInput('Lager', 'Magic Road Brewery'), abv: 4.0 });
+    const strong = ensureOrphan(db, { ...orphanInput('Lager', 'Magic Road Brewery'), abv: 7.5 });
+    expect(strong).not.toBe(light);
   });
 
   test('bumps the catalog version only when it inserts', () => {

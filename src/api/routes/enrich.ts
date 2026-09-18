@@ -19,6 +19,7 @@ import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { digitIdentity, readNameDigits } from '../../domain/digit-identity';
 import { styleNameIdentity } from '../../domain/style-identity';
+import { ABV_TOLERANCE } from '../../domain/matcher';
 import { isEligible, RECURRING_CLASSES } from '../../domain/lookup-backoff';
 import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import {
@@ -159,6 +160,9 @@ function ensureBeerRow(
   const cardStyle = normalized_name === '' ? styleNameIdentity(name, normalized_brewery) : '';
   const candidates = listBeersByNormalized(db, normalized_brewery, normalized_name).filter((r) => {
     if (normalized_name !== '') return true;
+    if (facts.abv != null && r.abv != null && Math.abs(facts.abv - r.abv) > ABV_TOLERANCE) {
+      return false;
+    }
     return cardStyle !== ''
       ? styleNameIdentity(r.name, r.normalized_brewery) === cardStyle
       : r.name.trim().toLowerCase() === name.trim().toLowerCase();
