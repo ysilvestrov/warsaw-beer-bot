@@ -48,9 +48,9 @@ export interface IssueCluster {
 
 // Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`34250`", "beer `#34252`", "рядок 31170", "beer 20804")
 const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{4,6})(?:\*{1,2})?\s*\|/g;
-const CODE_BEER_ID_RE = /`(\d{4,6})`/g;
+const CODE_BEER_ID_RE = /`(\d{4,6})`(?!\s*\(?vintage\b)/gi;
 const ROW_BEER_ID_RE =
-  /(?:row|рядок|beer_id|beer)\s*[:#]?\s*(?:\*{1,2}|`?)#?(\d{4,6})(?:\*{1,2}|`?)(?!\s*\(?vintage)/gi;
+  /(?:^|\W)(?:row|рядок|beer[ _]id|catalog beer|beer)\s*[:#]?\s*(?:\*{1,2}|`?)#?(\d{4,6})\b(?:\*{1,2}|`?)?(?!\s*[`\*]*\s*\(?vintage\b)/gi;
 
 export function extractBeerIds(text: string): number[] {
   const ids = new Set<number>();
