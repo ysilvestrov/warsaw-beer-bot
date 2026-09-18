@@ -47,9 +47,9 @@ export interface IssueCluster {
 }
 
 // Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`#34250`", "рядок 31170", "row 31180")
-const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{2,6})(?:\*{1,2})?\s*\|/g;
-const CODE_BEER_ID_RE = /`#?(\d{2,6})`/g;
-const ROW_BEER_ID_RE = /(?:row|рядок|beer_id|catalog beer)\s*[:#]?\s*(?:\*{1,2}|`?)(\d{2,6})(?:\*{1,2}|`?)/gi;
+const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{4,6})(?:\*{1,2})?\s*\|/g;
+const CODE_BEER_ID_RE = /`#?(\d{4,6})`/g;
+const ROW_BEER_ID_RE = /(?:row|рядок|beer_id|catalog beer)\s*[:#]?\s*(?:\*{1,2}|`?)(\d{4,6})(?:\*{1,2}|`?)/gi;
 
 export function extractBeerIds(text: string): number[] {
   const ids = new Set<number>();
@@ -271,6 +271,37 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/untappd-lookup.ts',
     ];
   }
+  // Search Depth & Pool Saturation
+  else if (
+    titleLower.includes('hitsperpage') ||
+    titleLower.includes('sibling pool') ||
+    titleLower.includes('truncates the exact match') ||
+    titleLower.includes('pool saturation')
+  ) {
+    locus = 'query_normalizer_bug';
+    clusterKey = 'search-depth-truncation';
+    clusterTitle = 'Algolia Search Depth & Sibling Pool Saturation';
+    targetFiles = [
+      'src/domain/untappd-lookup.ts',
+    ];
+  }
+  // Empty & Style-Only Name Identity Collapse
+  else if (
+    titleLower.includes('normalizes to empty') ||
+    titleLower.includes('нормалізується в порожнечу') ||
+    titleLower.includes('лише зі стилю') ||
+    titleLower.includes('bare brewery alias when the beer name normalizes') ||
+    (titleLower.includes('назва крана') && titleLower.includes('стилю'))
+  ) {
+    locus = 'matcher_gate_bug';
+    clusterKey = 'empty-style-name-collapse';
+    clusterTitle = 'Empty & Style-Only Name Identity Collapse';
+    targetFiles = [
+      'src/domain/matcher.ts',
+      'src/domain/untappd-lookup.ts',
+      'src/domain/name-identity.ts',
+    ];
+  }
   // Shop Adapters (title-specified shop or explicit parser/adapter bug)
   else if (
     (hasShopInTitle || isParserBug) &&
@@ -387,37 +418,6 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
       'src/domain/matcher.ts',
       'src/domain/untappd-lookup.ts',
       'src/domain/name-identity.ts',
-    ];
-  }
-  // Empty & Style-Only Name Identity Collapse
-  else if (
-    titleLower.includes('normalizes to empty') ||
-    titleLower.includes('нормалізується в порожнечу') ||
-    titleLower.includes('лише зі стилю') ||
-    titleLower.includes('bare brewery alias when the beer name normalizes') ||
-    (titleLower.includes('назва крана') && titleLower.includes('стилю'))
-  ) {
-    locus = 'matcher_gate_bug';
-    clusterKey = 'empty-style-name-collapse';
-    clusterTitle = 'Empty & Style-Only Name Identity Collapse';
-    targetFiles = [
-      'src/domain/matcher.ts',
-      'src/domain/untappd-lookup.ts',
-      'src/domain/name-identity.ts',
-    ];
-  }
-  // Search Depth & Pool Saturation
-  else if (
-    titleLower.includes('hitsperpage') ||
-    titleLower.includes('sibling pool') ||
-    titleLower.includes('truncates the exact match') ||
-    titleLower.includes('pool saturation')
-  ) {
-    locus = 'query_normalizer_bug';
-    clusterKey = 'search-depth-truncation';
-    clusterTitle = 'Algolia Search Depth & Sibling Pool Saturation';
-    targetFiles = [
-      'src/domain/untappd-lookup.ts',
     ];
   }
   // Language & Transliteration
