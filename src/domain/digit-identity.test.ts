@@ -8,14 +8,19 @@ const identity = (input: string, candidate: string): DigitIdentity =>
 describe('readNameDigits', () => {
   test('a hash number is hard, the degree grade is kept apart', () => {
     expect(readNameDigits('Dr.Hazy #7 15°')).toEqual({
-      numbers: ['7'], soft: [], grades: ['15'], versions: [], years: [],
+      numbers: ['7'], soft: [], grades: ['15'], versions: [], years: [], hasLetters: true,
     });
   });
 
   test('ABV with its mid-dot tail never becomes a number', () => {
     expect(readNameDigits('Buzdygan Rozkoszy 24°·8,5%')).toEqual({
-      numbers: [], soft: [], grades: ['24'], versions: [], years: [],
+      numbers: [], soft: [], grades: ['24'], versions: [], years: [], hasLetters: true,
     });
+  });
+
+  test('purely numeric name has no letters', () => {
+    expect(readNameDigits('21').hasLetters).toBe(false);
+    expect(readNameDigits('#21').hasLetters).toBe(false);
   });
 
   test('a year range inside brackets yields both years', () => {
@@ -121,6 +126,9 @@ describe('digitIdentity(input, candidate)', () => {
     ['Anniversary Edition 2024', 'Anniversary Edition', 'year-fallback', 'year-fallback'],
     // … and never overrides a year conflict
     ['Abraxas 2024', 'Abraxas (Batch 7) 2025', 'different', 'different'],
+    // candidate number without letters is not a fallback for lettered name (#663)
+    ['LAGER 10.5°', '21', 'different', 'different'],
+    ['Pils 12°', '15', 'different', 'different'],
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
     expect(identity(input, candidate)).toBe(forward);
     expect(identity(candidate, input)).toBe(reverse);
