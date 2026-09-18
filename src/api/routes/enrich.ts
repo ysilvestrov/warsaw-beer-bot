@@ -157,9 +157,12 @@ function ensureBeerRow(
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
   const cardStyle = normalized_name === '' ? styleNameIdentity(name, normalized_brewery) : '';
-  const candidates = listBeersByNormalized(db, normalized_brewery, normalized_name).filter((r) =>
-    normalized_name !== '' || styleNameIdentity(r.name, r.normalized_brewery) === cardStyle,
-  );
+  const candidates = listBeersByNormalized(db, normalized_brewery, normalized_name).filter((r) => {
+    if (normalized_name !== '') return true;
+    return cardStyle !== ''
+      ? styleNameIdentity(r.name, r.normalized_brewery) === cardStyle
+      : r.name.trim().toLowerCase() === name.trim().toLowerCase();
+  });
   const existing = pickRowByDigits(name, candidates);
   if (existing) {
     const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);

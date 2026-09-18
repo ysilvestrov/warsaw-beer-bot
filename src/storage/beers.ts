@@ -88,9 +88,12 @@ function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_sou
   const bidDigits = readNameDigits(b.name);
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
   const compatible = orphans.filter((o) => {
-    // #663: style-only names must match style identity
-    if (b.normalized_name === '' && styleNameIdentity(o.name, b.normalized_brewery) !== inputStyle) {
-      return false;
+    // #663: style-only names must match style identity (or exact name if style identity is empty)
+    if (b.normalized_name === '') {
+      const match = inputStyle !== ''
+        ? styleNameIdentity(o.name, b.normalized_brewery) === inputStyle
+        : o.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+      if (!match) return false;
     }
     const identity = digitIdentity(readNameDigits(o.name), bidDigits);
     return identity === 'same' || identity === 'year-fallback';
@@ -192,10 +195,13 @@ export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
     )
     .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string }[];
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
-  const existing = orphans.find((o) =>
-    digitsCompatibleAsPeers(o.name, b.name) &&
-    (b.normalized_name !== '' || styleNameIdentity(o.name, b.normalized_brewery) === inputStyle),
-  );
+  const existing = orphans.find((o) => {
+    if (!digitsCompatibleAsPeers(o.name, b.name)) return false;
+    if (b.normalized_name !== '') return true;
+    return inputStyle !== ''
+      ? styleNameIdentity(o.name, b.normalized_brewery) === inputStyle
+      : o.name.trim().toLowerCase() === b.name.trim().toLowerCase();
+  });
   if (existing) return existing.id;
 
   const res = db.prepare(
