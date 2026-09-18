@@ -24,13 +24,13 @@
 - Modify: `src/storage/beers.ts`
 - Modify: `src/storage/beers.test.ts`
 
-- [ ] **Step 1: Write unit tests in `src/storage/beers.test.ts`**:
+- [x] **Step 1: Write unit tests in `src/storage/beers.test.ts`**:
   - `ensureOrphan` creates two separate rows for `Magic Road / Stout` and `Magic Road / LAGER` even though both have `normalized_name === ''`.
   - `ensureOrphan` reuses the existing row for `Zakładowy / Pils 12°` and `Zakładowy / Pils 11°` (same style identity `"pils"`).
   - `resolvableOrphan` does NOT resolve an orphan `Stout` with a bid input for `LAGER`.
   - `resolvableOrphan` DOES resolve an orphan `Pils 12°` with a bid input for `Pils`.
 
-- [ ] **Step 2: Implement style gating in `src/storage/beers.ts`**:
+- [x] **Step 2: Implement style gating in `src/storage/beers.ts`**:
   - Import `styleNameIdentity` from `../domain/style-identity`.
   - In `ensureOrphan`:
     ```ts
@@ -52,9 +52,9 @@
     });
     ```
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/storage/beers.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "fix(storage): differentiate style-only names in ensureOrphan and resolvableOrphan (#663)"`.
+- [x] **Step 3: Run unit tests**: `npx vitest run src/storage/beers.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "fix(storage): differentiate style-only names in ensureOrphan and resolvableOrphan (#663)"`.
 
 ---
 
@@ -64,10 +64,10 @@
 - Modify: `src/api/routes/enrich.ts`
 - Modify: `src/api/routes/enrich.test.ts`
 
-- [ ] **Step 1: Write test in `src/api/routes/enrich.test.ts`**:
+- [x] **Step 1: Write test in `src/api/routes/enrich.test.ts`**:
   - Assert that `ensureBeerRow` with card `Pils` does not attach to an existing brewery row `WEIZEN` when both have `normalized_name === ''`.
 
-- [ ] **Step 2: Implement style filter in `ensureBeerRow`**:
+- [x] **Step 2: Implement style filter in `ensureBeerRow`**:
   - Import `styleNameIdentity` from `../../domain/style-identity`.
   - Filter `listBeersByNormalized`:
     ```ts
@@ -78,9 +78,9 @@
     const existing = pickRowByDigits(name, candidates);
     ```
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/api/routes/enrich.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "fix(enrich): filter ensureBeerRow candidates by style identity when name is empty (#663)"`.
+- [x] **Step 3: Run unit tests**: `npx vitest run src/api/routes/enrich.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "fix(enrich): filter ensureBeerRow candidates by style identity when name is empty (#663)"`.
 
 ---
 
@@ -90,10 +90,10 @@
 - Modify: `src/domain/untappd-lookup.ts`
 - Modify: `src/domain/untappd-lookup.test.ts`
 
-- [ ] **Step 1: Write test in `src/domain/untappd-lookup.test.ts`**:
+- [x] **Step 1: Write test in `src/domain/untappd-lookup.test.ts`**:
   - Assert that when `candidateName` would be empty, bare brewery brand is not admitted into `inputIdentityAliases`, rejecting an `alias_alt` that only matches the brand.
 
-- [ ] **Step 2: Filter empty candidates in `inputIdentityAliases`**:
+- [x] **Step 2: Filter empty candidates in `inputIdentityAliases`**:
   - In `src/domain/untappd-lookup.ts`:
     ```ts
     const inputIdentityAliases = new Set(
@@ -106,9 +106,9 @@
     );
     ```
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/domain/untappd-lookup.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "fix(lookup): drop empty candidate name from inputIdentityAliases (#465, #663)"`.
+- [x] **Step 3: Run unit tests**: `npx vitest run src/domain/untappd-lookup.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "fix(lookup): drop empty candidate name from inputIdentityAliases (#465, #663)"`.
 
 ---
 
@@ -117,12 +117,12 @@
 **Files:**
 - Modify: `spec.md`
 
-- [ ] **Step 1: Update `spec.md`**:
+- [x] **Step 1: Update `spec.md`**:
   - Document the behavior of names that normalize to empty (`normalizeName(name) === ''`):
     - `styleNameIdentity` extracts the style word from raw names;
     - Exact matching gate requires `styleNameIdentity` equality and ABV compatibility within `ABV_TOLERANCE`;
     - Fuzzy matching is forbidden when `normalizeName(name) === ''`;
     - `number-fallback` requires candidate to have letter characters outside numbers;
     - `ensureOrphan` and `resolvableOrphan` isolate style-only beers by `styleNameIdentity`.
-- [ ] **Step 2: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 3: Commit**: `git commit -m "docs(spec): document style-only tap name matching and orphan isolation (#663)"`.
+- [x] **Step 2: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 3: Commit**: `git commit -m "docs(spec): document style-only tap name matching and orphan isolation (#663)"`.
