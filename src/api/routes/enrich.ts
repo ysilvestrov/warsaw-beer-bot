@@ -18,6 +18,7 @@ import {
 import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { digitIdentity, readNameDigits } from '../../domain/digit-identity';
+import { styleNameIdentity } from '../../domain/style-identity';
 import { isEligible, RECURRING_CLASSES } from '../../domain/lookup-backoff';
 import { buildSearchUrl, htmlSearch } from '../../sources/untappd/search';
 import {
@@ -155,7 +156,11 @@ function ensureBeerRow(
   if (aliased) return { ...aliased, viaAlias: true };
   const normalized_brewery = normalizeBrewery(brewery);
   const normalized_name = normalizeName(name);
-  const existing = pickRowByDigits(name, listBeersByNormalized(db, normalized_brewery, normalized_name));
+  const cardStyle = normalized_name === '' ? styleNameIdentity(name, normalized_brewery) : '';
+  const candidates = listBeersByNormalized(db, normalized_brewery, normalized_name).filter((r) =>
+    normalized_name !== '' || styleNameIdentity(r.name, r.normalized_brewery) === cardStyle,
+  );
+  const existing = pickRowByDigits(name, candidates);
   if (existing) {
     const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
     if (abvGained) rearmLookup(db, existing.id);
@@ -164,6 +169,7 @@ function ensureBeerRow(
   // #617: сюди доходимо, лише коли рядка з цією нормалізованою парою немає зовсім — вставка сироти.
   // #636: або коли всі рядки пари мають інші цифри; ensureOrphan тоді не знайде й сумісної сироти (порівняння рівних
   // суворіше за вибір вище), тож вставить нову.
+  // #663: або коли для назви зі стилю (normalized_name === '') рядки пари належать іншим стилям.
   const id = ensureOrphan(db, {
     name, brewery,
     style: facts.style ?? null, abv: sanitizeAbv(facts.abv) ?? null,
