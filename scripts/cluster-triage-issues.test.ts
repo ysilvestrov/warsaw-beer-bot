@@ -444,4 +444,46 @@ Also see beer \`#34252\` and \`34253\`.
     expect(classified.locus).toBe('query_normalizer_bug');
     expect(classified.beerIds).toContain(34221);
   });
+
+  it('does not extract 2-3 digit issue references or short table cells as beer IDs', () => {
+    const text = `
+Regression introduced by \`#663\` and \`123\`.
+| count | status |
+|---|---|
+| 25 | live |
+Also mention beer \`31170\` and | **37334** |.
+    `;
+    const ids = extractBeerIds(text);
+    expect(ids).not.toContain(663);
+    expect(ids).not.toContain(123);
+    expect(ids).not.toContain(25);
+    expect(ids).toContain(31170);
+    expect(ids).toContain(37334);
+  });
+
+  it('prioritizes empty-style-name-collapse over query-zeroing descriptors', () => {
+    const issue: RawIssue = {
+      number: 991,
+      title: "[matcher-bug] trailing style normalizes to empty",
+      body: 'Body text',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    expect(classifyIssue(issue).clusterKey).toBe('empty-style-name-collapse');
+  });
+
+  it('prioritizes search-depth-truncation over title shop adapter', () => {
+    const issue: RawIssue = {
+      number: 992,
+      title: "[matcher-bug] flasker hitsPerPage=5 truncates the exact match",
+      body: 'Body text',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-01T00:00:00Z',
+      updatedAt: '2026-09-01T00:00:00Z',
+    };
+
+    expect(classifyIssue(issue).clusterKey).toBe('search-depth-truncation');
+  });
 });
