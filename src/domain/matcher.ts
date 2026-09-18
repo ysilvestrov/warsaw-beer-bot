@@ -2,8 +2,10 @@ import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 import { digitIdentity, readNameDigits } from './digit-identity';
+import { styleNameIdentity, stripBreweryFromName } from './style-identity';
 
 export { COLLAB_SEP } from './normalize';
+export { stripBreweryFromName };
 
 export interface CatalogBeer {
   id: number;
@@ -264,27 +266,6 @@ export function breweryAliasContained(a: string[], b: string[]): boolean {
   return a.some((x) => b.some((y) => tokenSublist(x, y)));
 }
 
-// Strip a brewery duplicated into a normalized name (e.g. title "PRIMÁTOR Free Mother
-// In Law" with brewery "Primátor", or a trailing "… Trzech Kumpli"). Removes every
-// non-overlapping contiguous run of the brewery tokens — at ANY position — but never
-// strips the name to empty, then trims any leftover leading/trailing BREWERY_NOISE.
-export function stripBreweryFromName(nameNorm: string, breweryNorm: string): string {
-  if (!breweryNorm) return nameNorm;
-  const bt = breweryNorm.split(' ').filter(Boolean);
-  if (!bt.length) return nameNorm;
-  const nt = nameNorm.split(' ').filter(Boolean);
-  for (let i = 0; i + bt.length <= nt.length; ) {
-    if (nt.length - bt.length >= 1 && bt.every((t, j) => nt[i + j] === t)) {
-      nt.splice(i, bt.length);
-    } else {
-      i++;
-    }
-  }
-  while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
-  while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
-  return nt.join(' ');
-}
-
 // Order-insensitive canonical form of a normalized string: tokens sorted, re-joined.
 function sortedTokens(norm: string): string {
   return norm.split(' ').filter(Boolean).sort().join(' ');
@@ -345,6 +326,8 @@ export function matchPrepared(
   const inputAliases = breweryAliases(input.brewery);
   const nn = normalizeName(input.name);
   const inputKeys = nameKeys(input.name, input.brewery);   // #117
+  const inputStyleIdentity = nn === '' ? styleNameIdentity(input.name, inputAliases[0] ?? '') : '';
+  const wantAbv = input.abv ?? null;
 
   // Brewery-matching rows, via the first-token index (was a full O(catalog) scan).
   // Computed once and reused by both the exact filter and the fuzzy pool below.
@@ -354,7 +337,19 @@ export function matchPrepared(
   // several vintages of the same beer. Latest id first. #117: also accept an
   // order-insensitive / collab-aware name-key intersection as exact-equivalent.
   let exacts = breweryMatches
-    .filter((c) => c.nameNorm === nn || intersects(c.keys, inputKeys))
+    .filter((c) => {
+      if (nn !== '') {
+        return c.nameNorm === nn || intersects(c.keys, inputKeys);
+      }
+      // #663: When nn === '', the name is style-only or numbers (e.g. `Pils 12°`, `Stout`).
+      // Require clean style identity match and ABV compatibility.
+      const candStyle = styleNameIdentity(c.name, c.breweryNorm);
+      if (candStyle === '' || candStyle !== inputStyleIdentity) return false;
+      if (wantAbv !== null && c.abv !== null && Math.abs(c.abv - wantAbv) > ABV_TOLERANCE) {
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => b.id - a.id);
 
   // Split-invariant second try (#169): only when the boundary-trusting exact path found
@@ -362,7 +357,7 @@ export function matchPrepared(
   // adapter's split — a candidate matches when its FULL brewery is a leading token-run of
   // the combined title and the remainder equals the candidate's canonical name. Strictly
   // stronger than the normal gate, so accepting single-token names here is FP-safe.
-  if (exacts.length === 0) {
+  if (exacts.length === 0 && nn !== '') {
     // Normalize the WHOLE `brewery + name` as one string (not each field separately):
     // since the concatenated token sequence is identical no matter where the adapter cut
     // brewery vs name, this makes `combined` split-invariant. Trade-off: a brewery whose
@@ -438,7 +433,8 @@ export function matchPrepared(
   // already run and missed, so the honest outcome is an orphan. Mirrors the relaxed-pool
   // rule in untappd-lookup.ts ("exact only, never approximate fuzzy"). See isBareBrandName
   // for what counts as "nothing beyond the brand".
-  if (isBareBrandName(input.name, input.brewery)) return null;
+  // #663: Also forbid fuzzy when name normalizes to empty (style-only or numbers).
+  if (isBareBrandName(input.name, input.brewery) || nn === '') return null;
 
   // Fuzzy fallback: prefer rows whose brewery aliases overlap the input's, otherwise the
   // full catalog (shared, lazily-built Searcher). The full-catalog path is ~89ms/item over

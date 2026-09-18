@@ -1300,3 +1300,62 @@ describe('#636 asymmetry: a number only the catalog row carries is the weakest a
       .toMatchObject({ id: 10, source: 'fuzzy' });
   });
 });
+
+describe('#663 style-only tap names: gate exact matching and forbid fuzzy', () => {
+  test('matches when candidate has identical style name identity and compatible ABV', () => {
+    expect(matchBeer(
+      { brewery: 'Zakładowy', name: 'Pils 12°', abv: 4.8 },
+      [c({ id: 101, brewery: 'Zakładowy', name: 'Pils', abv: 4.8 })],
+    )).toEqual({ id: 101, confidence: 1, source: 'exact' });
+  });
+
+  test('matches weizen tap to style-named candidate', () => {
+    expect(matchBeer(
+      { brewery: 'Trzech Kumpli', name: 'Weizen 12,5°', abv: 5.0 },
+      [c({ id: 102, brewery: 'Trzech Kumpli', name: 'Weizen', abv: 5.0 })],
+    )).toEqual({ id: 102, confidence: 1, source: 'exact' });
+  });
+
+  test('refuses candidate with different style even in exact stage', () => {
+    expect(matchBeer(
+      { brewery: 'Magic Road', name: 'Stout', abv: 4.5 },
+      [c({ id: 103, brewery: 'Magic Road', name: 'LAGER', abv: 4.3 })],
+    )).toBeNull();
+  });
+
+  test('refuses numeric candidate for style-only tap', () => {
+    expect(matchBeer(
+      { brewery: 'Funky Fluid', name: 'LAGER 10.5°', abv: 4.5 },
+      [c({ id: 104, brewery: 'Funky Fluid', name: '21', abv: 4.5 })],
+    )).toBeNull();
+  });
+
+  test('refuses fuzzy fallback when name normalizes to empty (IPA 13,5° vs Black IPA)', () => {
+    expect(matchBeer(
+      { brewery: 'Brovarnia Gdańsk', name: 'IPA 13,5°', abv: 6.0 },
+      [c({ id: 105, brewery: 'Brovarnia Gdańsk', name: 'Black IPA', abv: 6.0 })],
+    )).toBeNull();
+  });
+
+  test('refuses fuzzy fallback for Session IPA vs Wild Imperial Stout', () => {
+    expect(matchBeer(
+      { brewery: 'Browar Nieczajna', name: 'Session IPA 12°', abv: 4.5 },
+      [c({ id: 106, brewery: 'Browar Nieczajna', name: 'Wild Imperial Stout', abv: 11.0 })],
+    )).toBeNull();
+  });
+
+  test('refuses Pils vs WEIZEN from same brewery', () => {
+    expect(matchBeer(
+      { brewery: 'Remeslo', name: 'Pils 12,0°', abv: 4.8 },
+      [c({ id: 107, brewery: 'Remeslo', name: 'WEIZEN', abv: 5.0 })],
+    )).toBeNull();
+  });
+
+  test('refuses style candidate when ABV exceeds tolerance', () => {
+    expect(matchBeer(
+      { brewery: 'Zakładowy', name: 'Pils 12°', abv: 4.0 },
+      [c({ id: 108, brewery: 'Zakładowy', name: 'Pils', abv: 5.2 })],
+    )).toBeNull();
+  });
+});
+
