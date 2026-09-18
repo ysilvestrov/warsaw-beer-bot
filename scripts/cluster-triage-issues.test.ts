@@ -449,23 +449,34 @@ Also see beer \`#34252\` and \`34253\`.
     const text = `
 Regression introduced by \`#663\`, \`#1234\`, and \`123\`.
 This beer 2020 vintage is still orphaned.
-Also beer \`2020\` vintage and beer **2020** vintage.
-Do not backtrack on beer 20804 vintage.
+Also beer \`2020\` vintage, beer \`2020\` **vintage**, and beer **2020** vintage.
+Catalog beer ID \`20804\` vintage mismatch, and beer ID 20805 vintage mismatch.
 | count | status |
 |---|---|
 | 25 | live |
-Also mention bare catalog beer 20804, beer 20805 is orphaned, beer id 34221, beer \`#34252\`, row \`31170\`, and | **37334** |.
+| vintage | status |
+|---|---|
+| **2020** | orphan |
+| 2019 | orphan |
+| beer_id | brewery | name |
+|---|---|---|
+| 34250 | EvilTwin | Doughnut Break |
+| **34251** | Stone | Arrogant Bastard |
+Also mention bare catalog beer 20804, beer id 34221, beer \`#34252\`, row \`31170\`, and | **37334** |.
     `;
     const ids = extractBeerIds(text);
     expect(ids).not.toContain(663);
     expect(ids).not.toContain(1234);
     expect(ids).not.toContain(123);
     expect(ids).not.toContain(2020);
+    expect(ids).not.toContain(2019);
     expect(ids).not.toContain(2080);
     expect(ids).not.toContain(25);
     expect(ids).toContain(20804);
     expect(ids).toContain(20805);
     expect(ids).toContain(34221);
+    expect(ids).toContain(34250);
+    expect(ids).toContain(34251);
     expect(ids).toContain(34252);
     expect(ids).toContain(31170);
     expect(ids).toContain(37334);

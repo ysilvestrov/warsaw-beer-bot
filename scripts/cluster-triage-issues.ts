@@ -47,31 +47,112 @@ export interface IssueCluster {
 }
 
 // Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`34250`", "beer `#34252`", "рядок 31170", "beer 20804")
-const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{4,6})(?:\*{1,2})?\s*\|/g;
-const CODE_BEER_ID_RE = /`(\d{4,6})`(?!\s*\(?vintage\b)/gi;
+// Regex to discover beer IDs from inline backticks or prose mentions.
+// 5-6 digit numbers are always valid beer IDs. 4-digit numbers are excluded if followed by vintage descriptors.
+const CODE_BEER_ID_RE = /`(\d{5,6})`|`(\d{4})`(?![`\*_\s()]*vintage\b)/gi;
 const ROW_BEER_ID_RE =
-  /(?:^|\W)(?:row|рядок|beer[ _]id|catalog beer|beer)\s*[:#]?\s*(?:\*{1,2}|`?)#?(\d{4,6})\b(?:\*{1,2}|`?)?(?!\s*[`\*]*\s*\(?vintage\b)/gi;
+  /(?:^|\W)(?:row|рядок|beer[ _]id|catalog beer|beer)\s*[:#]?\s*(?:\*{1,2}|`?)#?(?:(\d{5,6})|(\d{4})(?![`\*_\s()]*vintage\b))\b(?:\*{1,2}|`?)?/gi;
+
+function splitTableCells(line: string): string[] {
+  let trimmed = line.trim();
+  if (trimmed.startsWith('|')) trimmed = trimmed.slice(1);
+  if (trimmed.endsWith('|')) trimmed = trimmed.slice(0, -1);
+  return trimmed.split('|').map((c) => c.trim());
+}
+
+function isSeparatorLine(line: string): boolean {
+  const cells = splitTableCells(line);
+  return cells.length > 0 && cells.every((c) => /^:?-+:?$/.test(c));
+}
+
+function extractTableBeerIds(text: string): number[] {
+  const ids: number[] = [];
+  const lines = text.split('\n');
+  let inTable = false;
+  let tableHasHeaders = false;
+  let beerColIndices: number[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line.startsWith('|') || !line.endsWith('|')) {
+      inTable = false;
+      tableHasHeaders = false;
+      beerColIndices = [];
+      // Standalone pipe cells outside markdown tables (e.g. `and | **37334** |.`)
+      const matches = line.matchAll(/\|\s*(?:\*{1,2}|`?)(\d{4,6})(?:\*{1,2})?\s*\|/g);
+      for (const m of matches) {
+        const id = parseInt(m[1], 10);
+        if (!isNaN(id) && id > 0) ids.push(id);
+      }
+      continue;
+    }
+
+    const nextLine = lines[i + 1]?.trim();
+    if (nextLine && nextLine.startsWith('|') && nextLine.endsWith('|') && isSeparatorLine(nextLine)) {
+      // Table header detected
+      inTable = true;
+      tableHasHeaders = true;
+      beerColIndices = [];
+      const headers = splitTableCells(line).map((h) => h.toLowerCase());
+      for (let col = 0; col < headers.length; col++) {
+        const h = headers[col];
+        const isBeerCol =
+          /(?:^|\W)(?:beer[ _]?id|id|рядок)(?:$|\W)/i.test(h) &&
+          !/(?:untappd|bid|vintage|year|count|status|рік|кількість)/i.test(h);
+        if (isBeerCol) {
+          beerColIndices.push(col);
+        }
+      }
+      continue;
+    }
+
+    if (isSeparatorLine(line)) {
+      continue;
+    }
+
+    if (inTable && tableHasHeaders) {
+      if (beerColIndices.length > 0) {
+        const cells = splitTableCells(line);
+        for (const col of beerColIndices) {
+          if (col < cells.length) {
+            const m = cells[col].match(/(?:\*{1,2}|`?)(\d{4,6})(?:\*{1,2}|`?)/);
+            if (m) {
+              const id = parseInt(m[1], 10);
+              if (!isNaN(id) && id > 0) ids.push(id);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return ids;
+}
 
 export function extractBeerIds(text: string): number[] {
   const ids = new Set<number>();
   let match: RegExpExecArray | null;
 
-  TABLE_BEER_ID_RE.lastIndex = 0;
-  while ((match = TABLE_BEER_ID_RE.exec(text)) !== null) {
-    const id = parseInt(match[1], 10);
-    if (!isNaN(id) && id > 0) ids.add(id);
+  for (const id of extractTableBeerIds(text)) {
+    ids.add(id);
   }
 
   CODE_BEER_ID_RE.lastIndex = 0;
   while ((match = CODE_BEER_ID_RE.exec(text)) !== null) {
-    const id = parseInt(match[1], 10);
-    if (!isNaN(id) && id > 0) ids.add(id);
+    const raw = match[1] || match[2];
+    if (raw) {
+      const id = parseInt(raw, 10);
+      if (!isNaN(id) && id > 0) ids.add(id);
+    }
   }
 
   ROW_BEER_ID_RE.lastIndex = 0;
   while ((match = ROW_BEER_ID_RE.exec(text)) !== null) {
-    const id = parseInt(match[1], 10);
-    if (!isNaN(id) && id > 0) ids.add(id);
+    const raw = match[1] || match[2];
+    if (raw) {
+      const id = parseInt(raw, 10);
+      if (!isNaN(id) && id > 0) ids.add(id);
+    }
   }
 
   return Array.from(ids);
