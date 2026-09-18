@@ -1353,11 +1353,11 @@ describe('#636 ensureBeerRow picks the row of the pair by the digits of the card
 
 describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', () => {
   const ROAD = 'Magic Road Brewery';
-  const linked = (db: ReturnType<typeof setup>['db'], untappd_id: number, name: string, brewery: string) => {
+  const linked = (db: ReturnType<typeof setup>['db'], untappd_id: number, name: string, brewery: string, abv: number | null = null) => {
     const res = db.prepare(
       `INSERT INTO beers (untappd_id, name, brewery, style, abv, rating_global, normalized_name, normalized_brewery, untappd_id_source)
-       VALUES (?, ?, ?, NULL, NULL, 3.9, ?, ?, 'checkin')`,
-    ).run(untappd_id, name, brewery, normalizeName(name), normalizeBrewery(brewery));
+       VALUES (?, ?, ?, NULL, ?, 3.9, ?, ?, 'checkin')`,
+    ).run(untappd_id, name, brewery, abv, normalizeName(name), normalizeBrewery(brewery));
     return Number(res.lastInsertRowid);
   };
 
@@ -1375,6 +1375,14 @@ describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', ()
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROAD, name: 'Lager 12°' }] });
     expect((await res.json()).candidates[0].eligible).toBe(false);
     expect(beerCount(db)).toBe(1);
+  });
+
+  it('a style-only card does not take a linked row of incompatible ABV', async () => {
+    const { db, app } = setup();
+    linked(db, 35687, 'LAGER', ROAD, 4.0);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROAD, name: 'Lager 12°', abv: 7.5 }] });
+    expect((await res.json()).candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
   });
 
   it('a degree-only card does not take a linked row of another degree when styleNameIdentity is empty', async () => {
