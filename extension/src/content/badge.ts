@@ -71,7 +71,17 @@ function wireBadgeClicks(badge: HTMLElement, href: string): void {
 }
 
 function attach(host: HTMLElement, badge: HTMLElement): void {
-  host.querySelector(`[${BADGE_MARKER}]`)?.remove();
+  const outgoing = host.querySelector(`[${BADGE_MARKER}]`);
+  if (outgoing) {
+    // Removing an element does NOT cancel its animations, and the spinner runs with
+    // `iterations: Infinity` — an infinite animation stays current forever and holds the
+    // detached node alive. A card walks queued → working → found on every page run, and
+    // the SPA re-render observer runs cards again, so these would accumulate with no
+    // ceiling. Guarded because jsdom has no getAnimations.
+    const stop = (outgoing as Element & { getAnimations?: (o?: { subtree?: boolean }) => Animation[] }).getAnimations;
+    if (typeof stop === 'function') for (const a of stop.call(outgoing, { subtree: true })) a.cancel();
+    outgoing.remove();
+  }
   if (getComputedStyle(host).position === 'static') host.style.position = 'relative';
   host.appendChild(badge);
 }
@@ -196,19 +206,33 @@ const ICONS: Record<IconName, [string, Record<string, string>][]> = {
 const COLOUR_DRUNK = '#63d999';
 const COLOUR_RATING = '#ffc24d';
 
+// SVG presentation attributes sit at the bottom of the cascade, so ANY shop stylesheet
+// beats them — and two of the most common e-commerce resets are fatal here: `svg {
+// width: 100% }` inflates the glyph inside a pill that has no width, and `svg path {
+// fill: currentColor }` turns every outline into a blob, which makes the queued ring and
+// the rated star the same shape. The old emoji badges were immune because they were text.
+// So everything that paints or sizes goes into inline style, where only `!important`
+// can reach it; only geometry stays an attribute.
+const PAINT_PROPS = new Set([
+  'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin', 'opacity',
+]);
+
 function icon(name: IconName, colour?: string): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 12 12');
-  svg.setAttribute('width', '12');
-  svg.setAttribute('height', '12');
   svg.setAttribute('aria-hidden', 'true');
   svg.setAttribute('data-icon', name);
+  svg.style.setProperty('width', '12px', 'important');
+  svg.style.setProperty('height', '12px', 'important');
   svg.style.display = 'block';
   svg.style.flex = 'none';
   if (colour) svg.style.color = colour;
   for (const [tag, attrs] of ICONS[name]) {
     const node = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (PAINT_PROPS.has(k)) node.style.setProperty(k, v, 'important');
+      else node.setAttribute(k, v);
+    }
     svg.appendChild(node);
   }
   return svg;
@@ -269,6 +293,14 @@ function foundLabel(s: Extract<CardState, { kind: 'found' }>): string {
   const head = s.unsure ? 'Непевний збіг. ' : '';
   if (s.drunk) {
     if (s.mine !== null) return `${head}Ти це пив. Твоя оцінка ${spoken(s.mine)}`;
+    // «Оцінки не ставив» можна стверджувати лише там, де сервер справді дивився: при
+    // непевному збігу `match-list.ts` не віддає особистої оцінки взагалі (user_rating
+    // тільки для exact), тож відсутність числа не доводить, що людина не оцінювала.
+    if (s.unsure) {
+      return s.global !== null
+        ? `${head}Схоже, ти це пив. Глобальна оцінка ${spoken(s.global)}`
+        : `${head}Схоже, ти це пив. Оцінок на Untappd поки замало`;
+    }
     if (s.global !== null) {
       return `${head}Ти це пив, але оцінки не ставив. Глобальна оцінка ${spoken(s.global)}`;
     }
@@ -310,7 +342,11 @@ function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTM
     border: shape.unsure ? '1px dashed rgba(255,255,255,0.8)' : 'none',
     borderRadius: '6px',
     boxSizing: 'border-box',
-    pointerEvents: shape.href !== null ? 'auto' : 'none',
+    // A badge with `pointer-events: none` is never a hit target, so the browser never
+    // renders its `title` tooltip — which would have made the tooltip dead in exactly
+    // the two states that set one. A sighted mouse user has no other way to learn what
+    // a grey reload arrow means; `aria-label` serves only the screen reader.
+    pointerEvents: shape.href !== null || shape.title !== null ? 'auto' : 'none',
     cursor: shape.href !== null ? 'pointer' : 'default',
   } as Partial<CSSStyleDeclaration>);
   for (const p of parts) badge.appendChild(p);
