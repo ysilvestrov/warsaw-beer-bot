@@ -1,6 +1,7 @@
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
 import { digitIdentity, digitsCompatibleAsPeers, readNameDigits } from '../domain/digit-identity';
+import { styleNameIdentity } from '../domain/style-identity';
 import { cardAbv, cardText } from '../domain/card-text';
 
 export type UntappdIdSource = 'search' | 'bid' | 'curated' | 'checkin';
@@ -85,7 +86,12 @@ function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_sou
       id: number; name: string; untappd_id_source: UntappdIdSource | null;
     }[];
   const bidDigits = readNameDigits(b.name);
+  const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
   const compatible = orphans.filter((o) => {
+    // #663: style-only names must match style identity
+    if (b.normalized_name === '' && styleNameIdentity(o.name, b.normalized_brewery) !== inputStyle) {
+      return false;
+    }
     const identity = digitIdentity(readNameDigits(o.name), bidDigits);
     return identity === 'same' || identity === 'year-fallback';
   });
@@ -185,7 +191,11 @@ export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
         ORDER BY id`,
     )
     .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string }[];
-  const existing = orphans.find((o) => digitsCompatibleAsPeers(o.name, b.name));
+  const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
+  const existing = orphans.find((o) =>
+    digitsCompatibleAsPeers(o.name, b.name) &&
+    (b.normalized_name !== '' || styleNameIdentity(o.name, b.normalized_brewery) === inputStyle),
+  );
   if (existing) return existing.id;
 
   const res = db.prepare(

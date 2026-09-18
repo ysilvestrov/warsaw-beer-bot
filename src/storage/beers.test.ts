@@ -1520,6 +1520,23 @@ describe('upsertBeerByBid (#617)', () => {
     expect(row.rating_global).toBeCloseTo(4.1);
   });
 
+  test('#663: style-only orphan is not resolved by a check-in of a different style', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Stout', 'Magic Road', 4.5);
+    const got = upsertBeerByBid(db, bidInput(9999, 'LAGER', 'Magic Road', { rating_global: 3.5 }));
+    expect(got).not.toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBeNull();
+    expect(getBeer(db, got)!.untappd_id).toBe(9999);
+  });
+
+  test('#663: style-only orphan is resolved by a check-in of matching style', () => {
+    const db = fresh();
+    const orphan = insertOrphanRaw(db, 'Pils 12°', 'Zakładowy', 4.8);
+    const got = upsertBeerByBid(db, bidInput(8888, 'Pils', 'Zakładowy', { rating_global: 3.8 }));
+    expect(got).toBe(orphan);
+    expect(getBeer(db, orphan)!.untappd_id).toBe(8888);
+  });
+
   test('#614 linking a row whose bid was cleared drops its merge aliases', () => {
     // Рев'ю 9, M2: аліаси доводили старий bid; без скидання синк оживляв їх під новим bid (хибний ✅).
     const db = fresh();
@@ -1764,6 +1781,22 @@ describe('ensureOrphan (#617)', () => {
       normalized_name: normalizeName('Łan'), normalized_brewery: normalizeBrewery('Sadyba Brewery'),
     });
     expect(got).toBe(oldest);
+  });
+
+  test('#663: orphans with normalized_name === empty separate by styleNameIdentity', () => {
+    const db = fresh();
+    const stout = ensureOrphan(db, orphanInput('Stout', 'Magic Road Brewery'));
+    const lager = ensureOrphan(db, orphanInput('LAGER', 'Magic Road Brewery'));
+    expect(lager).not.toBe(stout);
+    expect(getBeer(db, stout)!.name).toBe('Stout');
+    expect(getBeer(db, lager)!.name).toBe('LAGER');
+  });
+
+  test('#663: orphans with normalized_name === empty and same styleNameIdentity are reused', () => {
+    const db = fresh();
+    const pils12 = ensureOrphan(db, orphanInput('Pils 12°', 'Browar Zakładowy'));
+    const pils11 = ensureOrphan(db, orphanInput('Pils 11°', 'Browar Zakładowy'));
+    expect(pils11).toBe(pils12);
   });
 
   test('bumps the catalog version only when it inserts', () => {
