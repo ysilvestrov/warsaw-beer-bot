@@ -46,25 +46,28 @@ function makeBadge(text: string, href: string | null): HTMLElement {
     pointerEvents: href != null ? 'auto' : 'none',
     cursor: href != null ? 'pointer' : 'default',
   } as Partial<CSSStyleDeclaration>);
-  if (href != null) {
-    // Beershop delegates card navigation on mouseup, before click fires.
-    badge.addEventListener('mouseup', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    badge.addEventListener('click', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      window.open(href, '_blank', 'noopener');
-    });
-    badge.addEventListener('auxclick', (e) => {
-      if (e.button !== 1) return;
-      e.preventDefault();
-      e.stopPropagation();
-      window.open(href, '_blank', 'noopener');
-    });
-  }
+  if (href != null) wireBadgeClicks(badge, href);
   return badge;
+}
+
+// Beershop delegates card navigation on mouseup, before click fires — so all three
+// are swallowed. Shared by the legacy setters and by renderState (#648).
+function wireBadgeClicks(badge: HTMLElement, href: string): void {
+  badge.addEventListener('mouseup', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  badge.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(href, '_blank', 'noopener');
+  });
+  badge.addEventListener('auxclick', (e) => {
+    if (e.button !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(href, '_blank', 'noopener');
+  });
 }
 
 function attach(host: HTMLElement, badge: HTMLElement): void {
@@ -129,4 +132,251 @@ export function setSearching(host: HTMLElement): void {
 /** Swap the badge to ⭐ + global rating once the beer is enriched. */
 export function setEnriched(host: HTMLElement, untappdId: number, ratingGlobal: number | null): void {
   attach(host, makeBadge(ratingGlobal != null ? `⭐ ${ratingGlobal.toFixed(1)}` : '⭐', untappdUrl(untappdId)));
+}
+
+// ── #648: один стан картки — один бейдж ──────────────────────────────────────
+// Раніше бейдж будувався в п'ятьох місцях незалежно (badgeFor + чотири сеттери), і
+// набору гліфів не бачив цілком ніхто. Тепер абетка живе в одному union: додати
+// шостий гліф тихо вже не вийде.
+
+export type FailureReason = 'blocked' | 'network' | 'server' | 'unparsed';
+
+export type CardState =
+  | { kind: 'queued' }
+  | { kind: 'working' }
+  | {
+      kind: 'found';
+      drunk: boolean;
+      /** Твоя оцінка. Сервер заповнює її лише для точного збігу. */
+      mine: number | null;
+      global: number | null;
+      unsure: boolean;
+      /** null — випите пиво сидить на рядку-сироті; клік тоді веде в пошук. */
+      untappdId: number | null;
+      brewery: string;
+      name: string;
+    }
+  | { kind: 'missing'; brewery: string; name: string; orphan: boolean }
+  | { kind: 'deferred' }
+  | { kind: 'failed'; reason: FailureReason }
+  | { kind: 'nonBeer' };
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+type IconName = 'ring' | 'arc' | 'check' | 'star' | 'search' | 'reload' | 'warn' | 'cross';
+
+// Кожна іконка — 12×12, малюється на місці через createElementNS. Спрайта в документі
+// крамниці навмисно нема: чужа сторінка має свої `id`, і колізія коштувала б німого бейджа.
+const ICONS: Record<IconName, [string, Record<string, string>][]> = {
+  ring: [['circle', { cx: '6', cy: '6', r: '4.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5' }]],
+  arc: [
+    ['circle', { cx: '6', cy: '6', r: '4.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', opacity: '0.3' }],
+    ['path', { d: 'M6 1.6a4.4 4.4 0 0 1 4.4 4.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.6', 'stroke-linecap': 'round' }],
+  ],
+  check: [['path', { d: 'M2.3 6.3 5 9 9.8 3.3', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.8', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }]],
+  star: [['path', { d: 'M6 1.15 7.5 4.2l3.35.49-2.42 2.37.57 3.35L6 8.83 3 10.41l.57-3.35L1.15 4.69 4.5 4.2z', fill: 'currentColor' }]],
+  search: [
+    ['circle', { cx: '5.1', cy: '5.1', r: '3.3', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5' }],
+    ['path', { d: 'M7.6 7.6 10.3 10.3', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round' }],
+  ],
+  reload: [
+    ['path', { d: 'M10.2 6a4.2 4.2 0 1 1-1.3-3.03', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' }],
+    ['path', { d: 'M10.5 1.2v2.5H8', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }],
+  ],
+  warn: [
+    ['path', { d: 'M6 1.5 11 10.4H1z', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.4', 'stroke-linejoin': 'round' }],
+    ['path', { d: 'M6 4.8v2.4', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round' }],
+    ['circle', { cx: '6', cy: '8.7', r: '0.75', fill: 'currentColor' }],
+  ],
+  cross: [['path', { d: 'M3 3 9 9M9 3 3 9', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.7', 'stroke-linecap': 'round' }]],
+};
+
+// Колір носить лише сигнал: це єдині дві картки, між якими людина обирає. Форма
+// (галочка проти зірки) каже те саме без кольору — для монохрому й дальтонізму.
+const COLOUR_DRUNK = '#63d999';
+const COLOUR_RATING = '#ffc24d';
+
+function icon(name: IconName, colour?: string): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 12 12');
+  svg.setAttribute('width', '12');
+  svg.setAttribute('height', '12');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('data-icon', name);
+  svg.style.display = 'block';
+  svg.style.flex = 'none';
+  if (colour) svg.style.color = colour;
+  for (const [tag, attrs] of ICONS[name]) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    svg.appendChild(node);
+  }
+  return svg;
+}
+
+function spinning(svg: SVGSVGElement): SVGSVGElement {
+  svg.style.transformOrigin = '50% 50%';
+  const reduce =
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // WAAPI, а не CSS-анімація: @keyframes вимагали б <style> у чужому документі.
+  const animate = (svg as unknown as { animate?: Element['animate'] }).animate;
+  if (!reduce && typeof animate === 'function') {
+    animate.call(
+      svg,
+      [{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }],
+      { duration: 1100, iterations: Infinity },
+    );
+  }
+  return svg;
+}
+
+const numberSpan = (text: string): HTMLElement => {
+  const s = document.createElement('span');
+  s.textContent = text;
+  s.style.fontVariantNumeric = 'tabular-nums';
+  return s;
+};
+
+const questionMark = (): HTMLElement => {
+  const s = document.createElement('span');
+  s.textContent = '?';
+  s.style.font = '700 10px/1 system-ui, sans-serif';
+  return s;
+};
+
+const glued = (...kids: (HTMLElement | SVGElement)[]): HTMLElement => {
+  const w = document.createElement('span');
+  w.style.display = 'inline-flex';
+  w.style.alignItems = 'center';
+  w.style.gap = '2px';
+  for (const k of kids) w.appendChild(k);
+  return w;
+};
+
+// Показуємо крапку (4.1), промовляємо кому (4,1) — так її читає українська озвучка.
+const shown = (v: number): string => v.toFixed(1);
+const spoken = (v: number): string => v.toFixed(1).replace('.', ',');
+
+const FAILURE_LABEL: Record<FailureReason, string> = {
+  blocked: 'Не вдалося перевірити: Untappd не відповів',
+  network: 'Не вдалося перевірити: не було звʼязку',
+  server: 'Не вдалося перевірити: сервер не відповів',
+  unparsed: 'Не змогли розібрати цю картку',
+};
+
+function foundLabel(s: Extract<CardState, { kind: 'found' }>): string {
+  const head = s.unsure ? 'Непевний збіг. ' : '';
+  if (s.drunk) {
+    if (s.mine !== null) return `${head}Ти це пив. Твоя оцінка ${spoken(s.mine)}`;
+    if (s.global !== null) {
+      return `${head}Ти це пив, але оцінки не ставив. Глобальна оцінка ${spoken(s.global)}`;
+    }
+    return `${head}Ти це пив. Ані твоєї, ані глобальної оцінки нема`;
+  }
+  return s.global !== null
+    ? `${head}Ти це не пив. Глобальна оцінка ${spoken(s.global)}`
+    : `${head}Ти це не пив. Оцінок на Untappd поки замало`;
+}
+
+interface BadgeShape {
+  quiet: boolean;
+  unsure: boolean;
+  href: string | null;
+  label: string;
+  title: string | null;
+}
+
+function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTMLElement {
+  const badge = document.createElement('div');
+  badge.setAttribute(BADGE_MARKER, '');
+  badge.setAttribute('role', 'img');
+  badge.setAttribute('aria-label', shape.label);
+  if (shape.title !== null) badge.setAttribute('title', shape.title);
+  Object.assign(badge.style, {
+    position: 'absolute',
+    top: '4px',
+    right: '4px',
+    zIndex: '2147483647',
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '3px',
+    background: shape.quiet ? 'rgba(20,20,20,0.62)' : 'rgba(20,20,20,0.82)',
+    color: shape.quiet ? '#cfd4da' : '#fff',
+    font: '600 12px/1 system-ui, sans-serif',
+    // Пунктирна рамка з'їдає піксель усередині — padding компенсує, щоб пігулка
+    // непевного збігу не стрибала в розмірі проти певного.
+    padding: shape.unsure ? '2px 5px' : '3px 6px',
+    border: shape.unsure ? '1px dashed rgba(255,255,255,0.8)' : 'none',
+    borderRadius: '6px',
+    boxSizing: 'border-box',
+    pointerEvents: shape.href !== null ? 'auto' : 'none',
+    cursor: shape.href !== null ? 'pointer' : 'default',
+  } as Partial<CSSStyleDeclaration>);
+  for (const p of parts) badge.appendChild(p);
+  if (shape.href !== null) wireBadgeClicks(badge, shape.href);
+  return badge;
+}
+
+export function renderState(host: HTMLElement, state: CardState): void {
+  const parts: (HTMLElement | SVGElement)[] = [];
+  let quiet = false;
+  let unsure = false;
+  let href: string | null = null;
+  let title: string | null = null;
+  let label: string;
+
+  switch (state.kind) {
+    case 'queued':
+      quiet = true;
+      parts.push(icon('ring'));
+      label = 'Чекає черги';
+      break;
+    case 'working':
+      parts.push(spinning(icon('arc')));
+      label = 'Шукаємо це пиво';
+      break;
+    case 'nonBeer':
+      quiet = true;
+      parts.push(icon('cross'));
+      label = 'Не пиво';
+      break;
+    case 'deferred':
+      quiet = true;
+      parts.push(icon('reload'));
+      label = 'Не встигли: ліміт пошуків на сторінку. Перезавантаж сторінку';
+      title = label;
+      break;
+    case 'failed':
+      parts.push(icon('warn'));
+      label = FAILURE_LABEL[state.reason];
+      title = label;
+      break;
+    case 'missing':
+      parts.push(icon('search'));
+      href = untappdSearchUrl(state.brewery, state.name);
+      label = state.orphan
+        ? 'Пиво є в каталозі, але сторінки на Untappd нема. Клік відкриє пошук'
+        : 'На Untappd не знайшли. Клік відкриє пошук';
+      break;
+    case 'found':
+      unsure = state.unsure;
+      href = hrefFor(state.untappdId, state.brewery, state.name);
+      if (state.drunk) {
+        parts.push(icon('check', COLOUR_DRUNK));
+        if (unsure) parts.push(questionMark());
+        if (state.mine !== null) parts.push(numberSpan(shown(state.mine)));
+        else if (state.global !== null) {
+          parts.push(glued(icon('star', COLOUR_RATING), numberSpan(shown(state.global))));
+        }
+      } else {
+        parts.push(icon('star', COLOUR_RATING));
+        if (unsure) parts.push(questionMark());
+        if (state.global !== null) parts.push(numberSpan(shown(state.global)));
+      }
+      label = foundLabel(state);
+      break;
+  }
+
+  attach(host, buildBadge(parts, { quiet, unsure, href, label, title }));
 }

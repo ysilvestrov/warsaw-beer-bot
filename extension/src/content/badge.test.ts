@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER, resetCard } from './badge';
 import { setSearching, setEnriched, setOrphan, setNonBeer } from './badge';
+import { renderState, type CardState } from './badge';
 import type { MatchResult } from '../api/types';
 
 function el(): HTMLElement {
@@ -409,5 +410,189 @@ describe('❓ uncertain-drunk badge', () => {
     const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
     expect(badge).not.toBeNull();
     expect(badge.textContent).toBe('✅ 4.2');
+  });
+});
+
+function icons(host: HTMLElement): string[] {
+  const badge = host.querySelector(`[${BADGE_MARKER}]`)!;
+  return [...badge.querySelectorAll('[data-icon]')].map((n) => n.getAttribute('data-icon')!);
+}
+function badgeOf(host: HTMLElement): HTMLElement {
+  return host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
+}
+
+const found = (over: Partial<Extract<CardState, { kind: 'found' }>> = {}): CardState => ({
+  kind: 'found',
+  drunk: false,
+  mine: null,
+  global: 4.1,
+  unsure: false,
+  untappdId: 111,
+  brewery: 'PINTA',
+  name: 'Hazy Morning',
+  ...over,
+});
+
+describe('#648 renderState', () => {
+  const table: [string, CardState, string[], string, string | null][] = [
+    ['queued', { kind: 'queued' }, ['ring'], 'Чекає черги', null],
+    ['working', { kind: 'working' }, ['arc'], 'Шукаємо це пиво', null],
+    ['nonBeer', { kind: 'nonBeer' }, ['cross'], 'Не пиво', null],
+    ['deferred', { kind: 'deferred' }, ['reload'],
+      'Не встигли: ліміт пошуків на сторінку. Перезавантаж сторінку', null],
+    ['failed blocked', { kind: 'failed', reason: 'blocked' }, ['warn'],
+      'Не вдалося перевірити: Untappd не відповів', null],
+    ['failed unparsed', { kind: 'failed', reason: 'unparsed' }, ['warn'],
+      'Не змогли розібрати цю картку', null],
+    ['missing orphan', { kind: 'missing', brewery: 'PINTA', name: 'Ghost', orphan: true }, ['search'],
+      'Пиво є в каталозі, але сторінки на Untappd нема. Клік відкриє пошук',
+      'https://untappd.com/search?q=PINTA%20Ghost&type=beer'],
+    ['missing absent', { kind: 'missing', brewery: 'PINTA', name: 'Ghost', orphan: false }, ['search'],
+      'На Untappd не знайшли. Клік відкриє пошук',
+      'https://untappd.com/search?q=PINTA%20Ghost&type=beer'],
+    ['found, not drunk, rated', found(), ['star'],
+      'Ти це не пив. Глобальна оцінка 4,1', 'https://untappd.com/beer/111'],
+    ['found, not drunk, unrated', found({ global: null }), ['star'],
+      'Ти це не пив. Оцінок на Untappd поки замало', 'https://untappd.com/beer/111'],
+    ['found, drunk, own rating', found({ drunk: true, mine: 4.2 }), ['check'],
+      'Ти це пив. Твоя оцінка 4,2', 'https://untappd.com/beer/111'],
+    ['found, drunk, no own rating', found({ drunk: true }), ['check', 'star'],
+      'Ти це пив, але оцінки не ставив. Глобальна оцінка 4,1', 'https://untappd.com/beer/111'],
+    ['found, drunk, no rating at all', found({ drunk: true, global: null }), ['check'],
+      'Ти це пив. Ані твоєї, ані глобальної оцінки нема', 'https://untappd.com/beer/111'],
+    ['found, unsure', found({ drunk: true, unsure: true }), ['check', 'star'],
+      'Непевний збіг. Ти це пив, але оцінки не ставив. Глобальна оцінка 4,1',
+      'https://untappd.com/beer/111'],
+    ['found, drunk on an orphan row', found({ drunk: true, untappdId: null, global: null }), ['check'],
+      'Ти це пив. Ані твоєї, ані глобальної оцінки нема',
+      'https://untappd.com/search?q=PINTA%20Hazy%20Morning&type=beer'],
+  ];
+
+  it.each(table)('%s', (_name, state, wantIcons, wantLabel, wantHref) => {
+    const host = el();
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    renderState(host, state);
+    const badge = badgeOf(host);
+    expect(icons(host)).toEqual(wantIcons);
+    expect(badge.getAttribute('role')).toBe('img');
+    expect(badge.getAttribute('aria-label')).toBe(wantLabel);
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    if (wantHref === null) expect(open).not.toHaveBeenCalled();
+    else expect(open).toHaveBeenCalledWith(wantHref, '_blank', 'noopener');
+  });
+
+  it('shows the rating number with a dot, and only when there is one', () => {
+    const host = el();
+    renderState(host, found({ global: 4.1 }));
+    expect(badgeOf(host).textContent).toBe('4.1');
+    renderState(host, found({ global: null }));
+    expect(badgeOf(host).textContent).toBe('');
+  });
+
+  it('marks an unsure badge with a dashed border and a question mark', () => {
+    const host = el();
+    renderState(host, found({ unsure: true, global: 4.1 }));
+    const badge = badgeOf(host);
+    expect(badge.style.border).toContain('dashed');
+    expect(badge.textContent).toBe('?4.1');
+  });
+
+  // The drunk branch builds its own parts list, so it needs its own proof that the
+  // question mark is there — a mutation that dropped it only from this branch survived
+  // the table above, which pins icons and the label but not the text.
+  it('marks an unsure DRUNK badge with the question mark too', () => {
+    const host = el();
+    renderState(host, found({ drunk: true, unsure: true, mine: 4.2 }));
+    expect(badgeOf(host).textContent).toBe('?4.2');
+    renderState(host, found({ drunk: true, unsure: true, global: 4.1 }));
+    expect(badgeOf(host).textContent).toBe('?4.1');
+  });
+
+  it('colours only the check and the star', () => {
+    const host = el();
+    renderState(host, found({ drunk: true, mine: 4.2 }));
+    expect((badgeOf(host).querySelector('[data-icon="check"]') as HTMLElement).style.color)
+      .toBe('rgb(99, 217, 153)');
+
+    renderState(host, found({ global: 4.1 }));
+    expect((badgeOf(host).querySelector('[data-icon="star"]') as HTMLElement).style.color)
+      .toBe('rgb(255, 194, 77)');
+
+    const colourless: CardState[] = [
+      { kind: 'nonBeer' },
+      { kind: 'failed', reason: 'network' },
+      { kind: 'deferred' },
+      { kind: 'missing', brewery: 'a', name: 'b', orphan: false },
+    ];
+    for (const state of colourless) {
+      renderState(host, state);
+      const glyph = badgeOf(host).querySelector('[data-icon]') as HTMLElement;
+      expect(glyph.style.color).toBe('');
+    }
+  });
+
+  it('replaces the previous badge instead of stacking, so a transition is visible', () => {
+    const host = el();
+    renderState(host, { kind: 'queued' });
+    renderState(host, { kind: 'working' });
+    renderState(host, found({ global: 4.1 }));
+    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
+    expect(icons(host)).toEqual(['star']);
+  });
+
+  // jsdom provides NEITHER window.matchMedia NOR Element.animate, so both are defined
+  // here and put back afterwards — otherwise every later test in the file inherits a
+  // fake the suite never asked for. That jsdom lacks matchMedia is also why the guard
+  // in `spinning` is load-bearing and not defensive noise.
+  function withSpinnerEnv(reduceMotion: boolean | 'absent', body: (animate: () => void) => void): void {
+    const w = window as unknown as { matchMedia?: unknown };
+    const proto = SVGElement.prototype as unknown as { animate?: unknown };
+    const hadMm = Object.prototype.hasOwnProperty.call(w, 'matchMedia');
+    const prevMm = w.matchMedia;
+    const hadAnim = Object.prototype.hasOwnProperty.call(proto, 'animate');
+    const prevAnim = proto.animate;
+    const animate = vi.fn();
+    if (reduceMotion !== 'absent') {
+      w.matchMedia = (q: string) => ({
+        matches: reduceMotion, media: q, addEventListener() {}, removeEventListener() {},
+      });
+    }
+    proto.animate = animate;
+    try {
+      body(animate);
+    } finally {
+      if (hadMm) w.matchMedia = prevMm;
+      else delete w.matchMedia;
+      if (hadAnim) proto.animate = prevAnim;
+      else delete proto.animate;
+    }
+  }
+
+  it('does not animate the spinner when the viewer asked for reduced motion', () => {
+    const host = el();
+    withSpinnerEnv(true, (animate) => {
+      renderState(host, { kind: 'working' });
+      expect(animate).not.toHaveBeenCalled();
+    });
+  });
+
+  it('animates the spinner when reduced motion was not asked for', () => {
+    const host = el();
+    withSpinnerEnv(false, (animate) => {
+      renderState(host, { kind: 'working' });
+      expect(animate).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // No matchMedia means no preference was expressed, which is not the same as asking
+  // for reduced motion: the spinner still spins, and the guard only keeps the missing
+  // API from throwing.
+  it('still spins where matchMedia does not exist, instead of throwing', () => {
+    const host = el();
+    withSpinnerEnv('absent', (animate) => {
+      renderState(host, { kind: 'working' });
+      expect(icons(host)).toEqual(['arc']);
+      expect(animate).toHaveBeenCalledTimes(1);
+    });
   });
 });
