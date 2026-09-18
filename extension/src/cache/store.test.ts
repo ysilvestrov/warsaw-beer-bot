@@ -8,6 +8,8 @@ const sample: MatchResult = {
   is_drunk: true,
   drunk_uncertain: false,
   user_rating: 4.0,
+  source: 'exact',
+  searched: true,
 };
 
 describe('cache/store', () => {

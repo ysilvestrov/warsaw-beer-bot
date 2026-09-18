@@ -16,6 +16,8 @@ const drunk = (userRating: number | null): MatchResult => ({
   is_drunk: true,
   drunk_uncertain: false,
   user_rating: userRating,
+  source: 'exact',
+  searched: true,
 });
 
 const notDrunkRated: MatchResult = {
@@ -24,6 +26,8 @@ const notDrunkRated: MatchResult = {
   is_drunk: false,
   drunk_uncertain: false,
   user_rating: null,
+  source: 'exact',
+  searched: true,
 };
 
 const notDrunkOrphan: MatchResult = {
@@ -32,6 +36,8 @@ const notDrunkOrphan: MatchResult = {
   is_drunk: false,
   drunk_uncertain: false,
   user_rating: null,
+  source: 'exact',
+  searched: true,
 };
 
 const unmatched: MatchResult = {
@@ -40,6 +46,8 @@ const unmatched: MatchResult = {
   is_drunk: false,
   drunk_uncertain: false,
   user_rating: null,
+  source: null,
+  searched: true,
 };
 
 beforeEach(() => {
@@ -169,6 +177,8 @@ const orphan: MatchResult = {
   is_drunk: false,
   drunk_uncertain: false,
   user_rating: null,
+  source: 'exact',
+  searched: true,
 };
 
 describe('orphan + enrichment badge states', () => {
@@ -263,7 +273,7 @@ describe('seen marker', () => {
 describe('resetCard', () => {
   it('resetCard removes the badge and the seen marker', () => {
     const host = document.createElement('div');
-    renderBadge(host, { is_drunk: true, drunk_uncertain: false, user_rating: 4, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
+    renderBadge(host, { is_drunk: true, drunk_uncertain: false, user_rating: 4, source: null, searched: true, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
     markSeen(host);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
     expect(isSeen(host)).toBe(true);
@@ -288,7 +298,7 @@ describe('badge click targets (#167)', () => {
     renderBadge(host, {
       raw: { brewery: 'PINTA', name: 'Hazy Morning' },
       matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
-      is_drunk: true, drunk_uncertain: false, user_rating: 4.0,
+      is_drunk: true, drunk_uncertain: false, user_rating: 4.0, source: 'exact', searched: true,
     });
     const badge = clickBadge(host);
     expect(badge.style.cursor).toBe('pointer');
@@ -301,7 +311,7 @@ describe('badge click targets (#167)', () => {
     renderBadge(host, {
       raw: { brewery: 'Mad Brew', name: 'Bendera ya Uhuru' },
       matched_beer: { id: 2, name: 'Bendera ya Uhuru', brewery: 'Mad Brew', rating_global: null, untappd_id: null },
-      is_drunk: true, drunk_uncertain: false, user_rating: null,
+      is_drunk: true, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     });
     clickBadge(host);
     expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Mad%20Brew%20Bendera%20ya%20Uhuru&type=beer', '_blank', 'noopener');
@@ -313,7 +323,7 @@ describe('badge click targets (#167)', () => {
     renderBadge(host, {
       raw: { brewery: 'PINTA', name: 'Orphan' },
       matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: false, user_rating: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     });
     const badge = clickBadge(host);
     expect(badge.style.cursor).toBe('pointer');
@@ -326,7 +336,7 @@ describe('badge click targets (#167)', () => {
     renderBadge(host, {
       raw: { brewery: 'Rebrew', name: 'Fuzzy Orphan' },
       matched_beer: { id: 4, name: 'Fuzzy Orphan', brewery: 'Rebrew', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: true, user_rating: null,
+      is_drunk: false, drunk_uncertain: true, user_rating: null, source: 'fuzzy', searched: true,
     });
     clickBadge(host);
     expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Rebrew%20Fuzzy%20Orphan&type=beer', '_blank', 'noopener');
@@ -338,7 +348,7 @@ describe('badge click targets (#167)', () => {
     renderBadge(host, {
       raw: { brewery: 'PINTA', name: 'New One' },
       matched_beer: { id: 5, name: 'New One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 222 },
-      is_drunk: false, drunk_uncertain: false, user_rating: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     });
     clickBadge(host);
     expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
@@ -352,6 +362,8 @@ const baseUncertain: MatchResult = {
   is_drunk: false,
   drunk_uncertain: true,
   user_rating: null,
+  source: 'fuzzy',
+  searched: true,
   matched_beer: null,
 };
 
@@ -404,6 +416,8 @@ describe('❓ uncertain-drunk badge', () => {
       ...baseUncertain,
       is_drunk: true,
       user_rating: 4.2,
+      source: 'exact',
+      searched: true,
       matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
     };
     renderBadge(host, result);

@@ -13,6 +13,8 @@ function drunkResult(brewery: string, name: string): MatchResult {
     is_drunk: true,
     drunk_uncertain: false,
     user_rating: 4.2,
+    source: 'exact',
+    searched: true,
   };
 }
 
@@ -58,6 +60,8 @@ describe('runOverlay', () => {
       is_drunk: false,
       drunk_uncertain: false,
       user_rating: null,
+      source: null,
+      searched: true,
     };
     await setCached(normalizeKey('PINTA', 'Unknown'), unresolved);
     const sendMatch = vi.fn(async (): Promise<MatchResult[]> => [{
@@ -85,6 +89,8 @@ describe('runOverlay', () => {
       is_drunk: true,
       drunk_uncertain: false,
       user_rating: 4,
+      source: null,
+      searched: true,
     };
     await setCached(normalizeKey('PINTA', 'Unknown'), unresolved);
     const sendMatch = vi.fn(async (): Promise<MatchResult[]> => [{
@@ -342,7 +348,7 @@ describe('runOverlay', () => {
     const a = cardEl();
     const b = cardEl();
     const notDrunk: MatchResult = {
-      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
+      raw: { brewery: 'X', name: 'Two' }, matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null, source: null, searched: true,
     };
     const adapter = adapterFor([
       { el: a, brewery: 'X', name: 'One' },
@@ -361,7 +367,7 @@ describe('runOverlay', () => {
     const orphan: MatchResult = {
       raw: { brewery: 'B', name: 'Orphan One' },
       matched_beer: { id: 1, name: 'Orphan One', brewery: 'B', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: false, user_rating: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     };
     const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan One' }]);
     const sendMatch = async () => [orphan];
@@ -377,12 +383,12 @@ describe('runOverlay', () => {
     const uncertainOrphan: MatchResult = {
       raw: { brewery: 'B', name: 'Uncertain One' },
       matched_beer: { id: 2, name: 'Uncertain One', brewery: 'B', rating_global: 3.8, untappd_id: null },
-      is_drunk: false, drunk_uncertain: true, user_rating: null,
+      is_drunk: false, drunk_uncertain: true, user_rating: null, source: 'fuzzy', searched: true,
     };
     const regularOrphan: MatchResult = {
       raw: { brewery: 'B', name: 'Regular Orphan' },
       matched_beer: { id: 3, name: 'Regular Orphan', brewery: 'B', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: false, user_rating: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     };
     const adapter = adapterFor([
       { el: a, brewery: 'B', name: 'Uncertain One' },
@@ -405,7 +411,7 @@ describe('runOverlay bid-contradiction orphans (#384)', () => {
   const linked = (brewery: string, name: string, untappd_id: number, over: Partial<MatchResult> = {}): MatchResult => ({
     raw: { brewery, name },
     matched_beer: { id: 7, name, brewery, rating_global: 3.5, untappd_id },
-    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
     ...over,
   });
 
@@ -461,7 +467,7 @@ describe('runOverlay bid-contradiction orphans (#384)', () => {
     const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan', bid: 555, bidSlug: 'b-orphan' }]);
     const orphan: MatchResult = {
       raw: { brewery: 'B', name: 'Orphan' },
-      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
+      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null, source: null, searched: true,
     };
     const enrich = vi.fn();
     await runOverlay(document, adapter, async () => [orphan], enrich);
@@ -481,7 +487,7 @@ describe('runOverlay bid-contradiction orphans (#384)', () => {
     }]);
     const orphan: MatchResult = {
       raw: { brewery: 'Trappistes', name: 'Rochefort 8 (2025)' },
-      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null,
+      matched_beer: null, is_drunk: false, drunk_uncertain: false, user_rating: null, source: null, searched: true,
     };
     const enrich = vi.fn();
 
@@ -525,7 +531,7 @@ describe('runOverlay orphan facts (#369)', () => {
   const orphanResult = (brewery: string, name: string): MatchResult => ({
     raw: { brewery, name },
     matched_beer: { id: 1, name, brewery, rating_global: null, untappd_id: null },
-    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
   });
 
   it('relays abv and style, keeping 0 as a value rather than dropping it', async () => {
@@ -569,7 +575,7 @@ describe('runOverlay sanitizes shop ABV (#369)', () => {
   const orphanResult = (brewery: string, name: string): MatchResult => ({
     raw: { brewery, name },
     matched_beer: { id: 1, name, brewery, rating_global: null, untappd_id: null },
-    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
   });
 
   it.each([

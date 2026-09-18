@@ -8,7 +8,7 @@ const tick = (ms: number) => new Promise((r) => setTimeout(r, ms));
 beforeEach(() => { document.body.innerHTML = ''; });
 
 const drunk = (): MatchResult => ({
-  raw: { brewery: 'B', name: '' }, matched_beer: null, is_drunk: true, drunk_uncertain: false, user_rating: 4.2,
+  raw: { brewery: 'B', name: '' }, matched_beer: null, is_drunk: true, drunk_uncertain: false, user_rating: 4.2, source: null, searched: true,
 });
 
 function fakeAdapter(over: Partial<SiteAdapter> = {}): SiteAdapter {
