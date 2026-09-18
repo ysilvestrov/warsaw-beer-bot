@@ -1088,6 +1088,24 @@ describe('#427 upstream identity evidence', () => {
     expect(out.result.bid).toBe(1);
   });
 
+  test('#465 identity alias: bare brewery brand does not admit an unrelated beer when name is empty', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 999999,
+        beer_name: 'Random Beer',
+        brewery_name: 'Other Brewery',
+        style: 'IPA',
+        abv: 5,
+        global_rating: 3.5,
+        alias_alt: ['Magic Road'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Magic Road', name: '', abv: 5, search });
+
+    expect(out.kind).toBe('not_found');
+  });
+
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
       { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,

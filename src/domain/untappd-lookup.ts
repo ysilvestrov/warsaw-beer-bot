@@ -466,12 +466,13 @@ export async function lookupBeer(
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
   const normalizedInputName = baseNormalize(name);
+  // #465: drop empty candidate names so bare brewery brand is never admitted into inputIdentityAliases
   const inputIdentityAliases = new Set(
     inputBreweryAliases.flatMap((alias) => {
       const strippedName = stripBreweryFromName(normalizedInputName, alias);
-      return [normalizedInputName, strippedName].map((candidateName) =>
-        baseNormalize(`${alias} ${candidateName}`),
-      );
+      return [normalizedInputName, strippedName]
+        .filter((candidateName) => candidateName.trim() !== '')
+        .map((candidateName) => baseNormalize(`${alias} ${candidateName}`));
     }),
   );
   const targetNames = fuzzyTargets(name, brewery);
