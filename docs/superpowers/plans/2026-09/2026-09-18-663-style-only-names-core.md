@@ -121,9 +121,11 @@ export function styleNameIdentity(rawName: string, breweryNorm: string): string 
 }
 ```
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/domain/style-identity.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "feat(domain): add styleNameIdentity for style-only names (#663)"`.
+- [x] **Step 1: Write failing tests** in `src/domain/style-identity.test.ts`:
+- [x] **Step 2: Implement `src/domain/style-identity.ts`**:
+- [x] **Step 3: Run unit tests**: `npx vitest run src/domain/style-identity.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "feat(domain): add styleNameIdentity for style-only names (#663)"`.
 
 ---
 
@@ -133,16 +135,16 @@ export function styleNameIdentity(rawName: string, breweryNorm: string): string 
 - Modify: `src/domain/digit-identity.ts`
 - Modify: `src/domain/digit-identity.test.ts`
 
-- [ ] **Step 1: Write test in `src/domain/digit-identity.test.ts`**:
+- [x] **Step 1: Write test in `src/domain/digit-identity.test.ts`**:
 Add test asserting that `digitIdentity` does NOT give `number-fallback` when candidate has no letters outside digits (e.g. `LAGER 10.5°` vs candidate `21`).
 
-- [ ] **Step 2: Implement guard in `src/domain/digit-identity.ts`**:
+- [x] **Step 2: Implement guard in `src/domain/digit-identity.ts`**:
 In `digitIdentity(input, candidate)`:
 When candidate has a number that input does not have, allow `number-fallback` **only if** candidate name contains at least one letter token (`/[a-z]/i.test(candidateName)`). If candidate is purely numeric (like `21`, `15`, `87`), return `'different'`.
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/domain/digit-identity.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "fix(digit-identity): require candidate letters for number-fallback (#663, #636)"`.
+- [x] **Step 3: Run unit tests**: `npx vitest run src/domain/digit-identity.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "fix(digit-identity): require candidate letters for number-fallback (#663, #636)"`.
 
 ---
 
@@ -152,7 +154,7 @@ When candidate has a number that input does not have, allow `number-fallback` **
 - Modify: `src/domain/matcher.ts`
 - Modify: `src/domain/matcher.test.ts`
 
-- [ ] **Step 1: Add failing test cases in `src/domain/matcher.test.ts`**:
+- [x] **Step 1: Add failing test cases in `src/domain/matcher.test.ts`**:
   - `Pils 12°` matches `Zakładowy / Pils` (exact, conf=1.0)
   - `Weizen 12,5°` matches `Trzech Kumpli / Weizen` (exact, conf=1.0)
   - `Stout` refuses `Magic Road / LAGER` (returns null, stays orphan)
@@ -162,7 +164,7 @@ When candidate has a number that input does not have, allow `number-fallback` **
   - `Pils 12,0°` refuses `Remeslo / WEIZEN` (returns null, stays orphan)
   - `Pils 12°` (abv 4.8) refuses `Zakładowy / Pils` (abv 5.2) if breweries don't match or ABV mismatch
 
-- [ ] **Step 2: Update `matchPrepared` in `src/domain/matcher.ts`**:
+- [x] **Step 2: Update `matchPrepared` in `src/domain/matcher.ts`**:
   1. Compute `inputStyleIdentity = nn === '' ? styleNameIdentity(input.name, inputAliases[0] ?? '') : ''`.
   2. In exact filter:
      ```typescript
@@ -189,9 +191,9 @@ When candidate has a number that input does not have, allow `number-fallback` **
      ```
   4. Ensure `nameTokensDiverge(nn, cand.nameNorm)` also returns `true` (diverges) if one name has tokens while the other is empty.
 
-- [ ] **Step 3: Run unit tests**: `npx vitest run src/domain/matcher.test.ts`.
-- [ ] **Step 4: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 5: Commit**: `git commit -m "fix(matcher): gate exact matching and forbid fuzzy for style-only names (#663)"`.
+- [x] **Step 3: Run unit tests**: `npx vitest run src/domain/matcher.test.ts`.
+- [x] **Step 4: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 5: Commit**: `git commit -m "fix(matcher): gate exact matching and forbid fuzzy for style-only names (#663)"`.
 
 ---
 
@@ -200,7 +202,7 @@ When candidate has a number that input does not have, allow `number-fallback` **
 **Files:**
 - Run probe script against `/var/lib/warsaw-beer-bot/bot.db` (read-only).
 
-- [ ] **Step 1: Run replay on all 24 live tap links**:
+- [x] **Step 1: Run replay on all 24 live tap links**:
 Verify that all 16 bogus links are rejected (`res: null`), while legitimate links (`Zakładowy Pils`, `Trzech Kumpli Weizen`, `Zwierzyniec Pils`, `Remeslo WEIZEN`) match cleanly.
-- [ ] **Step 2: Run full gate**: `npm test && npm run typecheck`.
-- [ ] **Step 3: Summary and ready for whole-branch review before Periphery stage**.
+- [x] **Step 2: Run full gate**: `npm test && npm run typecheck`.
+- [x] **Step 3: Summary and ready for whole-branch review before Periphery stage**.
