@@ -367,4 +367,81 @@ Also see beer \`#34252\` and \`34253\`.
     expect(flaskerCluster.impactScore).toBeGreaterThan(0);
     expect(flaskerCluster.locus).toBe('adapter_bug');
   });
+
+  it('classifies empty & style-only name collapse issues into empty-style-name-collapse', () => {
+    const issue663: RawIssue = {
+      number: 663,
+      title: "Матчер: назва крана лише зі стилю (Pils 12°, IPA 15°, LAGER 10.5°) нормалізується в порожнечу і «точно» лінкується на випадкове пиво броварні (25 живих лінків)",
+      body: 'Серед 1 015 живих автолінків кранів 26 мають назву, яка нормалізується в порожнечу...',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-17T00:00:00Z',
+      updatedAt: '2026-09-17T00:00:00Z',
+    };
+    const issue465: RawIssue = {
+      number: 465,
+      title: "[matcher-bug] Identity-alias rescue can admit a bare brewery alias when the beer name normalizes to empty",
+      body: 'When one is empty, baseNormalize collapses to bare brewery alias...',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-08-15T00:00:00Z',
+      updatedAt: '2026-08-15T00:00:00Z',
+    };
+
+    expect(classifyIssue(issue663).clusterKey).toBe('empty-style-name-collapse');
+    expect(classifyIssue(issue663).locus).toBe('matcher_gate_bug');
+    expect(classifyIssue(issue465).clusterKey).toBe('empty-style-name-collapse');
+  });
+
+  it('classifies Czech Plato grade and vintage issues into query-zeroing-descriptors', () => {
+    const issue665: RawIssue = {
+      number: 665,
+      title: "Матчер: м'який градус пускає чеську «десітку» на «дванадцятку» — KONRAD 10° сидить на сироті Konrad 12° (2 живі лінки)",
+      body: 'Дефект виплив на чекпойнті #636...',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-18T00:00:00Z',
+      updatedAt: '2026-09-18T00:00:00Z',
+    };
+    const issue338: RawIssue = {
+      number: 338,
+      title: "Matcher: shop vintage differing from the single cataloged vintage is stuck orphan (year-aware /match vs year-blind enrich eligibility)",
+      body: 'matched catalog beer 20804 | Revolution Brewing | Café Deth (2020)',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-07-21T00:00:00Z',
+      updatedAt: '2026-07-21T00:00:00Z',
+    };
+
+    expect(classifyIssue(issue665).clusterKey).toBe('query-zeroing-descriptors');
+    expect(classifyIssue(issue338).clusterKey).toBe('query-zeroing-descriptors');
+    expect(classifyIssue(issue338).beerIds).toContain(20804);
+  });
+
+  it('classifies numeric series identity issues into typo-fuzzy-rescue', () => {
+    const issue664: RawIssue = {
+      number: 664,
+      title: "Ідентичність цифр: крамниця нумерує серію інакше, ніж Untappd — правило #636 відкидає правильне пиво (Owocowa Fantazja #1, рядок 31170)",
+      body: 'Рядок **31170** — той, заради якого робили #271',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-09-17T00:00:00Z',
+      updatedAt: '2026-09-17T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issue664);
+    expect(classified.clusterKey).toBe('typo-fuzzy-rescue');
+    expect(classified.beerIds).toContain(31170);
+  });
+
+  it('classifies Algolia search depth truncation into search-depth-truncation', () => {
+    const issue393: RawIssue = {
+      number: 393,
+      title: "[matcher-bug] hitsPerPage=5 truncates the exact match out of a narrowed sibling pool (found verifying #382)",
+      body: 'CITADEL / Томатка (beer_id 34221, flasker, ABV 5.0)',
+      labels: [{ name: 'orphan-triage' }, { name: 'matcher-bug' }],
+      createdAt: '2026-08-01T00:00:00Z',
+      updatedAt: '2026-08-01T00:00:00Z',
+    };
+
+    const classified = classifyIssue(issue393);
+    expect(classified.clusterKey).toBe('search-depth-truncation');
+    expect(classified.locus).toBe('query_normalizer_bug');
+    expect(classified.beerIds).toContain(34221);
+  });
 });

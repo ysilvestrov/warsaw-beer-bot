@@ -46,9 +46,10 @@ export interface IssueCluster {
   recommendedAction: string;
 }
 
-// Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |" or "`#34250`")
-const TABLE_BEER_ID_RE = /\|\s*(\d{4,6})\s*\|/g;
-const CODE_BEER_ID_RE = /`#?(\d{4,6})`/g;
+// Regex to discover beer IDs from markdown table rows or mentions (e.g. "| 34250 |", "| **37334** |", "`#34250`", "рядок 31170", "row 31180")
+const TABLE_BEER_ID_RE = /\|\s*(?:\*{1,2})?(\d{2,6})(?:\*{1,2})?\s*\|/g;
+const CODE_BEER_ID_RE = /`#?(\d{2,6})`/g;
+const ROW_BEER_ID_RE = /(?:row|рядок|beer_id|catalog beer)\s*[:#]?\s*(?:\*{1,2}|`?)(\d{2,6})(?:\*{1,2}|`?)/gi;
 
 export function extractBeerIds(text: string): number[] {
   const ids = new Set<number>();
@@ -62,6 +63,12 @@ export function extractBeerIds(text: string): number[] {
 
   CODE_BEER_ID_RE.lastIndex = 0;
   while ((match = CODE_BEER_ID_RE.exec(text)) !== null) {
+    const id = parseInt(match[1], 10);
+    if (!isNaN(id) && id > 0) ids.add(id);
+  }
+
+  ROW_BEER_ID_RE.lastIndex = 0;
+  while ((match = ROW_BEER_ID_RE.exec(text)) !== null) {
     const id = parseInt(match[1], 10);
     if (!isNaN(id) && id > 0) ids.add(id);
   }
@@ -345,27 +352,71 @@ export function classifyIssue(issue: RawIssue): ClassifiedIssue {
     titleLower.includes('trailing style') ||
     titleLower.includes('niepasteryzowane') ||
     titleLower.includes('over-constrain') ||
-    titleLower.includes('edition/descriptor')
+    titleLower.includes('edition/descriptor') ||
+    titleLower.includes('градус') ||
+    titleLower.includes('десітк') ||
+    titleLower.includes('dvanáctka') ||
+    titleLower.includes('desítka') ||
+    titleLower.includes('vintage') ||
+    titleLower.includes('year-aware')
   ) {
     locus = 'query_normalizer_bug';
     clusterKey = 'query-zeroing-descriptors';
-    clusterTitle = 'Query-Zeroing Descriptors & Packaging Tokens';
+    clusterTitle = 'Query-Zeroing Descriptors, Vintage & Plato Grade';
     targetFiles = [
       'src/domain/normalize.ts',
       'src/domain/untappd-lookup.ts',
+      'src/domain/czech-grade.ts',
+      'src/domain/matcher.ts',
     ];
   }
   // Typo & Fuzzy Rescue
   else if (
     titleLower.includes('typo') ||
     titleLower.includes('edit-distance') ||
-    titleLower.includes('fused brewery token')
+    titleLower.includes('fused brewery token') ||
+    titleLower.includes('ідентичність цифр') ||
+    titleLower.includes('нумерує серію') ||
+    titleLower.includes('digit identity') ||
+    titleLower.includes('правило #636')
   ) {
     locus = 'matcher_gate_bug';
     clusterKey = 'typo-fuzzy-rescue';
-    clusterTitle = 'Bounded Typo & Fused Token Rescue';
+    clusterTitle = 'Bounded Typo, Fused Token & Numeric Identity Rescue';
     targetFiles = [
       'src/domain/matcher.ts',
+      'src/domain/untappd-lookup.ts',
+      'src/domain/name-identity.ts',
+    ];
+  }
+  // Empty & Style-Only Name Identity Collapse
+  else if (
+    titleLower.includes('normalizes to empty') ||
+    titleLower.includes('нормалізується в порожнечу') ||
+    titleLower.includes('лише зі стилю') ||
+    titleLower.includes('bare brewery alias when the beer name normalizes') ||
+    (titleLower.includes('назва крана') && titleLower.includes('стилю'))
+  ) {
+    locus = 'matcher_gate_bug';
+    clusterKey = 'empty-style-name-collapse';
+    clusterTitle = 'Empty & Style-Only Name Identity Collapse';
+    targetFiles = [
+      'src/domain/matcher.ts',
+      'src/domain/untappd-lookup.ts',
+      'src/domain/name-identity.ts',
+    ];
+  }
+  // Search Depth & Pool Saturation
+  else if (
+    titleLower.includes('hitsperpage') ||
+    titleLower.includes('sibling pool') ||
+    titleLower.includes('truncates the exact match') ||
+    titleLower.includes('pool saturation')
+  ) {
+    locus = 'query_normalizer_bug';
+    clusterKey = 'search-depth-truncation';
+    clusterTitle = 'Algolia Search Depth & Sibling Pool Saturation';
+    targetFiles = [
       'src/domain/untappd-lookup.ts',
     ];
   }
@@ -508,6 +559,18 @@ export function groupIntoClusters(classifiedIssues: ClassifiedIssue[]): IssueClu
         c.complexity = 2;
         c.recommendedAction = 'Review and adjudicate individual rows';
         break;
+    }
+
+    if (c.key === 'empty-style-name-collapse') {
+      c.systemicLeverage = 5;
+      c.blastRadius = 2;
+      c.complexity = 3;
+      c.recommendedAction = 'Guard against empty normalized names and bare brewery aliases in identity sets';
+    } else if (c.key === 'search-depth-truncation') {
+      c.systemicLeverage = 4;
+      c.blastRadius = 1;
+      c.complexity = 2;
+      c.recommendedAction = 'Re-query on saturated Algolia candidate pools (nbHits > hitsPerPage)';
     }
 
     // Impact formula: (uniqueBeerCount * leverage * 10) / (blastRadius * complexity)
