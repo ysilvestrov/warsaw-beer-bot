@@ -1376,5 +1376,13 @@ describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', ()
     expect((await res.json()).candidates[0].eligible).toBe(false);
     expect(beerCount(db)).toBe(1);
   });
+
+  it('a degree-only card does not take a linked row of another degree when styleNameIdentity is empty', async () => {
+    const { db, app } = setup();
+    linked(db, 35687, '10°', ROAD);
+    const res = await post(app, '/enrich/candidates', { beers: [{ brewery: ROAD, name: '12°' }] });
+    expect((await res.json()).candidates[0].eligible).toBe(true);
+    expect(beerCount(db)).toBe(2);
+  });
 });
 
