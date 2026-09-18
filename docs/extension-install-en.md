@@ -22,14 +22,14 @@ extension. Step by step below.
 ### What you see without a token
 
 The extension works even **without a token**: shop pages show **global
-Untappd ratings** (⭐ badge) and links to the beer/search. This lets you see
+Untappd ratings** (the gold star badge) and links to the beer/search. This lets you see
 right away how it works.
 
 Products that a supported shop itself files under a "not beer" category also get
-a red `✕`; it needs no token and is not a link.
+a grey `✕`; it needs no token and is not a link.
 
-Personal features are unlocked by a **token** (Part 2): a ✅ "you already had
-this" badge with **your own** rating, a ❓ for likely matches, plus searching
+Personal features are unlocked by a **token** (Part 2): a green check "you already
+had this" badge with **your own** rating, a dashed `?` outline for uncertain matches, plus searching
 for missing beers and check-in syncing. The extension popup will show "Not
 connected" (English UI) until a token is added.
 
@@ -203,28 +203,42 @@ this guide first.
 
    | Badge | What it means |
    |---|---|
-   | **✅** (with a rating, e.g. `✅ 4.2`) | you've **already had** this beer — shows **your** rating; **click opens Untappd** (or a search, if there's no Untappd page yet) |
-   | **❓** (with a rating, e.g. `❓ 4.1`) | you've **likely** already had this beer, but the match is fuzzy; shows the **global** rating (if available); **click opens Untappd** to check (or an Untappd search, if there's no Untappd id yet) |
-   | **⭐** (with a rating, e.g. `⭐ 4.1`, or without one) | you haven't had it yet, the beer is on Untappd — shows the **global** rating when it's available; **click opens Untappd** |
-   | **⚪** | the beer is matched as an orphan (no Untappd page/rating yet); **click opens an Untappd search** pre-filled with the name |
-   | **⏳** | a search on Untappd is in progress (only if "Find missing beers…" is enabled — Part 3, step 4) |
-   | <span style="color:#d32f2f">**✕**</span> | the shop filed the product under a **"not beer"** category in a mixed catalog; the badge is **not clickable** |
-   | _(no badge)_ | the beer couldn't be matched to the catalog |
+   **Only two marks carry colour** — the green check and the gold star. Those are the
+   cards you choose between; everything else is grey on purpose, so it does not compete
+   for your attention.
+
+   | **green check** + a rating (e.g. `4.2`) | you've **already had** this beer — shows **your** rating; click opens Untappd |
+   | **green check** + **gold star** with a rating | you've had it but never rated it — the **global** rating is shown; click opens Untappd |
+   | **green check** with no number | you've had it; there is neither your rating nor a global one yet |
+   | **gold star** + a rating | you haven't had it yet — shows the **global** rating; click opens Untappd |
+   | **gold star** with no number | you haven't had it, and Untappd has too few ratings to show one |
+   | any of those in a **dashed outline** with `?` | the match is **uncertain** — the beer was found, but we are not sure; click opens Untappd to check |
+   | a **magnifier** | not found on Untappd; click opens a search pre-filled with the name |
+   | a grey **ring** | the card is waiting its turn |
+   | a grey spinning **arc** | this beer is being checked right now |
+   | a grey **reload arrow** | we ran out: this page hit its search limit. Hover for the hint, then reload the page |
+   | a **triangle with `!`** | the check failed: Untappd did not answer, the connection dropped, or the card could not be parsed. Hover to see which |
+   | a grey **✕** | the shop itself filed the product as **not beer**; the badge is **not clickable** |
+
+   Every badge carries a screen-reader label that spells the state out. **No badge at
+   all** now means one thing only: the overlay does not run on this page (a whole
+   not-beer category).
 
 3. This also works with SPA navigation: when the shop re-renders the list
    (filters, pagination), the overlay updates itself.
 
-> **✅ + your rating** only appear for beers from your own history (requires
-> `/import`, Part 1). **⭐** is also shown for beers you haven't had yet, if
-> they're already in the bot's catalog; when the global rating is available, it
-> sits next to it. **❓** — a beer
-> that's likely from your history, but the match is fuzzy: check it on
-> Untappd (click the badge).
+> **The check + your rating** only appear for beers from your own history (requires
+> `/import`, Part 1). **The star** is also shown for beers you haven't had yet, if
+> they're already in the bot's catalog. A number **without** a star after the check is
+> always yours; a number **with** a star is the global one.
+>
+> **The dashed `?` outline** now appears on beers you have *not* had, too: an uncertain
+> match used to look exactly like a certain one, with no cue to check for yourself.
 
 > When a shop's product page links to Untappd itself, the extension follows that link — the
 > badge then shows exactly that beer, even if the shop spells its name differently. When the
 > link disagrees with the brewery the shop names on the same page, the badge stays cautious
-> (**❓** or **⭐**): the beer was found, but we are not certain — click to check.
+> (a dashed `?` outline): the beer was found, but we are not certain — click to check.
 
 ### The toolbar button (popup)
 

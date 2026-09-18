@@ -23,6 +23,15 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
+## [Unreleased]
+
+- The badges are redrawn, and every card now carries one from the moment the page loads. You can see a card waiting its turn, being checked, and where it ended up — instead of a page that stays blank and then fills in with no explanation.
+- A beer you have not had yet now shows when the match is uncertain: a dashed outline with a `?`. Until now an uncertain match looked exactly like a certain one, so there was nothing telling you to check for yourself.
+- Colour now means one thing only: the green check for beers you have had and the gold star for their rating — the cards you actually choose between. Everything else went grey, including the `✕` on non-beer products, so it stops competing for your attention.
+- A number without a star is always your own rating; a number with a star is the global one. A beer you drank but never rated now says so, instead of looking unrated.
+- “We did not find it” and “we did not get to it” no longer look the same. When a page runs out of its search budget, the remaining cards say so and hint to reload, rather than sitting silently.
+- A failed check — Untappd not answering, a dropped connection, a card that could not be read — now shows on the card instead of leaving it blank, so a temporary problem stops looking like a final answer.
+
 ## [0.19.0] - 2026-09-16
 
 - Beers whose shop page links to Untappd itself now show the right beer straight away: its rating, and whether you have had it. Before, some of these showed no badge, a ⚪, or a different beer by the same brewery.
