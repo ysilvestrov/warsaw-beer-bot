@@ -1,10 +1,10 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, NAME_COLLAB_SEP, BREWERY_NOISE } from './normalize';
+import { normalizeName, normalizeBrewery, baseNormalize, BREWERY_COLLAB_SEP, COLLAB_SEP, NAME_COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 import { digitIdentity, readNameDigits } from './digit-identity';
 import { styleNameIdentity, stripBreweryFromName } from './style-identity';
 
-export { COLLAB_SEP, NAME_COLLAB_SEP } from './normalize';
+export { BREWERY_COLLAB_SEP, COLLAB_SEP, NAME_COLLAB_SEP } from './normalize';
 export { stripBreweryFromName };
 
 export interface CatalogBeer {
@@ -168,7 +168,7 @@ export function breweryAliases(brewery: string): string[] {
   const full = normalizeBrewery(brewery);
   if (full) aliases.add(full);
 
-  const collabParts = COLLAB_SEP.test(brewery) ? brewery.split(COLLAB_SEP) : [brewery];
+  const collabParts = BREWERY_COLLAB_SEP.test(brewery) ? brewery.split(BREWERY_COLLAB_SEP) : [brewery];
   for (const part of collabParts) {
     const parenMatch = part.match(/^(.+?)\s*\((.+)\)\s*$/);
     if (parenMatch) {

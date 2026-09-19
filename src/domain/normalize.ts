@@ -43,23 +43,22 @@ export function canonicalizeBreweryBrand(s: string): string {
   return out;
 }
 
-// Separator for collab/bilingual brewery names ONLY (never for beer titles/names).
-// Untappd uses:
+// Separator for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
 //   "A + B"  — " + " connector (collab)
 //   "A & B"  — " & " connector (collab, with spaces or unspaced between words of length >= 2, e.g. Stone&Garage)
 // String.split() applies this to every occurrence regardless of the global flag.
-// NOTE: For beer titles/names, use NAME_COLLAB_SEP instead. Beer titles frequently contain
-// unspaced or spaced "&" and "+" for flavours and adjuncts ("Salt&Vinegar", "Gin & Tonic",
-// "Mango + Passionfruit"), which must never be split into separate beer names.
-export const COLLAB_SEP = /\s*\/\s*|\s+[Xx+]\s+|\s+&\s*|\s*&\s+|(?<=\p{L}{2,})&(?=\p{L}{2,})/u;
+export const BREWERY_COLLAB_SEP = /\s*\/\s*|\s+[Xx+]\s+|\s+&\s*|\s*&\s+|(?<=\p{L}{2,})&(?=\p{L}{2,})/u;
 
 // Separator for collab/bilingual beer titles in the catalog/shop.
 // Unlike breweries, beer titles often use "&" and "+" for flavours/adjuncts
 // ("Salt&Vinegar", "Gin & Tonic", "Mango + Passionfruit"), which must never
 // be split into alternate beer names. Title collaborations use "/" or " x ".
 export const NAME_COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+/;
+
+// Backward-compatible default alias for name/collab splitting (preserves & and +).
+export const COLLAB_SEP = NAME_COLLAB_SEP;
 
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the
@@ -194,7 +193,7 @@ export function normalizeBrewery(s: string): string {
 // real brewery name (e.g. "JBW Brewery" vs the registered "JBW Browar").
 export function stripBreweryNoise(brewery: string): string {
   return stripLegalForm(brewery)
-    .split(COLLAB_SEP)             // collapse "/", " x ", " & " so glued junk ("collab/") detaches
+    .split(BREWERY_COLLAB_SEP)     // collapse "/", " x ", " & " so glued junk ("collab/") detaches
     .join(' ')
     .split(/\s+/)
     .filter((tok) => tok && !BREWERY_NOISE.has(tok.toLowerCase()))
@@ -294,7 +293,7 @@ function buildSearchQuery(
   // "collab/"), then whitespace; drop BREWERY_NOISE and empty folds; dedup by fold.
   const brandTokens: string[] = [];
   const brandFolds = new Set<string>();
-  for (const tok of cleanBrewery.split(COLLAB_SEP).join(' ').split(/\s+/)) {
+  for (const tok of cleanBrewery.split(BREWERY_COLLAB_SEP).join(' ').split(/\s+/)) {
     const f = fold(tok);
     if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f) || brandFolds.has(f)) continue;
     brandFolds.add(f);

@@ -5,6 +5,7 @@ import {
   breweryAliasContained,
   ABV_TOLERANCE,
   COLLAB_SEP,
+  BREWERY_COLLAB_SEP,
   NAME_COLLAB_SEP,
   extractYear,
   nameKeys,
@@ -59,7 +60,7 @@ export interface LookupArgs {
 // part is tried as a separate Untappd search query. This avoids an unregistered
 // collab partner poisoning the combined query to zero results.
 function brewerySearchParts(brewery: string): string[] {
-  const parts = brewery.split(COLLAB_SEP).map((p) => p.trim()).filter(Boolean);
+  const parts = brewery.split(BREWERY_COLLAB_SEP).map((p) => p.trim()).filter(Boolean);
   return parts.length > 1 ? parts : [brewery];
 }
 
@@ -260,7 +261,7 @@ function nameTokens(norm: string): string[] {
 }
 
 function singleTokenCollabParts(brewery: string): Set<string> {
-  const parts = brewery.split(COLLAB_SEP).map((part) => part.trim()).filter(Boolean);
+  const parts = brewery.split(BREWERY_COLLAB_SEP).map((part) => part.trim()).filter(Boolean);
   if (parts.length < 2) return new Set();
   return new Set(
     parts
