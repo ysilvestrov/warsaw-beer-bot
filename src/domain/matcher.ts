@@ -271,7 +271,7 @@ function sortedTokens(norm: string): string {
   return norm.split(' ').filter(Boolean).sort().join(' ');
 }
 
-// Set of canonical name keys: split on COLLAB_SEP (collab/bilingual sides), normalize
+// Set of canonical name keys: split on NAME_COLLAB_SEP (collab/bilingual sides), normalize
 // each side, strip an embedded brewery duplication (anywhere in the name), drop <2-token sides (weak keys), then
 // sort tokens (order-insensitive). Names match when their key sets intersect — set
 // EQUALITY per side, as FP-safe as exact match. Single-token whole names yield an empty
