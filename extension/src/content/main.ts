@@ -45,21 +45,38 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
     }
     // Ключ нормалізований, тож дві однакові картки на сторінці ділять його. Мапа на один
     // елемент оновлювала б лише останню, а решта лишалася б у «черзі» назавжди.
+    //
+    // Але ділити відповідь можна лише тим, хто справді питає одне й те саме (рев'ю PR
+    // #670): дві картки з однаковим текстом можуть публікувати різні Untappd-id. Далі по
+    // шляху дошуку ідентичність — це пара «броварня+назва» (`byPair` у `runEnrichment`),
+    // тож обидві заявки він фізично тримати не може. Отже: однакові факти — одна заявка на
+    // всіх; інші факти — окрема картка, яка лишається на тому, що вже довів `/match`, а не
+    // позичає чужу відповідь.
+    const factsOf = (o: { bid?: number; bidSlug?: string; brand?: string; abv?: number; style?: string }) =>
+      JSON.stringify([o.bid ?? null, o.bidSlug ?? null, o.brand ?? null, o.abv ?? null, o.style ?? null]);
     const elsByKey = new Map<string, HTMLElement[]>();
+    const representative = new Map<string, string>();
+    const queued: typeof orphans = [];
     for (const o of orphans) {
-      const seen = elsByKey.get(o.key);
-      if (seen) seen.push(o.el);
-      else elsByKey.set(o.key, [o.el]);
+      const facts = factsOf(o);
+      const known = representative.get(o.key);
+      if (known === undefined) {
+        representative.set(o.key, facts);
+        elsByKey.set(o.key, [o.el]);
+        queued.push(o);
+      } else if (known === facts) {
+        elsByKey.get(o.key)!.push(o.el);
+      } else {
+        renderState(o.el, o.state);
+      }
     }
     // #648: стан, яким картка стане, якщо дошук не знайде нічого кращого. Його порахував
     // `runOverlay` з відповіді `/match` — дошук цієї відповіді не бачить узагалі.
-    const fallbackByKey = new Map<string, CardState>(orphans.map((o) => [o.key, o.state]));
-    const identityByKey = new Map(orphans.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
-    // Дві однакові картки ділять нормалізований ключ, тож і пиво за ними одне. Без цього
-    // дедупу кожен дублікат коштував би власного пошуку — два слоти з двадцяти на ту саму
-    // відповідь, — і другий пошук ще й перемальовував би вже знайдену картку назад у
-    // «працюємо». Малюємо на всіх елементах ключа, а питаємо один раз.
-    const beers: OrphanBeer[] = orphans.filter((o, i) => orphans.findIndex((x) => x.key === o.key) === i).map((o) => ({
+    const fallbackByKey = new Map<string, CardState>(queued.map((o) => [o.key, o.state]));
+    const identityByKey = new Map(queued.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
+    // Питаємо один раз на ключ: інакше кожен дублікат коштував би власного слота з
+    // двадцяти, а другий пошук перемальовував би вже знайдену картку назад у «працюємо».
+    const beers: OrphanBeer[] = queued.map((o) => ({
       key: o.key,
       brewery: o.brewery,
       name: o.name,

@@ -336,4 +336,48 @@ describe('enrichOrphans resolves the cards it was handed (#670 review)', () => {
     expect(iconOf(first)).toBe('star');
     expect(iconOf(second)).toBe('star');
   });
+
+  // Round 2: two products can share a normalized brewery+name and still publish
+  // different Untappd ids. The enrichment path's identity IS that pair, so it cannot
+  // hold both claims — and painting the first card's answer onto the second would show
+  // a beer the shop never linked there.
+  it('does not lend one card\'s answer to a same-key card that publishes a different bid', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const asked: { bid?: number }[] = [];
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string; beers?: { brewery: string; name: string; bid?: number }[] },
+        cb: (r: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') {
+          asked.push(...(msg.beers ?? []));
+          cb({
+            candidates: (msg.beers ?? []).map((b) => ({
+              brewery: b.brewery, name: b.name, eligible: true,
+              algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'q', hitsPerPage: 5 },
+            })),
+          });
+        } else if (msg.type === 'enrich:fetch') cb({ algolia: { hits: [{ bid: 111 }] } });
+        else if (msg.type === 'enrich:result') {
+          cb({ result: { status: 'matched', untappd_id: 111, rating_global: 3.9 } });
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+
+    const first = card();
+    const second = card();
+    renderState(first, { kind: 'queued' });
+    renderState(second, { kind: 'queued' });
+
+    enrichOrphans([
+      { key: 'same', el: first, brewery: 'B', name: 'N', state: fallback('B', 'N'), bid: 111 },
+      { key: 'same', el: second, brewery: 'B', name: 'N', state: fallback('B', 'N'), bid: 222 },
+    ]);
+    await until(() => iconOf(first) === 'star');
+
+    expect(iconOf(first)).toBe('star');
+    // The disagreeing sibling keeps what /match proved for it — a search glyph, not a
+    // star pointing at a bid its own page never published.
+    expect(iconOf(second)).toBe('search');
+    expect(asked).toHaveLength(1);
+  });
 });
