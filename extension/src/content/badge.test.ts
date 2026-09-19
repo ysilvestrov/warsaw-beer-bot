@@ -1,8 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { renderBadge, BADGE_MARKER, markSeen, isSeen, SEEN_MARKER, resetCard } from './badge';
-import { setSearching, setEnriched, setOrphan, setNonBeer } from './badge';
+import { BADGE_MARKER, markSeen, isSeen, SEEN_MARKER, resetCard } from './badge';
 import { renderState, type CardState } from './badge';
-import type { MatchResult } from '../api/types';
 
 function el(): HTMLElement {
   const d = document.createElement('div');
@@ -10,111 +8,41 @@ function el(): HTMLElement {
   return d;
 }
 
-const drunk = (userRating: number | null): MatchResult => ({
-  raw: { brewery: 'PINTA', name: 'Hazy Morning' },
-  matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
-  is_drunk: true,
-  drunk_uncertain: false,
-  user_rating: userRating,
-  source: 'exact',
-  searched: true,
-});
-
-const notDrunkRated: MatchResult = {
-  raw: { brewery: 'PINTA', name: 'New One' },
-  matched_beer: { id: 2, name: 'New One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 222 },
-  is_drunk: false,
-  drunk_uncertain: false,
-  user_rating: null,
-  source: 'exact',
-  searched: true,
-};
-
-const notDrunkOrphan: MatchResult = {
-  raw: { brewery: 'PINTA', name: 'Orphan' },
-  matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
-  is_drunk: false,
-  drunk_uncertain: false,
-  user_rating: null,
-  source: 'exact',
-  searched: true,
-};
-
-const unmatched: MatchResult = {
-  raw: { brewery: 'Nowhere', name: 'Ghost' },
-  matched_beer: null,
-  is_drunk: false,
-  drunk_uncertain: false,
-  user_rating: null,
-  source: null,
-  searched: true,
-};
-
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
 });
 
-describe('renderBadge', () => {
-  it('adds a ✅ + personal rating badge for a drunk beer', () => {
-    const host = el();
-    renderBadge(host, drunk(4.0));
-    const badge = host.querySelector(`[${BADGE_MARKER}]`);
-    expect(badge).not.toBeNull();
-    expect(badge!.textContent).toContain('✅');
-    expect(badge!.textContent).toContain('4.0');
+describe('seen marker', () => {
+  it('marks and detects a processed element', () => {
+    const host = document.createElement('div');
+    expect(isSeen(host)).toBe(false);
+    markSeen(host);
+    expect(host.hasAttribute(SEEN_MARKER)).toBe(true);
+    expect(isSeen(host)).toBe(true);
   });
+});
 
-  it('shows just ✅ when drunk with no personal rating', () => {
-    const host = el();
-    renderBadge(host, drunk(null));
-    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('✅');
-  });
+describe('resetCard', () => {
+  it('removes the badge and the seen marker', () => {
+    const host = document.createElement('div');
+    renderState(host, { kind: 'queued' });
+    markSeen(host);
+    expect(host.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
+    expect(isSeen(host)).toBe(true);
 
-  it('adds a ⭐ + global rating badge for a not-drunk catalog beer with a bid', () => {
-    const host = el();
-    renderBadge(host, notDrunkRated);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`);
-    expect(badge!.textContent).toContain('⭐');
-    expect(badge!.textContent).toContain('3.9');
-  });
-
-  it('shows a clickable bare ⭐ when a catalog beer has a bid but no global rating', () => {
-    const host = el();
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    renderBadge(host, {
-      ...notDrunkRated,
-      matched_beer: { ...notDrunkRated.matched_beer!, rating_global: null },
-    });
-
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge?.textContent).toBe('⭐');
-
-    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
-  });
-
-  it('renders ⚪ for a not-drunk orphan (matched, no bid / no global rating)', () => {
-    const host = el();
-    renderBadge(host, notDrunkOrphan);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
-  });
-
-  it('renders nothing for an unmatched beer', () => {
-    const host = el();
-    renderBadge(host, unmatched);
+    resetCard(host);
     expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    expect(isSeen(host)).toBe(false);
   });
+});
 
-  it('opens the Untappd beer page on click and suppresses card navigation', () => {
-    const host = el();
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    renderBadge(host, notDrunkRated);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    const evt = new MouseEvent('click', { bubbles: true, cancelable: true });
-    const notPrevented = badge.dispatchEvent(evt);
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
-    expect(notPrevented).toBe(false); // preventDefault() was called
+// Ported from the deleted renderBadge suite: the #648 table dispatches `click` only,
+// and these two paths live in wireBadgeClicks, which outlived the setters.
+describe('badge click interception (#167)', () => {
+  const clickable = (host: HTMLElement) => renderState(host, {
+    kind: 'found', drunk: false, mine: null, global: 3.9, unsure: false,
+    untappdId: 222, brewery: 'PINTA', name: 'New One',
   });
 
   it('suppresses mouseup before Beershop delegates card navigation', () => {
@@ -125,13 +53,10 @@ describe('renderBadge', () => {
       if ((event.target as Element).closest('[data-href]')) navigate();
     };
     document.body.addEventListener('mouseup', handleMouseup);
-
     try {
-      renderBadge(host, notDrunkRated);
+      clickable(host);
       const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-
       badge.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
-
       expect(navigate).not.toHaveBeenCalled();
     } finally {
       document.body.removeEventListener('mouseup', handleMouseup);
@@ -147,288 +72,17 @@ describe('renderBadge', () => {
       if ((event.target as Element).closest('[data-href]')) navigate();
     };
     document.body.addEventListener('mouseup', handleMouseup);
-
     try {
-      renderBadge(host, notDrunkRated);
+      clickable(host);
       const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-
       badge.dispatchEvent(new MouseEvent('mouseup', { button: 1, bubbles: true, cancelable: true }));
       badge.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
-
       expect(navigate).not.toHaveBeenCalled();
       expect(open).toHaveBeenCalledOnce();
       expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
     } finally {
       document.body.removeEventListener('mouseup', handleMouseup);
     }
-  });
-
-  it('is idempotent — does not double-render', () => {
-    const host = el();
-    renderBadge(host, drunk(4.0));
-    renderBadge(host, drunk(4.0));
-    expect(host.querySelectorAll(`[${BADGE_MARKER}]`).length).toBe(1);
-  });
-});
-
-const orphan: MatchResult = {
-  raw: { brewery: 'PINTA', name: 'Orphan' },
-  matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
-  is_drunk: false,
-  drunk_uncertain: false,
-  user_rating: null,
-  source: 'exact',
-  searched: true,
-};
-
-describe('orphan + enrichment badge states', () => {
-  it('renders ⚪ for a not-drunk orphan (matched, no untappd_id)', () => {
-    const host = el();
-    renderBadge(host, orphan);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
-  });
-
-  it('setSearching replaces the badge with a loading glyph; setEnriched swaps to ⭐ + opens Untappd', () => {
-    const host = el();
-    setOrphan(host, 'PINTA', 'Orphan');
-    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⚪');
-
-    setSearching(host);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)!.textContent).toBe('⏳');
-    expect(host.querySelectorAll(`[${BADGE_MARKER}]`).length).toBe(1);
-
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    setEnriched(host, 222, 3.9);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`)!;
-    expect(badge.textContent).toContain('⭐');
-    expect(badge.textContent).toContain('3.9');
-    (badge as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
-  });
-});
-
-describe('non-beer badge (#615)', () => {
-  it('preserves an already-correct non-beer badge element', () => {
-    const host = el();
-    setNonBeer(host);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`);
-
-    setNonBeer(host);
-
-    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBe(badge);
-    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
-  });
-
-  it.each(['text', 'role', 'label'])('replaces a badge with incorrect %s', (field) => {
-    const host = el();
-    setNonBeer(host);
-    const previous = host.querySelector(`[${BADGE_MARKER}]`)!;
-    if (field === 'text') previous.textContent = '⚪';
-    if (field === 'role') previous.removeAttribute('role');
-    if (field === 'label') previous.setAttribute('aria-label', 'Other');
-
-    setNonBeer(host);
-
-    const badge = host.querySelector(`[${BADGE_MARKER}]`)!;
-    expect(badge).not.toBe(previous);
-    expect(badge.textContent).toBe('✕');
-    expect(badge.getAttribute('role')).toBe('img');
-    expect(badge.getAttribute('aria-label')).toBe('Не пиво');
-    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
-  });
-
-  it('renders a red accessible ✕ without an Untappd action', () => {
-    const host = el();
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-
-    setNonBeer(host);
-    setNonBeer(host); // repeated rendering stays idempotent
-
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge.textContent).toBe('✕');
-    expect(badge.getAttribute('role')).toBe('img');
-    expect(badge.getAttribute('aria-label')).toBe('Не пиво');
-    expect(badge.style.color).toBe('rgb(255, 107, 107)');
-    expect(badge.style.pointerEvents).toBe('none');
-    expect(badge.style.cursor).toBe('default');
-    expect(badge.tabIndex).toBe(-1);
-    expect(host.querySelectorAll(`[${BADGE_MARKER}]`)).toHaveLength(1);
-
-    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    badge.dispatchEvent(new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
-    expect(open).not.toHaveBeenCalled();
-  });
-});
-
-describe('seen marker', () => {
-  it('marks and detects a processed element', () => {
-    const host = document.createElement('div');
-    expect(isSeen(host)).toBe(false);
-    markSeen(host);
-    expect(host.hasAttribute(SEEN_MARKER)).toBe(true);
-    expect(isSeen(host)).toBe(true);
-  });
-});
-
-describe('resetCard', () => {
-  it('resetCard removes the badge and the seen marker', () => {
-    const host = document.createElement('div');
-    renderBadge(host, { is_drunk: true, drunk_uncertain: false, user_rating: 4, source: null, searched: true, raw: { brewery: 'b', name: 'n' }, matched_beer: null });
-    markSeen(host);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
-    expect(isSeen(host)).toBe(true);
-
-    resetCard(host);
-    expect(host.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
-    expect(isSeen(host)).toBe(false);
-  });
-});
-
-describe('badge click targets (#167)', () => {
-  const openSpy = () => vi.spyOn(window, 'open').mockReturnValue(null);
-  const clickBadge = (host: HTMLElement) => {
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    return badge;
-  };
-
-  it('✅ with a bid opens the matched beer page', () => {
-    const host = el();
-    const open = openSpy();
-    renderBadge(host, {
-      raw: { brewery: 'PINTA', name: 'Hazy Morning' },
-      matched_beer: { id: 1, name: 'Hazy Morning', brewery: 'PINTA', rating_global: 4.1, untappd_id: 111 },
-      is_drunk: true, drunk_uncertain: false, user_rating: 4.0, source: 'exact', searched: true,
-    });
-    const badge = clickBadge(host);
-    expect(badge.style.cursor).toBe('pointer');
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/111', '_blank', 'noopener');
-  });
-
-  it('✅ on a had orphan (no bid) opens an Untappd search', () => {
-    const host = el();
-    const open = openSpy();
-    renderBadge(host, {
-      raw: { brewery: 'Mad Brew', name: 'Bendera ya Uhuru' },
-      matched_beer: { id: 2, name: 'Bendera ya Uhuru', brewery: 'Mad Brew', rating_global: null, untappd_id: null },
-      is_drunk: true, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
-    });
-    clickBadge(host);
-    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Mad%20Brew%20Bendera%20ya%20Uhuru&type=beer', '_blank', 'noopener');
-  });
-
-  it('⚪ orphan opens an Untappd search prefilled with brewery+name', () => {
-    const host = el();
-    const open = openSpy();
-    renderBadge(host, {
-      raw: { brewery: 'PINTA', name: 'Orphan' },
-      matched_beer: { id: 3, name: 'Orphan', brewery: 'PINTA', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
-    });
-    const badge = clickBadge(host);
-    expect(badge.style.cursor).toBe('pointer');
-    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=PINTA%20Orphan&type=beer', '_blank', 'noopener');
-  });
-
-  it('❓ orphan (drunk_uncertain, no bid) opens an Untappd search', () => {
-    const host = el();
-    const open = openSpy();
-    renderBadge(host, {
-      raw: { brewery: 'Rebrew', name: 'Fuzzy Orphan' },
-      matched_beer: { id: 4, name: 'Fuzzy Orphan', brewery: 'Rebrew', rating_global: null, untappd_id: null },
-      is_drunk: false, drunk_uncertain: true, user_rating: null, source: 'fuzzy', searched: true,
-    });
-    clickBadge(host);
-    expect(open).toHaveBeenCalledWith('https://untappd.com/search?q=Rebrew%20Fuzzy%20Orphan&type=beer', '_blank', 'noopener');
-  });
-
-  it('⭐ still opens the matched beer page', () => {
-    const host = el();
-    const open = openSpy();
-    renderBadge(host, {
-      raw: { brewery: 'PINTA', name: 'New One' },
-      matched_beer: { id: 5, name: 'New One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 222 },
-      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
-    });
-    clickBadge(host);
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/222', '_blank', 'noopener');
-  });
-});
-
-// Base for spreading — always overridden with a real matched_beer per case. (The server
-// never emits drunk_uncertain with matched_beer null; that combination is not rendered.)
-const baseUncertain: MatchResult = {
-  raw: { brewery: 'PINTA', name: 'Fuzzy One' },
-  is_drunk: false,
-  drunk_uncertain: true,
-  user_rating: null,
-  // `source` is null exactly when matched_beer is; every case spreads a real
-  // matched_beer over this base and sets the fuzzy source along with it.
-  source: null,
-  searched: true,
-  matched_beer: null,
-};
-
-describe('❓ uncertain-drunk badge', () => {
-  it('renders ❓ + global rating when drunk_uncertain with a bid and rating_global', () => {
-    const host = el();
-    const open = vi.spyOn(window, 'open').mockReturnValue(null);
-    const result: MatchResult = {
-      ...baseUncertain,
-      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
-    };
-    renderBadge(host, result);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('❓ 3.9');
-    expect(badge.style.cursor).toBe('pointer');
-    badge.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
-    expect(open).toHaveBeenCalledWith('https://untappd.com/beer/555', '_blank', 'noopener'); // ❓ with a bid → beer page
-  });
-
-  it('renders bare ❓ when drunk_uncertain with a bid but rating_global is null', () => {
-    const host = el();
-    const result: MatchResult = {
-      ...baseUncertain,
-      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: null, untappd_id: 555 },
-    };
-    renderBadge(host, result);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('❓');
-    expect(badge.style.cursor).toBe('pointer'); // bid present → still clickable, even without a rating
-  });
-
-  it('renders bare ❓ clickable to Untappd search when drunk_uncertain but matched_beer has no untappd_id (orphan)', () => {
-    const host = el();
-    const result: MatchResult = {
-      ...baseUncertain,
-      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: null, untappd_id: null },
-    };
-    renderBadge(host, result);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('❓');
-    expect(badge.style.cursor).toBe('pointer'); // no bid → search URL → still clickable
-  });
-
-  it('is_drunk wins over drunk_uncertain — renders ✅ + personal rating', () => {
-    const host = el();
-    const result: MatchResult = {
-      ...baseUncertain,
-      is_drunk: true,
-      user_rating: 4.2,
-      // 'fuzzy', never 'exact': exactOn hardcodes drunk_uncertain false, so pairing
-      // 'exact' with drunk_uncertain would put a counterexample to the server invariant
-      // card-state.ts relies on inside our own fixtures.
-      source: 'fuzzy',
-      searched: true,
-      matched_beer: { id: 5, name: 'Fuzzy One', brewery: 'PINTA', rating_global: 3.9, untappd_id: 555 },
-    };
-    renderBadge(host, result);
-    const badge = host.querySelector(`[${BADGE_MARKER}]`) as HTMLElement;
-    expect(badge).not.toBeNull();
-    expect(badge.textContent).toBe('✅ 4.2');
   });
 });
 
