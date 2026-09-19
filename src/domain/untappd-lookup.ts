@@ -10,6 +10,7 @@ import {
   nameKeys,
   intersects,
   stripBreweryFromName,
+  leadingRun,
 } from './matcher';
 import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging, stripSearchNoise, BREWERY_NOISE } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
@@ -493,25 +494,16 @@ export async function lookupBeer(
       if (clean) inputIdentityAliases.add(clean);
     }
   }
-  if (nameSides.length > 1) {
+  if (inputBreweryAliases.length > 0 && nameSides.length > 1) {
     for (const side of nameSides) {
-      if (inputBreweryAliases.length === 0) {
-        // #401: when input brewery is empty, candidate sides of collab title serve as identity candidates
-        const cleanSide = normalizeIdentityAlias(side);
-        if (cleanSide.split(' ').filter(Boolean).length >= 2) {
-          inputIdentityAliases.add(baseNormalize(side));
-          inputIdentityAliases.add(cleanSide);
-        }
-      } else {
-        // When input brewery is present, collab sides must still be anchored by input brewery alias
-        for (const alias of inputBreweryAliases) {
-          const strippedSide = stripBreweryFromName(baseNormalize(side), alias);
-          for (const cand of [baseNormalize(side), strippedSide]) {
-            if (cand.trim() === '') continue;
-            inputIdentityAliases.add(baseNormalize(`${alias} ${cand}`));
-            const clean = normalizeIdentityAlias(`${alias} ${cand}`);
-            if (clean) inputIdentityAliases.add(clean);
-          }
+      // When input brewery is present, collab sides must still be anchored by input brewery alias
+      for (const alias of inputBreweryAliases) {
+        const strippedSide = stripBreweryFromName(baseNormalize(side), alias);
+        for (const cand of [baseNormalize(side), strippedSide]) {
+          if (cand.trim() === '') continue;
+          inputIdentityAliases.add(baseNormalize(`${alias} ${cand}`));
+          const clean = normalizeIdentityAlias(`${alias} ${cand}`);
+          if (clean) inputIdentityAliases.add(clean);
         }
       }
     }
@@ -557,23 +549,40 @@ export async function lookupBeer(
     const results = judged
       .filter((j) => j.identity !== 'different' && !(j.identity === 'number-fallback' && hasBetterOfSameSeries(j.result)))
       .map((j) => j.result);
-    const hasCollabBreweryCorroboration = (result: SearchResult): boolean => {
-      const candBrewery = breweryAliases(result.brewery_name);
-      return nameSides.some((side) => {
-        const sideNorm = normalizeBrewery(side);
-        return (
-          breweryAliasesMatch(candBrewery, breweryAliases(side)) ||
-          (sideNorm !== '' && breweryAliasContained(candBrewery, [sideNorm]))
-        );
-      });
+    const isCollabSideBrewery = (side: string, candBrewery: string[]): boolean => {
+      const sideNorm = normalizeBrewery(side);
+      return (
+        breweryAliasesMatch(candBrewery, breweryAliases(side)) ||
+        (sideNorm !== '' && candBrewery.some((alias) => leadingRun(sideNorm, alias)))
+      );
     };
+
     const identityHits = results.filter((result) => {
-      if (
-        inputBreweryAliases.length === 0 &&
-        nameSides.length > 1 &&
-        !hasCollabBreweryCorroboration(result)
-      ) {
-        return false;
+      if (inputBreweryAliases.length === 0) {
+        if (nameSides.length <= 1) return false;
+        const candBrewery = breweryAliases(result.brewery_name);
+        const brewerySides = nameSides.filter((side) => isCollabSideBrewery(side, candBrewery));
+        if (brewerySides.length === 0) return false;
+        const otherSides = nameSides.filter((side) => !brewerySides.includes(side));
+        if (otherSides.length === 0) return false;
+
+        const otherIdentityAliases = new Set<string>();
+        for (const side of otherSides) {
+          const cleanSide = normalizeIdentityAlias(side);
+          if (cleanSide.split(' ').filter(Boolean).length >= 2) {
+            otherIdentityAliases.add(baseNormalize(side));
+            otherIdentityAliases.add(cleanSide);
+          }
+        }
+        const candBrewerySet = new Set(candBrewery);
+        return (result.alias_alt ?? []).some((alias) => {
+          const norm = baseNormalize(alias);
+          if (candBrewerySet.has(norm)) return false;
+          return (
+            otherIdentityAliases.has(norm) ||
+            otherIdentityAliases.has(normalizeIdentityAlias(alias))
+          );
+        });
       }
       return (result.alias_alt ?? []).some((alias) =>
         inputIdentityAliases.has(baseNormalize(alias)) ||
