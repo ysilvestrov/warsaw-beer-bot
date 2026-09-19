@@ -113,6 +113,20 @@ describe('breweryAliases', () => {
     );
   });
 
+  test('non-spaced & collab returns full + each side (#589)', () => {
+    const out = breweryAliases('Stone&Garage Beer Co. Brewery');
+    expect(new Set(out)).toEqual(
+      new Set(['stone garage beer', 'stone', 'garage beer']),
+    );
+  });
+
+  test('+ connector collab returns full + each side (#401)', () => {
+    const out = breweryAliases('Nieczajna + Bistro Narożnik Brewery');
+    expect(new Set(out)).toEqual(
+      new Set(['nieczajna bistro naroznik', 'nieczajna', 'bistro naroznik']),
+    );
+  });
+
   test('empty input returns empty array', () => {
     expect(breweryAliases('')).toEqual([]);
   });
