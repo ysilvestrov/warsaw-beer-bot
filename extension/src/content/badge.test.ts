@@ -458,7 +458,7 @@ describe('#648 renderState', () => {
     ['working', { kind: 'working' }, ['arc'], 'Шукаємо це пиво', null],
     ['nonBeer', { kind: 'nonBeer' }, ['cross'], 'Не пиво', null],
     ['deferred', { kind: 'deferred' }, ['reload'],
-      'Не встигли: ліміт пошуків на сторінку. Перезавантаж сторінку', null],
+      'Не встигли перевірити цього разу. Спробуй перезавантажити сторінку', null],
     ['failed blocked', { kind: 'failed', reason: 'blocked' }, ['warn'],
       'Не вдалося перевірити: Untappd не відповів', null],
     ['failed unparsed', { kind: 'failed', reason: 'unparsed' }, ['warn'],
