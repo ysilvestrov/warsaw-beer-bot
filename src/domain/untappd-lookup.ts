@@ -10,7 +10,7 @@ import {
   intersects,
   stripBreweryFromName,
 } from './matcher';
-import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging, stripSearchNoise } from './normalize';
+import { baseNormalize, normalizeBrewery, normalizeName, searchQueryLadder, stripDescriptorAndPackaging, stripSearchNoise, BREWERY_NOISE } from './normalize';
 import { extractGrade, isAleStyle, isDark, extraDescriptorCount } from './czech-grade';
 import {
   buildSearchUrl,
@@ -455,6 +455,16 @@ function exactSwappedBrandNameScore(
   return null;
 }
 
+function normalizeIdentityAlias(s: string): string {
+  const norm = baseNormalize(s);
+  const parts = norm.split(' ');
+  let i = 0;
+  while (i < parts.length - 1 && BREWERY_NOISE.has(parts[i])) {
+    i++;
+  }
+  return parts.slice(i).join(' ');
+}
+
 export async function lookupBeer(
   args: LookupArgs,
   headRetried = false,
@@ -467,14 +477,24 @@ export async function lookupBeer(
   const inputBreweryAliases = breweryAliases(brewery);
   const normalizedInputName = baseNormalize(name);
   // #465: drop empty candidate names so bare brewery brand is never admitted into inputIdentityAliases
-  const inputIdentityAliases = new Set(
-    inputBreweryAliases.flatMap((alias) => {
-      const strippedName = stripBreweryFromName(normalizedInputName, alias);
-      return [normalizedInputName, strippedName]
-        .filter((candidateName) => candidateName.trim() !== '')
-        .map((candidateName) => baseNormalize(`${alias} ${candidateName}`));
-    }),
-  );
+  // #501, #401: normalize aliases without leading brewery noise, and include multi-token collab sides
+  const inputIdentityAliases = new Set<string>();
+  for (const alias of inputBreweryAliases) {
+    const strippedName = stripBreweryFromName(normalizedInputName, alias);
+    for (const candidateName of [normalizedInputName, strippedName]) {
+      if (candidateName.trim() === '') continue;
+      inputIdentityAliases.add(baseNormalize(`${alias} ${candidateName}`));
+      const clean = normalizeIdentityAlias(`${alias} ${candidateName}`);
+      if (clean) inputIdentityAliases.add(clean);
+    }
+  }
+  for (const side of name.split(COLLAB_SEP)) {
+    const cleanSide = normalizeIdentityAlias(side);
+    if (cleanSide.split(' ').filter(Boolean).length >= 2) {
+      inputIdentityAliases.add(baseNormalize(side));
+      inputIdentityAliases.add(cleanSide);
+    }
+  }
   const targetNames = fuzzyTargets(name, brewery);
   const inputDigits = originalDigits ?? readNameDigits(name);
   const parts = brewerySearchParts(brewery);
@@ -517,7 +537,10 @@ export async function lookupBeer(
       .filter((j) => j.identity !== 'different' && !(j.identity === 'number-fallback' && hasBetterOfSameSeries(j.result)))
       .map((j) => j.result);
     const identityHits = results.filter((result) =>
-      (result.alias_alt ?? []).some((alias) => inputIdentityAliases.has(baseNormalize(alias))),
+      (result.alias_alt ?? []).some((alias) =>
+        inputIdentityAliases.has(baseNormalize(alias)) ||
+        inputIdentityAliases.has(normalizeIdentityAlias(alias)),
+      ),
     );
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix

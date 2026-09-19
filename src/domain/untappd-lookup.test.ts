@@ -1106,6 +1106,46 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('#501 identity alias: matches candidate when alias_alt has leading brewery noise', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6622277,
+        beer_name: 'Hommage aux Cent Ponts',
+        brewery_name: 'Fauve',
+        style: 'IPA - Imperial / Double New England / Hazy',
+        abv: 7.5,
+        global_rating: 3.96,
+        alias_alt: ['Browar Stu Mostów Hommage Aux Cent Ponts'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Stu Mostów Brewery', name: 'Hommage aux Cent Ponts', abv: 7.5, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6622277);
+  });
+
+  test('#401 identity alias: empty-brewery collab name matches candidate alias_alt', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6588490,
+        beer_name: 'House of New Orleans',
+        brewery_name: 'Dutch Bargain',
+        style: 'Stout - Imperial / Double',
+        abv: 13,
+        global_rating: 4.1,
+        alias_alt: ['Brouwerij LOST House of New Orleans'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: '', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: null, search });
+
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6588490);
+  });
+
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
       { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
