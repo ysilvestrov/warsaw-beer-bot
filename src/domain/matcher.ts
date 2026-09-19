@@ -1,10 +1,10 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
-import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, BREWERY_NOISE } from './normalize';
+import { normalizeName, normalizeBrewery, baseNormalize, COLLAB_SEP, NAME_COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
 import { digitIdentity, readNameDigits } from './digit-identity';
 import { styleNameIdentity, stripBreweryFromName } from './style-identity';
 
-export { COLLAB_SEP } from './normalize';
+export { COLLAB_SEP, NAME_COLLAB_SEP } from './normalize';
 export { stripBreweryFromName };
 
 export interface CatalogBeer {
@@ -279,7 +279,7 @@ function sortedTokens(norm: string): string {
 export function nameKeys(rawName: string, brewery: string): Set<string> {
   const bNorm = normalizeBrewery(brewery);
   const keys = new Set<string>();
-  for (const side of rawName.split(COLLAB_SEP)) {
+  for (const side of rawName.split(NAME_COLLAB_SEP)) {
     const toks = stripBreweryFromName(normalizeName(side), bNorm).split(' ').filter(Boolean);
     if (toks.length < 2) continue;
     keys.add([...toks].sort().join(' '));

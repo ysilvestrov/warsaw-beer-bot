@@ -5,6 +5,7 @@ import {
   breweryAliasContained,
   ABV_TOLERANCE,
   COLLAB_SEP,
+  NAME_COLLAB_SEP,
   extractYear,
   nameKeys,
   intersects,
@@ -94,7 +95,8 @@ function isDescriptorAbvMismatch(inputAbv: number | null | undefined, candAbv: n
 function fuzzyTargets(name: string, brewery: string): FuzzyTarget[] {
   const breweryNorm = normalizeBrewery(brewery);
   const targets = new Map<string, FuzzyTarget>();
-  for (const [index, raw] of [name, ...name.split(COLLAB_SEP)].entries()) {
+  const collabSides = NAME_COLLAB_SEP.test(name) ? name.split(NAME_COLLAB_SEP) : [];
+  for (const [index, raw] of [name, ...collabSides].entries()) {
     const ident = nameIdentity(raw, breweryNorm);
     const value = ident.value;
     if (!value) continue;
@@ -488,8 +490,8 @@ export async function lookupBeer(
       if (clean) inputIdentityAliases.add(clean);
     }
   }
-  if (inputBreweryAliases.length === 0 && COLLAB_SEP.test(name)) {
-    for (const side of name.split(COLLAB_SEP)) {
+  if (NAME_COLLAB_SEP.test(name)) {
+    for (const side of name.split(NAME_COLLAB_SEP)) {
       const cleanSide = normalizeIdentityAlias(side);
       if (cleanSide.split(' ').filter(Boolean).length >= 2) {
         inputIdentityAliases.add(baseNormalize(side));
