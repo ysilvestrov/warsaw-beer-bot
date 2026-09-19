@@ -583,6 +583,137 @@ describe('#648 стан картки на всьому шляху', () => {
   });
 });
 
+// #648 (спека §5.2): `skip` — три різні поняття під одним прапорцем, і всі три раніше
+// закінчувались мовчазною карткою без бейджа. Кожне тепер має свій клас.
+describe('#648 card.skip — три поняття по трьох класах', () => {
+  const iconOf = (el: HTMLElement): string | null =>
+    el.querySelector(`[${BADGE_MARKER}] [data-icon]`)?.getAttribute('data-icon') ?? null;
+  const labelOf = (el: HTMLElement): string | null =>
+    el.querySelector(`[${BADGE_MARKER}]`)?.getAttribute('aria-label') ?? null;
+
+  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+
+  it('1. a shop-confirmed non-beer still ends as ✕, whatever `skip` says', async () => {
+    const el = cardEl();
+    const cards: Card[] = [{ el, brewery: '', name: '', nonBeer: true, skip: true }];
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapterFor(cards), sendMatch);
+
+    expect(iconOf(el)).toBe('cross');
+    expect(labelOf(el)).toBe('Не пиво');
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(isSeen(el)).toBe(true);
+  });
+
+  it('2. a card waiting for its product page reads as "working", not "queued"', async () => {
+    const el = cardEl();
+    const cards: Card[] = [
+      { el, brewery: 'VibrantPour', name: 'Mystery Gose', skip: true, skipReason: 'pending-detail' },
+    ];
+    const detail = deferred<void>();
+    const adapter: SiteAdapter = {
+      ...adapterFor(cards),
+      loadDetailsBeforeCache: true,
+      loadCardDetails: () => detail.promise,
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    const run = runOverlay(document, adapter, sendMatch);
+
+    // Synchronous: the detail request is still in flight, nothing has been awaited yet.
+    expect(iconOf(el)).toBe('arc');
+
+    detail.resolve();
+    await run;
+  });
+
+  it('3. a card whose product page never arrived fails with the network reason', async () => {
+    const el = cardEl();
+    const cards: Card[] = [
+      { el, brewery: 'VibrantPour', name: 'Mystery Gose', skip: true, skipReason: 'pending-detail' },
+    ];
+    const adapter: SiteAdapter = {
+      ...adapterFor(cards),
+      loadDetailsBeforeCache: true,
+      // The shop's detail page failed or carried no categories: `skip` is still true.
+      loadCardDetails: vi.fn(async () => {}),
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(iconOf(el)).toBe('warn');
+    expect(labelOf(el)).toBe('Не вдалося перевірити: не було звʼязку');
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(isSeen(el)).toBe(true);
+  });
+
+  it('4. a card whose title never parsed fails with the "unparsed" reason', async () => {
+    const el = cardEl();
+    const cards: Card[] = [
+      { el, brewery: '', name: 'Набір 6 пляшок', skip: true, skipReason: 'unparsed' },
+    ];
+    const adapter: SiteAdapter = {
+      ...adapterFor(cards),
+      loadDetailsBeforeCache: true,
+      loadCardDetails: vi.fn(async () => {}),
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(iconOf(el)).toBe('warn');
+    expect(labelOf(el)).toBe('Не змогли розібрати цю картку');
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(isSeen(el)).toBe(true);
+  });
+
+  it('5. a card the detail page gave no brewery fails with the "unparsed" reason', async () => {
+    const el = cardEl();
+    const cards: Card[] = [{ el, brewery: '', name: 'Aloha' }];
+    const adapter: SiteAdapter = {
+      ...adapterFor(cards),
+      // funkyshop hydrates *after* the cache lookup, so this card reaches the miss list
+      // first and only then turns out to be unusable.
+      loadCardDetails: vi.fn(async (hydrated: Card[]) => {
+        hydrated[0].skip = true;
+        hydrated[0].skipReason = 'unparsed';
+      }),
+    };
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(iconOf(el)).toBe('warn');
+    expect(labelOf(el)).toBe('Не змогли розібрати цю картку');
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(isSeen(el)).toBe(true);
+  });
+
+  it('6. a card whose product page did arrive goes on to /match as a normal one', async () => {
+    const el = cardEl();
+    const cards: Card[] = [
+      { el, brewery: 'VibrantPour', name: 'Mystery Gose', skip: true, skipReason: 'pending-detail' },
+    ];
+    const adapter: SiteAdapter = {
+      ...adapterFor(cards),
+      loadDetailsBeforeCache: true,
+      loadCardDetails: vi.fn(async (hydrated: Card[]) => { hydrated[0].skip = false; }),
+    };
+    const sendMatch = vi.fn(async () => [drunkResult('VibrantPour', 'Mystery Gose')]);
+
+    await runOverlay(document, adapter, sendMatch);
+
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'VibrantPour', name: 'Mystery Gose' }]);
+    expect(iconOf(el)).toBe('check');
+  });
+});
+
 // #384: a card whose shop-published bid disagrees with the link /match returned is the
 // only way the server's repair path can ever be reached — a wrongly-linked card comes
 // back *matched* and would otherwise never be offered for enrichment.

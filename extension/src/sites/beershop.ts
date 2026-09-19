@@ -146,7 +146,7 @@ export const beershop: SiteAdapter = {
       const name = beerNameFromTitle(titleName, header);
       if (!name) continue;
       if (isNonBeerName(`${brewery} ${name}`)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
       cards.push({ el, brewery, name });

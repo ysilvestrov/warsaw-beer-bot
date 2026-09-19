@@ -59,6 +59,6 @@ describe('beerrepublic adapter', () => {
     expect(parsed.filter((card) => !card.nonBeer).map((card) => card.name)).toEqual([
       'Mind Haze Galaxy Bender',
     ]);
-    expect(parsed.filter((card) => card.nonBeer).every((card) => card.skip)).toBe(true);
+    expect(parsed.filter((card) => card.nonBeer).every((card) => card.skip === undefined)).toBe(true);
   });
 });

@@ -162,7 +162,7 @@ describe('beershop adapter', () => {
     if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(156, 'Beershop', 'World Beer Gift Pack'), 'text/html');
     expect(adapter.parseCards(doc)).toEqual([
-      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true }),
     ]);
   });
 

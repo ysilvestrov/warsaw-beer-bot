@@ -86,7 +86,7 @@ export const onemorebeer: SiteAdapter = {
       const rawTitle = text(el.querySelector(TITLE_SELECTOR));
       if (!brewery || !rawTitle) continue;
       if (isNonBeerName(rawTitle) || MERCH_RE.test(rawTitle) || SOFT_DRINK_RE.test(rawTitle)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
       const name = cleanName(rawTitle, brewery);
@@ -96,7 +96,7 @@ export const onemorebeer: SiteAdapter = {
       // prefix from the title, so a name-only check misses cases where the brand carries
       // the family words (#376 follow-up).
       if (isNonAlcoholicSoftDrinkFamily({ name: `${brewery} ${name}`, style: facts.style, abv: facts.abv })) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
       cards.push({ el, brewery, name, ...facts });

@@ -71,7 +71,7 @@ describe('hoptimaal adapter', () => {
     const nonBeerCards = cards.filter((card) => card.nonBeer);
     const beerCards = cards.filter((card) => !card.nonBeer);
     expect(nonBeerCards.length).toBeGreaterThan(0);
-    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(nonBeerCards.every((card) => card.skip === undefined)).toBe(true);
     expect(beerCards).toHaveLength(1);
     expect(beerCards[0]).toMatchObject({
       brewery: 'PINTA Barrel Brewing',

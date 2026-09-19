@@ -82,7 +82,7 @@ describe('piwnemosty adapter', () => {
       .replace(',\n            "item_category": "Piwo"', '');
     const doc = new DOMParser().parseFromString(source, 'text/html');
     expect(piwnemosty.parseCards(doc)).toEqual([
-      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true, skip: true },
+      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true },
     ]);
   });
 
@@ -92,7 +92,7 @@ describe('piwnemosty adapter', () => {
     const doc = new DOMParser().parseFromString(source, 'text/html');
 
     expect(piwnemosty.parseCards(doc)).toEqual([
-      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true, skip: true },
+      { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true },
     ]);
   });
 
@@ -104,7 +104,7 @@ describe('piwnemosty adapter', () => {
       const doc = new DOMParser().parseFromString(source, 'text/html');
 
       expect(piwnemosty.parseCards(doc)).toEqual([
-        { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true, skip: true },
+        { el: doc.querySelector('.product'), brewery: '', name: '', nonBeer: true },
       ]);
     },
   );
@@ -250,6 +250,6 @@ describe('piwnemosty adapter', () => {
     const doc = new DOMParser().parseFromString(nonBeerHtml, 'text/html');
     const cards = piwnemosty.parseCards(doc);
     expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+    expect(cards.every((card) => card.nonBeer)).toBe(true);
   });
 });

@@ -55,7 +55,7 @@ describe('bierloods22 brewery extraction (#117)', () => {
 
     const nonBeerCards = cards.filter((card) => card.nonBeer);
     expect(nonBeerCards).toHaveLength(3);
-    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(nonBeerCards.every((card) => card.skip === undefined)).toBe(true);
     expect(cards.filter((card) => !card.nonBeer)).toEqual([
       expect.objectContaining({
         brewery: 'Browar Stu Mostów',

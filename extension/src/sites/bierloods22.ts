@@ -49,7 +49,7 @@ export const bierloods22: SiteAdapter = {
       const titleText = text(a);
       const titleAttr = a?.getAttribute('title') ?? '';
       if (isPackageTitle(titleText) || isPackageTitle(titleAttr)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
 

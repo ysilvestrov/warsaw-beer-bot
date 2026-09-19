@@ -475,6 +475,10 @@ describe('flasker adapter', () => {
     const cards = flasker.parseCards(load('flasker.nonbeer.html'));
     expect(cards).toHaveLength(4);
     expect(cards.every((card) => card.skip === true)).toBe(true);
+    // #648: these four titles are delicatessen, and none of them parses into a
+    // brewery+name at all — so they are skipped as `unparsed`, not as "awaiting detail".
+    // The detail page still runs and usually confirms non-beer, which outranks both.
+    expect(cards.every((card) => card.skipReason === 'unparsed')).toBe(true);
   });
 
   it('keeps block-view glassware and openers fail-closed for detail classification', () => {
@@ -674,7 +678,7 @@ describe('#384 flasker.loadCardDetails', () => {
     expect(cards.every((card) => card.skip === true)).toBe(true);
     await flasker.loadCardDetails?.(cards);
 
-    expect(cards.every((card) => card.skip && card.nonBeer)).toBe(true);
+    expect(cards.every((card) => card.nonBeer)).toBe(true);
     expect(fetchSpy).toHaveBeenCalledTimes(2);
     fetchSpy.mockRestore();
   });
@@ -701,6 +705,9 @@ describe('#384 flasker.loadCardDetails', () => {
     expect(cards).toHaveLength(2);
     expect(cards[0]).toMatchObject({
       brewery: 'VibrantPour', name: 'Mystery Gose', abv: 4, skip: true,
+      // #648: the detail request is what failed, so the card reports a network failure
+      // rather than disappearing.
+      skipReason: 'pending-detail',
     });
     expect(cards[0].nonBeer).toBeUndefined();
     expect(cards[1]).toMatchObject({ brewery: 'Burgomistr', name: 'IPA', abv: 6 });
@@ -994,6 +1001,8 @@ describe('#384 flasker.loadCardDetails', () => {
     expect(fetchSpy).toHaveBeenCalledTimes(24);
     expect(cards.slice(0, 23).every((card) => card.brewery === 'Hydrated Brand')).toBe(true);
     expect(cards[23].skip).toBe(true);
+    // #648: its title never parsed, and no later pass can change that — the card says so.
+    expect(cards[23].skipReason).toBe('unparsed');
     fetchSpy.mockRestore();
   });
 

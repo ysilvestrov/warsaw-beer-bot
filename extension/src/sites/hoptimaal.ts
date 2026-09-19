@@ -99,7 +99,7 @@ export const hoptimaal: SiteAdapter = {
     for (const el of Array.from(root.querySelectorAll<HTMLElement>(CARD_SELECTOR))) {
       const titleLink = el.querySelector('.product-item__product-title a');
       if (isNonBeerCard(el, titleLink)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
 

@@ -154,7 +154,7 @@ describe('beerfreak adapter', () => {
     ]));
 
     expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+    expect(cards.every((card) => card.nonBeer)).toBe(true);
   });
 
   it('keeps legitimate BeerFreak beers with incidental set-like substrings', () => {

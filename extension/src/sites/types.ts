@@ -11,7 +11,19 @@ export interface Card {
   bidSlug?: string;
   /** Product-page brand used to verify a published bid; may differ from parsed brewery. */
   brand?: string;
+  /**
+   * The card cannot go to /match as it stands. Why decides what the user sees (#648):
+   * without a reason the overlay can only guess, and used to guess "draw nothing".
+   */
   skip?: boolean;
+  /**
+   * #648: why `skip` is set.
+   *  • `pending-detail` — the product page decides; while it is in flight the card reads
+   *    as "working", and if `skip` survives the hydration pass the detail failed.
+   *  • `unparsed` — the title never parsed, or the detail page carried no brewery. No
+   *    later pass will fix it; the card says so instead of vanishing.
+   */
+  skipReason?: 'pending-detail' | 'unparsed';
   /** Shop-confirmed non-beer; renders a status badge and never reaches /match. */
   nonBeer?: boolean;
 }

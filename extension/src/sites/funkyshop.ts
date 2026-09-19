@@ -70,7 +70,7 @@ export const funkyshop: SiteAdapter = {
       const description = text(el.querySelector('.product-description-short'));
       if (!rawName) continue;
       if (isNonBeerTitle(rawName, description)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
 
@@ -99,7 +99,10 @@ export const funkyshop: SiteAdapter = {
       if (brewery) {
         card.brewery = brewery;
       } else {
+        // #648: the detail page is the only place a brewery could have come from, so this
+        // card is unusable for good — a failure the overlay names rather than hides.
         card.skip = true;
+        card.skipReason = 'unparsed';
       }
     }));
   },
