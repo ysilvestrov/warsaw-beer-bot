@@ -750,6 +750,9 @@ describe('nameKeys (#117)', () => {
     expect(intersects(input, nameKeys('Fifty / Fifty Clementine & Passionfruit', 'Magic Road'))).toBe(true);
     expect(intersects(input, nameKeys('Fifty / Fifty - Pineapple', 'Magic Road'))).toBe(false);
   });
+  test('unspaced ampersand in beer name is not split into collab sides (Salt&Vinegar)', () => {
+    expect([...nameKeys('Salt&Vinegar Chips', 'Magic Road')]).toEqual(['chips salt vinegar']);
+  });
 });
 
 describe('matchPrepared key-intersection (#117)', () => {

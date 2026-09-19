@@ -1163,6 +1163,41 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('identity alias: collab in beer name matches candidate alias_alt even when input brewery is non-empty', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6588490,
+        beer_name: 'House of New Orleans',
+        brewery_name: 'Some Other Brewer',
+        style: 'Stout - Imperial / Double',
+        abv: 13,
+        global_rating: 4.1,
+        alias_alt: ['Brouwerij LOST House of New Orleans'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Dutch Bargain', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: 13, search });
+    expect(out.kind).toBe('matched');
+    if (out.kind !== 'matched') return;
+    expect(out.result.bid).toBe(6588490);
+  });
+
+  test('fuzzyTargets: unspaced ampersand in beer name (Salt&Vinegar) is never split into separate targets (#671)', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 12345,
+        beer_name: 'Salt',
+        brewery_name: 'Other Brewery',
+        style: 'Gose',
+        abv: 4.5,
+        global_rating: 3.5,
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: '', name: 'Salt&Vinegar', abv: 4.5, search });
+    expect(out.kind).toBe('not_found');
+  });
+
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
       { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,

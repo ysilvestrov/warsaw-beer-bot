@@ -51,6 +51,12 @@ export function canonicalizeBreweryBrand(s: string): string {
 // String.split() applies this to every occurrence regardless of the global flag.
 export const COLLAB_SEP = /\s*\/\s*|\s+[Xx+]\s+|\s+&\s*|\s*&\s+|(?<=\p{L}{2,})&(?=\p{L}{2,})/u;
 
+// Separator for collab/bilingual beer titles in the catalog/shop.
+// Unlike breweries, beer titles often use "&" and "+" for flavours/adjuncts
+// ("Salt&Vinegar", "Gin & Tonic", "Mango + Passionfruit"), which must never
+// be split into alternate beer names. Title collaborations use "/" or " x ".
+export const NAME_COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+/;
+
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the
 // U+0300–U+036F block, which the regex then strips. Ł/ł is the one
