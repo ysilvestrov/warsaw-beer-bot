@@ -43,12 +43,16 @@ export function canonicalizeBreweryBrand(s: string): string {
   return out;
 }
 
-// Separator for collab/bilingual brewery names. Untappd uses:
+// Separator for collab/bilingual brewery names ONLY (never for beer titles/names).
+// Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
 //   "A + B"  — " + " connector (collab)
-//   "A & B"  — " & " connector (collab, with spaces or unspaced between words of length >= 2)
+//   "A & B"  — " & " connector (collab, with spaces or unspaced between words of length >= 2, e.g. Stone&Garage)
 // String.split() applies this to every occurrence regardless of the global flag.
+// NOTE: For beer titles/names, use NAME_COLLAB_SEP instead. Beer titles frequently contain
+// unspaced or spaced "&" and "+" for flavours and adjuncts ("Salt&Vinegar", "Gin & Tonic",
+// "Mango + Passionfruit"), which must never be split into separate beer names.
 export const COLLAB_SEP = /\s*\/\s*|\s+[Xx+]\s+|\s+&\s*|\s*&\s+|(?<=\p{L}{2,})&(?=\p{L}{2,})/u;
 
 // Separator for collab/bilingual beer titles in the catalog/shop.

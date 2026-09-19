@@ -1232,6 +1232,40 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('identity alias: empty-brewery collab rejects candidate whose alias_alt is only the candidate brewery brand', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 123456,
+        beer_name: 'Random IPA',
+        brewery_name: 'Dutch Bargain',
+        style: 'IPA',
+        abv: 6.0,
+        global_rating: 3.8,
+        alias_alt: ['Dutch Bargain'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: '', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: null, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('identity alias: empty-brewery collab rejects candidate whose brewery name only matches words in the beer title', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 123457,
+        beer_name: 'Some Beer',
+        brewery_name: 'House Brewing',
+        style: 'Stout',
+        abv: 13,
+        global_rating: 4.0,
+        alias_alt: ['Brouwerij LOST House of New Orleans'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: '', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: null, search });
+    expect(out.kind).toBe('not_found');
+  });
+
   test('native brewery alias: Carlsberg ownership admits the unique Okocim beer', async () => {
     const search = fakeSearch(() => [
       { bid: 9055, beer_name: 'Okocim Jasne Okocimskie / Jasne Pełne', brewery_name: 'Browar Okocim', style: 'Pilsner', abv: 5, global_rating: 3.1,
