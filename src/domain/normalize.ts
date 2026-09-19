@@ -46,9 +46,10 @@ export function canonicalizeBreweryBrand(s: string): string {
 // Separator for collab/bilingual brewery names. Untappd uses:
 //   "A / B"  — slash with any spacing (bilingual or collab)
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
-//   "A & B"  — " & " connector (collab)
+//   "A + B"  — " + " connector (collab)
+//   "A & B"  — " & " connector (collab, with spaces or unspaced between words of length >= 2)
 // String.split() applies this to every occurrence regardless of the global flag.
-export const COLLAB_SEP = /\s*[/&]\s*|\s+[Xx+]\s+/;
+export const COLLAB_SEP = /\s*\/\s*|\s+[Xx+]\s+|\s+&\s*|\s*&\s+|(?<=\p{L}{2,})&(?=\p{L}{2,})/u;
 
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the

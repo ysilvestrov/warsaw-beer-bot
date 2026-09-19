@@ -127,6 +127,10 @@ describe('breweryAliases', () => {
     );
   });
 
+  test('acronym ampersand brand B&B does not decompose into single letter parts', () => {
+    expect(breweryAliases('B&B Brewery')).toEqual(['b b']);
+  });
+
   test('empty input returns empty array', () => {
     expect(breweryAliases('')).toEqual([]);
   });

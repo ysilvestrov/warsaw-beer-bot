@@ -241,6 +241,9 @@ describe('cleanSearchQuery', () => {
   });
   test('collapses non-spaced & and + collab connectors (#401, #589)', () => {
     expect('Stone&Garage Beer Co.'.split(COLLAB_SEP)).toEqual(['Stone', 'Garage Beer Co.']);
+    expect('B&B Brewery'.split(COLLAB_SEP)).toEqual(['B&B Brewery']);
+    expect('C&C group'.split(COLLAB_SEP)).toEqual(['C&C group']);
+    expect('50&50'.split(COLLAB_SEP)).toEqual(['50&50']);
     expect('Nieczajna + Bistro Narożnik Brewery'.split(COLLAB_SEP)).toEqual(['Nieczajna', 'Bistro Narożnik Brewery']);
   });
   test('strips a bracketed adjunct list from the query (#236 Magic Road 30888)', () => {
