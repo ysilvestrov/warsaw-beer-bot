@@ -103,7 +103,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
   const fallbackState = (brewery: string, name: string): CardState =>
     ({ kind: 'missing', brewery, name, orphan: true });
 
-  function stubServiceWorker(): Msg[] {
+  function stubServiceWorker(result?: unknown): Msg[] {
     const sent: Msg[] = [];
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
       ((msg: Msg, cb: (r: unknown) => void) => {
@@ -119,7 +119,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
         } else if (msg.type === 'enrich:fetch') {
           cb({ algolia: { hits: [{ bid: 6648348 }] } });
         } else if (msg.type === 'enrich:result') {
-          cb({ result: { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
+          cb({ result: result ?? { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
         } else cb(undefined);
         return undefined;
       }) as never,
@@ -209,6 +209,53 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     for (const k of ['bid', 'bidSlug', 'brand', 'abv', 'style']) {
       expect(Object.keys(result)).not.toContain(k);
     }
+  });
+
+  // #648: enrich.ts reports events and main.ts is the ONE place that turns them into a
+  // badge. The translation is a field-by-field copy, so a dropped rating or a wrong state
+  // kind compiles and passes every enrich.test.ts case — these drive the real hop.
+  it('turns a found event into the rated star badge', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    stubServiceWorker();
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="star"]') !== null);
+
+    const badge = el.querySelector('[data-beerbadge]')!;
+    expect(badge.textContent).toContain('3.9');
+    expect(badge.getAttribute('aria-label')).toBe('Ти це не пив. Глобальна оцінка 3,9');
+  });
+
+  it('settles a fruitless search back onto the state /match proved', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker({ status: 'not_found' });
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="search"]') !== null);
+
+    // The fallback carried `orphan: true`, so the label must be the catalogue one — proving
+    // the /match state was restored rather than a fresh generic "missing" invented here.
+    expect(el.querySelector('[data-beerbadge]')!.getAttribute('aria-label'))
+      .toBe('Пиво є в каталозі, але сторінки на Untappd нема. Клік відкриє пошук');
+  });
+
+  it('shows a blocked search as an error, not as a verdict', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker({ status: 'blocked' });
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="warn"]') !== null);
+
+    expect(el.querySelector('[data-beerbadge]')!.getAttribute('aria-label'))
+      .toBe('Не вдалося перевірити: Untappd не відповів');
   });
 
   it('does nothing at all while the enrich opt-in is off', async () => {

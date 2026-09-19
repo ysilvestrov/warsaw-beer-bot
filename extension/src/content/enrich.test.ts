@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
-import { runEnrichment, MAX_SEARCHES_PER_PAGE, type EnrichDeps } from './enrich';
+import { describe, it, expect, vi, type Mock } from 'vitest';
+import { runEnrichment, MAX_SEARCHES_PER_PAGE, type EnrichDeps, type EnrichEvent } from './enrich';
 import type { EnrichResult } from '../api/types';
 
 function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
@@ -14,14 +14,24 @@ function deps(over: Partial<EnrichDeps> = {}): EnrichDeps {
     ),
     fetchSearch: vi.fn(async () => ({ hits: [{ bid: 7 }] })),
     submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'matched', untappd_id: 7, rating_global: 4.0 })),
-    setSearching: vi.fn(),
-    setEnriched: vi.fn(),
-    setOrphan: vi.fn(),
+    onEvent: vi.fn(),
     sleep: vi.fn(async () => {}),
     delayMs: 4000,
     ...over,
   };
 }
+
+// #648: дошук більше не малює бейджів — він повідомляє події. Тести читають саме їх.
+const events = (d: EnrichDeps): [string, EnrichEvent][] =>
+  (d.onEvent as unknown as Mock).mock.calls as [string, EnrichEvent][];
+
+const forKey = (d: EnrichDeps, key: string): EnrichEvent[] =>
+  events(d).filter(([k]) => k === key).map(([, e]) => e);
+
+const kindsFor = (d: EnrichDeps, key: string): string[] => forKey(d, key).map((e) => e.kind);
+
+/** Все, що не `searching`, — завершальна подія: після неї картка має кінцевий бейдж. */
+const isTerminal = (e: EnrichEvent): boolean => e.kind !== 'searching';
 
 const beers = (n: number) =>
   Array.from({ length: n }, (_, i) => ({ key: `k${i}`, brewery: 'B', name: `N${i}` }));
@@ -65,7 +75,7 @@ describe('runEnrichment', () => {
     expect(d.fetchSearch).toHaveBeenCalledTimes(MAX_SEARCHES_PER_PAGE); // search capped at 20
   });
 
-  it('searches eligible beers, throttling between them, and resolves matched → setEnriched', async () => {
+  it('searches eligible beers, throttling between them, and reports matched as a found event', async () => {
     const d = deps();
     await runEnrichment(beers(2), d);
     expect(d.getCandidates).toHaveBeenCalledTimes(1);
@@ -73,8 +83,11 @@ describe('runEnrichment', () => {
     // #369: submitResult now takes a 4th `facts` argument; these beers publish none.
     // #391: and a 5th — the ladder rung that actually produced the hits.
     expect(d.submitResult).toHaveBeenCalledWith('B', 'N0', { hits: [{ bid: 7 }] }, {}, 'q:N0');
-    expect(d.setSearching).toHaveBeenCalledTimes(2);
-    expect(d.setEnriched).toHaveBeenCalledWith('k0', 7, 4.0);
+    expect(events(d).filter(([, e]) => e.kind === 'searching')).toHaveLength(2);
+    expect(forKey(d, 'k0')).toEqual([
+      { kind: 'searching' },
+      { kind: 'found', untappdId: 7, ratingGlobal: 4.0 },
+    ]);
     expect(d.sleep).toHaveBeenCalledTimes(1); // between the two
   });
 
@@ -93,11 +106,97 @@ describe('runEnrichment', () => {
     expect(d.fetchSearch).not.toHaveBeenCalled();
   });
 
-  it('on not_found, clears the loader back to ⚪ and does not enrich', async () => {
+  it('on not_found, settles the card on its /match state and does not enrich', async () => {
     const d = deps({ submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'not_found' })) });
     await runEnrichment(beers(1), d);
-    expect(d.setEnriched).not.toHaveBeenCalled();
-    expect(d.setOrphan).toHaveBeenCalledWith('k0', 'B', 'N0');
+    expect(kindsFor(d, 'k0')).toEqual(['searching', 'settled']);
+  });
+});
+
+// #648: кожна картка, яку дошук узяв у чергу, мусить вийти з нього з вердиктом. Інакше
+// вона лишиться з бейджем «в черзі», який `/match` намалював, і крутитиметься назавжди.
+describe('runEnrichment resolves every card it took (#648)', () => {
+  it('gives the first MAX_SEARCHES_PER_PAGE a result and every card past it exactly one deferred', async () => {
+    const d = deps();
+    const n = MAX_SEARCHES_PER_PAGE + 5;
+    await runEnrichment(beers(n), d);
+
+    for (let i = 0; i < n; i++) {
+      const evs = kindsFor(d, `k${i}`);
+      if (i < MAX_SEARCHES_PER_PAGE) expect(evs).toEqual(['searching', 'found']);
+      else expect(evs).toEqual(['deferred']);
+    }
+    // Жодного ключа без завершальної події — і жодного з двома.
+    const terminals = events(d).filter(([, e]) => isTerminal(e));
+    expect(terminals).toHaveLength(n);
+    expect(new Set(terminals.map(([k]) => k)).size).toBe(n);
+  });
+
+  it('settles an ineligible card instead of leaving it queued', async () => {
+    const d = deps({
+      getCandidates: vi.fn(async (bs: { brewery: string; name: string }[]) =>
+        bs.map((b) => ({
+          brewery: b.brewery,
+          name: b.name,
+          eligible: false,
+          algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer' as const, query: 'u', hitsPerPage: 5 },
+        })),
+      ),
+    });
+    await runEnrichment(beers(2), d);
+    expect(kindsFor(d, 'k0')).toEqual(['settled']);
+    expect(kindsFor(d, 'k1')).toEqual(['settled']);
+  });
+
+  it('reports blocked as a failure, not as a verdict', async () => {
+    const d = deps({ submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'blocked' })) });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'searching' }, { kind: 'failed', reason: 'blocked' }]);
+  });
+
+  it('reports transient as a network failure, not as a verdict', async () => {
+    const d = deps({ submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'transient' })) });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'searching' }, { kind: 'failed', reason: 'network' }]);
+  });
+
+  it('reports a thrown search as a failure, not as a verdict', async () => {
+    const d = deps({ fetchSearch: vi.fn(async () => { throw new Error('offline'); }) });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'searching' }, { kind: 'failed', reason: 'network' }]);
+  });
+
+  // A null from fetchSearch is the service worker reporting that it got nothing from
+  // Algolia. It is not evidence of absence, so it must not be dressed up as a verdict.
+  it('reports an empty search response as a failure, not as a verdict', async () => {
+    const d = deps({ fetchSearch: vi.fn(async () => null) });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'searching' }, { kind: 'failed', reason: 'network' }]);
+    expect(d.submitResult).not.toHaveBeenCalled();
+  });
+
+  it('carries the bid and the global rating on found', async () => {
+    const d = deps({
+      submitResult: vi.fn(async (): Promise<EnrichResult> => ({
+        status: 'matched', untappd_id: 6648348, rating_global: 3.9,
+      })),
+    });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([
+      { kind: 'searching' },
+      { kind: 'found', untappdId: 6648348, ratingGlobal: 3.9 },
+    ]);
+  });
+
+  it('reports a null global rating as null rather than dropping the field', async () => {
+    const d = deps({
+      submitResult: vi.fn(async (): Promise<EnrichResult> => ({ status: 'matched', untappd_id: 7 })),
+    });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([
+      { kind: 'searching' },
+      { kind: 'found', untappdId: 7, ratingGlobal: null },
+    ]);
   });
 });
 
@@ -222,7 +321,7 @@ describe('runEnrichment query ladder (#391)', () => {
     });
     await runEnrichment(beers(1), d);
     expect(fetchSearch).toHaveBeenCalledTimes(1);
-    expect(d.setOrphan).toHaveBeenCalledWith('k0', 'B', 'N0');
+    expect(kindsFor(d, 'k0')).toEqual(['searching', 'settled']);
   });
 
   it('reports the executed query for a single-rung beer too', async () => {
@@ -251,10 +350,10 @@ describe('runEnrichment query ladder (#391)', () => {
     // 10 completed ladders submit; beer 10 (`N10`) was searched but must NOT be submitted.
     expect(d.submitResult).toHaveBeenCalledTimes(10);
     expect(d.submitResult).not.toHaveBeenCalledWith('B', 'N10', expect.anything(), expect.anything(), expect.anything());
-    // It was shown as ⏳, so it must be put back to ⚪ rather than left spinning.
-    expect(d.setSearching).toHaveBeenCalledWith('k10');
-    expect(d.setOrphan).toHaveBeenCalledWith('k10', 'B', 'N10');
-    // Beer 11 was never searched at all.
-    expect(d.setSearching).not.toHaveBeenCalledWith('k11');
+    // #648: половину сходинки не пройдено, отже ми НЕ дивилися до кінця — це «не встигли»,
+    // а не вердикт. `settled` тут збрехав би, що дошук сказав останнє слово.
+    expect(kindsFor(d, 'k10')).toEqual(['searching', 'deferred']);
+    // Beer 11 was never searched at all — but it still leaves with a verdict.
+    expect(kindsFor(d, 'k11')).toEqual(['deferred']);
   });
 });

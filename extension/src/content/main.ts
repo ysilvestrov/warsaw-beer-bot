@@ -3,7 +3,7 @@ import { runOverlay, type SendMatch, type EnrichOrphans } from './index';
 import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
 import { clearKeys } from '../cache/store';
-import { isSeen, setSearching, setEnriched, setOrphan } from './badge';
+import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { getSettings } from '../shared/config';
 import type { SiteAdapter } from '../sites/types';
@@ -37,6 +37,10 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
     const { enrichEnabled } = await getSettings();
     if (!enrichEnabled) return;
     const elByKey = new Map(orphans.map((o) => [o.key, o.el]));
+    // #648: стан, яким картка стане, якщо дошук не знайде нічого кращого. Його порахував
+    // `runOverlay` з відповіді `/match` — дошук цієї відповіді не бачить узагалі.
+    const fallbackByKey = new Map<string, CardState>(orphans.map((o) => [o.key, o.state]));
+    const identityByKey = new Map(orphans.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
     const beers: OrphanBeer[] = orphans.map((o) => ({
       key: o.key,
       brewery: o.brewery,
@@ -64,9 +68,38 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
           ...(facts?.brand !== undefined ? { brand: facts.brand } : {}),
           pageUrl: window.location.href,
         }))?.result ?? { status: 'transient' },
-      setSearching: (key) => { const el = elByKey.get(key); if (el) setSearching(el); },
-      setEnriched: (key, id, r) => { const el = elByKey.get(key); if (el) setEnriched(el, id, r); },
-      setOrphan: (key, brewery, name) => { const el = elByKey.get(key); if (el) setOrphan(el, brewery, name); },
+      // #648: дошук повідомляє події, а в бейдж їх перекладає одне це місце. Так уся мапа
+      // «що сталося → що людина бачить» лишається там само, де стан із `/match`.
+      //
+      // Відома межа: `found` після дошуку не знає, чи людина це пиво пила — `/enrich/result`
+      // статусу «пив» не несе, тож картка до й після перезавантаження може виглядати
+      // по-різному. Це не регрес цього issue (так було завжди); фіксить #666, який навчить
+      // дошук оновлювати кеш.
+      onEvent: (key, ev) => {
+        const el = elByKey.get(key);
+        if (!el) return;
+        const id = identityByKey.get(key);
+        switch (ev.kind) {
+          case 'searching':
+            return renderState(el, { kind: 'working' });
+          case 'found':
+            return renderState(el, {
+              kind: 'found', drunk: false, mine: null, global: ev.ratingGlobal,
+              unsure: false, untappdId: ev.untappdId,
+              brewery: id?.brewery ?? '', name: id?.name ?? '',
+            });
+          case 'settled':
+            return renderState(
+              el,
+              fallbackByKey.get(key)
+                ?? { kind: 'missing', brewery: id?.brewery ?? '', name: id?.name ?? '', orphan: false },
+            );
+          case 'deferred':
+            return renderState(el, { kind: 'deferred' });
+          case 'failed':
+            return renderState(el, { kind: 'failed', reason: ev.reason });
+        }
+      },
     });
   })();
 };
