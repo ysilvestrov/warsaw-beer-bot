@@ -478,6 +478,9 @@ export async function lookupBeer(
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
   const normalizedInputName = baseNormalize(name);
+  const nameSides = (NAME_COLLAB_SEP.test(name) ? name.split(NAME_COLLAB_SEP) : [])
+    .map((s) => s.trim())
+    .filter(Boolean);
   // #465: drop empty candidate names so bare brewery brand is never admitted into inputIdentityAliases
   // #501, #401: normalize aliases without leading brewery noise, and include multi-token collab sides
   const inputIdentityAliases = new Set<string>();
@@ -490,12 +493,26 @@ export async function lookupBeer(
       if (clean) inputIdentityAliases.add(clean);
     }
   }
-  if (NAME_COLLAB_SEP.test(name)) {
-    for (const side of name.split(NAME_COLLAB_SEP)) {
-      const cleanSide = normalizeIdentityAlias(side);
-      if (cleanSide.split(' ').filter(Boolean).length >= 2) {
-        inputIdentityAliases.add(baseNormalize(side));
-        inputIdentityAliases.add(cleanSide);
+  if (nameSides.length > 1) {
+    for (const side of nameSides) {
+      if (inputBreweryAliases.length === 0) {
+        // #401: when input brewery is empty, candidate sides of collab title serve as identity candidates
+        const cleanSide = normalizeIdentityAlias(side);
+        if (cleanSide.split(' ').filter(Boolean).length >= 2) {
+          inputIdentityAliases.add(baseNormalize(side));
+          inputIdentityAliases.add(cleanSide);
+        }
+      } else {
+        // When input brewery is present, collab sides must still be anchored by input brewery alias
+        for (const alias of inputBreweryAliases) {
+          const strippedSide = stripBreweryFromName(baseNormalize(side), alias);
+          for (const cand of [baseNormalize(side), strippedSide]) {
+            if (cand.trim() === '') continue;
+            inputIdentityAliases.add(baseNormalize(`${alias} ${cand}`));
+            const clean = normalizeIdentityAlias(`${alias} ${cand}`);
+            if (clean) inputIdentityAliases.add(clean);
+          }
+        }
       }
     }
   }
@@ -540,12 +557,29 @@ export async function lookupBeer(
     const results = judged
       .filter((j) => j.identity !== 'different' && !(j.identity === 'number-fallback' && hasBetterOfSameSeries(j.result)))
       .map((j) => j.result);
-    const identityHits = results.filter((result) =>
-      (result.alias_alt ?? []).some((alias) =>
+    const hasCollabBreweryCorroboration = (result: SearchResult): boolean => {
+      const candBrewery = breweryAliases(result.brewery_name);
+      return nameSides.some((side) => {
+        const sideNorm = normalizeBrewery(side);
+        return (
+          breweryAliasesMatch(candBrewery, breweryAliases(side)) ||
+          (sideNorm !== '' && breweryAliasContained(candBrewery, [sideNorm]))
+        );
+      });
+    };
+    const identityHits = results.filter((result) => {
+      if (
+        inputBreweryAliases.length === 0 &&
+        nameSides.length > 1 &&
+        !hasCollabBreweryCorroboration(result)
+      ) {
+        return false;
+      }
+      return (result.alias_alt ?? []).some((alias) =>
         inputIdentityAliases.has(baseNormalize(alias)) ||
         inputIdentityAliases.has(normalizeIdentityAlias(alias)),
-      ),
-    );
+      );
+    });
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /

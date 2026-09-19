@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, stripDescriptorAndPackaging, COLLAB_SEP } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, stripDescriptorAndPackaging, COLLAB_SEP, NAME_COLLAB_SEP } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -245,6 +245,13 @@ describe('cleanSearchQuery', () => {
     expect('C&C group'.split(COLLAB_SEP)).toEqual(['C&C group']);
     expect('50&50'.split(COLLAB_SEP)).toEqual(['50&50']);
     expect('Nieczajna + Bistro Narożnik Brewery'.split(COLLAB_SEP)).toEqual(['Nieczajna', 'Bistro Narożnik Brewery']);
+  });
+  test('NAME_COLLAB_SEP splits on / and x, but preserves & and + for adjuncts', () => {
+    expect('Dutch Bargain/Brouwerij LOST'.split(NAME_COLLAB_SEP)).toEqual(['Dutch Bargain', 'Brouwerij LOST']);
+    expect('Alpha x Beta'.split(NAME_COLLAB_SEP)).toEqual(['Alpha', 'Beta']);
+    expect('Salt&Vinegar'.split(NAME_COLLAB_SEP)).toEqual(['Salt&Vinegar']);
+    expect('Gin & Tonic'.split(NAME_COLLAB_SEP)).toEqual(['Gin & Tonic']);
+    expect('Mango + Passionfruit'.split(NAME_COLLAB_SEP)).toEqual(['Mango + Passionfruit']);
   });
   test('strips a bracketed adjunct list from the query (#236 Magic Road 30888)', () => {
     expect(

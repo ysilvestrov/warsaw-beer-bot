@@ -1163,12 +1163,46 @@ describe('#427 upstream identity evidence', () => {
     expect(out.kind).toBe('not_found');
   });
 
-  test('identity alias: collab in beer name matches candidate alias_alt even when input brewery is non-empty', async () => {
+  test('identity alias: collab side never matches candidate alias_alt with unrelated brewery without brewery corroboration', async () => {
     const search = fakeSearch(() => [
       {
         bid: 6588490,
         beer_name: 'House of New Orleans',
         brewery_name: 'Some Other Brewer',
+        style: 'Stout - Imperial / Double',
+        abv: 13,
+        global_rating: 4.1,
+        alias_alt: ['Brouwerij LOST House of New Orleans'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: 'Dutch Bargain', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: 13, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('identity alias: empty-brewery collab rejects candidate from unrelated brewery', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6588490,
+        beer_name: 'House of New Orleans',
+        brewery_name: 'Unrelated Brewery',
+        style: 'Stout - Imperial / Double',
+        abv: 13,
+        global_rating: 4.1,
+        alias_alt: ['Brouwerij LOST House of New Orleans'],
+      },
+    ]);
+
+    const out = await lookupBeer({ brewery: '', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: 13, search });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('identity alias: collab in beer name matches candidate from input brewery', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 6588490,
+        beer_name: 'House of New Orleans',
+        brewery_name: 'Dutch Bargain',
         style: 'Stout - Imperial / Double',
         abv: 13,
         global_rating: 4.1,
