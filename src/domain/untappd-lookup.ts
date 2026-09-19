@@ -488,11 +488,13 @@ export async function lookupBeer(
       if (clean) inputIdentityAliases.add(clean);
     }
   }
-  for (const side of name.split(COLLAB_SEP)) {
-    const cleanSide = normalizeIdentityAlias(side);
-    if (cleanSide.split(' ').filter(Boolean).length >= 2) {
-      inputIdentityAliases.add(baseNormalize(side));
-      inputIdentityAliases.add(cleanSide);
+  if (inputBreweryAliases.length === 0 && COLLAB_SEP.test(name)) {
+    for (const side of name.split(COLLAB_SEP)) {
+      const cleanSide = normalizeIdentityAlias(side);
+      if (cleanSide.split(' ').filter(Boolean).length >= 2) {
+        inputIdentityAliases.add(baseNormalize(side));
+        inputIdentityAliases.add(cleanSide);
+      }
     }
   }
   const targetNames = fuzzyTargets(name, brewery);
