@@ -1,4 +1,4 @@
-import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, stripDescriptorAndPackaging } from './normalize';
+import { normalizeName, normalizeBrewery, stripBreweryNoise, stripLegalForm, cleanSearchQuery, stripSearchNoise, stripQueryTokenNoise, repairHomoglyphs, searchQueryLadder, stripDescriptorAndPackaging, COLLAB_SEP } from './normalize';
 
 test('lowercases and strips diacritics', () => {
   expect(normalizeName('Atak Chmielu — Imperial')).toBe('atak chmielu');
@@ -238,6 +238,10 @@ describe('cleanSearchQuery', () => {
   });
   test('collapses a collab connector so "x" does not leak into the query', () => {
     expect(cleanSearchQuery('Alpha x Beta', 'Some Beer')).toBe('Alpha Beta Some Beer');
+  });
+  test('collapses non-spaced & and + collab connectors (#401, #589)', () => {
+    expect('Stone&Garage Beer Co.'.split(COLLAB_SEP)).toEqual(['Stone', 'Garage Beer Co.']);
+    expect('Nieczajna + Bistro Narożnik Brewery'.split(COLLAB_SEP)).toEqual(['Nieczajna', 'Bistro Narożnik Brewery']);
   });
   test('strips a bracketed adjunct list from the query (#236 Magic Road 30888)', () => {
     expect(

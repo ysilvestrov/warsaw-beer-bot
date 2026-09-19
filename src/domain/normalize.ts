@@ -48,7 +48,7 @@ export function canonicalizeBreweryBrand(s: string): string {
 //   "A x B"  — " x "/" X " connector (collab, case-insensitive)
 //   "A & B"  — " & " connector (collab)
 // String.split() applies this to every occurrence regardless of the global flag.
-export const COLLAB_SEP = /\s*\/\s*|\s+[Xx]\s+|\s+&\s+/;
+export const COLLAB_SEP = /\s*[/&]\s*|\s+[Xx+]\s+/;
 
 // NFD decomposes most Polish diacritics (ą ć ę ń ó ś ź ż and their
 // uppercase forms) into a base letter + a combining mark from the
