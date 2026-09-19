@@ -177,7 +177,10 @@ describe('beershop adapter', () => {
 
     await runOverlay(doc, adapter, sendMatch);
 
-    expect(doc.querySelector('[data-beerbadge]')?.textContent).toBe('✕');
+    // #648: the ✕ character became a composed badge — an svg glyph plus an aria-label.
+    expect(
+      doc.querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon'),
+    ).toBe('cross');
     expect(doc.querySelector('[data-beerseen]')).not.toBeNull();
     expect(sendMatch).not.toHaveBeenCalled();
   });

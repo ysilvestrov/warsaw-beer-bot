@@ -8,8 +8,13 @@ import type { MatchResult, RawBeer } from '../api/types';
 
 const fixturePath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.html`);
 const nonBeerHtmlPath = (id: string) => resolve(__dirname, `../../tests/fixtures/${id}.nonbeer.html`);
+// #648: every card is badged synchronously at parse time now, so "some badge exists" no
+// longer means "the overlay pass finished" — and it is the end of that pass which arms the
+// re-render observer. Waiting on any badge let the remount below happen first, so the
+// mutation was never observed. The drunk card's ✓ is only reachable through the /match
+// response, which makes it the signal that the pass really completed.
 const waitForBadge = () => vi.waitFor(
-  () => expect(document.querySelector('[data-beerbadge]')).not.toBeNull(),
+  () => expect(document.querySelector('[data-beerbadge] [data-icon="check"]')).not.toBeNull(),
   { timeout: 5_000 },
 );
 
@@ -20,15 +25,21 @@ function mountFixture(html: string) {
 }
 
 // Mark the first beer of each request drunk so badges appear deterministically.
+// #648: a drunk result has to carry the beer it is drunk *of*. `is_drunk` is set from the
+// imported check-ins and only on an exact match, so `matched_beer: null` with
+// `is_drunk: true` is a response the server cannot emit — and the state model reads it,
+// correctly, as "not found" rather than as a check-in.
 const sendMatch = (cards: RawBeer[]): Promise<MatchResult[]> =>
   Promise.resolve(
     cards.map((raw, i) => ({
       raw: { brewery: raw.brewery, name: raw.name },
-      matched_beer: null,
+      matched_beer: i === 0
+        ? { id: 1, name: raw.name, brewery: raw.brewery, rating_global: 4.1, untappd_id: 111 }
+        : null,
       is_drunk: i === 0,
       drunk_uncertain: false,
       user_rating: i === 0 ? 4 : null,
-      source: null,
+      source: i === 0 ? ('exact' as const) : null,
       searched: true,
     })),
   );
@@ -107,7 +118,9 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
 
     const cards = adapter.parseCards(doc);
     expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((card) => card.el.querySelector('[data-beerbadge]')?.textContent === '✕')).toBe(true);
+    // #648: the ✕ character became a composed badge — an svg glyph plus an aria-label.
+    expect(cards.every((card) => card.el
+      .querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon') === 'cross')).toBe(true);
     expect(cards.every((card) => card.el.hasAttribute('data-beerseen'))).toBe(true);
     expect(match).not.toHaveBeenCalled();
   });

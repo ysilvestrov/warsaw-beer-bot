@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { startOverlay, enrichOrphans } from './main';
-import { isSeen } from './badge';
+import { isSeen, type CardState } from './badge';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchResult } from '../api/types';
 
@@ -41,12 +41,19 @@ describe('startOverlay', () => {
       await tick(0); // first pass finishes and attaches the normal observer
       expect(sendMatch).toHaveBeenCalledTimes(1);
       document.body.appendChild(document.createElement('aside')); // one unrelated mutation
-      await tick(1400); // first retry plus several default 250ms debounce intervals
+      await tick(1400); // several default 250ms debounce intervals
 
-      expect(sendMatch).toHaveBeenCalledTimes(2);
+      // #648: the failure badge is itself a DOM write, so a failed card left unseen would
+      // re-arm the pass that drew it — one /match per debounce interval, forever. The pass
+      // marks it seen instead; a real grid re-render still retries it on fresh nodes.
+      expect(sendMatch).toHaveBeenCalledTimes(1);
       expect(nonBeer.querySelectorAll('[data-beerbadge]')).toHaveLength(1);
-      expect(nonBeer.querySelector('[data-beerbadge]')?.textContent).toBe('✕');
-      expect(isSeen(beer)).toBe(false);
+      expect(
+        nonBeer.querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon'),
+      ).toBe('cross');
+      expect(
+        beer.querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon'),
+      ).toBe('warn');
     } finally {
       stop();
     }
@@ -91,6 +98,11 @@ describe('startOverlay', () => {
 describe('enrichOrphans relays shop facts to the service worker', () => {
   type Msg = Record<string, unknown> & { type: string };
 
+  // #648: runOverlay hands each orphan the state it falls back to if enrichment finds
+  // nothing better. These tests are about the fact-relaying hops, so any valid state does.
+  const fallbackState = (brewery: string, name: string): CardState =>
+    ({ kind: 'missing', brewery, name, orphan: true });
+
   function stubServiceWorker(): Msg[] {
     const sent: Msg[] = [];
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
@@ -127,6 +139,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
 
     enrichOrphans([{
       key: 'k0', el, brewery: 'Mad Brew', name: 'Tomatol Bulgogi',
+      state: fallbackState('Mad Brew', 'Tomatol Bulgogi'),
       bid: 6648348, bidSlug: 'mad-brew-tomatol-bulgogi', abv: 5.5, style: 'IPA',
     }]);
     await until(() => sent.some((m) => m.type === 'enrich:result'));
@@ -153,6 +166,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
 
     enrichOrphans([{
       key: 'k0', el, brewery: 'Trappistes', name: 'Rochefort 8 (2025)',
+      state: fallbackState('Trappistes', 'Rochefort 8 (2025)'),
       brand: 'Імпортне пиво', bid: 6134078,
       bidSlug: 'abbaye-notre-dame-de-saint-remy-trappistes-rochefort-8-2025',
     }]);
@@ -171,7 +185,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     const el = document.createElement('div');
     document.body.appendChild(el);
 
-    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N' }]);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
     await until(() => sent.some((m) => m.type === 'enrich:result'));
 
     const result = sent.find((m) => m.type === 'enrich:result')!;
@@ -186,7 +200,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     const el = document.createElement('div');
     document.body.appendChild(el);
 
-    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N' }]);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
     await until(() => sent.some((m) => m.type === 'enrich:result'));
 
     expect((sent.find((m) => m.type === 'enrich:candidates')!.beers as unknown[])[0])
@@ -203,7 +217,7 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     const el = document.createElement('div');
     document.body.appendChild(el);
 
-    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', bid: 6648348 }]);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), bid: 6648348 }]);
     await until(() => sent.length > 0);
 
     expect(sent).toEqual([]);
