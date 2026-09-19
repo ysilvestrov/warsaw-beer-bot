@@ -3,7 +3,8 @@ import type { MatchResult, RawBeer } from '../api/types';
 import { getCached, setCached } from '../cache/store';
 import { normalizeKey } from '../shared/normalize';
 import { usableAbv } from '../shared/abv';
-import { renderBadge, markSeen, setNonBeer } from './badge';
+import { markSeen, renderState, type CardState } from './badge';
+import { stateFromMatch } from './card-state';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
 
@@ -13,6 +14,9 @@ export type EnrichOrphans = (
     el: HTMLElement;
     brewery: string;
     name: string;
+    // #648: стан, яким картка стане, якщо дошук не дасть нічого кращого. Його рахує той,
+    // хто тримає відповідь `/match`; дошук лише повідомляє події й не знає цієї відповіді.
+    state: CardState;
     // #369: shop-published facts, relayed to /enrich/* so the matcher stops
     // running blind. Omitted when the adapter did not publish them.
     abv?: number;
@@ -38,14 +42,28 @@ export async function runOverlay(
       if (!card.nonBeer) keyByCard.set(card, normalizeKey(card.brewery, card.name));
     }
 
+    // #648: бейдж з'являється в ту мить, коли картку взято в роботу, а не коли прийшла
+    // відповідь. До цієї зміни порожня картка означала п'ятнадцять різних речей — зокрема
+    // два протилежні: «зараз буде» і «більше нічого не буде».
+    for (const card of cards) {
+      if (card.nonBeer) {
+        renderState(card.el, { kind: 'nonBeer' });
+        markSeen(card.el);
+        continue;
+      }
+      renderState(card.el, { kind: 'queued' });
+    }
+
     if (adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
       await adapter.loadCardDetails(cards);
     }
 
     const misses: { el: HTMLElement; key: string; card: Card }[] = [];
     for (const card of cards) {
+      // Repeated deliberately: on the loadDetailsBeforeCache path the shop's own verdict
+      // arrives only with the product detail, so the pass above saw a plain queued card.
       if (card.nonBeer) {
-        setNonBeer(card.el);
+        renderState(card.el, { kind: 'nonBeer' });
         markSeen(card.el);
         continue;
       }
@@ -58,7 +76,9 @@ export async function runOverlay(
       if (key === undefined) continue;
       const cached = await getCached(key);
       if (cached?.matched_beer != null) {
-        renderBadge(card.el, cached);
+        // `enrichmentPossible: false` — кешований результат кінцевий для цього проходу:
+        // картка не потрапляє в `misses`, а черга дошуку будується лише з них (#666).
+        renderState(card.el, stateFromMatch(cached, { enrichmentPossible: false }));
         markSeen(card.el);
       } else {
         misses.push({ el: card.el, key, card });
@@ -105,23 +125,34 @@ export async function runOverlay(
       });
     if (rawMisses.length === 0) return;
 
+    for (const m of rawMisses) renderState(m.el, { kind: 'working' });
+
     let results: MatchResult[];
     try {
       results = await sendMatch(rawMisses.map((m) => m.raw));
     } catch {
-      return; // network/server error: leave the page untouched, retry next load
+      // #648: a silent `return` here left every uncached card on the page blank, which is
+      // also what "still loading" looks like — the user could not tell a dead request from
+      // a slow one.
+      //
+      // Seen, not left open: this write is itself a DOM mutation, and the re-render
+      // observer re-runs whenever a parsed card is unseen. Leaving a failed card unseen
+      // makes the failure badge re-arm the pass that drew it — one /match per debounce
+      // interval, forever, against a server that is already failing. The old code was
+      // safe from this only by accident: a failed pass wrote nothing at all. The real
+      // retry routes are untouched — a shop re-render brings fresh unseen nodes, and the
+      // popup's refresh calls resetCard.
+      for (const m of rawMisses) {
+        renderState(m.el, { kind: 'failed', reason: 'network' });
+        markSeen(m.el);
+      }
+      return;
     }
 
-    results.forEach((result, i) => {
-      const miss = rawMisses[i];
-      if (!miss) return;
-      renderBadge(miss.el, result);
-      markSeen(miss.el);
-      void setCached(miss.key, result);
-    });
-
-    if (enrich) {
-      const orphans = results
+    // Порядок важить: `enrichmentPossible` має бути відомий ДО малювання, інакше сирота,
+    // яка зараз поїде в дошук, на мить блимне як «не знайшли».
+    const orphanMisses = enrich
+      ? results
         .map((result, i) => ({ result, miss: rawMisses[i] }))
         .filter((x) => {
           if (!x.miss) return false;
@@ -143,11 +174,27 @@ export async function runOverlay(
             (matched == null || matched.untappd_id == null || bidContradicts)
           );
         })
+      : [];
+    const orphanKeys = new Set(orphanMisses.map((x) => x.miss!.key));
+
+    results.forEach((result, i) => {
+      const miss = rawMisses[i];
+      if (!miss) return;
+      renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
+      markSeen(miss.el);
+      void setCached(miss.key, result);
+    });
+
+    if (enrich) {
+      const orphans = orphanMisses
         .map((x) => ({
           key: x.miss!.key,
           el: x.miss!.el,
           brewery: x.miss!.raw.brewery,
           name: x.miss!.raw.name,
+          // Стан, яким картка стане, якщо дошук нічого не знайде: він уже врахував, що
+          // після дошуку черги більше не буде.
+          state: stateFromMatch(x.result, { enrichmentPossible: false }),
           ...(x.miss!.card.bid !== undefined ? { bid: x.miss!.card.bid } : {}),
           ...(x.miss!.card.bid !== undefined && x.miss!.card.bidSlug !== undefined
             ? { bidSlug: x.miss!.card.bidSlug }

@@ -78,7 +78,11 @@ describe('runOverlay', () => {
     await runOverlay(document, adapterFor([card]), sendMatch);
 
     expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'PINTA', name: 'Unknown' }]);
-    expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('⚪');
+    // #648: the ⚪ glyph is gone; a catalogue row with no Untappd page is the "not found"
+    // class, whose click still opens a prefilled search.
+    expect(
+      card.el.querySelector(`[${BADGE_MARKER}] [data-icon]`)?.getAttribute('data-icon'),
+    ).toBe('search');
   });
 
   it('rechecks an unresolved cached beer even when stale cache marks it drunk', async () => {
@@ -293,7 +297,9 @@ describe('runOverlay', () => {
     await runOverlay(document, adapter, sendMatch, enrich);
 
     expect(adapter.loadCardDetails).toHaveBeenCalledWith([card]);
-    expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('✕');
+    expect(
+      card.el.querySelector(`[${BADGE_MARKER}] [data-icon]`)?.getAttribute('data-icon'),
+    ).toBe('cross');
     expect(isSeen(card.el)).toBe(true);
     expect(sendMatch).not.toHaveBeenCalled();
     expect(enrich).not.toHaveBeenCalled();
@@ -316,7 +322,9 @@ describe('runOverlay', () => {
 
     await runOverlay(document, adapterFor([card]), sendMatch, enrich);
 
-    expect(card.el.querySelector(`[${BADGE_MARKER}]`)?.textContent).toBe('✕');
+    expect(
+      card.el.querySelector(`[${BADGE_MARKER}] [data-icon]`)?.getAttribute('data-icon'),
+    ).toBe('cross');
     expect(isSeen(card.el)).toBe(true);
     expect(chrome.storage.local.get).not.toHaveBeenCalled();
     expect(chrome.storage.local.set).not.toHaveBeenCalled();
@@ -337,11 +345,14 @@ describe('runOverlay', () => {
     expect(order).toEqual(['wait', 'parse']);
   });
 
-  it('does not throw when sendMatch fails (graceful skip)', async () => {
+  it('does not throw when sendMatch fails, and settles the card for this pass', async () => {
     const card: Card = { el: cardEl(), brewery: 'B', name: 'N' };
     const sendMatch = vi.fn(async () => { throw new Error('offline'); });
     await expect(runOverlay(document, adapterFor([card]), sendMatch)).resolves.toBeUndefined();
-    expect(card.el.querySelector(`[${BADGE_MARKER}]`)).toBeNull();
+    // #648: the card is no longer left blank (see the failure test below). It is marked
+    // seen because the failure badge is itself a DOM write, and an unseen card would make
+    // the re-render observer re-run the pass that drew it, once per debounce interval.
+    expect(isSeen(card.el)).toBe(true);
   });
 
   it('marks every parsed card element seen, drunk or not', async () => {
@@ -401,6 +412,174 @@ describe('runOverlay', () => {
     const enriched = enrich.mock.calls[0][0] as Array<{ name: string }>;
     expect(enriched).toHaveLength(1);
     expect(enriched[0]).toMatchObject({ name: 'Regular Orphan' });
+  });
+});
+
+// #648: до цієї зміни порожня картка означала п'ятнадцять різних речей — зокрема два
+// протилежні: «зараз буде» і «більше нічого не буде». Ці тести доводять переходи, а не
+// кінцеві кадри: стан має бути видно в кожну мить, а не лише після відповіді.
+describe('#648 стан картки на всьому шляху', () => {
+  const badgeOf = (el: HTMLElement): HTMLElement | null =>
+    el.querySelector(`[${BADGE_MARKER}]`);
+  const iconOf = (el: HTMLElement): string | null =>
+    badgeOf(el)?.querySelector('[data-icon]')?.getAttribute('data-icon') ?? null;
+
+  // A promise the test holds open, so the assertions land *while* /match is in flight.
+  function deferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
+    let resolve!: (v: T) => void;
+    const promise = new Promise<T>((r) => { resolve = r; });
+    return { promise, resolve };
+  }
+  const flush = (): Promise<void> => new Promise((r) => { setTimeout(r, 0); });
+
+  const found = (brewery: string, name: string): MatchResult => ({
+    raw: { brewery, name },
+    matched_beer: { id: 9, name, brewery, rating_global: 3.9, untappd_id: 222 },
+    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    source: 'exact', searched: true,
+  });
+  const orphanResult = (brewery: string, name: string): MatchResult => ({
+    raw: { brewery, name },
+    matched_beer: { id: 5, name, brewery, rating_global: null, untappd_id: null },
+    is_drunk: false, drunk_uncertain: false, user_rating: null,
+    source: 'exact', searched: true,
+  });
+
+  it('1. queues every card before it touches the network or the cache', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const c = cardEl();
+    const cards: Card[] = [
+      { el: a, brewery: 'PINTA', name: 'One' },
+      { el: b, brewery: 'PINTA', name: 'Two' },
+      { el: c, brewery: 'Термос', name: 'для пляшки', nonBeer: true },
+    ];
+    const d = deferred<MatchResult[]>();
+    const sendMatch = vi.fn(() => d.promise);
+
+    const run = runOverlay(document, adapterFor(cards), sendMatch);
+
+    // Synchronous on purpose: not one await has run yet, so nothing but the parse
+    // could have produced these badges.
+    expect(iconOf(a)).toBe('ring');
+    expect(iconOf(b)).toBe('ring');
+    expect(sendMatch).not.toHaveBeenCalled();
+
+    d.resolve([found('PINTA', 'One'), found('PINTA', 'Two')]);
+    await run;
+  });
+
+  it('2. shows "working" while /match is in flight, and the answer after', async () => {
+    const a = cardEl();
+    const d = deferred<MatchResult[]>();
+    const sendMatch = vi.fn(() => d.promise);
+
+    const run = runOverlay(document, adapterFor([{ el: a, brewery: 'PINTA', name: 'One' }]), sendMatch);
+    await flush();
+
+    expect(sendMatch).toHaveBeenCalledTimes(1);
+    expect(iconOf(a)).toBe('arc');
+    expect(badgeOf(a)?.getAttribute('aria-label')).toBe('Шукаємо це пиво');
+
+    d.resolve([found('PINTA', 'One')]);
+    await run;
+    expect(iconOf(a)).toBe('star');
+  });
+
+  it('3. renders the final state carried by the response', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const adapter = adapterFor([
+      { el: a, brewery: 'PINTA', name: 'New One' },
+      { el: b, brewery: 'PINTA', name: 'Hazy Morning' },
+    ]);
+
+    await runOverlay(document, adapter, async () => [
+      found('PINTA', 'New One'),
+      drunkResult('PINTA', 'Hazy Morning'),
+    ]);
+
+    expect(iconOf(a)).toBe('star');
+    expect(badgeOf(a)?.getAttribute('aria-label')).toBe('Ти це не пив. Глобальна оцінка 3,9');
+    expect(iconOf(b)).toBe('check');
+    expect(badgeOf(b)?.getAttribute('aria-label')).toBe('Ти це пив. Твоя оцінка 4,2');
+  });
+
+  it('4. says so when /match fails instead of leaving the page blank', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    await setCached(normalizeKey('PINTA', 'Cached'), drunkResult('PINTA', 'Cached'));
+    const adapter = adapterFor([
+      { el: a, brewery: 'PINTA', name: 'One' },
+      { el: b, brewery: 'PINTA', name: 'Cached' },
+    ]);
+    const sendMatch = vi.fn(async () => { throw new Error('offline'); });
+
+    await expect(runOverlay(document, adapter, sendMatch)).resolves.toBeUndefined();
+
+    expect(iconOf(a)).toBe('warn');
+    expect(badgeOf(a)?.getAttribute('aria-label')).toBe('Не вдалося перевірити: не було звʼязку');
+    expect(iconOf(b)).toBe('check'); // the cached card keeps its own answer
+  });
+
+  it('5. renders non-beer at parse time and never sends it to /match', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const d = deferred<MatchResult[]>();
+    const sendMatch = vi.fn(() => d.promise);
+    // The non-beer card sits *behind* a beer card on purpose: the cache lookup for the
+    // first card is an await, so anything that badges non-beer later than the parse pass
+    // cannot have drawn this cross by the time the assertion below runs.
+    const adapter = adapterFor([
+      { el: b, brewery: 'PINTA', name: 'One' },
+      { el: a, brewery: 'Термос', name: 'для пляшки', nonBeer: true },
+    ]);
+
+    const run = runOverlay(document, adapter, sendMatch);
+
+    // Before any await: a badge drawn after the response would still be `cross` at the
+    // end, so the moment is the assertion.
+    expect(iconOf(a)).toBe('cross');
+    expect(badgeOf(a)?.getAttribute('aria-label')).toBe('Не пиво');
+
+    await flush();
+    expect(sendMatch).toHaveBeenCalledWith([{ brewery: 'PINTA', name: 'One' }]);
+
+    d.resolve([found('PINTA', 'One')]);
+    await run;
+    expect(iconOf(a)).toBe('cross');
+  });
+
+  it('6. draws a cached card from the cache and keeps it out of /match', async () => {
+    const a = cardEl();
+    await setCached(normalizeKey('PINTA', 'New One'), found('PINTA', 'New One'));
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+
+    await runOverlay(document, adapterFor([{ el: a, brewery: 'PINTA', name: 'New One' }]), sendMatch);
+
+    expect(iconOf(a)).toBe('star');
+    expect(sendMatch).not.toHaveBeenCalled();
+  });
+
+  it('7. settles an unmatched card as "not found" when no enrichment can follow', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan' }]);
+
+    await runOverlay(document, adapter, async () => [orphanResult('B', 'Orphan')]);
+
+    expect(iconOf(a)).toBe('search');
+  });
+
+  it('8. leaves the same card queued when enrichment will look at it', async () => {
+    const a = cardEl();
+    const adapter = adapterFor([{ el: a, brewery: 'B', name: 'Orphan' }]);
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapter, async () => [orphanResult('B', 'Orphan')], enrich);
+
+    expect(iconOf(a)).toBe('ring');
+    expect(enrich).toHaveBeenCalledTimes(1);
+    expect(enrich.mock.calls[0][0][0]).toMatchObject({ brewery: 'B', name: 'Orphan' });
   });
 });
 
