@@ -31,11 +31,11 @@ describe('onemorebeer non-beer filtering', () => {
     </div>`;
     const doc = new DOMParser().parseFromString(html, 'text/html');
     expect(onemorebeer.parseCards(doc)).toEqual([
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
     ]);
   });
 
@@ -61,7 +61,7 @@ describe('onemorebeer non-beer filtering', () => {
     const nonBeerCards = cards.filter((card) => card.nonBeer);
     const beerCards = cards.filter((card) => !card.nonBeer);
     expect(nonBeerCards.length).toBeGreaterThan(0);
-    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(nonBeerCards.every((card) => card.skip === undefined)).toBe(true);
     expect(beerCards).toHaveLength(1);
     expect(beerCards[0].brewery).toBe('Koreb');
     expect(beerCards[0].name).toBe('KWAS CHLEBOWY');
@@ -254,7 +254,7 @@ describe('onemorebeer ginger/root beer gate (#376)', () => {
       'text/html',
     );
     expect(onemorebeer.parseCards(doc)).toEqual([
-      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true }),
     ]);
   });
 

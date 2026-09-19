@@ -133,7 +133,7 @@ export const piwnemosty: SiteAdapter = {
       const classification = classifyCard(title, item);
       if (classification === 'unknown') continue;
       if (classification === 'nonBeer') {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
 

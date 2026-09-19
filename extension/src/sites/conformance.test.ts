@@ -65,7 +65,10 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     expect(cards.some((card) => !card.nonBeer && card.name.length > 0)).toBe(true);
     for (const c of cards) {
       if (c.nonBeer) {
-        expect(c.skip).toBe(true);
+        // #648: a non-beer card carries no skip flag and no skip reason. `nonBeer` is
+        // checked first everywhere, so a second flag could only ever disagree with it.
+        expect(c.skip).toBeUndefined();
+        expect(c.skipReason).toBeUndefined();
       } else {
         expect(c.name.length).toBeGreaterThan(0);
       }
@@ -98,7 +101,7 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
       await adapter.loadCardDetails?.(cards);
     }
     expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+    expect(cards.every((card) => card.nonBeer)).toBe(true);
   });
 
   it('renders confirmed non-beer cards without matching them', async () => {

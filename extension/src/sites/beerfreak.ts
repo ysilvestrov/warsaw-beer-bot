@@ -246,7 +246,7 @@ export const beerfreak: SiteAdapter = {
       const rawTitle = product?.title ?? text(el.querySelector('.catalogCard-title a'));
       if (!rawTitle) continue;
       if (isNonBeerName(rawTitle) || isBeerFreakBundle(rawTitle)) {
-        cards.push({ el, brewery: '', name: '', nonBeer: true, skip: true });
+        cards.push({ el, brewery: '', name: '', nonBeer: true });
         continue;
       }
 

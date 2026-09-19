@@ -521,7 +521,9 @@ export const flasker: SiteAdapter = {
       if (!parsed) {
         if (!e.productUrl) continue;
         detailUrls.set(e.el, e.productUrl);
-        cards.push({ el: e.el, brewery: '', name: e.title, skip: true });
+        // #648: no hydration pass clears this one — the title itself never parsed, so the
+        // card is a permanent skip and says so on screen instead of staying blank.
+        cards.push({ el: e.el, brewery: '', name: e.title, skip: true, skipReason: 'unparsed' });
         continue;
       }
       // Match the family against brewery+name together: splitBreweryName can hand the
@@ -533,7 +535,14 @@ export const flasker: SiteAdapter = {
       if (e.productUrl) detailUrls.set(e.el, e.productUrl);
       if (requiresDetail) detailProofRequired.add(e.el);
       if (parsedWithProvenance.usedFallback) fallbackTitleHeads.add(e.el);
-      cards.push({ el: e.el, ...parsed, ...(requiresDetail ? { skip: true } : {}) });
+      // #648: `pending-detail` — loadCardDetails clears the flag once the product page
+      // proves the card is beer; until then the card is "working", not "queued", and if
+      // the flag survives that pass the detail failed.
+      cards.push({
+        el: e.el,
+        ...parsed,
+        ...(requiresDetail ? { skip: true, skipReason: 'pending-detail' as const } : {}),
+      });
     }
     return cards;
   },
@@ -548,8 +557,9 @@ export const flasker: SiteAdapter = {
       if (!detail) return;
       const categories = detail.categories ?? [];
       if (categories.some(isNonBeerCategory)) {
+        // #648: no `skip` here — the overlay checks `nonBeer` first and draws the shop's
+        // own verdict; `skip` would only be a second, weaker name for the same card.
         card.nonBeer = true;
-        card.skip = true;
         return;
       }
       if (detailProofRequired.has(card.el)) {

@@ -46,7 +46,7 @@ describe('funkyshop adapter', () => {
     const nonBeerCards = cards.filter((card) => card.nonBeer);
     const beerCards = cards.filter((card) => !card.nonBeer);
     expect(nonBeerCards.length).toBeGreaterThan(0);
-    expect(nonBeerCards.every((card) => card.skip)).toBe(true);
+    expect(nonBeerCards.every((card) => card.skip === undefined)).toBe(true);
     expect(beerCards.map((card) => card.name)).not.toContain('Lervig Rackhouse Barrel Aged Set');
     expect(beerCards.map((card) => card.name)).not.toContain("Gelato Week '26 Set");
   });
@@ -59,9 +59,9 @@ describe('funkyshop adapter', () => {
 
   it('marks glass and merch products from the non-beer fixture as non-beer', () => {
     expect(parse(nonBeerHtml)).toEqual([
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
-      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
+      expect.objectContaining({ nonBeer: true }),
     ]);
   });
 
@@ -106,7 +106,7 @@ describe('funkyshop adapter', () => {
     `);
 
     expect(cards).toEqual([
-      expect.objectContaining({ nonBeer: true, skip: true }),
+      expect.objectContaining({ nonBeer: true }),
     ]);
   });
 
@@ -151,7 +151,9 @@ describe('funkyshop adapter', () => {
 
     await funkyshop.loadCardDetails?.(cards);
 
-    expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha', skip: true });
+    // #648: the detail page was the only source of a brewery, so this card is unusable
+    // for good — `unparsed`, not a transient network failure.
+    expect(cards[0]).toMatchObject({ brewery: '', name: 'Aloha', skip: true, skipReason: 'unparsed' });
     fetchSpy.mockRestore();
   });
 

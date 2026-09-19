@@ -28,6 +28,13 @@ export type EnrichOrphans = (
   }[],
 ) => void;
 
+// #648 (спека §5.2): `skip` ніс три різні поняття, і всі три закінчувались однаково —
+// порожньою карткою. Кінцевий стан пропущеної картки називає причину: деталь товару не
+// приїхала (мережа) або розібрати картку не вдалося взагалі.
+function skipState(card: Card): CardState {
+  return { kind: 'failed', reason: card.skipReason === 'unparsed' ? 'unparsed' : 'network' };
+}
+
 export async function runOverlay(
   doc: Document,
   adapter: SiteAdapter,
@@ -51,7 +58,10 @@ export async function runOverlay(
         markSeen(card.el);
         continue;
       }
-      renderState(card.el, { kind: 'queued' });
+      // Деталь товару вже летить — це не черга, це робота (спека §5.2).
+      renderState(card.el, card.skipReason === 'pending-detail'
+        ? { kind: 'working' }
+        : { kind: 'queued' });
     }
 
     if (adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
@@ -67,7 +77,11 @@ export async function runOverlay(
         markSeen(card.el);
         continue;
       }
+      // `card.skip`, not `card.skipReason`: the reason survives a successful hydration,
+      // the flag does not. A card whose product page arrived clears `skip` and goes on
+      // to /match like any other.
       if (adapter.loadDetailsBeforeCache && card.skip) {
+        renderState(card.el, skipState(card));
         markSeen(card.el);
         continue;
       }
@@ -94,6 +108,14 @@ export async function runOverlay(
     // payload — that covers every adapter and both the /match and /enrich/* paths (#369).
     // `card` is kept alongside `raw` because /match carries only abv, while the enrich
     // payload also needs the shop style.
+    // The other hydration path (funkyshop): the card was already a miss when the detail
+    // page failed to name its brewery. Nothing more will happen to it, so it says so.
+    for (const m of misses) {
+      if (!m.card.skip) continue;
+      renderState(m.el, skipState(m.card));
+      markSeen(m.el);
+    }
+
     const rawMisses: { el: HTMLElement; key: string; raw: RawBeer; card: Card; abv?: number }[] = misses
       .filter(({ card }) => !card.skip)
       // #384: `key` is carried over from the lookup, never recomputed. loadCardDetails may

@@ -41,7 +41,9 @@ describe('winetime adapter', () => {
     for (const card of cards) {
       expect(card.el).toBeInstanceOf(HTMLElement);
       if (card.nonBeer) {
-        expect(card.skip).toBe(true);
+        // #648: `skip` on a non-beer card was dead weight — the overlay checks `nonBeer`
+        // first and draws the shop's verdict; a second flag only invited a second answer.
+        expect(card.skip).toBeUndefined();
       } else {
         expect(card.name.length).toBeGreaterThan(0);
       }
@@ -107,7 +109,7 @@ describe('winetime adapter', () => {
     for (const doc of [published, visible]) {
       const cards = winetime.parseCards(doc);
       expect(cards.length).toBeGreaterThan(0);
-      expect(cards.every((card) => card.nonBeer && card.skip)).toBe(true);
+      expect(cards.every((card) => card.nonBeer)).toBe(true);
     }
   });
 
