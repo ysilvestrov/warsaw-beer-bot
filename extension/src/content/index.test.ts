@@ -581,6 +581,26 @@ describe('#648 стан картки на всьому шляху', () => {
     expect(enrich).toHaveBeenCalledTimes(1);
     expect(enrich.mock.calls[0][0][0]).toMatchObject({ brewery: 'B', name: 'Orphan' });
   });
+
+  // PR #670 review: the render loop walks the RESULTS, so a response shorter than the
+  // request left the leftover cards spinning — and unseen, which re-arms the overlay on
+  // every DOM mutation the shop makes.
+  it('9. does not leave a card spinning when /match answers short', async () => {
+    const a = cardEl();
+    const b = cardEl();
+    const adapter = adapterFor([
+      { el: a, brewery: 'B', name: 'One' },
+      { el: b, brewery: 'B', name: 'Two' },
+    ]);
+
+    await runOverlay(document, adapter, async () => [found('B', 'One')]);
+
+    expect(iconOf(a)).toBe('star');
+    expect(iconOf(b)).toBe('warn');
+    expect(badgeOf(b)!.getAttribute('aria-label'))
+      .toBe('Не вдалося перевірити: сервер не відповів');
+    expect(isSeen(b)).toBe(true);
+  });
 });
 
 // #648 (спека §5.2): `skip` — три різні поняття під одним прапорцем, і всі три раніше

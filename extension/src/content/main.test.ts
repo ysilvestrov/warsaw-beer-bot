@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { startOverlay, enrichOrphans } from './main';
+import { renderState } from './badge';
 import { isSeen, type CardState } from './badge';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchResult } from '../api/types';
@@ -268,5 +269,71 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     await until(() => sent.length > 0);
 
     expect(sent).toEqual([]);
+  });
+});
+
+// PR #670 review. Both findings are the same shape: runOverlay drew these cards «в черзі»
+// precisely BECAUSE this callback exists, so anything that returns without emitting leaves
+// them spinning for the life of the page.
+describe('enrichOrphans resolves the cards it was handed (#670 review)', () => {
+  const fallback = (brewery: string, name: string): CardState =>
+    ({ kind: 'missing', brewery, name, orphan: true });
+
+  const iconOf = (el: HTMLElement): string | null =>
+    el.querySelector('[data-icon]')?.getAttribute('data-icon') ?? null;
+
+  const card = (): HTMLElement => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    return el;
+  };
+
+  async function until(pred: () => boolean): Promise<void> {
+    for (let i = 0; i < 200 && !pred(); i++) await tick(0);
+  }
+
+  it('falls the cards back to their /match state when enrichment is switched off', async () => {
+    await chrome.storage.local.set({ enrichEnabled: false, token: 't' });
+    const el = card();
+    renderState(el, { kind: 'queued' });
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallback('B', 'N') }]);
+    await until(() => iconOf(el) === 'search');
+
+    expect(iconOf(el)).toBe('search');
+  });
+
+  it('redraws every duplicate card that shares a normalized key, not just the last one', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string; beers?: { brewery: string; name: string }[] }, cb: (r: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') {
+          cb({
+            candidates: (msg.beers ?? []).map((b) => ({
+              brewery: b.brewery, name: b.name, eligible: true,
+              algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'q', hitsPerPage: 5 },
+            })),
+          });
+        } else if (msg.type === 'enrich:fetch') cb({ algolia: { hits: [{ bid: 6648348 }] } });
+        else if (msg.type === 'enrich:result') {
+          cb({ result: { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+
+    const first = card();
+    const second = card();
+    renderState(first, { kind: 'queued' });
+    renderState(second, { kind: 'queued' });
+
+    enrichOrphans([
+      { key: 'same', el: first, brewery: 'B', name: 'N', state: fallback('B', 'N') },
+      { key: 'same', el: second, brewery: 'B', name: 'N', state: fallback('B', 'N') },
+    ]);
+    await until(() => iconOf(first) === 'star' && iconOf(second) === 'star');
+
+    expect(iconOf(first)).toBe('star');
+    expect(iconOf(second)).toBe('star');
   });
 });

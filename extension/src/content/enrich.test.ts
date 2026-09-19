@@ -357,3 +357,47 @@ describe('runEnrichment query ladder (#391)', () => {
     expect(kindsFor(d, 'k11')).toEqual(['deferred']);
   });
 });
+
+// PR #670 review: everything in runEnrichment is driven by what /enrich/candidates
+// returned, so a short or empty answer — revoked Untappd permission, a worker error, the
+// `?? []` fallback in the client — emitted nothing at all and left every card spinning on
+// «в черзі». The verdict is owed to every beer handed in, not to every candidate returned.
+describe('runEnrichment owes a verdict to every beer handed in (#670 review)', () => {
+  it('resolves them all when the candidate list comes back empty', async () => {
+    const d = deps({ getCandidates: vi.fn(async () => []) });
+    await runEnrichment(beers(2), d);
+    expect(kindsFor(d, 'k0')).toEqual(['deferred']);
+    expect(kindsFor(d, 'k1')).toEqual(['deferred']);
+  });
+
+  it('resolves the beers the candidate list simply omitted', async () => {
+    const d = deps({
+      getCandidates: vi.fn(async (bs: { brewery: string; name: string }[]) =>
+        bs.slice(0, 1).map((b) => ({
+          brewery: b.brewery,
+          name: b.name,
+          eligible: true,
+          algolia: rung(`q:${b.name}`),
+        }))),
+    });
+    await runEnrichment(beers(2), d);
+    expect(kindsFor(d, 'k0')).toContain('searching');
+    expect(kindsFor(d, 'k1')).toEqual(['deferred']);
+  });
+
+  it('never hands a card a second verdict once it already has one', async () => {
+    const d = deps({
+      getCandidates: vi.fn(async (bs: { brewery: string; name: string }[]) =>
+        bs.map((b) => ({
+          brewery: b.brewery,
+          name: b.name,
+          eligible: false,
+          algolia: rung(`q:${b.name}`),
+        }))),
+    });
+    await runEnrichment(beers(2), d);
+    for (const key of ['k0', 'k1']) {
+      expect(forKey(d, key).filter(isTerminal)).toHaveLength(1);
+    }
+  });
+});

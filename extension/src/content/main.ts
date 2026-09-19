@@ -34,14 +34,32 @@ function sendBg<T>(message: unknown): Promise<T | undefined> {
 // every other test — the "ships dead" failure mode #384 already paid for once.
 export const enrichOrphans: EnrichOrphans = (orphans) => {
   void (async () => {
+    // #648 (рев'ю PR #670): `runOverlay` намалював цим карткам «в черзі» саме тому, що
+    // цей колбек існує. Якщо дошук вимкнено опцією, черги не буде — і мовчазний `return`
+    // лишив би їх крутити кільце до кінця сторінки. Тож перед виходом віддаємо кожній той
+    // стан, який уже довів `/match`.
     const { enrichEnabled } = await getSettings();
-    if (!enrichEnabled) return;
-    const elByKey = new Map(orphans.map((o) => [o.key, o.el]));
+    if (!enrichEnabled) {
+      for (const o of orphans) renderState(o.el, o.state);
+      return;
+    }
+    // Ключ нормалізований, тож дві однакові картки на сторінці ділять його. Мапа на один
+    // елемент оновлювала б лише останню, а решта лишалася б у «черзі» назавжди.
+    const elsByKey = new Map<string, HTMLElement[]>();
+    for (const o of orphans) {
+      const seen = elsByKey.get(o.key);
+      if (seen) seen.push(o.el);
+      else elsByKey.set(o.key, [o.el]);
+    }
     // #648: стан, яким картка стане, якщо дошук не знайде нічого кращого. Його порахував
     // `runOverlay` з відповіді `/match` — дошук цієї відповіді не бачить узагалі.
     const fallbackByKey = new Map<string, CardState>(orphans.map((o) => [o.key, o.state]));
     const identityByKey = new Map(orphans.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
-    const beers: OrphanBeer[] = orphans.map((o) => ({
+    // Дві однакові картки ділять нормалізований ключ, тож і пиво за ними одне. Без цього
+    // дедупу кожен дублікат коштував би власного пошуку — два слоти з двадцяти на ту саму
+    // відповідь, — і другий пошук ще й перемальовував би вже знайдену картку назад у
+    // «працюємо». Малюємо на всіх елементах ключа, а питаємо один раз.
+    const beers: OrphanBeer[] = orphans.filter((o, i) => orphans.findIndex((x) => x.key === o.key) === i).map((o) => ({
       key: o.key,
       brewery: o.brewery,
       name: o.name,
@@ -76,28 +94,30 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
       // по-різному. Це не регрес цього issue (так було завжди); фіксить #666, який навчить
       // дошук оновлювати кеш.
       onEvent: (key, ev) => {
-        const el = elByKey.get(key);
-        if (!el) return;
+        const els = elsByKey.get(key);
+        if (!els) return;
         const id = identityByKey.get(key);
+        const draw = (state: CardState) => {
+          for (const el of els) renderState(el, state);
+        };
         switch (ev.kind) {
           case 'searching':
-            return renderState(el, { kind: 'working' });
+            return draw({ kind: 'working' });
           case 'found':
-            return renderState(el, {
+            return draw({
               kind: 'found', drunk: false, mine: null, global: ev.ratingGlobal,
               unsure: false, untappdId: ev.untappdId,
               brewery: id?.brewery ?? '', name: id?.name ?? '',
             });
           case 'settled':
-            return renderState(
-              el,
+            return draw(
               fallbackByKey.get(key)
                 ?? { kind: 'missing', brewery: id?.brewery ?? '', name: id?.name ?? '', orphan: false },
             );
           case 'deferred':
-            return renderState(el, { kind: 'deferred' });
+            return draw({ kind: 'deferred' });
           case 'failed':
-            return renderState(el, { kind: 'failed', reason: ev.reason });
+            return draw({ kind: 'failed', reason: ev.reason });
         }
       },
     });
