@@ -153,6 +153,9 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
     handled++;
     const beer = byPair.get(pairKey(cand.brewery, cand.name));
     if (!beer) continue;
+    // Рев'ю PR #670: список кандидатів може повторити те саме пиво. Другий прохід з'їв би
+    // ще один слот Algolia і перекинув би картку з кінцевого стану назад у «працюємо».
+    if (resolved.has(beer.key)) continue;
 
     // Narrowest first. `algoliaNarrow` is absent unless the two rungs differ (#382).
     const rungs = cand.algoliaNarrow ? [cand.algoliaNarrow, cand.algolia] : [cand.algolia];

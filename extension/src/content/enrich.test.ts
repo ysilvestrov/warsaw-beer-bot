@@ -401,3 +401,23 @@ describe('runEnrichment owes a verdict to every beer handed in (#670 review)', (
     }
   });
 });
+
+// Round 2 of the PR #670 review: /enrich/candidates can repeat a beer. A second pass
+// would burn another Algolia slot and throw the card from its final badge back to
+// «працюємо».
+describe('runEnrichment searches a beer once even if the candidate list repeats it', () => {
+  it('ignores the duplicate row after the beer already has a verdict', async () => {
+    const d = deps({
+      getCandidates: vi.fn(async (bs: { brewery: string; name: string }[]) =>
+        bs.flatMap((b) => [
+          { brewery: b.brewery, name: b.name, eligible: true, algolia: rung(`q:${b.name}`) },
+          { brewery: b.brewery, name: b.name, eligible: true, algolia: rung(`q:${b.name}`) },
+        ])),
+    });
+    await runEnrichment(beers(1), d);
+
+    expect(forKey(d, 'k0').filter(isTerminal)).toHaveLength(1);
+    expect(kindsFor(d, 'k0').filter((k) => k === 'searching')).toHaveLength(1);
+    expect(d.fetchSearch).toHaveBeenCalledTimes(1);
+  });
+});
