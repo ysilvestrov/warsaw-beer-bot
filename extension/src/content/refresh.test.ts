@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { refreshCards } from './refresh';
-import { renderBadge, markSeen, isSeen, BADGE_MARKER, setNonBeer } from './badge';
+import { renderState, markSeen, isSeen, BADGE_MARKER } from './badge';
 import { normalizeKey } from '../shared/normalize';
 import type { SiteAdapter } from '../sites/types';
 
 function cardEl(): HTMLElement {
   const el = document.createElement('div');
-  renderBadge(el, { is_drunk: true, drunk_uncertain: false, user_rating: 4, source: null, searched: true, raw: { brewery: 'x', name: 'y' }, matched_beer: null });
+  renderState(el, { kind: 'found', drunk: true, mine: 4, global: null, unsure: false,
+    untappdId: 111, brewery: 'x', name: 'y' });
   markSeen(el);
   return el;
 }
@@ -86,7 +87,7 @@ describe('refreshCards', () => {
 
   it('returns a fresh beer key when a reused card still has a non-beer badge', async () => {
     const host = cardEl();
-    setNonBeer(host);
+    renderState(host, { kind: 'nonBeer' });
     const adapter = {
       id: 'fake',
       hostMatch: () => true,

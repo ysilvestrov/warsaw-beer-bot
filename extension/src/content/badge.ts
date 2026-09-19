@@ -1,5 +1,3 @@
-import type { MatchResult } from '../api/types';
-
 export const BADGE_MARKER = 'data-beerbadge';
 export const SEEN_MARKER = 'data-beerseen';
 
@@ -28,30 +26,6 @@ const untappdSearchUrl = (brewery: string, name: string): string =>
 const hrefFor = (untappdId: number | null, brewery: string, name: string): string =>
   untappdId != null ? untappdUrl(untappdId) : untappdSearchUrl(brewery, name);
 
-// Builds the styled badge element. Clickable (opens `href` in a new tab) when href is set.
-function makeBadge(text: string, href: string | null): HTMLElement {
-  const badge = document.createElement('div');
-  badge.setAttribute(BADGE_MARKER, '');
-  badge.textContent = text;
-  Object.assign(badge.style, {
-    position: 'absolute',
-    top: '4px',
-    right: '4px',
-    zIndex: '2147483647',
-    background: 'rgba(20,20,20,0.82)',
-    color: '#fff',
-    font: '600 12px/1 system-ui, sans-serif',
-    padding: '3px 6px',
-    borderRadius: '6px',
-    pointerEvents: href != null ? 'auto' : 'none',
-    cursor: href != null ? 'pointer' : 'default',
-  } as Partial<CSSStyleDeclaration>);
-  if (href != null) wireBadgeClicks(badge, href);
-  return badge;
-}
-
-// Beershop delegates card navigation on mouseup, before click fires — so all three
-// are swallowed. Shared by the legacy setters and by renderState (#648).
 function wireBadgeClicks(badge: HTMLElement, href: string): void {
   badge.addEventListener('mouseup', (e) => {
     e.preventDefault();
@@ -86,68 +60,11 @@ function attach(host: HTMLElement, badge: HTMLElement): void {
   host.appendChild(badge);
 }
 
-// Guard order: drunk → ✅ (+ personal rating); truly unmatched (matched_beer null) → no
-// badge; fuzzy-match-but-drunk → ❓ (+ global if present); not-drunk bid → ⭐ (+ global if present);
-// not-drunk matched orphan (no bid) → ⚪. All rendered badges are clickable: a bid → the
-// Untappd beer page; no bid → an Untappd search prefilled with the tried brewery+name.
-function badgeFor(result: MatchResult): HTMLElement | null {
-  const { brewery, name } = result.raw;
-  if (result.is_drunk) {
-    const href = hrefFor(result.matched_beer?.untappd_id ?? null, brewery, name);
-    return makeBadge(result.user_rating != null ? `✅ ${result.user_rating.toFixed(1)}` : '✅', href);
-  }
-  const m = result.matched_beer;
-  if (!m) return null;
-  if (result.drunk_uncertain) {
-    return makeBadge(m.rating_global != null ? `❓ ${m.rating_global.toFixed(1)}` : '❓', hrefFor(m.untappd_id, brewery, name));
-  }
-  if (m.untappd_id != null) {
-    const text = m.rating_global != null ? `⭐ ${m.rating_global.toFixed(1)}` : '⭐';
-    return makeBadge(text, untappdUrl(m.untappd_id));
-  }
-  if (m.untappd_id == null) return makeBadge('⚪', untappdSearchUrl(brewery, name));
-  return null;
-}
-
-export function renderBadge(host: HTMLElement, result: MatchResult): void {
-  if (host.querySelector(`[${BADGE_MARKER}]`)) return; // idempotent for the /match path
-  const badge = badgeFor(result);
-  if (badge) attach(host, badge);
-}
-
-/** Show the ⚪ orphan badge (used by enrichment); clickable to an Untappd search. */
-export function setOrphan(host: HTMLElement, brewery: string, name: string): void {
-  attach(host, makeBadge('⚪', untappdSearchUrl(brewery, name)));
-}
-
-/** Show that the shop explicitly classified this card as not beer. */
-export function setNonBeer(host: HTMLElement): void {
-  const existing = host.querySelector(`[${BADGE_MARKER}]`);
-  if (existing?.textContent === '✕'
-    && existing.getAttribute('role') === 'img'
-    && existing.getAttribute('aria-label') === 'Не пиво') return;
-
-  const badge = makeBadge('✕', null);
-  badge.style.color = '#ff6b6b';
-  badge.setAttribute('role', 'img');
-  badge.setAttribute('aria-label', 'Не пиво');
-  attach(host, badge);
-}
-
-/** Replace the badge with a loading glyph while an Untappd search is in flight. */
-export function setSearching(host: HTMLElement): void {
-  attach(host, makeBadge('⏳', null));
-}
-
-/** Swap the badge to ⭐ + global rating once the beer is enriched. */
-export function setEnriched(host: HTMLElement, untappdId: number, ratingGlobal: number | null): void {
-  attach(host, makeBadge(ratingGlobal != null ? `⭐ ${ratingGlobal.toFixed(1)}` : '⭐', untappdUrl(untappdId)));
-}
-
 // ── #648: один стан картки — один бейдж ──────────────────────────────────────
-// Раніше бейдж будувався в п'ятьох місцях незалежно (badgeFor + чотири сеттери), і
-// набору гліфів не бачив цілком ніхто. Тепер абетка живе в одному union: додати
-// шостий гліф тихо вже не вийде.
+// До цього бейдж будувався в п'ятьох місцях незалежно — `badgeFor` і чотири сеттери
+// (`setOrphan`, `setNonBeer`, `setSearching`, `setEnriched`), — і кожна фіча дописувала
+// свій, а набору гліфів не бачив цілком ніхто. Саме так абетка й розповзлася. Тепер вона
+// живе в одному union і має один рендер: додати шостий гліф тихо вже не вийде.
 
 export type FailureReason = 'blocked' | 'network' | 'server' | 'unparsed';
 
