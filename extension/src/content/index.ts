@@ -207,6 +207,16 @@ export async function runOverlay(
       void setCached(miss.key, result);
     });
 
+    // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але
+    // мовчати про неї не можна: ці картки вже стоять на «працюємо», і без цього циклу
+    // крутили б спінер до кінця сторінки, ще й без мітки `markSeen`, тобто під'юджуючи
+    // re-render observer щоразу, коли крамниця чіпає DOM. Відповіді для них нема, отже
+    // кешувати нічого — це помилка сервера, і так її й називаємо.
+    for (const miss of rawMisses.slice(results.length)) {
+      renderState(miss.el, { kind: 'failed', reason: 'server' });
+      markSeen(miss.el);
+    }
+
     if (enrich) {
       const orphans = orphanMisses
         .map((x) => ({

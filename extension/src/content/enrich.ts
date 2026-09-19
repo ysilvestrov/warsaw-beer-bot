@@ -110,6 +110,17 @@ const candidateFacts = (o: OrphanBeer): OrphanFacts => {
 export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Promise<void> {
   if (orphans.length === 0) return;
 
+  // #648 (рев'ю PR #670): вердикт винен КОЖЕН, кого сюди передали, а не кожен, кого
+  // повернув сервер. Усе нижче крутиться навколо `candidates`, тож порожня чи коротша
+  // відповідь `/enrich/candidates` — відкликаний дозвіл на Untappd, помилка воркера,
+  // `?? []` у клієнті — лишала б картки на «в черзі» назавжди. Рахуємо, кому вердикт уже
+  // видали, і замітаємо решту в кінці.
+  const resolved = new Set<string>();
+  const emit = (key: string, event: EnrichEvent): void => {
+    if (event.kind !== 'searching') resolved.add(key);
+    deps.onEvent(key, event);
+  };
+
   const candidates = await deps.getCandidates(
     orphans.map((o) => ({ brewery: o.brewery, name: o.name, ...candidateFacts(o) })),
   );
@@ -126,7 +137,7 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
   for (const cand of candidates) {
     if (cand.eligible) continue;
     const beer = byPair.get(pairKey(cand.brewery, cand.name));
-    if (beer) deps.onEvent(beer.key, { kind: 'settled' });
+    if (beer) emit(beer.key, { kind: 'settled' });
   }
 
   const delayMs = deps.delayMs ?? DEFAULT_DELAY_MS;
@@ -146,7 +157,7 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
     // Narrowest first. `algoliaNarrow` is absent unless the two rungs differ (#382).
     const rungs = cand.algoliaNarrow ? [cand.algoliaNarrow, cand.algolia] : [cand.algolia];
 
-    deps.onEvent(beer.key, { kind: 'searching' });
+    emit(beer.key, { kind: 'searching' });
     try {
       let response: AlgoliaResponse | null = null;
       let query = rungs[0].query;
@@ -166,32 +177,32 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
       // A half-run ladder is not a verdict. Submitting the empty narrow payload would make
       // the server record not_found and burn a backoff slot on a search we never finished.
       if (abandoned) {
-        deps.onEvent(beer.key, { kind: 'deferred' });
+        emit(beer.key, { kind: 'deferred' });
       } else if (response === null) {
         // The service worker got nothing back from Algolia at all. That is the same mute
         // failure as the catch below — calling it "not found" would claim a verdict no
         // search produced.
-        deps.onEvent(beer.key, { kind: 'failed', reason: 'network' });
+        emit(beer.key, { kind: 'failed', reason: 'network' });
       } else {
         const res = await deps.submitResult(cand.brewery, cand.name, response, orphanFacts(beer), query);
         if (res.status === 'matched' && res.untappd_id != null) {
-          deps.onEvent(beer.key, {
+          emit(beer.key, {
             kind: 'found',
             untappdId: res.untappd_id,
             ratingGlobal: res.rating_global ?? null,
           });
         } else if (res.status === 'blocked') {
-          deps.onEvent(beer.key, { kind: 'failed', reason: 'blocked' });
+          emit(beer.key, { kind: 'failed', reason: 'blocked' });
         } else if (res.status === 'transient') {
-          deps.onEvent(beer.key, { kind: 'failed', reason: 'network' });
+          emit(beer.key, { kind: 'failed', reason: 'network' });
         } else {
           // `not_found` / `skipped` / matched-without-an-id: the search ran and improved
           // nothing, so the card keeps whatever `/match` already proved about it.
-          deps.onEvent(beer.key, { kind: 'settled' });
+          emit(beer.key, { kind: 'settled' });
         }
       }
     } catch {
-      deps.onEvent(beer.key, { kind: 'failed', reason: 'network' });
+      emit(beer.key, { kind: 'failed', reason: 'network' });
     }
   }
 
@@ -199,6 +210,12 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
   // подивилися, каже про це сама, бо інакше застрягає на «в черзі» до кінця сторінки.
   for (const cand of eligible.slice(handled)) {
     const beer = byPair.get(pairKey(cand.brewery, cand.name));
-    if (beer) deps.onEvent(beer.key, { kind: 'deferred' });
+    if (beer) emit(beer.key, { kind: 'deferred' });
+  }
+
+  // Останній замет: те, про що сервер не сказав нічого. `deferred`, а не `settled` —
+  // ми справді не дивилися, тож і твердити «не знайшли» не маємо права.
+  for (const beer of orphans) {
+    if (!resolved.has(beer.key)) emit(beer.key, { kind: 'deferred' });
   }
 }
