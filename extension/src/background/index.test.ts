@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
-  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop,
+  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop, handleMatch,
 } from './index';
 import { setSettings } from '../shared/config';
 import { getCached } from '../cache/store';
@@ -77,6 +77,26 @@ describe('cache mutation queue', () => {
 
     expect(await getCached('k0')).toEqual(orphan);
     expect(await getCached('k1')).toEqual(second);
+  });
+});
+
+describe('handleMatch', () => {
+  it('posts a maximum-size message once', async () => {
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: '0' },
+      matched_beer: null,
+      is_drunk: false,
+      drunk_uncertain: false,
+      user_rating: null,
+      source: null,
+      searched: true,
+    };
+    const cards = Array.from({ length: 200 }, (_, i) => ({ brewery: 'B', name: String(i) }));
+    vi.spyOn(client, 'postMatch').mockResolvedValue([orphan]);
+
+    await expect(handleMatch({ type: 'match', cards })).resolves.toEqual({ type: 'match:ok', results: [orphan] });
+    expect(client.postMatch).toHaveBeenCalledTimes(1);
+    expect(client.postMatch).toHaveBeenCalledWith('https://api.test', 'tok', cards);
   });
 });
 

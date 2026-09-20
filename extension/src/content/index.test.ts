@@ -958,12 +958,18 @@ describe('runOverlay sanitizes shop ABV (#369)', () => {
 });
 
 describe('runOverlay progressive match chunks (#667)', () => {
+  function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
   it('renders the first partition while a deferred second partition is still working', async () => {
     const cards: Card[] = Array.from({ length: 201 }, (_, i) => ({
       el: cardEl(), brewery: 'B', name: String(i),
     }));
-    const first = Promise.withResolvers<MatchResult[]>();
-    const second = Promise.withResolvers<MatchResult[]>();
+    const first = deferred<MatchResult[]>();
+    const second = deferred<MatchResult[]>();
     let callNumber = 0;
     const sendMatch = vi.fn((_batch: RawBeer[]) => {
       callNumber += 1;
@@ -983,7 +989,7 @@ describe('runOverlay progressive match chunks (#667)', () => {
     expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('check');
     expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
-      ?.getAttribute('data-icon')).toBe('working');
+      ?.getAttribute('data-icon')).toBe('arc');
 
     second.resolve([drunkResult('B', '200')]);
     await run;
@@ -1004,7 +1010,7 @@ describe('runOverlay progressive match chunks (#667)', () => {
     );
     expect(sendMatch.mock.calls[1][0]).toEqual([{ brewery: 'B', name: '200' }]);
     expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
-      ?.getAttribute('data-icon')).toBe('failed');
+      ?.getAttribute('data-icon')).toBe('warn');
     expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('check');
   });

@@ -14,7 +14,6 @@ export type MatchReply =
   | { type: 'match:ok'; results: MatchResult[] }
   | { type: 'match:err'; code: 'unauthorized' | 'server' | 'network' };
 
-const MAX_PER_REQUEST = 200;
 let cacheMutationChain: Promise<unknown> = Promise.resolve();
 
 function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
@@ -33,20 +32,10 @@ export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
 export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
   enqueueCacheMutation(() => setCachedIfMatching(key, expected, result));
 
-function chunk<T>(arr: T[], size: number): T[][] {
-  const out: T[][] = [];
-  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
-  return out;
-}
-
 export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
   const { token, baseUrl } = await getSettings();
   try {
-    const results: MatchResult[] = [];
-    for (const part of chunk(msg.cards, MAX_PER_REQUEST)) {
-      results.push(...(await postMatch(baseUrl, token, part)));
-    }
-    return { type: 'match:ok', results };
+    return { type: 'match:ok', results: await postMatch(baseUrl, token, msg.cards) };
   } catch (e) {
     const rawCode = e instanceof ApiError ? e.code : 'server';
     const code: 'unauthorized' | 'server' | 'network' =
