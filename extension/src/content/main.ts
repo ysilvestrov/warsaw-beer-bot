@@ -2,7 +2,7 @@ import { pickAdapter } from '../sites/registry';
 import { runOverlay, type SendMatch, type EnrichOrphans } from './index';
 import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
-import { clearKeys } from '../cache/store';
+import { clearKeys, setCached, setCachedIfMatching } from '../cache/client';
 import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { getSettings } from '../shared/config';
@@ -74,6 +74,7 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
     // `runOverlay` з відповіді `/match` — дошук цієї відповіді не бачить узагалі.
     const fallbackByKey = new Map<string, CardState>(queued.map((o) => [o.key, o.state]));
     const identityByKey = new Map(queued.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
+    const resultByKey = new Map(queued.flatMap((o) => o.result ? [[o.key, o.result] as const] : []));
     // Питаємо один раз на ключ: інакше кожен дублікат коштував би власного слота з
     // двадцяти, а другий пошук перемальовував би вже знайдену картку назад у «працюємо».
     const beers: OrphanBeer[] = queued.map((o) => ({
@@ -121,6 +122,18 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
           case 'searching':
             return draw({ kind: 'working' });
           case 'found':
+            const previous = resultByKey.get(key);
+            const previousBeer = previous?.matched_beer;
+            if (previous && previousBeer) {
+              void setCachedIfMatching(key, previous, {
+                ...previous,
+                matched_beer: {
+                  ...previousBeer,
+                  untappd_id: ev.untappdId,
+                  rating_global: ev.ratingGlobal,
+                },
+              });
+            }
             return draw({
               kind: 'found', drunk: false, mine: null, global: ev.ratingGlobal,
               unsure: false, untappdId: ev.untappdId,
@@ -152,7 +165,7 @@ export function startOverlay(
   opts?: ReRenderOptions,
   enrich?: EnrichOrphans,
 ): () => void {
-  const run = () => runOverlay(doc, adapter, send, enrich);
+  const run = () => runOverlay(doc, adapter, send, enrich, setCached);
 
   const hasUnprocessed = () => {
     const scope = adapter.reRenderContainerSelector
@@ -182,7 +195,7 @@ if (adapter && !adapter.isNonBeerPage?.(pageUrl)) {
       try {
         const keys = await refreshCards(document, adapter);
         await clearKeys(keys);
-        await runOverlay(document, adapter, sendMatch, enrichOrphans);
+        await runOverlay(document, adapter, sendMatch, enrichOrphans, setCached);
         sendResponse({ ok: true, cleared: keys.length });
       } catch (err) {
         // Always answer so the popup never hangs on "Refreshing…".

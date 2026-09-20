@@ -3,6 +3,7 @@ import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
 import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
+import { clearAll, clearKeys, setCached, setCachedIfMatching } from '../cache/store';
 
 export interface MatchMessage {
   type: 'match';
@@ -14,6 +15,21 @@ export type MatchReply =
   | { type: 'match:err'; code: 'unauthorized' | 'server' | 'network' };
 
 const MAX_PER_REQUEST = 200;
+let cacheMutationChain: Promise<unknown> = Promise.resolve();
+
+function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
+  const result = cacheMutationChain.then(work, work);
+  cacheMutationChain = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+export const handleCacheSet = (key: string, result: MatchResult) =>
+  enqueueCacheMutation(async () => { await setCached(key, result); });
+export const handleCacheClearKeys = (keys: string[]) =>
+  enqueueCacheMutation(async () => { await clearKeys(keys); });
+export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
+export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
+  enqueueCacheMutation(() => setCachedIfMatching(key, expected, result));
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -301,6 +317,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
+  if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true })); return true; }
+  if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true })); return true; }
+  if (t === 'cache:clear-all') { handleCacheClearAll().then((count) => sendResponse({ count })); return true; }
+  if (t === 'cache:set-if-matching') {
+    handleCacheSetIfMatching(message.key, message.expected, message.result).then((written) => sendResponse({ written })); return true;
+  }
   if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
   if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }
   if (t === 'checkin-sync:status') { handleCheckinSyncStatus().then(sendResponse); return true; }

@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed missing beers getting stuck after you reload a shop page. Cards left over when a page reaches its search limit now continue on the next load; a beer found by that search keeps its rating, and a temporary Untappd problem can be tried again instead of looking final for eight hours.
 - The badges are redrawn, and every card now carries one from the moment the page loads. You can see a card waiting its turn, being checked, and where it ended up — instead of a page that stays blank and then fills in with no explanation.
 - A beer you have not had yet now shows when the match is uncertain: a dashed outline with a `?`. Until now an uncertain match looked exactly like a certain one, so there was nothing telling you to check for yourself.
 - Colour now means one thing only: the green check for beers you have had and the gold star for their rating — the cards you actually choose between. Everything else went grey, including the `✕` on non-beer products, so it stops competing for your attention.

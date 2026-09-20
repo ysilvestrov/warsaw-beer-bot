@@ -8,6 +8,11 @@ interface Entry {
   expiresAt: number;
 }
 
+async function writeCached(key: string, result: MatchResult, now: number): Promise<void> {
+  const entry: Entry = { result, expiresAt: now + CACHE_TTL_MS };
+  await chrome.storage.local.set({ [PREFIX + key]: entry });
+}
+
 export async function getCached(key: string, now: number = Date.now()): Promise<MatchResult | null> {
   const storageKey = PREFIX + key;
   const got = await chrome.storage.local.get(storageKey);
@@ -21,8 +26,20 @@ export async function setCached(
   result: MatchResult,
   now: number = Date.now(),
 ): Promise<void> {
-  const entry: Entry = { result, expiresAt: now + CACHE_TTL_MS };
-  await chrome.storage.local.set({ [PREFIX + key]: entry });
+  await writeCached(key, result, now);
+}
+
+/** Used by the service worker's serialized mutation queue. */
+export async function setCachedIfMatching(
+  key: string,
+  expected: MatchResult,
+  result: MatchResult,
+  now: number = Date.now(),
+): Promise<boolean> {
+  const current = await getCached(key, now);
+  if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
+  await writeCached(key, result, now);
+  return true;
 }
 
 export async function clearKeys(keys: string[]): Promise<void> {
