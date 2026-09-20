@@ -962,21 +962,30 @@ describe('runOverlay progressive match chunks (#667)', () => {
     const cards: Card[] = Array.from({ length: 201 }, (_, i) => ({
       el: cardEl(), brewery: 'B', name: String(i),
     }));
-    const deferred = Promise.withResolvers<MatchResult[]>();
-    const sendMatch = vi.fn((cards: RawBeer[]) =>
-      cards.length === 200
-        ? Promise.resolve(cards.map((card) => drunkResult(card.brewery, card.name)))
-        : deferred.promise,
-    );
+    const first = Promise.withResolvers<MatchResult[]>();
+    const second = Promise.withResolvers<MatchResult[]>();
+    let callNumber = 0;
+    const sendMatch = vi.fn((_batch: RawBeer[]) => {
+      callNumber += 1;
+      return callNumber === 1 ? first.promise : second.promise;
+    });
 
     const run = runOverlay(document, adapterFor(cards), sendMatch);
+    await vi.waitFor(() => expect(sendMatch).toHaveBeenCalledTimes(1));
+    expect(sendMatch.mock.calls[0][0]).toEqual(
+      cards.slice(0, 200).map(({ brewery, name }) => ({ brewery, name })),
+    );
+    expect(sendMatch).toHaveBeenCalledTimes(1);
+
+    first.resolve(cards.slice(0, 200).map((card) => drunkResult(card.brewery, card.name)));
     await vi.waitFor(() => expect(sendMatch).toHaveBeenCalledTimes(2));
+    expect(sendMatch.mock.calls[1][0]).toEqual([{ brewery: 'B', name: '200' }]);
     expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('check');
     expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('working');
 
-    deferred.resolve([drunkResult('B', '200')]);
+    second.resolve([drunkResult('B', '200')]);
     await run;
   });
 
@@ -990,6 +999,10 @@ describe('runOverlay progressive match chunks (#667)', () => {
 
     await runOverlay(document, adapterFor(cards), sendMatch);
     expect(sendMatch).toHaveBeenCalledTimes(2);
+    expect(sendMatch.mock.calls[0][0]).toEqual(
+      cards.slice(0, 200).map(({ brewery, name }) => ({ brewery, name })),
+    );
+    expect(sendMatch.mock.calls[1][0]).toEqual([{ brewery: 'B', name: '200' }]);
     expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('failed');
     expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
