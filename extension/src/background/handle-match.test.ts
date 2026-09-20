@@ -28,15 +28,14 @@ describe('handleMatch', () => {
     expect(spy).toHaveBeenCalledWith('https://api.test', 'tok', [{ brewery: 'B', name: 'X' }]);
   });
 
-  it('chunks requests larger than 200 and concatenates results', async () => {
+  it('passes a match request through as one request', async () => {
     const cards: RawBeer[] = Array.from({ length: 250 }, (_, i) => ({ brewery: 'B', name: `n${i}` }));
     const spy = vi
       .spyOn(client, 'postMatch')
       .mockImplementation(async (_b, _t, part) => part.map((p) => mkResult(p.name)));
     const reply = await handleMatch({ type: 'match', cards });
-    expect(spy).toHaveBeenCalledTimes(2);
-    expect(spy.mock.calls[0][2]).toHaveLength(200);
-    expect(spy.mock.calls[1][2]).toHaveLength(50);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith('https://api.test', 'tok', cards);
     expect(reply).toMatchObject({ type: 'match:ok' });
     if (reply.type === 'match:ok') expect(reply.results).toHaveLength(250);
   });
