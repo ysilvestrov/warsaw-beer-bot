@@ -3,7 +3,7 @@ import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
 import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
 import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
-import { clearAll, clearKeys, setCached, setCachedIfMatching } from '../cache/store';
+import { clearAll, clearKeys, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 
 export interface MatchMessage {
   type: 'match';
@@ -25,6 +25,8 @@ function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
 
 export const handleCacheSet = (key: string, result: MatchResult) =>
   enqueueCacheMutation(async () => { await setCached(key, result); });
+export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) =>
+  enqueueCacheMutation(() => setCachedMany(entries));
 export const handleCacheClearKeys = (keys: string[]) =>
   enqueueCacheMutation(async () => { await clearKeys(keys); });
 export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
@@ -318,6 +320,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
   if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
+  if (t === 'cache:set-many') { handleCacheSetMany(message.entries).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:clear-all') { handleCacheClearAll().then((count) => sendResponse({ ok: true, count }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:set-if-matching') {
