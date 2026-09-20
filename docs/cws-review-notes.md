@@ -1,5 +1,20 @@
 # Chrome Web Store — review notes (Warsaw Beer Overlay)
 
+> ⚠️ **Поле «Notes for reviewer» у дашборді має ліміт 500 символів.** Увесь цей
+> документ туди не влізе (він ~2.3k) — це внутрішній довідник. У дашборд іде
+> **лише** скорочений блок нижче; він тримається під лімітом навмисно, тож,
+> дописуючи туди речення, перерахуй довжину. Обґрунтування кожного дозволу має
+> свої окремі поля (`cws-listing.md` → «Permission justifications») і в цих 500
+> символів не входить — не дублюй їх сюди цілком.
+
+## Paste into the dashboard (≤500 chars)
+
+```
+To verify with no account: install, open https://onemorebeer.pl/ and browse a beer category. Cards get a grey badge at once; in ~2s gold-star Untappd ratings appear, a few at a time. Clicking one opens the beer on Untappd. Popup: "Not connected - global ratings only".
+
+A token (optional, from our Telegram bot) only adds personal "already had it" badges. untappd.com and *.algolia.net are optional, requested only if the user enables "find missing beers" / check-in sync.
+```
+
 ## What the extension does
 
 It overlays your personal Untappd status and ratings onto craft-beer shop pages
