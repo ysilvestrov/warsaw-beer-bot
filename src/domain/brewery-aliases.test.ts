@@ -202,6 +202,9 @@ describe('Cluster 4 parent/portfolio brand alias batch', () => {
     ['dobruska', 'rodinny rampusak'],
     ['jablecznik trzebnicki', 'cydr tradycyjny trzebnica'],
     ['edelweiss', 'brau union osterreich'],
+    ['rochefort', 'abbaye notre dame de saint remy'],
+    ['samuel smith', 'melbourn bros all saints'],
+    ['trio stout', 'united dutch breweries'],
   ];
 
   test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
