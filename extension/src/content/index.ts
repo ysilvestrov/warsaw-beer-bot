@@ -119,8 +119,8 @@ export async function runOverlay(
     }
     if (misses.length === 0 && cachedOrphans.length === 0) return;
 
-    if (misses.length > 0 && !adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
-      await adapter.loadCardDetails(misses.map((m) => m.card));
+    if (!adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
+      await adapter.loadCardDetails([...misses, ...cachedOrphans].map((m) => m.card));
     }
 
     // `abv` is sanitized once, here, where a card's shop-published value first enters a
@@ -218,13 +218,19 @@ export async function runOverlay(
       : [];
     const orphanKeys = new Set(orphanMisses.map((x) => x.miss!.key));
 
-    results.forEach((result, i) => {
+    for (const [i, result] of results.entries()) {
       const miss = rawMisses[i];
-      if (!miss) return;
+      if (!miss) continue;
       renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
       markSeen(miss.el);
-      void cacheSet(miss.key, result);
-    });
+      // A cache failure must not prevent enrichment for the rest of this page.
+      // The next render will retry the ordinary match path.
+      try {
+        await cacheSet(miss.key, result);
+      } catch {
+        // Rendering already succeeded; cache storage is an optimisation, not its gate.
+      }
+    }
 
     // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але
     // мовчати про неї не можна: ці картки вже стоять на «працюємо», і без цього циклу

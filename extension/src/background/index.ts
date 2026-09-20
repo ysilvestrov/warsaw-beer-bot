@@ -317,11 +317,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
-  if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true })); return true; }
-  if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true })); return true; }
-  if (t === 'cache:clear-all') { handleCacheClearAll().then((count) => sendResponse({ count })); return true; }
+  if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
+  if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
+  if (t === 'cache:clear-all') { handleCacheClearAll().then((count) => sendResponse({ ok: true, count }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:set-if-matching') {
-    handleCacheSetIfMatching(message.key, message.expected, message.result).then((written) => sendResponse({ written })); return true;
+    handleCacheSetIfMatching(message.key, message.expected, message.result).then((written) => sendResponse({ written }), () => sendResponse({ written: false })); return true;
   }
   if (t === 'checkin-sync:start') { handleCheckinSyncStart().then(sendResponse); return true; }
   if (t === 'checkin-sync:stop') { handleCheckinSyncStop().then(sendResponse); return true; }

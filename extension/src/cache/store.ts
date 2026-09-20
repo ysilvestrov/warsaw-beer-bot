@@ -36,7 +36,8 @@ export async function setCachedIfMatching(
   result: MatchResult,
   now: number = Date.now(),
 ): Promise<boolean> {
-  const current = await getCached(key, now);
+  const got = await chrome.storage.local.get(PREFIX + key);
+  const current = (got[PREFIX + key] as Entry | undefined)?.result ?? null;
   if (JSON.stringify(current) !== JSON.stringify(expected)) return false;
   await writeCached(key, result, now);
   return true;

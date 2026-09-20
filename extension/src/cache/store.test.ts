@@ -41,6 +41,14 @@ describe('cache/store', () => {
     expect(await getCached('a|x')).toEqual(newer);
   });
 
+  it('can conditionally replace an expired entry', async () => {
+    const now = 1_000_000;
+    const newer = { ...sample, is_drunk: false, user_rating: null };
+    await setCached('a|x', sample, now);
+
+    expect(await setCachedIfMatching('a|x', sample, newer)).toBe(true);
+  });
+
   it('clearKeys removes only the given keys', async () => {
     await setCached('a|x', sample);
     await setCached('b|y', sample);
