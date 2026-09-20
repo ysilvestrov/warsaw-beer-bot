@@ -15,7 +15,7 @@
 - Keep the `match` → `match:ok|match:err` Chrome runtime message contract unchanged.
 - Process at most 200 uncached cards per `SendMatch` request, sequentially in original card order.
 - A failed or short response affects only its own partition; later partitions continue.
-- Submit each successful partition as exactly one existing `cache:set-many` operation before enriching that partition.
+- Submit each successful partition as exactly one existing `cache:set-many` operation; accumulate fresh enrichment candidates and invoke existing enrichment once after all partitions.
 - Preserve #648 working/failure states, #666 cache ordering, and existing server-owned enrichment eligibility.
 - Add one user-facing `Unreleased` entry and update `docs/extension-install-uk.md` for the visible behavior.
 
@@ -119,11 +119,11 @@
     // render and mark only aligned results
     // await one cacheSetMany(cacheEntries), swallowing only cache failure
     // render server failure for misses.slice(results.length)
-    // call enrich only with this partition's fresh orphan payloads
+    // return this partition's fresh orphan payloads after its cache write
   }
   ```
 
-  Keep the existing cached-orphan payload construction outside the loop and send it once. Do not re-enrich cached orphans once per fresh partition.
+  Keep the existing cached-orphan payload construction outside the loop. Accumulate each successful partition's fresh orphan payloads only after its cache write; after the loop, invoke `enrich` once with cached plus accumulated fresh payloads. Do not invoke enrichment inside the partition loop.
 
 - [ ] **Step 4: Partition and continue after a rejected request**
 

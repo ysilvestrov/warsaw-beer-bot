@@ -88,7 +88,7 @@ async function finalizeMatchPart(
   results: MatchResult[],
   enrich: EnrichOrphans | undefined,
   cacheSetMany: CacheMatchResults,
-): Promise<void> {
+): Promise<Parameters<EnrichOrphans>[0]> {
   // Порядок важить: `enrichmentPossible` має бути відомий ДО малювання, інакше сирота,
   // яка зараз поїде в дошук, на мить блимне як «не знайшли».
   const orphanMisses = enrich
@@ -124,9 +124,7 @@ async function finalizeMatchPart(
     markSeen(miss.el);
   }
 
-  if (enrich && orphanMisses.length) {
-    enrich(orphanMisses.map(({ miss, result }) => freshOrphanPayload(miss, result)));
-  }
+  return orphanMisses.map(({ miss, result }) => freshOrphanPayload(miss, result));
 }
 
 export async function runOverlay(
@@ -255,10 +253,13 @@ export async function runOverlay(
 
     for (const m of rawMisses) renderState(m.el, { kind: 'working' });
 
+    const freshOrphanPayloads: Parameters<EnrichOrphans>[0] = [];
     for (let i = 0; i < rawMisses.length; i += MATCH_CHUNK_SIZE) {
       const part = rawMisses.slice(i, i + MATCH_CHUNK_SIZE);
       try {
-        await finalizeMatchPart(part, await sendMatch(part.map((m) => m.raw)), enrich, cacheSetMany);
+        freshOrphanPayloads.push(
+          ...await finalizeMatchPart(part, await sendMatch(part.map((m) => m.raw)), enrich, cacheSetMany),
+        );
       } catch {
         // #648: a failed request must leave a visible terminal state and not re-arm the
         // re-render observer. Later partitions remain eligible for their own request.
@@ -269,7 +270,8 @@ export async function runOverlay(
       }
     }
 
-    if (enrich && cachedOrphanPayloads.length) enrich(cachedOrphanPayloads);
+    const orphanPayloads = [...cachedOrphanPayloads, ...freshOrphanPayloads];
+    if (enrich && orphanPayloads.length) enrich(orphanPayloads);
   } catch {
     // Any parsing/rendering failure must never break the host page.
   }

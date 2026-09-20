@@ -1014,4 +1014,34 @@ describe('runOverlay progressive match chunks (#667)', () => {
     expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
       ?.getAttribute('data-icon')).toBe('check');
   });
+
+  it('enriches cached and successful partition orphans once per page', async () => {
+    const cachedCard: Card = { el: cardEl(), brewery: 'B', name: 'Cached' };
+    const cached: MatchResult = {
+      raw: { brewery: 'B', name: 'Cached' },
+      matched_beer: { id: 1, brewery: 'B', name: 'Cached', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    await setCached(normalizeKey('B', 'Cached'), cached);
+    const freshCards: Card[] = Array.from({ length: 201 }, (_, i) => ({
+      el: cardEl(), brewery: 'B', name: `Fresh ${i}`,
+    }));
+    const orphanResult = (name: string): MatchResult => ({
+      raw: { brewery: 'B', name },
+      matched_beer: null,
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: null, searched: true,
+    });
+    const sendMatch = vi.fn(async (batch: RawBeer[]) => batch.map(({ name }) => orphanResult(name)));
+    const cacheSetMany = vi.fn(async (_entries: { key: string; result: MatchResult }[]) => {});
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapterFor([cachedCard, ...freshCards]), sendMatch, enrich, cacheSetMany);
+
+    expect(cacheSetMany).toHaveBeenCalledTimes(2);
+    expect(cacheSetMany.mock.calls.map(([entries]) => entries).map((entries) => entries.length)).toEqual([200, 1]);
+    expect(enrich).toHaveBeenCalledTimes(1);
+    const names = (enrich.mock.calls[0][0] as Array<{ name: string }>).map(({ name }) => name);
+    expect(names).toHaveLength(202);
+    expect(names).toEqual(expect.arrayContaining(['Cached', 'Fresh 0', 'Fresh 200']));
+  });
 });

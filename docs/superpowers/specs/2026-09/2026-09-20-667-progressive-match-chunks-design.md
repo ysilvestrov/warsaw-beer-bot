@@ -17,9 +17,10 @@ cache-записи та enrichment першої частини чекають н
 ## Рішення
 
 Content script сам ділить `rawMisses` на послідовні частини максимум по 200 карток.
-Для кожної частини він викликає наявний `sendMatch`, одразу малює її фінальні стани,
-записує її результати одним `cache:set-many` і запускає enrichment тільки для її
-кандидатів. Background отримує вже обмежений запит і робить один `POST /match`; його
+Для кожної частини він викликає наявний `sendMatch`, одразу малює її фінальні стани
+і записує її результати одним `cache:set-many`. Кандидати enrichment накопичуються на
+сторінці та передаються одним наявним викликом після всіх частин, щоб зберегти спільний
+ліміт і throttle enrichment. Background отримує вже обмежений запит і робить один `POST /match`; його
 внутрішнє chunking-накопичення прибирається.
 
 Chrome runtime message contract лишається `match` → `match:ok|match:err`: не вводимо
@@ -36,7 +37,8 @@ Chrome runtime message contract лишається `match` → `match:ok|match:e
 - Кожна успішна частина передає весь свій набір записів одним `cache:set-many`. Наявна
   serial queue у service worker гарантує, що popup Refresh або інша вкладка не очистить
   частину старої відповіді між її записами.
-- Enrichment бачить лише успішні результати власної частини, після її cache write.
+- Enrichment бачить лише успішні результати частин, після їх cache write, але запускається
+  один раз для всієї сторінки. Його чинний page-wide ліміт і throttle не змінюються.
 
 ## Межі
 
@@ -65,4 +67,4 @@ Chrome runtime message contract лишається `match` → `match:ok|match:e
 - RED: background більше не об'єднує декілька частин, коли message уже містить максимум
   200 карток.
 - Existing: cache write залишається batch-atomic для кожної отриманої частини, а
-  enrichment отримує тільки results відповідної частини.
+  enrichment один раз отримує лише results успішних частин.
