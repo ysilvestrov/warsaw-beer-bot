@@ -34,7 +34,9 @@ export async function setCachedMany(
   entries: { key: string; result: MatchResult }[],
   now: number = Date.now(),
 ): Promise<void> {
-  await Promise.all(entries.map(({ key, result }) => writeCached(key, result, now)));
+  // This runs inside one service-worker queue item. Keep its writes ordered: a rejected
+  // write must not let a later queued clear overtake another write still in flight.
+  for (const { key, result } of entries) await writeCached(key, result, now);
 }
 
 /** Used by the service worker's serialized mutation queue. */
