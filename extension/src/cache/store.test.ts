@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  getCached, setCached, CACHE_TTL_MS, clearKeys, clearAll, countAll,
+  getCached, setCached, setCachedMany, CACHE_TTL_MS, clearKeys, clearAll, countAll,
   setCachedIfMatching,
 } from './store';
 import type { MatchResult } from '../api/types';
@@ -47,6 +47,16 @@ describe('cache/store', () => {
     await setCached('a|x', sample, now);
 
     expect(await setCachedIfMatching('a|x', sample, newer)).toBe(true);
+  });
+
+  it('keeps the later result when a batch contains the same key twice', async () => {
+    const newer = { ...sample, is_drunk: false, user_rating: null };
+    await setCachedMany([
+      { key: 'a|x', result: sample },
+      { key: 'a|x', result: newer },
+    ]);
+
+    expect(await getCached('a|x')).toEqual(newer);
   });
 
   it('clearKeys removes only the given keys', async () => {
