@@ -201,12 +201,15 @@ this guide first.
    to the bot for matching, and draws a **corner badge** on the cards. What
    the badges mean:
 
-   | Badge | What it means |
-   |---|---|
+   On a large page the finished cards get their usual badge while later ones may still
+   be showing a check-in-progress state — you do not have to wait for the whole catalog.
+
    **Only two marks carry colour** — the green check and the gold star. Those are the
    cards you choose between; everything else is grey on purpose, so it does not compete
    for your attention.
 
+   | Badge | What it means |
+   |---|---|
    | **green check** + a rating (e.g. `4.2`) | you've **already had** this beer — shows **your** rating; click opens Untappd |
    | **green check** + **gold star** with a rating | you've had it but never rated it — the **global** rating is shown; click opens Untappd |
    | **green check** with no number | you've had it; there is neither your rating nor a global one yet |
@@ -216,7 +219,7 @@ this guide first.
    | a **magnifier** | not found on Untappd; click opens a search pre-filled with the name |
    | a grey **ring** | the card is waiting its turn |
    | a grey spinning **arc** | this beer is being checked right now |
-   | a grey **reload arrow** | we ran out: this page hit its search limit. Hover for the hint, then reload the page |
+   | a grey **reload arrow** | we did not get to this one this time. Hover for the hint; reload the page and these cards carry on being checked |
    | a **triangle with `!`** | the check failed: Untappd did not answer, the connection dropped, or the card could not be parsed. Hover to see which |
    | a grey **✕** | the shop itself filed the product as **not beer**; the badge is **not clickable** |
 
