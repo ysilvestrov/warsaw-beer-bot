@@ -40,8 +40,11 @@ so you can decide at a glance:
 
 • ⭐ community rating — the beer's global Untappd score
 • ✅ you've already checked this beer in — with your own rating
-• ❓ a probable match you may have had
-• ⚪ known beer, not yet linked on Untappd
+• a dashed outline with "?" — the match is uncertain, so you can check it yourself
+• a magnifier — a known beer with no Untappd page yet; click to search for it
+
+Every card carries a badge from the moment the page loads, so you can also tell a beer
+that is still being checked from one that came back with no answer.
 
 You can see the list of supported beer shops directly in the extension UI.
 
