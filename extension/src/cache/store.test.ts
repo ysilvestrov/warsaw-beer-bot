@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { getCached, setCached, CACHE_TTL_MS, clearKeys, clearAll, countAll } from './store';
+import {
+  getCached, setCached, CACHE_TTL_MS, clearKeys, clearAll, countAll,
+  setCachedIfMatching,
+} from './store';
 import type { MatchResult } from '../api/types';
 
 const sample: MatchResult = {
@@ -27,6 +30,15 @@ describe('cache/store', () => {
     const now = 1_000_000;
     await setCached('pinta|hazy morning', sample, now);
     expect(await getCached('pinta|hazy morning', now + CACHE_TTL_MS + 1)).toBeNull();
+  });
+
+  it('refuses a conditional write after the key is refreshed', async () => {
+    const newer = { ...sample, is_drunk: false, user_rating: null };
+    await setCached('a|x', sample);
+    await setCached('a|x', newer);
+
+    expect(await setCachedIfMatching('a|x', sample, sample)).toBe(false);
+    expect(await getCached('a|x')).toEqual(newer);
   });
 
   it('clearKeys removes only the given keys', async () => {

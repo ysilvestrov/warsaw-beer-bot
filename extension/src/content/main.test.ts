@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { startOverlay, enrichOrphans } from './main';
 import { renderState } from './badge';
 import { isSeen, type CardState } from './badge';
+import { getCached, setCached, setCachedIfMatching } from '../cache/store';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchResult } from '../api/types';
 
@@ -121,6 +122,9 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
           cb({ algolia: { hits: [{ bid: 6648348 }] } });
         } else if (msg.type === 'enrich:result') {
           cb({ result: result ?? { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
+        } else if (msg.type === 'cache:set-if-matching') {
+          const m = msg as Msg & { key: string; expected: MatchResult; result: MatchResult };
+          void setCachedIfMatching(m.key, m.expected, m.result).then((written) => cb({ written }));
         } else cb(undefined);
         return undefined;
       }) as never,
@@ -227,6 +231,92 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     const badge = el.querySelector('[data-beerbadge]')!;
     expect(badge.textContent).toContain('3.9');
     expect(badge.getAttribute('aria-label')).toBe('Ти це не пив. Глобальна оцінка 3,9');
+  });
+
+  it('replaces a cached orphan when enrichment finds its Untappd id', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker();
+    const result: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    await setCached('k0', result);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+    await tick(0);
+
+    expect(await getCached('k0')).toMatchObject({
+      matched_beer: { id: 4, untappd_id: 6648348, rating_global: 3.9 },
+    });
+  });
+
+  it('does not overwrite a refreshed match when an older enrichment finishes', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    const refreshed: MatchResult = {
+      ...orphan,
+      matched_beer: { id: 9, brewery: 'B', name: 'Newer result', rating_global: 4.6, untappd_id: 999 },
+      is_drunk: true,
+      user_rating: 4.25,
+    };
+    await setCached('k0', orphan);
+    let replyToSearch: (() => void) | undefined;
+    const sent: string[] = [];
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string }, cb: (reply: unknown) => void) => {
+        sent.push(msg.type);
+        if (msg.type === 'enrich:candidates') {
+          cb({ candidates: [{ brewery: 'B', name: 'N', eligible: true,
+            algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'q', hitsPerPage: 5 } }] });
+        } else if (msg.type === 'enrich:fetch') {
+          replyToSearch = () => cb({ algolia: { hits: [{ bid: 6648348 }] } });
+        } else if (msg.type === 'enrich:result') {
+          cb({ result: { status: 'matched', untappd_id: 6648348, rating_global: 3.9 } });
+        } else if (msg.type === 'cache:set-if-matching') {
+          const m = msg as unknown as { key: string; expected: MatchResult; result: MatchResult };
+          void setCachedIfMatching(m.key, m.expected, m.result).then((written) => cb({ written }));
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result: orphan }]);
+    await until(() => replyToSearch !== undefined);
+    await setCached('k0', refreshed);
+    replyToSearch!();
+    await until(() => sent.includes('enrich:result'));
+    await tick(0);
+
+    expect(await getCached('k0')).toEqual(refreshed);
+  });
+
+  it('keeps a cached orphan after Untappd blocks the enrichment', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const sent = stubServiceWorker({ status: 'blocked' });
+    const result: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    await setCached('k0', result);
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result }]);
+    await until(() => sent.some((m) => m.type === 'enrich:result'));
+    await tick(0);
+
+    expect(await getCached('k0')).toEqual(result);
   });
 
   it('settles a fruitless search back onto the state /match proved', async () => {

@@ -52,6 +52,27 @@ describe('runOverlay', () => {
     expect(card.el.querySelector(`[${BADGE_MARKER}]`)).not.toBeNull();
   });
 
+  it('enriches a cached catalogue orphan without matching it again', async () => {
+    const card: Card = { el: cardEl(), brewery: 'PINTA', name: 'Still Missing' };
+    const cached: MatchResult = {
+      raw: { brewery: 'PINTA', name: 'Still Missing' },
+      matched_beer: {
+        id: 12, name: 'Still Missing', brewery: 'PINTA', rating_global: null, untappd_id: null,
+      },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    await setCached(normalizeKey('PINTA', 'Still Missing'), cached);
+    const sendMatch = vi.fn(async () => [] as MatchResult[]);
+    const enrich = vi.fn();
+
+    await runOverlay(document, adapterFor([card]), sendMatch, enrich);
+
+    expect(sendMatch).not.toHaveBeenCalled();
+    expect(enrich).toHaveBeenCalledWith([expect.objectContaining({
+      key: normalizeKey('PINTA', 'Still Missing'), brewery: 'PINTA', name: 'Still Missing',
+    })]);
+  });
+
   it('rechecks an unresolved cached beer so its registered orphan badge returns', async () => {
     const card: Card = { el: cardEl(), brewery: 'PINTA', name: 'Unknown' };
     const unresolved: MatchResult = {

@@ -17,6 +17,9 @@ export type EnrichOrphans = (
     // #648: стан, яким картка стане, якщо дошук не дасть нічого кращого. Його рахує той,
     // хто тримає відповідь `/match`; дошук лише повідомляє події й не знає цієї відповіді.
     state: CardState;
+    // The /match response is needed to replace this cache entry only after enrichment
+    // proves a new Untappd identity (#666).
+    result?: MatchResult;
     // #369: shop-published facts, relayed to /enrich/* so the matcher stops
     // running blind. Omitted when the adapter did not publish them.
     abv?: number;
@@ -35,11 +38,26 @@ function skipState(card: Card): CardState {
   return { kind: 'failed', reason: card.skipReason === 'unparsed' ? 'unparsed' : 'network' };
 }
 
+function canEnrich(result: MatchResult, card: Card): boolean {
+  const matched = result.matched_beer;
+  const bidContradicts =
+    card.bid !== undefined &&
+    matched != null &&
+    matched.untappd_id !== null &&
+    card.bid !== matched.untappd_id;
+  return (
+    !result.is_drunk &&
+    !result.drunk_uncertain &&
+    (matched == null || matched.untappd_id === null || bidContradicts)
+  );
+}
+
 export async function runOverlay(
   doc: Document,
   adapter: SiteAdapter,
   sendMatch: SendMatch,
   enrich?: EnrichOrphans,
+  cacheSet: (key: string, result: MatchResult) => Promise<void> = setCached,
 ): Promise<void> {
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
@@ -69,6 +87,7 @@ export async function runOverlay(
     }
 
     const misses: { el: HTMLElement; key: string; card: Card }[] = [];
+    const cachedOrphans: { el: HTMLElement; key: string; card: Card; result: MatchResult }[] = [];
     for (const card of cards) {
       // Repeated deliberately: on the loadDetailsBeforeCache path the shop's own verdict
       // arrives only with the product detail, so the pass above saw a plain queued card.
@@ -90,17 +109,17 @@ export async function runOverlay(
       if (key === undefined) continue;
       const cached = await getCached(key);
       if (cached?.matched_beer != null) {
-        // `enrichmentPossible: false` — кешований результат кінцевий для цього проходу:
-        // картка не потрапляє в `misses`, а черга дошуку будується лише з них (#666).
-        renderState(card.el, stateFromMatch(cached, { enrichmentPossible: false }));
+        const enrichmentPossible = Boolean(enrich && canEnrich(cached, card));
+        renderState(card.el, stateFromMatch(cached, { enrichmentPossible }));
         markSeen(card.el);
+        if (enrichmentPossible) cachedOrphans.push({ el: card.el, key, card, result: cached });
       } else {
         misses.push({ el: card.el, key, card });
       }
     }
-    if (misses.length === 0) return;
+    if (misses.length === 0 && cachedOrphans.length === 0) return;
 
-    if (!adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
+    if (misses.length > 0 && !adapter.loadDetailsBeforeCache && adapter.loadCardDetails) {
       await adapter.loadCardDetails(misses.map((m) => m.card));
     }
 
@@ -145,7 +164,20 @@ export async function runOverlay(
           ...(abv !== undefined ? { abv } : {}),
         };
       });
-    if (rawMisses.length === 0) return;
+    if (rawMisses.length === 0) {
+      if (enrich && cachedOrphans.length) {
+        enrich(cachedOrphans.map(({ key, el, card, result }) => ({
+          key, el, brewery: card.brewery, name: card.name,
+          state: stateFromMatch(result, { enrichmentPossible: false }), result,
+          ...(card.bid !== undefined ? { bid: card.bid } : {}),
+          ...(card.bid !== undefined && card.bidSlug !== undefined ? { bidSlug: card.bidSlug } : {}),
+          ...(card.brand !== undefined ? { brand: card.brand } : {}),
+          ...(usableAbv(card.abv) !== undefined ? { abv: usableAbv(card.abv) } : {}),
+          ...(card.style !== undefined ? { style: card.style } : {}),
+        })));
+      }
+      return;
+    }
 
     for (const m of rawMisses) renderState(m.el, { kind: 'working' });
 
@@ -181,20 +213,7 @@ export async function runOverlay(
           // #384: a card the shop links to a *different* Untappd id than the one we
           // stored is the only route to the server's repair path — it comes back from
           // /match matched, so the orphan test below never sees it.
-          const matched = x.result.matched_beer;
-          const bidContradicts =
-            x.miss.card.bid !== undefined &&
-            matched != null &&
-            matched.untappd_id !== null &&
-            x.miss.card.bid !== matched.untappd_id;
-          // The drunk exclusions gate BOTH branches, deliberately: a check-in means the
-          // user engaged with this beer, and re-linking underneath them is a bigger
-          // surprise than leaving one wrong badge. Revisit if that proves too cautious.
-          return (
-            !x.result.is_drunk &&
-            !x.result.drunk_uncertain &&
-            (matched == null || matched.untappd_id == null || bidContradicts)
-          );
+          return canEnrich(x.result, x.miss.card);
         })
       : [];
     const orphanKeys = new Set(orphanMisses.map((x) => x.miss!.key));
@@ -204,7 +223,7 @@ export async function runOverlay(
       if (!miss) return;
       renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
       markSeen(miss.el);
-      void setCached(miss.key, result);
+      void cacheSet(miss.key, result);
     });
 
     // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але
@@ -218,7 +237,17 @@ export async function runOverlay(
     }
 
     if (enrich) {
-      const orphans = orphanMisses
+      const orphans = [
+        ...cachedOrphans.map(({ key, el, card, result }) => ({
+          key, el, brewery: card.brewery, name: card.name,
+          state: stateFromMatch(result, { enrichmentPossible: false }), result,
+          ...(card.bid !== undefined ? { bid: card.bid } : {}),
+          ...(card.bid !== undefined && card.bidSlug !== undefined ? { bidSlug: card.bidSlug } : {}),
+          ...(card.brand !== undefined ? { brand: card.brand } : {}),
+          ...(usableAbv(card.abv) !== undefined ? { abv: usableAbv(card.abv) } : {}),
+          ...(card.style !== undefined ? { style: card.style } : {}),
+        })),
+        ...orphanMisses
         .map((x) => ({
           key: x.miss!.key,
           el: x.miss!.el,
@@ -227,6 +256,7 @@ export async function runOverlay(
           // Стан, яким картка стане, якщо дошук нічого не знайде: він уже врахував, що
           // після дошуку черги більше не буде.
           state: stateFromMatch(x.result, { enrichmentPossible: false }),
+          result: x.result,
           ...(x.miss!.card.bid !== undefined ? { bid: x.miss!.card.bid } : {}),
           ...(x.miss!.card.bid !== undefined && x.miss!.card.bidSlug !== undefined
             ? { bidSlug: x.miss!.card.bidSlug }
@@ -236,7 +266,8 @@ export async function runOverlay(
           // separating some same-brewery twins (#322).
           ...(x.miss!.abv !== undefined ? { abv: x.miss!.abv } : {}),
           ...(x.miss!.card.style !== undefined ? { style: x.miss!.card.style } : {}),
-        }));
+        })),
+      ];
       if (orphans.length) enrich(orphans);
     }
   } catch {

@@ -1,5 +1,6 @@
 import { pickAdapter } from '../sites/registry';
-import { clearAll, countAll } from '../cache/store';
+import { countAll } from '../cache/store';
+import { clearAll } from '../cache/client';
 import { getSettings, SETUP_GUIDE_URL } from '../shared/config';
 import { browserLanguages, renderSupportedShops } from './supported-shops';
 import { wireClearButton } from './clear-cache';

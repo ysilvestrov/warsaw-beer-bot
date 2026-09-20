@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
-import { feedUrl, handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop } from './index';
+import {
+  feedUrl, handleCacheSet, handleCacheSetIfMatching,
+  handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop,
+} from './index';
 import { setSettings } from '../shared/config';
+import { getCached } from '../cache/store';
+import type { MatchResult } from '../api/types';
 import * as client from '../api/client';
 
 const sessionStore = new Map<string, unknown>();
@@ -36,6 +41,30 @@ describe('feedUrl', () => {
 
   it('encodes the username', () => {
     expect(feedUrl('a b/c', null)).toBe('https://untappd.com/user/a%20b%2Fc');
+  });
+});
+
+describe('cache mutation queue', () => {
+  const orphan: MatchResult = {
+    raw: { brewery: 'B', name: 'N' },
+    matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+  };
+
+  it('does not let an older enrichment overwrite a newer match', async () => {
+    const refreshed: MatchResult = {
+      ...orphan,
+      matched_beer: { id: 9, brewery: 'B', name: 'Newer', rating_global: 4.6, untappd_id: 999 },
+    };
+    const found: MatchResult = {
+      ...orphan,
+      matched_beer: { ...orphan.matched_beer!, untappd_id: 6648348, rating_global: 3.9 },
+    };
+    await handleCacheSet('k0', orphan);
+    await handleCacheSet('k0', refreshed);
+
+    expect(await handleCacheSetIfMatching('k0', orphan, found)).toBe(false);
+    expect(await getCached('k0')).toEqual(refreshed);
   });
 });
 
