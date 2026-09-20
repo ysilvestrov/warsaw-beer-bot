@@ -12,6 +12,11 @@ export async function setCached(key: string, result: MatchResult): Promise<void>
   if (!reply?.ok) throw new Error('Cache write failed');
 }
 
+export async function setCachedMany(entries: { key: string; result: MatchResult }[]): Promise<void> {
+  const reply = await send<{ ok: boolean }>({ type: 'cache:set-many', entries });
+  if (!reply?.ok) throw new Error('Cache write failed');
+}
+
 export async function clearKeys(keys: string[]): Promise<void> {
   const reply = await send<{ ok: boolean }>({ type: 'cache:clear-keys', keys });
   if (!reply?.ok) throw new Error('Cache clear failed');

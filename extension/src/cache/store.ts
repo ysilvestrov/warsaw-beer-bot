@@ -30,6 +30,14 @@ export async function setCached(
 }
 
 /** Used by the service worker's serialized mutation queue. */
+export async function setCachedMany(
+  entries: { key: string; result: MatchResult }[],
+  now: number = Date.now(),
+): Promise<void> {
+  await Promise.all(entries.map(({ key, result }) => writeCached(key, result, now)));
+}
+
+/** Used by the service worker's serialized mutation queue. */
 export async function setCachedIfMatching(
   key: string,
   expected: MatchResult,

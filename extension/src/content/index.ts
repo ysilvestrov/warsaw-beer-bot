@@ -7,6 +7,7 @@ import { markSeen, renderState, type CardState } from './badge';
 import { stateFromMatch } from './card-state';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
+export type CacheMatchResults = (entries: { key: string; result: MatchResult }[]) => Promise<void>;
 
 export type EnrichOrphans = (
   orphans: {
@@ -57,7 +58,7 @@ export async function runOverlay(
   adapter: SiteAdapter,
   sendMatch: SendMatch,
   enrich?: EnrichOrphans,
-  cacheSet: (key: string, result: MatchResult) => Promise<void> = setCached,
+  cacheSetMany: CacheMatchResults = async (entries) => { await Promise.all(entries.map(({ key, result }) => setCached(key, result))); },
 ): Promise<void> {
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
@@ -218,18 +219,20 @@ export async function runOverlay(
       : [];
     const orphanKeys = new Set(orphanMisses.map((x) => x.miss!.key));
 
+    const cacheEntries: { key: string; result: MatchResult }[] = [];
     for (const [i, result] of results.entries()) {
       const miss = rawMisses[i];
       if (!miss) continue;
       renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
       markSeen(miss.el);
-      // A cache failure must not prevent enrichment for the rest of this page.
-      // The next render will retry the ordinary match path.
-      try {
-        await cacheSet(miss.key, result);
-      } catch {
-        // Rendering already succeeded; cache storage is an optimisation, not its gate.
-      }
+      cacheEntries.push({ key: miss.key, result });
+    }
+    // Submit one queue item so Refresh cannot clear part of this response and let the
+    // remainder arrive afterwards. A cache failure is still non-fatal for enrichment.
+    try {
+      await cacheSetMany(cacheEntries);
+    } catch {
+      // Rendering already succeeded; cache storage is an optimisation, not its gate.
     }
 
     // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але

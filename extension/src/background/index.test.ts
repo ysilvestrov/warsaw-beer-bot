@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
-  feedUrl, handleCacheSet, handleCacheSetIfMatching,
+  feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
   handleCheckinSyncStart, handleCheckinSyncStatus, handleCheckinSyncStop,
 } from './index';
 import { setSettings } from '../shared/config';
@@ -65,6 +65,18 @@ describe('cache mutation queue', () => {
 
     expect(await handleCacheSetIfMatching('k0', orphan, found)).toBe(false);
     expect(await getCached('k0')).toEqual(refreshed);
+  });
+
+  it('writes an overlay response as one queued batch', async () => {
+    const second = { ...orphan, raw: { brewery: 'B', name: 'Other' } };
+
+    await handleCacheSetMany([
+      { key: 'k0', result: orphan },
+      { key: 'k1', result: second },
+    ]);
+
+    expect(await getCached('k0')).toEqual(orphan);
+    expect(await getCached('k1')).toEqual(second);
   });
 });
 
