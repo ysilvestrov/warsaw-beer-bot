@@ -956,3 +956,43 @@ describe('runOverlay sanitizes shop ABV (#369)', () => {
     expect((enrich.mock.calls[0][0][0] as { abv?: number }).abv).toBe(0);
   });
 });
+
+describe('runOverlay progressive match chunks (#667)', () => {
+  it('renders the first partition while a deferred second partition is still working', async () => {
+    const cards: Card[] = Array.from({ length: 201 }, (_, i) => ({
+      el: cardEl(), brewery: 'B', name: String(i),
+    }));
+    const deferred = Promise.withResolvers<MatchResult[]>();
+    const sendMatch = vi.fn((cards: RawBeer[]) =>
+      cards.length === 200
+        ? Promise.resolve(cards.map((card) => drunkResult(card.brewery, card.name)))
+        : deferred.promise,
+    );
+
+    const run = runOverlay(document, adapterFor(cards), sendMatch);
+    await vi.waitFor(() => expect(sendMatch).toHaveBeenCalledTimes(2));
+    expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
+      ?.getAttribute('data-icon')).toBe('check');
+    expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
+      ?.getAttribute('data-icon')).toBe('working');
+
+    deferred.resolve([drunkResult('B', '200')]);
+    await run;
+  });
+
+  it('continues with the next partition when the first partition rejects', async () => {
+    const cards: Card[] = Array.from({ length: 201 }, (_, i) => ({
+      el: cardEl(), brewery: 'B', name: String(i),
+    }));
+    const sendMatch = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary network failure'))
+      .mockResolvedValueOnce([drunkResult('B', '200')]);
+
+    await runOverlay(document, adapterFor(cards), sendMatch);
+    expect(sendMatch).toHaveBeenCalledTimes(2);
+    expect(cards[0].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
+      ?.getAttribute('data-icon')).toBe('failed');
+    expect(cards[200].el.querySelector(`[${BADGE_MARKER}] [data-icon]`)
+      ?.getAttribute('data-icon')).toBe('check');
+  });
+});
