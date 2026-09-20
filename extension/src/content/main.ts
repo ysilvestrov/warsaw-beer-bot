@@ -3,6 +3,7 @@ import { runOverlay, type SendMatch, type EnrichOrphans } from './index';
 import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
 import { clearKeys, setCached, setCachedIfMatching } from '../cache/client';
+import { setCached as setCachedDirect } from '../cache/store';
 import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { getSettings } from '../shared/config';
@@ -132,7 +133,15 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
                   untappd_id: ev.untappdId,
                   rating_global: ev.ratingGlobal,
                 },
-              });
+              }).then((written) => {
+                if (!written) return;
+                draw({
+                  kind: 'found', drunk: false, mine: null, global: ev.ratingGlobal,
+                  unsure: false, untappdId: ev.untappdId,
+                  brewery: id?.brewery ?? '', name: id?.name ?? '',
+                });
+              }).catch(() => undefined);
+              return;
             }
             return draw({
               kind: 'found', drunk: false, mine: null, global: ev.ratingGlobal,
@@ -164,8 +173,9 @@ export function startOverlay(
   send: SendMatch,
   opts?: ReRenderOptions,
   enrich?: EnrichOrphans,
+  cacheSet: (key: string, result: MatchResult) => Promise<void> = setCachedDirect,
 ): () => void {
-  const run = () => runOverlay(doc, adapter, send, enrich, setCached);
+  const run = () => runOverlay(doc, adapter, send, enrich, cacheSet);
 
   const hasUnprocessed = () => {
     const scope = adapter.reRenderContainerSelector
@@ -186,7 +196,7 @@ export function startOverlay(
 const pageUrl = new URL(window.location.href);
 const adapter = pickAdapter(pageUrl);
 if (adapter && !adapter.isNonBeerPage?.(pageUrl)) {
-  startOverlay(document, adapter, sendMatch, undefined, enrichOrphans);
+  startOverlay(document, adapter, sendMatch, undefined, enrichOrphans, setCached);
   // Popup → "Refresh this page": drop the visible cards' cache entries and re-run
   // the overlay so badges reflect fresh server state without waiting out the TTL.
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
