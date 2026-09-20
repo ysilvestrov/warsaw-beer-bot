@@ -36,7 +36,15 @@ export async function setCachedMany(
 ): Promise<void> {
   // This runs inside one service-worker queue item. Keep its writes ordered: a rejected
   // write must not let a later queued clear overtake another write still in flight.
-  for (const { key, result } of entries) await writeCached(key, result, now);
+  let failed = false;
+  for (const { key, result } of entries) {
+    try {
+      await writeCached(key, result, now);
+    } catch {
+      failed = true;
+    }
+  }
+  if (failed) throw new Error('One or more cache writes failed');
 }
 
 /** Used by the service worker's serialized mutation queue. */
