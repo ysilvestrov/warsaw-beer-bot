@@ -32,6 +32,16 @@ export type EnrichOrphans = (
   }[],
 ) => void;
 
+type RawMiss = {
+  el: HTMLElement;
+  key: string;
+  raw: RawBeer;
+  card: Card;
+  abv?: number;
+};
+
+const MATCH_CHUNK_SIZE = 200;
+
 // #648 (спека §5.2): `skip` ніс три різні поняття, і всі три закінчувались однаково —
 // порожньою карткою. Кінцевий стан пропущеної картки називає причину: деталь товару не
 // приїхала (мережа) або розібрати картку не вдалося взагалі.
@@ -51,6 +61,72 @@ function canEnrich(result: MatchResult, card: Card): boolean {
     !result.drunk_uncertain &&
     (matched == null || matched.untappd_id === null || bidContradicts)
   );
+}
+
+function freshOrphanPayload(miss: RawMiss, result: MatchResult): Parameters<EnrichOrphans>[0][number] {
+  return {
+    key: miss.key,
+    el: miss.el,
+    brewery: miss.raw.brewery,
+    name: miss.raw.name,
+    state: stateFromMatch(result, { enrichmentPossible: false }),
+    result,
+    ...(miss.card.bid !== undefined ? { bid: miss.card.bid } : {}),
+    ...(miss.card.bid !== undefined && miss.card.bidSlug !== undefined
+      ? { bidSlug: miss.card.bidSlug }
+      : {}),
+    ...(miss.card.brand !== undefined ? { brand: miss.card.brand } : {}),
+    // `!== undefined`, never truthiness: 0.0% is a real ABV and the only thing
+    // separating some same-brewery twins (#322).
+    ...(miss.abv !== undefined ? { abv: miss.abv } : {}),
+    ...(miss.card.style !== undefined ? { style: miss.card.style } : {}),
+  };
+}
+
+async function finalizeMatchPart(
+  misses: RawMiss[],
+  results: MatchResult[],
+  enrich: EnrichOrphans | undefined,
+  cacheSetMany: CacheMatchResults,
+): Promise<void> {
+  // Порядок важить: `enrichmentPossible` має бути відомий ДО малювання, інакше сирота,
+  // яка зараз поїде в дошук, на мить блимне як «не знайшли».
+  const orphanMisses = enrich
+    ? results
+      .map((result, i) => ({ result, miss: misses[i] }))
+      .filter((x) => x.miss !== undefined && canEnrich(x.result, x.miss.card))
+    : [];
+  const orphanKeys = new Set(orphanMisses.map((x) => x.miss.key));
+
+  const cacheEntries: { key: string; result: MatchResult }[] = [];
+  for (const [i, result] of results.entries()) {
+    const miss = misses[i];
+    if (!miss) continue;
+    renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
+    markSeen(miss.el);
+    cacheEntries.push({ key: miss.key, result });
+  }
+  // Submit one queue item so Refresh cannot clear part of this response and let the
+  // remainder arrive afterwards. A cache failure is still non-fatal for enrichment.
+  try {
+    await cacheSetMany(cacheEntries);
+  } catch {
+    // Rendering already succeeded; cache storage is an optimisation, not its gate.
+  }
+
+  // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але
+  // мовчати про неї не можна: ці картки вже стоять на «працюємо», і без цього циклу
+  // крутили б спінер до кінця сторінки, ще й без мітки `markSeen`, тобто під'юджуючи
+  // re-render observer щоразу, коли крамниця чіпає DOM. Відповіді для них нема, отже
+  // кешувати нічого — це помилка сервера, і так її й називаємо.
+  for (const miss of misses.slice(results.length)) {
+    renderState(miss.el, { kind: 'failed', reason: 'server' });
+    markSeen(miss.el);
+  }
+
+  if (enrich && orphanMisses.length) {
+    enrich(orphanMisses.map(({ miss, result }) => freshOrphanPayload(miss, result)));
+  }
 }
 
 export async function runOverlay(
@@ -136,7 +212,7 @@ export async function runOverlay(
       markSeen(m.el);
     }
 
-    const rawMisses: { el: HTMLElement; key: string; raw: RawBeer; card: Card; abv?: number }[] = misses
+    const rawMisses: RawMiss[] = misses
       .filter(({ card }) => !card.skip)
       // #384: `key` is carried over from the lookup, never recomputed. loadCardDetails may
       // have overridden the card's brewery by now, and a write key derived from the new
@@ -165,120 +241,35 @@ export async function runOverlay(
           ...(abv !== undefined ? { abv } : {}),
         };
       });
-    if (rawMisses.length === 0) {
-      if (enrich && cachedOrphans.length) {
-        enrich(cachedOrphans.map(({ key, el, card, result }) => ({
-          key, el, brewery: card.brewery, name: card.name,
-          state: stateFromMatch(result, { enrichmentPossible: false }), result,
-          ...(card.bid !== undefined ? { bid: card.bid } : {}),
-          ...(card.bid !== undefined && card.bidSlug !== undefined ? { bidSlug: card.bidSlug } : {}),
-          ...(card.brand !== undefined ? { brand: card.brand } : {}),
-          ...(usableAbv(card.abv) !== undefined ? { abv: usableAbv(card.abv) } : {}),
-          ...(card.style !== undefined ? { style: card.style } : {}),
-        })));
-      }
-      return;
-    }
+    const cachedOrphanPayloads = enrich
+      ? cachedOrphans.map(({ key, el, card, result }) => ({
+        key, el, brewery: card.brewery, name: card.name,
+        state: stateFromMatch(result, { enrichmentPossible: false }), result,
+        ...(card.bid !== undefined ? { bid: card.bid } : {}),
+        ...(card.bid !== undefined && card.bidSlug !== undefined ? { bidSlug: card.bidSlug } : {}),
+        ...(card.brand !== undefined ? { brand: card.brand } : {}),
+        ...(usableAbv(card.abv) !== undefined ? { abv: usableAbv(card.abv) } : {}),
+        ...(card.style !== undefined ? { style: card.style } : {}),
+      }))
+      : [];
 
     for (const m of rawMisses) renderState(m.el, { kind: 'working' });
 
-    let results: MatchResult[];
-    try {
-      results = await sendMatch(rawMisses.map((m) => m.raw));
-    } catch {
-      // #648: a silent `return` here left every uncached card on the page blank, which is
-      // also what "still loading" looks like — the user could not tell a dead request from
-      // a slow one.
-      //
-      // Seen, not left open: this write is itself a DOM mutation, and the re-render
-      // observer re-runs whenever a parsed card is unseen. Leaving a failed card unseen
-      // makes the failure badge re-arm the pass that drew it — one /match per debounce
-      // interval, forever, against a server that is already failing. The old code was
-      // safe from this only by accident: a failed pass wrote nothing at all. The real
-      // retry routes are untouched — a shop re-render brings fresh unseen nodes, and the
-      // popup's refresh calls resetCard.
-      for (const m of rawMisses) {
-        renderState(m.el, { kind: 'failed', reason: 'network' });
-        markSeen(m.el);
+    for (let i = 0; i < rawMisses.length; i += MATCH_CHUNK_SIZE) {
+      const part = rawMisses.slice(i, i + MATCH_CHUNK_SIZE);
+      try {
+        await finalizeMatchPart(part, await sendMatch(part.map((m) => m.raw)), enrich, cacheSetMany);
+      } catch {
+        // #648: a failed request must leave a visible terminal state and not re-arm the
+        // re-render observer. Later partitions remain eligible for their own request.
+        for (const miss of part) {
+          renderState(miss.el, { kind: 'failed', reason: 'network' });
+          markSeen(miss.el);
+        }
       }
-      return;
     }
 
-    // Порядок важить: `enrichmentPossible` має бути відомий ДО малювання, інакше сирота,
-    // яка зараз поїде в дошук, на мить блимне як «не знайшли».
-    const orphanMisses = enrich
-      ? results
-        .map((result, i) => ({ result, miss: rawMisses[i] }))
-        .filter((x) => {
-          if (!x.miss) return false;
-          // #384: a card the shop links to a *different* Untappd id than the one we
-          // stored is the only route to the server's repair path — it comes back from
-          // /match matched, so the orphan test below never sees it.
-          return canEnrich(x.result, x.miss.card);
-        })
-      : [];
-    const orphanKeys = new Set(orphanMisses.map((x) => x.miss!.key));
-
-    const cacheEntries: { key: string; result: MatchResult }[] = [];
-    for (const [i, result] of results.entries()) {
-      const miss = rawMisses[i];
-      if (!miss) continue;
-      renderState(miss.el, stateFromMatch(result, { enrichmentPossible: orphanKeys.has(miss.key) }));
-      markSeen(miss.el);
-      cacheEntries.push({ key: miss.key, result });
-    }
-    // Submit one queue item so Refresh cannot clear part of this response and let the
-    // remainder arrive afterwards. A cache failure is still non-fatal for enrichment.
-    try {
-      await cacheSetMany(cacheEntries);
-    } catch {
-      // Rendering already succeeded; cache storage is an optimisation, not its gate.
-    }
-
-    // #648 (рев'ю PR #670): відповідь коротша за запит — не наша справа лагодити, але
-    // мовчати про неї не можна: ці картки вже стоять на «працюємо», і без цього циклу
-    // крутили б спінер до кінця сторінки, ще й без мітки `markSeen`, тобто під'юджуючи
-    // re-render observer щоразу, коли крамниця чіпає DOM. Відповіді для них нема, отже
-    // кешувати нічого — це помилка сервера, і так її й називаємо.
-    for (const miss of rawMisses.slice(results.length)) {
-      renderState(miss.el, { kind: 'failed', reason: 'server' });
-      markSeen(miss.el);
-    }
-
-    if (enrich) {
-      const orphans = [
-        ...cachedOrphans.map(({ key, el, card, result }) => ({
-          key, el, brewery: card.brewery, name: card.name,
-          state: stateFromMatch(result, { enrichmentPossible: false }), result,
-          ...(card.bid !== undefined ? { bid: card.bid } : {}),
-          ...(card.bid !== undefined && card.bidSlug !== undefined ? { bidSlug: card.bidSlug } : {}),
-          ...(card.brand !== undefined ? { brand: card.brand } : {}),
-          ...(usableAbv(card.abv) !== undefined ? { abv: usableAbv(card.abv) } : {}),
-          ...(card.style !== undefined ? { style: card.style } : {}),
-        })),
-        ...orphanMisses
-        .map((x) => ({
-          key: x.miss!.key,
-          el: x.miss!.el,
-          brewery: x.miss!.raw.brewery,
-          name: x.miss!.raw.name,
-          // Стан, яким картка стане, якщо дошук нічого не знайде: він уже врахував, що
-          // після дошуку черги більше не буде.
-          state: stateFromMatch(x.result, { enrichmentPossible: false }),
-          result: x.result,
-          ...(x.miss!.card.bid !== undefined ? { bid: x.miss!.card.bid } : {}),
-          ...(x.miss!.card.bid !== undefined && x.miss!.card.bidSlug !== undefined
-            ? { bidSlug: x.miss!.card.bidSlug }
-            : {}),
-          ...(x.miss!.card.brand !== undefined ? { brand: x.miss!.card.brand } : {}),
-          // `!== undefined`, never truthiness: 0.0% is a real ABV and the only thing
-          // separating some same-brewery twins (#322).
-          ...(x.miss!.abv !== undefined ? { abv: x.miss!.abv } : {}),
-          ...(x.miss!.card.style !== undefined ? { style: x.miss!.card.style } : {}),
-        })),
-      ];
-      if (orphans.length) enrich(orphans);
-    }
+    if (enrich && cachedOrphanPayloads.length) enrich(cachedOrphanPayloads);
   } catch {
     // Any parsing/rendering failure must never break the host page.
   }
