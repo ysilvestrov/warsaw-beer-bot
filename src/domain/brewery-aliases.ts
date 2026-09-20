@@ -92,7 +92,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Weizen still fails the name stage (#322 / #334).
   ['nachod', 'primator'],            // 34642 Weizenbier -> bid 30947, abv 4.7 vs 4.8
   ['stern scheubel', 'stern brau gunter scheubel'], // 30142 Vollbier Hell -> bid 1181659, abv 5.0 = 5.0
-  // Cluster 4 batch: parent/portfolio & conglomerate brand resolution (#417, #515, #554, #485).
+  // Cluster 4 batch: parent/portfolio & conglomerate brand resolution (#417, #515, #554, #485, #545).
   // Each pair is proven against an orphan in enrich_failures and rescues it live.
   ['kaunas alus', 'kauno alus'],                          // 368 Tradycynis ciemne z ziołami -> bid 722917, 8.2% = 8.2%
   ['tradycynis', 'kauno alus'],                           // 11875 Kokosowy -> bid 2669724 (5.0%), 11967 Ananasowe -> bid 3255099
@@ -103,6 +103,9 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['dobruska', 'rodinny rampusak'],                       // 11949 DOBRUŠSKÁ -> bid 654837 (4.4%), 11951 Rampusak 12 -> bid 445768 (4.9%)
   ['jablecznik trzebnicki', 'cydr tradycyjny trzebnica'], // 30135 Cydr tradycyjny -> bid 2132069, 5.2% vs 4.7%
   ['edelweiss', 'brau union osterreich'],                 // 35120 12° Hefetrüb -> bid 93420, 5.1%
+  ['rochefort', 'abbaye notre dame de saint remy'],       // 35131 Rochefort 10 -> bid 6766, 11.3% (#545)
+  ['samuel smith', 'melbourn bros all saints'],           // 35147 Organic Apricot -> bid 119231, 5.1% (#545)
+  ['trio stout', 'united dutch breweries'],               // 25908 Extra CAN -> bid 79060, 7.2% (#545)
   // Cluster 5 batch: bounded brewery-typo rescue (#476).
   // Each pair is proven against an orphan in enrich_failures and rescues it live.
   ['racborz', 'zamkowy raciborz'],                                    // 386 Raciborskie Klasyczne -> bid 4525184, 5.0% = 5.0%
