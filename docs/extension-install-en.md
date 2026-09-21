@@ -1,8 +1,8 @@
 # Browser extension "Warsaw Beer Overlay" — install & setup
 
-The extension overlays your personal **"already had it"** status and **your
-rating** on craft beer shop pages, for every beer that matches your Untappd
-history. The supported shops, grouped by where they ship from, are:
+The extension overlays your personal **"already had it"** status and, when the
+match is exact, **your rating** for beers from your Untappd history on craft beer
+shop pages. The supported shops, grouped by where they ship from, are:
 
 - **Ukraine:** [BeerFreak](https://beerfreak.org/),
   [WineTime](https://winetime.com.ua/), [Flasker](https://flasker.com.ua/)
@@ -215,7 +215,7 @@ this guide first.
    | **green check** with no number | you've had it; there is neither your rating nor a global one yet |
    | **gold star** + a rating | you haven't had it yet — shows the **global** rating; click opens Untappd |
    | **gold star** with no number | you haven't had it, and Untappd has too few ratings to show one |
-   | any of those in a **dashed outline** with `?` | the match is **uncertain** — the beer was found, but we are not sure; click opens Untappd to check |
+   | any of those in a **dashed outline** with `?` | the match is **uncertain** — the beer was found, but we are not sure; click opens Untappd to check. Here a check only means “you probably had this”, so we **do not show your rating**. If a star and number appear, that number is still the **global** rating — not evidence that you did not leave your own |
    | a **magnifier** | not found on Untappd; click opens a search pre-filled with the name |
    | a grey **ring** | the card is waiting its turn |
    | a grey spinning **arc** | this beer is being checked right now |
@@ -223,9 +223,10 @@ this guide first.
    | a **triangle with `!`** | the check failed: Untappd did not answer, the connection dropped, or the card could not be parsed. Hover to see which |
    | a grey **✕** | the shop itself filed the product as **not beer**; the badge is **not clickable** |
 
-   Every badge carries a screen-reader label that spells the state out. **No badge at
-   all** now means one thing only: the overlay does not run on this page (a whole
-   not-beer category).
+   Every badge carries a screen-reader label that spells the state out. For example,
+   `✅ ? ⭐ 3.6` is read as “Uncertain match. You probably had this. Global rating 3.6”.
+   **No badge at all** now means one thing only: the overlay does not run on this page
+   (a whole not-beer category).
 
 3. This also works with SPA navigation: when the shop re-renders the list
    (filters, pagination), the overlay updates itself.
@@ -235,8 +236,11 @@ this guide first.
 > they're already in the bot's catalog. A number **without** a star after the check is
 > always yours; a number **with** a star is the global one.
 >
-> **The dashed `?` outline** now appears on beers you have *not* had, too: an uncertain
-> match used to look exactly like a certain one, with no cue to check for yourself.
+> **The dashed `?` outline** means every table row about your own rating is qualified: we
+> do not know for certain that this is the same beer. For example, `✅ ? ⭐ 3.6` means
+> “you probably had this; 3.6 is the global rating”, not “you did not rate it”. The outline
+> now appears on beers you have *not* had, too: an uncertain match used to look exactly like
+> a certain one, with no cue to check for yourself.
 
 > When a shop's product page links to Untappd itself, the extension follows that link — the
 > badge then shows exactly that beer, even if the shop spells its name differently. When the
