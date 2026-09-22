@@ -113,14 +113,19 @@ export function resolveReplayArgs(argv: string[]): {
   let headOverride: string | undefined;
 
   for (let i = 0; i < argv.length; i++) {
-    if (argv[i] !== '--head') {
-      positional.push(argv[i]);
+    if (argv[i] === '--head') {
+      const value = argv[i + 1];
+      if (!value || value.startsWith('--')) throw new Error('--head needs a commit sha');
+      headOverride = value;
+      i++;
       continue;
     }
-    const value = argv[i + 1];
-    if (!value || value.startsWith('--')) throw new Error('--head needs a commit sha');
-    headOverride = value;
-    i++;
+    // A `--foo` token that is not `--head` (e.g. a mistyped `--head=abc`) must
+    // not fall through and get treated as the positional base-sha silently.
+    if (argv[i].startsWith('--')) {
+      throw new Error(`unrecognised option: ${argv[i]}`);
+    }
+    positional.push(argv[i]);
   }
 
   const [pr, explicitBase] = positional;

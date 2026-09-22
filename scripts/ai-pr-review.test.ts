@@ -784,28 +784,87 @@ describe('findExistingReview', () => {
   });
 });
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 // replay.ts calls buildReviewContext directly, so a body exclusion applied only
 // on the CI side would leave the measurement harness assembling a different
 // context than production — and replay is how every model and prompt decision
 // in this project gets made. The asymmetry below is the correctness argument of
 // the whole change, which is why it is pinned in source rather than trusted.
+//
+// Call sites are found by scanning scripts/**/*.ts (same idiom as
+// src/storage/seed-beer-guard.test.ts) instead of a hardcoded file list, so a
+// future third caller is guarded automatically rather than silently unscanned.
 describe('context reader is applied at every call site', () => {
-  const CALL_SITES = ['scripts/ai-pr-review.ts', 'scripts/ai-review/replay.ts'];
+  const SCRIPTS_DIR = resolve(__dirname);
 
-  it('every buildReviewContext call passes contextReader, and nothing else does', () => {
-    for (const file of CALL_SITES) {
-      const src = readFileSync(file, 'utf8');
-      const calls = src.split('buildReviewContext({').length - 1;
-      expect(calls, `${file} should call buildReviewContext`).toBeGreaterThan(0);
-      const wrapped = src.split('readFile: contextReader(').length - 1;
-      expect(wrapped, `${file} must wrap every buildReviewContext reader`).toBe(calls);
+  function tsFiles(dir: string): string[] {
+    const out: string[] = [];
+    for (const name of readdirSync(dir)) {
+      const p = resolve(dir, name);
+      if (statSync(p).isDirectory()) {
+        out.push(...tsFiles(p));
+        continue;
+      }
+      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue;
+      out.push(p);
     }
+    return out;
+  }
 
-    // The gate and verify must NOT be wrapped: they need the real bytes.
-    const reviewer = readFileSync('scripts/ai-pr-review.ts', 'utf8');
-    expect(reviewer).toContain('fileContent: deps.readFile');
-    expect(reviewer).not.toContain('fileContent: contextReader');
-  });
+  // Every CALL of `name(`, paired with its own balanced-paren argument text —
+  // not a whole-file occurrence count, which a doc comment or an unrelated
+  // second occurrence of the wrapped form can inflate independently of the
+  // real call. Skips the `function buildReviewContext(` declaration itself.
+  function callArgs(src: string, name: string): string[] {
+    const out: string[] = [];
+    const re = new RegExp(`(function\\s+)?${name}\\(`, 'g');
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(src))) {
+      if (m[1]) continue; // declaration, not a call
+      let depth = 1;
+      let i = re.lastIndex;
+      const start = i;
+      while (depth > 0 && i < src.length) {
+        if (src[i] === '(') depth++;
+        else if (src[i] === ')') depth--;
+        i++;
+      }
+      out.push(src.slice(start, i - 1));
+    }
+    return out;
+  }
+
+  it(
+    'every buildReviewContext call wraps readFile in contextReader(…) as an inline object ' +
+      'literal, and no fileContent: in the same file is wrapped (a hoisted params variable ' +
+      'is not recognised by this guard — the call must stay inline)',
+    () => {
+      let sawACall = false;
+      for (const file of tsFiles(SCRIPTS_DIR)) {
+        const src = readFileSync(file, 'utf8');
+
+        for (const args of callArgs(src, 'buildReviewContext')) {
+          sawACall = true;
+          expect(
+            args,
+            `${file}: buildReviewContext must be called with an inline object literal ` +
+              'wrapping readFile: contextReader(…)',
+          ).toMatch(/readFile:\s*contextReader\(/);
+        }
+
+        // The gate and verify must NOT be wrapped: they need the real bytes.
+        const wrappedFileContent = src.match(/fileContent:\s*contextReader\(/g) ?? [];
+        expect(
+          wrappedFileContent,
+          `${file}: fileContent: must never be wrapped in contextReader — the gate and ` +
+            'verify need the real file bytes',
+        ).toHaveLength(0);
+      }
+      expect(sawACall, 'the scan should have found at least one buildReviewContext call').toBe(
+        true,
+      );
+    },
+  );
 });
