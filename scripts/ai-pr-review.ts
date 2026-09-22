@@ -21,6 +21,41 @@ export const INCLUDE_PATTERNS = [
 
 export const IGNORE_PATTERNS = ['package-lock.json', '*.md', 'docs/**'];
 
+/**
+ * Paths whose BODY is never embedded in the review context — their diff still is,
+ * and findings inside them are still legal and publishable.
+ *
+ * Deliberately not `IGNORE_PATTERNS`: that removes a file from review entirely.
+ * This removes only the body, because a test body is the most expensive thing in
+ * the context and the least useful. Measured 2026-09-22: test bodies were 41% of
+ * the assembled context (687k of 1686k chars over nine PRs), and when the budget
+ * binds, churn ordering spends it on them — on PR #670 that demoted 31 SOURCE
+ * files to diff-only, on #669 the context held 168k chars of tests against 2k of
+ * source. Only 1 of 38 published findings in live reviews targeted a test file,
+ * and its quoted line was an ADDED line, present in the diff without the body —
+ * which is general, not luck: the gate drops everything `outside_changed_lines`,
+ * so a publishable finding always anchors to a line the diff already carries.
+ */
+export const BODY_EXCLUDE_PATTERNS = ['**/*.test.ts', 'tests/**/*.ts'];
+
+/**
+ * Wrap a file reader for CONTEXT ASSEMBLY ONLY.
+ *
+ * `buildReviewContext` treats `null` as "list this path as diff-only", which is
+ * exactly the behaviour we want for a test file.
+ *
+ * Never hand this to `applyGate` or `verifyAll`. The gate locates the model's
+ * verbatim quote in the real file and corrects the line number; verify reads the
+ * body to adjudicate. Give either of them this reader and every finding inside a
+ * test file becomes `quote_not_found` — the run stays green and a whole class of
+ * finding disappears without a trace.
+ */
+export function contextReader(
+  readFile: (path: string) => string | null,
+): (path: string) => string | null {
+  return (path) => (matchesAny(path, BODY_EXCLUDE_PATTERNS) ? null : readFile(path));
+}
+
 export function globToRegExp(glob: string): RegExp {
   let re = '';
   for (let i = 0; i < glob.length; i++) {
@@ -373,7 +408,7 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
     const { text: context, diffOnly } = buildReviewContext({
       diff,
       reviewable,
-      readFile: deps.readFile,
+      readFile: contextReader(deps.readFile),
     });
     if (diffOnly.length > 0) {
       deps.log(`::notice::Context budget: ${diffOnly.length} file(s) sent as diff only.`);

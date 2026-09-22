@@ -1,4 +1,39 @@
-import { filterReviewableFiles, globToRegExp } from './ai-pr-review';
+import {
+  BODY_EXCLUDE_PATTERNS,
+  contextReader,
+  filterReviewableFiles,
+  globToRegExp,
+  matchesAny,
+} from './ai-pr-review';
+
+describe('BODY_EXCLUDE_PATTERNS', () => {
+  it('excludes test bodies at any depth without touching source that merely contains "test"', () => {
+    expect(matchesAny('src/storage/x.test.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('x.test.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('extension/src/a.test.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('tests/b.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('tests/a/b.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('src/domain/latest.ts', BODY_EXCLUDE_PATTERNS)).toBe(false);
+    expect(matchesAny('src/domain/triage-plan.ts', BODY_EXCLUDE_PATTERNS)).toBe(false);
+  });
+
+  it('does NOT remove test files from review scope', () => {
+    expect(filterReviewableFiles(['src/a.test.ts'])).toEqual(['src/a.test.ts']);
+  });
+});
+
+describe('contextReader', () => {
+  it('hides a test body and passes every other read through untouched', () => {
+    const read = contextReader((p) => `BODY OF ${p}`);
+    expect(read('src/a.test.ts')).toBeNull();
+    expect(read('tests/helpers.ts')).toBeNull();
+    expect(read('src/a.ts')).toBe('BODY OF src/a.ts');
+  });
+
+  it('propagates a null from the underlying reader', () => {
+    expect(contextReader(() => null)('src/a.ts')).toBeNull();
+  });
+});
 
 describe('globToRegExp', () => {
   it('matches ** across directories and * within a segment', () => {
@@ -472,6 +507,85 @@ describe('runReview — full mode', () => {
     expect(logs.some((message) => message.includes('failure comment could not be posted'))).toBe(
       true,
     );
+  });
+});
+
+describe('runReview — test-file bodies', () => {
+  const TEST_FILE = 'src/a.test.ts';
+  const TEST_BODY = "it('guards', () => {\n  expect(scan(SRC, SCRIPTS)).toBe(0);\n});\n";
+  const TEST_DIFF = [
+    `--- a/${TEST_FILE}`,
+    `+++ b/${TEST_FILE}`,
+    '@@ -1,2 +1,3 @@',
+    " it('guards', () => {",
+    '+  expect(scan(SRC, SCRIPTS)).toBe(0);',
+    ' });',
+  ].join('\n');
+
+  const TEST_FINDING = {
+    file: TEST_FILE,
+    start_line: 2,
+    end_line: 2,
+    quote: 'expect(scan(SRC, SCRIPTS)).toBe(0);',
+    claim: 'the guard test scans a directory that need not exist',
+    why_it_breaks: 'readdirSync throws ENOENT before the assertion runs',
+    severity: 'P2',
+    confidence: 'high',
+  };
+
+  function testFileDeps(over = {}) {
+    return deps({
+      listChangedFiles: () => [TEST_FILE],
+      getDiff: () => TEST_DIFF,
+      readFile: () => TEST_BODY,
+      ...over,
+    });
+  }
+
+  it('publishes a finding quoting a test file, although its body was never sent', async () => {
+    const ai = openaiFetch([
+      JSON.stringify({ findings: [TEST_FINDING] }),
+      JSON.stringify({
+        verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 calls scan(SRC, SCRIPTS)' }],
+      }),
+    ]);
+    const gh = githubFetch(null);
+
+    await runReview(CFG, testFileDeps({ openaiFetch: ai.fetchFn, githubFetch: gh.fetchFn }));
+
+    // The gate must have anchored the quote — which is only possible if it was
+    // given the UNFILTERED reader. Filtered, this finding is silently dropped.
+    expect(gh.put.body).toContain('the guard test scans a directory that need not exist');
+  });
+
+  it('sends the test file as diff-only, so its body never reaches the model', async () => {
+    const bodies: string[] = [];
+    const capture = (async (_url: string, init?: RequestInit) => {
+      bodies.push(init?.body as string);
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ findings: [] }) } }],
+          usage: { prompt_tokens: 10, completion_tokens: 1 },
+        }),
+        text: async () => '',
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await runReview(
+      CFG,
+      testFileDeps({ openaiFetch: capture, githubFetch: githubFetch(null).fetchFn }),
+    );
+
+    const findRequest = bodies[0];
+    // The diff still carries the changed line — that is what a finding anchors to.
+    expect(findRequest).toContain('+  expect(scan(SRC, SCRIPTS)).toBe(0);');
+    // …but the body block (`## <path>` + fence) and its section heading are gone,
+    // and the model is told explicitly that it is seeing only a diff for this path.
+    expect(findRequest).toContain('Files where you see only the diff');
+    expect(findRequest).not.toContain('## src/a.test.ts');
+    expect(findRequest).not.toContain('# Full contents of changed files (at HEAD)');
   });
 });
 
