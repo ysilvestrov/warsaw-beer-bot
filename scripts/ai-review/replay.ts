@@ -166,13 +166,19 @@ async function main(): Promise<void> {
     head,
     hasCommit,
     fetchHead: () => {
-      sh(['fetch', 'origin', `pull/${pr}/head`]);
       // `refs/pull/<n>/head` tracks the PR's CURRENT head, so it cannot deliver
       // a commit a later force-push made unreachable — and that is exactly the
       // commit a recall probe asks for, since `--head` exists to replay the head
       // a past review saw. GitHub still serves such a commit by sha, so ask for
-      // it by name before `ensureHeadCommit` gives up. Only for an explicit
-      // `--head`: without one the PR's own head ref is by definition the target.
+      // it by name. Only for an explicit `--head`: without one the PR's own head
+      // ref is by definition the target, and its failure is the real failure.
+      try {
+        sh(['fetch', 'origin', `pull/${pr}/head`]);
+      } catch (err) {
+        // With `--head` the pull ref is a best-effort first try; letting it
+        // throw here would bury the by-sha attempt that is the whole point.
+        if (!headOverride) throw err;
+      }
       if (headOverride && !hasCommit(head)) sh(['fetch', 'origin', head]);
     },
     log: (message) => console.error(message),
