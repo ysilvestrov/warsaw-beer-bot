@@ -76,6 +76,13 @@ only from the JSON schema. Repeat one rich PR (#358 works) **three times per con
 of two findings is noise. Only aggregates across the corpus, or a miss repeated across
 every run, carry signal.
 
+**Match the number of draws, not just the session.** A union over N runs of one config
+against a single run of another is not a comparison, it is a head start. This exact mistake
+was made here on 2026-09-22: three luna runs unioned against one baseline draw scored luna
+**4/5** on the recall probe; three-against-three on the identical context scored it **2/5**,
+and the recommendation flipped. Luna's per-run spread is 1–2 findings, so the union was
+carried by a single lucky draw. Report per-run numbers **and** the union, for every config.
+
 ## 4. Re-measure the baseline in the same session
 
 **Always.** The 2026-07 run of config B gave 26 raised / 22 published; the identical config
@@ -115,15 +122,34 @@ Corpus, published findings, one run each:
 | T | 3 | 3 | 1 | 0 | 3 | 10 | 0 (1 nit) |
 | L | 3 | 4 | 1 | 0 | 3 | 11 | 0 |
 
-Recall probe, PR #418 @ `584aa661`:
+Recall probe, PR #418 @ `584aa661`, **on the pre-stage-1 (starved) context** — kept only to
+show what context starvation does, not as a model comparison:
 
-| config | context | of 5 |
-|---|---|---|
-| B | test bodies present | 4/5 |
-| T | test bodies present | 3/5 |
-| L | test bodies present | 2/5 |
-| L | test bodies dropped (union of 3) | 4/5 |
-| B | test bodies dropped (union of 2) | 3/5 |
+| config | of 5 |
+|---|---|
+| gpt-5.5 | 4/5 |
+| gpt-5.6-terra | 3/5 |
+| gpt-5.6-luna | 2/5 |
+
+## Reference results — 2026-09-22, second pass (the one to compare against)
+
+Run after stage 1 shipped, so the context is the one CI now assembles; baseline re-measured
+in the same session; **three draws per config**, per the rule above. This supersedes the
+first pass for every purpose except the starvation illustration.
+
+| config | verified per run | of the 5 known defects | price in/out |
+|---|---|---|---|
+| gpt-5.5 | 5 / 5 / 3 | **5/5** | $5 / $30 |
+| **gpt-5.6-sol** (now the default `find`) | **8 / 6** | **5/5** plus several more | **$4 / $20** |
+| gpt-5.6-terra | 4 / 3 / 5 | 3–4/5 | $2 / $12 |
+| gpt-5.6-luna | 1 / 2 / 2 | 2/5 — **refuted** | $0.20 / $1.20 |
+
+Corpus, findings published in total: gpt-5.5 **16**, terra **9**, luna **6**.
+
+Sol is cheaper than the model it replaces on both input and output *and* published more of
+the known defects, so the switch carried no quality bet. Its one real cost is triage time:
+8 verified findings per run is more to read, and by the 2026-07 labels about half of what
+this pipeline publishes is `unfalsifiable`.
 
 Prices per 1M tokens, read from the vendor page 2026-09-22 — recheck before reusing:
 
@@ -141,6 +167,40 @@ rejected on arithmetic — luna undercuts all but DeepSeek Flash, whose ≈7% fu
 does not pay for a second vendor account, a per-model request-shape seam (`max_tokens` vs
 `max_completion_tokens`), provider pinning against silent re-quantization, and
 `require_parameters: true` to keep strict `json_schema` routing.
+
+## The OpenRouter pass (not yet run)
+
+Every candidate measured so far has been OpenAI's, because the key and the request shape
+were already there. Widening to the open-weight models needs one account and three code
+concessions, and is worth doing once the gpt-5.6 generation stops moving.
+
+Prices seen 2026-09-22, for sizing only — recheck before spending on them: DeepSeek Pro
+$0.60/$1.80, GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00.
+Against the shipped default (`gpt-5.6-sol`, $4/$20) the headroom is real; against `terra`
+($2/$12) it is a factor of a few, not an order of magnitude.
+
+**Take one OpenRouter account, not one account per vendor.** One key, one balance, one
+OpenAI-compatible endpoint, so `OPENAI_API_ENDPOINT` + `AI_REVIEW_MODEL` reach every
+candidate with no code change. The repo is public, so handing a diff to another vendor
+raises nothing we do not already publish.
+
+Three things must be settled before any number from such a run means anything:
+
+1. **`response_format: {json_schema, strict: true}` must actually be honoured.** The whole
+   pipeline depends on it. OpenRouter supports it, but the *endpoint it routes to* may not —
+   set `require_parameters: true` in the provider preferences, or a run silently degrades to
+   free-form JSON.
+2. **Pin the provider.** The same open-weight model is served by several hosts at different
+   quantizations. Without `provider.order`/`only`, a measurement is not reproducible a week
+   later, and a regression looks like model drift.
+3. **The request shape needs a seam.** `openai.ts` sends `max_completion_tokens` because
+   gpt-5.x rejects `max_tokens`; DeepSeek direct wants the opposite. That is a new concept in
+   the client, so this work is architectural — spec and plan, not a config tweak.
+
+Measure exactly as above: the labelled corpus for fabrication, the recall probe at
+`584aa661` for coverage, three draws per config, and the incumbent re-measured in the same
+session. A candidate that cannot beat `terra` on coverage is not interesting, because terra
+is already available with no account, no seam and no pinning.
 
 ## Outcomes that are settled — do not re-derive
 

@@ -95,7 +95,14 @@ Named for what it does — excludes the *body*, not the file — because the dis
 The diff-only notice already in the context tells the model it is seeing only a diff for
 those paths, so nothing new has to be explained to it.
 
-### Stage 2 (periphery) — move `find` to `gpt-5.6-luna`
+### Stage 2 (periphery) — move `find` to `gpt-5.6-sol`
+
+> **Amended 2026-09-22, after stage 1 shipped.** This section originally chose
+> `gpt-5.6-luna`. Re-measured against the **shipped** stage-1 context, as this document
+> required, that choice was **refuted** — see "Stage 2 re-measurement" below. `sol` replaces
+> it: it is cheaper than the incumbent *and* at least as thorough, so it carries no quality
+> bet at all. The projections in the table below are the pre-stage-1 ones and are superseded
+> by the corrected arithmetic in that section.
 
 Prices, read off the vendor's own page on 2026-09-22:
 
@@ -178,6 +185,58 @@ comment arithmetic: a daily cap bounds a rolling 31-day window by 32 buckets, no
 correct, but a comment, not a wrong-result path).
 
 Spike cost: ≈$7.2.
+
+## Stage 2 re-measurement, 2026-09-22 (after stage 1 shipped)
+
+Run against the **shipped** stage-1 context, baseline re-measured in the same session, three
+draws per config on the recall probe — the protocol this document wrote, applied to itself.
+Precondition checked first: on all six corpus/probe targets no live source file is diff-only
+(two on #348 are files the PR *deletes*, which have no body to send).
+
+| config | verified per run | of the 5 known defects | price in/out |
+|---|---|---|---|
+| gpt-5.5 (incumbent) | 5 / 5 / 3 | **5/5** | $5 / $30 |
+| **gpt-5.6-sol** | **8 / 6** | **5/5**, plus several more | **$4 / $20** |
+| gpt-5.6-terra | 4 / 3 / 5 | 3–4/5 | $2 / $12 |
+| gpt-5.6-luna | 1 / 2 / 2 | **2/5** | $0.20 / $1.20 |
+
+Corpus (the five labelled PRs), findings published in total: gpt-5.5 **16**, terra **9**,
+luna **6**.
+
+**Luna is refuted.** Across three independent runs it never raised `triage-plan.ts:192` (the
+new-issue scope guard) or the tool-schema finding, and on the one run where it did reach the
+latter, verify returned `error`.
+
+**The earlier 4/5 for luna was a measurement error of this document's own making**: it
+compared a **union of three** luna runs against a **single** baseline draw. Luna's per-run
+spread is 1–2 findings, so the union was carried by one lucky draw. The context was
+identical both times (148k chars), so nothing about stage 1 explains the gap — the
+comparison was unfair, not the conditions. This is the same failure the protocol warns about
+in "re-measure the baseline in the same session", one level up: **match the number of draws,
+not just the session.**
+
+**Sol is a strict improvement**, which is why it needs no quality bet: it is cheaper than
+the incumbent on both input and output, and it published more of the known defects, more
+consistently. The one cost it does carry is not money — 8 verified findings per run is more
+text to triage, and by the 2026-07 labels roughly half of what gpt-5.5 publishes is
+`unfalsifiable`. If sol holds that ratio, the extra volume is paid in review time.
+
+Corrected arithmetic (the 28-run sample; stage 1 already cut find input ~24%):
+
+| find | sample bill | ≈ per week | vs. pre-stage-1 |
+|---|---|---|---|
+| gpt-5.5, pre-stage-1 | $7.09 | ≈$17 | — |
+| gpt-5.5, post-stage-1 | $6.22 | ≈$15 | −12% |
+| **sol** | **$4.95** | **≈$12** | **−30%** |
+| terra | $3.27 | ≈$8 | −54% |
+| ~~luna~~ | ~~$1.51~~ | — | refuted on quality |
+
+The «≈$17 → ≈$3.5» promised earlier in this document assumed luna and dies with it. `verify`
+stays on gpt-5.5 for the reason already given.
+
+**Decision:** `DEFAULT_FIND_MODEL` becomes `gpt-5.6-sol`. Terra stays on the shelf as the
+option that buys another −24 points for one of five known findings — a trade to revisit only
+with a reason, not by default.
 
 ## Keeping this repeatable
 
