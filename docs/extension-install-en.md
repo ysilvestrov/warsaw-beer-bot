@@ -223,8 +223,9 @@ this guide first.
    | a **triangle with `!`** | the check failed: Untappd did not answer, the connection dropped, or the card could not be parsed. Hover to see which |
    | a grey **✕** | the shop itself filed the product as **not beer**; the badge is **not clickable** |
 
-   Every badge carries a screen-reader label that spells the state out. For example,
-   `✅ ? ⭐ 3.6` is read as “Uncertain match. You probably had this. Global rating 3.6”.
+   Every badge carries a screen-reader label that spells the state out, and hovering it
+   shows the same wording. For example, `✅ ? ⭐ 3.6` is read and shown as “Uncertain
+   match. You probably had this. Global rating 3.6”.
    **No badge at all** now means one thing only: the overlay does not run on this page
    (a whole not-beer category).
 
