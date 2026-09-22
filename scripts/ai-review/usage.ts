@@ -83,9 +83,12 @@ export interface Price {
  */
 export const PRICES: Record<string, Price> = {
   'gpt-5.5': { input: 5, cachedInput: 0.5, output: 30 },
+  'gpt-5.6-sol': { input: 4, cachedInput: 0.4, output: 20 },
+  'gpt-5.6-terra': { input: 2, cachedInput: 0.2, output: 12 },
+  'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, output: 1.2 },
 };
 
-export const PRICES_CHECKED_ON = '2026-07-30';
+export const PRICES_CHECKED_ON = '2026-09-22';
 
 /** Dollars for `u` at `model`'s rates, or null when we have no verified price. */
 export function costUsd(model: string, u: Usage): number | null {
