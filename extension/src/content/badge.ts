@@ -233,7 +233,6 @@ interface BadgeShape {
   unsure: boolean;
   href: string | null;
   label: string;
-  title: string | null;
 }
 
 function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTMLElement {
@@ -241,7 +240,7 @@ function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTM
   badge.setAttribute(BADGE_MARKER, '');
   badge.setAttribute('role', 'img');
   badge.setAttribute('aria-label', shape.label);
-  if (shape.title !== null) badge.setAttribute('title', shape.title);
+  badge.setAttribute('title', shape.label);
   Object.assign(badge.style, {
     position: 'absolute',
     top: '4px',
@@ -259,11 +258,9 @@ function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTM
     border: shape.unsure ? '1px dashed rgba(255,255,255,0.8)' : 'none',
     borderRadius: '6px',
     boxSizing: 'border-box',
-    // A badge with `pointer-events: none` is never a hit target, so the browser never
-    // renders its `title` tooltip — which would have made the tooltip dead in exactly
-    // the two states that set one. A sighted mouse user has no other way to learn what
-    // a grey reload arrow means; `aria-label` serves only the screen reader.
-    pointerEvents: shape.href !== null || shape.title !== null ? 'auto' : 'none',
+    // The title repeats the screen-reader label for mouse users, including passive
+    // states with no click action, so every badge must receive hover events.
+    pointerEvents: 'auto',
     cursor: shape.href !== null ? 'pointer' : 'default',
   } as Partial<CSSStyleDeclaration>);
   for (const p of parts) badge.appendChild(p);
@@ -276,7 +273,6 @@ export function renderState(host: HTMLElement, state: CardState): void {
   let quiet = false;
   let unsure = false;
   let href: string | null = null;
-  let title: string | null = null;
   let label: string;
 
   switch (state.kind) {
@@ -302,12 +298,10 @@ export function renderState(host: HTMLElement, state: CardState): void {
       // свідомо (спека §3.3), але речення, яке назве один механізм, буде брехнею
       // для другого — а підпис читають як факт.
       label = 'Не встигли перевірити цього разу. Спробуй перезавантажити сторінку';
-      title = label;
       break;
     case 'failed':
       parts.push(icon('warn'));
       label = FAILURE_LABEL[state.reason];
-      title = label;
       break;
     case 'missing':
       parts.push(icon('search'));
@@ -335,5 +329,5 @@ export function renderState(host: HTMLElement, state: CardState): void {
       break;
   }
 
-  attach(host, buildBadge(parts, { quiet, unsure, href, label, title }));
+  attach(host, buildBadge(parts, { quiet, unsure, href, label }));
 }

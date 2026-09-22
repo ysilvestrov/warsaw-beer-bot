@@ -153,6 +153,7 @@ describe('#648 renderState', () => {
     expect(icons(host)).toEqual(wantIcons);
     expect(badge.getAttribute('role')).toBe('img');
     expect(badge.getAttribute('aria-label')).toBe(wantLabel);
+    expect(badge.getAttribute('title')).toBe(wantLabel);
     badge.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     if (wantHref === null) expect(open).not.toHaveBeenCalled();
     else expect(open).toHaveBeenCalledWith(wantHref, '_blank', 'noopener');
@@ -214,20 +215,21 @@ describe('#648 renderState', () => {
     expect(badgeOf(host).style.color).toBe('rgb(255, 255, 255)');
   });
 
-  // A badge with pointer-events: none is never hovered, so its tooltip never renders —
-  // which would have made `title` dead in exactly the two states that set one.
-  it('lets the states that carry a tooltip actually receive the pointer', () => {
+  it('lets every badge receive a hover tooltip without making passive states clickable', () => {
     const host = el();
-    for (const state of [{ kind: 'deferred' } as CardState, { kind: 'failed', reason: 'network' } as CardState]) {
+    for (const state of [
+      { kind: 'queued' } as CardState,
+      { kind: 'working' } as CardState,
+      { kind: 'nonBeer' } as CardState,
+      { kind: 'deferred' } as CardState,
+      { kind: 'failed', reason: 'network' } as CardState,
+    ]) {
       renderState(host, state);
       const badge = badgeOf(host);
       expect(badge.getAttribute('title')).toBe(badge.getAttribute('aria-label'));
       expect(badge.style.pointerEvents).toBe('auto');
       expect(badge.style.cursor).toBe('default');
     }
-    renderState(host, { kind: 'queued' });
-    expect(badgeOf(host).getAttribute('title')).toBeNull();
-    expect(badgeOf(host).style.pointerEvents).toBe('none');
   });
 
   // Host shops ship resets like `svg { width: 100% }` and `svg path { fill: currentColor }`.
