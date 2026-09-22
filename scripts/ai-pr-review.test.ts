@@ -17,6 +17,24 @@ describe('BODY_EXCLUDE_PATTERNS', () => {
     expect(matchesAny('src/domain/triage-plan.ts', BODY_EXCLUDE_PATTERNS)).toBe(false);
   });
 
+  it('covers the second test root, which is reviewable but not under top-level tests/', () => {
+    // extension/tests/setup.ts is a real file: filterReviewableFiles admits it
+    // via `extension/**/*.ts`, while `tests/**/*.ts` is anchored at the repo
+    // root and never matched it — so its body kept consuming the budget.
+    expect(matchesAny('extension/tests/setup.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(matchesAny('extension/tests/helpers/dom.ts', BODY_EXCLUDE_PATTERNS)).toBe(true);
+    expect(filterReviewableFiles(['extension/tests/setup.ts'])).toEqual([
+      'extension/tests/setup.ts',
+    ]);
+  });
+
+  it('does not let the second root leak into source directories that merely end in "tests"', () => {
+    // The reason both roots are listed instead of `**/tests/**/*.ts`: that glob
+    // compiles to /^.*tests\/.*[^/]*\.ts$/, which swallows src/contests/foo.ts.
+    expect(matchesAny('src/contests/foo.ts', BODY_EXCLUDE_PATTERNS)).toBe(false);
+    expect(matchesAny('src/latests/bar.ts', BODY_EXCLUDE_PATTERNS)).toBe(false);
+  });
+
   it('does NOT remove test files from review scope', () => {
     expect(filterReviewableFiles(['src/a.test.ts'])).toEqual(['src/a.test.ts']);
   });
