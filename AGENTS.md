@@ -415,6 +415,18 @@ For every code change:
 - evaluate review comments technically before changing code
 - address review findings that are valid and worth addressing
 
+Measuring a change to the AI reviewer
+
+When changing the AI PR reviewer's model, prompts, or context assembly:
+
+- **re-measure the baseline in the same session as the candidate.** There is no determinism knob (`temperature: 0` is rejected on gpt-5.x), and the identical config on identical heads gave 26 raised / 22 published in 2026-07 and 17 / 15 in 2026-09. Comparing against a stored number charges the baseline's own drift to the candidate.
+- **check the context is not starving before comparing models.** If `Context budget: N file(s) sent as diff only` names any **source** file, fix the context first. Measured cost of skipping this: `gpt-5.6-luna` scored 2/5 on a recall probe and never raised the two missing findings across four runs — one of them lived in a file the budget had demoted to diff-only, and on a freed context luna scored 4/5, level with gpt-5.5.
+- **a recall probe replays at the head the live review saw**, visible in `<!-- ai-pr-review-state {"head":…} -->` — never the merged head, where the findings have already been fixed and the measurement means nothing. This trap has cost two investigations (#344 in 2026-07, #418 in 2026-09).
+
+The full protocol, the labelled corpus, and this evaluation's reference numbers are in `docs/ai-review-model-evaluation.md`.
+
+---
+
 When automating GitHub PR operations:
 
 - avoid GitHub GraphQL for PR edits or metadata updates; prefer `gh pr` commands, and if those fail due GitHub GraphQL/deprecation issues, use REST via `gh api repos/<owner>/<repo>/pulls/<number>` instead

@@ -1,7 +1,7 @@
 # AI PR review — context starvation and the cost of `find`
 
 **Date:** 2026-09-22
-**Issue:** none yet (opened from a spend review, not a bug report)
+**Issue:** [#687](https://github.com/ysilvestrov/warsaw-beer-bot/issues/687) (opened from a spend review, not a bug report)
 **Related:** [#175 two-stage reviewer](2026-07-28-ai-review-quality-design.md),
 [#364 cost reduction](2026-07-30-ai-review-cost-reduction-design.md),
 [baseline labels](2026-07-28-ai-review-baseline-labels.md),
