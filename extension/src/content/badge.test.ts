@@ -11,6 +11,10 @@ function el(): HTMLElement {
 beforeEach(() => {
   document.body.innerHTML = '';
   vi.restoreAllMocks();
+  Object.defineProperty(document, 'elementFromPoint', {
+    configurable: true,
+    value: () => null,
+  });
 });
 
 describe('seen marker', () => {
@@ -83,6 +87,20 @@ describe('badge click interception (#167)', () => {
     } finally {
       document.body.removeEventListener('mouseup', handleMouseup);
     }
+  });
+
+  it('passes a passive badge click to the shop control underneath it', () => {
+    const host = el();
+    const control = document.createElement('button');
+    const clicked = vi.fn();
+    control.addEventListener('click', clicked);
+    host.appendChild(control);
+    vi.spyOn(document, 'elementFromPoint').mockReturnValue(control);
+
+    renderState(host, { kind: 'queued' });
+    badgeOf(host).dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+
+    expect(clicked).toHaveBeenCalledOnce();
   });
 });
 

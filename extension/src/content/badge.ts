@@ -44,6 +44,30 @@ function wireBadgeClicks(badge: HTMLElement, href: string): void {
   });
 }
 
+function wirePassiveBadgeClicks(badge: HTMLElement): void {
+  const passThrough = (event: MouseEvent): void => {
+    event.preventDefault();
+    event.stopPropagation();
+    // Keep the badge hoverable for its native title, but find the shop control beneath
+    // it for clicks. Without temporarily removing it from hit testing, elementFromPoint
+    // would simply find the badge again.
+    badge.style.pointerEvents = 'none';
+    const below = document.elementFromPoint(event.clientX, event.clientY);
+    badge.style.pointerEvents = 'auto';
+    if (below === null || below === badge) return;
+    below.dispatchEvent(new MouseEvent(event.type, {
+      bubbles: true,
+      cancelable: true,
+      button: event.button,
+      clientX: event.clientX,
+      clientY: event.clientY,
+    }));
+  };
+  badge.addEventListener('mouseup', passThrough);
+  badge.addEventListener('click', passThrough);
+  badge.addEventListener('auxclick', passThrough);
+}
+
 function attach(host: HTMLElement, badge: HTMLElement): void {
   const outgoing = host.querySelector(`[${BADGE_MARKER}]`);
   if (outgoing) {
@@ -265,6 +289,7 @@ function buildBadge(parts: (HTMLElement | SVGElement)[], shape: BadgeShape): HTM
   } as Partial<CSSStyleDeclaration>);
   for (const p of parts) badge.appendChild(p);
   if (shape.href !== null) wireBadgeClicks(badge, shape.href);
+  else wirePassiveBadgeClicks(badge);
   return badge;
 }
 
