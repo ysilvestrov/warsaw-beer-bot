@@ -111,16 +111,27 @@ export interface Config {
 }
 
 /**
- * Chosen by replay measurement on 2026-07-28, not by preference — see
- * docs/superpowers/specs/2026-07/2026-07-28-ai-review-measurement.md.
- * gpt-5.5 as finder published 0 fabrications across the precision set;
- * gpt-5.4-mini published 5 of 10. The verifier is the same model because no
- * asymmetric pairing measured better.
+ * Chosen by replay measurement, never by preference. The protocol and every
+ * number behind these two strings are in docs/ai-review-model-evaluation.md.
+ *
+ * `find` → gpt-5.6-sol (2026-09-22): a strict improvement on the gpt-5.5 it
+ * replaces, which is why it carried no quality bet — cheaper on both input
+ * ($4 vs $5 per 1M) and output ($20 vs $30), while publishing 5 of the recall
+ * probe's 5 known defects plus several more, at 8 and 6 verified per run
+ * against gpt-5.5's 5/5/3. Cheaper tiers were measured and declined: terra
+ * reaches 3-4 of the 5, luna only 2 and never raises the new-issue scope guard
+ * at all.
+ *
+ * `verify` stays gpt-5.5: it is the adversarial adjudicator, its prompts are
+ * small, and it is ~18% of the bill — there is no money in moving it and there
+ * is precision to lose. The 2026-07 finding that no asymmetric pairing measured
+ * better was about a WEAKER finder; a stronger, cheaper one is a different
+ * question, and this is its answer.
  *
  * Exported so the replay tool measures the configuration CI runs instead of a
  * second copy of these strings that can drift away from it.
  */
-export const DEFAULT_FIND_MODEL = 'gpt-5.5';
+export const DEFAULT_FIND_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_VERIFY_MODEL = 'gpt-5.5';
 
 export function readConfig(env: NodeJS.ProcessEnv): Config {

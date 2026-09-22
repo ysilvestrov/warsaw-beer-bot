@@ -268,6 +268,44 @@ const FINDING = {
   confidence: 'high',
 };
 
+describe('runReview — each stage calls its own model', () => {
+  // Until 2026-09-22 both defaults were the same string, so nothing could tell a
+  // swapped pair from a correct one and no test did. find is gpt-5.6-sol now and
+  // verify is still gpt-5.5, so a swap would quietly bill the wrong model and
+  // change what the reviewer finds, with every existing test still green.
+  // Distinct sentinels here rather than the real ids: this pins the WIRING, and
+  // it must not need editing the next time a model is chosen by measurement.
+  it('sends the find model on the find call and the verify model on the verify call', async () => {
+    const models: string[] = [];
+    const capture = (async (_url: string, init?: RequestInit) => {
+      const sent = JSON.parse(init!.body as string) as { model: string };
+      models.push(sent.model);
+      const content =
+        models.length === 1
+          ? JSON.stringify({ findings: [FINDING] })
+          : JSON.stringify({
+              verdicts: [{ index: 1, verdict: 'confirmed', evidence: 'line 2 returns not_found' }],
+            });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content } }],
+          usage: { prompt_tokens: 1000, completion_tokens: 100 },
+        }),
+        text: async () => content,
+      } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await runReview(
+      { ...CFG, findModel: 'find-sentinel', verifyModel: 'verify-sentinel' },
+      deps({ openaiFetch: capture, githubFetch: githubFetch(null).fetchFn }),
+    );
+
+    expect(models).toEqual(['find-sentinel', 'verify-sentinel']);
+  });
+});
+
 function openaiFetch(responses: string[]): { fetchFn: typeof fetch; calls: string[] } {
   const calls: string[] = [];
   let i = 0;
