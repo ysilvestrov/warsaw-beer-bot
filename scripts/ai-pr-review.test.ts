@@ -783,3 +783,29 @@ describe('findExistingReview', () => {
     expect(found).toBeNull();
   });
 });
+
+import { readFileSync } from 'node:fs';
+
+// replay.ts calls buildReviewContext directly, so a body exclusion applied only
+// on the CI side would leave the measurement harness assembling a different
+// context than production — and replay is how every model and prompt decision
+// in this project gets made. The asymmetry below is the correctness argument of
+// the whole change, which is why it is pinned in source rather than trusted.
+describe('context reader is applied at every call site', () => {
+  const CALL_SITES = ['scripts/ai-pr-review.ts', 'scripts/ai-review/replay.ts'];
+
+  it('every buildReviewContext call passes contextReader, and nothing else does', () => {
+    for (const file of CALL_SITES) {
+      const src = readFileSync(file, 'utf8');
+      const calls = src.split('buildReviewContext({').length - 1;
+      expect(calls, `${file} should call buildReviewContext`).toBeGreaterThan(0);
+      const wrapped = src.split('readFile: contextReader(').length - 1;
+      expect(wrapped, `${file} must wrap every buildReviewContext reader`).toBe(calls);
+    }
+
+    // The gate and verify must NOT be wrapped: they need the real bytes.
+    const reviewer = readFileSync('scripts/ai-pr-review.ts', 'utf8');
+    expect(reviewer).toContain('fileContent: deps.readFile');
+    expect(reviewer).not.toContain('fileContent: contextReader');
+  });
+});

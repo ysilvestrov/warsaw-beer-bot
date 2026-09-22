@@ -16,6 +16,7 @@ import { verifyAll } from './verify';
 import {
   DEFAULT_FIND_MODEL,
   DEFAULT_VERIFY_MODEL,
+  contextReader,
   filterReviewableFiles,
 } from '../ai-pr-review';
 
@@ -152,7 +153,11 @@ async function main(): Promise<void> {
     }
   };
 
-  const { text: context } = buildReviewContext({ diff, reviewable, readFile });
+  const { text: context } = buildReviewContext({
+    diff,
+    reviewable,
+    readFile: contextReader(readFile),
+  });
 
   const { findModel, verifyModel } = replayModels(process.env);
   const endpoint = process.env.OPENAI_API_ENDPOINT || 'https://api.openai.com/v1';
