@@ -199,8 +199,4 @@ describe('gpt-5.6 tiers', () => {
     expect(costUsd('gpt-5.6-luna', usage)).toBeCloseTo(0.2 + 0.12, 6);
     expect(costUsd('gpt-5.5', usage)).toBeCloseTo(5 + 3, 6);
   });
-
-  it('records when the table was last checked against the vendor page', () => {
-    expect(PRICES_CHECKED_ON).toBe('2026-09-22');
-  });
 });

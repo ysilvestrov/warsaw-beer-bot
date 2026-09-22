@@ -147,4 +147,23 @@ describe('resolveReplayArgs', () => {
   it('rejects a missing PR number', () => {
     expect(() => resolveReplayArgs([])).toThrow('usage:');
   });
+
+  it('rejects an unrecognised --flag instead of silently treating it as a positional base-sha', () => {
+    expect(() => resolveReplayArgs(['418', '--head=deadbee'])).toThrow(
+      'unrecognised option: --head=deadbee',
+    );
+    expect(() => resolveReplayArgs(['--base', 'abc123', '418'])).toThrow(
+      'unrecognised option: --base',
+    );
+  });
+
+  it('still allows extra positionals and lets the last --head win', () => {
+    expect(resolveReplayArgs(['418', 'abc123', 'extra'])).toEqual({
+      pr: '418',
+      explicitBase: 'abc123',
+    });
+    expect(
+      resolveReplayArgs(['418', '--head', 'first', '--head', 'second']),
+    ).toEqual({ pr: '418', headOverride: 'second' });
+  });
 });
