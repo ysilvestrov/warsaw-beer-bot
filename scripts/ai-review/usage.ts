@@ -88,6 +88,17 @@ export const PRICES: Record<string, Price> = {
   'gpt-5.6-luna': { input: 0.2, cachedInput: 0.02, output: 1.2 },
 };
 
+/**
+ * `gpt-5.6-sol`'s $4/$20 is PROMOTIONAL, guaranteed only through **2026-11-21**,
+ * after which the vendor page says it may revert to its launch price of $5/$30 —
+ * exactly what `gpt-5.5` costs. Nothing here breaks when that happens: the
+ * footer simply starts understating the bill, silently, which is the one failure
+ * this table is supposed to make impossible. Re-check on or before that date.
+ *
+ * Verified independently 2026-09-22: a `gpt-5.5` call billed through a third
+ * party came back at exactly this table's arithmetic, so the gpt-5.5 row is
+ * ground truth and not a transcription of a web page.
+ */
 export const PRICES_CHECKED_ON = '2026-09-22';
 
 /** Dollars for `u` at `model`'s rates, or null when we have no verified price. */

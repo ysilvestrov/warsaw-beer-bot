@@ -1,8 +1,10 @@
 # Evaluating a model for the AI PR reviewer
 
 How to decide whether a different model can run `find` or `verify`, without betting the
-reviewer's quality on a price list. Written after the 2026-09-22 evaluation, which cost
-≈$7.2 and spent most of that re-deriving a method that already existed.
+reviewer's quality on a price list. Written after the 2026-09-22 evaluation, whose
+first pass cost ≈$7.2 and spent most of that re-deriving a method that already existed;
+the later passes, run to this document, cost ≈$5 more including the whole OpenRouter screen
+at $1.21.
 
 Run this whenever a new model generation lands, a price changes materially, or someone
 proposes a swap. The answer is never read off a benchmark.
@@ -140,7 +142,7 @@ first pass for every purpose except the starvation illustration.
 | config | verified per run | of the 5 known defects | price in/out |
 |---|---|---|---|
 | gpt-5.5 | 5 / 5 / 3 | **5/5** | $5 / $30 |
-| **gpt-5.6-sol** (now the default `find`) | **8 / 6** | **5/5** plus several more | **$4 / $20** |
+| **gpt-5.6-sol** (now the default `find`) | **8 / 6 / 5** | **5/5** plus several more | **$4 / $20** |
 | gpt-5.6-terra | 4 / 3 / 5 | 3–4/5 | $2 / $12 |
 | gpt-5.6-luna | 1 / 2 / 2 | 2/5 — **refuted** | $0.20 / $1.20 |
 
@@ -153,13 +155,13 @@ this pipeline publishes is `unfalsifiable`.
 
 Prices per 1M tokens, read from the vendor page 2026-09-22 — recheck before reusing:
 
-| model | input | cached | output |
-|---|---|---|---|
-| gpt-5.5 | $5.00 | $0.50 | $30.00 |
-| gpt-5.6-sol | $4.00 | $0.40 | $20.00 |
-| gpt-5.6-terra | $2.00 | $0.20 | $12.00 |
-| gpt-5.6-luna | $0.20 | $0.02 | $1.20 |
-| gpt-5.4-mini | $0.75 | $0.075 | $4.50 |
+| model | input | cached | output | note |
+|---|---|---|---|---|
+| gpt-5.5 | $5.00 | $0.50 | $30.00 | confirmed against a real bill, not transcribed |
+| gpt-5.6-sol | $4.00 | $0.40 | $20.00 | ← **promotional until 2026-11-21**, then may revert to $5/$30 |
+| gpt-5.6-terra | $2.00 | $0.20 | $12.00 | |
+| gpt-5.6-luna | $0.20 | $0.02 | $1.20 | |
+| gpt-5.4-mini | $0.75 | $0.075 | $4.50 | |
 
 Non-OpenAI candidates priced the same day, for the record: DeepSeek Pro $0.60/$1.80,
 GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00. All were
@@ -168,11 +170,48 @@ does not pay for a second vendor account, a per-model request-shape seam (`max_t
 `max_completion_tokens`), provider pinning against silent re-quantization, and
 `require_parameters: true` to keep strict `json_schema` routing.
 
-## The OpenRouter pass (not yet run)
+## The OpenRouter pass — RUN 2026-09-22, no candidate came close
 
-Every candidate measured so far has been OpenAI's, because the key and the request shape
-were already there. Widening to the open-weight models needs one account and three code
-concessions, and is worth doing once the gpt-5.6 generation stops moving.
+Recall probe, PR #418 @ `584aa661`, three draws each, verify on `gpt-5.5` throughout.
+Total spend for the whole screen: **$1.21**.
+
+| config | verified per run | what happened |
+|---|---|---|
+| `gpt-5.6-sol` (incumbent, direct) | 8 / 6 / 5 | — |
+| `deepseek/deepseek-v4-pro-0813` | **0 / 1 / 1** | raises 8, 10 and **31**; verify returns **35 `refuted`** across the three runs |
+| `z-ai/glm-5.3` | — | one truncated JSON body, then empty completions |
+| `moonshotai/kimi-k2.7-code` | — | empty completions |
+
+**DeepSeek fabricates.** Its findings die at *verify*, not at the gate, with the verdict
+`refuted` — the adversarial judge saying the code contradicts the claim. For scale: the
+production counters from PRs #359–#363 recorded 8 rejections of 29, **all `out_of_scope`
+and not one `refuted`**. Thirty-five refutations in three runs is the `gpt-5.4-mini` failure
+mode of 2026-07, at a larger size.
+
+**GLM and Kimi could not complete a structured call** over the path available to us. That may
+be routing rather than the models: unpinned, a request can land on an endpoint that does not
+honour `strict` (see the three preconditions below). Fixing it needs the request-shape seam —
+and nothing here justifies building one, since the only candidate that worked mechanically
+published 0–1 findings against the incumbent's 5–8.
+
+### Two things this pass corrected about its own instructions
+
+- **No seam is needed to *measure* through OpenRouter.** Probed live: it accepts our exact
+  body — `max_completion_tokens` (not `max_tokens`) together with
+  `response_format: {json_schema, strict: true}` — and both candidates returned schema-valid
+  JSON. The seam is required only to talk to a vendor *directly*. An evaluation is therefore
+  two env vars, not a project.
+- **OpenRouter is not cheaper for OpenAI's models — it is dearer, and its listed price does
+  not predict the bill.** Measured on one call each: `gpt-5.5` billed $0.021385, exactly this
+  repo's price table, while the listing implied $0.0107; `gpt-5.6-sol` billed $0.025497
+  against a listing implying $0.0041 and a direct price of $0.016332, because routing sent it
+  to **Azure**. The model-level `pricing` field reflects the cheapest endpoint, not the one
+  that serves you. Never quote it as a saving.
+
+A side benefit: `gpt-5.5` billed through a third party matched `PRICES['gpt-5.5']` to the
+cent, so that row is now confirmed by an independent source rather than transcribed.
+
+## The preconditions
 
 Prices seen 2026-09-22, for sizing only — recheck before spending on them: DeepSeek Pro
 $0.60/$1.80, GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00.
@@ -193,14 +232,22 @@ Three things must be settled before any number from such a run means anything:
 2. **Pin the provider.** The same open-weight model is served by several hosts at different
    quantizations. Without `provider.order`/`only`, a measurement is not reproducible a week
    later, and a regression looks like model drift.
-3. **The request shape needs a seam.** `openai.ts` sends `max_completion_tokens` because
-   gpt-5.x rejects `max_tokens`; DeepSeek direct wants the opposite. That is a new concept in
-   the client, so this work is architectural — spec and plan, not a config tweak.
+3. **A request-shape seam is needed only to go DIRECT to a vendor**, not to measure.
+   `openai.ts` sends `max_completion_tokens` because gpt-5.x rejects `max_tokens`, and
+   DeepSeek direct wants the opposite — but OpenRouter accepts our body unchanged (probed
+   2026-09-22). Build the seam when a candidate has already earned a direct account, never
+   before.
 
 Measure exactly as above: the labelled corpus for fabrication, the recall probe at
 `584aa661` for coverage, three draws per config, and the incumbent re-measured in the same
 session. A candidate that cannot beat `terra` on coverage is not interesting, because terra
 is already available with no account, no seam and no pinning.
+
+Two failure modes to expect, both seen on 2026-09-22: a candidate that **raises volume and
+loses it at verify** (`refuted`, not `out_of_scope` — that distinction is the whole signal),
+and a candidate that **returns empty or truncated completions**, which is usually the
+unpinned endpoint not honouring `strict` rather than the model being unable. Diagnose the
+second with precondition 1 before blaming the model.
 
 ## Outcomes that are settled — do not re-derive
 
