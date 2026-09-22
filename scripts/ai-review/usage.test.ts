@@ -180,3 +180,27 @@ describe('costUsd — a call whose usage block never arrived', () => {
     expect(costUsd('gpt-5.5', parseUsage(undefined))).toBeNull();
   });
 });
+
+describe('gpt-5.6 tiers', () => {
+  it('prices every tier the reviewer might be pointed at', () => {
+    expect(PRICES['gpt-5.6-luna']).toEqual({ input: 0.2, cachedInput: 0.02, output: 1.2 });
+    expect(PRICES['gpt-5.6-terra']).toEqual({ input: 2, cachedInput: 0.2, output: 12 });
+    expect(PRICES['gpt-5.6-sol']).toEqual({ input: 4, cachedInput: 0.4, output: 20 });
+  });
+
+  it('bills a luna find pass at luna rates, not gpt-5.5 rates', () => {
+    const usage = {
+      calls: 1,
+      promptTokens: 1_000_000,
+      cachedTokens: 0,
+      completionTokens: 100_000,
+      reasoningTokens: 90_000,
+    };
+    expect(costUsd('gpt-5.6-luna', usage)).toBeCloseTo(0.2 + 0.12, 6);
+    expect(costUsd('gpt-5.5', usage)).toBeCloseTo(5 + 3, 6);
+  });
+
+  it('records when the table was last checked against the vendor page', () => {
+    expect(PRICES_CHECKED_ON).toBe('2026-09-22');
+  });
+});
