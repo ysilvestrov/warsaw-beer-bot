@@ -23,6 +23,10 @@
   `## [x.y.z] - DATE` (see docs/extension-release.md).
 -->
 
+## [Unreleased]
+
+- Hover over any badge to read what it means in words, including an uncertain match, instead of having to infer it from the icons.
+
 ## [0.20.0] - 2026-09-20
 
 - The badges are redrawn, and every card now carries one from the moment the page loads. You can see a card waiting its turn, being checked, and where it ended up — instead of a page that stays blank and then fills in with no explanation.
