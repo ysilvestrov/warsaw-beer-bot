@@ -116,3 +116,35 @@ describe('resolveReplayBase', () => {
     expect(base).toBe('abc123');
   });
 });
+
+import { resolveReplayArgs } from './replay';
+
+describe('resolveReplayArgs', () => {
+  it('reads a bare PR number', () => {
+    expect(resolveReplayArgs(['418'])).toEqual({ pr: '418' });
+  });
+
+  it('keeps the positional base-sha working', () => {
+    expect(resolveReplayArgs(['418', 'abc123'])).toEqual({ pr: '418', explicitBase: 'abc123' });
+  });
+
+  it('takes --head before or after the positionals without eating them', () => {
+    expect(resolveReplayArgs(['418', '--head', 'deadbee'])).toEqual({
+      pr: '418',
+      headOverride: 'deadbee',
+    });
+    expect(resolveReplayArgs(['--head', 'deadbee', '418', 'abc123'])).toEqual({
+      pr: '418',
+      explicitBase: 'abc123',
+      headOverride: 'deadbee',
+    });
+  });
+
+  it('rejects --head with no value rather than silently replaying the merged head', () => {
+    expect(() => resolveReplayArgs(['418', '--head'])).toThrow('--head needs a commit sha');
+  });
+
+  it('rejects a missing PR number', () => {
+    expect(() => resolveReplayArgs([])).toThrow('usage:');
+  });
+});

@@ -93,10 +93,49 @@ export function resolveReplayBase(p: {
   return p.explicit ?? p.mergeBase(`origin/${p.baseRefName}`, p.head);
 }
 
+/**
+ * Replay arguments: `<pr> [base-sha] [--head <sha>]`.
+ *
+ * `--head` exists for the recall probe. Replaying a PR at its MERGED head
+ * measures nothing about what a config would have FOUND: the findings the live
+ * review produced have been fixed by then, which is precisely why they are known
+ * to be real. The head the live review saw is in its own state block
+ * (`<!-- ai-pr-review-state {"head":…} -->`), or is the commit before the fix.
+ * This trap has cost two investigations — #344 in 2026-07, #418 in 2026-09 —
+ * which is why it is a flag now rather than a thing to remember.
+ */
+export function resolveReplayArgs(argv: string[]): {
+  pr: string;
+  explicitBase?: string;
+  headOverride?: string;
+} {
+  const positional: string[] = [];
+  let headOverride: string | undefined;
+
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] !== '--head') {
+      positional.push(argv[i]);
+      continue;
+    }
+    const value = argv[i + 1];
+    if (!value || value.startsWith('--')) throw new Error('--head needs a commit sha');
+    headOverride = value;
+    i++;
+  }
+
+  const [pr, explicitBase] = positional;
+  if (!pr) {
+    throw new Error('usage: npm run ai-review-replay -- <pr-number> [base-sha] [--head <sha>]');
+  }
+  return {
+    pr,
+    ...(explicitBase ? { explicitBase } : {}),
+    ...(headOverride ? { headOverride } : {}),
+  };
+}
+
 async function main(): Promise<void> {
-  const pr = process.argv[2];
-  if (!pr) throw new Error('usage: npm run ai-review-replay -- <pr-number> [base-sha]');
-  const explicitBase = process.argv[3];
+  const { pr, explicitBase, headOverride } = resolveReplayArgs(process.argv.slice(2));
 
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
@@ -108,7 +147,7 @@ async function main(): Promise<void> {
     gh(['pr', 'view', pr, '--json', 'title,body,headRefOid,baseRefName']),
   ) as { title: string; body: string; headRefOid: string; baseRefName: string };
 
-  const head = meta.headRefOid;
+  const head = headOverride ?? meta.headRefOid;
   ensureHeadCommit({
     pr,
     head,
