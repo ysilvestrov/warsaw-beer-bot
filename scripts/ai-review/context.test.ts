@@ -137,3 +137,43 @@ describe('buildReviewContext', () => {
     expect(diffOnly).toEqual(['src/small.ts']);
   });
 });
+
+describe('buildReviewContext under a binding budget', () => {
+  // Sized so the test body alone fits the budget (churn order offers it
+  // first) but test body + source body together do not — the greedy
+  // selector then keeps the test body and demotes the source, which is
+  // exactly the failure mode #670/#669 measured in production.
+  const BIG_TEST = 'T'.repeat(1500);
+  const SRC = 'S'.repeat(400);
+  const DIFF_BOTH = [
+    '--- a/src/a.test.ts',
+    '+++ b/src/a.test.ts',
+    '@@ -1,1 +1,4 @@',
+    '+t1',
+    '+t2',
+    '+t3',
+    '--- a/src/a.ts',
+    '+++ b/src/a.ts',
+    '@@ -1,1 +1,2 @@',
+    '+s1',
+  ].join('\n');
+
+  const read = (p: string) => (p === 'src/a.test.ts' ? BIG_TEST : SRC);
+  const args = { diff: DIFF_BOTH, reviewable: ['src/a.test.ts', 'src/a.ts'], budget: 2000 };
+
+  it('spends a binding budget on the test body, demoting the source', () => {
+    // The test file has more churn, so churn ordering offers it the budget first.
+    const { diffOnly } = buildReviewContext({ ...args, readFile: read });
+    expect(diffOnly).toContain('src/a.ts');
+  });
+
+  it('gives that budget back to the source once the test body is withheld', () => {
+    const { text, diffOnly } = buildReviewContext({
+      ...args,
+      readFile: (p) => (p === 'src/a.test.ts' ? null : read(p)),
+    });
+    expect(diffOnly).toEqual(['src/a.test.ts']);
+    expect(diffOnly).not.toContain('src/a.ts');
+    expect(text).toContain(SRC);
+  });
+});
