@@ -36,7 +36,16 @@ export const IGNORE_PATTERNS = ['package-lock.json', '*.md', 'docs/**'];
  * which is general, not luck: the gate drops everything `outside_changed_lines`,
  * so a publishable finding always anchors to a line the diff already carries.
  */
-export const BODY_EXCLUDE_PATTERNS = ['**/*.test.ts', 'tests/**/*.ts'];
+export const BODY_EXCLUDE_PATTERNS = [
+  '**/*.test.ts',
+  'tests/**/*.ts',
+  // Both test roots are named explicitly, mirroring INCLUDE_PATTERNS above,
+  // because `**/tests/**/*.ts` would be wrong here: globToRegExp compiles `**`
+  // to `.*` with no path-boundary anchoring, so that pattern also matches
+  // `src/contests/foo.ts`. An over-broad body exclusion is the one failure this
+  // file cannot afford — it would hide real source from the reviewer.
+  'extension/tests/**/*.ts',
+];
 
 /**
  * Wrap a file reader for CONTEXT ASSEMBLY ONLY.
