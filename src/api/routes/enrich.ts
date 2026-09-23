@@ -16,6 +16,7 @@ import {
   type OrphanFacts,
 } from '../../storage/beers';
 import { isNotABeer, reviewClassOf } from '../../storage/enrich_failures';
+import { findActiveDispositionForBeer, findActiveDispositionForCard } from '../../storage/legacy-orphan-dispositions';
 import { normalizeBrewery, normalizeName, searchQueryLadder } from '../../domain/normalize';
 import { digitIdentity, readNameDigits } from '../../domain/digit-identity';
 import { styleNameIdentity } from '../../domain/style-identity';
@@ -159,6 +160,7 @@ function ensureBeerRow(
   const normalized_name = normalizeName(name);
   const cardStyle = normalized_name === '' ? styleNameIdentity(name, normalized_brewery) : '';
   const candidates = listBeersByNormalized(db, normalized_brewery, normalized_name).filter((r) => {
+    if (findActiveDispositionForBeer(db, r.id)) return false;
     if (normalized_name !== '') return true;
     if (facts.abv != null && r.abv != null && Math.abs(facts.abv - r.abv) > ABV_TOLERANCE) {
       return false;
@@ -195,6 +197,15 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     const now = new Date();
     const candidates = deps.db.transaction(() =>
       beers.map((b) => {
+        if (findActiveDispositionForCard(deps.db, b.brewery, b.name, b.abv ?? null)) {
+          const rungs = searchQueryLadder(b.brewery, b.name);
+          const narrow = rungs.length > 1 ? rungs[0] : null;
+          return {
+            brewery: b.brewery, name: b.name, eligible: false,
+            algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
+            ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
+          };
+        }
         const row = ensureBeerRow(deps.db, b.brewery, b.name, {
           abv: b.abv ?? undefined, style: b.style ?? undefined,
         });
@@ -252,6 +263,9 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     async (c) => {
     const { brewery, name, abv, style, html, algolia, pageUrl, bid, bidSlug, brand, query } =
       c.req.valid('json');
+    if (findActiveDispositionForCard(deps.db, brewery, name, abv ?? null)) {
+      return c.json({ status: 'not_found' });
+    }
     const row = ensureBeerRow(deps.db, brewery, name, {
       abv: abv ?? undefined, style: style ?? undefined,
     });
