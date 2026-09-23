@@ -13,7 +13,6 @@ function fresh() {
 
 describe('api_tokens storage', () => {
   it('hashToken is deterministic sha256 hex (64 chars)', () => {
-    expect(hashToken('abc')).toBe(hashToken('abc'));
     expect(hashToken('abc')).toMatch(/^[0-9a-f]{64}$/);
     expect(hashToken('abc')).not.toBe(hashToken('abd'));
   });

@@ -389,6 +389,15 @@ When modifying behavior:
 
 Tests should verify the requested behavior and remain narrowly scoped.
 
+Test Quality Principles:
+
+Newly written and refactored tests must maintain high assertion rigor:
+- **No weak assertions**: Prefer `.toBe()` or `.toEqual()` with exact expected values over `.toBeGreaterThanOrEqual()`, `.toBeTruthy()`, or `.toBeDefined()`. A test that passes for both the right and wrong value is worthless.
+- **No conditional test logic**: Avoid `if/else`, early returns (`if (!x) return;`), or branching assertions inside tests. Tests must have a single deterministic assertion path.
+- **No tautological tests**: Tests must assert against external reality or explicit expected constants, never against their own internal logic or comparing a function to itself (e.g. `expect(fn(a)).toBe(fn(b))`).
+- **Cover edge cases and boundaries**: Do not test only the happy path. Explicitly verify error cases, boundary conditions, empty inputs, and invalid payloads.
+- **No test setup that mirrors implementation**: Tests must not re-implement production logic or algorithms in test helpers to derive expected values.
+
 ---
 
 Pull Requests

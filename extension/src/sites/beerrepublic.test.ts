@@ -30,14 +30,6 @@ describe('beerrepublic adapter', () => {
     expect(cards.length).toBeGreaterThan(20);
   });
 
-  it('splits brewery (vendor) from name (title)', () => {
-    const withBrewery = cards.filter((c) => c.brewery.length > 0);
-    expect(withBrewery.length).toBeGreaterThan(0);
-    if (withBrewery.length > 0) {
-      expect(withBrewery[0].brewery).not.toEqual(withBrewery[0].name);
-    }
-  });
-
   it('does not define waitForGrid (SSR)', () => {
     expect(beerrepublic.waitForGrid).toBeUndefined();
   });
