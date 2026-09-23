@@ -17,6 +17,7 @@
     "adjudicate": "tsx scripts/adjudicate-runner.ts",
     "pin-match": "tsx scripts/pin-match.ts",
     "repair-legacy-card": "tsx scripts/repair-legacy-card.ts",
+    "dispose-legacy-orphan": "tsx scripts/dispose-legacy-orphan.ts",
     "retire-resolved-orphans": "tsx scripts/retire-resolved-orphans.ts",
     "cluster-triage": "tsx scripts/cluster-triage-issues.ts",
     "render-docs": "tsx scripts/render-docs.ts",
