@@ -79,7 +79,12 @@ describe('loadCorpus — the committed seed', () => {
         .sort(),
     ).toEqual(
       [
+        '0723-344-3',
+        '0726-348-2',
         '0726-348-4',
+        '0727-352-2',
+        '0727-352-3',
+        '0728-358-1',
         '0728-358-4',
         '0923-418-D2',
         '0923-418-D3',
@@ -88,6 +93,17 @@ describe('loadCorpus — the committed seed', () => {
         '0923-418-D5',
       ].sort(),
     );
+  });
+
+  // Stage 2, task 2: the report splits by expected verdict precisely because the
+  // corpus is skewed, but the skew must stay describable — if refuted entries
+  // outnumber confirmed ones by more than 3:1 a judge answering `refuted` to
+  // everything scores over 75% on the aggregate line a reader skims first.
+  it('keeps the refuted-to-confirmed ratio under 3:1', () => {
+    const corpus = loadCorpus();
+    const refuted = corpus.filter((e) => e.expected === 'refuted').length;
+    const confirmed = corpus.filter((e) => e.expected === 'confirmed').length;
+    expect(refuted / confirmed).toBeLessThan(3);
   });
 
   // A judge comparison run against one entry per verdict class measures nothing.
