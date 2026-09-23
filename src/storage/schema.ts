@@ -639,7 +639,9 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         reopening_operator TEXT,
         CHECK ((reopened_at IS NULL AND reopening_reason IS NULL
                 AND reopening_evidence_url IS NULL AND reopening_operator IS NULL)
-            OR (reopened_at IS NOT NULL AND length(trim(reopening_reason)) > 0
+            OR (reopened_at IS NOT NULL AND reopening_reason IS NOT NULL
+                AND reopening_evidence_url IS NOT NULL AND reopening_operator IS NOT NULL
+                AND length(trim(reopening_reason)) > 0
                 AND length(trim(reopening_evidence_url)) > 0
                 AND length(trim(reopening_operator)) > 0))
       );
