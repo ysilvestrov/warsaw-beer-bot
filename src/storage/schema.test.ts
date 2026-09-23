@@ -69,7 +69,7 @@ describe('schema migrations', () => {
     expect(tables).not.toContain('google_quota');
 
     const version = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
-    expect(version).toBeGreaterThanOrEqual(20);
+    expect(version).toBe(34);
     db.close();
   });
 
@@ -145,8 +145,7 @@ describe('schema migrations', () => {
     migrate(db);
 
     // (a) v7 is registered — this is the fail-first hook (maxV is 6 before v7).
-    const maxV = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
-    expect(maxV).toBeGreaterThanOrEqual(7);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 7').get()).toEqual({ version: 7 });
 
     // (b) the v7 statement: orphans (untappd_id NULL) get backoff cleared,
     //     matched beers (untappd_id set) are left untouched.
@@ -422,13 +421,10 @@ describe('schema migrations', () => {
       ]);
     });
 
-    it('reaches at least version 23', () => {
+    it('registers version 23', () => {
       const db = openDb(':memory:');
       migrate(db);
-      const v = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      // >= rather than == : this asserts v23 is registered, not that it's the head
-      // (later migrations, e.g. v24, are expected to move the head further).
-      expect(v.v).toBeGreaterThanOrEqual(23);
+      expect(db.prepare('SELECT version FROM schema_version WHERE version = 23').get()).toEqual({ version: 23 });
     });
   });
 

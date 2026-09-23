@@ -79,7 +79,15 @@ describe('beerfreak adapter', () => {
   });
 
   it('parses the Horoshop catalog cards', () => {
-    expect(cards.length).toBeGreaterThan(20);
+    expect(cards).toHaveLength(40);
+    expect(cards[0]).toMatchObject({
+      brewery: 'VOLTA BREWERY',
+      name: 'SMOOTHIE BEAST: RED CURRANT, YUZU, BLUEBERRY, RASPBERRY, BERGAMOT',
+    });
+    expect(cards[cards.length - 1]).toMatchObject({
+      brewery: 'SPARKLE ✨',
+      name: 'Birthday #3 Nectaron (2026)',
+    });
   });
 
   it('uses embedded product metadata for brewery and name', () => {

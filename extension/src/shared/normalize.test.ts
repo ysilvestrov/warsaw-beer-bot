@@ -11,6 +11,6 @@ describe('normalizeKey', () => {
   });
 
   it('is stable across surrounding whitespace', () => {
-    expect(normalizeKey('  PINTA ', ' Hazy Morning ')).toBe(normalizeKey('PINTA', 'Hazy Morning'));
+    expect(normalizeKey('  PINTA ', ' Hazy Morning ')).toBe('pinta|hazy morning');
   });
 });

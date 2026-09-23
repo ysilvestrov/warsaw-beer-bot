@@ -14,12 +14,19 @@ const krakowHtml = fs.readFileSync(
   'utf8',
 );
 
-test('parses at least 20 pubs with slug + name', () => {
+test('parses exactly 43 pubs with slug + name from Warsaw fixture', () => {
   const pubs = parseOntapCityIndex(html);
-  expect(pubs.length).toBeGreaterThanOrEqual(20);
-  const first = pubs[0];
-  expect(first.slug).toMatch(/^[a-z0-9-]+$/);
-  expect(first.name.length).toBeGreaterThan(0);
+  expect(pubs).toHaveLength(43);
+  expect(pubs[0]).toEqual({
+    slug: 'taproom-wilanow',
+    name: 'Bar & Pub Taproom.Wilanów',
+    taps: 22,
+  });
+  expect(pubs[pubs.length - 1]).toEqual({
+    slug: 'white-crow',
+    name: 'White Crow - Craft Beer&Kitchen',
+    taps: 25,
+  });
 });
 
 test('every pub has a subdomain URL derivable from slug', () => {
@@ -29,10 +36,16 @@ test('every pub has a subdomain URL derivable from slug', () => {
 
 test('generalizes to a non-Warsaw city page (Kraków)', () => {
   const pubs = parseOntapCityIndex(krakowHtml);
-  // The real captured Kraków page lists ~25 pubs — the same DOM template as Warsaw.
-  expect(pubs.length).toBeGreaterThanOrEqual(10);
-  const first = pubs[0];
-  expect(first.slug).toMatch(/^[a-z0-9-]+$/);
-  expect(first.slug).not.toContain('/');
-  expect(first.name.length).toBeGreaterThan(0);
+  // The real captured Kraków page lists exactly 25 pubs — the same DOM template as Warsaw.
+  expect(pubs).toHaveLength(25);
+  expect(pubs[0]).toEqual({
+    slug: 'antycafe',
+    name: 'Antycafe',
+    taps: 26,
+  });
+  expect(pubs[pubs.length - 1]).toEqual({
+    slug: 'wezze-krafta',
+    name: 'Weźże Krafta',
+    taps: 25,
+  });
 });

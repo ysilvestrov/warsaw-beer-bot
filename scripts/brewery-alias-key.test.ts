@@ -11,4 +11,24 @@ describe('formatAliasPair', () => {
     expect(formatAliasPair('Nepomucen Brewery', 'Nepo Brewing'))
       .toBe("['nepomucen', 'nepo'],");
   });
+
+  test('handles apostrophes and quotes', () => {
+    expect(formatAliasPair("O'Hara's Brewery", 'Carlow Brewing'))
+      .toBe("['o hara s', 'carlow'],");
+  });
+
+  test('handles empty inputs', () => {
+    expect(formatAliasPair('', ''))
+      .toBe("['', ''],");
+  });
+
+  test('handles identical brewery names', () => {
+    expect(formatAliasPair('Pinta', 'Pinta'))
+      .toBe("['pinta', 'pinta'],");
+  });
+
+  test('handles surrounding whitespace and punctuation', () => {
+    expect(formatAliasPair('  Browar Pinta!  ', 'PINTA - Barrel... Brewing'))
+      .toBe("['pinta', 'pinta barrel'],");
+  });
 });
