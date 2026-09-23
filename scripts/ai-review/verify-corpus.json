@@ -73,5 +73,35 @@
     "why_it_breaks": "Every verdict in the batch compares the same pre-run count against the cap, so an issue at 11 accepts every row in the batch.",
     "expected": "refuted",
     "why_expected": "This tree accumulates within the run: `const accepted = byIssue.get(verdict.issue_number!)?.length ?? 0;` and the guard compares `target.postCreationRows + accepted >= MAX_ROWS_PER_ISSUE`, so rows accepted earlier in the same batch do count. Answering `confirmed` here means the judge recognised the defect from memory instead of reading the tree."
+  },
+  {
+    "id": "0923-418-D2",
+    "provenance": "harvested",
+    "source": "PR #418 AI review at 584aa661 — one of the five defects closed by fix commit 2170717",
+    "sha": "584aa66183e55e4371819c9c5b19b2662ddaa6a2",
+    "file": "src/domain/triage-scope.ts",
+    "matchedLine": 37,
+    "matchedEndLine": 40,
+    "quote": "export function isLegalScope(scope: Scope): boolean {\n  if (scope.beer_ids.length > 0) return true;\n  return scope.where.some((t) => t.col !== 'review_class');\n}",
+    "quoteOrigin": "reconstructed",
+    "claim": "isLegalScope accepts any scope that carries a non-empty `beer_ids` cohort without inspecting its `where` at all, so a `where` that only constrains `review_class` is legal whenever it rides alongside a cohort — the same `where`, used alone, is exactly the 'accepts every future row of the class' shape this function exists to reject.",
+    "why_it_breaks": "rowSatisfiesScope (also in this file) ORs `beer_ids` with `where`: `scope.beer_ids.includes(row.beer_id)` short-circuits true for cohort rows, but for every row OUTSIDE the cohort it falls through to `scope.where.every(...)`. A `where` of `review_class = X` alone matches every row of that class regardless of cohort membership, so a scope legalized only because it also carries a cohort ends up accepting every future row of the class too — laundering the exact shape isLegalScope was written to block.",
+    "expected": "confirmed",
+    "why_expected": "isLegalScope returns `true` the moment `scope.beer_ids.length > 0`, before `scope.where` is evaluated at all — the `where.some((t) => t.col !== 'review_class')` check only runs when `beer_ids` is empty. rowSatisfiesScope, defined further down in this same file, shows why that early return is unsound: it tests `beer_ids.includes(row.beer_id)` first, but a row that fails that test still reaches `scope.where.every((t) => termMatches(row, verdictClass, t))`, so a `where` of `review_class = X` — which `isLegalScope`'s own `where.some` check would reject on its own (`t.col !== 'review_class'` is false for every one of its terms) — is never actually screened out for a scope that also carries a cohort."
+  },
+  {
+    "id": "0923-418-D5",
+    "provenance": "harvested",
+    "source": "PR #418 AI review at 584aa661 — one of the five defects closed by fix commit 2170717",
+    "sha": "584aa66183e55e4371819c9c5b19b2662ddaa6a2",
+    "file": "src/domain/triage-analysis.ts",
+    "matchedLine": 112,
+    "matchedEndLine": 113,
+    "quote": "                    col: { type: 'string' },\n                    op: { type: 'string' },",
+    "quoteOrigin": "reconstructed",
+    "claim": "ANALYSIS_TOOL_SCHEMA's `new_issues[].scope.where[]` properties `col` and `op` are declared as plain `{ type: 'string' }`, with no `enum` restricting them, so the tool schema itself places no constraint on which column or operator names the provider may emit.",
+    "why_it_breaks": "Any column/operator string satisfies this schema, including pairings the domain has no meaning for (e.g. `col: 'brewery', op: '>='`), so a model can produce a tool-valid `where` term that is nonetheless not a legal scope term.",
+    "expected": "confirmed",
+    "why_expected": "The two properties quoted here are `{ type: 'string' }` and nothing else — no `enum`, no `const`, no `pattern`. JSON Schema's bare `type: 'string'` accepts any string value, so the schema this file defines does not, by itself, limit `col` or `op` to any particular set."
   }
 ]
