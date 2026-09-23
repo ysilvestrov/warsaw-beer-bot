@@ -59,6 +59,56 @@ describe('formatReport', () => {
   // unrelated text two lines apart (the drill-down heading plus the cost line's
   // "1 call(s)") — deleting the error column entirely left this passing.
   // Mutation-proven below. Anchor to the rendered draw line instead.
+  // PR #698 review, P1: an `error` is a harness failure that reached no judgement,
+  // so charging it to the model reproduces #691 at the level of the scoreboard —
+  // a judge that answered every readable entry perfectly would print
+  // `confirmed 5/6`, indistinguishable from one that got an answer wrong.
+  it('excludes an errored entry from the scored ratio rather than counting it wrong', () => {
+    const text = formatReport({
+      model: 'gpt-5.5',
+      draws: [[
+        outcome({ id: 'a', expected: 'confirmed', actual: 'confirmed', correct: true }),
+        outcome({ id: 'b', expected: 'confirmed', actual: 'error', correct: false }),
+      ]],
+      usage,
+      costUsd: null,
+    });
+    expect(text).toMatch(/draw 1: confirmed 1\/1 /);
+    expect(text).not.toMatch(/confirmed 1\/2/);
+  });
+
+  // The exclusion must never be silent: a shrinking denominator has to be visible
+  // beside the ratio, or a corpus half of which failed to load reads as a clean run.
+  it('names entries that no draw could score', () => {
+    const text = formatReport({
+      model: 'gpt-5.5',
+      draws: [
+        [outcome({ id: 'a', actual: 'error', correct: false })],
+        [outcome({ id: 'a', actual: 'error', correct: false })],
+      ],
+      usage,
+      costUsd: null,
+    });
+    expect(text).toMatch(/union .*· not scored 1/);
+    expect(text).toMatch(/consensus .*· not scored 1/);
+  });
+
+  // An entry that errored in one draw and was judged in another is scored on the
+  // draw that produced a verdict — it is not thrown away, and not marked unscored.
+  it('scores an entry on the draws that produced a verdict', () => {
+    const text = formatReport({
+      model: 'gpt-5.5',
+      draws: [
+        [outcome({ id: 'a', expected: 'confirmed', actual: 'error', correct: false })],
+        [outcome({ id: 'a', expected: 'confirmed', actual: 'confirmed', correct: true })],
+      ],
+      usage,
+      costUsd: null,
+    });
+    expect(text).toMatch(/consensus .*confirmed 1\/1/);
+    expect(text).not.toMatch(/not scored/);
+  });
+
   it('counts errors in their own column', () => {
     const text = formatReport({
       model: 'gpt-5.5',
