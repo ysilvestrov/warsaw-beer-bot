@@ -4,6 +4,7 @@ import type { FallbackBudget } from '../../domain/matcher';
 import { matchBeerList, type MatchInput, type MatchListResult } from '../../domain/match-list';
 import { triedBeerIds, hadBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer, countCheckins, latestCheckinAt } from '../../storage/checkins';
+import { findActiveDispositionForBeer, findActiveDispositionForCard } from '../../storage/legacy-orphan-dispositions';
 
 /**
  * What we are willing to assert about one submitted beer.
@@ -79,7 +80,11 @@ export async function runMatchTool(
   const { prepared, byId, aliases } = await catalog.get();
   const drunkSet = triedBeerIds(db, telegramId);       // two-source model: checkins ∪ untappd_had
   const ratings = latestRatingsByBeer(db, telegramId);
-  const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, { aliases });
+  const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, {
+    aliases,
+    isInactiveCard: (item) => findActiveDispositionForCard(db, item.brewery, item.name, item.abv ?? null) !== null,
+    isInactiveBeerId: (id) => findActiveDispositionForBeer(db, id) !== null,
+  });
   const drunkSetEmpty = drunkSet.size === 0;
 
   return {

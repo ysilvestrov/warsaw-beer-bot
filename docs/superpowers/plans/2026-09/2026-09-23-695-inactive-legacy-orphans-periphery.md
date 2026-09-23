@@ -126,7 +126,7 @@ if (findActiveDispositionForCard(deps.db, b.brewery, b.name, b.abv ?? null)) {
 
 - [ ] **Step 4: Run focused/full gate, commit.** `npx vitest run src/api/routes/enrich.test.ts src/api/routes/merge-alias-loop.test.ts`, then `npm test && npm run typecheck`; commit with `git commit -m "fix: ignore sealed historical shop cards in relay enrichment"`.
 
-### Task 4: `/match` and MCP veto, cross-path acceptance, whole-branch review
+### Task 4: `/match` and MCP veto, cross-path acceptance
 
 **Files:** Modify `src/domain/match-list.ts`, `src/domain/match-list.test.ts`, `src/api/routes/match.ts`, `src/api/routes/match.test.ts`, `src/api/mcp/match-tool.ts`, `src/api/mcp/match-tool.test.ts`, `spec.md`; add/extend one route-level acceptance test if needed. No new endpoint or public status.
 
@@ -152,8 +152,18 @@ const options = { aliases, byUntappdId, isInactiveCard: inactive, isInactiveBeer
 const outcome = await matchBeerList(prepared, byId, drunkSet, ratings, beers, options);
 ```
 
-- [ ] **Step 4: Full acceptance and specification check.** Exercise old card `/match` → `/enrich/candidates` → direct `/enrich/result` and corrected card through the same sequence; assert no active duplicate/triage for old input, normal corrected resolution, no automatic reopen on review reset or issue-close job, and manual reopen changes only the episode. Update `spec.md` wording for the now-deployed exclusions. Run `npm test && npm run typecheck`, `git diff --check`, and review the whole branch from `902e52b` for stale cache, ABV-key collisions, issue-closure, audit loss, and unrelated edits. Commit with `git commit -m "fix: keep sealed cards out of matching and complete #695"`. Do not apply a production disposition until a copy-of-production rehearsal and individual evidence review under the rollout plan.
+- [ ] **Step 4: Full acceptance and specification check.** Exercise old card `/match` → `/enrich/candidates` → direct `/enrich/result` and corrected card through the same sequence; assert no active duplicate/triage for old input, normal corrected resolution, no automatic reopen on review reset or issue-close job, and manual reopen changes only the episode. Update `spec.md` wording. Run `npm test && npm run typecheck`, `git diff --check`; commit with `git commit -m "fix: keep sealed cards out of matching"`. Do not apply a production disposition until a copy-of-production rehearsal and individual evidence review under the rollout plan.
+
+### Task 5: Close automatic catalog and cleanup paths found in branch review
+
+**Review finding:** `refresh-ontap.ts` builds its own catalog rather than using `loadCatalog`; `cleanup-polluted-ontap.ts` rewrites/deletes all orphan rows; `dedupe-brewery-aliases.ts` deletes matching orphan rows. Left unchanged, these can automatically relink, mutate, or delete an inactive historical row. This was found in the whole-branch review after Task 4's tests; no production row has been disposed.
+
+**Files:** `src/jobs/refresh-ontap.ts`, `src/jobs/cleanup-polluted-ontap.ts`, `src/jobs/dedupe-brewery-aliases.ts`, and their focused tests. Reuse `inactiveLegacyOrphanPredicate` with a `beers b` alias where practical; no new concept.
+
+- [ ] Write failing tests: sealed row is absent from refresh's prepared catalog and remains untouched while a corrected tap gets a different live row; polluted cleanup neither rewrites/deletes a sealed source nor selects it as a merge target; brewery-alias dedupe leaves a sealed orphan and its references intact. Controls without episodes retain existing behavior.
+- [ ] Exclude active episodes from those three read-side candidate sets. Do not modify the disposition, review fields, backoff, or audit. Run focused tests, then `npm test && npm run typecheck`, commit as `fix: preserve inactive orphans in startup jobs`.
+- [ ] Re-run `git diff --check` and review the full branch from `902e52b` for any other automatic row mutation, stale catalog, issue-close, ABV-key collision, audit loss, and unrelated edits. The feature remains local until PR review/deploy.
 
 ## Completion boundary
 
-After Task 4 the #695 feature is locally implemented, but no #677 row has been classified. Ask whether to create a PR; if yes, fetch/rebase `main`, rerun the full gate, push and wait for CI/AI review. Deployment and the #697 close-out gate remain separate steps. An unknown-identity verdict requires card/ABV provenance and a row-specific investigation; the eight #677 `unrescued` search results do not establish it.
+After Task 5 the #695 feature is locally implemented, but no #677 row has been classified. Ask whether to create a PR; if yes, fetch/rebase `main`, rerun the full gate, push and wait for CI/AI review. Deployment and the #697 close-out gate remain separate steps. An unknown-identity verdict requires card/ABV provenance and a row-specific investigation; the eight #677 `unrescued` search results do not establish it.

@@ -109,6 +109,9 @@ export interface MatchListOptions {
   aliases?: AliasIndex;
   // #633: untappd_id → рядок того самого знімка каталогу. Без нього bid ігнорується.
   byUntappdId?: ReadonlyMap<number, CatalogBeerWithRating>;
+  // #695: live disposition vetoes stale catalog snapshots and the exact historical card.
+  isInactiveCard?: (item: MatchInput) => boolean;
+  isInactiveBeerId?: (id: number) => boolean;
 }
 
 /** #633: скільки карток несли опублікований bid і чим це скінчилося — для лічильників у лозі роуту. */
@@ -152,6 +155,10 @@ export async function matchBeerList(
   const out: MatchListResult[] = [];
   for (const item of items) {
     const raw = { brewery: item.brewery, name: item.name };
+    const noMatch = (searched: boolean): MatchListResult => ({
+      raw, matched_beer: null, is_drunk: false, drunk_uncertain: false,
+      user_rating: null, source: null, searched,
+    });
     const exactOn = (beer: CatalogBeerWithRating): MatchListResult => ({
       raw,
       matched_beer: toMatchedBeer(beer),
@@ -162,8 +169,15 @@ export async function matchBeerList(
       searched: true,
     });
 
+    if (opts.isInactiveCard?.(item)) {
+      out.push(noMatch(true));
+      await yield_();
+      continue;
+    }
+
     // #633: рядок опублікованого bid — лише з цього знімка каталогу.
-    const bidRow = item.bid === undefined ? null : (opts.byUntappdId?.get(item.bid) ?? null);
+    const cachedBidRow = item.bid === undefined ? null : (opts.byUntappdId?.get(item.bid) ?? null);
+    const bidRow = cachedBidRow && !opts.isInactiveBeerId?.(cachedBidRow.id) ? cachedBidRow : null;
     if (item.bid !== undefined) bid.sent++;
     // Доказ броварні потрібен кроку 2 (прийняти bid) і кроку 4 (віддати рядок bid попри
     // суперечність). Крок 3 його не питає: там доказ — збіг самої назви.
@@ -189,10 +203,7 @@ export async function matchBeerList(
       const m = matchPrepared(item, prepared, budget);
       const searched = budget.budgetSkipped === skippedBefore;
       if (!m) {
-        result = {
-          raw, matched_beer: null, is_drunk: false, drunk_uncertain: false,
-          user_rating: null, source: null, searched,
-        };
+        result = noMatch(searched);
       } else {
         const beer = byId.get(m.id)!;
         result = {
@@ -240,7 +251,8 @@ export async function matchBeerList(
       }
     }
 
-    out.push(result);
+    out.push(result.matched_beer && opts.isInactiveBeerId?.(result.matched_beer.id)
+      ? noMatch(result.searched) : result);
     await yield_();
   }
   return { results: out, fallback: budget, bid };
