@@ -596,3 +596,121 @@ was not. Filed as **#691**.
   `$0.2581` uncached. Production never replays an identical prompt, so a cached draw flatters a
   candidate for having been measured second. (This does not revive "the cache is a lever" — that
   finding is about consecutive runs on a live PR, where the diff and churn order change.)
+
+## 2026-09-23, verify-judge parity — three judges on the filled 15-entry corpus, haiku as a negative control
+
+A prior pass, on the 6-entry corpus before Tasks 1–3 of this stage filled it, found `gpt-5.5`
+and `claude-sonnet-5` **identical** on `verify` — same union, same consensus, both wavering on
+the same single entry. That corpus is now 15 entries, but stage 2's own findings say its
+discriminating power is weak: 7 of 8 harvested `refuted` entries carry their decisive construct
+inside the quoted span, all 4 constructed shifts too, and two of the four have the fix's own
+comment stating the resolution in near-claim language. Re-running the same two near-equal
+judges on a corpus this shallow cannot tell "the judges are equal" from "the instrument cannot
+tell them apart." A third, deliberately weaker config settles which: **`claude-haiku-4-5-20251001`**,
+over the same Anthropic OpenAI-compat endpoint (`https://api.anthropic.com/v1`), already known
+weak on this pipeline as a *finder* (2 fabrications, six `out_of_scope`, and an empty findings
+array across three 2026-09-23 draws).
+
+`npm run verify-corpus -- --check`: **15/15 `ok`, exit 0** — every entry's `quote` still matches
+its pinned tree byte-for-byte before anything was spent.
+
+Corpus: 15 entries — 4 `confirmed` (all harvested, PR #418 D2/D3/D4/D5) and 11 `refuted` (7
+harvested from the 2026-07 baseline plus PR #418's D4, and 4 constructed shifts D2t/D3t/D4t/D5t
+— see Tasks 1–3 of this stage for how each label was earned). Three draws per config, one
+session, `OPENAI_API_ENDPOINT` switched between OpenAI and Anthropic between configs, the
+incumbent re-measured here rather than read from the entry above (that entry scores a different
+corpus — `find` recall on PR #418 — not this one).
+
+| config | draw 1 | draw 2 | draw 3 | union | **consensus** | confirmed (consensus) | refuted (consensus) | tokens (prompt→completion) | cost |
+|---|---|---|---|---|---|---|---|---|---|
+| `gpt-5.5` (incumbent) | 15/15 | 15/15 | 15/15 | 15/15 | **15/15** | 4/4 | 11/11 | 115.9k→9.7k | $0.6849 (priced) |
+| `claude-sonnet-5` | 15/15 | 15/15 | 14/15 | 15/15 | **14/15** | 4/4 | 10/11 | 188.8k→26.0k | $0.6376 (recomputed) |
+| `claude-haiku-4-5-20251001` | 13/15 | 13/15 | 13/15 | 14/15 | **12/15** | 4/4 | 8/11 | 144.3k→4.5k | $0.1668 (recomputed) |
+
+No `error` outcomes in any of the 9 draws — nothing excluded from the scored ratios.
+
+### Per-entry drill-down
+
+All four `confirmed` entries were unanimous — every config, every draw. They carry no signal
+here (the design note's own prediction: a judge that never fakes reading the fix on the easy
+half tells you nothing about the hard half). Three `refuted` entries were ever wrong, and only
+those three:
+
+- **`0728-358-1`** (harvested, 2026-07 baseline — the dropped-attachment/lost-query claim).
+  `gpt-5.5`: refuted, refuted, refuted. `claude-sonnet-5`: refuted, refuted, **out_of_scope**
+  (draw 3). `claude-haiku-4-5`: refuted, **confirmed**, **out_of_scope** — wrong in two directions
+  in two of three draws. This is very likely the entry that wavered in the 6-entry pass; it
+  still wavers here, now on two of the three judges, never on `gpt-5.5`. Caveat: the corpus's
+  own schema excludes `out_of_scope` from labelled ground truth — "its correctness depends on
+  the diff, and a label we cannot defend against the tree poisons the corpus" — so a flip to
+  `out_of_scope` is scored as *not-refuted*, not necessarily proven wrong. It may be a
+  defensible boundary call this corpus cannot adjudicate, not a fabrication.
+- **`0923-418-D2t`** (constructed shift — `isLegalScope` cohort-laundering closed by
+  `whereIsWholeClass`, expected `refuted`). `gpt-5.5` and `claude-sonnet-5`: refuted every draw.
+  `claude-haiku-4-5`: **confirmed**, refuted, refuted — wrong once, then self-corrected.
+- **`0923-418-D3t`** (constructed shift — proposed-issue scope guard, expected `refuted`
+  because the tree's own comment reads "Guard 2 applies to a PROPOSED issue too"). `gpt-5.5`
+  and `claude-sonnet-5`: refuted every draw. `claude-haiku-4-5`: **confirmed in all three
+  draws** — the one non-noisy miss in this run. This entry's `why_expected` field warns in
+  advance that answering `confirmed` here means the judge recognised the defect from memory
+  rather than reading the tree; haiku did exactly that, every time.
+
+### Cost, recomputed from tokens
+
+`gpt-5.5` has a `PRICES` row; its printed `$0.6849` is exact. `claude-sonnet-5` and
+`claude-haiku-4-5-20251001` have none, so the CLI prints `(unpriced model)`; recomputed here at
+$2/$10 per 1M (sonnet) and $1/$5 per 1M (haiku), from the same run's token totals (the CLI
+prints these at `formatTokens` resolution — nearest ~100 tokens — not re-derived from a second
+paid run):
+
+- **sonnet**: 188 800 × $2/1M + 26 000 × $10/1M = $0.3776 + $0.2600 = **$0.6376** — 93% of the
+  incumbent's $0.6849. Only **~7% cheaper**, not the ~60% the sticker prices ($2/$10 vs $5/$30)
+  would suggest.
+- **haiku**: 144 300 × $1/1M + 4 500 × $5/1M = $0.1443 + $0.0225 = **$0.1668** — 24% of the
+  incumbent, **~76% cheaper**.
+
+Token ratios this session: sonnet/gpt-5.5 input = 188.8k/115.9k ≈ **1.63×**, close to the 1.65×
+measured 2026-09-23 on a different file — consistent, not identical, so still worth re-checking
+per workload rather than assumed. Output ratio here is **2.68×** (26.0k/9.7k), well above the
+2.19× logged in that earlier probe: the two probes measure different workloads (a single-file
+review call there, 13 verify groups across the whole corpus here), and the multiplier moved
+with it. **This is the point of recomputing rather than reusing the stored ratio** — it moved
+by more than a quarter between two verify workloads. Net effect: the input markup and the
+sticker discount very nearly cancel, so sonnet is not a cost win on this workload — a case for
+switching `verify` to sonnet would be buying at roughly cost parity, not at a discount.
+
+Haiku's ratios run the other way: output 4.5k/9.7k ≈ **0.46×** (it writes shorter evidence, not
+longer) and input 144.3k/115.9k ≈ **1.25×** (smaller than sonnet's) — consistent with a smaller
+model producing terser, less hedged output.
+
+### What this settles
+
+**The corpus discriminates — the negative control was the point of this pass.**
+`claude-haiku-4-5-20251001`, already known weak on this pipeline as a *finder*, scores **12/15
+consensus** against the incumbent's clean **15/15**, and one of its three wrong entries
+(`0923-418-D3t`) is wrong in all three draws, not just noisy. A blind instrument would not show
+a bad judge as bad; this one did. That rules out "the instrument cannot tell judges apart" as
+the explanation for `gpt-5.5` and `claude-sonnet-5` scoring close to each other.
+
+**`claude-sonnet-5` is close to the incumbent, not proven identical.** At 15 entries it no
+longer ties `gpt-5.5` exactly: it drops to 14/15 consensus on one wavering entry (`0728-358-1`),
+via a `refuted`→`out_of_scope` flip in one of three draws — a flip the corpus's own design
+cannot certify as wrong, since it excludes `out_of_scope` from labelled ground truth.
+Everywhere else — all 4 `confirmed` entries and 10 of 11 `refuted` — sonnet matches `gpt-5.5`
+draw for draw, across every draw. "Close, and real" is the supportable statement; "identical"
+was the 6-entry corpus's artefact, not a property of the judges.
+
+**What would sharpen this further:** more draws on `0728-358-1` alone (5–6 rather than 3) would
+say whether sonnet's miss is noise around a genuine `refuted`/`out_of_scope` boundary or a real
+1-in-3 tendency; a second harvested entry testing that same boundary would say whether this is
+one quirky entry or a class the corpus systematically under-tests. Neither is needed to answer
+this pass's question — haiku's clean separation from the other two already proves the corpus
+is not blind — but either would be needed before treating sonnet's single miss as settled.
+
+**Not a recommendation to switch `verify` to `claude-sonnet-5`.** This pass measures agreement
+with the incumbent's own labelled verdicts, not real-PR recall or precision, and it inherits
+every caveat Tasks 1–3 already logged about this corpus: most of its `refuted` half and all of
+its constructed shifts are tests of "did you read the quoted span," not "did you read the
+whole file" — no entry in this corpus can supply a whole-file probe, because each of the three
+fixes it draws on edited its own quoted code in place. An instrument that admits what it cannot
+test is worth more here than a verdict it cannot support.
