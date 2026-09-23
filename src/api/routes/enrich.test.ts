@@ -908,6 +908,38 @@ const BULGOGI = {
 };
 const hydrateBulgogi = () => vi.fn(async () => new Map([[BULGOGI.bid, BULGOGI]]));
 
+test('an in-flight published-bid result keeps the old public status after disposition', async () => {
+  let release!: () => void;
+  const waiting = new Promise<void>((resolve) => { release = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const { db, app } = setup({ hydrateByBid: async () => {
+    entered();
+    await waiting;
+    return new Map([[BULGOGI.bid, BULGOGI]]);
+  } });
+  const card = { brewery: 'Mad Brew', name: 'Tomatol Bulgogi', abv: 4.2 };
+  const id = seedBeer(db, {
+    untappd_id: null, ...card, style: null, rating_global: null,
+    normalized_name: normalizeName(card.name), normalized_brewery: normalizeBrewery(card.brewery),
+  });
+  const response = post(app, '/enrich/result', {
+    ...card, bid: BULGOGI.bid, brand: 'Mad Brew', algolia: { hits: [] },
+  });
+  await started;
+  insertLegacyDisposition(db, {
+    beerId: id, issueNumber: 677, cardBrewery: card.brewery, cardName: card.name, cardAbv: card.abv,
+    breweryText: cardText(card.brewery), nameText: cardText(card.name), abvKey: cardAbv(card.abv),
+    failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+    operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+  });
+  release();
+  expect(await (await response).json()).toEqual({ status: 'not_found' });
+  expect(getBeer(db, id)?.untappd_id).toBeNull();
+  expect(db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id)).toBeUndefined();
+  db.close();
+});
+
 const shopRowInput = (over: Record<string, unknown> = {}) => ({
   name: 'Tomatol Bulgogi', brewery: 'Mad Brew',
   normalized_name: normalizeName('Tomatol Bulgogi'),

@@ -3,6 +3,8 @@ import { migrate } from '../storage/schema';
 import { findAliasTarget } from '../storage/beers';
 import type { HydratedBeer } from '../sources/untappd/search';
 import { applyLegacyCardRepair, previewLegacyCardRepair, type LegacyCardRepairInput } from './repair-legacy-card';
+import { cardAbv, cardText } from './card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 function fixture() {
   const db = openDb(':memory:');
@@ -46,6 +48,26 @@ function fixture() {
 }
 
 describe('repairLegacyCard (#696)', () => {
+  it('requires an explicit reopen before repairing an inactive orphan', () => {
+    const { db, input } = fixture();
+    const stale = previewLegacyCardRepair(db, input);
+    const episode = insertLegacyDisposition(db, {
+      beerId: input.beerId, issueNumber: 677, cardBrewery: 'De Cam',
+      cardName: 'Abrikoos Rabarber 2018', cardAbv: 6,
+      breweryText: cardText('De Cam'), nameText: cardText('Abrikoos Rabarber 2018'), abvKey: cardAbv(6),
+      failureSourceUrl: 'https://flasker.com.ua/', reason: 'Identity unknown',
+      evidenceUrl: 'https://example.com/evidence', operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    expect(() => previewLegacyCardRepair(db, input)).toThrow(/reopen|inactive/i);
+    expect(() => applyLegacyCardRepair(db, input, stale)).toThrow(/reopen|inactive/i);
+    expect(db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(input.beerId)).toEqual({ untappd_id: null });
+    closeLegacyDisposition(db, episode, {
+      reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+      reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+    });
+    expect(previewLegacyCardRepair(db, input).orphan.id).toBe(input.beerId);
+    db.close();
+  });
   it('preserves the old 6% card while merging into an existing 7% bid with an audit', () => {
     const { db, input } = fixture();
     db.prepare(`

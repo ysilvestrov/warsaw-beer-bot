@@ -330,6 +330,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
               return applyLookupOutcome({ db: deps.db, log: deps.log }, cardRowId, outcome, nowIso, input);
             })()
           : applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, input);
+        if (kind === 'skipped') return c.json({ status: 'not_found' });
         if (kind === 'matched' || kind === 'merged') {
           stampBidProvenance(deps.db, resolved.result.bid);
           return c.json({
@@ -377,6 +378,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // Сирота могла взяти ABV іншої картки з тим самим текстом (близнюк 6.1% і 0.5% на одній сторінці), і
     // пошук довів «текст + ABV рядка»; ключ з ABV тіла записав би аліас, якого пошук не доводив.
     const kind = applyLookupOutcome({ db: deps.db, log: deps.log }, row.id, outcome, nowIso, { brewery, name, abv: row.abv, sourceUrl: pageUrl });
+    if (kind === 'skipped') return c.json({ status: 'not_found' });
     // A merge is a success: the bid is real and already owned by a canonical row,
     // so answer like a match instead of the old not_found. `outcome.result` still
     // holds the bid — nothing needs plumbing through applyLookupOutcome. The

@@ -4,6 +4,7 @@ import { cardAbv, cardText } from './card-text';
 import { normalizeBrewery, normalizeName } from './normalize';
 import { findAliasTarget, mergeIntoCanonical } from '../storage/beers';
 import { bumpCatalogVersion } from '../storage/catalog-version';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 export interface LegacyCardRepairInput {
   beerId: number;
@@ -114,6 +115,9 @@ function countRefs(db: DB, table: 'match_links' | 'checkins' | 'untappd_had', be
 
 export function previewLegacyCardRepair(db: DB, input: LegacyCardRepairInput): LegacyCardRepairPreview {
   assertInput(input);
+  if (findActiveDispositionForBeer(db, input.beerId)) {
+    throw new Error('inactive legacy orphan requires explicit reopen before repair');
+  }
   const row = db.prepare(`
     SELECT id, brewery, name, abv, untappd_id, untappd_lookup_at,
            untappd_lookup_count, rearm_count FROM beers WHERE id = ?
