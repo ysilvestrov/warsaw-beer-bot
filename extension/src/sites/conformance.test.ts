@@ -76,58 +76,6 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     }
   });
 
-  it('reRenderContainerSelector, when set, matches a node in the fixture', () => {
-    if (!adapter.reRenderContainerSelector) return;
-    const parsed = new DOMParser().parseFromString(readFileSync(fixturePath(id), 'utf8'), 'text/html');
-    expect(parsed.querySelector(adapter.reRenderContainerSelector)).not.toBeNull();
-  });
-
-  it('returns confirmed per-card non-beer products (or preserves a whole-page exception)', async () => {
-    expect(existsSync(nonBeerHtmlPath(id))).toBe(true);
-    const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
-
-    if (id === 'beershop') {
-      expect(adapter.parseCards(doc)).toEqual([]);
-      return;
-    }
-
-    const cards = adapter.parseCards(doc);
-    if (id === 'flasker') {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        text: async () =>
-          '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
-      } as Response);
-      await adapter.loadCardDetails?.(cards);
-    }
-    expect(cards.length).toBeGreaterThan(0);
-    expect(cards.every((card) => card.nonBeer)).toBe(true);
-  });
-
-  it('renders confirmed non-beer cards without matching them', async () => {
-    if (id === 'beershop') return;
-    const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
-    const match = vi.fn(sendMatch);
-
-    if (id === 'flasker') {
-      vi.mocked(fetch).mockResolvedValue({
-        ok: true,
-        text: async () =>
-          '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
-      } as Response);
-    }
-
-    await runOverlay(doc, adapter, match);
-
-    const cards = adapter.parseCards(doc);
-    expect(cards.length).toBeGreaterThan(0);
-    // #648: the ✕ character became a composed badge — an svg glyph plus an aria-label.
-    expect(cards.every((card) => card.el
-      .querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon') === 'cross')).toBe(true);
-    expect(cards.every((card) => card.el.hasAttribute('data-beerseen'))).toBe(true);
-    expect(match).not.toHaveBeenCalled();
-  });
-
   it('re-badges after the grid is replaced with fresh nodes', async () => {
     const html = readFileSync(fixturePath(id), 'utf8');
     mountFixture(html);
@@ -139,5 +87,73 @@ describe.each(ADAPTERS.map((a) => [a.id, a] as const))('adapter contract: %s', (
     expect(document.querySelector('[data-beerbadge]')).toBeNull();
     await waitForBadge();
     stop();
+  });
+});
+
+const adaptersWithReRender = ADAPTERS.filter((a): a is typeof a & { reRenderContainerSelector: string } =>
+  Boolean(a.reRenderContainerSelector),
+);
+
+describe.each(adaptersWithReRender.map((a) => [a.id, a] as const))(
+  'adapter re-render container: %s',
+  (id, adapter) => {
+    it('matches a node in the fixture', () => {
+      const parsed = new DOMParser().parseFromString(readFileSync(fixturePath(id), 'utf8'), 'text/html');
+      expect(parsed.querySelector(adapter.reRenderContainerSelector)).not.toBeNull();
+    });
+  },
+);
+
+const perCardNonBeerAdapters = ADAPTERS.filter((a) => a.id !== 'beershop');
+
+describe.each(perCardNonBeerAdapters.map((a) => [a.id, a] as const))(
+  'per-card non-beer contract: %s',
+  (id, adapter) => {
+    it('returns confirmed per-card non-beer products', async () => {
+      expect(existsSync(nonBeerHtmlPath(id))).toBe(true);
+      const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+      const cards = adapter.parseCards(doc);
+      if (id === 'flasker') {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          text: async () =>
+            '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
+        } as Response);
+        await adapter.loadCardDetails?.(cards);
+      }
+      expect(cards.length).toBeGreaterThan(0);
+      expect(cards.every((card) => card.nonBeer)).toBe(true);
+    });
+
+    it('renders confirmed non-beer cards without matching them', async () => {
+      const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath(id), 'utf8'), 'text/html');
+      const match = vi.fn(sendMatch);
+
+      if (id === 'flasker') {
+        vi.mocked(fetch).mockResolvedValue({
+          ok: true,
+          text: async () =>
+            '<span class="posted_in"><a href="https://flasker.com.ua/product-category/suveniry/">Сувеніри</a></span>',
+        } as Response);
+      }
+
+      await runOverlay(doc, adapter, match);
+
+      const cards = adapter.parseCards(doc);
+      expect(cards.length).toBeGreaterThan(0);
+      // #648: the ✕ character became a composed badge — an svg glyph plus an aria-label.
+      expect(cards.every((card) => card.el
+        .querySelector('[data-beerbadge] [data-icon]')?.getAttribute('data-icon') === 'cross')).toBe(true);
+      expect(cards.every((card) => card.el.hasAttribute('data-beerseen'))).toBe(true);
+      expect(match).not.toHaveBeenCalled();
+    });
+  },
+);
+
+describe('whole-page non-beer exception: beershop', () => {
+  it('drops all products from the non-beer catalog fixture', () => {
+    const beershopAdapter = ADAPTERS.find((a) => a.id === 'beershop')!;
+    const doc = new DOMParser().parseFromString(readFileSync(nonBeerHtmlPath('beershop'), 'utf8'), 'text/html');
+    expect(beershopAdapter.parseCards(doc)).toEqual([]);
   });
 });

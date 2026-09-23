@@ -8,31 +8,22 @@ const html = fs.readFileSync(fixturePath, 'utf8');
 
 describe('parseUserBeersPage', () => {
   test('parses every .beer-item in the fixture', () => {
-    const $ = cheerio.load(html);
-    const expected = $('.beer-item[data-bid]').length;
     const items = parseUserBeersPage(html);
-    expect(items.length).toBe(Math.min(expected, 25));
-    expect(items.length).toBeGreaterThan(0);
+    expect(items).toHaveLength(25);
   });
 
   test('first item has bid, name, brewery, style, both ratings populated', () => {
     const items = parseUserBeersPage(html);
-    const first = items[0];
-    expect(typeof first.bid).toBe('number');
-    expect(Number.isFinite(first.bid)).toBe(true);
-    expect(first.beer_name.length).toBeGreaterThan(0);
-    expect(first.brewery_name.length).toBeGreaterThan(0);
-    expect(first).toHaveProperty('style');
-    if (first.global_rating !== null) {
-      expect(typeof first.global_rating).toBe('number');
-      expect(first.global_rating).toBeGreaterThan(0);
-      expect(first.global_rating).toBeLessThanOrEqual(5);
-    }
-    if (first.their_rating !== null) {
-      expect(typeof first.their_rating).toBe('number');
-      expect(first.their_rating).toBeGreaterThanOrEqual(0);
-      expect(first.their_rating).toBeLessThanOrEqual(5);
-    }
+    expect(items[0]).toEqual({
+      bid: 6455508,
+      beer_name: 'Pint Size Penny - Foreign Legion 2025',
+      brewery_name: 'KOMPAAN Dutch Craft Beer Company',
+      style: 'Stout - Imperial / Double',
+      abv: 11,
+      their_rating: 4.8,
+      global_rating: 3.81,
+      global_rating_shown: true,
+    });
   });
 
   test('caps result at first 25 items', () => {

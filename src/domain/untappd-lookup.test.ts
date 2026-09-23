@@ -1,3 +1,4 @@
+import assert from 'node:assert';
 import { lookupBeer } from './untappd-lookup';
 import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
@@ -21,7 +22,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5001);
     expect(out.result.global_rating).toBe(3.98);
   });
@@ -51,7 +52,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6620595);
   });
 
@@ -70,7 +71,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(2388534);
   });
 
@@ -95,7 +96,7 @@ describe('lookupBeer', () => {
       search: throwingSearch(boom),
     });
     expect(out.kind).toBe('transient');
-    if (out.kind !== 'transient') return;
+    assert(out.kind === 'transient');
     expect(out.error).toBe(boom);
   });
 
@@ -121,7 +122,7 @@ describe('lookupBeer', () => {
     expect(calledQueries[0]).not.toContain('Brewery');
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6172039);
   });
 
@@ -151,7 +152,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(7777);
     expect(calledQueries).toHaveLength(2);
     expect(calledQueries[0]).toContain('TankBusters');
@@ -170,7 +171,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(8888);
     expect(calledQueries).toHaveLength(1);
     expect(calledQueries[0]).toContain('ZIEMIA');
@@ -186,7 +187,7 @@ describe('lookupBeer', () => {
       search,
     });
     expect(out.kind).toBe('transient');
-    if (out.kind !== 'transient') return;
+    assert(out.kind === 'transient');
     expect(out.error).toBe(boom);
     expect(callCount).toBe(1);
   });
@@ -210,7 +211,7 @@ describe('lookupBeer', () => {
       ]);
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'Totally Different Beer', search });
       expect(out.kind).toBe('not_found');
-      if (out.kind !== 'not_found') return;
+      assert(out.kind === 'not_found');
       expect(out.searchUrls[0]).toContain('Magic%20Road');
       expect(out.candidates.map((c) => c.beer_name)).toContain('Atak Chmielu');
     });
@@ -218,7 +219,7 @@ describe('lookupBeer', () => {
     test('not_found with zero results returns empty candidates', async () => {
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'Whatever', search: fakeSearch(() => []) });
       expect(out.kind).toBe('not_found');
-      if (out.kind !== 'not_found') return;
+      assert(out.kind === 'not_found');
       expect(out.candidates).toEqual([]);
       expect(out.searchUrls.length).toBeGreaterThan(0);
     });
@@ -226,7 +227,7 @@ describe('lookupBeer', () => {
     test('blocked returns the search URL that tripped the block', async () => {
       const out = await lookupBeer({ brewery: 'Magic Road', name: 'X', search: throwingSearch(new HttpError(403, 'u')) });
       expect(out.kind).toBe('blocked');
-      if (out.kind !== 'blocked') return;
+      assert(out.kind === 'blocked');
       expect(out.searchUrl).toContain('Magic%20Road');
     });
   });
@@ -238,7 +239,7 @@ describe('lookupBeer', () => {
       ]);
       const out = await lookupBeer({ brewery: 'Schneider', name: 'TAP04 FESTWEISSE', search });
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(11827);
     });
 
@@ -248,7 +249,7 @@ describe('lookupBeer', () => {
       ]);
       const out = await lookupBeer({ brewery: 'Root + Branch', name: 'Fast Talking / North Park', search });
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(6683161);
     });
 
@@ -272,7 +273,7 @@ describe('lookupBeer', () => {
         search,
       });
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(7201);
     });
 
@@ -286,7 +287,7 @@ describe('lookupBeer', () => {
         search,
       });
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(7202);
     });
 
@@ -310,7 +311,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: '', name: 'St-Feuillien Blonde', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(22540);
   });
 
@@ -321,7 +322,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Staropolski', name: 'KULTOWE PILS', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1673808);
   });
 
@@ -351,7 +352,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: "Murphy's Brewery", name: "Murphy's Irish Stout", search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5932);
   });
 
@@ -385,7 +386,7 @@ describe('lookupBeer', () => {
       const out = await lookupBeer({ brewery, name: input, search });
 
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(bid);
     });
 
@@ -408,7 +409,7 @@ describe('lookupBeer', () => {
       });
 
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(12082);
     });
   });
@@ -468,7 +469,7 @@ describe('lookupBeer', () => {
     ])('matched: reviewed near candidate $candidate.bid', async ({ brewery, name, candidate }) => {
       const out = await lookupBeer({ brewery, name, search: fakeSearch(() => [candidate]) });
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(candidate.bid);
     });
   });
@@ -484,7 +485,7 @@ describe('lookupBeer', () => {
     );
     const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja #1, Pastry Sour z Guavą, Mango', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(7000);
   });
 
@@ -566,7 +567,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Kamenice nad Lipou Brewery', name: 'Desitka', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(12141);
   });
 
@@ -578,7 +579,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Nachmelená Opice Brewery', name: '11', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1);
   });
 
@@ -590,7 +591,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Pivovar Krakonoš Brewery', name: 'Trutnov 11', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(31);
   });
 
@@ -605,7 +606,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Kamenice nad Lipou Brewery', name: 'Dvanastka', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect([40, 41]).toContain(out.result.bid);
   });
 
@@ -635,7 +636,7 @@ describe('lookupBeer', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Kutna Hora Brewery', name: 'Zlata 12', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(70);
   });
 });
@@ -707,7 +708,7 @@ describe('#382 query ladder', () => {
     const { search } = recordingSearch(() => []);
     const out = await lookupBeer({ brewery: 'Ципа', name: 'Сидр Грушевий PERRY', search });
     expect(out.kind).toBe('not_found');
-    if (out.kind !== 'not_found') return;
+    assert(out.kind === 'not_found');
     expect(out.searchUrls).toHaveLength(2);
     expect(decodeURIComponent(out.searchUrls[0])).toContain('Ципа Сидр Грушевий PERRY');
     expect(decodeURIComponent(out.searchUrls[1])).toContain('PERRY');
@@ -743,7 +744,7 @@ describe('#382 query ladder', () => {
     };
     const out = await lookupBeer({ brewery: 'Alpha x Beta', name: 'Some Beer', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(8002);
     expect(queries.length).toBeGreaterThan(1);
   });
@@ -758,7 +759,7 @@ describe('#347 curated alias batch', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Browary Książęce Brewery', name: 'Złote Pszeniczne', abv: 4.9, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(323265);
 
     // Search order is not identity evidence: reversing every candidate keeps the dominant beer.
@@ -779,7 +780,7 @@ describe('#347 curated alias batch', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Lobkowicz Brewery', name: 'Ježek Kvasnicovy', abv: 4.9, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(71011);
   });
 
@@ -791,7 +792,7 @@ describe('#347 curated alias batch', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Pivovar Lobkowicz Brewery', name: 'Rychtář Premium 12°', abv: 5.0, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(301434);
   });
 
@@ -803,7 +804,7 @@ describe('#347 curated alias batch', () => {
     // No ABV on purpose: the name stage alone must discriminate.
     const out = await lookupBeer({ brewery: 'Pivovar Rychtář', name: 'Premium', search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(301434);
   });
 
@@ -813,7 +814,7 @@ describe('#347 curated alias batch', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Cieszyn Brewery', name: 'Pszeniczne 12,5°', abv: 5.4, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1036654);
   });
 
@@ -825,7 +826,7 @@ describe('#347 curated alias batch', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Tomatol', name: 'Wasabi', abv: 3.8, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6819716);
   });
 
@@ -944,7 +945,7 @@ describe('#347 curated alias batch', () => {
       });
 
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(6648348);
     });
 
@@ -1030,7 +1031,7 @@ describe('#347 curated alias batch', () => {
       });
 
       expect(out.kind).toBe('matched');
-      if (out.kind !== 'matched') return;
+      assert(out.kind === 'matched');
       expect(out.result.bid).toBe(7103);
     });
   });
@@ -1046,7 +1047,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Dżemer', abv: 5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6603979);
   });
 
@@ -1059,7 +1060,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Magic Road Dżemer', abv: 5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6603979);
   });
 
@@ -1084,7 +1085,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Magic Road Brewery', name: 'Dżemer', abv: 5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1);
   });
 
@@ -1122,7 +1123,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Stu Mostów Brewery', name: 'Hommage aux Cent Ponts', abv: 7.5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6622277);
   });
 
@@ -1142,7 +1143,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: '', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: null, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6588490);
   });
 
@@ -1212,7 +1213,7 @@ describe('#427 upstream identity evidence', () => {
 
     const out = await lookupBeer({ brewery: 'Dutch Bargain', name: 'Dutch Bargain/Brouwerij LOST House of New Orleans', abv: 13, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6588490);
   });
 
@@ -1279,7 +1280,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Carlsberg Brewery', name: 'okocim jasne', abv: 5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(9055);
   });
 
@@ -1292,7 +1293,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Stu Mostów Brewery', name: 'WRCLW Schöps', abv: 4.8, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1741395);
   });
 
@@ -1316,7 +1317,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Carlsberg Brewery', name: 'Okocim Jasne', abv: 5, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(1);
   });
 
@@ -1352,7 +1353,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'Leffe', name, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(bid);
   });
 
@@ -1364,7 +1365,7 @@ describe('#427 upstream identity evidence', () => {
     const out = await lookupBeer({ brewery: 'CRAFT', name: 'STAR Double Stout', abv: 6, search });
 
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6518418);
   });
 
@@ -1407,7 +1408,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Primator Brewery', name: 'Weizenbier', abv: 4.8, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(30947);
   });
 
@@ -1419,7 +1420,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Kronenbourg Brewery', name: 'Kronenbourg 1664', abv: 5, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5939);
   });
 
@@ -1431,7 +1432,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Primator Brewery', name: 'Primator Weizen', abv: 4.8, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(30947);
   });
 
@@ -1460,7 +1461,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Harpagan', name: 'Buzdygan Rozkoszy IPA', abv: 5, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6620595);
   });
 
@@ -1489,7 +1490,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: 'Brouwerij Boon Brewery', name: 'Lambic Boon', abv: 7, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(756972);
   });
 
@@ -1516,7 +1517,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
     ]);
     const out = await lookupBeer({ brewery: '', name: 'Atak', abv: 6.2, search });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(42001);
   });
 
@@ -1569,7 +1570,7 @@ describe('lookupBeer — name identity floor (#505)', () => {
         });
 
         expect(out.kind).toBe('matched');
-        if (out.kind !== 'matched') return;
+        assert(out.kind === 'matched');
         expect(out.result.bid).toBe(6852067);
       },
     );
@@ -1689,7 +1690,7 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(2852216);
   });
 
@@ -1717,7 +1718,7 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(2916237);
   });
 
@@ -1745,7 +1746,7 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(4624110);
   });
 
@@ -1794,7 +1795,7 @@ describe('#353 zero-hit descriptor and packaging retry with guards', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5042332);
   });
 
@@ -1892,7 +1893,7 @@ describe('#405 Sub-cohort A1: empty input brewery candidate stripping', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5315178);
   });
 
@@ -1914,7 +1915,7 @@ describe('#405 Sub-cohort A1: empty input brewery candidate stripping', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(123456);
   });
 
@@ -1958,7 +1959,7 @@ describe('#405 Sub-cohort A3: swapped brewery and beer name', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6757171);
   });
 
@@ -2048,7 +2049,7 @@ describe('#405 Sub-cohort A3: swapped brewery and beer name', () => {
       search,
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6757171);
   });
 });
@@ -2064,7 +2065,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       search: fakeSearch(() => [hit(5899401, 'Dr. Hazy #4')]),
     });
     expect(out.kind).toBe('not_found');
-    if (out.kind !== 'not_found') return;
+    assert(out.kind === 'not_found');
     // the refused candidate is still triage evidence
     expect(out.candidates.map((c) => c.bid)).toEqual([5899401]);
   });
@@ -2075,7 +2076,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       search: fakeSearch(() => [hit(5899401, 'Dr. Hazy #4')]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5899401);
   });
 
@@ -2085,7 +2086,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Juicy Trap')]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5000001);
   });
 
@@ -2098,7 +2099,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       }]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6819481);
   });
 
@@ -2160,7 +2161,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Beer Underground Juicy Trap')]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5000001);
   });
 
@@ -2173,7 +2174,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       ]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6000001);
   });
 
@@ -2187,7 +2188,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       ]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6819481);
   });
 
@@ -2197,7 +2198,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       search: fakeSearch(() => [hit(6625206, 'Juicy Trap #20'), hit(5000001, 'Juicy Trap')]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(5000001);
   });
 
@@ -2211,7 +2212,7 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
       ]),
     });
     expect(out.kind).toBe('matched');
-    if (out.kind !== 'matched') return;
+    assert(out.kind === 'matched');
     expect(out.result.bid).toBe(6819481);
   });
 });

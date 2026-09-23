@@ -10,6 +10,7 @@ const nonBeerHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/beersh
 function adapterFor(url = 'https://www.beershop.pl/katalog-piv') {
   const adapter = pickAdapter(new URL(url));
   expect(adapter?.id).toBe('beershop');
+  if (!adapter) throw new Error(`expected beershop adapter for ${url}`);
   return adapter;
 }
 
@@ -50,8 +51,6 @@ describe('beershop adapter', () => {
 
   it('parses brewery and beer name from the live catalog fixture', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
-
     const doc = new DOMParser().parseFromString(beerHtml, 'text/html');
     const cards = adapter.parseCards(doc);
 
@@ -81,7 +80,6 @@ describe('beershop adapter', () => {
     ['To-Øl', '11° 30 Days Italian Pilsner', '/p/to-ol-30-days-italian-pilsner', '11° 30 Days Italian Pilsner'],
   ])('uses the product path to exclude BeerShop display-only text from %s %s', (brewery, title, href, expected) => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(156, brewery, title, href), 'text/html');
 
     expect(adapter.parseCards(doc)[0]).toMatchObject({ brewery, name: expected });
@@ -89,7 +87,6 @@ describe('beershop adapter', () => {
 
   it('keeps the visible title when the product path cannot identify it', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(156), 'text/html');
 
     expect(adapter.parseCards(doc)[0]).toMatchObject({
@@ -100,7 +97,6 @@ describe('beershop adapter', () => {
 
   it('does not truncate a title when its product path transliterates a name token', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(
       productHtml(156, 'Brewery', '12° Beer Різдвяне IPA', '/p/brewery-beer-rizdviane'),
       'text/html',
@@ -114,7 +110,6 @@ describe('beershop adapter', () => {
 
   it('does not truncate a title when the product path contains only part of a punctuated word', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(
       productHtml(156, 'Brewery', '12° Cherry/Cola Sour Ale', '/p/brewery-cherry'),
       'text/html',
@@ -130,7 +125,6 @@ describe('beershop adapter', () => {
     'drops every product from non-beer category id %i',
     (categoryId) => {
       const adapter = adapterFor();
-      if (!adapter) return;
       const doc = new DOMParser().parseFromString(productHtml(categoryId), 'text/html');
       expect(adapter.parseCards(doc)).toEqual([]);
     },
@@ -138,32 +132,27 @@ describe('beershop adapter', () => {
 
   it('reads the page category id when parsing a re-rendered product grid', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(150), 'text/html');
     const grid = doc.querySelector('.p-l-boxes');
     expect(grid).not.toBeNull();
-    if (!grid) return;
 
-    expect(adapter.parseCards(grid)).toEqual([]);
+    expect(adapter.parseCards(grid!)).toEqual([]);
   });
 
   it('drops products when the page category id is JSON-encoded as a number', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtmlWithNumericCategoryId(150), 'text/html');
     expect(adapter.parseCards(doc)).toEqual([]);
   });
 
   it('drops the live lemonade and cola fixture', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(nonBeerHtml, 'text/html');
     expect(adapter.parseCards(doc)).toEqual([]);
   });
 
   it('returns confirmed shared non-beer packs from otherwise eligible grids', () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(productHtml(156, 'Beershop', 'World Beer Gift Pack'), 'text/html');
     expect(adapter.parseCards(doc)).toEqual([
       expect.objectContaining({ nonBeer: true }),
@@ -172,7 +161,6 @@ describe('beershop adapter', () => {
 
   it('renders a non-clickable status for a shared non-beer pack in a mixed grid', async () => {
     const adapter = adapterFor();
-    if (!adapter) return;
     const doc = new DOMParser().parseFromString(
       productHtml(156, 'Beershop', 'World Beer Gift Pack'),
       'text/html',
