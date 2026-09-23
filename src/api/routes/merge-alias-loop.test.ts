@@ -6,6 +6,8 @@ import { seedBeer } from '../../storage/seed-beer.testing';
 import { ensureProfile } from '../../storage/user_profiles';
 import { mergeCheckin } from '../../storage/checkins';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
+import { applyLegacyCardRepair, previewLegacyCardRepair } from '../../domain/repair-legacy-card';
+import { findAliasTarget } from '../../storage/beers';
 import { createCatalogCache } from '../../domain/catalog-cache';
 import { enrichRoute } from './enrich';
 import { matchRoute } from './match';
@@ -158,5 +160,45 @@ describe('#614 merge memory closes the extension loop', () => {
       expect(bidOf(twinRow)).toBe(777);
     }
     expect(await match(CARD)).toMatchObject({ matched_beer: { untappd_id: 8888 }, source: 'exact' });
+  });
+});
+
+describe('#696 manual legacy-card repair reaches extension routes', () => {
+  it('resolves the old 6% card without lookup while the corrected card still resolves', async () => {
+    const { db, post, match, beerCount } = loop();
+    db.prepare(`INSERT INTO beers (id, brewery, name, abv, normalized_brewery, normalized_name)
+      VALUES (29955, 'De Cam', 'Abrikoos Rabarber 2018', 6, 'de cam', 'abrikoos rabarber')`).run();
+    db.prepare(`INSERT INTO enrich_failures
+      (beer_id, brewery, name, search_url, source_url, outcome, candidates_count,
+       candidates_summary, fail_count, last_at, review_class, issue_number)
+      VALUES (29955, 'De Cam', 'Abrikoos Rabarber 2018', '', 'https://flasker.com.ua/',
+        'not_found', 0, '', 1, '2026-09-23T00:00:00Z', 'parser_bug', 677)`).run();
+    db.prepare(`INSERT INTO beers
+      (id, untappd_id, brewery, name, abv, normalized_brewery, normalized_name)
+      VALUES (77, 3615616, 'Geuzestekerij De Cam', 'Abrikoos Rabarber 2018', 7,
+        'geuzestekerij de cam', 'abrikoos rabarber')`).run();
+    const repair = {
+      beerId: 29955, issueNumber: 677, cardAbv: 6, bid: 3615616,
+      evidenceUrl: 'https://flasker.com.ua/product/de-cam-abrikoos-rabarber-2018-750-ml/',
+      reason: 'Shop printed 6%; Untappd lists 7%', operator: 'maintainer',
+      overwriteAbv: true, at: '2026-09-23T17:00:00Z',
+      hydrated: {
+        bid: 3615616, beer_name: 'Abrikoos Rabarber 2018',
+        brewery_name: 'Geuzestekerij De Cam', style: 'Lambic', abv: 7,
+        global_rating: 4.1, beer_slug: 'abrikoos-rabarber-2018', brewery_alias: [],
+      },
+    };
+    applyLegacyCardRepair(db, repair, previewLegacyCardRepair(db, repair));
+
+    const oldCard = { brewery: 'De Cam', name: 'Abrikoos Rabarber 2018', abv: 6 };
+    const corrected = { brewery: 'Geuzestekerij De Cam', name: 'Abrikoos Rabarber 2018', abv: 7 };
+    const countAfterRepair = beerCount();
+    expect(await match(oldCard)).toMatchObject({
+      matched_beer: { id: 77, untappd_id: 3615616 }, source: 'exact',
+    });
+    expect((await post('/enrich/candidates', { beers: [oldCard] })).candidates[0].eligible).toBe(false);
+    expect(beerCount()).toBe(countAfterRepair);
+    expect(await match(corrected)).toMatchObject({ matched_beer: { id: 77, untappd_id: 3615616 } });
+    expect(findAliasTarget(db, oldCard.brewery, oldCard.name, 7)).toBeNull();
   });
 });
