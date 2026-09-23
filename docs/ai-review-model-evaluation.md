@@ -690,27 +690,48 @@ model producing terser, less hedged output.
 consensus** against the incumbent's clean **15/15**, and one of its three wrong entries
 (`0923-418-D3t`) is wrong in all three draws, not just noisy. A blind instrument would not show
 a bad judge as bad; this one did. That rules out "the instrument cannot tell judges apart" as
-the explanation for `gpt-5.5` and `claude-sonnet-5` scoring close to each other.
+the explanation for `gpt-5.5` and `claude-sonnet-5` scoring close to each other — but it proves
+only that the corpus can separate a much weaker judge from the incumbent. It does not prove the
+corpus has the resolution to detect a *small* difference between two close judges; that is a
+different, unanswered question, and the paragraph below does not claim it is answered.
 
-**`claude-sonnet-5` is close to the incumbent, not proven identical.** At 15 entries it no
-longer ties `gpt-5.5` exactly: it drops to 14/15 consensus on one wavering entry (`0728-358-1`),
-via a `refuted`→`out_of_scope` flip in one of three draws — a flip the corpus's own design
-cannot certify as wrong, since it excludes `out_of_scope` from labelled ground truth.
-Everywhere else — all 4 `confirmed` entries and 10 of 11 `refuted` — sonnet matches `gpt-5.5`
-draw for draw, across every draw. "Close, and real" is the supportable statement; "identical"
-was the 6-entry corpus's artefact, not a property of the judges.
+**No certifiable divergence from `gpt-5.5`.** Sonnet's only deviation across all 45 judgments
+(15 entries × 3 draws) is the single `refuted`→`out_of_scope` flip on `0728-358-1` — the one
+entry the corpus's own design cannot certify as wrong, since it excludes `out_of_scope` from
+labelled ground truth. Exclude that one entry and sonnet is **44/44** against the incumbent's
+**45/45**: on every judgment this corpus can actually certify, the two judges are still exactly
+tied. A corpus the negative control just proved is not blind **reproduces** the 6-entry tie
+rather than overturning it. That is not the same as proving there is no small gap: the control
+shows the instrument can catch a large difference, not that it can resolve a small one, so this
+result neither confirms nor rules out a real, small gap between the two — it gives no evidence
+of one.
 
 **What would sharpen this further:** more draws on `0728-358-1` alone (5–6 rather than 3) would
-say whether sonnet's miss is noise around a genuine `refuted`/`out_of_scope` boundary or a real
-1-in-3 tendency; a second harvested entry testing that same boundary would say whether this is
-one quirky entry or a class the corpus systematically under-tests. Neither is needed to answer
-this pass's question — haiku's clean separation from the other two already proves the corpus
-is not blind — but either would be needed before treating sonnet's single miss as settled.
+say whether sonnet's `out_of_scope` flip recurs at a stable rate or was a single-draw event; a
+second harvested entry testing that same `refuted`/`out_of_scope` boundary would say whether
+this is one quirky entry or a class the corpus systematically under-tests. Neither is needed to
+answer this pass's question — haiku's clean separation from the other two already proves the
+corpus is not blind — but either would be needed to raise this corpus's resolution enough to
+certify a small gap between the two close judges, if one exists.
 
-**Not a recommendation to switch `verify` to `claude-sonnet-5`.** This pass measures agreement
-with the incumbent's own labelled verdicts, not real-PR recall or precision, and it inherits
-every caveat Tasks 1–3 already logged about this corpus: most of its `refuted` half and all of
-its constructed shifts are tests of "did you read the quoted span," not "did you read the
-whole file" — no entry in this corpus can supply a whole-file probe, because each of the three
-fixes it draws on edited its own quoted code in place. An instrument that admits what it cannot
-test is worth more here than a verdict it cannot support.
+**Not a recommendation to switch `verify` to `claude-sonnet-5`.** Cost is part of why the
+question is moot rather than merely open: recomputed above, sonnet runs ~7% cheaper than the
+incumbent on this workload, not the ~60% the sticker prices imply once Anthropic's own token
+counting is priced in — too small a saving on its own to motivate a switch even before the
+methodological limits below are weighed. Those limits stand regardless of cost: this pass
+measures agreement with the incumbent's own labelled verdicts, not real-PR recall or precision,
+and it inherits every caveat Tasks 1–3 already logged about this corpus: most of its `refuted`
+half and all of its constructed shifts are tests of "did you read the quoted span," not "did
+you read the whole file" — no entry in this corpus can supply a whole-file probe, because each
+of the three fixes it draws on edited its own quoted code in place. An instrument that admits
+what it cannot test is worth more here than a verdict it cannot support.
+
+**`0923-418-D3t` confirms, rather than reverses, Task 3's own prediction.** Task 3 built the
+constructed shifts to separate "read the quote" from "read nothing," not a careful reader from
+a merely literate one, and warned that a `confirmed` verdict on `D3t` would mean the judge
+recognised the defect from memory instead of the tree. This run is the first data point on that
+line, and it lands exactly there: `gpt-5.5` and `claude-sonnet-5` answered `D3t` correctly in
+all 6 of their combined draws, while `claude-haiku-4-5` missed it in all 3 of its own — the
+predicted "reads nothing" failure, reproduced in a model verdict rather than asserted. Recorded
+so `D3t` is not later misread as evidence the shifts probe something beyond quote-reading; this
+pass confirms they probe exactly what Task 3 said they would, no more.
