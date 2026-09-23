@@ -1,6 +1,25 @@
 import { parseUsage, type Usage } from './usage';
 
-export class NonRetryableError extends Error {}
+/**
+ * A failure that must not be retried.
+ *
+ * `usage` is set when the call **completed and was billed** but its content was
+ * unusable — the empty-completion case below. Carrying it is not tidiness: the
+ * spec's rule for the cost footer is that the reviewer prints its own bill and
+ * that an admitted gap beats an invented number, and a billed call that vanishes
+ * from the footer understates the bill *silently*, which is the one direction
+ * that rule exists to forbid. Callers that swallow this error to keep going
+ * (`verifyAll`) must add `usage` to their running total. It stays undefined for
+ * transport and HTTP failures, where no token count was ever reported.
+ */
+export class NonRetryableError extends Error {
+  readonly usage?: Usage;
+
+  constructor(message: string, usage?: Usage) {
+    super(message);
+    this.usage = usage;
+  }
+}
 
 export interface ChatMessage {
   role: 'system' | 'user';
@@ -85,7 +104,13 @@ export async function callStructured(
         usage?: unknown;
       };
       const content = data.choices?.[0]?.message?.content;
-      if (!content) throw new NonRetryableError('OpenAI returned an empty completion');
+      if (!content) {
+        // Measured in production 2026-09-23 (#691): a reasoning model can spend the
+        // whole `max_completion_tokens` budget thinking and emit no content. The call
+        // is billed for every one of those tokens, so the usage travels with the
+        // failure.
+        throw new NonRetryableError('OpenAI returned an empty completion', parseUsage(data.usage));
+      }
       // Usage is read from the same response as the content, so a call can never
       // be published without being billed for in the footer.
       return { content, usage: parseUsage(data.usage) };

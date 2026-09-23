@@ -95,6 +95,55 @@ describe('callStructured', () => {
       }),
     ).rejects.toBeInstanceOf(NonRetryableError);
   });
+
+  // #691: a reasoning model can burn the whole completion budget and return no
+  // content. That call is billed, so the tokens must survive the failure — a
+  // caller that swallows the error to keep going has no other source for them.
+  it('carries the billed usage on an empty completion', async () => {
+    const fetchFn = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: {} }],
+          usage: {
+            prompt_tokens: 7100,
+            completion_tokens: 2400,
+            completion_tokens_details: { reasoning_tokens: 2400 },
+          },
+        }),
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const err = await callStructured(deps(fetchFn), [{ role: 'user', content: 'hi' }], {
+      name: 'review',
+      schema: SCHEMA,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect((err as NonRetryableError).usage).toEqual({
+      calls: 1,
+      promptTokens: 7100,
+      cachedTokens: 0,
+      completionTokens: 2400,
+      reasoningTokens: 2400,
+    });
+  });
+
+  // The other non-retryable paths report no token count at all, so they must not
+  // invent one: an HTTP failure priced as zero tokens is the same silent
+  // under-report, arriving from the other direction.
+  it('leaves usage undefined when the call never reported tokens', async () => {
+    const fetchFn = (async () =>
+      ({ ok: false, status: 400, text: async () => 'bad request' }) as unknown as Response) as unknown as typeof fetch;
+
+    const err = await callStructured(deps(fetchFn), [{ role: 'user', content: 'hi' }], {
+      name: 'review',
+      schema: SCHEMA,
+    }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(NonRetryableError);
+    expect((err as NonRetryableError).usage).toBeUndefined();
+  });
 });
 
 describe('callStructured — 429 handling', () => {

@@ -1,3 +1,4 @@
+import { EMPTY_USAGE } from './usage';
 import { verifyAll, type VerifyRequest } from './verify';
 
 const req = (over: Partial<VerifyRequest> = {}): VerifyRequest => ({
@@ -200,6 +201,52 @@ describe('verifyAll — billing of a completed but malformed call', () => {
       fileContent: () => 'file body',
     });
     expect(out.usage.calls).toBe(1);
+    expect(out.results[0].verdict).toBe('error');
+  });
+
+  // #691, measured in production: the two cases above RETURN an error, so their
+  // usage survives by the ordinary path. An empty completion THROWS, and the
+  // throw used to take the token count with it — the tokens were paid for and
+  // absent from the footer. Seen 3 times in 12 replay draws, always on a large
+  // file, where the whole completion budget went to reasoning.
+  it('counts the usage of a completed call that returned no content at all', async () => {
+    const emptyWithUsage = (async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: {} }],
+          usage: { prompt_tokens: 7100, completion_tokens: 2400 },
+        }),
+      }) as unknown as Response) as unknown as typeof fetch;
+
+    const out = await verifyAll(deps(emptyWithUsage), {
+      instructions: 'verify',
+      requests: [req(), req({ id: 'f1', claim: 'other bug' })],
+      fileContent: () => 'file body',
+    });
+
+    expect(out.usage.calls).toBe(1);
+    expect(out.usage.promptTokens).toBe(7100);
+    expect(out.usage.completionTokens).toBe(2400);
+    expect(out.results.map((r) => r.verdict)).toEqual(['error', 'error']);
+  });
+
+  // A transport failure reports no tokens, so nothing may be added for it. This
+  // is the pair to the test above: the fix must add real usage without inventing
+  // usage where the API never gave any.
+  it('adds nothing for a failure that never reported tokens', async () => {
+    const boom = (async () => {
+      throw new Error('socket hang up');
+    }) as unknown as typeof fetch;
+
+    const out = await verifyAll({ ...deps(boom), attempts: 1 }, {
+      instructions: 'verify',
+      requests: [req()],
+      fileContent: () => 'file body',
+    });
+
+    expect(out.usage).toEqual(EMPTY_USAGE);
     expect(out.results[0].verdict).toBe('error');
   });
 });
