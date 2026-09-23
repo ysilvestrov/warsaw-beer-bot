@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { DB } from '../storage/db';
+import { bumpCatalogVersion } from '../storage/catalog-version';
 import { cardAbv, cardText } from './card-text';
 import {
   closeLegacyDisposition, findActiveDispositionForBeer, findActiveDispositionForCard,
@@ -203,7 +204,7 @@ export function applyLegacyOrphanDisposition(
   db: DB, input: LegacyDispositionInput, expected?: LegacyDispositionPreview,
 ): { episodeId: number; kind: 'applied' | 'noop' } {
   validateDisposition(input);
-  return db.transaction(() => {
+  const result = db.transaction(() => {
     const existing = findActiveDispositionForBeer(db, input.beerId);
     if (existing) {
       if (sameActiveAction(existing, input)) return { episodeId: existing.id, kind: 'noop' as const };
@@ -221,6 +222,8 @@ export function applyLegacyOrphanDisposition(
     });
     return { episodeId, kind: 'applied' as const };
   })();
+  if (result.kind === 'applied') bumpCatalogVersion();
+  return result;
 }
 
 interface EpisodeRow {
@@ -266,7 +269,7 @@ export function applyLegacyOrphanReopen(
   db: DB, input: LegacyReopenInput, expected?: LegacyReopenPreview,
 ): { episodeId: number; kind: 'reopened' | 'noop' } {
   validateReopen(input);
-  return db.transaction(() => {
+  const result = db.transaction(() => {
     const episode = readEpisode(db, input.episodeId);
     if (!episode) throw new Error('episode is missing');
     if (episode.reopened_at !== null) {
@@ -286,4 +289,6 @@ export function applyLegacyOrphanReopen(
     })) throw new Error('episode is no longer active');
     return { episodeId: input.episodeId, kind: 'reopened' as const };
   })();
+  if (result.kind === 'reopened') bumpCatalogVersion();
+  return result;
 }
