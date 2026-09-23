@@ -9,6 +9,8 @@ import type { LookupOutcome } from './untappd-lookup';
 import type { SearchResult } from '../sources/untappd/search';
 import { SHADOW_ONLY, classifyOrphanAsNonBeer } from './drink-boundary';
 import { setEnrichFailureReview } from '../storage/enrich_failures';
+import { cardAbv, cardText } from './card-text';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -27,6 +29,25 @@ const failRow = (db: any, id: number) =>
   db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(id);
 
 describe('applyLookupOutcome failure logging', () => {
+  test.each<LookupOutcome>([
+    { kind: 'matched', result: cand({ bid: 999 }) },
+    { kind: 'not_found', searchUrls: ['u'], candidates: [] },
+    { kind: 'transient', error: new Error('timeout') },
+    { kind: 'blocked', searchUrl: 'u' },
+  ])('refuses %s writes after a disposition becomes active', (outcome) => {
+    const { db, id, log } = fresh();
+    insertLegacyDisposition(db, {
+      beerId: id, issueNumber: 677, cardBrewery: input.brewery, cardName: input.name, cardAbv: null,
+      breweryText: cardText(input.brewery), nameText: cardText(input.name), abvKey: cardAbv(null),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const before = getBeer(db, id);
+    expect(applyLookupOutcome({ db, log }, id, outcome, '2026-09-24T00:00:00Z', input)).toBe('skipped');
+    expect(getBeer(db, id)).toEqual(before);
+    expect(failRow(db, id)).toBeUndefined();
+    db.close();
+  });
   test('not_found records a failure row with candidate summary', () => {
     const { db, id, log } = fresh();
     const outcome: LookupOutcome = {

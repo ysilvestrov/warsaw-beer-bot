@@ -6,6 +6,8 @@ import { seedBeer } from '../storage/seed-beer.testing';
 import { upsertMatch, getMatch } from '../storage/match_links';
 import { recordEnrichFailure } from '../storage/enrich_failures';
 import { pinMatch, unpinByRef, unpinByBeer, listPins } from './pin-match';
+import { cardAbv, cardText } from './card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 function newDb() {
   const db = openDb(':memory:');
@@ -23,6 +25,26 @@ function orphan(db: ReturnType<typeof openDb>, brewery: string, name: string): n
 const AT = '2026-07-23T12:00:00.000Z';
 
 describe('pinMatch', () => {
+  test('requires explicit reopen before pinning an inactive orphan', () => {
+    const db = newDb();
+    const id = orphan(db, 'Old Brewery', 'Old Card');
+    upsertMatch(db, null, 'Old Card', id, 1.0);
+    const episode = insertLegacyDisposition(db, {
+      beerId: id, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: null,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(null),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    expect(() => pinMatch(db, id, 9001, AT)).toThrow(/reopen|inactive/i);
+    expect(getBeer(db, id)?.untappd_id).toBeNull();
+    expect(getMatch(db, null, 'Old Card')?.reviewed_by_user).toBe(0);
+    closeLegacyDisposition(db, episode, {
+      reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+      reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+    });
+    expect(pinMatch(db, id, 9001, AT)).toEqual({ kind: 'set', beerId: id });
+    db.close();
+  });
   test('merge case: redirects the orphan link to the canonical row, pins it, deletes orphan', () => {
     const db = newDb();
     const canonicalId = seedBeer(db, {

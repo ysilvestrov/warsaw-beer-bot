@@ -2,6 +2,7 @@ import type { DB } from '../storage/db';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 import { dropAliasesOnRelink } from '../storage/beers';
 import { tapBreweryKey } from '../storage/match_links';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 export type PinResult =
   | { kind: 'merged'; canonicalId: number; redirected: number }
@@ -24,6 +25,9 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
     .get(untappdId) as { id: number } | undefined;
 
   return db.transaction((): PinResult => {
+    if (findActiveDispositionForBeer(db, beerId)) {
+      throw new Error('inactive legacy orphan requires explicit reopen before pinning');
+    }
     if (canonical && canonical.id !== beerId) {
       const info = db
         .prepare('UPDATE match_links SET untappd_beer_id = ?, reviewed_by_user = 1 WHERE untappd_beer_id = ?')

@@ -8,6 +8,7 @@ import { applyLookupOutcome } from '../domain/lookup-outcome';
 import type { EnrichOutcomeKind } from '../domain/lookup-outcome';
 import { getBeer } from '../storage/beers';
 import { reviewClassOf } from '../storage/enrich_failures';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 export type { EnrichOutcomeKind } from '../domain/lookup-outcome';
 
@@ -26,6 +27,7 @@ export async function enrichOneOrphan(
 ): Promise<EnrichOutcomeKind> {
   const beer = getBeer(deps.db, beerId);
   if (!beer || beer.untappd_id !== null) return 'skipped';
+  if (findActiveDispositionForBeer(deps.db, beerId)) return 'skipped';
 
   const now = (deps.now ?? (() => new Date()))();
   // #421: the SECOND eligibility gate (the pools apply the first). Both must read the row's

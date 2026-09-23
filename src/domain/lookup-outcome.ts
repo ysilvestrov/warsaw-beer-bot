@@ -12,6 +12,7 @@ import { getBeer } from '../storage/beers';
 import type { LookupOutcome } from './untappd-lookup';
 import { summarizeCandidates } from './candidate-format';
 import { classifyOrphanAsNonBeer, autoClassifyAction, SHADOW_ONLY } from './drink-boundary';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient' | 'skipped' | 'blocked';
 
@@ -20,6 +21,22 @@ export type EnrichOutcomeKind = 'matched' | 'merged' | 'not_found' | 'transient'
 // both behave identically: on a UNIQUE clash the found bid is merged into the canonical
 // row; a `blocked` outcome records NOTHING (a block must never mutate backoff state).
 export function applyLookupOutcome(
+  deps: { db: DB; log: pino.Logger },
+  beerId: number,
+  outcome: LookupOutcome,
+  nowIso: string,
+  input: AliasCard & { sourceUrl?: string },
+): EnrichOutcomeKind {
+  // The network probe may have started before an operator made this row inactive.
+  // Acquire the write lock before checking so another connection cannot apply a
+  // disposition between this check and the outcome's writes.
+  return deps.db.transaction(() => {
+    if (findActiveDispositionForBeer(deps.db, beerId)) return 'skipped' as const;
+    return applyLookupOutcomeUnchecked(deps, beerId, outcome, nowIso, input);
+  }).immediate();
+}
+
+function applyLookupOutcomeUnchecked(
   deps: { db: DB; log: pino.Logger },
   beerId: number,
   outcome: LookupOutcome,

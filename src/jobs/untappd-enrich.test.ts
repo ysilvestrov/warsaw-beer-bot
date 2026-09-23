@@ -7,6 +7,8 @@ import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 import { enrichOneOrphan } from './untappd-enrich';
 import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -25,6 +27,52 @@ function throwingSearch(err: Error): BeerSearch {
 }
 
 describe('enrichOneOrphan', () => {
+  test('an in-flight lookup cannot write after an operator makes the row inactive', async () => {
+    const db = fresh();
+    const beerId = seedBeer(db, {
+      name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6, rating_global: null,
+      normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    let release!: () => void;
+    const waiting = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const search: BeerSearch = { search: async () => { entered(); await waiting; return []; } };
+    const lookup = enrichOneOrphan({ db, log: silentLog, search }, beerId);
+    await started;
+    insertLegacyDisposition(db, {
+      beerId, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const before = getBeer(db, beerId);
+    release();
+    expect(await lookup).toBe('skipped');
+    expect(getBeer(db, beerId)).toEqual(before);
+    expect(db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(beerId)).toBeUndefined();
+    db.close();
+  });
+
+  test('an already inactive row spends no search request at the second gate', async () => {
+    const db = fresh();
+    const beerId = seedBeer(db, {
+      name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6, rating_global: null,
+      normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    insertLegacyDisposition(db, {
+      beerId, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    let searched = false;
+    expect(await enrichOneOrphan({ db, log: silentLog,
+      search: { search: async () => { searched = true; return []; } },
+    }, beerId)).toBe('skipped');
+    expect(searched).toBe(false);
+    db.close();
+  });
   test('matched: fills untappd_id + rating, returns "matched"', async () => {
     const db = fresh();
     const beerId = seedBeer(db, {
