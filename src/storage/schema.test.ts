@@ -537,7 +537,7 @@ describe('schema migrations', () => {
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
       // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: this rewind starts from v23
       // and runs migrate() to completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(33);
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(34);
     });
   });
 
@@ -586,7 +586,7 @@ describe('schema migrations', () => {
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
       // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: a fresh DB's
       // reachable head moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(33);
+      expect(version.v).toBe(34);
     });
   });
 
@@ -728,5 +728,47 @@ describe('v32 beer_aliases (#614)', () => {
     db.prepare('DELETE FROM beers WHERE id = 2815').run();
     const left = db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get() as { n: number };
     expect(left.n).toBe(0);
+  });
+});
+
+describe('v34 legacy_card_repairs (#696)', () => {
+  it('retains one durable decision per removed orphan and rejects incomplete audit records', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const columns = (db.prepare('PRAGMA table_info(legacy_card_repairs)').all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).toEqual([
+      'id', 'orphan_beer_id', 'issue_number', 'card_brewery', 'card_name', 'card_abv',
+      'failure_source_url', 'target_bid', 'canonical_beer_id', 'evidence_url',
+      'operator', 'reason', 'overwrite_abv', 'prior_canonical_abv',
+      'final_canonical_abv', 'applied_at',
+    ]);
+
+    const insert = db.prepare(`
+      INSERT INTO legacy_card_repairs (
+        orphan_beer_id, issue_number, card_brewery, card_name, card_abv,
+        failure_source_url, target_bid, canonical_beer_id, evidence_url,
+        operator, reason, overwrite_abv, prior_canonical_abv,
+        final_canonical_abv, applied_at
+      ) VALUES (29955, 677, ?, ?, 6, 'https://flasker.com.ua/', 3615616, 77,
+                ?, ?, ?, ?, 6, 7, '2026-09-23T00:00:00Z')
+    `);
+    const valid = ['De Cam', 'Abrikoos Rabarber 2018', 'https://flasker.com.ua/product/de-cam/',
+      'operator-1', 'Shop ABV differs from Untappd'];
+    insert.run(...valid, 1);
+    expect(() => insert.run(...valid, 1)).toThrow(/UNIQUE constraint failed/);
+    for (const invalid of [
+      ['', valid[1], valid[2], valid[3], valid[4], 1],
+      [valid[0], '', valid[2], valid[3], valid[4], 1],
+      [valid[0], valid[1], '', valid[3], valid[4], 1],
+      [valid[0], valid[1], valid[2], '', valid[4], 1],
+      [valid[0], valid[1], valid[2], valid[3], '', 1],
+      [...valid, 2],
+    ]) {
+      db.prepare('DELETE FROM legacy_card_repairs').run();
+      expect(() => insert.run(...invalid)).toThrow(/CHECK constraint failed/);
+    }
+    expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(34);
+    db.close();
   });
 });
