@@ -11,6 +11,7 @@ import { upsertPub } from '../storage/pubs';
 import { createSnapshot, insertTaps } from '../storage/snapshots';
 import { upsertMatch, getMatch, type MatchRow } from '../storage/match_links';
 import { ensureOrphan, getBeer, inactiveLegacyOrphanPredicate } from '../storage/beers';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 import { matchPrepared, prepareBeer, type CatalogBeer, type PreparedCatalog } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
@@ -121,7 +122,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
           const m = matchPrepared({ brewery, name, abv: t.abv }, prepared);
           let beerId: number;
           let isFreshOrphan = false;
-          if (m) {
+          if (m && !findActiveDispositionForBeer(db, m.id)) {
             upsertMatch(db, t.brewery_ref, t.beer_ref, m.id, m.confidence);
             beerId = m.id;
           } else if (isRememberedMerge(db, link)) {

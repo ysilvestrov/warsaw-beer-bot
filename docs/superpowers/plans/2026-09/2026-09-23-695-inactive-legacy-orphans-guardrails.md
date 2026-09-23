@@ -13,6 +13,10 @@ In `src/domain/pin-match.ts` and `src/domain/repair-legacy-card.ts`, reject an a
 
 In `src/jobs/untappd-enrich.ts`, skip a newly inactive row at its second eligibility gate. In `src/domain/lookup-outcome.ts`, recheck the active episode under a short immediate write transaction before changing any beer, failure, backoff, or alias. Return the existing internal `skipped` kind. In `/enrich/result`, map that internal kind to the existing public `not_found` status, including the published-bid path. Tests pause an async lookup, apply a disposition, resume it, and assert no row/failure mutation; a direct writer test covers all outcome kinds. Do not change the disposition or automatically reopen it.
 
+## Task 3 — Prepared job plans cannot outrun the operator decision
+
+The refresh prepared catalog and cleanup merge plans can outlive the read at which they were built. Before using a matched row in `refresh-ontap`, recheck the live disposition and fall through to ordinary orphan creation if it became inactive. In cleanup and dedupe transactions, acquire the write lock and recheck both source and target IDs before rewriting, redirecting, or deleting. For normalization backfill, make the update conditional on the episode still being inactive-free. A paused-cleanup test and an in-flight refresh test prove this path; existing active-at-start tests remain.
+
 ## Gate
 
 Run focused tests, `npm test && npm run typecheck`, `git diff --check`, inspect branch diff from `902e52b`, commit guardrails separately. PR/deployment and any #677 production disposition remain gated by the original rollout plan.

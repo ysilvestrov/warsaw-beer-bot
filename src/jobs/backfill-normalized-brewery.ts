@@ -16,15 +16,16 @@ export function backfillNormalizedBrewery(db: DB, log: pino.Logger): BackfillRes
     .prepare(`SELECT b.id, b.brewery, b.normalized_brewery FROM beers b
       WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as Array<{ id: number; brewery: string; normalized_brewery: string }>;
-  const update = db.prepare('UPDATE beers SET normalized_brewery = ? WHERE id = ?');
+  const update = db.prepare(`UPDATE beers SET normalized_brewery = ? WHERE id = ?
+    AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+      WHERE lod.beer_id = beers.id AND lod.reopened_at IS NULL)`);
   let updated = 0;
 
   const tx = db.transaction((items: typeof rows) => {
     for (const r of items) {
       const fresh = normalizeBrewery(r.brewery);
       if (fresh !== r.normalized_brewery) {
-        update.run(fresh, r.id);
-        updated++;
+        updated += update.run(fresh, r.id).changes;
       }
     }
   });

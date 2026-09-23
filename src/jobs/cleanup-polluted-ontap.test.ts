@@ -64,6 +64,26 @@ describe('cleanupPollutedOntap', () => {
     expect(getRow(db, polluted)?.name).toBe('Oxymel 14°');
     db.close();
   });
+
+  test('does not execute a prepared rewrite after an operator seals the source', async () => {
+    const db = fresh();
+    const name = 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale';
+    const old = seedBeer(db, {
+      untappd_id: null, name, brewery: 'Wagabunda Brewery', style: null, abv: 4.5,
+      rating_global: null, normalized_name: 'wagabunda brewery oxymel 14 4 5 ale',
+      normalized_brewery: 'wagabunda',
+    });
+    const running = cleanupPollutedOntap(db, silentLog);
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Wagabunda Brewery', cardName: name, cardAbv: 4.5,
+      breweryText: cardText('Wagabunda Brewery'), nameText: cardText(name), abvKey: cardAbv(4.5),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    expect(await running).toEqual({ rewritten: 0, merged: 0 });
+    expect(getRow(db, old)?.name).toBe(name);
+    db.close();
+  });
   test('empty DB → no-op', async () => {
     const db = fresh();
     expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 0 });
