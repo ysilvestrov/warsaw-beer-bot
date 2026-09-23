@@ -587,6 +587,32 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE match_links_v33 RENAME TO match_links;
     `,
   },
+  {
+    version: 34,
+    // #696: historical shop-card repair deletes the orphan and may later outlive the
+    // canonical row too. Keep both local IDs as snapshots, not cascading FKs.
+    sql: `
+      CREATE TABLE IF NOT EXISTS legacy_card_repairs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        orphan_beer_id INTEGER NOT NULL UNIQUE,
+        issue_number INTEGER NOT NULL CHECK (issue_number > 0),
+        card_brewery TEXT NOT NULL CHECK (length(trim(card_brewery)) > 0),
+        card_name TEXT NOT NULL CHECK (length(trim(card_name)) > 0),
+        card_abv REAL,
+        failure_source_url TEXT NOT NULL,
+        target_bid INTEGER NOT NULL CHECK (target_bid > 0),
+        canonical_beer_id INTEGER NOT NULL,
+        evidence_url TEXT NOT NULL CHECK (length(trim(evidence_url)) > 0),
+        operator TEXT NOT NULL CHECK (length(trim(operator)) > 0),
+        reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+        overwrite_abv INTEGER NOT NULL CHECK (overwrite_abv IN (0, 1)),
+        prior_canonical_abv REAL,
+        final_canonical_abv REAL,
+        applied_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_legacy_card_repairs_issue ON legacy_card_repairs(issue_number);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
