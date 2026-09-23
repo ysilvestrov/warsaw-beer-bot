@@ -401,6 +401,35 @@ describe('refreshOntap multi-city', () => {
       .toEqual({ name: 'Old Card', untappd_id: null });
     db.close();
   });
+
+  test('rechecks a prepared match when the operator seals it during the pub fetch', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const old = seedBeer(db, {
+      untappd_id: null, name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6,
+      rating_global: null, normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    const index = `<div onclick="location.assign('https://oldpub.ontap.pl/')"><div class="panel-body">Old Pub 1 taps</div></div>`;
+    const http: Http = { async get(url: string) {
+      if (url === 'https://ontap.pl/warszawa') return index;
+      if (url === 'https://oldpub.ontap.pl/') {
+        insertLegacyDisposition(db, {
+          beerId: old, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+          breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+          failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+          operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+        });
+        return `<html><head><meta property="og:title" content="Old Pub / ontap.pl"></head>
+          <body>${panel(1, 'Old Brewery', 'Old Card 6%', 'IPA')}</body></html>`;
+      }
+      throw new Error(`Unexpected ${url}`);
+    } };
+    await refreshOntap({ db, log: silentLog, http, search: { search: async () => [] },
+      geocoder: async () => null, cities: CITIES.filter((c) => c.slug === 'warszawa'),
+      lookupEnabled: false });
+    expect(getMatch(db, 'Old Brewery', 'Old Card')?.untappd_beer_id).not.toBe(old);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beers').get()).toEqual({ n: 2 });
+    db.close();
+  });
   const cityIndex = (slug: string) => `
     <div onclick="location.assign('https://${slug}pub.ontap.pl/')">
       <div class="panel-body">${slug} Pub 2 taps</div>

@@ -6,6 +6,7 @@ import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName } from '../domain/normalize';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 import { inactiveLegacyOrphanPredicate } from '../storage/beers';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 const POLLUTION_RE = /\d+(?:[.,]\d+)?\s*[°%]| — /;
 const MERGE_THRESHOLD = 0.9;
@@ -84,6 +85,8 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
   let merged = 0;
   const tx = db.transaction((items: Plan[]) => {
     for (const plan of items) {
+      if (findActiveDispositionForBeer(db, plan.pollutedId)
+        || (plan.kind === 'merge' && findActiveDispositionForBeer(db, plan.targetId))) continue;
       if (plan.kind === 'merge') {
         updateLinks.run(plan.targetId, plan.pollutedId);
         updateCheckins.run(plan.targetId, plan.pollutedId);
@@ -95,7 +98,7 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
       }
     }
   });
-  tx(plans);
+  tx.immediate(plans);
   if (rewritten + merged > 0) bumpCatalogVersion();
 
   log.info({ rewritten, merged }, 'cleanup-polluted-ontap: pass complete');

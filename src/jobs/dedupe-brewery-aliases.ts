@@ -4,6 +4,7 @@ import { breweryAliases } from '../domain/matcher';
 import { digitIdentity, readNameDigits } from '../domain/digit-identity';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 import { inactiveLegacyOrphanPredicate } from '../storage/beers';
+import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
 
 interface PairCandidate {
   canonical_id: number;
@@ -84,16 +85,19 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
   );
   const deleteBeer = db.prepare('DELETE FROM beers WHERE id = ?');
 
+  let merged = 0;
   const tx = db.transaction((pairs: PairCandidate[]) => {
     for (const p of pairs) {
+      if (findActiveDispositionForBeer(db, p.orphan_id)
+        || findActiveDispositionForBeer(db, p.canonical_id)) continue;
       updateLinks.run(p.canonical_id, p.orphan_id);
       updateCheckins.run(p.canonical_id, p.orphan_id);
       deleteBeer.run(p.orphan_id);
+      merged++;
     }
   });
-  tx(Array.from(pairsByOrphan.values()));
+  tx.immediate(Array.from(pairsByOrphan.values()));
 
-  const merged = pairsByOrphan.size;
   if (merged > 0) bumpCatalogVersion();
   log.info(
     { pairs: merged },
