@@ -55,10 +55,14 @@ describe('beershop adapter', () => {
     const doc = new DOMParser().parseFromString(beerHtml, 'text/html');
     const cards = adapter.parseCards(doc);
 
-    expect(cards.length).toBeGreaterThan(20);
+    expect(cards).toHaveLength(40);
     expect(cards[0]).toMatchObject({
       brewery: 'Klín',
       name: '12° Berry',
+    });
+    expect(cards[cards.length - 1]).toMatchObject({
+      brewery: 'Eeuwige',
+      name: '18° Bullebak',
     });
     expect(cards.find(({ el }) => (
       el.querySelector('.p-i-header a')?.getAttribute('href') === '/p/fenek-sun-and-soil'

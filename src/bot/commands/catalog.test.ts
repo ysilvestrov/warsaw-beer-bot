@@ -45,7 +45,23 @@ describe('buildCommandMenu', () => {
 
   test('the native menu is unaffected by #399 — it still lists every command', () => {
     const menu = buildCommandMenu(createTranslator('uk'));
-    expect(menu.map((c) => c.command)).toEqual(COMMAND_CATALOG.map((e) => e.command));
+    expect(menu.map((c) => c.command)).toEqual([
+      'newbeers',
+      'route',
+      'pubs',
+      'filters',
+      'link',
+      'import',
+      'extension',
+      'announce',
+      'beers',
+      'refresh',
+      'lang',
+      'city',
+      'status',
+      'help',
+      'start',
+    ]);
   });
 });
 

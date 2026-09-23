@@ -523,19 +523,23 @@ describe('repairHomoglyphs', () => {
 
 describe('#382 homoglyph repair reaches name matching', () => {
   test('a Cyrillic С in a Latin word no longer blocks the match', () => {
-    expect(normalizeName('Belgian Сhristmas Ale')).toBe(normalizeName('Belgian Christmas Ale'));
+    expect(normalizeName('Belgian Сhristmas Ale')).toBe('belgian christmas ale');
+    expect(normalizeName('Belgian Christmas Ale')).toBe('belgian christmas ale');
   });
 
   test('a Latin i in a Cyrillic word no longer blocks the match', () => {
-    expect(normalizeName('Львiвське Бiле')).toBe(normalizeName('Львівське Біле'));
+    expect(normalizeName('Львiвське Бiле')).toBe('львівське біле');
+    expect(normalizeName('Львівське Біле')).toBe('львівське біле');
   });
 
   test('brewery normalization gets the same repair', () => {
-    expect(normalizeBrewery('Проскурiвське')).toBe(normalizeBrewery('Проскурівське'));
+    expect(normalizeBrewery('Проскурiвське')).toBe('проскурівське');
+    expect(normalizeBrewery('Проскурівське')).toBe('проскурівське');
   });
 
   test('a genuinely mixed name is still not equated with either script', () => {
-    expect(normalizeName('BeerЛога')).not.toBe(normalizeName('BeerLoga'));
+    expect(normalizeName('BeerЛога')).toBe('beerлога');
+    expect(normalizeName('BeerLoga')).toBe('beerloga');
   });
 });
 

@@ -116,10 +116,14 @@ describe('piwnemosty adapter', () => {
   });
 
   it('parses beer cards from the fixture', () => {
-    expect(cards.length).toBeGreaterThan(20);
+    expect(cards).toHaveLength(24);
     expect(cards[0]).toMatchObject({
       brewery: 'Browar Magic Road',
       name: 'Szpont',
+    });
+    expect(cards[cards.length - 1]).toMatchObject({
+      brewery: 'Browar Funky Fluid',
+      name: 'Funky On Tour Islay',
     });
   });
 
@@ -137,7 +141,7 @@ describe('piwnemosty adapter', () => {
     const doc = new DOMParser().parseFromString(withoutItemMetadata(html), 'text/html');
     const parsed = piwnemosty.parseCards(doc);
 
-    expect(parsed.length).toBeGreaterThan(20);
+    expect(parsed).toHaveLength(24);
     expect(parsed[0]).toMatchObject({
       brewery: 'Magic Road',
       name: 'Szpont',
