@@ -68,7 +68,20 @@ describe('parseCorpus', () => {
 describe('loadCorpus — the committed seed', () => {
   it('loads and validates the shipped corpus', () => {
     const corpus = loadCorpus();
-    expect(corpus.length).toBe(6);
+    expect(corpus.length).toBe(5);
+  });
+
+  // The in-file evidence rule, measured into existence on 2026-09-23: an entry whose
+  // truth cannot be established from the ONE file body verify sends measures whether
+  // the judge guesses, not whether it reads. `0723-344-1` was such an entry — its
+  // claim turned on `checkins.beer_id` having no `ON DELETE CASCADE`, which lives in
+  // `src/storage/schema.ts`, while the judge saw only `src/domain/pin-match.ts` (whose
+  // own comment says "enrich_failures CASCADE-drop", actively suggesting the delete is
+  // safe). Both judges measured wavered on it and on nothing else. It is gone, and no
+  // entry may cite a file other than its own as the thing that settles the verdict.
+  it('holds no entry whose file differs from the one its verdict turns on', () => {
+    const corpus = loadCorpus();
+    expect(corpus.map((e) => e.id)).not.toContain('0723-344-1');
   });
 
   // The seed is not an arbitrary sample: each of these properties is what makes a

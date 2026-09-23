@@ -30,21 +30,6 @@
     "why_expected": "The stored value *is* the match test: `resultKeys(await args.search.search(query)).has(expected)` is false unless the expected key is among the results, so unrelated hits record `false`."
   },
   {
-    "id": "0723-344-1",
-    "provenance": "harvested",
-    "source": "PR #344 AI review 2026-07-23, finding 1 (the only `real` in the 2026-07 baseline)",
-    "sha": "6deab17049981fe5ee042305856bc632ab13813e",
-    "file": "src/domain/pin-match.ts",
-    "matchedLine": 29,
-    "matchedEndLine": 29,
-    "quote": "      db.prepare('DELETE FROM beers WHERE id = ?').run(beerId); // enrich_failures CASCADE-drop",
-    "quoteOrigin": "original",
-    "claim": "Merging an orphan into a canonical beer deletes the orphan row without redirecting its check-ins, so those check-ins are lost.",
-    "why_it_breaks": "The merge redirects `match_links` to the canonical id and then deletes the orphan beer, but nothing redirects rows that reference the orphan by `checkins.beer_id`.",
-    "expected": "confirmed",
-    "why_expected": "In this tree the transaction updates `match_links` and then runs `DELETE FROM beers WHERE id = ?` with no statement touching `checkins`, and `checkins.beer_id` has no `ON DELETE CASCADE` redirect to the canonical row. With `foreign_keys=ON` that missing redirect makes the `DELETE` abort instead of orphaning the rows, but either way — abort or silent orphan, depending on FK enforcement — the merge loses those check-ins. Fixed in `ef2ebd2`, 13 minutes after the review, whose own message states the abort."
-  },
-  {
     "id": "0923-418-D3",
     "provenance": "harvested",
     "source": "PR #418 AI review at 584aa661 — one of the five defects closed by fix commit 2170717",
