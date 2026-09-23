@@ -462,6 +462,7 @@ export function mergeIntoCanonical(
   canonicalId: number,
   at: string,
   aliasSource?: AliasCard,
+  bumpVersion = true,
 ): void {
   db.transaction(() => {
     // #366: the merge is the only moment we learn "this ontap_ref is that canonical beer".
@@ -523,7 +524,7 @@ export function mergeIntoCanonical(
     }
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
   })();
-  bumpCatalogVersion();
+  if (bumpVersion) bumpCatalogVersion();
 }
 
 export function recordLookupNotFound(db: DB, beerId: number, at: string): void {
