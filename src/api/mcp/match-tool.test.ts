@@ -7,6 +7,8 @@ import { prepareCatalog, FULL_FALLBACK_BUDGET } from '../../domain/matcher';
 import type { CatalogCache } from '../../domain/catalog-cache';
 import type { CatalogBeerWithRating } from '../../domain/match-list';
 import { runMatchTool, renderMatchToolText } from './match-tool';
+import { cardAbv, cardText } from '../../domain/card-text';
+import { insertLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 
 const CATALOG: CatalogBeerWithRating[] = [
   { id: 105, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85, untappd_id: 9001 },
@@ -46,6 +48,26 @@ function db0() {
 }
 
 describe('runMatchTool', () => {
+  it('does not disclose a sealed row from an old catalog snapshot', async () => {
+    const db = db0();
+    const old = { id: 300, brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6,
+      rating_global: null, untappd_id: null };
+    seedBeer(db, old);
+    const staleCache = cacheOf([...CATALOG, old]);
+    insertLegacyDisposition(db, {
+      beerId: old.id, issueNumber: 677, cardBrewery: old.brewery, cardName: old.name, cardAbv: old.abv,
+      breweryText: cardText(old.brewery), nameText: cardText(old.name), abvKey: cardAbv(old.abv),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const { output } = await runMatchTool(db, staleCache, 1, [
+      { brewery: old.brewery, name: old.name, abv: 6 },
+      { brewery: old.brewery, name: old.name, abv: 7 },
+    ]);
+    expect(output.results.map((r) => r.beer)).toEqual([null, null]);
+    expect(output.results.map((r) => r.status)).toEqual(['not_in_catalog', 'not_in_catalog']);
+    db.close();
+  });
   it('an exact match on a beer the user rated is claimed as drunk, with the rating', async () => {
     const db = db0();
     mergeCheckin(db, {

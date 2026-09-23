@@ -12,6 +12,8 @@ import type { ApiEnv } from '../types';
 import { BEER_TEXT_LIMIT_CHARS, MATCH_BODY_LIMIT_BYTES } from '../middleware/payload-limit';
 import { prepareCatalog } from '../../domain/matcher';
 import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cache';
+import { cardAbv, cardText } from '../../domain/card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 
 function setup(log?: pino.Logger) {
   const warn = vi.fn();
@@ -55,6 +57,41 @@ function post(app: Hono<ApiEnv>, body: unknown) {
 }
 
 describe('POST /match', () => {
+  it('vetoes a sealed old card and stale cached row, while a distinct live card still matches', async () => {
+    const { appAnon, db } = setup();
+    const old = seedBeer(db, {
+      untappd_id: null, name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6,
+      rating_global: null, normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    const corrected = Number(db.prepare(`INSERT INTO beers
+      (untappd_id, name, brewery, abv, rating_global, normalized_name, normalized_brewery)
+      VALUES (9002, 'Old Card', 'Old Brewery', 7, 3.9, 'old card', 'old brewery')`)
+      .run().lastInsertRowid);
+    const app = appAnon();
+    expect((await (await post(app, { beers: [{ brewery: 'Old Brewery', name: 'Old Card', abv: 6 }] })).json())
+      .results[0].matched_beer?.id).toBe(old); // warm the cache before sealing
+    const episode = insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const oldResponse = await (await post(app, { beers: [
+      { brewery: 'Old Brewery', name: 'Old Card', abv: 6, bid: 9001, brand: 'Trzech Kumpli' },
+      { brewery: 'Old Brewery', name: 'Old Card', abv: 7, bid: 9002, brand: 'Old Brewery' },
+    ] })).json();
+    expect(oldResponse.results[0]).toMatchObject({ matched_beer: null, source: null });
+    expect(oldResponse.results[1].matched_beer?.id).toBe(corrected);
+    expect((await (await post(app, { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] })).json())
+      .results[0].matched_beer?.id).toBeDefined();
+    closeLegacyDisposition(db, episode, {
+      reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+      reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+    });
+    expect((await (await post(app, { beers: [{ brewery: 'Old Brewery', name: 'Old Card', abv: 6 }] })).json())
+      .results[0].matched_beer?.id).toBe(old);
+    db.close();
+  });
   it('matches against the INJECTED catalog cache, never one of its own', async () => {
     // The ghost beer exists only inside the stub cache — it is not in the database at all.
     // If the route built its own cache from `db`, this input could not match anything.

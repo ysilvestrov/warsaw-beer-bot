@@ -15,6 +15,23 @@ const catalog: CatalogBeerWithRating[] = [
 ];
 
 describe('matchBeerList', () => {
+  it('vetoes an exact inactive card before its published bid and an inactive stale-cache answer', async () => {
+    const old = { id: 300, brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6,
+      rating_global: null, untappd_id: 3615616 };
+    const { prepared, byId } = prep([old]);
+    const options = {
+      byUntappdId: new Map([[3615616, old]]),
+      isInactiveCard: (item: { abv?: number | null }) => item.abv === 6,
+      isInactiveBeerId: (id: number) => id === 300,
+    };
+    const oldCard = (await matchBeerList(prepared, byId, new Set([300]), new Map([[300, 4]]),
+      [{ brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6, bid: 3615616, brand: 'De Cam' }], options)).results[0];
+    expect(oldCard).toMatchObject({ matched_beer: null, source: null, is_drunk: false,
+      drunk_uncertain: false, user_rating: null, searched: true });
+    const corrected = (await matchBeerList(prepared, byId, new Set([300]), new Map(),
+      [{ brewery: 'De Cam', name: 'Abrikoos 2018', abv: 7, bid: 3615616, brand: 'De Cam' }], options)).results[0];
+    expect(corrected).toMatchObject({ matched_beer: null, source: null, searched: true });
+  });
   it('marks a matched, drunk beer with its personal rating', async () => {
     const { prepared, byId } = prep(catalog);
     const res = await matchBeerList(

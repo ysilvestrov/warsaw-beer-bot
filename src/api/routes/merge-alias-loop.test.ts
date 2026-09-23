@@ -6,6 +6,8 @@ import { seedBeer } from '../../storage/seed-beer.testing';
 import { ensureProfile } from '../../storage/user_profiles';
 import { mergeCheckin } from '../../storage/checkins';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
+import { cardAbv, cardText } from '../../domain/card-text';
+import { insertLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 import { applyLegacyCardRepair, previewLegacyCardRepair } from '../../domain/repair-legacy-card';
 import { findAliasTarget } from '../../storage/beers';
 import { createCatalogCache } from '../../domain/catalog-cache';
@@ -52,6 +54,46 @@ function loop(hydrateByBid: NonNullable<ApiDeps['hydrateByBid']> = async () => n
 }
 
 describe('#614 merge memory closes the extension loop', () => {
+  it('#695 old and corrected cards take separate paths through match and enrich', async () => {
+    const { db, post, match, beerCount } = loop();
+    const oldCard = { brewery: 'Old Brewery', name: 'Old Card', abv: 6 };
+    const old = seedBeer(db, {
+      untappd_id: null, ...oldCard, style: null, rating_global: null,
+      normalized_name: normalizeName(oldCard.name), normalized_brewery: normalizeBrewery(oldCard.brewery),
+    });
+    db.prepare(`INSERT INTO enrich_failures
+      (beer_id, brewery, name, search_url, source_url, outcome, candidates_count,
+       candidates_summary, fail_count, last_at, review_class, issue_number)
+      VALUES (?, ?, ?, '', '', 'not_found', 0, '', 1,
+        '2026-09-23T00:00:00Z', 'parser_bug', 677)`)
+      .run(old, oldCard.brewery, oldCard.name);
+    expect((await match(oldCard)).matched_beer?.id).toBe(old);
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: oldCard.brewery, cardName: oldCard.name, cardAbv: 6,
+      breweryText: cardText(oldCard.brewery), nameText: cardText(oldCard.name), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const before = beerCount();
+    expect((await match(oldCard)).matched_beer).toBeNull();
+    expect((await post('/enrich/candidates', { beers: [oldCard] })).candidates[0].eligible).toBe(false);
+    expect(await post('/enrich/result', {
+      ...oldCard, bid: 3548624, brand: 'Varvar Brew', algolia: { hits: [] },
+    })).toEqual({ status: 'not_found' });
+    expect(beerCount()).toBe(before);
+    db.prepare('UPDATE enrich_failures SET review_class = NULL WHERE beer_id = ?').run(old);
+    expect((await post('/enrich/candidates', { beers: [oldCard] })).candidates[0].eligible).toBe(false);
+
+    const corrected = { ...oldCard, abv: 7 };
+    expect((await match(corrected)).matched_beer).toBeNull();
+    expect((await post('/enrich/candidates', { beers: [corrected] })).candidates[0].eligible).toBe(true);
+    expect(await post('/enrich/result', { ...corrected, algolia: { hits: [] } }))
+      .toEqual({ status: 'not_found' });
+    expect(beerCount()).toBe(before + 1);
+    expect(db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(old)).toEqual({ untappd_id: null });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM enrich_failures WHERE beer_id = ?').get(old)).toEqual({ n: 1 });
+    db.close();
+  });
   it('the card is searched once: /match then answers exactly with the drinker status, and a repeat round mints no orphan', async () => {
     const { blackBean, post, match, beerCount } = loop();
 

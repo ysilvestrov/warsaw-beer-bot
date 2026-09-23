@@ -7,6 +7,7 @@ import { triedBeerIds } from '../../storage/untappd_had';
 import { latestRatingsByBeer } from '../../storage/checkins';
 import { matchBeerList } from '../../domain/match-list';
 import { recordMatchUsage } from '../../storage/api_usage';
+import { findActiveDispositionForBeer, findActiveDispositionForCard } from '../../storage/legacy-orphan-dispositions';
 import { warsawDateAndHour } from '../../domain/warsaw-time';
 import {
   BEER_TEXT_LIMIT_CHARS,
@@ -66,6 +67,8 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
     const { results, fallback, bid } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, {
       aliases,
       byUntappdId,
+      isInactiveCard: (item) => findActiveDispositionForCard(deps.db, item.brewery, item.name, item.abv ?? null) !== null,
+      isInactiveBeerId: (id) => findActiveDispositionForBeer(deps.db, id) !== null,
     });
     deps.log.info(
       {
