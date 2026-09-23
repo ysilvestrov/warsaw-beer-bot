@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { callStructured, type OpenAiDeps } from './openai';
+import { NonRetryableError, callStructured, type OpenAiDeps } from './openai';
 import { EMPTY_USAGE, addUsage, type Usage } from './usage';
 import type { VerifyRequest, VerifyResult } from './types';
 
@@ -191,6 +191,12 @@ export async function verifyAll(
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // A swallowed failure must not swallow the bill too. When the call completed
+      // and was billed but returned nothing usable, `NonRetryableError` carries the
+      // usage, and this is the only place that can still add it: the findings are
+      // being turned into `error` verdicts here, and the run continues. Without
+      // this line the tokens are paid for and absent from the footer (#691).
+      if (err instanceof NonRetryableError && err.usage) usage = addUsage(usage, err.usage);
       for (const r of requests) {
         byId.set(r.id, { id: r.id, verdict: 'error', evidence: message.slice(0, 200) });
       }
