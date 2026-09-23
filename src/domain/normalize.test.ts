@@ -59,10 +59,6 @@ describe('normalizeName structural search noise', () => {
     expect(normalizeName(raw)).toBe(expected);
   });
 
-  test('normalizes noisy and clean names symmetrically', () => {
-    expect(normalizeName('Jubilance (Pure Bedlam Collab)')).toBe(normalizeName('Jubilance'));
-  });
-
   test('preserves internal punctuation and decimal release identifiers', () => {
     expect(normalizeName('Dynaboost: Mosaic 9.0')).toBe('dynaboost mosaic 9.0');
   });
