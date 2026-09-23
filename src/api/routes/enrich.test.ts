@@ -6,6 +6,8 @@ import { findBeerByNormalized, getBeer, mergeIntoCanonical } from '../../storage
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { recordEnrichFailure, setEnrichFailureReview } from '../../storage/enrich_failures';
 import { normalizeName, normalizeBrewery, cleanSearchQuery } from '../../domain/normalize';
+import { cardAbv, cardText } from '../../domain/card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 import { enrichRoute } from './enrich';
 import { buildSearchUrl } from '../../sources/untappd/search';
 import type { ApiDeps, ApiEnv } from '../types';
@@ -58,6 +60,60 @@ function aliasedBlackBean(db: ReturnType<typeof setup>['db'], source: 'search' |
 
 const beerCount = (db: ReturnType<typeof setup>['db']) =>
   (db.prepare('SELECT COUNT(*) AS n FROM beers').get() as { n: number }).n;
+
+test('sealed old card never writes through either enrich route; ABV-corrected card remains eligible', async () => {
+  const { db, app } = setup();
+  const card = { brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6 };
+  const old = seedBeer(db, {
+    untappd_id: null, ...card, style: null, rating_global: null,
+    normalized_brewery: normalizeBrewery(card.brewery), normalized_name: normalizeName(card.name),
+  });
+  recordEnrichFailure(db, {
+    beer_id: old, brewery: card.brewery, name: card.name, search_url: '', source_url: '',
+    outcome: 'not_found', candidates_count: 0, candidates_summary: '', at: '2026-09-23T00:00:00Z',
+  });
+  db.prepare(`UPDATE enrich_failures SET issue_number = 677 WHERE beer_id = ?`).run(old);
+  const episode = insertLegacyDisposition(db, {
+    beerId: old, issueNumber: 677, cardBrewery: card.brewery, cardName: card.name, cardAbv: card.abv,
+    breweryText: cardText(card.brewery), nameText: cardText(card.name), abvKey: cardAbv(card.abv),
+    failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+    operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+  });
+  const before = {
+    beerCount: beerCount(db),
+    beer: getBeer(db, old),
+    failure: db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(old),
+  };
+  expect((await (await post(app, '/enrich/candidates', { beers: [card] })).json()).candidates[0])
+    .toMatchObject({ brewery: card.brewery, name: card.name, eligible: false });
+  expect(await (await post(app, '/enrich/result', {
+    ...card, bid: 3615616, algolia: { hits: [] }, pageUrl: 'https://flasker.com.ua/',
+  })).json()).toEqual({ status: 'not_found' });
+  expect(beerCount(db)).toBe(before.beerCount);
+  expect(getBeer(db, old)).toEqual(before.beer);
+  expect(db.prepare('SELECT * FROM enrich_failures WHERE beer_id = ?').get(old)).toEqual(before.failure);
+  db.prepare('UPDATE enrich_failures SET review_class = NULL WHERE beer_id = ?').run(old);
+  expect((await (await post(app, '/enrich/candidates', { beers: [card] })).json()).candidates[0].eligible)
+    .toBe(false);
+  const corrected = { ...card, abv: 7 };
+  expect((await (await post(app, '/enrich/candidates', { beers: [corrected] })).json()).candidates[0].eligible)
+    .toBe(true);
+  expect(beerCount(db)).toBe(before.beerCount + 1);
+  const correctedId = (db.prepare('SELECT id FROM beers WHERE id != ?').get(old) as { id: number }).id;
+  expect(await (await post(app, '/enrich/result', {
+    ...corrected, algolia: { hits: [] }, pageUrl: 'https://flasker.com.ua/corrected',
+  })).json()).toEqual({ status: 'not_found' });
+  expect(db.prepare('SELECT source_url FROM enrich_failures WHERE beer_id = ?').get(correctedId))
+    .toEqual({ source_url: 'https://flasker.com.ua/corrected' });
+  expect(getBeer(db, old)).toEqual(before.beer);
+  closeLegacyDisposition(db, episode, {
+    reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+    reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+  });
+  expect((await (await post(app, '/enrich/candidates', { beers: [card] })).json()).candidates[0].eligible)
+    .toBe(true);
+  db.close();
+});
 
 describe('POST /enrich/candidates', () => {
   it('rejects a raw body over the route byte limit', async () => {
@@ -1393,4 +1449,3 @@ describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', ()
     expect(beerCount(db)).toBe(2);
   });
 });
-
