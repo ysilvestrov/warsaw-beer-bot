@@ -70,7 +70,13 @@ function renderFinding(r: VerifyRequest, index: number): string {
  */
 export async function verifyFile(
   deps: OpenAiDeps,
-  p: { instructions: string; file: string; fileContent: string; requests: VerifyRequest[] },
+  p: {
+    instructions: string;
+    file: string;
+    fileContent: string;
+    requests: VerifyRequest[];
+    maxCompletionTokens?: number;
+  },
 ): Promise<{
   verdicts: Map<number, { verdict: 'confirmed' | 'refuted' | 'out_of_scope'; evidence: string }>;
   usage: Usage;
@@ -97,7 +103,8 @@ export async function verifyFile(
       { role: 'user', content: user },
     ],
     { name: 'review_verdicts', schema: VERDICTS_SCHEMA },
-    Math.max(MIN_VERIFY_TOKENS, p.requests.length * TOKENS_PER_VERDICT),
+    p.maxCompletionTokens ??
+      Math.max(MIN_VERIFY_TOKENS, p.requests.length * TOKENS_PER_VERDICT),
   );
 
   // Unusable content is reported, not thrown: the call completed and is billed,
@@ -144,6 +151,13 @@ export async function verifyAll(
     instructions: string;
     requests: VerifyRequest[];
     fileContent: (path: string) => string | null;
+    /**
+     * Override the per-call completion budget. Production leaves this unset and
+     * keeps `max(MIN_VERIFY_TOKENS, n * TOKENS_PER_VERDICT)`; the corpus runner
+     * sets it so that a verbose judge does not hit the ceiling more often than a
+     * terse one and lose findings to #691 — a bias that reads as lower quality.
+     */
+    maxCompletionTokens?: number;
   },
 ): Promise<{ results: VerifyResult[]; usage: Usage }> {
   const byFile = new Map<string, VerifyRequest[]>();
@@ -174,6 +188,7 @@ export async function verifyAll(
         file,
         fileContent: content,
         requests,
+        maxCompletionTokens: p.maxCompletionTokens,
       });
       usage = addUsage(usage, out.usage);
       requests.forEach((r, i) => {
