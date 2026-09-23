@@ -15,6 +15,8 @@ import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import type { BeerSearch } from '../sources/untappd/search';
 import { getMatch, upsertMatch } from '../storage/match_links';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 // Wrap ensureOrphan in a spy while keeping the real implementation (and every other
 // export, e.g. listLookupCandidates) intact. Lets the orphan-reuse test assert that a
@@ -363,6 +365,42 @@ function panel(
 }
 
 describe('refreshOntap multi-city', () => {
+  test('excludes inactive historical rows from its own catalog and gives a corrected tap a new row', async () => {
+    const db = openDb(':memory:'); migrate(db);
+    const old = seedBeer(db, {
+      untappd_id: null, name: 'Old Card', brewery: 'Old Brewery', style: null, abv: 6,
+      rating_global: null, normalized_name: 'old card', normalized_brewery: 'old brewery',
+    });
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: 6,
+      breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(6),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    let preparedIds: number[] = [];
+    const index = `<div onclick="location.assign('https://oldpub.ontap.pl/')"><div class="panel-body">Old Pub 1 taps</div></div>`;
+    const http: Http = { async get(url: string) {
+      if (url === 'https://ontap.pl/warszawa') return index;
+      if (url === 'https://oldpub.ontap.pl/') return `<html><head><meta property="og:title" content="Old Pub / ontap.pl"></head>
+        <body>${panel(1, 'Old Brewery', 'Old Card 7%', 'IPA')}</body></html>`;
+      throw new Error(`Unexpected ${url}`);
+    } };
+    await refreshOntap({
+      db, log: silentLog, http, search: { search: async () => [] }, geocoder: async () => null,
+      cities: CITIES.filter((c) => c.slug === 'warszawa'), lookupEnabled: false,
+      prepareCatalog: async (rows) => {
+        preparedIds = rows.map((r) => r.id);
+        return prepareCatalogChunked(rows);
+      },
+    });
+    expect(preparedIds).not.toContain(old);
+    const link = getMatch(db, 'Old Brewery', 'Old Card');
+    expect(link?.untappd_beer_id).toBeDefined();
+    expect(link?.untappd_beer_id).not.toBe(old);
+    expect(db.prepare('SELECT name, untappd_id FROM beers WHERE id = ?').get(old))
+      .toEqual({ name: 'Old Card', untappd_id: null });
+    db.close();
+  });
   const cityIndex = (slug: string) => `
     <div onclick="location.assign('https://${slug}pub.ontap.pl/')">
       <div class="panel-body">${slug} Pub 2 taps</div>

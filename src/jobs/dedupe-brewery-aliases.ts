@@ -3,6 +3,7 @@ import type { DB } from '../storage/db';
 import { breweryAliases } from '../domain/matcher';
 import { digitIdentity, readNameDigits } from '../domain/digit-identity';
 import { bumpCatalogVersion } from '../storage/catalog-version';
+import { inactiveLegacyOrphanPredicate } from '../storage/beers';
 
 interface PairCandidate {
   canonical_id: number;
@@ -40,6 +41,7 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
         AND a.id <> b.id
        WHERE a.untappd_id IS NOT NULL
          AND b.untappd_id IS NULL
+         AND NOT ${inactiveLegacyOrphanPredicate}
          AND (
            a.brewery LIKE '%/%'
            OR (a.brewery LIKE '%(%' AND a.brewery LIKE '%)%')
