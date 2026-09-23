@@ -80,6 +80,12 @@ export async function runRepairLegacyCard(
   },
 ): Promise<void> {
   const args = parseRepairCliArgs(argv);
+  const schemaVersion = (deps.db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as
+    { version: number | null }).version ?? 0;
+  const readyToApply = schemaVersion >= 34;
+  if (args.apply && !readyToApply) {
+    throw new Error(`schema v34 migration is required before --apply (current v${schemaVersion})`);
+  }
   const record = (await deps.hydrate([args.bid])).get(args.bid);
   if (!record || record.bid !== args.bid) throw new Error(`could not hydrate exact bid ${args.bid}`);
   const input = {
@@ -90,7 +96,8 @@ export async function runRepairLegacyCard(
   };
   const preview = previewLegacyCardRepair(deps.db, input);
   deps.print(JSON.stringify({
-    ...preview, evidenceUrl: args.evidenceUrl, reason: args.reason,
+    ...preview, schemaVersion, readyToApply,
+    evidenceUrl: args.evidenceUrl, reason: args.reason,
     operator: args.operator, apply: args.apply,
   }, null, 2));
   if (!args.apply) return;
