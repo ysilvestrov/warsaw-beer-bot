@@ -159,25 +159,22 @@ describe('onemorebeer technical panel (#369)', () => {
   it('parses a real 0.0% product as 0, not undefined', () => {
     const abvHtml = readFileSync(resolve(__dirname, '../../tests/fixtures/onemorebeer.abv.html'), 'utf8');
     const parsed = onemorebeer.parseCards(new DOMParser().parseFromString(abvHtml, 'text/html'));
-    expect(parsed.length).toBeGreaterThan(0);
+    expect(parsed).toHaveLength(2);
 
-    const zero = parsed.filter((c) => c.abv === 0); // MUST be 0 — a falsy check here breaks #322
-    expect(zero.length).toBeGreaterThan(0);
-    for (const card of zero) {
-      expect(card.abv).toBe(0);
-      expect(card.abv).not.toBeUndefined();
-      expect(card.brewery.length).toBeGreaterThan(0);
-    }
-
-    // Style parses alongside abv from the same panel. Only "at least one" — that is what
-    // the capture guard promises, and a 0.0% product legitimately need not publish a Styl
-    // row (the main onemorebeer fixture contains such a product).
-    expect(zero.some((c) => c.style)).toBe(true);
-
-    // No card may come back with a non-zero ABV it did not publish.
-    for (const card of parsed) {
-      if (card.abv !== undefined) expect(Number.isFinite(card.abv)).toBe(true);
-    }
+    expect(parsed).toEqual([
+      expect.objectContaining({
+        brewery: 'AleBrowar',
+        name: 'KWAS CHLEBOWY RYE',
+        abv: 0,
+        style: 'Kwas Chlebowy',
+      }),
+      expect.objectContaining({
+        brewery: 'Sady',
+        name: 'KWAS CHLEBOWY',
+        abv: 0,
+        style: 'Kwas Chlebowy',
+      }),
+    ]);
   });
 
   it('accepts a comma decimal separator', () => {

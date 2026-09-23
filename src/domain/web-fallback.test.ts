@@ -134,7 +134,9 @@ describe('runWebFallback', () => {
     const sr = await runWebFallback({ db, resolver, hydrate: noHydrate, cap: 90, log, now }, { beerId, ...input });
     expect(sr?.bid).toBe(5158585);
     expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
-    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toEqual({
+      web_tried_at: '2026-07-24T12:00:00.000Z',
+    });
     db.close();
   });
 
@@ -317,7 +319,9 @@ describe('runWebFallback', () => {
     ).rejects.toThrow(boom);
 
     expect((db.prepare('SELECT count FROM web_search_quota').get() as { count: number }).count).toBe(1);
-    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toBeTruthy();
+    expect(db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId)).toEqual({
+      web_tried_at: '2026-07-24T12:00:00.000Z',
+    });
     expect(info).toHaveBeenCalledTimes(1);
     const [fields, msg] = info.mock.calls[0];
     expect(msg).toBe('web-fallback call');

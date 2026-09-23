@@ -644,17 +644,6 @@ describe('prepareCatalog — breweryCandidates index', () => {
   ];
   const prepared = prepareCatalog(cat);
 
-  // The index must return exactly the rows a full linear breweryAliasesMatch scan
-  // would — set equality, regardless of order. This is the invariant that lets the
-  // index replace the O(catalog) per-beer filter without changing any match result.
-  const fullScan = (brewery: string) => {
-    const ia = breweryAliases(brewery);
-    return cat
-      .map(prepareBeer)
-      .filter((c) => breweryAliasesMatch(c.aliases, ia))
-      .map((c) => c.id)
-      .sort();
-  };
   const indexed = (brewery: string) =>
     prepared
       .breweryCandidates(breweryAliases(brewery))
@@ -662,15 +651,15 @@ describe('prepareCatalog — breweryCandidates index', () => {
       .sort();
 
   test.each([
-    'Pinta',                                  // token-prefix matches 'Pinta' + 'Pinta Barrel', not 'Pinto'
-    'Pinta Barrel',
-    'Pinto',
-    'Beer Underground',                       // matches the collab inner alias of id 5
-    'Piwne Podziemie / Beer Underground',
-    'Beer Bros',
-    'Nowhere',                                // no bucket → empty
-  ])('matches the full-scan result set for %s', (brewery) => {
-    expect(indexed(brewery)).toEqual(fullScan(brewery));
+    ['Pinta', [1, 2]],                                  // token-prefix matches 'Pinta' + 'Pinta Barrel', not 'Pinto'
+    ['Pinta Barrel', [1, 2]],
+    ['Pinto', [3]],
+    ['Beer Underground', [5]],                       // matches the collab inner alias of id 5
+    ['Piwne Podziemie / Beer Underground', [5]],
+    ['Beer Bros', [6]],
+    ['Nowhere', []],                                // no bucket → empty
+  ])('returns expected candidate IDs for %s', (brewery, expectedIds) => {
+    expect(indexed(brewery)).toEqual(expectedIds);
   });
 
   test('returns no duplicate rows when a row has multiple same-first-token aliases', () => {

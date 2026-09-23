@@ -108,16 +108,23 @@ const found = (over: Partial<Extract<CardState, { kind: 'found' }>> = {}): CardS
 });
 
 describe('#648 renderState', () => {
-  const table: [string, CardState, string[], string, string | null][] = [
-    ['queued', { kind: 'queued' }, ['ring'], 'Чекає черги', null],
-    ['working', { kind: 'working' }, ['arc'], 'Шукаємо це пиво', null],
-    ['nonBeer', { kind: 'nonBeer' }, ['cross'], 'Не пиво', null],
+  const unlinkedTable: [string, CardState, string[], string][] = [
+    ['queued', { kind: 'queued' }, ['ring'], 'Чекає черги'],
+    ['working', { kind: 'working' }, ['arc'], 'Шукаємо це пиво'],
+    ['nonBeer', { kind: 'nonBeer' }, ['cross'], 'Не пиво'],
     ['deferred', { kind: 'deferred' }, ['reload'],
-      'Не встигли перевірити цього разу. Спробуй перезавантажити сторінку', null],
+      'Не встигли перевірити цього разу. Спробуй перезавантажити сторінку'],
     ['failed blocked', { kind: 'failed', reason: 'blocked' }, ['warn'],
-      'Не вдалося перевірити: Untappd не відповів', null],
+      'Не вдалося перевірити: Untappd не відповів'],
     ['failed unparsed', { kind: 'failed', reason: 'unparsed' }, ['warn'],
-      'Не змогли розібрати цю картку', null],
+      'Не змогли розібрати цю картку'],
+    ['failed network', { kind: 'failed', reason: 'network' }, ['warn'],
+      'Не вдалося перевірити: не було зв\u02bcязку'],
+    ['failed server', { kind: 'failed', reason: 'server' }, ['warn'],
+      'Не вдалося перевірити: сервер не відповів'],
+  ];
+
+  const linkedTable: [string, CardState, string[], string, string][] = [
     ['missing orphan', { kind: 'missing', brewery: 'PINTA', name: 'Ghost', orphan: true }, ['search'],
       'Пиво є в каталозі, але сторінки на Untappd нема. Клік відкриє пошук',
       'https://untappd.com/search?q=PINTA%20Ghost&type=beer'],
@@ -137,16 +144,12 @@ describe('#648 renderState', () => {
     ['found, unsure', found({ drunk: true, unsure: true }), ['check', 'star'],
       'Непевний збіг. Схоже, ти це пив. Глобальна оцінка 4,1',
       'https://untappd.com/beer/111'],
-    ['failed network', { kind: 'failed', reason: 'network' }, ['warn'],
-      'Не вдалося перевірити: не було зв\u02bcязку', null],
-    ['failed server', { kind: 'failed', reason: 'server' }, ['warn'],
-      'Не вдалося перевірити: сервер не відповів', null],
     ['found, drunk on an orphan row', found({ drunk: true, untappdId: null, global: null }), ['check'],
       'Ти це пив. Ані твоєї, ані глобальної оцінки нема',
       'https://untappd.com/search?q=PINTA%20Hazy%20Morning&type=beer'],
   ];
 
-  it.each(table)('%s', (_name, state, wantIcons, wantLabel, wantHref) => {
+  it.each(unlinkedTable)('renders unlinked badge for %s', (_name, state, wantIcons, wantLabel) => {
     const host = el();
     const open = vi.spyOn(window, 'open').mockImplementation(() => null);
     renderState(host, state);
@@ -156,8 +159,20 @@ describe('#648 renderState', () => {
     expect(badge.getAttribute('aria-label')).toBe(wantLabel);
     expect(badge.getAttribute('title')).toBe(wantLabel);
     badge.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    if (wantHref === null) expect(open).not.toHaveBeenCalled();
-    else expect(open).toHaveBeenCalledWith(wantHref, '_blank', 'noopener');
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it.each(linkedTable)('renders linked badge for %s and navigates on click', (_name, state, wantIcons, wantLabel, wantHref) => {
+    const host = el();
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    renderState(host, state);
+    const badge = badgeOf(host);
+    expect(icons(host)).toEqual(wantIcons);
+    expect(badge.getAttribute('role')).toBe('img');
+    expect(badge.getAttribute('aria-label')).toBe(wantLabel);
+    expect(badge.getAttribute('title')).toBe(wantLabel);
+    badge.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(open).toHaveBeenCalledWith(wantHref, '_blank', 'noopener');
   });
 
   it('shows the rating number with a dot, and only when there is one', () => {
