@@ -30,23 +30,39 @@ export interface ResolvedArgs {
 export function resolveArgs(argv: string[]): ResolvedArgs {
   let model = '';
   let draws = 1;
+  let drawsGiven = false;
   let only: string | undefined;
   let check = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--model') model = argv[++i] ?? '';
-    else if (a === '--draws') draws = Number(argv[++i]);
-    else if (a === '--only') {
+    else if (a === '--draws') {
+      draws = Number(argv[++i]);
+      drawsGiven = true;
+    } else if (a === '--only') {
       const v = argv[++i];
-      // A valueless `--only` (e.g. it is the last token) must stop the run
-      // rather than silently filter nothing and score the whole corpus.
-      if (v === undefined) throw new Error('--only requires a value');
+      // A `--only` with nothing usable behind it must stop the run. Both shapes
+      // reach the same end if allowed through: `undefined` (it was the last
+      // token) and `''` or whitespace (an unexpanded shell variable, the common
+      // case). Downstream the filter is applied as `only ? filter : all`, so an
+      // empty string reads as "no filter" — the operator asks for a subset and
+      // silently pays for the whole corpus, with no FILTERED marker in the
+      // report to show it happened. Found by the AI review on PR #698.
+      if (v === undefined || v.trim() === '') throw new Error('--only requires a non-empty value');
       only = v;
     } else if (a === '--check') check = true;
     else throw new Error(`unrecognised argument: ${a}`);
   }
   if (check) {
     if (model) throw new Error('--check cannot be combined with --model');
+    // #698's P2: `--check` used to return before the draw-count validation, so
+    // `--draws 0` — and a valueless `--draws`, which is NaN — were accepted and
+    // then quietly ignored. Rejecting the combination is the fix, not reordering
+    // the validation: silently discarding an argument the operator typed is the
+    // same defect as silently widening `--only`. This stands BEFORE the
+    // positive-integer check on purpose, so the message names the real mistake
+    // rather than complaining about a count that was never going to be used.
+    if (drawsGiven) throw new Error('--draws is meaningless with --check, which never calls a model');
     return { check: true, model: '', draws, only };
   }
   if (!model) throw new Error('--model <name> is required');

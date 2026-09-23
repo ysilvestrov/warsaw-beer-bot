@@ -172,4 +172,29 @@ describe('resolveArgs', () => {
   it('rejects a valueless --only', () => {
     expect(() => resolveArgs(['--model', 'm', '--only'])).toThrow(/--only/);
   });
+
+  // PR #698 review, P1: the M5 fix only guarded `undefined`. An EMPTY value —
+  // the shape an unexpanded shell variable produces — still read as "no filter"
+  // downstream (`only ? filter : all`), so the operator asked for a subset and
+  // silently paid for the whole corpus, with no FILTERED marker to show it.
+  it('rejects an empty --only value', () => {
+    expect(() => resolveArgs(['--model', 'm', '--only', ''])).toThrow(/--only/);
+  });
+
+  it('rejects a whitespace-only --only value', () => {
+    expect(() => resolveArgs(['--model', 'm', '--only', '   '])).toThrow(/--only/);
+  });
+
+  // PR #698 review, P2: `--check` used to return before the draw-count check, so
+  // `--draws 0` and even a valueless `--draws` were accepted and then ignored.
+  // The fix that actually closes it is rejecting the combination outright —
+  // `--check` never calls a model, so a draw count there is a misunderstanding
+  // worth naming rather than discarding. Asserting the specific message keeps
+  // this test honest about WHICH guard fires: a bare `/--draws/` would also be
+  // satisfied by the positive-integer error and prove less than it appears to.
+  it('rejects --draws combined with --check, whatever the value', () => {
+    for (const argv of [['--check', '--draws', '3'], ['--check', '--draws', '0'], ['--check', '--draws']]) {
+      expect(() => resolveArgs(argv)).toThrow(/--draws is meaningless with --check/);
+    }
+  });
 });
