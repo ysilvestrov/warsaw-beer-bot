@@ -295,9 +295,9 @@ describe('verifyAll — completion budget', () => {
       instructions: 'verify',
       requests: [req()],
       fileContent: () => 'body',
-      maxCompletionTokens: 8000,
+      maxCompletionTokens: 7777,
     });
 
-    expect(body.max_completion_tokens).toBe(8000);
+    expect(body.max_completion_tokens).toBe(7777);
   });
 });

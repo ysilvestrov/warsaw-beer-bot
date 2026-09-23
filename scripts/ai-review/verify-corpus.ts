@@ -29,7 +29,10 @@ const entrySchema = z.object({
   id: nonEmpty,
   provenance: z.enum(['harvested', 'constructed']),
   source: nonEmpty,
-  sha: nonEmpty,
+  // Full 40-character shas only (M6, final review): a short sha is a prefix that
+  // can stop being unique as the repo grows, and `git show <prefix>:<file>` is
+  // exactly the ambiguous form `--check` (I5) and the runner both need to avoid.
+  sha: z.string().regex(/^[0-9a-f]{40}$/, 'sha must be a full 40-character hex commit id'),
   file: nonEmpty,
   matchedLine: z.number().int().positive(),
   matchedEndLine: z.number().int().positive(),

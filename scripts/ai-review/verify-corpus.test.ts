@@ -5,7 +5,8 @@ const entry = (over: Partial<CorpusEntry> = {}): CorpusEntry => ({
   id: '0726-348-4',
   provenance: 'harvested',
   source: 'PR #348 AI review 2026-07-26',
-  sha: 'eb20128c2875',
+  // Full 40-character sha (M6, final review): the schema now rejects a short prefix.
+  sha: 'eb20128c2875a67fabe0971b08608020d259f1a8',
   file: 'src/storage/web_search_quota.ts',
   matchedLine: 8,
   matchedEndLine: 16,

@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import type { OpenAiDeps } from './openai';
 import { EMPTY_USAGE, addUsage, type Usage } from './usage';
 import type { CorpusEntry } from './verify-corpus';
-import { verifyAll } from './verify';
+import type { verifyAll } from './verify';
 
 export interface CorpusGroup {
   sha: string;
@@ -52,6 +52,12 @@ export function gitBody(sha: string, file: string): string | null {
     return execFileSync('git', ['show', `${sha}:${file}`], {
       encoding: 'utf8',
       maxBuffer: 50 * 1024 * 1024,
+      // Absent paths are the expected, common failure here (an entry only exists
+      // at the trees it was harvested from), and a paid corpus run should not
+      // have `git`'s raw `fatal: …` interleaved with the judge's own output —
+      // that noise is exactly the harness-vs-judge distinction this runner exists
+      // to keep separate. The message still reaches the outcome via `evidence`.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
   } catch {
     return null;
