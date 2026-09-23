@@ -66,22 +66,59 @@ describe('parseCorpus', () => {
 });
 
 describe('loadCorpus — the committed seed', () => {
+  // The explicit id inventory, not a bare count: `parseCorpus([])` returns `[]`
+  // without throwing, so a length-only assertion cannot tell 7 entries from 1, and
+  // it is the only thing watching the total (verify-corpus.ts's own header warns a
+  // skipped entry "shrinks the denominator invisibly"). Naming every id also means
+  // an honest drop shows up in the diff as "this id left", not as a changed number
+  // with no story — see `0923-418-D1` below, dropped by stage-2 task-1 fix round 1.
   it('loads and validates the shipped corpus', () => {
+    expect(
+      loadCorpus()
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual(
+      [
+        '0726-348-4',
+        '0728-358-4',
+        '0923-418-D2',
+        '0923-418-D3',
+        '0923-418-D4',
+        '0923-418-D4t',
+        '0923-418-D5',
+      ].sort(),
+    );
+  });
+
+  // A judge comparison run against one entry per verdict class measures nothing.
+  it('keeps enough of each verdict class to measure anything', () => {
     const corpus = loadCorpus();
-    expect(corpus.length).toBe(5);
+    expect(corpus.filter((e) => e.expected === 'confirmed').length).toBeGreaterThanOrEqual(3);
+    expect(corpus.filter((e) => e.expected === 'refuted').length).toBeGreaterThanOrEqual(2);
   });
 
   // The in-file evidence rule, measured into existence on 2026-09-23: an entry whose
   // truth cannot be established from the ONE file body verify sends measures whether
-  // the judge guesses, not whether it reads. `0723-344-1` was such an entry — its
-  // claim turned on `checkins.beer_id` having no `ON DELETE CASCADE`, which lives in
+  // the judge guesses, not whether it reads. Two entries have failed it so far.
+  // `0723-344-1` (dropped before this task, in 58e6ead): its claim turned on
+  // `checkins.beer_id` having no `ON DELETE CASCADE`, which lives in
   // `src/storage/schema.ts`, while the judge saw only `src/domain/pin-match.ts` (whose
   // own comment says "enrich_failures CASCADE-drop", actively suggesting the delete is
-  // safe). Both judges measured wavered on it and on nothing else. It is gone, and no
-  // entry may cite a file other than its own as the thing that settles the verdict.
+  // safe) — both judges measured wavered on it and on nothing else.
+  // `0923-418-D1` (dropped by this task's fix round 1): `parseScopeBlock` is
+  // byte-identical at 584aa661, at the fix commit 2170717, and in main today — the
+  // fix never touched the quoted code, only its caller in the OTHER file
+  // (`src/jobs/orphan-triage.ts`, which concatenates model-authored `issue.body`
+  // ahead of the rendered scope block). Worse, `triage-scope.ts` itself asserts the
+  // opposite of the claim (lines 130-133: "the model never authors the text") and
+  // names the flagged first-match behaviour as already handled (lines 138-144). A
+  // judge reading only this file has no ground truth for "confirmed" and every
+  // in-file signal points it toward "refuted" or "out_of_scope" instead.
+  // Neither may return.
   it('holds no entry whose file differs from the one its verdict turns on', () => {
     const corpus = loadCorpus();
     expect(corpus.map((e) => e.id)).not.toContain('0723-344-1');
+    expect(corpus.map((e) => e.id)).not.toContain('0923-418-D1');
   });
 
   // The seed is not an arbitrary sample: each of these properties is what makes a
@@ -104,5 +141,12 @@ describe('loadCorpus — the committed seed', () => {
     const corpus = loadCorpus();
     const shas = corpus.filter((e) => e.file === 'src/domain/triage-plan.ts').map((e) => e.sha);
     expect(new Set(shas).size).toBe(2);
+  });
+
+  // Stage 2, task 1: known-true entries must not all sit in one file, or a judge
+  // that reads that file well scores perfectly on every confirmable claim there is.
+  it('spreads the known-true entries over more than one file', () => {
+    const confirmed = loadCorpus().filter((e) => e.expected === 'confirmed');
+    expect(new Set(confirmed.map((e) => e.file)).size).toBeGreaterThan(1);
   });
 });
