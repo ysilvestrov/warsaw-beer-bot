@@ -87,10 +87,13 @@ describe('loadCorpus — the committed seed', () => {
         '0728-358-1',
         '0728-358-4',
         '0923-418-D2',
+        '0923-418-D2t',
         '0923-418-D3',
+        '0923-418-D3t',
         '0923-418-D4',
         '0923-418-D4t',
         '0923-418-D5',
+        '0923-418-D5t',
       ].sort(),
     );
   });
@@ -164,5 +167,16 @@ describe('loadCorpus — the committed seed', () => {
   it('spreads the known-true entries over more than one file', () => {
     const confirmed = loadCorpus().filter((e) => e.expected === 'confirmed');
     expect(new Set(confirmed.map((e) => e.file)).size).toBeGreaterThan(1);
+  });
+
+  // A time shift is only meaningful as a PAIR: the same claim, opposite verdicts,
+  // either side of the fix. An unpaired shift measures nothing in particular.
+  it('pairs every constructed entry with a known-true twin carrying the same claim', () => {
+    const corpus = loadCorpus();
+    for (const shifted of corpus.filter((e) => e.provenance === 'constructed')) {
+      const twin = corpus.find((e) => e.claim === shifted.claim && e.expected === 'confirmed');
+      expect(twin, `no confirmed twin for ${shifted.id}`).toBeDefined();
+      expect(twin!.sha).not.toBe(shifted.sha);
+    }
   });
 });

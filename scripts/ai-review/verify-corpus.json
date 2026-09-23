@@ -178,5 +178,50 @@
     "why_it_breaks": "The rewritten verdict drops `issue_number` and `new_issue_key` and nothing retains the proposed query or the expected target, so a cause that is valid but merely unproven leaves no trace to analyse later.",
     "expected": "refuted",
     "why_expected": "Both values are recorded in this same block, one statement before the rewrite: `log.info({ beerId: v.beer_id, query: v.proposed_query, expected: v.expected_target }, 'orphan-triage: cause unverified, attachment dropped')`. The rewrite also keeps the model's own reasoning on the row rather than dropping it — `review_note: `unverified: ${v.review_note}`` — so the classification is retained with an explicit marker, not silently emptied."
+  },
+  {
+    "id": "0923-418-D2t",
+    "provenance": "constructed",
+    "source": "Time shift of 0923-418-D2: the identical claim judged against the tree that fixed it (2170717). True before the fix, false after.",
+    "sha": "2170717fc247ce202acc6ffd731fbea277f06a54",
+    "file": "src/domain/triage-scope.ts",
+    "matchedLine": 50,
+    "matchedEndLine": 59,
+    "quote": "export function isLegalScope(scope: Scope): boolean {\n  // A `where` that constrains nothing but the class is illegal on its own terms, and a\n  // cohort does NOT launder it: rowSatisfiesScope ORs the two, so for every row OUTSIDE\n  // the cohort the `where` is what decides — and a review_class-only `where` matches\n  // every future row of that class. That is the dumping ground wearing a disguise.\n  const whereIsWholeClass =\n    scope.where.length > 0 && !scope.where.some((t) => t.col !== 'review_class');\n  if (whereIsWholeClass) return false;\n  return scope.beer_ids.length > 0 || scope.where.length > 0;\n}",
+    "quoteOrigin": "reconstructed",
+    "claim": "isLegalScope accepts any scope that carries a non-empty `beer_ids` cohort without inspecting its `where` at all, so a `where` that only constrains `review_class` is legal whenever it rides alongside a cohort — the same `where`, used alone, is exactly the 'accepts every future row of the class' shape this function exists to reject.",
+    "why_it_breaks": "rowSatisfiesScope (also in this file) ORs `beer_ids` with `where`: `scope.beer_ids.includes(row.beer_id)` short-circuits true for cohort rows, but for every row OUTSIDE the cohort it falls through to `scope.where.every(...)`. A `where` of `review_class = X` alone matches every row of that class regardless of cohort membership, so a scope legalized only because it also carries a cohort ends up accepting every future row of the class too — laundering the exact shape isLegalScope was written to block.",
+    "expected": "refuted",
+    "why_expected": "This tree adds `whereIsWholeClass` ahead of the old early return: `scope.where.length > 0 && !scope.where.some((t) => t.col !== 'review_class')`. When that is true the function now returns `false` BEFORE the `beer_ids` check ever runs, so a `where` of only `review_class` terms is illegal regardless of whether a cohort rides alongside it — exactly the laundering the claim describes is no longer possible. Answering `confirmed` here means the judge recognised the defect from memory instead of reading the tree."
+  },
+  {
+    "id": "0923-418-D3t",
+    "provenance": "constructed",
+    "source": "Time shift of 0923-418-D3: the identical claim judged against the tree that fixed it (2170717). True before the fix, false after.",
+    "sha": "2170717fc247ce202acc6ffd731fbea277f06a54",
+    "file": "src/domain/triage-plan.ts",
+    "matchedLine": 196,
+    "matchedEndLine": 210,
+    "quote": "    } else {\n      const proposed = uniqueIssues.get(verdict.new_issue_key!);\n      if (!proposed || !allowedKeys.has(verdict.new_issue_key!)) { skipped++; continue; }\n      // Guard 2 applies to a PROPOSED issue too. Without this a model could file an\n      // issue whose scope its own founding row contradicts — the consequence would be\n      // applied with no row evidence, which is the invariant this whole change exists\n      // to enforce, and the issue would be born unable to accept the very row that\n      // created it.\n      if (!rowSatisfiesScope(row, verdict.review_class, proposed.scope)) {\n        guardHits.scope_violation += 1;\n        skipped++;\n        continue;\n      }\n      pushInto(byKey, verdict.new_issue_key!, verdict);\n    }",
+    "quoteOrigin": "reconstructed",
+    "claim": "A verdict routed to a newly proposed issue is never checked against that issue's own scope, so a model can file an issue whose founding row contradicts it.",
+    "why_it_breaks": "The consequence is applied with no row evidence, and the issue is born unable to accept the row that created it.",
+    "expected": "refuted",
+    "why_expected": "The proposed-issue branch in this tree now calls `rowSatisfiesScope(row, verdict.review_class, proposed.scope)` before `pushInto` runs, and the comment names the fix directly: \"Guard 2 applies to a PROPOSED issue too.\" A row that fails the check hits `guardHits.scope_violation += 1; skipped++; continue;` instead of reaching `pushInto`, so a verdict routed to a newly proposed issue IS now checked against that issue's own scope. Answering `confirmed` here means the judge recognised the defect from memory instead of reading the tree."
+  },
+  {
+    "id": "0923-418-D5t",
+    "provenance": "constructed",
+    "source": "Time shift of 0923-418-D5: the identical claim judged against the tree that fixed it (2170717). True before the fix, false after.",
+    "sha": "2170717fc247ce202acc6ffd731fbea277f06a54",
+    "file": "src/domain/triage-analysis.ts",
+    "matchedLine": 119,
+    "matchedEndLine": 120,
+    "quote": "                    col: { type: 'string', enum: [...SCOPE_COLS] },\n                    op: { type: 'string', enum: [...SCOPE_OPS] },",
+    "quoteOrigin": "reconstructed",
+    "claim": "ANALYSIS_TOOL_SCHEMA's `new_issues[].scope.where[]` properties `col` and `op` are declared as plain `{ type: 'string' }`, with no `enum` restricting them, so the tool schema itself places no constraint on which column or operator names the provider may emit.",
+    "why_it_breaks": "Any column/operator string satisfies this schema, including pairings the domain has no meaning for (e.g. `col: 'brewery', op: '>='`), so a model can produce a tool-valid `where` term that is nonetheless not a legal scope term.",
+    "expected": "refuted",
+    "why_expected": "The two properties quoted here are now `{ type: 'string', enum: [...SCOPE_COLS] }` and `{ type: 'string', enum: [...SCOPE_OPS] }`, not bare `{ type: 'string' }`. SCOPE_COLS and SCOPE_OPS (imported from triage-scope.ts) constrain the JSON Schema to the same vocabularies zod accepts, so the tool schema now DOES restrict which column and operator names the provider may emit. Answering `confirmed` here means the judge recognised the defect from memory instead of reading the tree."
   }
 ]
