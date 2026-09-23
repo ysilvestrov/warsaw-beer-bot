@@ -10,8 +10,25 @@
 import { formatTokens, type Usage } from './usage';
 import type { EntryOutcome } from './verify-corpus-run';
 
+/**
+ * A scored ratio, over the entries this split actually adjudicated.
+ *
+ * Errored entries are EXCLUDED from both halves, never counted as wrong answers.
+ * An `error` means the harness failed — most often an unreadable tree or verify
+ * returning an empty completion (#691) — and it reached no judgement at all.
+ * Leaving it in the denominator charges our own failure to the model: a judge
+ * that answered every readable entry perfectly would print `confirmed 5/6`,
+ * indistinguishable from one that got an answer wrong. That is exactly the
+ * mistake this corpus exists to stop, reproduced at the level of the scoreboard
+ * — and the design says so in as many words. Found by the AI review on PR #698,
+ * which was right where an earlier human-directed review had waved it through.
+ *
+ * The exclusion is never silent: every draw line carries its own `error N`, and
+ * the union and consensus lines carry `not scored N` when an entry errored in
+ * every draw, so a shrinking denominator is always visible beside the ratio.
+ */
 function tally(outcomes: EntryOutcome[], pick: (o: EntryOutcome) => boolean): string {
-  const rows = outcomes.filter(pick);
+  const rows = outcomes.filter((o) => pick(o) && o.actual !== 'error');
   const right = rows.filter((o) => o.correct).length;
   return `${right}/${rows.length}`;
 }
@@ -59,20 +76,30 @@ export function formatReport(p: {
     else byId.set(o.id, [o]);
   }
 
+  // An entry errored in SOME draws is judged on the draws that produced a verdict;
+  // it drops out of the scored ratios only when every draw errored, and `tally`
+  // recognises that by the surviving `actual: 'error'`.
   const unionRows: EntryOutcome[] = ids.map((id) => {
     const all = byId.get(id)!;
-    return { ...all[0], correct: all.some((o) => o.correct) };
+    const judged = all.filter((o) => o.actual !== 'error');
+    if (judged.length === 0) return { ...all[0], correct: false };
+    return { ...judged[0], correct: judged.some((o) => o.correct) };
   });
   const consensusRows: EntryOutcome[] = ids.map((id) => {
     const all = byId.get(id)!;
-    return { ...all[0], correct: all.every((o) => o.correct) };
+    const judged = all.filter((o) => o.actual !== 'error');
+    if (judged.length === 0) return { ...all[0], correct: false };
+    return { ...judged[0], correct: judged.every((o) => o.correct) };
   });
+  const neverScored = ids.filter((id) => byId.get(id)!.every((o) => o.actual === 'error')).length;
+  const notScored = neverScored > 0 ? ` · not scored ${neverScored}` : '';
 
   const splitLine = (label: string, rows: EntryOutcome[]) =>
     `${label}: confirmed ${tally(rows, (o) => o.expected === 'confirmed')} · ` +
     `refuted ${tally(rows, (o) => o.expected === 'refuted')} · ` +
     `harvested ${tally(rows, (o) => o.provenance === 'harvested')} · ` +
-    `constructed ${tally(rows, (o) => o.provenance === 'constructed')}`;
+    `constructed ${tally(rows, (o) => o.provenance === 'constructed')}` +
+    notScored;
 
   lines.push(
     '',
