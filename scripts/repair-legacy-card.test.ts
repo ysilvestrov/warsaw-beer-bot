@@ -46,6 +46,7 @@ describe('repair-legacy-card CLI (#696)', () => {
       args.map((value) => value === '3615616' ? '0' : value),
       args.map((value) => value === '6' ? 'NaN' : value),
       args.map((value) => value === '6' ? '-1' : value),
+      args.map((value) => value === '6' ? '100.01' : value),
       args.map((value) => value === proof ? 'file:///tmp/proof' : value),
     ]) {
       expect(() => parseRepairCliArgs(invalid)).toThrow();
@@ -82,6 +83,22 @@ describe('repair-legacy-card CLI (#696)', () => {
       db: second.db, hydrate: async () => new Map([[3615616, null]]), print: () => {},
     })).rejects.toThrow(/hydrat|bid/i);
     expect(second.db.prepare('SELECT COUNT(*) AS n FROM legacy_card_repairs').get()).toEqual({ n: 0 });
+  });
+
+  it('returns the audited no-op when the same apply command is retried', async () => {
+    const { db, hydrate } = fixture();
+    await runRepairLegacyCard([...args, '--apply'], { db, hydrate, print: () => {} });
+    const lines: string[] = [];
+    await runRepairLegacyCard([...args, '--apply'], {
+      db, hydrate, print: (line) => lines.push(line),
+    });
+    expect(JSON.parse(lines.at(-1)!)).toMatchObject({ kind: 'noop' });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM legacy_card_repairs').get()).toEqual({ n: 1 });
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 1 });
+    await expect(runRepairLegacyCard([
+      ...args.map((value) => value === 'Shop printed 6%, Untappd lists 7%'
+        ? 'different reason' : value), '--apply',
+    ], { db, hydrate, print: () => {} })).rejects.toThrow(/audit.*conflict/i);
   });
 
   it('shows that a pre-deployment v33 database cannot yet accept an apply', async () => {

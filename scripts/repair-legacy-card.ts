@@ -55,7 +55,9 @@ export function parseRepairCliArgs(argv: string[]): RepairCliArgs {
     throw new Error('--card-abv must be a decimal or absent');
   }
   const cardAbv = rawAbv === 'absent' ? null : Number(rawAbv);
-  if (cardAbv !== null && !Number.isFinite(cardAbv)) throw new Error('--card-abv is not finite');
+  if (cardAbv !== null && (!Number.isFinite(cardAbv) || cardAbv > 100)) {
+    throw new Error('--card-abv must be between 0 and 100');
+  }
   const evidenceUrl = values.get('--evidence')!;
   let url: URL;
   try { url = new URL(evidenceUrl); } catch { throw new Error('--evidence must be an HTTP(S) URL'); }
@@ -94,6 +96,11 @@ export async function runRepairLegacyCard(
     operator: args.operator, overwriteAbv: args.overwriteAbv,
     hydrated: record, at: new Date().toISOString(),
   };
+  if (args.apply && deps.db.prepare('SELECT 1 FROM legacy_card_repairs WHERE orphan_beer_id = ?')
+    .get(args.beerId)) {
+    deps.print(JSON.stringify(applyLegacyCardRepair(deps.db, input)));
+    return;
+  }
   const preview = previewLegacyCardRepair(deps.db, input);
   deps.print(JSON.stringify({
     ...preview, schemaVersion, readyToApply,

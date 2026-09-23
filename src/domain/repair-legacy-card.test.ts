@@ -118,6 +118,16 @@ describe('repairLegacyCard (#696)', () => {
       .toThrow(/ABV|overwrite/i);
   });
 
+  it('rejects impossible historical and hydrated ABVs before writing an alias', () => {
+    const { db, input } = fixture();
+    expect(() => previewLegacyCardRepair(db, { ...input, cardAbv: 100.01 }))
+      .toThrow(/ABV/i);
+    expect(() => previewLegacyCardRepair(db, {
+      ...input, hydrated: { ...input.hydrated, abv: 100.01 },
+    })).toThrow(/ABV/i);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beer_aliases').get()).toEqual({ n: 0 });
+  });
+
   it('refuses to take an alias that already points at another bid', () => {
     const { db, input } = fixture();
     db.prepare(`INSERT INTO beers (id, untappd_id, brewery, name, normalized_brewery, normalized_name)
