@@ -83,16 +83,18 @@ function assertInput(input: LegacyCardRepairInput): void {
     || !Number.isSafeInteger(input.bid) || input.bid <= 0) {
     throw new Error('beer ID, issue number and bid must be positive integers');
   }
-  if (input.cardAbv !== null && (!Number.isFinite(input.cardAbv) || input.cardAbv < 0)) {
-    throw new Error('historical card ABV must be finite or explicitly absent');
+  if (input.cardAbv !== null && (!Number.isFinite(input.cardAbv)
+    || input.cardAbv < 0 || input.cardAbv > 100)) {
+    throw new Error('historical card ABV must be between 0 and 100 or explicitly absent');
   }
   if (input.hydrated.bid !== input.bid || !input.hydrated.beer_name.trim()
     || !input.hydrated.brewery_name.trim()) {
     throw new Error('hydration must identify the exact bid with a beer and brewery');
   }
   if (input.hydrated.abv !== null
-    && (!Number.isFinite(input.hydrated.abv) || input.hydrated.abv < 0)) {
-    throw new Error('hydrated ABV must be finite or absent');
+    && (!Number.isFinite(input.hydrated.abv)
+      || input.hydrated.abv < 0 || input.hydrated.abv > 100)) {
+    throw new Error('hydrated ABV must be between 0 and 100 or absent');
   }
   if (!input.reason.trim() || !input.operator.trim()) {
     throw new Error('operator and reason are required');
@@ -177,7 +179,7 @@ export function previewLegacyCardRepair(db: DB, input: LegacyCardRepairInput): L
 }
 
 export function applyLegacyCardRepair(
-  db: DB, input: LegacyCardRepairInput, expected: LegacyCardRepairPreview,
+  db: DB, input: LegacyCardRepairInput, expected?: LegacyCardRepairPreview,
 ): { canonicalId: number; kind: 'merged' | 'created' | 'noop' } {
   assertInput(input);
   const result = db.transaction(() => {
@@ -188,20 +190,23 @@ export function applyLegacyCardRepair(
       if (orphanStillPresent) throw new Error('repair audit conflicts with a live orphan');
       const live = findAliasTarget(db, audit.card_brewery, audit.card_name, audit.card_abv);
       if (audit.issue_number === input.issueNumber
-        && audit.card_brewery === expected.orphan.brewery
-        && audit.card_name === expected.orphan.name
+        && (!expected || (audit.card_brewery === expected.orphan.brewery
+          && audit.card_name === expected.orphan.name))
         && audit.card_abv === input.cardAbv
         && audit.target_bid === input.bid
         && audit.evidence_url === input.evidenceUrl
         && audit.operator === input.operator
         && audit.reason === input.reason
         && audit.overwrite_abv === Number(input.overwriteAbv)
-        && audit.final_canonical_abv === (input.hydrated.abv ?? expected.canonical?.abv ?? null)
+        && audit.final_canonical_abv === (input.hydrated.abv
+          ?? expected?.canonical?.abv ?? audit.final_canonical_abv)
         && live?.untappd_id === input.bid) {
         return { canonicalId: live.id, kind: 'noop' as const };
       }
       throw new Error('repair audit conflicts with this application');
     }
+
+    if (!expected) throw new Error('fresh preview is required before applying a new repair');
 
     const current = previewLegacyCardRepair(db, input);
     const o = current.orphan;
