@@ -1,4 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { EMPTY_USAGE } from './usage';
 import { gitBody, groupEntries, runDraw } from './verify-corpus-run';
 import type { CorpusEntry } from './verify-corpus';
@@ -42,22 +46,59 @@ describe('groupEntries', () => {
 });
 
 describe('gitBody', () => {
-  // A commit already in the repo's own history, so this test needs no network
-  // and cannot flake. `gitBody`'s two arguments are `(sha, file)` — swapped,
-  // every entry in a real run would come back null and the whole corpus would
-  // report `error`, which reads as a catastrophic judge failure rather than the
-  // one-line bug it is. This pins the argument order directly.
-  const SHA = '584aa66183e55e4371819c9c5b19b2662ddaa6a2';
+  // Hermetic on purpose (C1, final review): CI checks out with `actions/checkout@v7`
+  // and no `fetch-depth`, i.e. depth 1. A test that reads THIS repo's own deep
+  // history (a commit older than the shallow clone's single commit) fails on
+  // exactly the branch that introduces it — proven by cloning `--depth 1` and
+  // watching the positive case fail with "expected null not to be null" while the
+  // negative case passes vacuously (the sha is missing, not the path, so it still
+  // returns null — for the wrong reason). A throwaway repo has no such history to
+  // be shallow about.
+  //
+  // `gitBody` runs `git` in the process cwd, so the test `process.chdir`s into the
+  // temp repo and restores the previous cwd in `finally`, so a failing assertion
+  // cannot leave the rest of the suite running from the wrong directory.
+  let dir: string;
+  let sha: string;
 
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'wbb-verify-gitbody-'));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: dir });
+    execFileSync('git', ['config', 'user.name', 'T'], { cwd: dir });
+    mkdirSync(join(dir, 'src'));
+    writeFileSync(join(dir, 'src', 'present.ts'), 'export const PRESENT_MARKER = true;\n');
+    execFileSync('git', ['add', '-A'], { cwd: dir });
+    execFileSync('git', ['commit', '-q', '-m', 'seed'], { cwd: dir });
+    sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
+  });
+
+  // `gitBody`'s two arguments are `(sha, file)` — swapped, every entry in a real
+  // run would come back null and the whole corpus would report `error`, which
+  // reads as a catastrophic judge failure rather than the one-line bug it is.
+  // This pins the argument order directly: a swap makes `git show` receive
+  // `<file>:<sha>`, an invalid revision, which throws and is caught into `null`.
   it('reads a file that exists at a pinned sha', () => {
-    const body = gitBody(SHA, 'src/domain/triage-plan.ts');
-    expect(body).not.toBeNull();
-    expect(body).toContain('PlannedNewIssue');
+    const prev = process.cwd();
+    process.chdir(dir);
+    try {
+      const body = gitBody(sha, 'src/present.ts');
+      expect(body).not.toBeNull();
+      expect(body).toContain('PRESENT_MARKER');
+    } finally {
+      process.chdir(prev);
+    }
   });
 
   it('returns null, not a throw, for a path absent at that sha', () => {
-    expect(() => gitBody(SHA, 'scripts/ai-review/verify-corpus.ts')).not.toThrow();
-    expect(gitBody(SHA, 'scripts/ai-review/verify-corpus.ts')).toBeNull();
+    const prev = process.cwd();
+    process.chdir(dir);
+    try {
+      expect(() => gitBody(sha, 'src/absent.ts')).not.toThrow();
+      expect(gitBody(sha, 'src/absent.ts')).toBeNull();
+    } finally {
+      process.chdir(prev);
+    }
   });
 });
 

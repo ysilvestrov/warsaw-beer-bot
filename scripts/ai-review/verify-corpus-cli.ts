@@ -1,35 +1,133 @@
 /**
  * `npm run verify-corpus -- --model <m> [--draws N] [--only <id-prefix>]`
+ * `npm run verify-corpus -- --check [--only <id-prefix>]`
  *
- * Scores one model against the labelled verify corpus. Posts nothing, writes
- * nothing, reads file bodies out of git at each entry's pinned sha.
+ * The first form scores one model against the labelled verify corpus. Posts
+ * nothing, writes nothing, reads file bodies out of git at each entry's pinned
+ * sha, and spends money on the given model.
+ *
+ * `--check` makes no API call and takes no model: it re-derives each entry's
+ * span from its own `quote` (the same way production does, `gate.ts`) and
+ * checks it against the pinned tree, so an edited `matchedLine` or a retyped
+ * `quote` is caught before it silently points every future measurement at the
+ * wrong lines. See I5, final review fix wave.
  */
 import { readFileSync } from 'node:fs';
 import { DEFAULT_MAX_COMPLETION_TOKENS } from './openai';
 import { addUsage, costUsd, EMPTY_USAGE } from './usage';
-import { loadCorpus } from './verify-corpus';
+import { loadCorpus, type CorpusEntry } from './verify-corpus';
 import { formatReport } from './verify-corpus-report';
 import { gitBody, runDraw, type EntryOutcome } from './verify-corpus-run';
 import { verifyAll } from './verify';
 
-export function resolveArgs(argv: string[]): { model: string; draws: number; only?: string } {
+export interface ResolvedArgs {
+  check: boolean;
+  model: string;
+  draws: number;
+  only?: string;
+}
+
+export function resolveArgs(argv: string[]): ResolvedArgs {
   let model = '';
   let draws = 1;
   let only: string | undefined;
+  let check = false;
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--model') model = argv[++i] ?? '';
     else if (a === '--draws') draws = Number(argv[++i]);
-    else if (a === '--only') only = argv[++i];
+    else if (a === '--only') {
+      const v = argv[++i];
+      // A valueless `--only` (e.g. it is the last token) must stop the run
+      // rather than silently filter nothing and score the whole corpus.
+      if (v === undefined) throw new Error('--only requires a value');
+      only = v;
+    } else if (a === '--check') check = true;
     else throw new Error(`unrecognised argument: ${a}`);
+  }
+  if (check) {
+    if (model) throw new Error('--check cannot be combined with --model');
+    return { check: true, model: '', draws, only };
   }
   if (!model) throw new Error('--model <name> is required');
   if (!Number.isInteger(draws) || draws < 1) throw new Error('--draws must be a positive integer');
-  return { model, draws, only };
+  return { check: false, model, draws, only };
+}
+
+export interface CheckResult {
+  id: string;
+  ok: boolean;
+  detail: string;
+}
+
+/**
+ * Re-derive one entry's span from its `quote` and check it against the pinned
+ * tree. `readBody` is injected (same shape as `gitBody`) so tests never shell
+ * out — see `runDraw`, which does the same for the same reason.
+ */
+export function checkEntry(entry: CorpusEntry, readBody: (sha: string, file: string) => string | null): CheckResult {
+  const body = readBody(entry.sha, entry.file);
+  if (body === null) {
+    return { id: entry.id, ok: false, detail: `${entry.sha}:${entry.file} does not resolve` };
+  }
+
+  const lines = body.split('\n');
+  const quoteLines = entry.quote.split('\n');
+  const expectedSpan = entry.matchedEndLine - entry.matchedLine + 1;
+
+  if (expectedSpan !== quoteLines.length) {
+    return {
+      id: entry.id,
+      ok: false,
+      detail:
+        `matchedEndLine - matchedLine + 1 is ${expectedSpan} but the quote has ${quoteLines.length} line(s)`,
+    };
+  }
+
+  if (entry.matchedLine < 1 || entry.matchedLine - 1 + quoteLines.length > lines.length) {
+    return {
+      id: entry.id,
+      ok: false,
+      detail: `matchedLine ${entry.matchedLine} is out of range for a ${lines.length}-line body`,
+    };
+  }
+
+  const actual = lines.slice(entry.matchedLine - 1, entry.matchedLine - 1 + quoteLines.length).join('\n');
+  if (actual !== entry.quote) {
+    return {
+      id: entry.id,
+      ok: false,
+      detail: `quote does not match ${entry.file}:${entry.matchedLine}-${entry.matchedEndLine} byte-for-byte`,
+    };
+  }
+
+  return { id: entry.id, ok: true, detail: 'ok' };
+}
+
+function runCheck(only: string | undefined): number {
+  const all = loadCorpus();
+  const entries = only ? all.filter((e) => e.id.startsWith(only)) : all;
+  if (entries.length === 0) throw new Error(`--only ${only} matched no entry`);
+
+  let failed = 0;
+  for (const entry of entries) {
+    const result = checkEntry(entry, gitBody);
+    console.log(`${result.ok ? 'ok' : 'FAIL'} ${result.id}: ${result.detail}`);
+    if (!result.ok) failed++;
+  }
+  return failed;
 }
 
 async function main(): Promise<void> {
-  const { model, draws, only } = resolveArgs(process.argv.slice(2));
+  const args = resolveArgs(process.argv.slice(2));
+
+  if (args.check) {
+    const failed = runCheck(args.only);
+    if (failed > 0) process.exit(1);
+    return;
+  }
+
+  const { model, draws, only } = args;
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) throw new Error('OPENAI_API_KEY is not set');
   const endpoint = process.env.OPENAI_API_ENDPOINT || 'https://api.openai.com/v1';
@@ -57,7 +155,7 @@ async function main(): Promise<void> {
     usage = addUsage(usage, out.usage);
   }
 
-  console.log(formatReport({ model, draws: results, usage, costUsd: costUsd(model, usage) }));
+  console.log(formatReport({ model, draws: results, usage, costUsd: costUsd(model, usage), only }));
 }
 
 if (require.main === module) {
