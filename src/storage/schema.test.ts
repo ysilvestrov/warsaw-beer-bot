@@ -41,6 +41,8 @@ describe('schema migrations', () => {
               '2026-09-23T00:00:00Z')`);
     insert.run(29955);
     expect(() => insert.run(29955)).toThrow();
+    expect(() => db.prepare(`UPDATE legacy_orphan_dispositions
+      SET reopened_at = '2026-09-24T00:00:00Z' WHERE beer_id = 29955`).run()).toThrow();
     expect(() => db.prepare(`INSERT INTO legacy_orphan_dispositions
       (beer_id, issue_number, card_brewery, card_name, card_abv,
        brewery_text, name_text, abv_key, failure_source_url,
