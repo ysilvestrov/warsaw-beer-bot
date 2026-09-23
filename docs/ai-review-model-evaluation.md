@@ -4,10 +4,22 @@ How to decide whether a different model can run `find` or `verify`, without bett
 reviewer's quality on a price list. Written after the 2026-09-22 evaluation, whose
 first pass cost ≈$7.2 and spent most of that re-deriving a method that already existed;
 the later passes, run to this document, cost ≈$5 more including the whole OpenRouter screen
-at $1.21.
+at $1.21. The 2026-09-23 census that follows them cost under $0.10, because it measured
+prices and request shapes before spending anything on quality.
 
 Run this whenever a new model generation lands, a price changes materially, or someone
 proposes a swap. The answer is never read off a benchmark.
+
+The document has two halves and they are read differently. **The protocol** (sections 1–5,
+then the preconditions) is how to measure; change it only when a measurement teaches you
+something about measuring. **The results log** is append-only: every pass gets a dated
+entry with its own numbers, and an earlier entry is never edited to agree with a later one
+— a superseded number is labelled superseded, because the drift between two passes is
+itself evidence (see section 4).
+
+Companion: `docs/ai-review-fabrication-corpus-2026-09-22.md` holds 16 wrong claims a good
+judge rejected — the test set for a **verify** candidate, which the recall probe cannot
+measure.
 
 ## The two things being measured
 
@@ -112,7 +124,82 @@ Context budget: N file(s) sent as diff only.
 If a source file is on that list, fix the context first. A model evaluation run against a
 starved context will recommend the wrong model.
 
-## Reference results — 2026-09-22
+## The preconditions
+
+Prices seen 2026-09-22, for sizing only — recheck before spending on them: DeepSeek Pro
+$0.60/$1.80, GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00.
+Against the shipped default (`gpt-5.6-sol`, $4/$20) the headroom is real; against `terra`
+($2/$12) it is a factor of a few, not an order of magnitude.
+
+**Take one OpenRouter account, not one account per vendor.** One key, one balance, one
+OpenAI-compatible endpoint, so `OPENAI_API_ENDPOINT` + `AI_REVIEW_MODEL` reach every
+candidate with no code change. The repo is public, so handing a diff to another vendor
+raises nothing we do not already publish.
+
+Four things must be settled before any number from such a run means anything:
+
+1. **`response_format: {json_schema, strict: true}` must actually be honoured.** The whole
+   pipeline depends on it. OpenRouter supports it, but the *endpoint it routes to* may not —
+   set `require_parameters: true` in the provider preferences, or a run silently degrades to
+   free-form JSON.
+2. **Pin the provider.** The same open-weight model is served by several hosts at different
+   quantizations. Without `provider.order`/`only`, a measurement is not reproducible a week
+   later, and a regression looks like model drift.
+3. **Probe the request shape per vendor; never infer it.** `openai.ts` sends
+   `max_completion_tokens` because gpt-5.x rejects `max_tokens`, and DeepSeek direct wants
+   the opposite — from which this document once concluded that any direct vendor needs a
+   seam. Wrong: OpenRouter accepts our body unchanged (probed 2026-09-22) and so does
+   **Anthropic, directly**, over its OpenAI-compatibility endpoint at
+   `https://api.anthropic.com/v1` with a Bearer key (probed 2026-09-23, three models). One
+   free structured call settles it. Build the seam only for a vendor that has actually
+   refused the body.
+4. **Check the candidate's reasoning switch reaches it.** The find stage leans on reasoning
+   — 5.1k of 5.6k find completion tokens on PR #688 — and gpt-5.x reasons by default.
+   Anthropic's compat endpoint accepts both `reasoning_effort` and a native `thinking`
+   block **and ignores them** (probed 2026-09-23: completion tokens unchanged, no reasoning
+   accounting). A candidate measured with reasoning off can only be cleared by that test,
+   never rejected by it.
+
+Measure exactly as above: the labelled corpus for fabrication, the recall probe at
+`584aa661` for coverage, three draws per config, and the incumbent re-measured in the same
+session. A candidate that cannot beat `terra` on coverage is not interesting, because terra
+is already available with no account, no seam and no pinning.
+
+Two failure modes to expect, both seen on 2026-09-22: a candidate that **raises volume and
+loses it at verify** (`refuted`, not `out_of_scope` — that distinction is the whole signal),
+and a candidate that **returns empty or truncated completions**, which is usually the
+unpinned endpoint not honouring `strict` rather than the model being unable. Diagnose the
+second with precondition 1 before blaming the model.
+
+## Outcomes that are settled — do not re-derive
+
+- **The verify pass is not a removal candidate** (production counters, PRs #359–#363:
+  8 of 29 gated rejected, 7 `out_of_scope` + 1 `error`). It filters design noise.
+- **The prompt cache is not a lever.** Prefix overlap between consecutive runs on a PR is
+  0%, and still 0% with bodies reordered ahead of the diff, because churn ordering puts the
+  just-edited file first.
+- **Repeated cheap sampling does not recover recall.** Four luna runs, zero hits on the two
+  missing findings. Union-of-samples is not a substitute for context.
+- **`max_tokens` and `temperature: 0` are rejected on gpt-5.x.** Use
+  `max_completion_tokens`; determinism comes from the schema.
+- **A spent OpenAI balance returns 429, not 402.**
+- **A price row is not a cost.** Multiply it by the tokens *that vendor* counts for your
+  prompt: Anthropic counts 1.65× what OpenAI does for identical text (measured 2026-09-23),
+  which is enough to flip a ranking.
+- **Output is no longer a rounding error.** #364 recorded that input dominates the bill;
+  with a reasoning model on `find` it does not — output was 60% of find's cost on PR #688.
+  Weigh both halves of a candidate's price.
+- **`gpt-6-*` does not match a `gpt-5` grep.** Filter the `/v1/models` list by date, not by
+  name, or you will miss a whole generation (2026-09-23).
+
+---
+
+# Results log
+
+Newest pass last. Each entry states what was measured, on what context, and what it
+settled; numbers from a superseded pass stay put with a note saying so.
+
+## 2026-09-22, first pass — superseded, kept for the starvation illustration
 
 `B` = gpt-5.5, `T` = gpt-5.6-terra, `L` = gpt-5.6-luna, all with `verify` on gpt-5.5.
 
@@ -133,7 +220,7 @@ show what context starvation does, not as a model comparison:
 | gpt-5.6-terra | 3/5 |
 | gpt-5.6-luna | 2/5 |
 
-## Reference results — 2026-09-22, second pass (the one to compare against)
+## 2026-09-22, second pass — the baseline to compare against
 
 Run after stage 1 shipped, so the context is the one CI now assembles; baseline re-measured
 in the same session; **three draws per config**, per the rule above. This supersedes the
@@ -170,7 +257,7 @@ does not pay for a second vendor account, a per-model request-shape seam (`max_t
 `max_completion_tokens`), provider pinning against silent re-quantization, and
 `require_parameters: true` to keep strict `json_schema` routing.
 
-## The OpenRouter pass — RUN 2026-09-22, no candidate came close
+## 2026-09-22, OpenRouter pass — no candidate came close
 
 Recall probe, PR #418 @ `584aa661`, three draws each, verify on `gpt-5.5` throughout.
 Total spend for the whole screen: **$1.21**.
@@ -178,15 +265,22 @@ Total spend for the whole screen: **$1.21**.
 | config | verified per run | what happened |
 |---|---|---|
 | `gpt-5.6-sol` (incumbent, direct) | 8 / 6 / 5 | — |
-| `deepseek/deepseek-v4-pro-0813` | **0 / 1 / 1** | raises 8, 10 and **31**; verify returns **35 `refuted`** across the three runs |
+| `deepseek/deepseek-v4-pro-0813` | **0 / 1 / 1** | raises 8, 10 and **31**; of the 37 claims that reached verify, **16 came back `refuted`** |
 | `z-ai/glm-5.3` | — | one truncated JSON body, then empty completions |
 | `moonshotai/kimi-k2.7-code` | — | empty completions |
 
 **DeepSeek fabricates.** Its findings die at *verify*, not at the gate, with the verdict
 `refuted` — the adversarial judge saying the code contradicts the claim. For scale: the
 production counters from PRs #359–#363 recorded 8 rejections of 29, **all `out_of_scope`
-and not one `refuted`**. Thirty-five refutations in three runs is the `gpt-5.4-mini` failure
-mode of 2026-07, at a larger size.
+and not one `refuted`**. Sixteen refutations of 37 adjudicated claims is the `gpt-5.4-mini`
+failure mode of 2026-07, at a larger size.
+
+> **Corrected 2026-09-23.** This section first read "35 `refuted`". Recounting the run
+> outputs gives 16 `refuted` + 19 `out_of_scope` = the 35 verify **rejections**; only the
+> refutations are the fabrication signal, and conflating the two doubled the headline
+> number. The conclusion is unchanged — production has produced zero refutations — and the
+> 16 claims are now preserved verbatim in
+> `docs/ai-review-fabrication-corpus-2026-09-22.md`.
 
 **GLM and Kimi could not complete a structured call** over the path available to us. That may
 be routing rather than the models: unpinned, a request can land on an endpoint that does not
@@ -200,7 +294,8 @@ published 0–1 findings against the incumbent's 5–8.
   body — `max_completion_tokens` (not `max_tokens`) together with
   `response_format: {json_schema, strict: true}` — and both candidates returned schema-valid
   JSON. The seam is required only to talk to a vendor *directly*. An evaluation is therefore
-  two env vars, not a project.
+  two env vars, not a project. *(The second sentence was itself refuted on 2026-09-23:
+  Anthropic takes our body directly too. See that entry.)*
 - **OpenRouter is not cheaper for OpenAI's models — it is dearer, and its listed price does
   not predict the bill.** Measured on one call each: `gpt-5.5` billed $0.021385, exactly this
   repo's price table, while the listing implied $0.0107; `gpt-5.6-sol` billed $0.025497
@@ -211,53 +306,151 @@ published 0–1 findings against the incumbent's 5–8.
 A side benefit: `gpt-5.5` billed through a third party matched `PRICES['gpt-5.5']` to the
 cent, so that row is now confirmed by an independent source rather than transcribed.
 
-## The preconditions
+## 2026-09-23, census and mechanical screen — no quality numbers yet
 
-Prices seen 2026-09-22, for sizing only — recheck before spending on them: DeepSeek Pro
-$0.60/$1.80, GLM 5.3 FlashX $0.37/$1.25, DeepSeek Flash $0.12/$0.48, Kimi K2.6 $0.95/$4.00.
-Against the shipped default (`gpt-5.6-sol`, $4/$20) the headroom is real; against `terra`
-($2/$12) it is a factor of a few, not an order of magnitude.
+Two new generations landed within days of the 2026-09-22 passes: OpenAI's **gpt-6** family
+(`gpt-6-astra` 2026-08-27, `gpt-6-sol` and `gpt-6-luna` 2026-09-14) and Anthropic's
+**Claude Opus 5.5** (2026-09-21). This entry is the cheap half of the protocol — what
+exists, what it costs, and whether it takes our request body. **No recall or corpus numbers
+were measured**; the pass that measures them is specified at the end.
 
-**Take one OpenRouter account, not one account per vendor.** One key, one balance, one
-OpenAI-compatible endpoint, so `OPENAI_API_ENDPOINT` + `AI_REVIEW_MODEL` reach every
-candidate with no code change. The repo is public, so handing a diff to another vendor
-raises nothing we do not already publish.
+Both vendor keys were probed against `/v1/models` first, per the protocol's standing note,
+and again it paid: `gpt-6-*` does not match a `gpt-5` grep, so the first sweep of the model
+list missed the whole new generation.
 
-Three things must be settled before any number from such a run means anything:
+### Prices, read from the vendor pages 2026-09-23
 
-1. **`response_format: {json_schema, strict: true}` must actually be honoured.** The whole
-   pipeline depends on it. OpenRouter supports it, but the *endpoint it routes to* may not —
-   set `require_parameters: true` in the provider preferences, or a run silently degrades to
-   free-form JSON.
-2. **Pin the provider.** The same open-weight model is served by several hosts at different
-   quantizations. Without `provider.order`/`only`, a measurement is not reproducible a week
-   later, and a regression looks like model drift.
-3. **A request-shape seam is needed only to go DIRECT to a vendor**, not to measure.
-   `openai.ts` sends `max_completion_tokens` because gpt-5.x rejects `max_tokens`, and
-   DeepSeek direct wants the opposite — but OpenRouter accepts our body unchanged (probed
-   2026-09-22). Build the seam when a candidate has already earned a direct account, never
-   before.
+Per 1M tokens, short-context tier. OpenAI's long-context tier still starts above **272k
+input tokens** (2× input, 1.5× output, applied to the whole request) and our budget of
+240 000 *characters* cannot reach it.
 
-Measure exactly as above: the labelled corpus for fabrication, the recall probe at
-`584aa661` for coverage, three draws per config, and the incumbent re-measured in the same
-session. A candidate that cannot beat `terra` on coverage is not interesting, because terra
-is already available with no account, no seam and no pinning.
+| model | input | cached in | output | context | note |
+|---|---|---|---|---|---|
+| `gpt-5.6-sol` | $4.00 | $0.40 | $20.00 | | incumbent `find`; promo price ends 2026-11-21 |
+| `gpt-5.5` | $5.00 | $0.50 | $30.00 | | incumbent `verify` |
+| **`gpt-6-sol`** | **$2.00** | **$0.20** | **$10.00** | 1 050 000 / 128k out | knowledge cutoff 2026-04-20 |
+| **`gpt-6-luna`** | **$0.10** | **$0.01** | **$0.50** | | |
+| `gpt-6-astra` | $10.00 | $1.00 | $50.00 | | flagship — dearer, excluded |
+| `gpt-5.6-cyber` | $12.50 | $1.25 | $75.00 | | excluded |
+| **`claude-opus-5-5`** | $4.00 | $0.20 read / $5.00 write | $20.00 | | |
+| **`claude-sonnet-5`** | $2.00 | $0.20 / $2.50 | $10.00 | | |
+| **`claude-haiku-4-5`** | $1.00 | $0.10 / $1.25 | $5.00 | | API id `claude-haiku-4-5-20251001` |
+| `claude-opus-5` | $5.00 | $0.50 / $6.25 | $25.00 | | dearer than the incumbent |
+| `claude-fable-5-1` | $10.00 | $0.25 / $12.50 | $50.00 | | excluded |
 
-Two failure modes to expect, both seen on 2026-09-22: a candidate that **raises volume and
-loses it at verify** (`refuted`, not `out_of_scope` — that distinction is the whole signal),
-and a candidate that **returns empty or truncated completions**, which is usually the
-unpinned endpoint not honouring `strict` rather than the model being unable. Diagnose the
-second with precondition 1 before blaming the model.
+### Three live probes, and what each one settled
 
-## Outcomes that are settled — do not re-derive
+**1. Every candidate accepts our exact request body.** One structured call each with
+`max_completion_tokens`, no `temperature`, and `response_format: {json_schema, strict:true}`
+— the body `scripts/ai-review/openai.ts` sends. All six returned schema-valid JSON:
+`gpt-6-sol`, `gpt-6-luna`, `gpt-6-astra`, and — through Anthropic's OpenAI-compatibility
+endpoint at `https://api.anthropic.com/v1` with a Bearer key — `claude-opus-5-5`,
+`claude-sonnet-5`, `claude-haiku-4-5`.
 
-- **The verify pass is not a removal candidate** (production counters, PRs #359–#363:
-  8 of 29 gated rejected, 7 `out_of_scope` + 1 `error`). It filters design noise.
-- **The prompt cache is not a lever.** Prefix overlap between consecutive runs on a PR is
-  0%, and still 0% with bodies reordered ahead of the diff, because churn ordering puts the
-  just-edited file first.
-- **Repeated cheap sampling does not recover recall.** Four luna runs, zero hits on the two
-  missing findings. Union-of-samples is not a substitute for context.
-- **`max_tokens` and `temperature: 0` are rejected on gpt-5.x.** Use
-  `max_completion_tokens`; determinism comes from the schema.
-- **A spent OpenAI balance returns 429, not 402.**
+> This **refutes precondition 3 as written**. It claimed a request-shape seam is needed to
+> talk to a vendor directly, generalising from DeepSeek's `max_tokens`. Anthropic needs no
+> seam: two env vars reach it, exactly as OpenRouter does. What a vendor rejects has to be
+> probed per vendor, not inferred from another vendor.
+
+**2. Anthropic counts 1.65× more input tokens for the identical prompt.** The same 6 596-char
+TypeScript file, same messages, same schema: OpenAI 1 725 prompt tokens (3.82 char/token),
+Anthropic 2 850 (2.31 char/token). The ratio held across Sonnet 5 and Opus 5.5 and is partly
+tokenizer, partly the compat layer re-expressing our `json_schema`. **A price row alone does
+not compare two vendors** — multiply it by the tokens that vendor counts. This one
+measurement moves `claude-opus-5-5` from "same price as the incumbent" to *dearer than it*.
+
+**3. Extended thinking cannot be switched on through the compat endpoint.** Both
+`reasoning_effort: "medium"` and an Anthropic-native `thinking` block were accepted without
+error and had no observable effect: completion tokens unchanged (227 / 209 / 212 on an
+identical prompt) and no reasoning accounting in `usage`. gpt-5.x reasons by default and the
+find stage leans on it — PR #688's live review spent 5.1k of its 5.6k find completion tokens
+on reasoning. So a Claude candidate measured over this endpoint is measured **with reasoning
+off**, which makes the test one-sided: a pass is strong evidence, a failure is inconclusive
+and would have to be re-run over the native Messages API before it means anything.
+
+### Cost per real review call, not per million tokens
+
+Grounded on PR #688's own footer — `find 1 call 18.5k→5.6k (5.1k reasoning) · verify 1 call
+3.6k→665` — because that is a whole review of a real PR. Anthropic input scaled by the
+measured 1.65×; output held at the same count, which is an assumption the pass has to
+replace with a measurement.
+
+| `find` model | input $ | output $ | per call | vs incumbent |
+|---|---|---|---|---|
+| `gpt-5.6-sol` (incumbent) | 0.074 | 0.112 | **$0.186** | — |
+| `gpt-6-sol` | 0.037 | 0.056 | **$0.093** | **−50%** |
+| `gpt-6-luna` | 0.002 | 0.003 | **$0.005** | −97% |
+| `claude-sonnet-5` | 0.061 | 0.056 | **$0.117** | −37% |
+| `claude-haiku-4-5` | 0.031 | 0.028 | **$0.059** | −68% |
+| `claude-opus-5-5` | 0.122 | 0.112 | **$0.234** | **+26% — excluded** |
+
+Note what this corrects about an older belief: the #364 cost review recorded that **input
+dominates the bill**. With a reasoning model on `find` that is no longer true — on PR #688 output was
+60% of find's cost, because 5.1k of 5.6k completion tokens were reasoning. A candidate's
+output price now matters as much as its input price, which is why `gpt-6-sol`'s halving of
+*both* is worth more than it looks.
+
+### Candidate register
+
+| candidate | stage | price verdict | measured? | next |
+|---|---|---|---|---|
+| `gpt-6-sol` | find | −50%, same family as incumbent | shape ✅ | **first** — full pass |
+| `claude-haiku-4-5` | find | −68% | shape ✅, thinking off | screen on recall probe |
+| `gpt-6-luna` | find | −97% | shape ✅ | screen; `gpt-5.6-luna` was refuted, generation changed |
+| `claude-sonnet-5` | **verify** | −37% vs sol, −60% vs gpt-5.5 | shape ✅, thinking off | fabrication corpus |
+| `claude-opus-5-5` | — | +26% per call once tokens are counted | shape ✅ | **excluded on price** |
+| `gpt-6-astra`, `gpt-5.6-cyber`, `claude-fable-5-1`, `claude-opus-5` | — | dearer | — | excluded |
+
+### The pass that is planned, and what it costs
+
+Nothing above says a word about quality. The pass to run, per the protocol and in this
+order, so a cheap refutation stops the spending early:
+
+1. **Recall probe, PR #418 @ `584aa661`, three draws each**, verify pinned to `gpt-5.5`
+   throughout, and the incumbent `gpt-5.6-sol` **re-measured in the same session** —
+   `gpt-6-sol`, then `claude-haiku-4-5`, then `gpt-6-luna`. Print the context budget line
+   first and confirm no source file is diff-only.
+2. **Corpus pass** (#344, #348, #352, #356, #358, one run each) for anything that survives
+   step 1, labelling every published finding against its own tree.
+3. **Verify candidates** only after a `find` model is settled: `claude-sonnet-5` against
+   `docs/ai-review-fabrication-corpus-2026-09-22.md`, scored on how many of the 12 usable
+   claims it returns `refuted`, with `gpt-5.5` re-scored on the same 12 in the same session.
+
+Commands, with the key files in `./tmp/` (ephemeral — not committed):
+
+```
+export OPENAI_API_ENDPOINT=https://api.openai.com/v1        # or https://api.anthropic.com/v1
+export OPENAI_API_KEY=$(tr -d '\r\n ' < tmp/openai.key)     # or tmp/claude.key
+AI_REVIEW_MODEL=gpt-6-sol AI_REVIEW_VERIFY_MODEL=gpt-5.5 \
+  npm run ai-review-replay -- 418 --head 584aa66183e55e4371819c9c5b19b2662ddaa6a2
+```
+
+Add a `PRICES` row for each candidate **before** running, or every footer reads
+"(unpriced model)" and the run measures coverage without measuring cost.
+
+Sizing from the 2026-09-22 passes: the whole OpenRouter screen (3 configs × 3 draws) cost
+$1.21, and a corpus pass runs $1–2 per config. Budget **$5–8** for all of the above.
+
+### Jev — assessed 2026-09-23, rejected without a run
+
+`typesafe/jev` was proposed for `verify`. It is a **structured decision model**: it returns
+a typed choice (`noul`/`choice`/`score`) over a separate alpha endpoint,
+`POST https://openrouter.ai/api/alpha/decisions`, with a 32 000-token ceiling and free
+output. Three things rule it out for this stage, in order of severity:
+
+1. **No prose field.** `verify` must return `evidence` — "one sentence citing the code that
+   settles it" — which is published as "**Verified:** …", stored in the state block and
+   carried into the next run; the prompt says in so many words that *"Looks correct" is not
+   evidence*. A typed vote cannot produce it. That is a change in what the stage is, not in
+   who supplies it.
+2. **A context ceiling we do not have today.** `verify` sends the full current file body.
+   The largest reviewable sources are `src/storage/beers.ts` (45 638 ch ≈ 11.4k tok) and
+   `src/domain/untappd-lookup.ts` (43 673 ch ≈ 10.9k tok), and observed production verify
+   inputs ran 1.5k–19.0k tokens. Most calls fit; the ones that would not are the big files
+   where findings matter most.
+3. **A different protocol**, not a different parameter — a second client, not a seam.
+
+Standing economics behind all three: `verify` is ~18% of the bill and the stage whose job is
+to decide what a human sees. It is the worst candidate for saving money and the best one for
+losing precision. The probe was not run — both keys used on 2026-09-22 had been revoked at
+that point — and nothing above needs a probe to settle.
