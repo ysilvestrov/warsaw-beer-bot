@@ -2,6 +2,8 @@ import { openDb } from './db';
 import { migrate, V23_BACKFILL_SQL } from './schema';
 import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from './legacy-orphan-dispositions';
 import {
   recordEnrichFailure,
   clearEnrichFailure,
@@ -59,6 +61,39 @@ function seedFailure(
 }
 
 const NOW = '2026-08-15T00:00:00.000Z';
+
+test('active disposition excludes reset triage, lock, ownerless, issue quota, and paid fallback', () => {
+  const db = testDb();
+  const id = 9101;
+  seedFailure(db, id);
+  db.prepare(`UPDATE enrich_failures SET review_class = 'matcher_bug', issue_number = 677,
+    reviewed_at = '2026-09-23T00:00:00Z' WHERE beer_id = ?`).run(id);
+  const episode = insertLegacyDisposition(db, {
+    beerId: id, issueNumber: 677, cardBrewery: 'brewery-9101', cardName: 'name-9101', cardAbv: null,
+    breweryText: cardText('brewery-9101'), nameText: cardText('name-9101'), abvKey: cardAbv(null),
+    failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+    operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+  });
+  expect(listLockedRows(db).map((r) => r.beer_id)).not.toContain(id);
+  expect(countRowsForIssue(db, 677, '2026-09-22T00:00:00Z')).toBe(0);
+  db.prepare(`UPDATE enrich_failures SET review_class = NULL, issue_number = NULL WHERE beer_id = ?`).run(id);
+  expect(listUntriagedFailures(db, 20).map((r) => r.beer_id)).not.toContain(id);
+  expect(isWebFallbackBlocked(db, id)).toBe(true);
+  db.prepare(`UPDATE enrich_failures SET review_class = 'matcher_bug',
+    review_note = 'off-scope test' WHERE beer_id = ?`).run(id);
+  expect(listOwnerlessRows(db).map((r) => r.beer_id)).not.toContain(id);
+  expect(countOwnerlessRows(db)).toBe(0);
+  expect(closeLegacyDisposition(db, episode, {
+    reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+    reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+  })).toBe(true);
+  expect(listOwnerlessRows(db).map((r) => r.beer_id)).toContain(id);
+  expect(countOwnerlessRows(db)).toBe(1);
+  db.prepare(`UPDATE enrich_failures SET review_class = NULL WHERE beer_id = ?`).run(id);
+  expect(listUntriagedFailures(db, 20).map((r) => r.beer_id)).toContain(id);
+  expect(isWebFallbackBlocked(db, id)).toBe(false);
+  db.close();
+});
 
 // Inserts a beer with a distinct name/brewery so autoincrement assigns id `n`
 // (fresh in-memory db, called in order n = 1, 2, 3, ...). Word-based labels:

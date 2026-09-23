@@ -588,6 +588,13 @@ export const lockedRowPredicate = `EXISTS (
              AND ef.unlocked_at IS NULL
          )`;
 
+// An operator-only disposition removes this historical row from automatic work.
+// Assumes the `beers` alias `b` at each call site.
+export const inactiveLegacyOrphanPredicate = `EXISTS (
+           SELECT 1 FROM legacy_orphan_dispositions lod
+           WHERE lod.beer_id = b.id AND lod.reopened_at IS NULL
+         )`;
+
 // #486: the single definition of "this beer is on a tap right now" — a `match_links` row
 // (#632: keyed by the tap brewery + name pair) reaching a tap on some pub's LATEST snapshot. `listLookupCandidates` interpolates it as-is;
 // `orphanNotOnTapPredicate` below interpolates its negation, which is what makes the two pools
@@ -628,6 +635,7 @@ export function listLookupCandidates(
                 AS review_class
        FROM beers b
        WHERE b.untappd_id IS NULL
+         AND NOT ${inactiveLegacyOrphanPredicate}
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id
@@ -666,6 +674,7 @@ export function listLookupCandidates(
 // cron. spec.md called that deliberate; it cost 462 of 911 orphans, 376 of them never queried
 // once. Writing it as the negation makes the partition a property of the construction.
 export const orphanNotOnTapPredicate = `b.untappd_id IS NULL
+         AND NOT ${inactiveLegacyOrphanPredicate}
          AND NOT EXISTS (
            SELECT 1 FROM enrich_failures ef
            WHERE ef.beer_id = b.id

@@ -151,11 +151,13 @@ export function listLockedRows(
 ): { beer_id: number; issue_number: number; unrescued_issue: number | null }[] {
   return db
     .prepare(
-      `SELECT beer_id, issue_number, unrescued_issue FROM enrich_failures
+      `SELECT beer_id, issue_number, unrescued_issue FROM enrich_failures ef
         WHERE review_class IN ('matcher_bug', 'parser_bug')
           AND issue_number IS NOT NULL
           AND unlocked_at IS NULL
-          AND retired_at IS NULL`,
+          AND retired_at IS NULL
+          AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+            WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)`,
     )
     .all() as { beer_id: number; issue_number: number; unrescued_issue: number | null }[];
 }
@@ -233,12 +235,17 @@ export function isWebFallbackBlocked(db: DB, beerId: number): boolean {
   return (
     db
       .prepare(
-        `SELECT 1 FROM enrich_failures
-          WHERE beer_id = ?
-            AND (review_class IN ('not_a_beer', 'unidentifiable', 'parser_bug', 'not_on_untappd')
-                 OR retired_at IS NOT NULL)`,
+        `SELECT 1 WHERE EXISTS (
+           SELECT 1 FROM legacy_orphan_dispositions
+           WHERE beer_id = ? AND reopened_at IS NULL
+         ) OR EXISTS (
+           SELECT 1 FROM enrich_failures
+           WHERE beer_id = ?
+             AND (review_class IN ('not_a_beer', 'unidentifiable', 'parser_bug', 'not_on_untappd')
+                  OR retired_at IS NOT NULL)
+         )`,
       )
-      .get(beerId) !== undefined
+      .get(beerId, beerId) !== undefined
   );
 }
 
@@ -298,8 +305,10 @@ export function setEnrichFailureReview(
 export function countRowsForIssue(db: DB, issueNumber: number, sinceIso: string): number {
   const row = db
     .prepare(
-      `SELECT COUNT(*) AS n FROM enrich_failures
-        WHERE issue_number = ? AND reviewed_at > ?`,
+      `SELECT COUNT(*) AS n FROM enrich_failures ef
+        WHERE issue_number = ? AND reviewed_at > ?
+          AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+            WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)`,
     )
     .get(issueNumber, sinceIso) as { n: number };
   return row.n;
@@ -360,6 +369,8 @@ export function listUntriagedFailures(db: DB, limit: number): UntriagedFailure[]
          FROM enrich_failures ef
          JOIN beers b ON b.id = ef.beer_id
         WHERE ef.review_class IS NULL AND ef.outcome = 'not_found'
+          AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+            WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)
         ORDER BY ef.last_at DESC, ef.beer_id DESC
         LIMIT ?`,
     )
@@ -384,10 +395,12 @@ export interface OwnerlessRow {
 export function listOwnerlessRows(db: DB): OwnerlessRow[] {
   return db.prepare(
     `SELECT beer_id, brewery, name, review_class, review_note
-       FROM enrich_failures
+       FROM enrich_failures ef
       WHERE review_class IN ('matcher_bug', 'parser_bug')
         AND issue_number IS NULL
         AND retired_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+          WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)
         AND (review_note LIKE 'off-scope %' OR review_note LIKE 'no absence evidence:%'
              OR review_note LIKE 'unverified:%')
       ORDER BY beer_id`,
@@ -398,9 +411,11 @@ export function listOwnerlessRows(db: DB): OwnerlessRow[] {
 // the pile really is.
 export function countOwnerlessRows(db: DB): number {
   const r = db.prepare(
-    `SELECT COUNT(*) AS n FROM enrich_failures
+    `SELECT COUNT(*) AS n FROM enrich_failures ef
       WHERE review_class IN ('matcher_bug', 'parser_bug')
-        AND issue_number IS NULL AND retired_at IS NULL`,
+        AND issue_number IS NULL AND retired_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+          WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)`,
   ).get() as { n: number };
   return r.n;
 }
