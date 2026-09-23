@@ -4,6 +4,7 @@ import { upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readW
 import { seedBeer } from './seed-beer.testing';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
 import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from './legacy-orphan-dispositions';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -516,6 +517,33 @@ describe('listRelayLookupCandidates', () => {
   }
 
   const NOW = new Date('2026-05-26T12:00:00Z');
+
+  test('active disposition removes its row from both pools; manual reopen restores it', () => {
+    const db = fresh();
+    const onTap = seedBeerOnTapLocal(db, { brewery: 'Old Brewery', name: 'Old Card' });
+    const relay = seedRelayOrphan(db, { brewery: 'Old Brewery', name: 'Relay Card' });
+    const liveOnTap = seedBeerOnTapLocal(db, { brewery: 'Live Brewery', name: 'Live Card' });
+    const liveRelay = seedRelayOrphan(db, { brewery: 'Live Brewery', name: 'Live Relay' });
+    const seal = (beerId: number, name: string) => insertLegacyDisposition(db, {
+      beerId, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: name, cardAbv: null,
+      breweryText: cardText('Old Brewery'), nameText: cardText(name), abvKey: cardAbv(null),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const onTapEpisode = seal(onTap, 'Old Card');
+    const relayEpisode = seal(relay, 'Relay Card');
+    expect(listLookupCandidates(db, 20, NOW).map((r) => r.id)).toEqual([liveOnTap]);
+    expect(listRelayLookupCandidates(db, 20, NOW).map((r) => r.id)).toEqual([liveRelay]);
+    for (const id of [onTapEpisode, relayEpisode]) {
+      closeLegacyDisposition(db, id, {
+        reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+        reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+      });
+    }
+    expect(listLookupCandidates(db, 20, NOW).map((r) => r.id)).toContain(onTap);
+    expect(listRelayLookupCandidates(db, 20, NOW).map((r) => r.id)).toContain(relay);
+    db.close();
+  });
 
   test('returns an orphan that has no match_links row at all', () => {
     const db = fresh();

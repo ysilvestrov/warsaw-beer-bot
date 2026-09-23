@@ -2,7 +2,7 @@ import fs from 'fs';
 import type { DB } from './db';
 import { getJobState } from './job_state';
 import { getUsageForDate } from './api_usage';
-import { orphanNotOnTapPredicate } from './beers';
+import { inactiveLegacyOrphanPredicate, orphanNotOnTapPredicate } from './beers';
 import { warsawDateAndHour, previousDate } from '../domain/warsaw-time';
 
 export interface StatusMetrics {
@@ -118,6 +118,7 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     orphansPending: count(
       `SELECT COUNT(*) AS c FROM beers b
         WHERE b.untappd_id IS NULL
+          AND NOT ${inactiveLegacyOrphanPredicate}
           AND NOT EXISTS (
             SELECT 1 FROM enrich_failures ef
             WHERE ef.beer_id = b.id AND ef.retired_at IS NOT NULL
@@ -156,7 +157,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
         WHERE ef.review_class IN ('matcher_bug','parser_bug')
           AND ef.issue_number IS NOT NULL AND ef.unlocked_at IS NULL
           AND ef.retired_at IS NULL
-          AND b.untappd_id IS NULL`,
+          AND b.untappd_id IS NULL
+          AND NOT ${inactiveLegacyOrphanPredicate}`,
     ),
     // Beat 1 firing. Counts only rows still IN FLIGHT: beat 2 clears unlocked_at, so a row
     // that settles within the same week leaves this count and appears in the next one. The

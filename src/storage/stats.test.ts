@@ -11,12 +11,41 @@ import {
   recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued,
 } from './enrich_failures';
 import { previousDate, warsawDateAndHour } from '../domain/warsaw-time';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition, closeLegacyDisposition } from './legacy-orphan-dispositions';
 
 function fresh() {
   const db = openDb(':memory:');
   migrate(db);
   return db;
 }
+
+test('active disposition is absent from live pending, relay and lock counts', () => {
+  const db = fresh();
+  const inactive = seedBeer(db, { untappd_id: null, name: 'Old Card', brewery: 'Old Brewery',
+    style: null, abv: null, rating_global: null, normalized_name: 'old card', normalized_brewery: 'old brewery' });
+  seedBeer(db, { untappd_id: null, name: 'Live Card', brewery: 'Live Brewery',
+    style: null, abv: null, rating_global: null, normalized_name: 'live card', normalized_brewery: 'live brewery' });
+  db.prepare(`INSERT INTO enrich_failures
+    (beer_id, brewery, name, search_url, source_url, outcome, candidates_count,
+     candidates_summary, fail_count, last_at, review_class, issue_number)
+    VALUES (?, 'Old Brewery', 'Old Card', '', '', 'not_found', 0, '', 1,
+      '2026-09-23T00:00:00Z', 'matcher_bug', 677)`).run(inactive);
+  const episode = insertLegacyDisposition(db, {
+    beerId: inactive, issueNumber: 677, cardBrewery: 'Old Brewery', cardName: 'Old Card', cardAbv: null,
+    breweryText: cardText('Old Brewery'), nameText: cardText('Old Card'), abvKey: cardAbv(null),
+    failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+    operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+  });
+  const now = new Date('2026-09-23T12:00:00Z');
+  expect(collectStatus(db, now)).toMatchObject({ orphansPending: 1, orphansRelayQueue: 1, lockedRows: 0 });
+  closeLegacyDisposition(db, episode, {
+    reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+    reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+  });
+  expect(collectStatus(db, now)).toMatchObject({ orphansPending: 2, orphansRelayQueue: 2, lockedRows: 1 });
+  db.close();
+});
 
 function tap(beerRef: string) {
   return { tap_number: 1, beer_ref: beerRef, brewery_ref: null, abv: null, ibu: null, style: null, u_rating: null };
