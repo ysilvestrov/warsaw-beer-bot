@@ -140,5 +140,57 @@ describe('runDraw', () => {
       deps,
     });
     expect(out.outcomes[0].actual).toBe('error');
+    expect(out.outcomes[0].correct).toBe(false);
+  });
+
+  // Two entries on the same group: the stub answers in an order that differs
+  // from request order, and the two entries have opposite `expected` values.
+  // An index-based (rather than id-based) lookup would swap the verdicts and
+  // score both entries wrong; only id-matching scores both correct.
+  it('maps verdicts back to entries by id, not by request order', async () => {
+    const reversedOrderVerify = (async (_d: unknown, _p: { requests: Array<{ id: string }> }) => ({
+      results: [
+        { id: 'b', verdict: 'refuted' as const, evidence: 'eb' },
+        { id: 'a', verdict: 'confirmed' as const, evidence: 'ea' },
+      ],
+      usage: { ...EMPTY_USAGE, calls: 1 },
+    })) as never;
+
+    const out = await runDraw({
+      entries: [entry({ id: 'a', expected: 'confirmed' }), entry({ id: 'b', expected: 'refuted' })],
+      instructions: 'verify',
+      readBody: () => 'body',
+      verify: reversedOrderVerify,
+      deps,
+    });
+
+    const byId = Object.fromEntries(out.outcomes.map((o) => [o.id, o]));
+    expect(byId.a.actual).toBe('confirmed');
+    expect(byId.a.correct).toBe(true);
+    expect(byId.b.actual).toBe('refuted');
+    expect(byId.b.correct).toBe(true);
+  });
+
+  // Two entries on the same group, but the stub answers for only one of them.
+  // The entry with no matching result must become `error`, never silently
+  // inherit its neighbour's verdict.
+  it('marks a missing result as error rather than inheriting a neighbour\'s verdict', async () => {
+    const partialVerify = (async (_d: unknown, _p: { requests: Array<{ id: string }> }) => ({
+      results: [{ id: 'b', verdict: 'confirmed' as const, evidence: 'eb' }],
+      usage: { ...EMPTY_USAGE, calls: 1 },
+    })) as never;
+
+    const out = await runDraw({
+      entries: [entry({ id: 'a', expected: 'refuted' }), entry({ id: 'b', expected: 'confirmed' })],
+      instructions: 'verify',
+      readBody: () => 'body',
+      verify: partialVerify,
+      deps,
+    });
+
+    const byId = Object.fromEntries(out.outcomes.map((o) => [o.id, o]));
+    expect(byId.a.actual).toBe('error');
+    expect(byId.a.correct).toBe(false);
+    expect(byId.b.actual).toBe('confirmed');
   });
 });
