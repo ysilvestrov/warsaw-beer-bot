@@ -103,7 +103,7 @@ describe('repair-legacy-card CLI (#696)', () => {
 
   it('shows that a pre-deployment v33 database cannot yet accept an apply', async () => {
     const { db, lines, hydrate } = fixture();
-    db.prepare('DELETE FROM schema_version WHERE version = 34').run();
+    db.prepare('DELETE FROM schema_version WHERE version >= 34').run();
     await runRepairLegacyCard(args, { db, hydrate, print: (line) => lines.push(line) });
     expect(JSON.parse(lines[0])).toMatchObject({ schemaVersion: 33, readyToApply: false });
     await expect(runRepairLegacyCard([...args, '--apply'], {
