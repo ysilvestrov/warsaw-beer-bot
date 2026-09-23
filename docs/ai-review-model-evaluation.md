@@ -77,9 +77,34 @@ and replay it at the head the live review actually saw.
 > reviewed head in the review's own state block (`<!-- ai-pr-review-state {"head":…} -->`)
 > or take the commit before the fix commit.
 
-Current probe: **PR #418 at `584aa661`**, five known-real findings — scope-fence hijack,
-new-issue scope guard, in-run saturation counter, free-string tool schema, and the guard
-counters. Score a config by how many of the five it publishes.
+Current probe: **PR #418 at `584aa661`**. The five known-real findings are the ones the fix
+commit `2170717` closed ("All five were valid on inspection; none were declined") — read them
+there, never from a summary:
+
+- **D1 — body scope hijack.** `issue.body` is model prose and lands *before* our rendered
+  block, so a `triage-scope` fence written there wins `parseScopeBlock`'s first-match race.
+- **D2 — `isLegalScope` lets a cohort launder a whole-class `where`.** `rowSatisfiesScope` ORs
+  `beer_ids` with `where`, so a `review_class`-only `where` decides for every row outside the
+  cohort.
+- **D3 — a verdict routed to a NEW issue was never checked against that issue's scope.**
+- **D4 — saturation counted only pre-run rows**, so one batch could walk an issue past its cap.
+- **D5 — the tool schema advertised `col`/`op` as free strings**, so a tool-valid term that zod
+  rejects failed the whole run instead of the term.
+
+Score a config by how many of the five it publishes, judged on the **mechanism**, not the
+wording — and check the claim against both trees before crediting it.
+
+> **Corrected 2026-09-23.** This list previously read "scope-fence hijack, new-issue scope
+> guard, in-run saturation counter, free-string tool schema, and **the guard counters**". The
+> last is not one of the five: "guard counters are logged only when the model omitted
+> verdicts" is a separate observation the fix commit never closed, and **D2** was missing
+> altogether. Every pass before this one scored against a list off by one.
+>
+> A near-miss to adjudicate the same way: a run claiming *"parsed scopes on existing issues are
+> never passed through `isLegalScope`"* has **not** found D2. Verified in both trees — the fix
+> changed the rule *inside* `isLegalScope` and left its single call site on `new_issues`, so
+> existing issues still skip the guard after the fix. It is real and still open — filed as
+> **#692** — but it is a different defect.
 
 ## 3. Variance probe — is the difference real
 
@@ -191,6 +216,14 @@ second with precondition 1 before blaming the model.
   Weigh both halves of a candidate's price.
 - **`gpt-6-*` does not match a `gpt-5` grep.** Filter the `/v1/models` list by date, not by
   name, or you will miss a whole generation (2026-09-23).
+- **`verify` is not ≈18% of the bill.** Measured 2026-09-23 across 12 draws: 38–47% of a run
+  with the incumbent on find, and **94–96%** with a cheap find model. The 18% came from PRs
+  carrying one or two findings. Verify, not find, is where the remaining money is.
+- **Cheap does not mean thoughtless.** `gpt-6-luna` spent *more* reasoning tokens than the
+  incumbent (4.1–4.9k vs 2.6–3.1k) at 1/38 the find cost. When a cheap model under-covers,
+  find the blind spot; do not explain it with the price.
+- **Quote per-draw scores and the union together.** They are different numbers and a candidate
+  is compared like-to-like with each. Half of a 2026-09-22 confusion was this alone.
 
 ---
 
@@ -392,16 +425,24 @@ output price now matters as much as its input price, which is why `gpt-6-sol`'s 
 
 ### Candidate register
 
-| candidate | stage | price verdict | measured? | next |
-|---|---|---|---|---|
-| `gpt-6-sol` | find | −50%, same family as incumbent | shape ✅ | **first** — full pass |
-| `claude-haiku-4-5` | find | −68% | shape ✅, thinking off | screen on recall probe |
-| `gpt-6-luna` | find | −97% | shape ✅ | screen; `gpt-5.6-luna` was refuted, generation changed |
-| `claude-sonnet-5` | **verify** | −37% vs sol, −60% vs gpt-5.5 | shape ✅, thinking off | fabrication corpus |
-| `claude-opus-5-5` | — | +26% per call once tokens are counted | shape ✅ | **excluded on price** |
-| `gpt-6-astra`, `gpt-5.6-cyber`, `claude-fable-5-1`, `claude-opus-5` | — | dearer | — | excluded |
+Verdicts filled in from the quality pass that follows.
+
+| candidate | stage | price verdict | outcome |
+|---|---|---|---|
+| `gpt-6-sol` | find | −60% measured | **3/5 union — shelved**, D5 blind spot |
+| `claude-haiku-4-5` | find | −78% measured | **0/5 union + 2 `refuted` — refuted** |
+| `gpt-6-luna` | find | −97% measured | **3/5 union — shelved**, but reasons *more* than the incumbent |
+| `claude-sonnet-5` | **verify** | −60% vs `gpt-5.5` | **not yet measured — now the priority** |
+| `claude-opus-5-5` | — | +26% per call once tokens are counted | excluded on price |
+| `gpt-6-astra`, `gpt-5.6-cyber`, `claude-fable-5-1`, `claude-opus-5` | — | dearer | excluded |
 
 ### The pass that is planned, and what it costs
+
+> **Run the same day** — results in the next entry. Read this section for the method and the
+> budget that was set before spending; read the next one for what the numbers turned out to be.
+> Two of its predictions were wrong: `gpt-6-sol` was expected to be the front-runner and came
+> in at 3/5, and the estimate of Anthropic's token penalty (1.65×, from a small file) was 1.22×
+> on the real review prompt.
 
 Nothing above says a word about quality. The pass to run, per the protocol and in this
 order, so a cheap refutation stops the spending early:
@@ -454,3 +495,104 @@ Standing economics behind all three: `verify` is ~18% of the bill and the stage 
 to decide what a human sees. It is the worst candidate for saving money and the best one for
 losing precision. The probe was not run — both keys used on 2026-09-22 had been revoked at
 that point — and nothing above needs a probe to settle.
+
+## 2026-09-23, quality pass — nothing replaces the incumbent on `find`, and the money moved
+
+The pass planned in the entry above, run the same day for **$2.72**. Recall probe, PR #418 @
+`584aa661`, **three draws per config**, verify pinned to `gpt-5.5` on OpenAI throughout, the
+incumbent re-measured in the same session. Context identical for every draw — 147 605 chars,
+6 files diff-only, **all six `*.test.ts`, zero source** — so the § 5 precondition held.
+
+Scored against the five defects the fix commit closed (see § 2, whose list this pass had to
+correct first). Costs are recomputed from token counts at **uncached** list rates; see the
+cache note below.
+
+| config | per draw | **union** | published | find $/run | whole run $ |
+|---|---|---|---|---|---|
+| **`gpt-5.6-sol`** (incumbent) | 3 / 4 / 4 | **5/5** | 6 / 7 / 5 | $0.2564 | **$0.4440** |
+| `gpt-6-sol` | 2⚠ / 2⚠ / 3 | 3/5 | 3 / 3 / 5 | $0.1021 | $0.1928 |
+| `gpt-6-luna` | 2 / 3 / 1 | 3/5 | 3 / 5 / 2 | **$0.0068** | $0.1301 |
+| `claude-haiku-4-5` | 0 / 0 / 0 | **0/5** | 1 / 0 / 0 | $0.0575 | $0.1412 |
+
+⚠ = the defect was **raised** and verify returned `error` rather than a verdict — a harness
+failure, scored apart from a miss. See "the empty-completion defect" below.
+
+**The incumbent stays.** No candidate matched 5/5, and the band the two gpt-6 models land in
+(3/5) is the band `gpt-5.6-terra` was shelved in on 2026-09-22. Rejecting terra for costing one
+of five and then accepting a model that costs two would not be a decision, it would be a mood.
+
+### What each candidate actually did
+
+**`gpt-6-sol` — cheaper because it thinks less.** On the identical prompt it spent 871 / 658 /
+871 reasoning tokens against the incumbent's 2 562 / 2 563 / 3 072, and emitted 2.0k completion
+against 4.2–4.8k. −60% on find, and the two defects it never raised are the price.
+
+**`gpt-6-luna` — the surprise, and still not enough.** It reasons *more* than the incumbent
+(4 078 / 4 900 / 4 430 tokens) at 1/38 the find cost: **$0.0068 a run against $0.2564**. Its
+union is 3/5 and its per-draw spread is 1–3, so it is not a replacement — but "cheap models
+don't think" is not why it fails, and that is worth knowing before the next generation lands.
+
+**`claude-haiku-4-5` — refuted, three different ways in three draws.** r1 published one finding
+outside the five and produced **2 `refuted`** (production has zero in 29); r2 raised 6 and every
+one came back `out_of_scope`; r3 returned an **empty findings array** (8 completion tokens).
+Reasoning was 0 tokens in all three, exactly as precondition 4 predicted, so this rejects haiku
+**over the compat endpoint**, not as a model — but 0/5 plus fabrications does not pay for a
+native Messages client.
+
+### Which misses carry signal
+
+Both gpt-6 models missed D2 and D5 in all three of their draws. Only one of those is a finding:
+
+- **D5 (free-string tool schema) is a real blind spot** of the generation. The incumbent raised
+  it in 2 of 3 draws, the two gpt-6 models in **0 of 6** — at p≈2/3, six consecutive misses
+  land about 0.1% of the time.
+- **D2 is not established.** The incumbent itself raised it in only 1 of 3 draws, so at p≈1/3
+  six misses happen ~9% of the time. Under-powered, and it needs draws rather than adjectives.
+
+### The money moved to verify — this is the pass's real finding
+
+`verify`'s share of a run, measured here rather than assumed:
+
+| find model | verify share of the run |
+|---|---|
+| `gpt-5.6-sol` | 41% / 47% / 38% |
+| `gpt-6-sol` | 35% / 40% / 59% |
+| `claude-haiku-4-5` | 65% / 69% / — |
+| `gpt-6-luna` | **96% / 94% / 94%** |
+
+The "verify is ≈18% of the bill" figure this repo has been quoting came from PRs carrying one
+or two findings. On a PR where the reviewer has real work — seven findings, full file bodies
+re-sent per file group — the judge costs as much as the hunter. And the cheaper the find model,
+the more completely verify *is* the bill: at luna's prices it is 94–96% of it.
+
+Consequence for the next pass: **`find` is no longer the lever.** Verify runs `gpt-5.5` at
+$5/$30, the dearest model in play, and a candidate there is measured on the fabrication corpus
+and on agreement with the incumbent judge — never on the recall probe, which measures a hunter.
+
+### The empty-completion defect — found by this pass, ours not a candidate's
+
+`[verify:error] … reason: OpenAI returned an empty completion`, seen 3 times across 12 draws,
+always on `src/jobs/orphan-triage.ts` (31 689 chars). Mechanism: `verifyFile` requests
+`max(MIN_VERIFY_TOKENS=2000, n * TOKENS_PER_VERDICT=1200)` completion tokens, gpt-5.5 spends
+the whole budget reasoning over a large file, returns no content, and `callStructured` throws.
+Two consequences, both live in production:
+
+1. **every finding in that file is silently lost** — they surface as `error`, and a fail-open
+   re-check publishes nothing;
+2. **the call is billed and never counted**, because the throw happens before usage is
+   returned. Visible in the numbers: verify usage 3.6k on the errored draws against 11.9k on the
+   draw where the same file's call succeeded.
+
+It penalised `gpt-6-sol` twice on D1 — i.e. this defect can make a candidate look blind when it
+was not. Filed as **#691**.
+
+### Two things this pass corrected about its own method
+
+- **Quote per-draw and union together, always.** Yesterday's "sol 5/5" was a *union*; today's
+  incumbent scores 3/4/4 per draw and 5/5 as a union. Both numbers are true and neither is the
+  other, so a candidate is compared union-to-union and draw-to-draw, never across.
+- **An identical replay hits the prefix cache; a model comparison must not use the cached
+  figure.** INC r2's own footer printed find `$0.1092` where the same 41 384→4 630 tokens cost
+  `$0.2581` uncached. Production never replays an identical prompt, so a cached draw flatters a
+  candidate for having been measured second. (This does not revive "the cache is a lever" — that
+  finding is about consecutive runs on a live PR, where the diff and churn order change.)
