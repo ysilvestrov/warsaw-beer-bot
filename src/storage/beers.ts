@@ -80,8 +80,9 @@ export interface BidBeerInput {
 function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_source: UntappdIdSource | null } | null {
   const orphans = db
     .prepare(
-      `SELECT id, name, abv, untappd_id_source FROM beers
-        WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?`,
+      `SELECT b.id, b.name, b.abv, b.untappd_id_source FROM beers b
+        WHERE b.untappd_id IS NULL AND b.normalized_brewery = ? AND b.normalized_name = ?
+          AND NOT ${inactiveLegacyOrphanPredicate}`,
     )
     .all(b.normalized_brewery, b.normalized_name) as {
       id: number; name: string; abv: number | null; untappd_id_source: UntappdIdSource | null;
@@ -193,9 +194,10 @@ export interface OrphanBeerInput {
 export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
   const orphans = db
     .prepare(
-      `SELECT id, name, abv FROM beers
-        WHERE untappd_id IS NULL AND normalized_brewery = ? AND normalized_name = ?
-        ORDER BY id`,
+      `SELECT b.id, b.name, b.abv FROM beers b
+        WHERE b.untappd_id IS NULL AND b.normalized_brewery = ? AND b.normalized_name = ?
+          AND NOT ${inactiveLegacyOrphanPredicate}
+        ORDER BY b.id`,
     )
     .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string; abv: number | null }[];
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
@@ -305,7 +307,8 @@ export interface CatalogRow {
 
 export function loadCatalog(db: DB): CatalogRow[] {
   return db
-    .prepare('SELECT id, brewery, name, abv, rating_global, untappd_id FROM beers')
+    .prepare(`SELECT b.id, b.brewery, b.name, b.abv, b.rating_global, b.untappd_id
+      FROM beers b WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as CatalogRow[];
 }
 

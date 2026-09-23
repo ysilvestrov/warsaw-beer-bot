@@ -16,6 +16,38 @@ test('findBeerByNormalized returns null when absent', () => {
   expect(findBeerByNormalized(fresh(), 'x', 'y')).toBeNull();
 });
 
+test('inactive orphan is absent from catalog and cannot be adopted by name or published bid', () => {
+  const db = fresh();
+  const old = ensureOrphan(db, {
+    brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6,
+    normalized_brewery: 'de cam', normalized_name: 'abrikoos',
+  });
+  const episode = insertLegacyDisposition(db, {
+    beerId: old, issueNumber: 677, cardBrewery: 'De Cam', cardName: 'Abrikoos 2018', cardAbv: 6,
+    breweryText: cardText('De Cam'), nameText: cardText('Abrikoos 2018'), abvKey: cardAbv(6),
+    failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+    operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+  });
+  expect(loadCatalog(db).map((r) => r.id)).not.toContain(old);
+  const corrected = ensureOrphan(db, {
+    brewery: 'De Cam', name: 'Abrikoos 2018', abv: 7,
+    normalized_brewery: 'de cam', normalized_name: 'abrikoos',
+  });
+  expect(corrected).not.toBe(old);
+  expect(upsertBeerByBid(db, {
+    untappd_id: 3615616, brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6,
+    normalized_brewery: 'de cam', normalized_name: 'abrikoos', untappd_id_source: 'bid',
+  })).toBe(corrected);
+  expect(db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(old)).toEqual({ untappd_id: null });
+  expect(loadCatalog(db).map((r) => r.id)).toContain(corrected);
+  closeLegacyDisposition(db, episode, {
+    reopenedAt: '2026-09-24T00:00:00Z', reopeningReason: 'New evidence',
+    reopeningEvidenceUrl: 'https://example.com/new', reopeningOperator: 'test',
+  });
+  expect(loadCatalog(db).map((r) => r.id)).toContain(old);
+  db.close();
+});
+
 // ---------------------------------------------------------------------------
 // PR-D1 helpers below
 // ---------------------------------------------------------------------------

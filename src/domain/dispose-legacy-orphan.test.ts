@@ -1,6 +1,8 @@
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { findActiveDispositionForBeer } from '../storage/legacy-orphan-dispositions';
+import { catalogVersion } from '../storage/catalog-version';
+import { createCatalogCache } from './catalog-cache';
 import {
   applyLegacyOrphanDisposition, applyLegacyOrphanReopen,
   previewLegacyOrphanDisposition, previewLegacyOrphanReopen,
@@ -27,6 +29,31 @@ function fixture() {
 }
 
 describe('dispose legacy orphan (#695)', () => {
+  it('invalidates cached catalog only for applied or reopened transactions', async () => {
+    const { db, input } = fixture();
+    const cache = createCatalogCache(db);
+    expect((await cache.get()).byId.has(input.beerId)).toBe(true);
+    const before = catalogVersion();
+    const episode = applyLegacyOrphanDisposition(db, input, previewLegacyOrphanDisposition(db, input));
+    expect(catalogVersion()).toBe(before + 1);
+    expect(applyLegacyOrphanDisposition(db, input).kind).toBe('noop');
+    expect(catalogVersion()).toBe(before + 1);
+    await cache.get();
+    await cache.idle();
+    expect((await cache.get()).byId.has(input.beerId)).toBe(false);
+    const reopen: LegacyReopenInput = {
+      episodeId: episode.episodeId, reason: 'New evidence', evidenceUrl: 'https://example.com/new',
+      operator: 'maintainer', at: '2026-09-24T12:00:00Z',
+    };
+    expect(applyLegacyOrphanReopen(db, reopen, previewLegacyOrphanReopen(db, reopen)).kind).toBe('reopened');
+    expect(catalogVersion()).toBe(before + 2);
+    expect(applyLegacyOrphanReopen(db, reopen).kind).toBe('noop');
+    expect(catalogVersion()).toBe(before + 2);
+    await cache.get();
+    await cache.idle();
+    expect((await cache.get()).byId.has(input.beerId)).toBe(true);
+    db.close();
+  });
   it('previews without writing and applies one audited inactive episode', () => {
     const { db, input } = fixture();
     const preview = previewLegacyOrphanDisposition(db, input);
