@@ -28,6 +28,36 @@ function insertFailure(
 }
 
 describe('schema migrations', () => {
+  it('v35 keeps inactive legacy-card decisions unique while retaining reopened history', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const insert = db.prepare(`INSERT INTO legacy_orphan_dispositions
+      (beer_id, issue_number, card_brewery, card_name, card_abv,
+       brewery_text, name_text, abv_key, failure_source_url,
+       reason, evidence_url, operator, inactive_at)
+      VALUES (?, 677, 'De Cam', 'Abrikoos 2018', 6,
+              'de cam', 'abrikoos 2018', '6', '',
+              'No defensible bid', 'https://example.com/evidence', 'maintainer',
+              '2026-09-23T00:00:00Z')`);
+    insert.run(29955);
+    expect(() => insert.run(29955)).toThrow();
+    expect(() => db.prepare(`INSERT INTO legacy_orphan_dispositions
+      (beer_id, issue_number, card_brewery, card_name, card_abv,
+       brewery_text, name_text, abv_key, failure_source_url,
+       reason, evidence_url, operator, inactive_at)
+      VALUES (29956, 677, 'De Cam', 'Abrikoos 2018', 6,
+              'de cam', 'abrikoos 2018', '6', '',
+              'Another row', 'https://example.com/evidence', 'maintainer',
+              '2026-09-23T00:00:00Z')`).run()).toThrow();
+    db.prepare(`UPDATE legacy_orphan_dispositions SET reopened_at = '2026-09-24T00:00:00Z',
+      reopening_reason = 'New evidence', reopening_evidence_url = 'https://example.com/new',
+      reopening_operator = 'maintainer' WHERE beer_id = 29955`).run();
+    insert.run(29955);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM legacy_orphan_dispositions').get()).toEqual({ n: 2 });
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+    db.close();
+  });
+
   it('creates all tables in an empty db', () => {
     const db = openDb(':memory:');
     migrate(db);
@@ -533,7 +563,7 @@ describe('schema migrations', () => {
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
       // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: this rewind starts from v23
       // and runs migrate() to completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(34);
+      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(35);
     });
   });
 
@@ -582,7 +612,7 @@ describe('schema migrations', () => {
       // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
       // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: a fresh DB's
       // reachable head moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(34);
+      expect(version.v).toBe(35);
     });
   });
 
@@ -764,7 +794,7 @@ describe('v34 legacy_card_repairs (#696)', () => {
       db.prepare('DELETE FROM legacy_card_repairs').run();
       expect(() => insert.run(...invalid)).toThrow(/CHECK constraint failed/);
     }
-    expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(34);
+    expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(35);
     db.close();
   });
 });

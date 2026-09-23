@@ -613,6 +613,43 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_legacy_card_repairs_issue ON legacy_card_repairs(issue_number);
     `,
   },
+  {
+    version: 35,
+    // #695: one active decision per historical row and exact shop-card key.
+    // Historical beer IDs must survive later deletion, so there is no cascading FK.
+    sql: `
+      CREATE TABLE IF NOT EXISTS legacy_orphan_dispositions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        beer_id INTEGER NOT NULL CHECK (beer_id > 0),
+        issue_number INTEGER NOT NULL CHECK (issue_number > 0),
+        card_brewery TEXT NOT NULL CHECK (length(trim(card_brewery)) > 0),
+        card_name TEXT NOT NULL CHECK (length(trim(card_name)) > 0),
+        card_abv REAL CHECK (card_abv IS NULL OR card_abv BETWEEN 0 AND 100),
+        brewery_text TEXT NOT NULL CHECK (length(brewery_text) > 0),
+        name_text TEXT NOT NULL CHECK (length(name_text) > 0),
+        abv_key TEXT NOT NULL,
+        failure_source_url TEXT NOT NULL,
+        reason TEXT NOT NULL CHECK (length(trim(reason)) > 0),
+        evidence_url TEXT NOT NULL CHECK (length(trim(evidence_url)) > 0),
+        operator TEXT NOT NULL CHECK (length(trim(operator)) > 0),
+        inactive_at TEXT NOT NULL,
+        reopened_at TEXT,
+        reopening_reason TEXT,
+        reopening_evidence_url TEXT,
+        reopening_operator TEXT,
+        CHECK ((reopened_at IS NULL AND reopening_reason IS NULL
+                AND reopening_evidence_url IS NULL AND reopening_operator IS NULL)
+            OR (reopened_at IS NOT NULL AND length(trim(reopening_reason)) > 0
+                AND length(trim(reopening_evidence_url)) > 0
+                AND length(trim(reopening_operator)) > 0))
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_legacy_orphan_active_beer
+        ON legacy_orphan_dispositions(beer_id) WHERE reopened_at IS NULL;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_legacy_orphan_active_card
+        ON legacy_orphan_dispositions(brewery_text, name_text, abv_key) WHERE reopened_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_legacy_orphan_dispositions_issue ON legacy_orphan_dispositions(issue_number);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
