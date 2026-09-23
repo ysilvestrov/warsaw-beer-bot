@@ -10,6 +10,7 @@
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "ai-review-replay": "tsx scripts/ai-review/replay.ts",
+    "verify-corpus": "tsx scripts/ai-review/verify-corpus-cli.ts",
     "alias-key": "tsx scripts/brewery-alias-key.ts",
     "rearm-aliased-orphans": "tsx scripts/rearm-aliased-orphans.ts",
     "rearm-matcher-bug-orphans": "tsx scripts/rearm-matcher-bug-orphans.ts",

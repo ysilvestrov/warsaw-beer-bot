@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_USAGE } from './usage';
-import { groupEntries, runDraw } from './verify-corpus-run';
+import { gitBody, groupEntries, runDraw } from './verify-corpus-run';
 import type { CorpusEntry } from './verify-corpus';
 
 const entry = (over: Partial<CorpusEntry>): CorpusEntry => ({
@@ -38,6 +38,26 @@ describe('groupEntries', () => {
   it('splits different files at the same sha into two groups', () => {
     const groups = groupEntries([entry({ id: 'a', file: 'src/a.ts' }), entry({ id: 'b', file: 'src/b.ts' })]);
     expect(groups.length).toBe(2);
+  });
+});
+
+describe('gitBody', () => {
+  // A commit already in the repo's own history, so this test needs no network
+  // and cannot flake. `gitBody`'s two arguments are `(sha, file)` — swapped,
+  // every entry in a real run would come back null and the whole corpus would
+  // report `error`, which reads as a catastrophic judge failure rather than the
+  // one-line bug it is. This pins the argument order directly.
+  const SHA = '584aa66183e55e4371819c9c5b19b2662ddaa6a2';
+
+  it('reads a file that exists at a pinned sha', () => {
+    const body = gitBody(SHA, 'src/domain/triage-plan.ts');
+    expect(body).not.toBeNull();
+    expect(body).toContain('PlannedNewIssue');
+  });
+
+  it('returns null, not a throw, for a path absent at that sha', () => {
+    expect(() => gitBody(SHA, 'scripts/ai-review/verify-corpus.ts')).not.toThrow();
+    expect(gitBody(SHA, 'scripts/ai-review/verify-corpus.ts')).toBeNull();
   });
 });
 
