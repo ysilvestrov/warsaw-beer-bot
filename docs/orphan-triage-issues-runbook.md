@@ -125,7 +125,8 @@ npm run repair-legacy-card -- \
   --overwrite-abv
 ```
 
-Перевір у preview старий текст, `abvKey`, issue, власника наявного аліаса,
+Перевір у preview `readyToApply: true` (схема v34 має бути вже задеплоєна),
+старий текст, `abvKey`, issue, власника наявного аліаса,
 цільовий bid, гідроване ABV, посилання, які переїдуть, та причину. Якщо ABV
 стара картка **не надсилала**, явно вкажи `--card-abv absent`. Якщо старе ABV
 або ABV канонічного рядка розходиться з Untappd, `--overwrite-abv` потрібен:
