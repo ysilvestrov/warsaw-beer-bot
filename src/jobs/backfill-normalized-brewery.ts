@@ -1,6 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { normalizeBrewery } from '../domain/normalize';
+import { inactiveLegacyOrphanPredicate } from '../storage/beers';
 
 export interface BackfillResult {
   updated: number;
@@ -12,7 +13,8 @@ export interface BackfillResult {
 // rules change. idx_beers_norm is non-UNIQUE, so collisions cannot throw.
 export function backfillNormalizedBrewery(db: DB, log: pino.Logger): BackfillResult {
   const rows = db
-    .prepare('SELECT id, brewery, normalized_brewery FROM beers')
+    .prepare(`SELECT b.id, b.brewery, b.normalized_brewery FROM beers b
+      WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as Array<{ id: number; brewery: string; normalized_brewery: string }>;
   const update = db.prepare('UPDATE beers SET normalized_brewery = ? WHERE id = ?');
   let updated = 0;

@@ -2,11 +2,13 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import pino from 'pino';
 import { seedBeer } from '../storage/seed-beer.testing';
-import { upsertMatch } from '../storage/match_links';
+import { getMatch, upsertMatch } from '../storage/match_links';
 import { mergeCheckin } from '../storage/checkins';
 import { ensureProfile } from '../storage/user_profiles';
 import { catalogVersion } from '../storage/catalog-version';
 import { dedupeBreweryAliases } from './dedupe-brewery-aliases';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -17,6 +19,26 @@ function fresh() {
 const silentLog = pino({ level: 'silent' });
 
 describe('dedupeBreweryAliases', () => {
+  test('does not delete or redirect an inactive orphan', () => {
+    const db = fresh();
+    seedBeer(db, { untappd_id: 1905189, name: 'Juicilicious',
+      brewery: 'Piwne Podziemie / Beer Underground', style: null, abv: 6,
+      rating_global: null, normalized_name: 'juicilicious', normalized_brewery: 'piwne podziemie beer underground' });
+    const old = seedBeer(db, { untappd_id: null, name: 'Juicilicious',
+      brewery: 'Piwne Podziemie Brewery', style: null, abv: null,
+      rating_global: null, normalized_name: 'juicilicious', normalized_brewery: 'piwne podziemie' });
+    upsertMatch(db, null, 'Juicilicious', old, 1.0);
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Piwne Podziemie Brewery', cardName: 'Juicilicious', cardAbv: null,
+      breweryText: cardText('Piwne Podziemie Brewery'), nameText: cardText('Juicilicious'), abvKey: cardAbv(null),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 0, beersDeleted: 0 });
+    expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(old)).toEqual({ id: old });
+    expect(getMatch(db, null, 'Juicilicious')?.untappd_beer_id).toBe(old);
+    db.close();
+  });
   test('returns zero when catalog is clean', () => {
     const db = fresh();
     const result = dedupeBreweryAliases(db, silentLog);

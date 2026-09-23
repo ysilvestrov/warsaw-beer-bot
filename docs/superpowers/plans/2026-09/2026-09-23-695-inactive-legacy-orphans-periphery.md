@@ -156,11 +156,11 @@ const outcome = await matchBeerList(prepared, byId, drunkSet, ratings, beers, op
 
 ### Task 5: Close automatic catalog and cleanup paths found in branch review
 
-**Review finding:** `refresh-ontap.ts` builds its own catalog rather than using `loadCatalog`; `cleanup-polluted-ontap.ts` rewrites/deletes all orphan rows; `dedupe-brewery-aliases.ts` deletes matching orphan rows. Left unchanged, these can automatically relink, mutate, or delete an inactive historical row. This was found in the whole-branch review after Task 4's tests; no production row has been disposed.
+**Review finding:** `refresh-ontap.ts` builds its own catalog rather than using `loadCatalog`; `cleanup-polluted-ontap.ts` rewrites/deletes all orphan rows; `dedupe-brewery-aliases.ts` deletes matching orphan rows; `backfill-normalized-brewery.ts` can mutate the historical normalized key. Left unchanged, these can automatically relink, mutate, or delete an inactive historical row. This was found in the whole-branch review after Task 4's tests; no production row has been disposed.
 
-**Files:** `src/jobs/refresh-ontap.ts`, `src/jobs/cleanup-polluted-ontap.ts`, `src/jobs/dedupe-brewery-aliases.ts`, and their focused tests. Reuse `inactiveLegacyOrphanPredicate` with a `beers b` alias where practical; no new concept.
+**Files:** `src/jobs/refresh-ontap.ts`, `src/jobs/cleanup-polluted-ontap.ts`, `src/jobs/dedupe-brewery-aliases.ts`, `src/jobs/backfill-normalized-brewery.ts`, and their focused tests. Reuse `inactiveLegacyOrphanPredicate` with a `beers b` alias where practical; no new concept.
 
-- [ ] Write failing tests: sealed row is absent from refresh's prepared catalog and remains untouched while a corrected tap gets a different live row; polluted cleanup neither rewrites/deletes a sealed source nor selects it as a merge target; brewery-alias dedupe leaves a sealed orphan and its references intact. Controls without episodes retain existing behavior.
+- [ ] Write failing tests: sealed row is absent from refresh's prepared catalog and remains untouched while a corrected tap gets a different live row; polluted cleanup neither rewrites/deletes a sealed source nor selects it as a merge target; brewery-alias dedupe leaves a sealed orphan and its references intact; normalization backfill skips the historical row. Controls without episodes retain existing behavior.
 - [ ] Exclude active episodes from those three read-side candidate sets. Do not modify the disposition, review fields, backoff, or audit. Run focused tests, then `npm test && npm run typecheck`, commit as `fix: preserve inactive orphans in startup jobs`.
 - [ ] Re-run `git diff --check` and review the full branch from `902e52b` for any other automatic row mutation, stale catalog, issue-close, ABV-key collision, audit loss, and unrelated edits. The feature remains local until PR review/deploy.
 

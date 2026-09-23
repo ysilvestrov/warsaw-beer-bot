@@ -4,6 +4,8 @@ import { migrate } from '../storage/schema';
 import { seedBeer } from '../storage/seed-beer.testing';
 import { catalogVersion } from '../storage/catalog-version';
 import { cleanupPollutedOntap } from './cleanup-polluted-ontap';
+import { cardAbv, cardText } from '../domain/card-text';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -20,6 +22,48 @@ function getRow(db: ReturnType<typeof openDb>, id: number) {
 }
 
 describe('cleanupPollutedOntap', () => {
+  test('does not rewrite or delete an inactive polluted row', async () => {
+    const db = fresh();
+    const name = 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale';
+    const old = seedBeer(db, {
+      untappd_id: null, name, brewery: 'Wagabunda Brewery', style: null, abv: 4.5,
+      rating_global: null, normalized_name: 'wagabunda brewery oxymel 14 4 5 ale',
+      normalized_brewery: 'wagabunda',
+    });
+    insertLegacyDisposition(db, {
+      beerId: old, issueNumber: 677, cardBrewery: 'Wagabunda Brewery', cardName: name, cardAbv: 4.5,
+      breweryText: cardText('Wagabunda Brewery'), nameText: cardText(name), abvKey: cardAbv(4.5),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 0 });
+    expect(getRow(db, old)?.name).toBe(name);
+    db.close();
+  });
+
+  test('does not merge a live polluted row into an inactive catalog target', async () => {
+    const db = fresh();
+    const target = seedBeer(db, {
+      untappd_id: null, name: 'Oxymel 14°', brewery: 'Wagabunda Brewery',
+      style: null, abv: 4.5, rating_global: null,
+      normalized_name: 'oxymel', normalized_brewery: 'wagabunda',
+    });
+    insertLegacyDisposition(db, {
+      beerId: target, issueNumber: 677, cardBrewery: 'Wagabunda Brewery', cardName: 'Oxymel 14°', cardAbv: 4.5,
+      breweryText: cardText('Wagabunda Brewery'), nameText: cardText('Oxymel 14°'), abvKey: cardAbv(4.5),
+      failureSourceUrl: '', reason: 'Identity unknown', evidenceUrl: 'https://example.com/evidence',
+      operator: 'test', inactiveAt: '2026-09-23T00:00:00Z',
+    });
+    const polluted = seedBeer(db, {
+      untappd_id: null, name: 'Wagabunda Brewery Oxymel 14°·4,5% — Sour Ale',
+      brewery: 'Wagabunda Brewery', style: null, abv: 4.5, rating_global: null,
+      normalized_name: 'wagabunda brewery oxymel 14 4 5 ale', normalized_brewery: 'wagabunda',
+    });
+    expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 1, merged: 0 });
+    expect(getRow(db, target)?.name).toBe('Oxymel 14°');
+    expect(getRow(db, polluted)?.name).toBe('Oxymel 14°');
+    db.close();
+  });
   test('empty DB → no-op', async () => {
     const db = fresh();
     expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 0 });

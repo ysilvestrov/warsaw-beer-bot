@@ -5,6 +5,7 @@ import { matchPrepared, type CatalogBeer } from '../domain/matcher';
 import { prepareCatalogChunked } from '../domain/catalog-cache';
 import { normalizeName } from '../domain/normalize';
 import { bumpCatalogVersion } from '../storage/catalog-version';
+import { inactiveLegacyOrphanPredicate } from '../storage/beers';
 
 const POLLUTION_RE = /\d+(?:[.,]\d+)?\s*[°%]| — /;
 const MERGE_THRESHOLD = 0.9;
@@ -26,9 +27,9 @@ type Plan = MergePlan | RewritePlan;
 export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<CleanupResult> {
   const allOntap = db
     .prepare(
-      `SELECT id, name, brewery, abv, normalized_name, untappd_id
-         FROM beers
-        WHERE untappd_id IS NULL`,
+      `SELECT b.id, b.name, b.brewery, b.abv, b.normalized_name, b.untappd_id
+         FROM beers b
+        WHERE b.untappd_id IS NULL AND NOT ${inactiveLegacyOrphanPredicate}`,
     )
     .all() as BeerRow[];
 
@@ -47,7 +48,8 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
   }
 
   const cleanPool = db
-    .prepare('SELECT id, name, brewery, abv FROM beers')
+    .prepare(`SELECT b.id, b.name, b.brewery, b.abv FROM beers b
+      WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as CatalogBeer[];
   const pool = cleanPool.filter((c) => !pollutedIds.has(c.id));
   const preparedPool = await prepareCatalogChunked(pool);
