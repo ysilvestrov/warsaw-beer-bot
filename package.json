@@ -15,6 +15,7 @@
     "rearm-aliased-orphans": "tsx scripts/rearm-aliased-orphans.ts",
     "rearm-matcher-bug-orphans": "tsx scripts/rearm-matcher-bug-orphans.ts",
     "adjudicate": "tsx scripts/adjudicate-runner.ts",
+    "close-orphan-issue": "tsx scripts/close-orphan-issue.ts",
     "pin-match": "tsx scripts/pin-match.ts",
     "repair-legacy-card": "tsx scripts/repair-legacy-card.ts",
     "dispose-legacy-orphan": "tsx scripts/dispose-legacy-orphan.ts",
