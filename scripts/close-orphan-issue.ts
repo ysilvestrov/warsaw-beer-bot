@@ -38,7 +38,7 @@ export async function runCloseOrphanIssue(argv: string[], deps: {
     if (!second.ready) { deps.print(JSON.stringify(second, null, 2)); return 1; }
     await deps.github.closeIssue(args.issue);
     const after = await inspect('closed');
-    deps.print(JSON.stringify({ ...after, closed: true }, null, 2));
+    deps.print(JSON.stringify({ ...after, closed: after.github.state === 'closed' }, null, 2));
     return after.ready ? 0 : 1;
   } catch (error) {
     deps.print(`closeout refused: ${error instanceof Error ? error.message : String(error)}`);

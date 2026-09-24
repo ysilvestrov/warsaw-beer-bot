@@ -70,6 +70,23 @@ function proveRescued(db: ReturnType<typeof fresh>, beerId: number, issueNumber:
 }
 
 describe('unlockFixedOrphans', () => {
+  it('rolls back rearm when saving the withheld result fails', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'Proved row', 'matcher_bug', 697);
+    proveRescued(db, beerId, 697);
+    db.exec(`CREATE TRIGGER reject_unlock_result BEFORE INSERT ON job_state
+      WHEN NEW.key = 'unlock_fixed_orphans_last_result'
+      BEGIN SELECT RAISE(ABORT, 'result write failed'); END`);
+    await expect(unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW }))
+      .rejects.toThrow('result write failed');
+    expect(db.prepare('SELECT rearm_count FROM beers WHERE id = ?').get(beerId))
+      .toEqual({ rearm_count: 0 });
+    expect(db.prepare('SELECT unlocked_at FROM enrich_failures WHERE beer_id = ?').get(beerId))
+      .toEqual({ unlocked_at: null });
+    expect(getJobState(db, UNLOCK_LAST_RESULT_KEY)).toBeNull();
+    expect(getJobState(db, UNLOCK_LAST_RUN_KEY)).toBeNull();
+  });
+
   it('does not unlock an unproved row even if its issue was closed manually', async () => {
     const db = fresh();
     const beerId = seedLocked(db, 'No proof', 'matcher_bug', 697);
