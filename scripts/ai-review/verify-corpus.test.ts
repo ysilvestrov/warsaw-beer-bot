@@ -169,13 +169,23 @@ describe('loadCorpus — the committed seed', () => {
     expect(new Set(confirmed.map((e) => e.file)).size).toBeGreaterThan(1);
   });
 
-  // A time shift is only meaningful as a PAIR: the same claim, opposite verdicts,
-  // either side of the fix. An unpaired shift measures nothing in particular.
-  it('pairs every constructed entry with a known-true twin carrying the same claim', () => {
+  // A time shift is only meaningful as a PAIR: the same claim about the SAME FILE,
+  // opposite verdicts, either side of the fix. An unpaired shift measures nothing in
+  // particular.
+  //
+  // The file check is not redundant with the claim match, and the AI review on PR #705
+  // was right to ask for it: matching on claim text alone would let a shift pair with an
+  // entry about a different file, and the invariant this test exists to enforce is that
+  // the judge sees the same body either side of the fix. A collision is implausible with
+  // claims this long — but a test that only rejects the implausible blesses the rest.
+  it('pairs every constructed entry with a known-true twin on the same file', () => {
     const corpus = loadCorpus();
     for (const shifted of corpus.filter((e) => e.provenance === 'constructed')) {
-      const twin = corpus.find((e) => e.claim === shifted.claim && e.expected === 'confirmed');
-      expect(twin, `no confirmed twin for ${shifted.id}`).toBeDefined();
+      const twin = corpus.find(
+        (e) =>
+          e.claim === shifted.claim && e.expected === 'confirmed' && e.file === shifted.file,
+      );
+      expect(twin, `no confirmed twin on ${shifted.file} for ${shifted.id}`).toBeDefined();
       expect(twin!.sha).not.toBe(shifted.sha);
     }
   });
