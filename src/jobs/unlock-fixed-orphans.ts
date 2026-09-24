@@ -8,6 +8,7 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 import { TRIAGE_LABEL } from './orphan-triage';
 
 export const UNLOCK_LAST_RUN_KEY = 'unlock_fixed_orphans_last_run';
+export const UNLOCK_LAST_RESULT_KEY = 'unlock_fixed_orphans_last_result';
 
 // listOpenIssues fetches per_page=100 without pagination, so a FULL page may be a truncated
 // open set — and a truncated open set reads as "these issues closed", unlocking rows in bulk
@@ -35,13 +36,8 @@ export interface UnlockOutcome {
 // job is the only thing that turns external GitHub state into the local fact the pool
 // queries read (`enrich_failures.unlocked_at`) — the pools themselves can never ask GitHub.
 //
-// The trigger is deliberately coarse: "the issue left the open set", not "a fix shipped".
-// GitHub cannot tell us the latter (checked: closedByPullRequestsReferences is empty across
-// the whole referenced set, and stateReason records how the close button was clicked — #319
-// is NOT_PLANNED with its fix deployed, #255 is COMPLETED having only been decomposed). The
-// ambiguity is paid for in quota instead of cleverness: a close that was really a
-// decomposition costs ONE lookup per row, against the four the old timer burned on a
-// schedule that could not succeed.
+// Leaving the open set only triggers a check; a row needs its own current rescued proof
+// before this job grants a free retry. A manual GitHub close cannot bypass that check.
 //
 // Once per Warsaw day via job_state, on the same UTC-tick pattern as orphan-triage and
 // daily-status — node-cron's timezone pin is unreliable on this host. Kept separate from
@@ -101,6 +97,7 @@ export async function unlockFixedOrphans(deps: UnlockDeps): Promise<UnlockOutcom
       markUnlocked(db, row.beer_id, atIso);
       count += 1;
     }
+    setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({ date, withheld: withheldRows }));
     setJobState(db, UNLOCK_LAST_RUN_KEY, date);
     return count;
   })();

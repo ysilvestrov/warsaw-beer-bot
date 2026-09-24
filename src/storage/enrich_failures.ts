@@ -143,12 +143,8 @@ export function clearEnrichFailure(db: DB, beerId: number): void {
 // unlocked_at and reset the backoff for a retry that can never run, silently spending the
 // row's one bet and leaving it in-flight forever, since beat 2 needs a failure that never
 // comes. 3 such rows exist on prod today.
-// #558 review finding #1: this used to collapse `unrescued_issue` into a boolean, which the
-// unlock guard read as "any marker at all skips the re-arm" — regardless of WHICH issue
-// proved it. A row re-triaged onto a different issue (or remapped to a sub-issue per the
-// CLAUDE.md rule) then denies its own re-arm on a fix that was never replayed against it.
-// The caller must compare `unrescued_issue` against `issue_number` itself, so the number —
-// not a derived boolean — is what crosses this boundary.
+// Preserve unrescued_issue for audit callers. Unlock now requires positive proof; this
+// negative marker is not its gate.
 export function listLockedRows(
   db: DB,
 ): { beer_id: number; issue_number: number; unrescued_issue: number | null }[] {
@@ -167,7 +163,7 @@ export function listLockedRows(
 
 // #558: «фікс приїхав, і реплей довів, що цього рядка він не рятує». НЕ термінальний у
 // сенсі retired_at: рядок лишається в пулі й доживає свій бекоф — знімається лише
-// безкоштовне обнулення лічильника, яке дає закриття issue. review_class зберігається
+// безкоштовне обнулення лічильника: тепер для нього потрібен позитивний proof. review_class зберігається
 // (клас каже, ЯКИЙ це дефект; маркер — що конкретний фікс до нього не дотягнувся).
 // Ідемпотентний: WHERE unrescued_at IS NULL, тож повторний запуск не рухає таймстемп.
 export function markUnrescued(

@@ -194,10 +194,8 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     // read ~0 whether the rule was honoured or silently skipped — it could not fail loud.
     // The fix keys on the same durable residue `verdictsOutlived7d` already reads (beat 2
     // clears review_class but LEAVES issue_number), restricted to rows nobody has since
-    // adjudicated: a shipped fix did not settle this row, and no `unrescued_at` verdict says
-    // why not either. That state persists for the full week, so this grows when the runbook
-    // rule (adjudicate every row of a closing issue) is skipped and shrinks when it is
-    // applied — the actual compliance signal, not a same-day snapshot of it.
+    // given a negative marker. Since #697 the positive proof is separate, so this historical
+    // metric is not a count of rows lacking adjudication; it is only "without unrescued".
     // `retired_at IS NULL` is defensive rather than load-bearing: retireEnrichFailure PRESERVES
     // review_class, and both pools hold retired rows out, so a retired row can never be re-queried
     // into the beat-2 state this counts. Kept anyway for the reason every sibling metric carries
