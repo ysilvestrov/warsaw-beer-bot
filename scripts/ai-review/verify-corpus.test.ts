@@ -187,6 +187,11 @@ describe('loadCorpus — the committed seed', () => {
       );
       expect(twin, `no confirmed twin on ${shifted.file} for ${shifted.id}`).toBeDefined();
       expect(twin!.sha).not.toBe(shifted.sha);
+      // The third property the comment promises, and the one the code kept omitting:
+      // the shift's own verdict must be the OPPOSITE of its twin's. Without this the
+      // pair could be two `confirmed` entries and the test would still pass, which
+      // measures nothing — the whole point is that the same claim flips across the fix.
+      expect(shifted.expected).toBe('refuted');
     }
   });
 });
