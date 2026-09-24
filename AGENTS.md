@@ -182,6 +182,16 @@ explicit re-arm clears the marker — it asserts only "as of today, a free retry
 
 ---
 
+Issue Severity
+
+Every open issue carries one `Severity-1` … `Severity-4` label (1 is the worst) and one
+`effort/S|M|L` label. Work order: highest severity first, smallest effort within it.
+Harm is judged only against the project's two goals — giving people the right answer about
+beer, and money (the budget is $20–40/month). A wrong answer ranks one level above a missing
+one; a silent failure gets +1; the reach of an orphan issue is counted in live taps, not in
+database rows. The scale, modifiers, reach query and procedure are in
+`docs/issue-severity.md`; label every new issue (including auto-filed orphan issues) by it.
+
 Architecture
 
 Preserve the existing architecture.
