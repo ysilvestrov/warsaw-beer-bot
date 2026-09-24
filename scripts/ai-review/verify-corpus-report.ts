@@ -2,8 +2,8 @@
  * The verify-corpus scoreboard.
  *
  * Deliberately prints no single overall percentage. The corpus is skewed toward
- * `refuted` (6 known-true against 13 known-false when complete), so a judge that
- * answers `refuted` to everything would score 68% — which reads as work. Counts
+ * `refuted` (4 known-true against 11 known-false as shipped), so a judge that
+ * answers `refuted` to everything would score 73% — which reads as work. Counts
  * are therefore split by expected verdict and by provenance, and a model that
  * fails the `confirmed` row is rejected whatever the `refuted` row says.
  */
@@ -62,9 +62,10 @@ export function formatReport(p: {
   // beside the per-draw rows and never instead of them — conflating the two is the
   // 2026-09-22 mistake (a union of three runs compared against a single draw).
   //
-  // The union alone flatters a coin-flipper: verdicts are binary, so over N draws
-  // a judge answering at random is right at least once with p ≈ 1 - 0.5^N (≈0.875
-  // at N=3) per entry — its union row is then byte-identical to a perfect judge's.
+  // The union alone flatters a coin-flipper: there are THREE legal verdicts
+  // (`confirmed`/`refuted`/`out_of_scope`), so over N draws a judge answering at
+  // random is right at least once with p ≈ 1 - (2/3)^N (≈0.70 at N=3) per entry —
+  // still high enough that its union row can look close to a perfect judge's.
   // Consensus (correct in EVERY draw) is the number a coin-flipper cannot fake,
   // so it is reported beside the union, never in its place, with the same splits.
   const draws = p.draws.length;
