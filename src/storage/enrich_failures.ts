@@ -200,6 +200,7 @@ export interface RescuedProof {
   lookupCount: number;
   lookupAt: string | null;
   rearmCount: number;
+  failureCount: number;
   probedAt: string;
   appliedAt: string;
 }
@@ -209,14 +210,14 @@ export interface RescuedProof {
 export function markRescued(db: DB, proof: RescuedProof): boolean {
   const current = db.prepare(`SELECT issue_number, unrescued_at, rescued_issue, rescued_bid,
       rescued_brewery, rescued_name, rescued_abv, rescued_lookup_count,
-      rescued_lookup_at, rescued_rearm_count, rescued_probed_at
+      rescued_lookup_at, rescued_rearm_count, rescued_failure_count, rescued_probed_at
     FROM enrich_failures WHERE beer_id = ?`).get(proof.beerId) as {
       issue_number: number | null; unrescued_at: string | null;
       rescued_issue: number | null; rescued_bid: number | null;
       rescued_brewery: string | null; rescued_name: string | null;
       rescued_abv: number | null; rescued_lookup_count: number | null;
       rescued_lookup_at: string | null; rescued_rearm_count: number | null;
-      rescued_probed_at: string | null;
+      rescued_failure_count: number | null; rescued_probed_at: string | null;
     } | undefined;
   if (!current || current.issue_number !== proof.issueNumber || current.unrescued_at !== null) {
     throw new Error(`cannot mark beer ${proof.beerId} rescued for issue ${proof.issueNumber}`);
@@ -230,13 +231,14 @@ export function markRescued(db: DB, proof: RescuedProof): boolean {
     && current.rescued_lookup_count === proof.lookupCount
     && current.rescued_lookup_at === proof.lookupAt
     && current.rescued_rearm_count === proof.rearmCount
+    && current.rescued_failure_count === proof.failureCount
     && current.rescued_probed_at === proof.probedAt) return false;
   db.prepare(`UPDATE enrich_failures SET rescued_issue = ?, rescued_at = ?, rescued_bid = ?,
       rescued_brewery = ?, rescued_name = ?, rescued_abv = ?, rescued_lookup_count = ?,
-      rescued_lookup_at = ?, rescued_rearm_count = ?, rescued_probed_at = ?
+      rescued_lookup_at = ?, rescued_rearm_count = ?, rescued_failure_count = ?, rescued_probed_at = ?
     WHERE beer_id = ? AND issue_number = ? AND unrescued_at IS NULL`).run(
     proof.issueNumber, proof.appliedAt, proof.bid, proof.brewery, proof.name, proof.abv,
-    proof.lookupCount, proof.lookupAt, proof.rearmCount, proof.probedAt,
+    proof.lookupCount, proof.lookupAt, proof.rearmCount, proof.failureCount, proof.probedAt,
     proof.beerId, proof.issueNumber,
   );
   return true;

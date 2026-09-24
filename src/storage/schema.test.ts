@@ -32,6 +32,7 @@ function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
   for (const name of [
     'rescued_issue', 'rescued_at', 'rescued_bid', 'rescued_brewery', 'rescued_name',
     'rescued_abv', 'rescued_lookup_count', 'rescued_lookup_at', 'rescued_rearm_count',
+    'rescued_failure_count',
     'rescued_probed_at',
   ]) db.exec(`ALTER TABLE enrich_failures DROP COLUMN ${name}`);
 }

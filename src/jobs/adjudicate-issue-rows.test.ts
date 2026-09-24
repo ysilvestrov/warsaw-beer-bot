@@ -235,7 +235,7 @@ describe('probeIssueRows', () => {
       ({ kind: 'matched' as const, result: { bid: 42, name: 'x', brewery: 'y' } as never });
     const out = await probeIssueRows({ db, log, lookup, canary: okCanary }, 576);
     expect(out.status === 'ok' && out.file.verdicts[0]).toMatchObject({
-      verdict: 'rescued', bid: 42, abv: null,
+      verdict: 'rescued', bid: 42, abv: null, failure_count: 1,
     });
   });
 
