@@ -5,7 +5,7 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { getBeer } from '../storage/beers';
 import { seedBeer } from '../storage/seed-beer.testing';
-import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued } from '../storage/enrich_failures';
+import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued, markRescued } from '../storage/enrich_failures';
 import { getJobState } from '../storage/job_state';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
@@ -56,7 +56,30 @@ function seedLocked(
   return beerId;
 }
 
+function proveRescued(db: ReturnType<typeof fresh>, beerId: number, issueNumber: number): void {
+  const beer = getBeer(db, beerId)!;
+  expect(markRescued(db, {
+    beerId, issueNumber, bid: 3615616, brewery: beer.brewery, name: beer.name,
+    abv: beer.abv ?? null, lookupCount: beer.untappd_lookup_count,
+    lookupAt: beer.untappd_lookup_at, rearmCount: (db.prepare('SELECT rearm_count FROM beers WHERE id = ?')
+      .get(beerId) as { rearm_count: number }).rearm_count,
+    probedAt: '2026-08-16T06:00:00Z', appliedAt: '2026-08-16T06:01:00Z',
+  })).toBe(true);
+}
+
 describe('unlockFixedOrphans', () => {
+  it('does not unlock an unproved row even if its issue was closed manually', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'No proof', 'matcher_bug', 697);
+    db.prepare('UPDATE beers SET untappd_lookup_count = 3 WHERE id = ?').run(beerId);
+    const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
+    expect(out.unlocked).toBe(0);
+    expect(out.withheld).toBe(1);
+    expect(db.prepare('SELECT unlocked_at FROM enrich_failures WHERE beer_id = ?').get(beerId))
+      .toEqual({ unlocked_at: null });
+    expect(getBeer(db, beerId)?.untappd_lookup_count).toBe(3);
+  });
+
   // Red if the job stops comparing against the open set: rows whose fix shipped would stay
   // locked forever, which is the permanent seal #377 spent a whole design removing.
   it('unlocks rows whose issue left the open set and re-arms their backoff', async () => {
@@ -65,6 +88,7 @@ describe('unlockFixedOrphans', () => {
     const stillOpen = seedLocked(db, 'Cyrillic Row', 'parser_bug', 376);
     db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
       .run('2026-08-01T00:00:00Z', closedIssue);
+    proveRescued(db, closedIssue, 347);
 
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([{ number: 376 }]), now: NOW });
 
@@ -100,7 +124,7 @@ describe('unlockFixedOrphans', () => {
   // tick, resetting the backoff of rows legitimately working through their retries.
   it('runs once per Warsaw day', async () => {
     const db = fresh();
-    seedLocked(db, 'Bitter Cost', 'matcher_bug', 347);
+    proveRescued(db, seedLocked(db, 'Bitter Cost', 'matcher_bug', 347), 347);
     const deps = { db, log, github: stubGithub([]), now: NOW };
 
     expect((await unlockFixedOrphans(deps)).unlocked).toBe(1);
@@ -113,7 +137,7 @@ describe('unlockFixedOrphans', () => {
   // a full day of reachability — the failure mode #316 fixed for triage.
   it('does not close the day when GitHub fails', async () => {
     const db = fresh();
-    seedLocked(db, 'Bitter Cost', 'matcher_bug', 347);
+    proveRescued(db, seedLocked(db, 'Bitter Cost', 'matcher_bug', 347), 347);
     const failing = {
       listOpenIssues: async () => { throw new Error('GitHub GET: 502'); },
       createIssue: async () => { throw new Error('unexpected'); },
@@ -178,8 +202,7 @@ describe('unlockFixedOrphans', () => {
     expect(row.unlocked_at).toBe('2026-08-15T06:00:00.000Z');
   });
 
-  // Обидві сироти під замком на issue 700, яка вже НЕ у відкритому наборі (stubGithub([])).
-  it('unlocks a marked row but does NOT re-arm it — the closure cannot rescue it', async () => {
+  it('keeps an unrescued row locked after its issue closes', async () => {
     const db = fresh();
     const beerId = seedLocked(db, 'frozen', 'parser_bug', 700);
     db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
@@ -188,23 +211,18 @@ describe('unlockFixedOrphans', () => {
 
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
-    expect(out.unlocked).toBe(1);
-    expect(out.rearmSkipped).toBe(1);
+    expect(out.unlocked).toBe(0);
+    expect(out.withheld).toBe(1);
     const beer = getBeer(db, beerId)!;
     expect(beer.untappd_lookup_count).toBe(3);            // лічильник НЕ обнулено
     expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
     const row = db.prepare('SELECT unlocked_at, unrescued_at FROM enrich_failures WHERE beer_id = ?')
       .get(beerId) as { unlocked_at: string | null; unrescued_at: string | null };
-    expect(row.unlocked_at).not.toBeNull();               // замок усе одно знято
+    expect(row.unlocked_at).toBeNull();                    // негативний реплей не знімає замок
     expect(row.unrescued_at).not.toBeNull();              // маркер лишається
   });
 
-  // #558 review finding #1: a marker naming a DIFFERENT issue than the one that just
-  // closed must NOT block the re-arm — that fix was never replayed against this row. This
-  // is exactly the shape left behind by the beat-2 re-triage in the review's own repro, and
-  // by the CLAUDE.md orphan-triage remap routine (`UPDATE ... SET issue_number = <child>`),
-  // which moves a row onto a narrower issue while an old marker still names the parent.
-  it('re-arms a row whose marker names a DIFFERENT issue than the one that closed', async () => {
+  it('does not let an old issue marker authorize a new issue close', async () => {
     const db = fresh();
     const beerId = seedLocked(db, 'remapped', 'parser_bug', 500);
     db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
@@ -215,18 +233,18 @@ describe('unlockFixedOrphans', () => {
 
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
-    expect(out.unlocked).toBe(1);
-    expect(out.rearmSkipped).toBe(0);
+    expect(out.unlocked).toBe(0);
+    expect(out.withheld).toBe(1);
     const beer = getBeer(db, beerId)!;
-    expect(beer.untappd_lookup_count).toBe(0);      // re-armed: #500's replay never tested #600's fix
-    expect(beer.untappd_lookup_at).toBeNull();
+    expect(beer.untappd_lookup_count).toBe(3);
+    expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
     const row = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = ?')
       .get(beerId) as { unrescued_at: string | null; unrescued_issue: number | null };
-    expect(row.unrescued_at).toBeNull();            // rearmLookup clears the now-stale marker too
-    expect(row.unrescued_issue).toBeNull();
+    expect(row.unrescued_at).not.toBeNull();
+    expect(row.unrescued_issue).toBe(500);
   });
 
-  it('still re-arms an unmarked row', async () => {
+  it('does not re-arm an unproved row', async () => {
     const db = fresh();
     const beerId = seedLocked(db, 'ordinary', 'matcher_bug', 700);
     db.prepare('UPDATE beers SET untappd_lookup_count = 3, untappd_lookup_at = ? WHERE id = ?')
@@ -234,10 +252,10 @@ describe('unlockFixedOrphans', () => {
 
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
 
-    expect(out.rearmSkipped).toBe(0);
+    expect(out.withheld).toBe(1);
     const beer = getBeer(db, beerId)!;
-    expect(beer.untappd_lookup_count).toBe(0);
-    expect(beer.untappd_lookup_at).toBeNull();
+    expect(beer.untappd_lookup_count).toBe(3);
+    expect(beer.untappd_lookup_at).toBe('2026-08-01T00:00:00Z');
   });
 
   // Extracts an `export function NAME(...) { ... }` body by brace-depth counting, so the

@@ -1,7 +1,7 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import type { GithubIssuesClient } from '../infra/github-issues';
-import { listLockedRows, markUnlocked } from '../storage/enrich_failures';
+import { hasCurrentRescueProof, listLockedRows, markUnlocked } from '../storage/enrich_failures';
 import { rearmLookup } from '../storage/beers';
 import { getJobState, setJobState } from '../storage/job_state';
 import { warsawDateAndHour } from '../domain/warsaw-time';
@@ -26,9 +26,7 @@ export interface UnlockDeps {
 export interface UnlockOutcome {
   unlocked: number;
   issuesClosed: number;
-  // #558: скільки рядків розімкнено БЕЗ перезарядки, бо реплей при фіксі довів, що
-  // закриття цієї issue їх не рятує. Окремо від `unlocked`, бо замок таки знято.
-  rearmSkipped: number;
+  withheld: number;
   skippedReason: string | null;
   error: string | null;
 }
@@ -55,7 +53,7 @@ export async function unlockFixedOrphans(deps: UnlockDeps): Promise<UnlockOutcom
   const now = (deps.now ?? (() => new Date()))();
   const { date } = warsawDateAndHour(now);
   const empty: UnlockOutcome = {
-    unlocked: 0, issuesClosed: 0, rearmSkipped: 0, skippedReason: null, error: null,
+    unlocked: 0, issuesClosed: 0, withheld: 0, skippedReason: null, error: null,
   };
 
   if (getJobState(db, UNLOCK_LAST_RUN_KEY) === date) {
@@ -88,27 +86,28 @@ export async function unlockFixedOrphans(deps: UnlockDeps): Promise<UnlockOutcom
   const openNumbers = new Set(open.map((i) => i.number));
   const closed = new Set(locked.map((r) => r.issue_number).filter((n) => !openNumbers.has(n)));
   const atIso = now.toISOString();
-  let unlocked = 0;
-  let rearmSkipped = 0;
-  for (const row of locked) {
-    if (!closed.has(row.issue_number)) continue;
-    // #558: маркер означає «реплей ПРИ ЦЬОМУ САМЕ issue довів, що рядок фікс не рятує» —
-    // тож пропускаємо перезарядку лише коли маркер називає ТОЙ issue, що щойно закрився.
-    // Review finding #1 (2026-09-02): порівняння з булевим `unrescued` тут було дірою —
-    // рядок, ре-тріажений на інший issue (або перемаплений на під-issue за правилом
-    // CLAUDE.md) зберігав маркер старого issue, і будь-яке наступне закриття (чужого
-    // issue, чий фікс НІКОЛИ не реплеївся проти цього рядка) назавжди відмовляло йому в
-    // перезарядці — а коли untappd_lookup_count впирається в стелю бекофу, rearmLookup
-    // лишається єдиним виходом. Якщо issue не збігається, рядок перезаряджається як
-    // звичайно; rearmLookup заразом знімає застарілий маркер (він завжди нулить обидві
-    // колонки), тож стара, вже нерелевантна відповідь не переживає це закриття.
-    if (row.unrescued_issue === row.issue_number) rearmSkipped += 1;
-    else rearmLookup(db, row.beer_id);
-    markUnlocked(db, row.beer_id, atIso);
-    unlocked += 1;
+  const withheldRows: { beerId: number; issueNumber: number }[] = [];
+  const unlocked = db.transaction(() => {
+    let count = 0;
+    for (const row of locked) {
+      if (!closed.has(row.issue_number)) continue;
+      // GitHub closure is only the trigger. The proof is checked against the live row
+      // inside this write transaction, so a manual close or late new row cannot re-arm it.
+      if (!hasCurrentRescueProof(db, row.beer_id, row.issue_number)) {
+        withheldRows.push({ beerId: row.beer_id, issueNumber: row.issue_number });
+        continue;
+      }
+      rearmLookup(db, row.beer_id);
+      markUnlocked(db, row.beer_id, atIso);
+      count += 1;
+    }
+    setJobState(db, UNLOCK_LAST_RUN_KEY, date);
+    return count;
+  })();
+  for (const row of withheldRows) {
+    log.warn(row, 'unlock-fixed-orphans: closed issue without current rescue proof');
   }
-
-  setJobState(db, UNLOCK_LAST_RUN_KEY, date);
-  log.info({ unlocked, rearmSkipped, issuesClosed: closed.size }, 'unlock-fixed-orphans finished');
-  return { unlocked, rearmSkipped, issuesClosed: closed.size, skippedReason: null, error: null };
+  const withheld = withheldRows.length;
+  log.info({ unlocked, withheld, issuesClosed: closed.size }, 'unlock-fixed-orphans finished');
+  return { unlocked, withheld, issuesClosed: closed.size, skippedReason: null, error: null };
 }
