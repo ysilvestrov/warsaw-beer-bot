@@ -18,7 +18,7 @@ interface VerdictBase {
 }
 
 export type Verdict =
-  | (VerdictBase & { verdict: 'rescued'; bid: number; abv: number | null; failure_count: number })
+  | (VerdictBase & { verdict: 'rescued'; bid: number; abv: number | null; real_failure_count: number })
   | (VerdictBase & { verdict: 'unrescued' | 'inconclusive' | 'already_marked' });
 
 export interface VerdictFile {
@@ -118,7 +118,7 @@ export async function probeIssueRows(
   const rows = deps.db
     .prepare(
       `SELECT b.id, b.brewery, b.name, b.abv, b.untappd_lookup_at, b.untappd_lookup_count,
-              b.rearm_count, ef.unrescued_at, ef.fail_count
+              b.rearm_count, ef.unrescued_at, ef.real_failure_count
          FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
         WHERE ef.issue_number = ?
           AND ef.retired_at IS NULL
@@ -128,7 +128,7 @@ export async function probeIssueRows(
     .all(issueNumber) as {
       id: number; brewery: string; name: string; abv: number | null;
       untappd_lookup_at: string | null; untappd_lookup_count: number; rearm_count: number;
-      unrescued_at: string | null; fail_count: number;
+      unrescued_at: string | null; real_failure_count: number;
     }[];
 
   const selected = deps.limit === undefined ? rows : rows.slice(0, deps.limit);
@@ -150,7 +150,7 @@ export async function probeIssueRows(
     await sleep(sleepMs);
     if (outcome.kind === 'matched') {
       verdicts.push({ ...base, verdict: 'rescued', bid: outcome.result.bid, abv: row.abv,
-        failure_count: row.fail_count });
+        real_failure_count: row.real_failure_count });
     }
     else if (outcome.kind === 'not_found') verdicts.push({ ...base, verdict: 'unrescued' });
     else {

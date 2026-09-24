@@ -422,7 +422,7 @@ describe('positive replay proof (#697)', () => {
     expect(markRescued(db, {
       beerId: 1, issueNumber: 697, bid: 3615616,
       brewery: 'b1', name: 'n1', abv: null,
-      lookupCount: 0, lookupAt: null, rearmCount: 0, failureCount: 1,
+      lookupCount: 0, lookupAt: null, rearmCount: 0, realFailureCount: 1,
       probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
     })).toBe(true);
     expect(hasCurrentRescueProof(db, 1, 697)).toBe(true);
@@ -436,7 +436,7 @@ describe('positive replay proof (#697)', () => {
     orphanWithIssue(db, 1, 697);
     markRescued(db, {
       beerId: 1, issueNumber: 697, bid: 3615616, brewery: 'b1', name: 'n1',
-      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, failureCount: 1,
+      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, realFailureCount: 1,
       probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
     });
     recordEnrichFailure(db, {
@@ -452,7 +452,7 @@ describe('positive replay proof (#697)', () => {
     orphanWithIssue(db, 1, 697);
     markRescued(db, {
       beerId: 1, issueNumber: 697, bid: 3615616, brewery: 'b1', name: 'n1',
-      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, failureCount: 1,
+      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, realFailureCount: 1,
       probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
     });
     recordEnrichFailure(db, {
@@ -468,7 +468,7 @@ describe('positive replay proof (#697)', () => {
     orphanWithIssue(db, 1, 697);
     markRescued(db, {
       beerId: 1, issueNumber: 697, bid: 3615616, brewery: 'b1', name: 'n1',
-      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, failureCount: 1,
+      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, realFailureCount: 1,
       probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
     });
     db.prepare('UPDATE enrich_failures SET issue_number = 698 WHERE beer_id = 1').run();

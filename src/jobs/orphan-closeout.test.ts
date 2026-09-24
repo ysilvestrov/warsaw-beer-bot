@@ -33,7 +33,7 @@ it('classifies every live row and reports repairs without excusing a blocker', (
   const blocked = add('Still unknown');
   markRescued(db, {
     beerId: rescued, issueNumber: 697, bid: 3615616, brewery: 'Mad Brew', name: 'Resolved card',
-    abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, failureCount: 1,
+    abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0, realFailureCount: 1,
     probedAt: '2026-09-24T09:00:00Z', appliedAt: '2026-09-24T09:01:00Z',
   });
   insertLegacyDisposition(db, {

@@ -65,8 +65,8 @@ function proveRescued(db: ReturnType<typeof fresh>, beerId: number, issueNumber:
     abv: beer.abv ?? null, lookupCount: beer.untappd_lookup_count,
     lookupAt: beer.untappd_lookup_at, rearmCount: (db.prepare('SELECT rearm_count FROM beers WHERE id = ?')
       .get(beerId) as { rearm_count: number }).rearm_count,
-    failureCount: (db.prepare('SELECT fail_count FROM enrich_failures WHERE beer_id = ?')
-      .get(beerId) as { fail_count: number }).fail_count,
+    realFailureCount: (db.prepare('SELECT real_failure_count FROM enrich_failures WHERE beer_id = ?')
+      .get(beerId) as { real_failure_count: number }).real_failure_count,
     probedAt: '2026-08-16T06:00:00Z', appliedAt: '2026-08-16T06:01:00Z',
   })).toBe(true);
 }

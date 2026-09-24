@@ -666,7 +666,6 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN rescued_lookup_count INTEGER;
       ALTER TABLE enrich_failures ADD COLUMN rescued_lookup_at TEXT;
       ALTER TABLE enrich_failures ADD COLUMN rescued_rearm_count INTEGER;
-      ALTER TABLE enrich_failures ADD COLUMN rescued_failure_count INTEGER;
       ALTER TABLE enrich_failures ADD COLUMN rescued_probed_at TEXT;
       CREATE TRIGGER clear_rescue_on_retriage
       AFTER UPDATE OF issue_number, review_class ON enrich_failures
@@ -674,6 +673,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       BEGIN
         UPDATE enrich_failures SET rescued_issue = NULL WHERE beer_id = NEW.beer_id;
       END;
+    `,
+  },
+  {
+    version: 37,
+    // A blocked attempt increments fail_count but is not a new beer observation.
+    // Keep a separate generation for validating positive replay files.
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN real_failure_count INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_real_failure_count INTEGER;
     `,
   },
 ];

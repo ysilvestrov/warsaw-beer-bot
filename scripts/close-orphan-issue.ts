@@ -22,7 +22,7 @@ export async function runCloseOrphanIssue(argv: string[], deps: {
   const args = parseCloseArgs(argv);
   const version = (deps.db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as
     { v: number | null }).v ?? 0;
-  if (version < 36) throw new Error(`schema v36 required before closeout (current v${version})`);
+  if (version < 37) throw new Error(`schema v37 required before closeout (current v${version})`);
   const inspect = async (expectedState: 'open' | 'closed') => {
     const issue = await deps.github.getIssue(args.issue);
     const report = inspectOrphanIssue(deps.db, args.issue);
