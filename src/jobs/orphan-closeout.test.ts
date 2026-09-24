@@ -88,3 +88,20 @@ it('reports an empty cohort explicitly', () => {
   const { db } = fixture();
   expect(inspectOrphanIssue(db, 697)).toEqual({ issueNumber: 697, rows: [], repairs: [], ready: true });
 });
+
+it('does not treat an inactive disposition as resolution of an unrescued replay', () => {
+  const { db, add } = fixture();
+  const beerId = add('Unknown card');
+  insertLegacyDisposition(db, {
+    beerId, issueNumber: 697, cardBrewery: 'Mad Brew', cardName: 'Unknown card',
+    cardAbv: null, breweryText: cardText('Mad Brew'), nameText: cardText('Unknown card'),
+    abvKey: cardAbv(null), failureSourceUrl: '', reason: 'Identity unknown',
+    evidenceUrl: 'https://example.com/evidence', operator: 'maintainer',
+    inactiveAt: '2026-09-24T09:02:00Z',
+  });
+  db.prepare('UPDATE enrich_failures SET unrescued_at = ? WHERE beer_id = ?')
+    .run('2026-09-24T09:03:00Z', beerId);
+  expect(inspectOrphanIssue(db, 697).rows).toMatchObject([
+    { beerId, state: 'blocked', reason: 'unrescued replay is not a closeout disposition' },
+  ]);
+});

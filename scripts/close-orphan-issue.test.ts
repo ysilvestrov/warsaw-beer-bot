@@ -59,6 +59,27 @@ it('refuses to close when a new row appears during the second preflight', async 
   expect(f.closes()).toBe(0);
 });
 
+it('reports a row arriving after PATCH as incomplete closeout', async () => {
+  const f = fixture();
+  // Simulate the GitHub state changing with the PATCH while DB receives a late row.
+  let closed = false;
+  f.github.closeIssue = async () => {
+    closed = true;
+    f.db.prepare(`INSERT INTO beers (id, brewery, name, normalized_brewery, normalized_name)
+      VALUES (1, 'B', 'N', 'b', 'n')`).run();
+    f.db.prepare(`INSERT INTO enrich_failures
+      (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary,
+       fail_count, last_at, review_class, issue_number)
+      VALUES (1, 'B', 'N', '', 'not_found', 0, '', 1,
+        '2026-09-24T10:00:00Z', 'parser_bug', 697)`).run();
+  };
+  f.github.getIssue = async (number) => ({ number, state: closed ? 'closed' : 'open',
+    labels: ['orphan-triage'], isPullRequest: false });
+  expect(await runCloseOrphanIssue(['--issue', '697', '--close'], f)).toBe(1);
+  expect(JSON.parse(f.lines.at(-1)!)).toMatchObject({ closed: true, ready: false,
+    rows: [{ beerId: 1, state: 'blocked' }] });
+});
+
 it('refuses a closed issue, a missing label, and a PR number', async () => {
   for (const issue of [
     { state: 'closed' as const, labels: ['orphan-triage'], isPullRequest: false },
