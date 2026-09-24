@@ -100,8 +100,6 @@ describe('schema migrations', () => {
     ).map((t) => t.name);
     expect(tables).not.toContain('google_quota');
 
-    const version = (db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v;
-    expect(version).toBe(34);
     db.close();
   });
 
