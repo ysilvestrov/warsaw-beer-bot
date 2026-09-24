@@ -432,7 +432,7 @@ Verdicts filled in from the quality pass that follows.
 | `gpt-6-sol` | find | −60% measured | **3/5 union — shelved**, D5 blind spot |
 | `claude-haiku-4-5` | find | −78% measured | **0/5 union + 2 `refuted` — refuted** |
 | `gpt-6-luna` | find | −97% measured | **3/5 union — shelved**, but reasons *more* than the incumbent |
-| `claude-sonnet-5` | **verify** | −60% vs `gpt-5.5` | **not yet measured — now the priority** |
+| `claude-sonnet-5` | **verify** | ≈27% vs `gpt-5.5` (uncached; measured 2026-09-23) | **no certifiable divergence on the 15-entry corpus — not adopted, corpus resolution unproven** |
 | `claude-opus-5-5` | — | +26% per call once tokens are counted | excluded on price |
 | `gpt-6-astra`, `gpt-5.6-cyber`, `claude-fable-5-1`, `claude-opus-5` | — | dearer | excluded |
 
@@ -602,10 +602,12 @@ was not. Filed as **#691**.
 A prior pass, on the 6-entry corpus before Tasks 1–3 of this stage filled it, found `gpt-5.5`
 and `claude-sonnet-5` **identical** on `verify` — same union, same consensus, both wavering on
 the same single entry. That corpus is now 15 entries, but stage 2's own findings say its
-discriminating power is weak: 7 of 8 harvested `refuted` entries carry their decisive construct
-inside the quoted span, all 4 constructed shifts too, and two of the four have the fix's own
-comment stating the resolution in near-claim language. Re-running the same two near-equal
-judges on a corpus this shallow cannot tell "the judges are equal" from "the instrument cannot
+discriminating power is narrow: 11 of its 15 entries are quote-local — all 7 harvested `refuted`
+entries carry their decisive construct inside the quoted span, as do 3 of the 4 constructed
+shifts (the fourth, `D4t`, is the corpus's one whole-file probe — see the per-entry drill-down
+below), and two of the four constructed shifts have the fix's own comment stating the resolution
+in near-claim language. Re-running the same two near-equal judges on a corpus this shallow
+cannot tell "the judges are equal" from "the instrument cannot
 tell them apart." A third, deliberately weaker config settles which: **`claude-haiku-4-5-20251001`**,
 over the same Anthropic OpenAI-compat endpoint (`https://api.anthropic.com/v1`), already known
 weak on this pipeline as a *finder* (2 fabrications, six `out_of_scope`, and an empty findings
@@ -615,8 +617,8 @@ array across three 2026-09-23 draws).
 its pinned tree byte-for-byte before anything was spent.
 
 Corpus: 15 entries — 4 `confirmed` (all harvested, PR #418 D2/D3/D4/D5) and 11 `refuted` (7
-harvested from the 2026-07 baseline plus PR #418's D4, and 4 constructed shifts D2t/D3t/D4t/D5t
-— see Tasks 1–3 of this stage for how each label was earned). Three draws per config, one
+harvested from the 2026-07 baseline, plus 4 constructed shifts D2t/D3t/D4t/D5t — see Tasks 1–3
+of this stage for how each label was earned). Three draws per config, one
 session, `OPENAI_API_ENDPOINT` switched between OpenAI and Anthropic between configs, the
 incumbent re-measured here rather than read from the entry above (that entry scores a different
 corpus — `find` recall on PR #418 — not this one).
@@ -639,12 +641,22 @@ those three:
 - **`0728-358-1`** (harvested, 2026-07 baseline — the dropped-attachment/lost-query claim).
   `gpt-5.5`: refuted, refuted, refuted. `claude-sonnet-5`: refuted, refuted, **out_of_scope**
   (draw 3). `claude-haiku-4-5`: refuted, **confirmed**, **out_of_scope** — wrong in two directions
-  in two of three draws. This is very likely the entry that wavered in the 6-entry pass; it
-  still wavers here, now on two of the three judges, never on `gpt-5.5`. Caveat: the corpus's
+  in two of three draws. This is **not** the entry that wavered in the 6-entry pass — `0728-358-1`
+  entered the corpus only in this branch (commit `d70e8b1`); the 6-entry waverer was
+  `0723-344-1`, later deleted under the in-file evidence rule. The tie the 6-entry pass found is
+  reproduced here, but by a different boundary entry, which strengthens rather than weakens the
+  "reproduced, not overturned" reading below: two separate entries have now put both close
+  judges on the same knife-edge. Caveat: the corpus's
   own schema excludes `out_of_scope` from labelled ground truth — "its correctness depends on
   the diff, and a label we cannot defend against the tree poisons the corpus" — so a flip to
   `out_of_scope` is scored as *not-refuted*, not necessarily proven wrong. It may be a
-  defensible boundary call this corpus cannot adjudicate, not a fabrication.
+  defensible boundary call this corpus cannot adjudicate, not a fabrication. Deeper cause, found
+  this pass: this entry's `claim` is an authored transcription of a softer, observability-class
+  original ("could lead to loss of important information", "Consider logging…"), and its span was
+  drawn to include the refuting `log.info` rather than around the rewrite alone — see the design
+  doc's "Наше не лише проміжок" section. The judge's label rests on a sharpening it cannot see,
+  which is a plausible mechanism for exactly this entry being the one two of three judges waver
+  on.
 - **`0923-418-D2t`** (constructed shift — `isLegalScope` cohort-laundering closed by
   `whereIsWholeClass`, expected `refuted`). `gpt-5.5` and `claude-sonnet-5`: refuted every draw.
   `claude-haiku-4-5`: **confirmed**, refuted, refuted — wrong once, then self-corrected.
@@ -657,27 +669,55 @@ those three:
 
 ### Cost, recomputed from tokens
 
-`gpt-5.5` has a `PRICES` row; its printed `$0.6849` is exact. `claude-sonnet-5` and
-`claude-haiku-4-5-20251001` have none, so the CLI prints `(unpriced model)`; recomputed here at
-$2/$10 per 1M (sonnet) and $1/$5 per 1M (haiku), from the same run's token totals (the CLI
-prints these at `formatTokens` resolution — nearest ~100 tokens — not re-derived from a second
-paid run):
+`gpt-5.5` has a `PRICES` row, and the CLI's printed `$0.6849` is exactly what was billed — but
+it is **not** the number to compare against sonnet's, because it is not fully uncached. Three
+identical draws on this corpus hit OpenAI's prefix cache, and `PRICES['gpt-5.5']` prices cached
+input at $0.5/1M against $5/1M uncached (`scripts/ai-review/usage.ts:84`). Solving the printed
+total against the run's known prompt/completion split (115.9k → 9.7k) implies **≈41.2k of the
+115.9k prompt tokens were billed at the cached rate** — a third of the input, from the three
+repeated draws. This is exactly the trap the previous entry names twenty lines above, at line
+594: "An identical replay hits the prefix cache; a model comparison must not use the cached
+figure." An earlier draft of this section made that mistake anyway.
 
-- **sonnet**: 188 800 × $2/1M + 26 000 × $10/1M = $0.3776 + $0.2600 = **$0.6376** — 93% of the
-  incumbent's $0.6849. Only **~7% cheaper**, not the ~60% the sticker prices ($2/$10 vs $5/$30)
+Fully uncached, `gpt-5.5` costs 115 900 × $5/1M + 9 700 × $30/1M = $0.5795 + $0.2910 =
+**$0.8705** — the figure to compare against. The Anthropic compatibility endpoint offers no
+equivalent prompt-caching discount, so sonnet's recomputed figure below has no cache in it at
+all: it was already an apples-to-apples uncached number, and only the incumbent's side needed
+correcting.
+
+`claude-sonnet-5` and `claude-haiku-4-5-20251001` have no `PRICES` row, so the CLI prints
+`(unpriced model)`; recomputed here at $2/$10 per 1M (sonnet) and $1/$5 per 1M (haiku), from the
+same run's token totals (the CLI prints these at `formatTokens` resolution — nearest ~100 tokens
+— not re-derived from a second paid run):
+
+- **sonnet**: 188 800 × $2/1M + 26 000 × $10/1M = $0.3776 + $0.2600 = **$0.6376** — 73% of the
+  incumbent's uncached $0.8705. **≈27% cheaper**, not the ~7% a comparison against the cached
+  $0.6849 reads off, and still short of the ~60% the sticker prices ($2/$10 vs $5/$30) alone
   would suggest.
-- **haiku**: 144 300 × $1/1M + 4 500 × $5/1M = $0.1443 + $0.0225 = **$0.1668** — 24% of the
-  incumbent, **~76% cheaper**.
+- **haiku**: 144 300 × $1/1M + 4 500 × $5/1M = $0.1443 + $0.0225 = **$0.1668** — 19% of the
+  incumbent's uncached figure, **~81% cheaper**.
 
-Token ratios this session: sonnet/gpt-5.5 input = 188.8k/115.9k ≈ **1.63×**, close to the 1.65×
-measured 2026-09-23 on a different file — consistent, not identical, so still worth re-checking
-per workload rather than assumed. Output ratio here is **2.68×** (26.0k/9.7k), well above the
-2.19× logged in that earlier probe: the two probes measure different workloads (a single-file
-review call there, 13 verify groups across the whole corpus here), and the multiplier moved
-with it. **This is the point of recomputing rather than reusing the stored ratio** — it moved
-by more than a quarter between two verify workloads. Net effect: the input markup and the
-sticker discount very nearly cancel, so sonnet is not a cost win on this workload — a case for
-switching `verify` to sonnet would be buying at roughly cost parity, not at a discount.
+The trap is invisible in the tool's own output, which is why it is worth naming for the next
+reader: `formatReport` prints `promptTokens` but never `cachedTokens`
+(`scripts/ai-review/verify-corpus-report.ts:120-124`), so a cached discount cannot be seen in
+the report a write-up is based on — it has to be solved for, as above, or read from the raw
+usage object before the number is trusted.
+
+Token ratios this session: sonnet/gpt-5.5 input = 188.8k/115.9k ≈ **1.63×**. That lands close to
+the 1.65× measured 2026-09-23 on a small file (section 2 above), but that number is itself not
+stable across workloads: the same estimate came out at **1.22×** on a real review prompt (the
+callout at line 444). Three measurements now span **1.22×–1.65×** — wider a spread than
+"consistent" implies, so each workload still needs its own check rather than reuse of any one of
+them. Output ratio here is **2.68×** (26.0k/9.7k); the stage-2 plan logs **2.19×** on the same
+verify workload measured earlier in that plan's own pass (`docs/superpowers/plans/2026-09/
+2026-09-23-verify-corpus-stage-2.md`, step 4) — not logged anywhere in this document, so cited
+rather than restated. The two probes measure different workloads (a single-file review call
+there, 13 verify groups across the whole corpus here), and the multiplier moved with it.
+**This is the point of recomputing rather than reusing the stored ratio** — it moved
+by more than a fifth between two verify workloads. Net effect: sonnet's input markup eats into
+the sticker discount but does not cancel it — corrected for the incumbent's own cached draws
+(above), the two rates net to a real **≈27% saving** on this workload. A case for switching
+`verify` to sonnet would be buying at a real, if modest, discount, not at parity.
 
 Haiku's ratios run the other way: output 4.5k/9.7k ≈ **0.46×** (it writes shorter evidence, not
 longer) and input 144.3k/115.9k ≈ **1.25×** (smaller than sonnet's) — consistent with a smaller
@@ -698,9 +738,12 @@ different, unanswered question, and the paragraph below does not claim it is ans
 **No certifiable divergence from `gpt-5.5`.** Sonnet's only deviation across all 45 judgments
 (15 entries × 3 draws) is the single `refuted`→`out_of_scope` flip on `0728-358-1` — the one
 entry the corpus's own design cannot certify as wrong, since it excludes `out_of_scope` from
-labelled ground truth. Exclude that one entry and sonnet is **44/44** against the incumbent's
-**45/45**: on every judgment this corpus can actually certify, the two judges are still exactly
-tied. A corpus the negative control just proved is not blind **reproduces** the 6-entry tie
+labelled ground truth. Excluding an entry removes three judgments — one per draw — from **each**
+judge, not just from sonnet's side: sonnet is **42/42** against the incumbent's **42/42**, an
+exact tie on identical denominators, not the 44/44-vs-45/45 mismatched count an earlier draft of
+this section reported. On every judgment this corpus can actually certify, the two judges are
+still exactly tied. A corpus the negative control just proved is not blind **reproduces** the
+6-entry tie
 rather than overturning it. That is not the same as proving there is no small gap: the control
 shows the instrument can catch a large difference, not that it can resolve a small one, so this
 result neither confirms nor rules out a real, small gap between the two — it gives no evidence
@@ -714,17 +757,20 @@ answer this pass's question — haiku's clean separation from the other two alre
 corpus is not blind — but either would be needed to raise this corpus's resolution enough to
 certify a small gap between the two close judges, if one exists.
 
-**Not a recommendation to switch `verify` to `claude-sonnet-5`.** Cost is part of why the
-question is moot rather than merely open: recomputed above, sonnet runs ~7% cheaper than the
-incumbent on this workload, not the ~60% the sticker prices imply once Anthropic's own token
-counting is priced in — too small a saving on its own to motivate a switch even before the
-methodological limits below are weighed. Those limits stand regardless of cost: this pass
-measures agreement with the incumbent's own labelled verdicts, not real-PR recall or precision,
-and it inherits every caveat Tasks 1–3 already logged about this corpus: most of its `refuted`
-half and all of its constructed shifts are tests of "did you read the quoted span," not "did
-you read the whole file" — no entry in this corpus can supply a whole-file probe, because each
-of the three fixes it draws on edited its own quoted code in place. An instrument that admits
-what it cannot test is worth more here than a verdict it cannot support.
+**Not a recommendation to switch `verify` to `claude-sonnet-5`.** Cost is not the reason to
+decline: recomputed above against the incumbent's own uncached figure (not its cached one),
+sonnet runs **≈27% cheaper** on this workload — real, on a stage that is 38–47% of a review's
+bill, but not large enough on its own to force the question, and not the reason to hold off
+either way. The reason is methodological: this pass measures agreement with the incumbent's own
+labelled verdicts, not real-PR recall or precision, and it inherits every caveat Tasks 1–3
+already logged about this corpus. Most of its `refuted` half and all but one of its constructed
+shifts are tests of "did you read the quoted span," not "did you read the whole file": **11 of
+the corpus's 15 entries are quote-local** (10 of 11 `refuted`, 1 of 4 `confirmed`). The one
+exception, `0923-418-D4t`, is a whole-file probe but a weak one — the `accepted` variable its
+claim turns on is defined one line above the quote, under a comment that already states the fix
+in near-claim language, the same weakness already flagged above for two of the four constructed
+shifts. An instrument that admits what it cannot test is worth more here than a verdict it
+cannot support.
 
 **`0923-418-D3t` confirms, rather than reverses, Task 3's own prediction.** Task 3 built the
 constructed shifts to separate "read the quote" from "read nothing," not a careful reader from
@@ -735,3 +781,18 @@ all 6 of their combined draws, while `claude-haiku-4-5` missed it in all 3 of it
 predicted "reads nothing" failure, reproduced in a model verdict rather than asserted. Recorded
 so `D3t` is not later misread as evidence the shifts probe something beyond quote-reading; this
 pass confirms they probe exactly what Task 3 said they would, no more.
+
+**Against the stage's own stated criterion, this is unmet, and the entry should say so plainly.**
+The stage-2 plan set the bar explicitly, before any measurement: "the corpus separates two
+judges, or shows with adequate draws that they do not differ"
+(`docs/superpowers/plans/2026-09/2026-09-23-verify-corpus-stage-2.md:17`). This pass did neither.
+Summarised in the plan's own terms: the instrument is proven non-blind to a large gap (haiku's
+12/15 against two clean 15/15s); no divergence between `gpt-5.5` and `claude-sonnet-5` was
+detected at this resolution (42/42 vs 42/42 on everything this corpus can certify); the corpus's
+discriminating surface is narrow (11 of 15 entries quote-local, and the one non-quote-local
+`refuted` probe, `D4t`, is quote-adjacent rather than a deep whole-file read); three draws is not
+"adequate draws" on a corpus whose small-gap resolution is explicitly unproven. **The stage's
+stated criterion is unmet.** (The plan's other stage-2 item, updating `spec.md`, needs no
+follow-up here: it was already satisfied in stage 1 — `spec.md:2349-2361` documents the CLI and
+`--check` — so the plan's own "`spec.md` needs no change" line is correct, not a contradiction of
+the design's stage-2 description.)
