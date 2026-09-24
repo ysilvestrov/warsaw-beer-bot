@@ -191,6 +191,75 @@ export function clearUnrescued(db: DB, beerId: number): void {
   ).run(beerId);
 }
 
+export interface RescuedProof {
+  beerId: number;
+  issueNumber: number;
+  bid: number;
+  brewery: string;
+  name: string;
+  abv: number | null;
+  lookupCount: number;
+  lookupAt: string | null;
+  rearmCount: number;
+  probedAt: string;
+  appliedAt: string;
+}
+
+// A successful probe is evidence only for the exact issue/input/lookup state it observed.
+// The caller checks the live row inside its transaction before invoking this write.
+export function markRescued(db: DB, proof: RescuedProof): boolean {
+  const current = db.prepare(`SELECT issue_number, unrescued_at, rescued_issue, rescued_bid,
+      rescued_brewery, rescued_name, rescued_abv, rescued_lookup_count,
+      rescued_lookup_at, rescued_rearm_count, rescued_probed_at
+    FROM enrich_failures WHERE beer_id = ?`).get(proof.beerId) as {
+      issue_number: number | null; unrescued_at: string | null;
+      rescued_issue: number | null; rescued_bid: number | null;
+      rescued_brewery: string | null; rescued_name: string | null;
+      rescued_abv: number | null; rescued_lookup_count: number | null;
+      rescued_lookup_at: string | null; rescued_rearm_count: number | null;
+      rescued_probed_at: string | null;
+    } | undefined;
+  if (!current || current.issue_number !== proof.issueNumber || current.unrescued_at !== null) {
+    throw new Error(`cannot mark beer ${proof.beerId} rescued for issue ${proof.issueNumber}`);
+  }
+  if (!Number.isSafeInteger(proof.bid) || proof.bid <= 0) throw new Error('rescued bid must be positive');
+  if (current.rescued_issue === proof.issueNumber
+    && current.rescued_bid === proof.bid
+    && current.rescued_brewery === proof.brewery
+    && current.rescued_name === proof.name
+    && current.rescued_abv === proof.abv
+    && current.rescued_lookup_count === proof.lookupCount
+    && current.rescued_lookup_at === proof.lookupAt
+    && current.rescued_rearm_count === proof.rearmCount
+    && current.rescued_probed_at === proof.probedAt) return false;
+  db.prepare(`UPDATE enrich_failures SET rescued_issue = ?, rescued_at = ?, rescued_bid = ?,
+      rescued_brewery = ?, rescued_name = ?, rescued_abv = ?, rescued_lookup_count = ?,
+      rescued_lookup_at = ?, rescued_rearm_count = ?, rescued_probed_at = ?
+    WHERE beer_id = ? AND issue_number = ? AND unrescued_at IS NULL`).run(
+    proof.issueNumber, proof.appliedAt, proof.bid, proof.brewery, proof.name, proof.abv,
+    proof.lookupCount, proof.lookupAt, proof.rearmCount, proof.probedAt,
+    proof.beerId, proof.issueNumber,
+  );
+  return true;
+}
+
+// The persisted proof is not a seal. Every consumer must check it against live row
+// state, including a re-arm that left lookup_count/lookup_at at their existing zeros.
+export function hasCurrentRescueProof(db: DB, beerId: number, issueNumber: number): boolean {
+  return db.prepare(`SELECT 1 FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
+    WHERE ef.beer_id = ? AND ef.issue_number = ? AND ef.rescued_issue = ef.issue_number
+      AND ef.rescued_bid > 0 AND ef.rescued_at IS NOT NULL
+      AND ef.rescued_probed_at IS NOT NULL AND ef.unrescued_at IS NULL
+      AND ef.rescued_brewery IS NOT NULL AND ef.rescued_name IS NOT NULL
+      AND ef.rescued_lookup_count IS NOT NULL AND ef.rescued_rearm_count IS NOT NULL
+      AND ef.review_class IN ('parser_bug', 'matcher_bug')
+      AND ef.retired_at IS NULL AND ef.unlocked_at IS NULL AND b.untappd_id IS NULL
+      AND b.brewery IS ef.rescued_brewery AND b.name IS ef.rescued_name
+      AND b.abv IS ef.rescued_abv AND b.untappd_lookup_count = ef.rescued_lookup_count
+      AND b.untappd_lookup_at IS ef.rescued_lookup_at
+      AND b.rearm_count = ef.rescued_rearm_count`).get(beerId, issueNumber) !== undefined;
+}
+
 // #421 beat 1: the row is spending its post-fix free retry. The verdict is deliberately
 // KEPT — we still believe it, we are testing it. recordEnrichFailure settles the bet.
 export function markUnlocked(db: DB, beerId: number, atIso: string): void {

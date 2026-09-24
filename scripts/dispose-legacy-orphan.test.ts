@@ -56,7 +56,7 @@ describe('dispose-legacy-orphan CLI (#695)', () => {
     const lines: string[] = [];
     runDisposeLegacyOrphan(args, { db, print: (line) => lines.push(line) });
     expect(JSON.parse(lines[0])).toMatchObject({
-      apply: false, readyToApply: true, schemaVersion: 35,
+      apply: false, readyToApply: true, schemaVersion: 36,
       key: { breweryText: 'de cam', nameText: 'abrikoos 2018', abvKey: '6' },
       orphan: { id: 29955 }, failure: { issueNumber: 677 },
     });
@@ -92,7 +92,7 @@ describe('dispose-legacy-orphan CLI (#695)', () => {
 
   it('refuses apply when migration v35 has not been recorded', () => {
     const db = fixture();
-    db.prepare('DELETE FROM schema_version WHERE version = 35').run();
+    db.prepare('DELETE FROM schema_version WHERE version >= 35').run();
     const lines: string[] = [];
     runDisposeLegacyOrphan(args, { db, print: (line) => lines.push(line) });
     expect(JSON.parse(lines[0])).toMatchObject({ schemaVersion: 34, readyToApply: false });

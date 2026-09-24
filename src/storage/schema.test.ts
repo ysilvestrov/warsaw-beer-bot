@@ -27,6 +27,14 @@ function insertFailure(
   ).run(id, outcome, reviewClass);
 }
 
+function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
+  for (const name of [
+    'rescued_issue', 'rescued_at', 'rescued_bid', 'rescued_brewery', 'rescued_name',
+    'rescued_abv', 'rescued_lookup_count', 'rescued_lookup_at', 'rescued_rearm_count',
+    'rescued_probed_at',
+  ]) db.exec(`ALTER TABLE enrich_failures DROP COLUMN ${name}`);
+}
+
 describe('schema migrations', () => {
   it('v35 keeps inactive legacy-card decisions unique while retaining reopened history', () => {
     const db = openDb(':memory:');
@@ -86,12 +94,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..35 on a fresh db, with no gaps', () => {
+  it('records every migration 1..36 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 35 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 36 }, (_, i) => i + 1));
     db.close();
   });
 
@@ -640,6 +648,7 @@ describe('schema migrations', () => {
           merged_at TEXT
         );
       `);
+      dropV36ProofColumns(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 33').run();
       for (const id of [1, 2, 3, 4]) seedBeer(db, id);
 
@@ -714,6 +723,7 @@ describe('v31 rating_checked_at (#616)', () => {
     const db = openDb(':memory:');
     migrate(db);
     db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
+    dropV36ProofColumns(db);
     db.prepare('DELETE FROM schema_version WHERE version >= 31').run();
     db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery, rating_refresh_at, rating_refresh_count)
                 VALUES (1, 6869890, 'Prototype', 'Funky Fluid', 0, 'prototype', 'funky fluid', '2026-09-12T01:30:00.000Z', 4),

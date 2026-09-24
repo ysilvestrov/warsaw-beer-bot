@@ -652,6 +652,23 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       CREATE INDEX IF NOT EXISTS idx_legacy_orphan_dispositions_issue ON legacy_orphan_dispositions(issue_number);
     `,
   },
+  {
+    version: 36,
+    // #697: only a canary-backed, applied positive replay can authorize issue-close rearm.
+    // No backfill: old closed issues carry no per-row proof.
+    sql: `
+      ALTER TABLE enrich_failures ADD COLUMN rescued_issue INTEGER;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_at TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_bid INTEGER;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_brewery TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_name TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_abv REAL;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_lookup_count INTEGER;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_lookup_at TEXT;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_rearm_count INTEGER;
+      ALTER TABLE enrich_failures ADD COLUMN rescued_probed_at TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

@@ -15,6 +15,8 @@ import {
   listOwnerlessRows,
   countOwnerlessRows,
   markUnrescued,
+  markRescued,
+  hasCurrentRescueProof,
   clearUnrescued,
   listLockedRows,
   type EnrichFailureRow,
@@ -409,6 +411,24 @@ describe('markUnrescued / clearUnrescued / listLockedRows (#558)', () => {
     expect(row.unrescued_at).toBeNull();
     expect(row.unrescued_issue).toBeNull();
     expect(row.review_class).toBe('parser_bug');
+  });
+});
+
+describe('positive replay proof (#697)', () => {
+  it('allows only a current proof for the same issue to authorize a retry', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 697);
+    expect(hasCurrentRescueProof(db, 1, 697)).toBe(false);
+    expect(markRescued(db, {
+      beerId: 1, issueNumber: 697, bid: 3615616,
+      brewery: 'b1', name: 'n1', abv: null,
+      lookupCount: 0, lookupAt: null, rearmCount: 0,
+      probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
+    })).toBe(true);
+    expect(hasCurrentRescueProof(db, 1, 697)).toBe(true);
+    expect(hasCurrentRescueProof(db, 1, 698)).toBe(false);
+    db.prepare('UPDATE beers SET rearm_count = rearm_count + 1 WHERE id = 1').run();
+    expect(hasCurrentRescueProof(db, 1, 697)).toBe(false);
   });
 });
 
