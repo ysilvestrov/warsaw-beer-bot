@@ -1,5 +1,5 @@
 import type { DB } from '../storage/db';
-import { markUnrescued } from '../storage/enrich_failures';
+import { markRescued, markUnrescued } from '../storage/enrich_failures';
 import type { Verdict, VerdictFile } from './adjudicate-issue-rows';
 import { tallyVerdicts, formatVerdictTally } from './adjudicate-issue-rows';
 
@@ -13,8 +13,11 @@ export function parseVerdictFile(raw: unknown): VerdictFile {
   if (!Number.isInteger(f.issue)) throw new Error('verdict file: `issue` must be an integer');
   if (typeof f.probed_at !== 'string') throw new Error('verdict file: `probed_at` must be a string');
   if (!Array.isArray(f.verdicts)) throw new Error('verdict file: `verdicts` must be an array');
+  const seen = new Set<number>();
   for (const v of f.verdicts) {
     if (!Number.isInteger(v?.beer_id)) throw new Error('verdict file: verdict without an integer `beer_id`');
+    if (seen.has(v.beer_id)) throw new Error(`verdict file: duplicate beer_id ${v.beer_id}`);
+    seen.add(v.beer_id);
     if (typeof v.brewery !== 'string' || typeof v.name !== 'string') {
       throw new Error(`verdict file: verdict ${v.beer_id} is missing the probed brewery/name`);
     }
@@ -32,6 +35,14 @@ export function parseVerdictFile(raw: unknown): VerdictFile {
     if (!Number.isInteger(v.rearm_count)) {
       throw new Error(`verdict file: verdict ${v.beer_id} is missing the probed rearm_count`);
     }
+    if (v.verdict === 'rescued') {
+      if (!Number.isSafeInteger(v.bid) || v.bid <= 0) {
+        throw new Error(`verdict file: rescued ${v.beer_id} needs a positive bid`);
+      }
+      if (!Object.hasOwn(v, 'abv') || (v.abv !== null && (typeof v.abv !== 'number' || !Number.isFinite(v.abv)))) {
+        throw new Error(`verdict file: rescued ${v.beer_id} needs a valid abv snapshot`);
+      }
+    }
   }
   return f;
 }
@@ -42,6 +53,8 @@ export type SkipReason =
 export interface ApplyReport {
   marked: number;
   alreadyMarked: number;
+  rescuedMarked: number;
+  rescuedAlreadyMarked: number;
   skipped: { beer_id: number; reason: SkipReason }[];
 }
 
@@ -51,21 +64,21 @@ export interface ApplyReport {
 // Critical у #575. Тому кожен вердикт звіряється з поточним рядком, а що зрушило —
 // називається у звіті, а не ковтається.
 export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyReport {
-  const report: ApplyReport = { marked: 0, alreadyMarked: 0, skipped: [] };
+  const report: ApplyReport = { marked: 0, alreadyMarked: 0, rescuedMarked: 0, rescuedAlreadyMarked: 0, skipped: [] };
   const read = db.prepare(
-    `SELECT b.brewery, b.name, b.untappd_id, b.untappd_lookup_at, b.untappd_lookup_count,
-            b.rearm_count, ef.issue_number, ef.retired_at
+    `SELECT b.brewery, b.name, b.abv, b.untappd_id, b.untappd_lookup_at, b.untappd_lookup_count,
+            b.rearm_count, ef.issue_number, ef.retired_at, ef.unrescued_at
        FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE ef.beer_id = ?`,
   );
 
   const run = db.transaction((verdicts: Verdict[]) => {
     for (const v of verdicts) {
-      if (v.verdict !== 'unrescued') continue;
+      if (v.verdict !== 'unrescued' && v.verdict !== 'rescued') continue;
       const row = read.get(v.beer_id) as {
-        brewery: string; name: string; untappd_id: number | null;
+        brewery: string; name: string; abv: number | null; untappd_id: number | null;
         untappd_lookup_at: string | null; untappd_lookup_count: number; rearm_count: number;
-        issue_number: number | null; retired_at: string | null;
+        issue_number: number | null; retired_at: string | null; unrescued_at: string | null;
       } | undefined;
       const skip = (reason: SkipReason) => report.skipped.push({ beer_id: v.beer_id, reason });
       if (!row) { skip('missing'); continue; }
@@ -73,6 +86,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (row.retired_at !== null) { skip('retired'); continue; }
       if (row.issue_number !== file.issue) { skip('issue_moved'); continue; }
       if (row.brewery !== v.brewery || row.name !== v.name) { skip('input_changed'); continue; }
+      if (v.verdict === 'rescued' && row.abv !== v.abv) { skip('input_changed'); continue; }
       // #576: рядок здобув нове свідчення відтоді, як ми його пробували — його або явно
       // ре-армили (обидва поля обнулено), або крон устиг зробити свій лукап (лічильник
       // зріс). Обидва випадки означають одне: наша проба більше не найсвіжіше, що про
@@ -87,7 +101,17 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
         || row.rearm_count !== v.rearm_count) {
         skip('lookup_moved'); continue;
       }
-      if (markUnrescued(db, v.beer_id, file.issue, atIso)) report.marked += 1;
+      if (v.verdict === 'rescued') {
+        if (row.unrescued_at !== null) { skip('lookup_moved'); continue; }
+        const marked = markRescued(db, {
+          beerId: v.beer_id, issueNumber: file.issue, bid: v.bid,
+          brewery: v.brewery, name: v.name, abv: v.abv,
+          lookupCount: v.lookup_count, lookupAt: v.lookup_at, rearmCount: v.rearm_count,
+          probedAt: file.probed_at, appliedAt: atIso,
+        });
+        if (marked) report.rescuedMarked += 1;
+        else report.rescuedAlreadyMarked += 1;
+      } else if (markUnrescued(db, v.beer_id, file.issue, atIso)) report.marked += 1;
       else report.alreadyMarked += 1;
     }
   });
