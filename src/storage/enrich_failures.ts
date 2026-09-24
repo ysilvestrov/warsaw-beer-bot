@@ -257,7 +257,10 @@ export function hasCurrentRescueProof(db: DB, beerId: number, issueNumber: numbe
       AND b.brewery IS ef.rescued_brewery AND b.name IS ef.rescued_name
       AND b.abv IS ef.rescued_abv AND b.untappd_lookup_count = ef.rescued_lookup_count
       AND b.untappd_lookup_at IS ef.rescued_lookup_at
-      AND b.rearm_count = ef.rescued_rearm_count`).get(beerId, issueNumber) !== undefined;
+      AND b.rearm_count = ef.rescued_rearm_count
+      AND NOT EXISTS (SELECT 1 FROM legacy_orphan_dispositions lod
+        WHERE lod.beer_id = ef.beer_id AND lod.reopened_at IS NULL)`)
+    .get(beerId, issueNumber) !== undefined;
 }
 
 // #421 beat 1: the row is spending its post-fix free retry. The verdict is deliberately
