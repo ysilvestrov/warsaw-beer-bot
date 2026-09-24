@@ -32,7 +32,7 @@ export function inspectOrphanIssue(db: DB, issueNumber: number): CloseoutReport 
       && disposition.breweryText === cardText(row.brewery)
       && disposition.nameText === cardText(row.name)
       && disposition.abvKey === cardAbv(row.abv)
-      && row.untappd_id === null && row.retired_at === null && row.unrescued_at === null) {
+      && row.untappd_id === null && row.retired_at === null) {
       return { beerId, state: 'inactive', reason: `active disposition ${disposition.id}` };
     }
     if (hasCurrentRescueProof(db, beerId, issueNumber)) {

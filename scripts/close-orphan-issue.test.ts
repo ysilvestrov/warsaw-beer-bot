@@ -1,5 +1,7 @@
 import { openDb } from '../src/storage/db';
 import { migrate } from '../src/storage/schema';
+import { insertLegacyDisposition } from '../src/storage/legacy-orphan-dispositions';
+import { cardAbv, cardText } from '../src/domain/card-text';
 import type { GithubCloseoutClient } from '../src/infra/github-closeout';
 import { parseCloseArgs, runCloseOrphanIssue } from './close-orphan-issue';
 
@@ -37,6 +39,31 @@ it('dry-runs without PATCH and closes only after a second successful preflight',
   expect(await runCloseOrphanIssue(['--issue', '697', '--close'], f)).toBe(0);
   expect(f.closes()).toBe(1);
   expect(f.reads()).toBe(4); // one dry run; two preflights and post-close check
+});
+
+it('closes only after an exact inactive decision resolves a prior negative replay', async () => {
+  const f = fixture();
+  f.db.prepare(`INSERT INTO beers (id, brewery, name, normalized_brewery, normalized_name)
+    VALUES (1, 'Mad Brew', 'Unknown card', 'mad brew', 'unknown card')`).run();
+  f.db.prepare(`INSERT INTO enrich_failures
+    (beer_id, brewery, name, search_url, outcome, candidates_count, candidates_summary,
+     fail_count, last_at, review_class, issue_number, unrescued_at)
+    VALUES (1, 'Mad Brew', 'Unknown card', '', 'not_found', 0, '', 1,
+      '2026-09-24T09:00:00Z', 'parser_bug', 697, '2026-09-24T09:00:00Z')`).run();
+  expect(await runCloseOrphanIssue(['--issue', '697', '--close'], f)).toBe(1);
+  expect(f.closes()).toBe(0);
+  insertLegacyDisposition(f.db, {
+    beerId: 1, issueNumber: 697, cardBrewery: 'Mad Brew', cardName: 'Unknown card',
+    cardAbv: null, breweryText: cardText('Mad Brew'), nameText: cardText('Unknown card'),
+    abvKey: cardAbv(null), failureSourceUrl: '', reason: 'Identity unknown',
+    evidenceUrl: 'https://example.com/evidence', operator: 'maintainer',
+    inactiveAt: '2026-09-24T09:02:00Z',
+  });
+  expect(await runCloseOrphanIssue(['--issue', '697', '--close'], f)).toBe(0);
+  expect(f.closes()).toBe(1);
+  expect(JSON.parse(f.lines.at(-1)!)).toMatchObject({
+    closed: true, ready: true, rows: [{ beerId: 1, state: 'inactive' }],
+  });
 });
 
 it('refuses to close when a new row appears during the second preflight', async () => {

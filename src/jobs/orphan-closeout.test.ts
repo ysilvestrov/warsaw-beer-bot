@@ -89,9 +89,11 @@ it('reports an empty cohort explicitly', () => {
   expect(inspectOrphanIssue(db, 697)).toEqual({ issueNumber: 697, rows: [], repairs: [], ready: true });
 });
 
-it('does not treat an inactive disposition as resolution of an unrescued replay', () => {
+it('accepts an exact inactive decision after an unrescued replay without clearing the marker', () => {
   const { db, add } = fixture();
   const beerId = add('Unknown card');
+  db.prepare('UPDATE enrich_failures SET unrescued_at = ? WHERE beer_id = ?')
+    .run('2026-09-24T09:00:00Z', beerId);
   insertLegacyDisposition(db, {
     beerId, issueNumber: 697, cardBrewery: 'Mad Brew', cardName: 'Unknown card',
     cardAbv: null, breweryText: cardText('Mad Brew'), nameText: cardText('Unknown card'),
@@ -99,9 +101,20 @@ it('does not treat an inactive disposition as resolution of an unrescued replay'
     evidenceUrl: 'https://example.com/evidence', operator: 'maintainer',
     inactiveAt: '2026-09-24T09:02:00Z',
   });
+  expect(inspectOrphanIssue(db, 697)).toMatchObject({
+    ready: true, rows: [{ beerId, state: 'inactive' }],
+  });
+  expect((db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = ?')
+    .get(beerId) as { unrescued_at: string }).unrescued_at).toBe('2026-09-24T09:00:00Z');
+});
+
+it('keeps an unrescued replay without a disposition blocked', () => {
+  const { db, add } = fixture();
+  const beerId = add('Unknown card');
   db.prepare('UPDATE enrich_failures SET unrescued_at = ? WHERE beer_id = ?')
-    .run('2026-09-24T09:03:00Z', beerId);
-  expect(inspectOrphanIssue(db, 697).rows).toMatchObject([
-    { beerId, state: 'blocked', reason: 'unrescued replay is not a closeout disposition' },
-  ]);
+    .run('2026-09-24T09:00:00Z', beerId);
+  expect(inspectOrphanIssue(db, 697)).toMatchObject({
+    ready: false,
+    rows: [{ beerId, state: 'blocked', reason: 'unrescued replay is not a closeout disposition' }],
+  });
 });
