@@ -667,6 +667,12 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN rescued_lookup_at TEXT;
       ALTER TABLE enrich_failures ADD COLUMN rescued_rearm_count INTEGER;
       ALTER TABLE enrich_failures ADD COLUMN rescued_probed_at TEXT;
+      CREATE TRIGGER clear_rescue_on_retriage
+      AFTER UPDATE OF issue_number, review_class ON enrich_failures
+      WHEN NEW.issue_number IS NOT OLD.issue_number OR NEW.review_class IS NOT OLD.review_class
+      BEGIN
+        UPDATE enrich_failures SET rescued_issue = NULL WHERE beer_id = NEW.beer_id;
+      END;
     `,
   },
 ];
