@@ -3,9 +3,8 @@ import type { DB } from '../storage/db';
 import type { LookupOutcome } from '../domain/untappd-lookup';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
 
-export interface Verdict {
+interface VerdictBase {
   beer_id: number; brewery: string; name: string;
-  verdict: 'unrescued' | 'rescued' | 'inconclusive' | 'already_marked';
   // #576: стан лукап-бухгалтерії НА МОМЕНТ ПРОБИ. `rearmLookup` не чіпає жодного з полів,
   // які звіряє `applyVerdicts` (brewery/name/issue_number/retired_at/untappd_id) — тобто
   // ре-арм, що стався між пробою і застосуванням, був невидимий, і застарілий вердикт тихо
@@ -17,6 +16,10 @@ export interface Verdict {
   // лічильник ловить сам факт ре-арму, а не його побічний ефект.
   rearm_count: number;
 }
+
+export type Verdict =
+  | (VerdictBase & { verdict: 'rescued'; bid: number; abv: number | null })
+  | (VerdictBase & { verdict: 'unrescued' | 'inconclusive' | 'already_marked' });
 
 export interface VerdictFile {
   issue: number;
@@ -145,7 +148,9 @@ export async function probeIssueRows(
     }
     const outcome = await deps.lookup({ brewery: row.brewery, name: row.name, abv: row.abv });
     await sleep(sleepMs);
-    if (outcome.kind === 'matched') verdicts.push({ ...base, verdict: 'rescued' });
+    if (outcome.kind === 'matched') {
+      verdicts.push({ ...base, verdict: 'rescued', bid: outcome.result.bid, abv: row.abv });
+    }
     else if (outcome.kind === 'not_found') verdicts.push({ ...base, verdict: 'unrescued' });
     else {
       deps.log.warn({ beerId: row.id, kind: outcome.kind }, 'adjudicate: inconclusive probe');

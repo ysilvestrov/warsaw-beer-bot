@@ -42,6 +42,28 @@ const fileFor = (verdicts: Verdict[]) => ({
 });
 
 describe('applyVerdicts', () => {
+  it('persists a rescued verdict as current proof for its issue and bid', () => {
+    const db = fresh();
+    orphanWithIssue(db, 1, 576);
+    const rescued = {
+      beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'rescued' as const,
+      lookup_count: 0, lookup_at: null, rearm_count: 0, bid: 3615616, abv: null,
+    };
+    const report = applyVerdicts(db, fileFor([rescued]), '2026-09-02T11:00:00.000Z');
+    expect(report.rescuedMarked).toBe(1);
+    const row = db.prepare('SELECT rescued_issue, rescued_bid, rescued_probed_at FROM enrich_failures WHERE beer_id = 1')
+      .get();
+    expect(row).toEqual({ rescued_issue: 576, rescued_bid: 3615616, rescued_probed_at: '2026-09-02T10:00:00.000Z' });
+  });
+
+  it('rejects a positive verdict file without a bid or ABV snapshot', () => {
+    const old = fileFor([{
+      beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'rescued',
+      lookup_count: 0, lookup_at: null, rearm_count: 0,
+    } as never]);
+    expect(() => parseVerdictFile(old)).toThrow(/bid|abv/i);
+  });
+
   // #576 (рев'ю PR #580, P1): чотири перевірки рядка дивляться на brewery/name/untappd_id/
   // issue_number/retired_at — а `rearmLookup` не чіпає жодного з них. Ре-арм, що стався між
   // пробою і застосуванням, був невидимий, і застарілий вердикт тихо скасовував його грант.
@@ -63,7 +85,7 @@ describe('applyVerdicts', () => {
       lookup_count: probed.untappd_lookup_count, lookup_at: probed.untappd_lookup_at, rearm_count: 0
     }]), '2026-09-02T11:00:00.000Z');
 
-    expect(report).toEqual({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'lookup_moved' }] });
+    expect(report).toMatchObject({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'lookup_moved' }] });
     const row = db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = 1')
       .get() as { unrescued_at: string | null };
     expect(row.unrescued_at).toBeNull();
@@ -97,7 +119,7 @@ describe('applyVerdicts', () => {
       rearm_count: atProbe.rearm_count,
     }]), '2026-09-02T11:00:00.000Z');
 
-    expect(report).toEqual({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'lookup_moved' }] });
+    expect(report).toMatchObject({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'lookup_moved' }] });
     const row = db.prepare('SELECT unrescued_at FROM enrich_failures WHERE beer_id = 1')
       .get() as { unrescued_at: string | null };
     expect(row.unrescued_at).toBeNull();
@@ -133,18 +155,18 @@ describe('applyVerdicts', () => {
       lookup_count: probed.untappd_lookup_count, lookup_at: probed.untappd_lookup_at, rearm_count: 0
     }]), '2026-09-02T11:00:00.000Z');
 
-    expect(report).toEqual({ marked: 1, alreadyMarked: 0, skipped: [] });
+    expect(report).toMatchObject({ marked: 1, alreadyMarked: 0, skipped: [] });
   });
 
-  it('marks only the unrescued verdicts', () => {
+  it('marks rescued and unrescued verdicts separately', () => {
     const db = fresh();
     orphanWithIssue(db, 1, 576);
     orphanWithIssue(db, 2, 576);
     const report = applyVerdicts(db, fileFor([
       { beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
-      { beer_id: 2, brewery: 'Mad Brew', name: 'Row 2', verdict: 'rescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
+      { beer_id: 2, brewery: 'Mad Brew', name: 'Row 2', verdict: 'rescued', lookup_count: 0, lookup_at: null, rearm_count: 0, bid: 3615616, abv: null },
     ]), '2026-09-02T11:00:00.000Z');
-    expect(report).toEqual({ marked: 1, alreadyMarked: 0, skipped: [] });
+    expect(report).toMatchObject({ marked: 1, rescuedMarked: 1, alreadyMarked: 0, skipped: [] });
     const one = db.prepare('SELECT unrescued_at, unrescued_issue FROM enrich_failures WHERE beer_id = 1')
       .get() as { unrescued_at: string; unrescued_issue: number };
     expect(one).toEqual({ unrescued_at: '2026-09-02T11:00:00.000Z', unrescued_issue: 576 });
@@ -173,7 +195,7 @@ describe('applyVerdicts', () => {
     const report = applyVerdicts(db, fileFor([
       { beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
     ]), '2026-09-02T11:00:00.000Z');
-    expect(report).toEqual({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'issue_moved' }] });
+    expect(report).toMatchObject({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 1, reason: 'issue_moved' }] });
   });
 
   it('skips a row retired since the probe', () => {
@@ -203,7 +225,7 @@ describe('applyVerdicts', () => {
     const report = applyVerdicts(db, fileFor([
       { beer_id: 1, brewery: 'Mad Brew', name: 'Row 1', verdict: 'unrescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
     ]), '2026-09-02T11:00:00.000Z');
-    expect(report).toEqual({ marked: 0, alreadyMarked: 1, skipped: [] });
+    expect(report).toMatchObject({ marked: 0, alreadyMarked: 1, skipped: [] });
   });
 
   it('rejects a malformed file rather than applying part of it', () => {
@@ -220,7 +242,7 @@ describe('applyVerdicts', () => {
     const report = applyVerdicts(db, fileFor([
       { beer_id: 999999, brewery: 'Nobody', name: 'Nothing', verdict: 'unrescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
     ]), '2026-09-02T11:00:00.000Z');
-    expect(report).toEqual({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 999999, reason: 'missing' }] });
+    expect(report).toMatchObject({ marked: 0, alreadyMarked: 0, skipped: [{ beer_id: 999999, reason: 'missing' }] });
   });
 });
 
@@ -254,7 +276,7 @@ describe('verdict-file staleness (#576 I3)', () => {
   it('summarizes issue, probed_at, age, and the verdict tally before any write', () => {
     const f = fileFor([
       { beer_id: 1, brewery: 'x', name: 'y', verdict: 'unrescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
-      { beer_id: 2, brewery: 'x', name: 'z', verdict: 'rescued', lookup_count: 0, lookup_at: null , rearm_count: 0},
+      { beer_id: 2, brewery: 'x', name: 'z', verdict: 'rescued', lookup_count: 0, lookup_at: null, rearm_count: 0, bid: 42, abv: null },
       { beer_id: 3, brewery: 'x', name: 'w', verdict: 'inconclusive', lookup_count: 0, lookup_at: null , rearm_count: 0},
       { beer_id: 4, brewery: 'x', name: 'v', verdict: 'already_marked', lookup_count: 0, lookup_at: null , rearm_count: 0},
     ]);

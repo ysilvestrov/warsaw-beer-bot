@@ -42,7 +42,7 @@ async function main(argv: string[]): Promise<number> {
         return 1;
       }
       const report = applyVerdicts(db, file, nowIso);
-      console.log(`marked ${report.marked}, already marked ${report.alreadyMarked}`);
+      console.log(`unrescued marked ${report.marked}, already marked ${report.alreadyMarked}; rescued marked ${report.rescuedMarked}, already marked ${report.rescuedAlreadyMarked}`);
       for (const s of report.skipped) console.log(`  skipped ${s.beer_id}: ${s.reason}`);
       return 0;
     }
