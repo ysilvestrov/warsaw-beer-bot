@@ -7,6 +7,8 @@ import { getBeer } from '../storage/beers';
 import { seedBeer } from '../storage/seed-beer.testing';
 import { recordEnrichFailure, setEnrichFailureReview, retireEnrichFailure, markUnrescued, markRescued } from '../storage/enrich_failures';
 import { getJobState } from '../storage/job_state';
+import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
+import { cardAbv, cardText } from '../domain/card-text';
 import type { GithubIssuesClient } from '../infra/github-issues';
 import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
 
@@ -78,6 +80,29 @@ describe('unlockFixedOrphans', () => {
     expect(db.prepare('SELECT unlocked_at FROM enrich_failures WHERE beer_id = ?').get(beerId))
       .toEqual({ unlocked_at: null });
     expect(getBeer(db, beerId)?.untappd_lookup_count).toBe(3);
+  });
+
+  it('does not unlock a row disposed while the GitHub request was in flight', async () => {
+    const db = fresh();
+    const beerId = seedLocked(db, 'Old card', 'parser_bug', 697);
+    proveRescued(db, beerId, 697);
+    const github = stubGithub([]);
+    github.listOpenIssues = async () => {
+      insertLegacyDisposition(db, {
+        beerId, issueNumber: 697, cardBrewery: 'Mad Brew', cardName: 'Old card', cardAbv: null,
+        breweryText: cardText('Mad Brew'), nameText: cardText('Old card'), abvKey: cardAbv(null),
+        failureSourceUrl: '', reason: 'Historical identity unknown',
+        evidenceUrl: 'https://example.com/evidence', operator: 'maintainer',
+        inactiveAt: '2026-08-16T06:30:00Z',
+      });
+      return [];
+    };
+    const out = await unlockFixedOrphans({ db, log, github, now: NOW });
+    expect(out.unlocked).toBe(0);
+    expect(db.prepare('SELECT rearm_count FROM beers WHERE id = ?').get(beerId))
+      .toEqual({ rearm_count: 0 });
+    expect(db.prepare('SELECT unlocked_at FROM enrich_failures WHERE beer_id = ?').get(beerId))
+      .toEqual({ unlocked_at: null });
   });
 
   // Red if the job stops comparing against the open set: rows whose fix shipped would stay
