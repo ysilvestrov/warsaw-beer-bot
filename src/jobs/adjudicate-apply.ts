@@ -44,8 +44,8 @@ export function parseVerdictFile(raw: unknown): VerdictFile {
       if (!Object.hasOwn(v, 'abv') || (v.abv !== null && (typeof v.abv !== 'number' || !Number.isFinite(v.abv)))) {
         throw new Error(`verdict file: rescued ${v.beer_id} needs a valid abv snapshot`);
       }
-      if (!Number.isSafeInteger(v.failure_count) || v.failure_count < 1) {
-        throw new Error(`verdict file: rescued ${v.beer_id} needs a positive failure_count`);
+      if (!Number.isSafeInteger(v.real_failure_count) || v.real_failure_count < 0) {
+        throw new Error(`verdict file: rescued ${v.beer_id} needs a nonnegative real_failure_count`);
       }
     }
   }
@@ -72,7 +72,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
   const report: ApplyReport = { marked: 0, alreadyMarked: 0, rescuedMarked: 0, rescuedAlreadyMarked: 0, skipped: [] };
   const read = db.prepare(
     `SELECT b.brewery, b.name, b.abv, b.untappd_id, b.untappd_lookup_at, b.untappd_lookup_count,
-            b.rearm_count, ef.issue_number, ef.retired_at, ef.unrescued_at, ef.fail_count
+            b.rearm_count, ef.issue_number, ef.retired_at, ef.unrescued_at, ef.real_failure_count
        FROM enrich_failures ef JOIN beers b ON b.id = ef.beer_id
       WHERE ef.beer_id = ?`,
   );
@@ -84,7 +84,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
         brewery: string; name: string; abv: number | null; untappd_id: number | null;
         untappd_lookup_at: string | null; untappd_lookup_count: number; rearm_count: number;
         issue_number: number | null; retired_at: string | null; unrescued_at: string | null;
-        fail_count: number;
+        real_failure_count: number;
       } | undefined;
       const skip = (reason: SkipReason) => report.skipped.push({ beer_id: v.beer_id, reason });
       if (!row) { skip('missing'); continue; }
@@ -93,7 +93,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
       if (row.issue_number !== file.issue) { skip('issue_moved'); continue; }
       if (row.brewery !== v.brewery || row.name !== v.name) { skip('input_changed'); continue; }
       if (v.verdict === 'rescued' && row.abv !== v.abv) { skip('input_changed'); continue; }
-      if (v.verdict === 'rescued' && row.fail_count !== v.failure_count) {
+      if (v.verdict === 'rescued' && row.real_failure_count !== v.real_failure_count) {
         skip('lookup_moved'); continue;
       }
       // #576: рядок здобув нове свідчення відтоді, як ми його пробували — його або явно
@@ -116,7 +116,7 @@ export function applyVerdicts(db: DB, file: VerdictFile, atIso: string): ApplyRe
           beerId: v.beer_id, issueNumber: file.issue, bid: v.bid,
           brewery: v.brewery, name: v.name, abv: v.abv,
           lookupCount: v.lookup_count, lookupAt: v.lookup_at, rearmCount: v.rearm_count,
-          failureCount: v.failure_count,
+          realFailureCount: v.real_failure_count,
           probedAt: file.probed_at, appliedAt: atIso,
         });
         if (marked) report.rescuedMarked += 1;

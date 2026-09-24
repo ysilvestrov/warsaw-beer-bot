@@ -75,8 +75,9 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
 
     db.prepare(
       `INSERT INTO enrich_failures
-         (beer_id, brewery, name, search_url, source_url, outcome, candidates_count, candidates_summary, fail_count, last_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+         (beer_id, brewery, name, search_url, source_url, outcome, candidates_count,
+          candidates_summary, fail_count, last_at, real_failure_count)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
        ON CONFLICT(beer_id) DO UPDATE SET
          brewery            = excluded.brewery,
          name               = excluded.name,
@@ -87,6 +88,7 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
          candidates_count   = excluded.candidates_count,
          candidates_summary = excluded.candidates_summary,
          fail_count         = enrich_failures.fail_count + 1,
+         real_failure_count = enrich_failures.real_failure_count + 1,
          last_at            = excluded.last_at,
          review_class       = CASE
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
@@ -122,7 +124,7 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
          unlocked_at        = NULL`,
     ).run(
       r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,
-      r.candidates_count, r.candidates_summary, r.at,
+      r.candidates_count, r.candidates_summary, r.at, r.outcome === 'blocked' ? 0 : 1,
     );
   })();
 }
@@ -200,7 +202,7 @@ export interface RescuedProof {
   lookupCount: number;
   lookupAt: string | null;
   rearmCount: number;
-  failureCount: number;
+  realFailureCount: number;
   probedAt: string;
   appliedAt: string;
 }
@@ -210,14 +212,14 @@ export interface RescuedProof {
 export function markRescued(db: DB, proof: RescuedProof): boolean {
   const current = db.prepare(`SELECT issue_number, unrescued_at, rescued_issue, rescued_bid,
       rescued_brewery, rescued_name, rescued_abv, rescued_lookup_count,
-      rescued_lookup_at, rescued_rearm_count, rescued_failure_count, rescued_probed_at
+      rescued_lookup_at, rescued_rearm_count, rescued_real_failure_count, rescued_probed_at
     FROM enrich_failures WHERE beer_id = ?`).get(proof.beerId) as {
       issue_number: number | null; unrescued_at: string | null;
       rescued_issue: number | null; rescued_bid: number | null;
       rescued_brewery: string | null; rescued_name: string | null;
       rescued_abv: number | null; rescued_lookup_count: number | null;
       rescued_lookup_at: string | null; rescued_rearm_count: number | null;
-      rescued_failure_count: number | null; rescued_probed_at: string | null;
+      rescued_real_failure_count: number | null; rescued_probed_at: string | null;
     } | undefined;
   if (!current || current.issue_number !== proof.issueNumber || current.unrescued_at !== null) {
     throw new Error(`cannot mark beer ${proof.beerId} rescued for issue ${proof.issueNumber}`);
@@ -231,14 +233,14 @@ export function markRescued(db: DB, proof: RescuedProof): boolean {
     && current.rescued_lookup_count === proof.lookupCount
     && current.rescued_lookup_at === proof.lookupAt
     && current.rescued_rearm_count === proof.rearmCount
-    && current.rescued_failure_count === proof.failureCount
+    && current.rescued_real_failure_count === proof.realFailureCount
     && current.rescued_probed_at === proof.probedAt) return false;
   db.prepare(`UPDATE enrich_failures SET rescued_issue = ?, rescued_at = ?, rescued_bid = ?,
       rescued_brewery = ?, rescued_name = ?, rescued_abv = ?, rescued_lookup_count = ?,
-      rescued_lookup_at = ?, rescued_rearm_count = ?, rescued_failure_count = ?, rescued_probed_at = ?
+      rescued_lookup_at = ?, rescued_rearm_count = ?, rescued_real_failure_count = ?, rescued_probed_at = ?
     WHERE beer_id = ? AND issue_number = ? AND unrescued_at IS NULL`).run(
     proof.issueNumber, proof.appliedAt, proof.bid, proof.brewery, proof.name, proof.abv,
-    proof.lookupCount, proof.lookupAt, proof.rearmCount, proof.failureCount, proof.probedAt,
+    proof.lookupCount, proof.lookupAt, proof.rearmCount, proof.realFailureCount, proof.probedAt,
     proof.beerId, proof.issueNumber,
   );
   return true;
