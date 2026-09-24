@@ -5,7 +5,7 @@ import { openDb } from '../src/storage/db';
 import { loadOperatorEnv } from './operator-env';
 import { probeIssueRows, summarizeProbe } from '../src/jobs/adjudicate-issue-rows';
 import {
-  parseVerdictFile, applyVerdicts, isVerdictFileStale, summarizeVerdictFile,
+  parseVerdictFile, applyVerdicts, isVerdictFileStale, verdictFileAgeMs, summarizeVerdictFile,
 } from '../src/jobs/adjudicate-apply';
 import { parseAdjudicateArgs } from '../src/jobs/adjudicate-args';
 import { lookupBeer } from '../src/domain/untappd-lookup';
@@ -33,6 +33,10 @@ async function main(argv: string[]): Promise<number> {
       // which run, how old, what it contains. A bare "marked N, already marked M" after the fact
       // told them nothing about which file they'd just trusted.
       console.log(summarizeVerdictFile(file, nowIso));
+      if (verdictFileAgeMs(file, nowIso) < 0) {
+        console.error('refusing: verdict file probe time is in the future');
+        return 1;
+      }
       if (isVerdictFileStale(file, nowIso) && !parsed.force) {
         console.error(
           'refusing: this verdict file is older than the staleness window — a row it names may '
