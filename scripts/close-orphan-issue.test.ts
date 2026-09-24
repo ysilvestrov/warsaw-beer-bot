@@ -80,6 +80,14 @@ it('reports a row arriving after PATCH as incomplete closeout', async () => {
     rows: [{ beerId: 1, state: 'blocked' }] });
 });
 
+it('does not report closed when post-PATCH GitHub still says open', async () => {
+  const f = fixture();
+  f.github.getIssue = async (number) => ({ number, state: 'open',
+    labels: ['orphan-triage'], isPullRequest: false });
+  expect(await runCloseOrphanIssue(['--issue', '697', '--close'], f)).toBe(1);
+  expect(JSON.parse(f.lines.at(-1)!)).toMatchObject({ closed: false, ready: false });
+});
+
 it('refuses a closed issue, a missing label, and a PR number', async () => {
   for (const issue of [
     { state: 'closed' as const, labels: ['orphan-triage'], isPullRequest: false },
