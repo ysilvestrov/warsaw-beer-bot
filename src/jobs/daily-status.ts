@@ -4,12 +4,14 @@ import { collectStatus, type StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
+import { UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
 export function buildStatusMessage(
   m: StatusMetrics, date: string,
   triageLine?: string | null, saturatedLine?: string | null,
+  withheldLine?: string | null,
 ): string {
   const matchPct = m.beersTotal > 0 ? Math.round((m.beersMatched / m.beersTotal) * 100) : 0;
   const scrapeLine = m.lastScrapeHoursAgo === null
@@ -31,7 +33,8 @@ export function buildStatusMessage(
     `• Печатки: ${group(m.sealUnidentifiable)} unidentifiable (${group(m.sealUnidentifiableReobserved)} переспостережено) · ${group(m.sealNotABeer)} not_a_beer (+${group(m.sealNotABeer7d)}/7д) · ${group(m.sealRetiredFalsified)} спростованих retire`,
     // #421: the fix-keyed lock's own audit. `під замком` is the quota saved; a week of
     // zero unlocks while issues closed means the mechanism is dead.
-    `• Замок: ${group(m.lockedRows)} під замком · ${group(m.unlocked7d)} розімкнено/7д · ${group(m.verdictsOutlived7d)} вердиктів пережили фікс/7д · ${group(m.unrescuedRows)} unrescued (${group(m.unlockedUnadjudicated7d)} розімкнено без вердикту/7д)`,
+    `• Замок: ${group(m.lockedRows)} під замком · ${group(m.unlocked7d)} розімкнено/7д · ${group(m.verdictsOutlived7d)} вердиктів пережили фікс/7д · ${group(m.unrescuedRows)} unrescued (${group(m.unlockedUnadjudicated7d)} без негативного маркера/7д)`,
+    ...(withheldLine ? [`• ${withheldLine}`] : []),
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,
@@ -101,6 +104,7 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
   // job_state; only shown when it belongs to today's digest date.
   let triageLine: string | null = null;
   let saturatedLine: string | null = null;
+  let withheldLine: string | null = null;
   const rawTriage = getJobState(db, TRIAGE_LAST_RESULT_KEY);
   if (rawTriage) {
     try {
@@ -112,7 +116,27 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
       }
     } catch { /* malformed state — ignore */ }
   }
-  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine);
+  const rawUnlock = getJobState(db, UNLOCK_LAST_RESULT_KEY);
+  if (rawUnlock) {
+    try {
+      const parsed = JSON.parse(rawUnlock) as {
+        date?: unknown; withheld?: unknown;
+      };
+      if (parsed.date === dateKey && Array.isArray(parsed.withheld)) {
+        const rows = parsed.withheld as { beerId?: unknown; issueNumber?: unknown }[];
+        if (rows.every((row) => row && Number.isSafeInteger(row.beerId)
+          && Number(row.beerId) > 0 && Number.isSafeInteger(row.issueNumber)
+          && Number(row.issueNumber) > 0)) {
+          if (rows.length > 0) {
+            const examples = rows.slice(0, 5)
+              .map((row) => `#${row.issueNumber} / beer ${row.beerId}`).join(', ');
+            withheldLine = `Утримано після закриття: ${rows.length} (${examples}${rows.length > 5 ? ', …' : ''})`;
+          }
+        }
+      }
+    } catch { /* malformed state — ignore */ }
+  }
+  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine, withheldLine);
   try {
     await notifyAdmin(text);
     setJobState(db, DAILY_STATUS_KEY, dateKey);

@@ -5,6 +5,7 @@ import { migrate } from '../storage/schema';
 import { buildStatusMessage, dailyStatus, shouldSendDailyStatus } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
+import { UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -41,7 +42,7 @@ test('buildStatusMessage: full message exact string', () => {
       '• Рейтинги: 134 зматчених пив без рейтингу · 30 120 звірено за 30 днів',
       '• Enrich: +5 зматчено / 3 провалів за 24 год · пошук ✅',
       '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
-      '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д · 4 unrescued (1 розімкнено без вердикту/7д)',
+      '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д · 4 unrescued (1 без негативного маркера/7д)',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
       "• Користувачі: 31 профіль (24 прив'язано)",
       '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',
@@ -52,6 +53,37 @@ test('buildStatusMessage: full message exact string', () => {
       '• Нових на кранах (24 год): 37',
     ].join('\n'),
   );
+});
+
+test('dailyStatus shows same-day withheld beer and issue IDs', async () => {
+  const db = emptyDb();
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({
+    date: '2026-06-21', withheld: [{ beerId: 29955, issueNumber: 677 }],
+  }));
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, notifyAdmin: async (msg) => { sent.push(msg); },
+    now: () => new Date('2026-06-21T07:00:00Z') });
+  expect(sent[0]).toContain('#677 / beer 29955');
+});
+
+test('dailyStatus ignores stale or malformed withheld results', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const deps = { db, log: silentLog,
+    notifyAdmin: async (msg: string) => { sent.push(msg); },
+    now: () => new Date('2026-06-21T07:00:00Z') };
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({
+    date: '2026-06-20', withheld: [{ beerId: 29955, issueNumber: 677 }],
+  }));
+  await dailyStatus(deps);
+  expect(sent[0]).not.toContain('Утримано після закриття');
+
+  db.prepare("DELETE FROM job_state WHERE key = 'daily_status_last_sent'").run();
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({
+    date: '2026-06-21', withheld: [{ beerId: -1, issueNumber: 677 }],
+  }));
+  await dailyStatus(deps);
+  expect(sent[1]).not.toContain('Утримано після закриття');
 });
 
 test('buildStatusMessage: the MCP line shows zeros when there was no MCP traffic', () => {

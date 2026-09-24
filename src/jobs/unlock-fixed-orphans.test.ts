@@ -10,7 +10,7 @@ import { getJobState } from '../storage/job_state';
 import { insertLegacyDisposition } from '../storage/legacy-orphan-dispositions';
 import { cardAbv, cardText } from '../domain/card-text';
 import type { GithubIssuesClient } from '../infra/github-issues';
-import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
+import { unlockFixedOrphans, UNLOCK_LAST_RUN_KEY, UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
 
 const log = pino({ level: 'silent' });
 const NOW = () => new Date('2026-08-16T07:00:00Z');
@@ -77,6 +77,9 @@ describe('unlockFixedOrphans', () => {
     const out = await unlockFixedOrphans({ db, log, github: stubGithub([]), now: NOW });
     expect(out.unlocked).toBe(0);
     expect(out.withheld).toBe(1);
+    expect(JSON.parse(getJobState(db, UNLOCK_LAST_RESULT_KEY)!)).toEqual({
+      date: '2026-08-16', withheld: [{ beerId, issueNumber: 697 }],
+    });
     expect(db.prepare('SELECT unlocked_at FROM enrich_failures WHERE beer_id = ?').get(beerId))
       .toEqual({ unlocked_at: null });
     expect(getBeer(db, beerId)?.untappd_lookup_count).toBe(3);
