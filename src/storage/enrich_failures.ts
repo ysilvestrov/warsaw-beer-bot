@@ -116,6 +116,9 @@ export function recordEnrichFailure(db: DB, r: EnrichFailureRow): void {
            WHEN (enrich_failures.candidates_count = 0) <> (excluded.candidates_count = 0)
              OR enrich_failures.unlocked_at IS NOT NULL
            THEN NULL ELSE enrich_failures.unrescued_issue END,
+         -- #697: a new real failure is newer evidence than the applied positive replay.
+         -- A blocked result returned above and does not invalidate it.
+         rescued_issue      = NULL,
          unlocked_at        = NULL`,
     ).run(
       r.beer_id, r.brewery, r.name, r.search_url, r.source_url, r.outcome,

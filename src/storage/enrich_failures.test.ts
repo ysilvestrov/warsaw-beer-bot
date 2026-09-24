@@ -430,6 +430,35 @@ describe('positive replay proof (#697)', () => {
     db.prepare('UPDATE beers SET rearm_count = rearm_count + 1 WHERE id = 1').run();
     expect(hasCurrentRescueProof(db, 1, 697)).toBe(false);
   });
+
+  it('invalidates proof when a new real failure is recorded without moving lookup counters', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 697);
+    markRescued(db, {
+      beerId: 1, issueNumber: 697, bid: 3615616, brewery: 'b1', name: 'n1',
+      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0,
+      probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
+    });
+    recordEnrichFailure(db, {
+      beer_id: 1, brewery: 'b1', name: 'n1', search_url: 'u', source_url: '',
+      outcome: 'not_found', candidates_count: 0, candidates_summary: '',
+      at: '2026-09-24T10:02:00Z',
+    });
+    expect(hasCurrentRescueProof(db, 1, 697)).toBe(false);
+  });
+
+  it('does not revive old proof when a row is remapped away and back to the same issue', () => {
+    const db = freshDb();
+    orphanWithIssue(db, 1, 697);
+    markRescued(db, {
+      beerId: 1, issueNumber: 697, bid: 3615616, brewery: 'b1', name: 'n1',
+      abv: null, lookupCount: 0, lookupAt: null, rearmCount: 0,
+      probedAt: '2026-09-24T10:00:00Z', appliedAt: '2026-09-24T10:01:00Z',
+    });
+    db.prepare('UPDATE enrich_failures SET issue_number = 698 WHERE beer_id = 1').run();
+    db.prepare('UPDATE enrich_failures SET issue_number = 697 WHERE beer_id = 1').run();
+    expect(hasCurrentRescueProof(db, 1, 697)).toBe(false);
+  });
 });
 
 describe('isWebFallbackBlocked', () => {

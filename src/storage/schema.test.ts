@@ -28,6 +28,7 @@ function insertFailure(
 }
 
 function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
+  db.exec('DROP TRIGGER clear_rescue_on_retriage');
   for (const name of [
     'rescued_issue', 'rescued_at', 'rescued_bid', 'rescued_brewery', 'rescued_name',
     'rescued_abv', 'rescued_lookup_count', 'rescued_lookup_at', 'rescued_rearm_count',
@@ -375,6 +376,7 @@ describe('schema migrations', () => {
       // MAX(version), so leaving a LATER row in place would make it skip v22 entirely
       // and this test would silently assert nothing.
       db.exec('ALTER TABLE beers DROP COLUMN untappd_id_source');
+      db.exec('DROP TRIGGER clear_rescue_on_retriage');
       db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
       // v26 (#379) also re-runs in this rewind window (>= 22) but ALTERs
       // user_profiles, untouched by anything else rewound here. Drop it too, or
@@ -428,6 +430,7 @@ describe('schema migrations', () => {
       // Rewind >= 23, not = 23: migrate() compares against MAX(version), so leaving a
       // LATER row (v24+) in place would make it skip v23 entirely and this test would
       // silently assert nothing against the dropped column (see #377 v22 test history).
+      db.exec('DROP TRIGGER clear_rescue_on_retriage');
       db.exec('ALTER TABLE enrich_failures DROP COLUMN issue_number');
       // v26 (#379) also runs in this rewind window (>= 23) but isn't touched by the
       // v24 rebuild below (it ALTERs user_profiles, not enrich_failures), so its
