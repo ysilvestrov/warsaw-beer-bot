@@ -82,6 +82,19 @@ describe('schema migrations', () => {
     expect(() => migrate(db)).not.toThrow();
   });
 
+  // The ONLY assertion on the schema head: bump it here when a migration is added.
+  // Tests of an individual migration assert that THEIR version is recorded, never
+  // the head — a head pinned inside such a test silently collides with any branch
+  // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
+  it('records every migration 1..35 on a fresh db, with no gaps', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
+      .map((r) => r.version);
+    expect(versions).toEqual(Array.from({ length: 35 }, (_, i) => i + 1));
+    db.close();
+  });
+
   it('v20 renames the quota table and the per-beer stamp to provider-neutral names', () => {
     const db = openDb(':memory:');
     migrate(db);
@@ -100,6 +113,7 @@ describe('schema migrations', () => {
     ).map((t) => t.name);
     expect(tables).not.toContain('google_quota');
 
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 20').get()).toEqual({ version: 20 });
     db.close();
   });
 
@@ -560,10 +574,8 @@ describe('schema migrations', () => {
         .get(notABeer) as { r: string | null };
       expect(kept.r).not.toBeNull();
 
-      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: this rewind starts from v23
-      // and runs migrate() to completion, so the reachable head moves whenever a later migration is added.
-      expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(35);
+      // The rewind deleted v24's record; the second migrate() must have re-recorded it.
+      expect(db.prepare('SELECT version FROM schema_version WHERE version = 24').get()).toEqual({ version: 24 });
     });
   });
 
@@ -602,17 +614,13 @@ describe('schema migrations', () => {
     // Deviation from the brief: uses this project's own schema_version table rather
     // than PRAGMA user_version. migrate() (src/storage/schema.ts) never sets SQLite's
     // user_version pragma — it tracks the applied version in schema_version instead
-    // (see the other "reaches at least version N" tests in this file) — so the
+    // (see the other "registers version N" checks in this file) — so the
     // pragma would read 0 regardless of migration state and could never go red/green
     // on the thing this test is meant to check.
     it('v25 is reachable and recorded in schema_version', () => {
       const db = openDb(':memory:');
       migrate(db);
-      const version = db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number };
-      // Updated 25 -> 26 by #379, 26 -> 27 by #558, 27 -> 28 by #576, 28 -> 29 by #587,
-      // 29 -> 30 by MCP wiring task 1, 30 -> 31 by #616, 31 -> 32 by #614, 32 -> 33 by #632: a fresh DB's
-      // reachable head moves whenever a later migration is added; this still proves v25 wasn't lost along the way.
-      expect(version.v).toBe(35);
+      expect(db.prepare('SELECT version FROM schema_version WHERE version = 25').get()).toEqual({ version: 25 });
     });
   });
 
@@ -794,7 +802,7 @@ describe('v34 legacy_card_repairs (#696)', () => {
       db.prepare('DELETE FROM legacy_card_repairs').run();
       expect(() => insert.run(...invalid)).toThrow(/CHECK constraint failed/);
     }
-    expect((db.prepare('SELECT MAX(version) AS v FROM schema_version').get() as { v: number }).v).toBe(35);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 34').get()).toEqual({ version: 34 });
     db.close();
   });
 });
