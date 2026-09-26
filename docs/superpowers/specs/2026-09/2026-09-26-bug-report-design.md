@@ -130,7 +130,9 @@ composition root: інтеграційний тест + source-guard.
 перевищує 28 000, список обрізається: спершу відкидаються найстаріші закриті issues.
 Це пишеться в лог і в рядок скарги (`candidates_truncated = 1`).
 
-### Крок 2 — вердикт (`openai/gpt-5.6-luna` через OpenRouter chat completions)
+### Крок 2 — вердикт (`gpt-5.6-luna`, OpenAI напряму)
+
+Виклик іде на `https://api.openai.com/v1/chat/completions` нашим `OPENAI_API_KEY`. Форма тіла та сама, що в `scripts/ai-review/openai.ts`: `max_completion_tokens` + строга `json_schema`. Нове в ній лише `image_url` з `data:`-URL. Цю частину ще не пробували напряму: проби йшли через OpenRouter тим самим вендором, тож токени й ціна виміряні правильно, а сама форма запиту — ні. Тому перший крок задачі з клієнтом — один живий виклик зі скріншотом (передумова: ключ у прод-`.env`).
 
 На вхід:
 
@@ -322,13 +324,14 @@ issue. Далі — список `needs_review` і `failed` з `R-{id}`.
 
 ## Конфігурація
 
-- `OPENROUTER_API_KEY` — обидва кроки.
+- `OPENROUTER_API_KEY` — лише крок 1 (Jev існує тільки на OpenRouter).
+- `OPENAI_API_KEY` — крок 2 (наявний ключ; орфан-тріаж його теж читає).
 - `BUG_REPORT_SELECT_MODEL` — за замовчуванням `typesafe/jev-1.13`.
-- `BUG_REPORT_VERDICT_MODEL` — за замовчуванням `openai/gpt-5.6-luna`.
+- `BUG_REPORT_VERDICT_MODEL` — за замовчуванням `gpt-5.6-luna`.
 - `BUG_REPORT_MEDIA_DIR` — у проді `/var/lib/warsaw-beer-bot/bug-reports`.
 - `GITHUB_TOKEN`, `GITHUB_REPO` — наявні.
 
-Без `OPENROUTER_API_KEY`, `GITHUB_TOKEN` або `BUG_REPORT_MEDIA_DIR` `/report` відповідає
+Без `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `GITHUB_TOKEN` або `BUG_REPORT_MEDIA_DIR` `/report` відповідає
 «скарги тимчасово недоступні». Реєстр «вимикає фічу» в `config/env.ts` отримує відповідні
 рядки, тож стартовий WARN про це скаже.
 
@@ -345,7 +348,7 @@ issue. Далі — список `needs_review` і `failed` з `R-{id}`.
 | `domain/bug-report-redact.ts` | Вирізання персональних шаблонів |
 | `domain/bug-report-verdict.ts` | Валідація виходу кроку 2 + доповнення лейблів |
 | `infra/openrouter-decisions.ts` | Клієнт Decisions API (крок 1) |
-| `infra/bug-report-llm.ts` | Крок 2: chat completions зі строгою схемою і зображеннями |
+| `infra/bug-report-llm.ts` | Крок 2: OpenAI chat completions напряму, строга схема, зображення |
 | `infra/github-issues.ts` | + `listIssuesByLabels` (open+closed, пагінація, без PR), `getIssueWithComments` |
 | `storage/bug_reports.ts` | Чернетки, скарги, медіа, бани, лічильники |
 | `jobs/bug-report-worker.ts` | Черга, стеля, ретраї, `publishing`, прибирання медіа |
@@ -440,7 +443,7 @@ issue. Далі — список `needs_review` і `failed` з `R-{id}`.
 
 - розмітка antigravity застосована;
 - лейбл `user-report` створено;
-- постійний `OPENROUTER_API_KEY` у `.env`;
+- постійний `OPENROUTER_API_KEY` і `OPENAI_API_KEY` у прод-`.env` (зараз OpenAI-ключ є лише в секретах GitHub Actions);
 - каталог медіа створено з власником `warsaw-beer-bot`.
 
 ## Додаток: розмічений набір 2026-09-26
