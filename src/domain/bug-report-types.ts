@@ -160,6 +160,8 @@ export interface BugReportRow extends NewBugReport {
   verdict: Verdict | null;
   issueNumber: number | null;
   processedAt: string | null;
+  jevJson: string | null;
+  related: number[] | null;
 }
 
 export type MediaKind = 'photo' | 'video';
@@ -187,7 +189,8 @@ export interface BugReportStore {
   getReport(db: DB, id: number): BugReportRow | null;
   listByStatus(db: DB, status: ReportStatus): BugReportRow[]; // oldest first (id ASC)
   markPublishing(db: DB, id: number): void;
-  markDone(db: DB, id: number, v: { verdict: Verdict; issueNumber: number | null; processedAt: string }): void;
+  markDone(db: DB, id: number, v: { verdict: Verdict; issueNumber: number | null; processedAt: string; related: number[] | null }): void;
+  setJevResponse(db: DB, id: number, json: string): void;
   markFailed(db: DB, id: number, v: { error: string; processedAt: string }): void;
   markNeedsReview(db: DB, id: number, processedAt: string): void;
   recordAttemptError(db: DB, id: number, error: string): number; // returns the new attempts count

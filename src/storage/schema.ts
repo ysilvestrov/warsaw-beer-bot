@@ -734,6 +734,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       );
     `,
   },
+  {
+    version: 39,
+    // Audit of /report verdicts (spec 2026-09-27-bug-report-audit-related-design.md).
+    sql: `
+      ALTER TABLE bug_reports ADD COLUMN jev_json TEXT;
+      ALTER TABLE bug_reports ADD COLUMN related_json TEXT;
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

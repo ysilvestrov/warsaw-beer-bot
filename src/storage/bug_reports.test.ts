@@ -6,7 +6,7 @@ import {
   addMedia, countProcessedSince, countSubmittedSince, getReport, insertReport,
   listByStatus, listMedia, listPrunableMedia, markDeferredNotified, markDone,
   markFailed, markMediaPruned, markNeedsReview, markPublishing, recordAttemptError,
-  setCandidatesTruncated, summarizeSince, bugReportStore,
+  setCandidatesTruncated, setJevResponse, summarizeSince, bugReportStore,
 } from './bug_reports';
 
 let db: DB;
@@ -28,9 +28,36 @@ test('insertReport and getReport round-trip every report field', () => {
   expect(getReport(db, id)).toEqual({
     ...report, id: 1, status: 'queued', attempts: 0, lastError: null,
     candidatesTruncated: false, deferredNotified: false, verdict: null,
-    issueNumber: null, processedAt: null,
+    issueNumber: null, processedAt: null, jevJson: null, related: null,
   });
   expect(getReport(db, 999)).toBeNull();
+});
+
+test('a fresh report has no Jev response and no related issues', () => {
+  const id = insertReport(db, report);
+  expect(getReport(db, id)).toMatchObject({ jevJson: null, related: null });
+});
+
+test('setJevResponse stores the exact JSON on a queued report', () => {
+  const id = insertReport(db, report);
+  setJevResponse(db, id, '{"model":"jev","probabilities":{"i7":0.6,"none":0.4}}');
+  expect(getReport(db, id)?.jevJson).toBe('{"model":"jev","probabilities":{"i7":0.6,"none":0.4}}');
+});
+
+test('setJevResponse refuses a report that is no longer queued', () => {
+  const id = insertReport(db, report);
+  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-26T13:00:00.000Z', related: null });
+  expect(() => setJevResponse(db, id, '{}')).toThrow('illegal transition done → jev_json');
+});
+
+test.each([
+  [[539, 666], [539, 666]],
+  [[], []],
+  [null, null],
+] as const)('markDone stores related %j and reads it back as %j', (related, expected) => {
+  const id = insertReport(db, report);
+  markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00.000Z', related: related as number[] | null });
+  expect(getReport(db, id)?.related).toEqual(expected);
 });
 
 test('listByStatus returns oldest matching reports by id', () => {
@@ -52,18 +79,18 @@ test('markPublishing changes a queued report once', () => {
 
 test('markDone records a new verdict directly from queued', () => {
   const id = insertReport(db, report);
-  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-26T13:00:00.000Z' });
+  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-26T13:00:00.000Z', related: null });
   expect(getReport(db, id)).toEqual({
     ...report, id: 1, status: 'done', attempts: 0, lastError: null,
     candidatesTruncated: false, deferredNotified: false, verdict: 'not_a_bug',
-    issueNumber: null, processedAt: '2026-09-26T13:00:00.000Z',
+    issueNumber: null, processedAt: '2026-09-26T13:00:00.000Z', jevJson: null, related: null,
   });
 });
 
 test('markDone records a GitHub verdict from publishing', () => {
   const id = insertReport(db, report);
   markPublishing(db, id);
-  markDone(db, id, { verdict: 'duplicate_open', issueNumber: 77, processedAt: '2026-09-26T13:00:00.000Z' });
+  markDone(db, id, { verdict: 'duplicate_open', issueNumber: 77, processedAt: '2026-09-26T13:00:00.000Z', related: null });
   expect(getReport(db, id)?.status).toBe('done');
   expect(getReport(db, id)?.issueNumber).toBe(77);
   expect(getReport(db, id)?.verdict).toBe('duplicate_open');
@@ -90,9 +117,9 @@ test.each([
   ['done', 'markPublishing', (id: number) => markPublishing(db, id), 'publishing'],
   ['failed', 'markPublishing', (id: number) => markPublishing(db, id), 'publishing'],
   ['needs_review', 'markPublishing', (id: number) => markPublishing(db, id), 'publishing'],
-  ['done', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z' }), 'done'],
-  ['failed', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z' }), 'done'],
-  ['needs_review', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z' }), 'done'],
+  ['done', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z', related: null }), 'done'],
+  ['failed', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z', related: null }), 'done'],
+  ['needs_review', 'markDone', (id: number) => markDone(db, id, { verdict: 'new', issueNumber: 9, processedAt: '2026-09-26T13:00:00Z', related: null }), 'done'],
   ['publishing', 'markFailed', (id: number) => markFailed(db, id, { error: 'error', processedAt: '2026-09-26T13:00:00Z' }), 'failed'],
   ['done', 'markFailed', (id: number) => markFailed(db, id, { error: 'error', processedAt: '2026-09-26T13:00:00Z' }), 'failed'],
   ['failed', 'markFailed', (id: number) => markFailed(db, id, { error: 'error', processedAt: '2026-09-26T13:00:00Z' }), 'failed'],
@@ -141,7 +168,7 @@ test('countSubmittedSince includes reports regardless of processing status', () 
   insertReport(db, report);
   insertReport(db, report);
   insertReport(db, report);
-  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T13:00:00.000Z' });
+  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T13:00:00.000Z', related: null });
   markFailed(db, 2, { error: 'bad response', processedAt: '2026-09-26T13:00:00.000Z' });
   expect(countSubmittedSince(db, 101, '2026-09-26T12:00:00.000Z')).toBe(3);
 });
@@ -150,22 +177,22 @@ test('countProcessedSince includes the boundary and excludes unprocessed reports
   insertReport(db, report);
   insertReport(db, report);
   insertReport(db, report);
-  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T11:59:59.999Z' });
-  markDone(db, 2, { verdict: 'new', issueNumber: 91, processedAt: '2026-09-26T12:00:00.000Z' });
+  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T11:59:59.999Z', related: null });
+  markDone(db, 2, { verdict: 'new', issueNumber: 91, processedAt: '2026-09-26T12:00:00.000Z', related: null });
   expect(countProcessedSince(db, '2026-09-26T12:00:00.000Z')).toBe(1);
 });
 
 test('summarizeSince counts every verdict and returns status lists and closed links', () => {
   for (let i = 0; i < 8; i += 1) insertReport(db, report);
   db.prepare("UPDATE bug_reports SET created_at = '2026-09-20T00:00:00.000Z' WHERE id = 5").run();
-  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T12:00:00.000Z' });
-  markDone(db, 2, { verdict: 'duplicate_open', issueNumber: 91, processedAt: '2026-09-26T12:01:00.000Z' });
-  markDone(db, 3, { verdict: 'duplicate_closed', issueNumber: 92, processedAt: '2026-09-26T12:02:00.000Z' });
-  markDone(db, 4, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-26T12:03:00.000Z' });
+  markDone(db, 1, { verdict: 'new', issueNumber: 90, processedAt: '2026-09-26T12:00:00.000Z', related: null });
+  markDone(db, 2, { verdict: 'duplicate_open', issueNumber: 91, processedAt: '2026-09-26T12:01:00.000Z', related: null });
+  markDone(db, 3, { verdict: 'duplicate_closed', issueNumber: 92, processedAt: '2026-09-26T12:02:00.000Z', related: null });
+  markDone(db, 4, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-26T12:03:00.000Z', related: null });
   markPublishing(db, 6);
   markNeedsReview(db, 6, '2026-09-26T12:04:00.000Z');
   markFailed(db, 7, { error: 'bad response', processedAt: '2026-09-26T12:05:00.000Z' });
-  markDone(db, 8, { verdict: 'duplicate_closed', issueNumber: 99, processedAt: '2026-09-26T11:59:59.999Z' });
+  markDone(db, 8, { verdict: 'duplicate_closed', issueNumber: 99, processedAt: '2026-09-26T11:59:59.999Z', related: null });
   expect(summarizeSince(db, '2026-09-26T12:00:00.000Z')).toEqual({
     processed: 6,
     byVerdict: { new: 1, duplicate_open: 1, duplicate_closed: 1, not_a_bug: 1 },

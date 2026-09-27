@@ -23,6 +23,8 @@ interface ReportDbRow {
   issue_number: number | null;
   created_at: string;
   processed_at: string | null;
+  jev_json: string | null;
+  related_json: string | null;
 }
 
 interface MediaDbRow {
@@ -44,6 +46,7 @@ function mapReport(row: ReportDbRow): BugReportRow {
     deferredNotified: row.deferred_notified !== 0,
     verdict: row.verdict, issueNumber: row.issue_number,
     createdAt: row.created_at, processedAt: row.processed_at,
+    jevJson: row.jev_json, related: row.related_json === null ? null : JSON.parse(row.related_json) as number[],
   };
 }
 
@@ -86,12 +89,12 @@ export function markPublishing(db: DB, id: number): void {
 }
 
 export function markDone(
-  db: DB, id: number, v: { verdict: Verdict; issueNumber: number | null; processedAt: string },
+  db: DB, id: number, v: { verdict: Verdict; issueNumber: number | null; processedAt: string; related: number[] | null },
 ): void {
   const result = db.prepare(`UPDATE bug_reports
-    SET status = 'done', verdict = ?, issue_number = ?, processed_at = ?
+    SET status = 'done', verdict = ?, issue_number = ?, processed_at = ?, related_json = ?
     WHERE id = ? AND status IN ('queued', 'publishing')`)
-    .run(v.verdict, v.issueNumber, v.processedAt, id);
+    .run(v.verdict, v.issueNumber, v.processedAt, v.related === null ? null : JSON.stringify(v.related), id);
   assertChanged(db, id, 'done', result.changes);
 }
 
@@ -118,6 +121,12 @@ export function recordAttemptError(db: DB, id: number, error: string): number {
     .run(error, id);
   assertChanged(db, id, 'attempt_error', result.changes);
   return (db.prepare('SELECT attempts FROM bug_reports WHERE id = ?').get(id) as { attempts: number }).attempts;
+}
+
+export function setJevResponse(db: DB, id: number, json: string): void {
+  const result = db.prepare(`UPDATE bug_reports SET jev_json = ? WHERE id = ? AND status = 'queued'`)
+    .run(json, id);
+  assertChanged(db, id, 'jev_json', result.changes);
 }
 
 export function setCandidatesTruncated(db: DB, id: number): void {
@@ -184,7 +193,7 @@ export function markMediaPruned(db: DB, reportId: number, idx: number, prunedAt:
 
 export const bugReportStore: BugReportStore = {
   insertReport, getReport, listByStatus, markPublishing, markDone, markFailed,
-  markNeedsReview, recordAttemptError, setCandidatesTruncated, markDeferredNotified,
+  markNeedsReview, recordAttemptError, setJevResponse, setCandidatesTruncated, markDeferredNotified,
   countSubmittedSince, countProcessedSince, summarizeSince, addMedia, listMedia,
   listPrunableMedia, markMediaPruned,
 };

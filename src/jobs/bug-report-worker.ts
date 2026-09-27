@@ -123,7 +123,7 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
       const value = judged.value;
       const processedAt = deps.now().toISOString();
       if (value.kind === 'not_a_bug') {
-        store.markDone(db, report.id, { verdict: 'not_a_bug', issueNumber: null, processedAt });
+        store.markDone(db, report.id, { verdict: 'not_a_bug', issueNumber: null, processedAt, related: null });
         await notify(report, { kind: 'not_a_bug' });
         return finished();
       }
@@ -141,13 +141,13 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
           title: value.fields.title, body: renderIssueBody(value.fields, ctx),
           labels: [...value.labels, value.severity, value.effort],
         });
-        store.markDone(db, report.id, { verdict: 'new', issueNumber, processedAt });
+        store.markDone(db, report.id, { verdict: 'new', issueNumber, processedAt, related: null });
         candidateCache = null;
         outcome = { kind: 'created', issueNumber };
       } else {
         const issueNumber = value.issue.number;
         await deps.github.commentOnIssue(issueNumber, renderDuplicateComment(value.fields, ctx));
-        store.markDone(db, report.id, { verdict: value.kind, issueNumber, processedAt });
+        store.markDone(db, report.id, { verdict: value.kind, issueNumber, processedAt, related: null });
         outcome = value.kind === 'duplicate_open'
           ? { kind: 'duplicate_open', issueNumber }
           : {
