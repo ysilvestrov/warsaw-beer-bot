@@ -135,6 +135,52 @@ export interface Messages {
   'announce.turned_on': string;
   'announce.turned_off': string;
   'announce.no_token': string;
+
+  // bug reports
+  'cmd.report': string;
+  'report.ask_source': string;
+  'report.source.bot': string;
+  'report.source.extension': string;
+  'report.ask_category': string;
+  'report.cat.wrong_beer': string;
+  'report.cat.no_rating': string;
+  'report.cat.had_status': string;
+  'report.cat.stale_data': string;
+  'report.cat.route': string;
+  'report.cat.no_badge': string;
+  'report.cat.ext_broken': string;
+  'report.cat.bot_broken': string;
+  'report.cat.text_ui': string;
+  'report.cat.other': string;
+  'report.ask_text': string;
+  'report.too_short': string;
+  'report.ask_media': string;
+  'report.media_added': string;
+  'report.media_full': string;
+  'report.media_too_big': string;
+  'report.btn.done': string;
+  'report.btn.no_media': string;
+  'report.btn.send': string;
+  'report.btn.cancel': string;
+  'report.confirm': string;
+  'report.accepted': string;
+  'report.cancelled': string;
+  'report.expired': string;
+  'report.limit': string;
+  'report.banned': string;
+  'report.unavailable': string;
+  'report.private_only': string;
+  'report.done.created': string;
+  'report.done.duplicate_open': string;
+  'report.done.duplicate_closed_fixed': string;
+  'report.done.duplicate_closed': string;
+  'report.done.not_a_bug': string;
+  'report.done.deferred': string;
+  'report.done.needs_review': string;
+  'report.done.failed': string;
+  'reportban.usage': string;
+  'reportban.banned': string;
+  'reportban.unbanned': string;
 }
 
 export type Translator = (
