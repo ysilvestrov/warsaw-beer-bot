@@ -23,6 +23,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   { command: 'lang', descKey: 'cmd.lang' },
   { command: 'city', descKey: 'cmd.city' },
   { command: 'status', descKey: 'cmd.status' },
+  { command: 'report', descKey: 'cmd.report' },
   { command: 'help', descKey: 'cmd.help' },
   { command: 'start', descKey: 'cmd.start' },
 ];

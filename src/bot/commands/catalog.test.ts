@@ -59,6 +59,7 @@ describe('buildCommandMenu', () => {
       'lang',
       'city',
       'status',
+      'report',
       'help',
       'start',
     ]);
