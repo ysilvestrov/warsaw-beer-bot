@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { startOverlay, enrichOrphans } from './main';
+import { startOverlay, enrichOrphans as enrichOrphansActual } from './main';
 import { renderState } from './badge';
 import { isSeen, type CardState } from './badge';
 import { getCached, setCached, setCachedIfMatching } from '../cache/store';
@@ -12,6 +12,19 @@ beforeEach(() => { document.body.innerHTML = ''; });
 const drunk = (): MatchResult => ({
   raw: { brewery: 'B', name: '' }, matched_beer: null, is_drunk: true, drunk_uncertain: false, user_rating: 4.2, source: null, searched: true,
 });
+
+const unmatched = (brewery: string, name: string): MatchResult => ({
+  raw: { brewery, name }, matched_beer: null, is_drunk: false,
+  drunk_uncertain: false, user_rating: null, source: null, searched: true,
+});
+
+// Direct relay tests omit a result when it is irrelevant to the assertion. The
+// actual overlay always supplies the /match response for every orphan.
+function enrichOrphans(
+  orphans: (Omit<Parameters<typeof enrichOrphansActual>[0][number], 'result'> & { result?: MatchResult })[],
+): void {
+  enrichOrphansActual(orphans.map((o) => ({ ...o, result: o.result ?? unmatched(o.brewery, o.name) })));
+}
 
 function fakeAdapter(over: Partial<SiteAdapter> = {}): SiteAdapter {
   return {
@@ -289,72 +302,6 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     expect(await getCached('k0')).toEqual(linked);
     expect(el.querySelector('[data-beerbadge]')!.getAttribute('aria-label')).toContain('4,5');
     expect(sent).toEqual(['enrich:candidates', 'match', 'cache:set-if-matching']);
-  });
-
-  it('draws a linked match despite a stale cache when the first answer is absent', async () => {
-    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
-    const linked: MatchResult = {
-      raw: { brewery: 'B', name: 'N' },
-      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: 4.1, untappd_id: 44 },
-      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
-    };
-    const stale: MatchResult = {
-      ...linked, matched_beer: { ...linked.matched_beer!, rating_global: null, untappd_id: null },
-    };
-    await setCached('k0', stale);
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((msg: { type: string }, cb: (reply: unknown) => void) => {
-        if (msg.type === 'enrich:candidates') cb({ candidates: [
-          { brewery: 'B', name: 'N', eligible: false, linked: true },
-        ] });
-        else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
-        else cb(undefined);
-        return undefined;
-      }) as never,
-    );
-    const el = document.createElement('div');
-    document.body.appendChild(el);
-    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
-    await until(() => el.querySelector('[data-beerbadge] [data-icon="star"]') !== null);
-    expect(el.querySelector('[data-beerbadge]')!.textContent).toContain('4.1');
-    expect(await getCached('k0')).toEqual(stale);
-  });
-
-  it('keeps a newer cached badge when a refresh has no initial match result', async () => {
-    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
-    const older: MatchResult = {
-      raw: { brewery: 'B', name: 'N' },
-      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: 4.1, untappd_id: 44 },
-      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
-    };
-    const newer: MatchResult = {
-      ...older, matched_beer: { ...older.matched_beer!, rating_global: 4.6, untappd_id: 46 },
-    };
-    await setCached('k0', newer);
-    let replyToMatch: (() => void) | undefined;
-    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((msg: { type: string }, cb: (reply: unknown) => void) => {
-        if (msg.type === 'enrich:candidates') cb({ candidates: [
-          { brewery: 'B', name: 'N', eligible: false, linked: true },
-        ] });
-        else if (msg.type === 'match') replyToMatch = () => cb({ type: 'match:ok', results: [older] });
-        else cb(undefined);
-        return undefined;
-      }) as never,
-    );
-    const el = document.createElement('div');
-    document.body.appendChild(el);
-    renderState(el, { kind: 'queued' });
-    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
-    await until(() => replyToMatch !== undefined);
-    renderState(el, {
-      kind: 'found', drunk: false, mine: null, global: 4.6, unsure: false,
-      untappdId: 46, brewery: 'B', name: 'N',
-    });
-    replyToMatch!();
-    await tick(0);
-    expect(el.querySelector('[data-beerbadge]')?.textContent).toContain('4.6');
-    expect(await getCached('k0')).toEqual(newer);
   });
 
   it('draws the newer cached answer when a linked refresh loses its conditional write', async () => {
