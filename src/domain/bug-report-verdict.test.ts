@@ -102,3 +102,10 @@ test('accepts not_a_bug without issue fields', () => {
   expect(validateVerdict({ ...raw, verdict: 'not_a_bug' }, [], 'bot'))
     .toEqual({ ok: true, value: { kind: 'not_a_bug' } });
 });
+
+test('an e-mail that the length limit would cut in half is redacted before the cut', () => {
+  const summary = `${'x'.repeat(290)} ivan.k@gmail.com`; // the 300-char clamp lands inside the address
+  expect(validateVerdict({ ...raw, verdict: 'new', issueNumber: null, summary }, [], 'bot')).toMatchObject({
+    ok: true, value: { kind: 'new', fields: { summary: `${'x'.repeat(290)} [прихова…` } },
+  });
+});

@@ -23,7 +23,9 @@ export function validateVerdict(
 
   if (raw.verdict === 'not_a_bug') return { ok: true, value: { kind: 'not_a_bug' } };
 
-  const fields = redactFields(clampFields(raw));
+  // Redact BEFORE clamping: a cut can split an e-mail or phone at the limit into a fragment the
+  // patterns no longer recognise, and that fragment would be published.
+  const fields = clampFields(redactFields(raw));
   if (raw.verdict === 'new') {
     if (!SEVERITIES.includes(raw.severity)) return { ok: false, reason: 'Invalid severity.' };
     if (!EFFORTS.includes(raw.effort)) return { ok: false, reason: 'Invalid effort.' };
