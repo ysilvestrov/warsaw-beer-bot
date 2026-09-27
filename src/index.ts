@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { promises as fs } from 'node:fs';
 import cron from 'node-cron';
 import pino from 'pino';
 import { loadEnv, missingExpectedKeys } from './config/env';
@@ -40,7 +41,15 @@ import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
-import { announceRelease } from './jobs/announce-release';
+import { announceRelease, ANNOUNCED_VERSION_KEY } from './jobs/announce-release';
+import { createReportCommand } from './bot/commands/report';
+import { createNotifier } from './bot/bug-report-media';
+import { createJevSelector } from './infra/openrouter-decisions';
+import { createOpenAiJudge } from './infra/bug-report-llm';
+import { createBugReportWorker } from './jobs/bug-report-worker';
+import { pruneBugReportMedia } from './jobs/bug-report-prune';
+import { bugReportStore } from './storage/bug_reports';
+import { getJobState } from './storage/job_state';
 import { fetchPublishedVersion } from './sources/cws-version';
 import { createTriageLlm } from './infra/triage-llm';
 import { createTriageArchive } from './infra/triage-archive';
@@ -146,6 +155,27 @@ async function main(): Promise<void> {
 
   const bot = createBot({ db, env, log });
 
+  const bugReportsAvailable = !!(env.OPENROUTER_API_KEY && env.OPENAI_API_KEY
+    && env.GITHUB_TOKEN && env.BUG_REPORT_MEDIA_DIR);
+  const worker = bugReportsAvailable
+    ? createBugReportWorker({
+        db, store: bugReportStore,
+        github: createGithubIssuesClient({ token: env.GITHUB_TOKEN!, repo: env.GITHUB_REPO }),
+        selector: createJevSelector({ apiKey: env.OPENROUTER_API_KEY!, model: env.BUG_REPORT_SELECT_MODEL }),
+        judge: createOpenAiJudge({ apiKey: env.OPENAI_API_KEY!, model: env.BUG_REPORT_VERDICT_MODEL }),
+        readFile: fs.readFile,
+        notify: createNotifier({ telegram: bot.telegram, repo: env.GITHUB_REPO }),
+        latestExtensionVersion: () => getJobState(db, ANNOUNCED_VERSION_KEY),
+        now: () => new Date(), log,
+      })
+    : null;
+  const downloadFile = async (fileId: string): Promise<Buffer> => {
+    const link = await bot.telegram.getFileLink(fileId);
+    const response = await fetch(link.toString());
+    if (!response.ok) throw new Error(`Telegram file HTTP ${response.status}`);
+    return Buffer.from(await response.arrayBuffer());
+  };
+
   const notifyAdmin = env.ADMIN_TELEGRAM_ID
     ? (msg: string) =>
         bot.telegram.sendMessage(env.ADMIN_TELEGRAM_ID!, msg).then(() => {})
@@ -189,6 +219,9 @@ async function main(): Promise<void> {
 
   bot.use(
     cityGate,
+    createReportCommand({ available: bugReportsAvailable, mediaDir: env.BUG_REPORT_MEDIA_DIR ?? null,
+      now: () => new Date(), triggerWorker: () => { void worker?.runOnce().catch((e) => log.error({ err: e }, 'bug-report worker')); },
+      downloadFile }),
     startCommand,
     linkCommand,
     importCommand,
@@ -286,7 +319,7 @@ async function main(): Promise<void> {
     // and catches up if the bot was down at 09:00. Self-noops when
     // ADMIN_TELEGRAM_ID is unset.
     cron.schedule('*/15 * * * *', () => {
-      dailyStatus({ db, log, notifyAdmin })
+      dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
         .catch((e) => log.error({ err: e }, 'daily-status cron'));
     }),
     // orphan-triage: daily LLM triage of enrich_failures, Warsaw [06:00,09:00)
@@ -339,6 +372,16 @@ async function main(): Promise<void> {
     }),
   ];
 
+  if (worker) {
+    cronJobs.push(cron.schedule('*/15 * * * *', () => {
+      worker.runOnce().catch((e) => log.error({ err: e }, 'bug-report worker cron'));
+    }));
+    cronJobs.push(cron.schedule('0 3 * * *', () => {
+      pruneBugReportMedia({ db, now: new Date(), unlink: fs.unlink })
+        .catch((e) => log.error({ err: e }, 'bug-report media prune cron'));
+    }));
+  }
+
   if (untappdHttp) {
     cronJobs.push(cron.schedule('0 3 * * *', () => {
       refreshAllUntappd({
@@ -366,7 +409,7 @@ async function main(): Promise<void> {
   // within the morning window, emit today's digest now instead of waiting for the
   // next 15-min tick. Idempotent via job_state, so a normal start is a no-op once
   // the day's digest already went out.
-  dailyStatus({ db, log, notifyAdmin })
+  dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
     .catch((e) => log.error({ err: e }, 'daily-status startup'));
 
   const apiApp = createApiApp({
