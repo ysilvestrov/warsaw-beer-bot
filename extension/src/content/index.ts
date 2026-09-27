@@ -20,7 +20,7 @@ export type EnrichOrphans = (
     state: CardState;
     // The /match response is needed to replace this cache entry only after enrichment
     // proves a new Untappd identity (#666).
-    result?: MatchResult;
+    result: MatchResult;
     // #369: shop-published facts, relayed to /enrich/* so the matcher stops
     // running blind. Omitted when the adapter did not publish them.
     abv?: number;
