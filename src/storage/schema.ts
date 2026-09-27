@@ -684,6 +684,56 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE enrich_failures ADD COLUMN rescued_real_failure_count INTEGER;
     `,
   },
+  {
+    version: 38,
+    sql: `
+      CREATE TABLE IF NOT EXISTS bug_report_drafts (
+        telegram_id INTEGER PRIMARY KEY,
+        step        TEXT NOT NULL,
+        source      TEXT,
+        category    TEXT,
+        text        TEXT,
+        media_json  TEXT NOT NULL DEFAULT '[]',
+        updated_at  TEXT NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        telegram_id           INTEGER NOT NULL,
+        chat_id               INTEGER NOT NULL,
+        status_message_id     INTEGER,
+        locale                TEXT NOT NULL,
+        city                  TEXT,
+        source                TEXT NOT NULL CHECK (source IN ('bot','extension')),
+        category              TEXT NOT NULL CHECK (category IN ('wrong_beer','no_rating','had_status','stale_data','route','no_badge','ext_broken','bot_broken','text_ui','other')),
+        text                  TEXT NOT NULL,
+        status                TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued','publishing','done','failed','needs_review')),
+        attempts              INTEGER NOT NULL DEFAULT 0,
+        last_error            TEXT,
+        candidates_truncated  INTEGER NOT NULL DEFAULT 0,
+        deferred_notified     INTEGER NOT NULL DEFAULT 0,
+        verdict               TEXT CHECK (verdict IS NULL OR verdict IN ('new','duplicate_open','duplicate_closed','not_a_bug')),
+        issue_number          INTEGER,
+        created_at            TEXT NOT NULL,
+        processed_at          TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_user_created ON bug_reports(telegram_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_processed ON bug_reports(processed_at);
+      CREATE TABLE IF NOT EXISTS bug_report_media (
+        report_id INTEGER NOT NULL REFERENCES bug_reports(id) ON DELETE CASCADE,
+        idx       INTEGER NOT NULL,
+        kind      TEXT NOT NULL CHECK (kind IN ('photo','video')),
+        path      TEXT NOT NULL,
+        bytes     INTEGER NOT NULL,
+        pruned_at TEXT,
+        PRIMARY KEY (report_id, idx)
+      );
+      CREATE TABLE IF NOT EXISTS bug_report_bans (
+        telegram_id INTEGER PRIMARY KEY,
+        banned_at   TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
