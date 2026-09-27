@@ -291,6 +291,93 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     expect(sent).toEqual(['enrich:candidates', 'match', 'cache:set-if-matching']);
   });
 
+  it('draws a linked match even when the first answer was not cached', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const linked: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: 4.1, untappd_id: 44 },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string }, cb: (reply: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') cb({ candidates: [
+          { brewery: 'B', name: 'N', eligible: false, linked: true },
+        ] });
+        else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
+        else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="star"]') !== null);
+    expect(el.querySelector('[data-beerbadge]')!.textContent).toContain('4.1');
+  });
+
+  it('draws the newer cached answer when a linked refresh loses its conditional write', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    const linked: MatchResult = {
+      ...orphan, matched_beer: { ...orphan.matched_beer!, rating_global: 4.1, untappd_id: 44 },
+    };
+    const newer: MatchResult = {
+      ...orphan, matched_beer: { ...orphan.matched_beer!, rating_global: 4.6, untappd_id: 46 },
+    };
+    await setCached('k0', newer);
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string; key?: string; expected?: MatchResult; result?: MatchResult }, cb: (reply: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') cb({ candidates: [
+          { brewery: 'B', name: 'N', eligible: false, linked: true },
+        ] });
+        else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
+        else if (msg.type === 'cache:set-if-matching') {
+          void setCachedIfMatching(msg.key!, msg.expected!, msg.result!).then((written) => cb({ written }));
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result: orphan }]);
+    await until(() => el.querySelector('[data-beerbadge]')?.textContent?.includes('4.6') === true);
+    expect(await getCached('k0')).toEqual(newer);
+    expect(el.querySelector('[data-beerbadge] [data-icon="star"]')).not.toBeNull();
+  });
+
+  it('restores the prior search badge when a linked cache write fails', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    const linked: MatchResult = {
+      ...orphan, matched_beer: { ...orphan.matched_beer!, rating_global: 4.1, untappd_id: 44 },
+    };
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string }, cb: (reply: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') cb({ candidates: [
+          { brewery: 'B', name: 'N', eligible: false, linked: true },
+        ] });
+        else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
+        else if (msg.type === 'cache:set-if-matching') cb(undefined);
+        else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result: orphan }]);
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="search"]') !== null);
+    expect(el.querySelector('[data-beerbadge]')!.getAttribute('aria-label'))
+      .toBe('Пиво є в каталозі, але сторінки на Untappd нема. Клік відкриє пошук');
+  });
+
   it('does not overwrite a refreshed match when an older enrichment finishes', async () => {
     await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
     const orphan: MatchResult = {
