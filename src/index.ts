@@ -171,7 +171,9 @@ async function main(): Promise<void> {
     : null;
   const downloadFile = async (fileId: string): Promise<Buffer> => {
     const link = await bot.telegram.getFileLink(fileId);
-    const response = await fetch(link.toString());
+    // Bounded so a hung Telegram download cannot stall the submit handler; a timeout is
+    // recorded as an unsaved file (bytes = 0), like any other download failure.
+    const response = await fetch(link.toString(), { signal: AbortSignal.timeout(60_000) });
     if (!response.ok) throw new Error(`Telegram file HTTP ${response.status}`);
     return Buffer.from(await response.arrayBuffer());
   };
