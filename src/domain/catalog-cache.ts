@@ -99,11 +99,14 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
 
   return {
     async get() {
+      // Only writes already visible when this request starts are its barrier.
+      // Following every new version here could starve a request during a write burst.
+      const wanted = getVersion();
       // Cold: no cached value yet — await (and surface) the build.
       if (current === null) await rebuild(false);
-      // A write can land while a build is running. Recheck its captured version
-      // before returning so the first request after that write sees the new link.
-      while (current!.version !== getVersion()) await rebuild(false);
+      // An in-flight build may have started before this request. Wait for one
+      // that captured at least the version observed above.
+      while (current!.version < wanted) await rebuild(false);
       const stale = now() - current!.builtAt > ttlMs;
       // SWR: kick off the rebuild in the background and serve stale immediately. The
       // failure is already routed to onError inside rebuild(); the trailing catch keeps
