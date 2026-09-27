@@ -1,35 +1,47 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BugReportRow, ReportOutcome } from '../domain/bug-report-types';
-import { createNotifier, saveReportMedia } from './bug-report-media';
+import { createNotifier, downloadMedia, safeExt, writeReportMediaSync } from './bug-report-media';
 
 let dir: string;
 beforeEach(async () => { dir = await mkdtemp(join(tmpdir(), 'report-media-')); });
 afterEach(async () => { await rm(dir, { recursive: true, force: true }); });
 
-const media = { fileId: 'telegram-photo', kind: 'photo' as const, fileSize: 4, ext: 'jpg' };
-
-test('saveReportMedia writes the downloaded bytes under report ID and index', async () => {
-  const result = await saveReportMedia({ dir, reportId: 12, idx: 1, media,
-    download: async () => Buffer.from('data') });
+test('writeReportMediaSync writes the bytes under report ID and index', () => {
+  const result = writeReportMediaSync({ dir, reportId: 12, idx: 1, ext: 'jpg', data: Buffer.from('data') });
   expect(result).toEqual({ path: join(dir, '12', '1.jpg'), bytes: 4 });
-  expect(await readFile(join(dir, '12', '1.jpg'), 'utf8')).toBe('data');
+  expect(readFileSync(join(dir, '12', '1.jpg'), 'utf8')).toBe('data');
 });
 
-test('saveReportMedia records zero bytes when Telegram download fails', async () => {
-  const result = await saveReportMedia({ dir, reportId: 12, idx: 1, media,
-    download: async () => { throw new Error('Telegram unavailable'); } });
+test('writeReportMediaSync records zero bytes and writes nothing for a failed download', () => {
+  const result = writeReportMediaSync({ dir, reportId: 12, idx: 1, ext: 'jpg', data: null });
   expect(result).toEqual({ path: join(dir, '12', '1.jpg'), bytes: 0 });
+  expect(existsSync(join(dir, '12'))).toBe(false);
 });
 
-test('saveReportMedia records zero bytes when the directory cannot be created', async () => {
+test('writeReportMediaSync records zero bytes when the directory cannot be created', async () => {
   const blocked = join(dir, 'blocked');
   await writeFile(blocked, 'not a directory');
-  const result = await saveReportMedia({ dir: blocked, reportId: 12, idx: 1, media,
-    download: async () => Buffer.from('data') });
+  const result = writeReportMediaSync({ dir: blocked, reportId: 12, idx: 1, ext: 'jpg', data: Buffer.from('data') });
   expect(result).toEqual({ path: join(blocked, '12', '1.jpg'), bytes: 0 });
+});
+
+test('a client-supplied traversal extension cannot leave the report directory', () => {
+  const result = writeReportMediaSync({ dir, reportId: 12, idx: 0, ext: '../../evil', data: Buffer.from('x') });
+  expect(result).toEqual({ path: join(dir, '12', '0.bin'), bytes: 1 });
+  expect(existsSync(join(dir, '..', 'evil'))).toBe(false);
+});
+
+test.each([['png', 'png'], ['jpg', 'jpg'], ['webp', 'webp'], ['svg+xml', 'bin'], ['../x', 'bin'], ['', 'bin'], ['abcdefghi', 'bin']])(
+  'safeExt(%s) is %s', (ext, expected) => { expect(safeExt(ext)).toBe(expected); },
+);
+
+test('downloadMedia returns null when Telegram download fails', async () => {
+  expect(await downloadMedia('id', async () => { throw new Error('Telegram unavailable'); })).toBeNull();
+  expect(await downloadMedia('id', async () => Buffer.from('ok'))).toEqual(Buffer.from('ok'));
 });
 
 const report: BugReportRow = {

@@ -1,30 +1,45 @@
-import { mkdir, open } from 'node:fs/promises';
+import { closeSync, fsyncSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Telegram } from 'telegraf';
-import type { DraftMedia } from '../domain/bug-report-flow';
 import type { BugReportRow, ReportOutcome } from '../domain/bug-report-types';
 import { createTranslator } from '../i18n';
 import { toLocale } from '../storage/user_profiles';
 
-export async function saveReportMedia(args: {
-  dir: string;
-  reportId: number;
-  idx: number;
-  media: DraftMedia;
-  download(fileId: string): Promise<Buffer>;
-}): Promise<{ path: string; bytes: number }> {
-  const path = join(args.dir, String(args.reportId), `${args.idx}.${args.media.ext}`);
+// The extension comes from a client-supplied mime type (`image/<subtype>`). Anything but a short
+// alphanumeric token — `../../x`, `svg+xml` — becomes `bin`, so the path can never leave the
+// report's directory.
+export function safeExt(ext: string): string {
+  return /^[a-z0-9]{1,8}$/.test(ext) ? ext : 'bin';
+}
+
+export async function downloadMedia(
+  fileId: string, download: (fileId: string) => Promise<Buffer>,
+): Promise<Buffer | null> {
   try {
-    const data = await args.download(args.media.fileId);
-    await mkdir(join(args.dir, String(args.reportId)), { recursive: true });
-    const file = await open(path, 'w');
+    return await download(fileId);
+  } catch {
+    return null;
+  }
+}
+
+// Synchronous on purpose: the caller inserts the report and its media rows with no `await` in
+// between, so the in-process worker can never pick up a report whose media is not recorded yet.
+export function writeReportMediaSync(args: {
+  dir: string; reportId: number; idx: number; ext: string; data: Buffer | null;
+}): { path: string; bytes: number } {
+  const reportDir = join(args.dir, String(args.reportId));
+  const path = join(reportDir, `${args.idx}.${safeExt(args.ext)}`);
+  if (!args.data) return { path, bytes: 0 };
+  try {
+    mkdirSync(reportDir, { recursive: true });
+    const fd = openSync(path, 'w');
     try {
-      await file.writeFile(data);
-      await file.sync();
+      writeFileSync(fd, args.data);
+      fsyncSync(fd);
     } finally {
-      await file.close();
+      closeSync(fd);
     }
-    return { path, bytes: data.length };
+    return { path, bytes: args.data.length };
   } catch {
     return { path, bytes: 0 };
   }
