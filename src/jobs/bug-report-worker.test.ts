@@ -186,6 +186,68 @@ test('two invalid verdicts fail without a GitHub write', async () => {
   expect(outcomes).toEqual([{ id, outcome: { kind: 'failed' } }]);
 });
 
+test("Jev's raw answer is on the row even when the judge fails for good", async () => {
+  const id = addReport();
+  vi.mocked(deps.judge.judge).mockRejectedValue(new Error('boom'));
+  await run();
+  expect(row(id)).toMatchObject({
+    status: 'failed', jevJson: '{"model":"jev-test","probabilities":{"i77":0.6,"none":0.4}}',
+  });
+});
+
+test("a retried report keeps Jev's answer from its latest attempt", async () => {
+  const id = addReport();
+  vi.mocked(deps.judge.judge).mockRejectedValueOnce(new HttpStatusError('unavailable', 503));
+  await run();
+  vi.mocked(deps.selector.select).mockResolvedValue({
+    numbers: [77], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.9, none: 0.1 } },
+  });
+  await run();
+  expect(row(id)).toMatchObject({
+    status: 'done', jevJson: '{"model":"jev-test","probabilities":{"i77":0.9,"none":0.1}}',
+  });
+});
+
+test('a new issue lists related issues and the row keeps them', async () => {
+  const id = addReport();
+  vi.mocked(deps.selector.select).mockResolvedValue({
+    numbers: [77, 78], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.5, i78: 0.3, none: 0.2 } },
+  });
+  vi.mocked(deps.judge.judge).mockResolvedValue({ ...raw, related: [78, 77] });
+  await run();
+  expect(deps.github.createIssue).toHaveBeenCalledWith(expect.objectContaining({
+    body: expect.stringContaining('**Схожі (оцінка агента):** #78, #77'),
+  }));
+  expect(row(id)).toMatchObject({ verdict: 'new', related: [78, 77] });
+});
+
+test('a duplicate keeps related on the row but never mentions it in the comment', async () => {
+  const id = addReport();
+  vi.mocked(deps.selector.select).mockResolvedValue({
+    numbers: [77, 78], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.5, i78: 0.3, none: 0.2 } },
+  });
+  vi.mocked(deps.judge.judge).mockResolvedValue({ ...raw, verdict: 'duplicate_open', issueNumber: 77, related: [78] });
+  await run();
+  expect(deps.github.commentOnIssue).toHaveBeenCalledWith(77, expect.not.stringContaining('Схожі'));
+  expect(row(id)).toMatchObject({ verdict: 'duplicate_open', related: [78] });
+});
+
+test('not a bug stores no related issues even when the model named some', async () => {
+  const id = addReport();
+  vi.mocked(deps.judge.judge).mockResolvedValue({ ...raw, verdict: 'not_a_bug', related: [77] });
+  await run();
+  expect(row(id)).toMatchObject({ verdict: 'not_a_bug', related: null });
+});
+
+test('the worker logs the candidates and the verdict', async () => {
+  const id = addReport();
+  await run();
+  expect(deps.log.info).toHaveBeenCalledWith({ reportId: id, top: [77], none: 0.4 }, 'Bug report candidates');
+  expect(deps.log.info).toHaveBeenCalledWith(
+    { reportId: id, verdict: 'new', issueNumber: null, related: [] }, 'Bug report verdict',
+  );
+});
+
 test('the daily cap processes the twentieth report and defers the next only once', async () => {
   for (let i = 0; i < 19; i++) {
     const id = addReport();
