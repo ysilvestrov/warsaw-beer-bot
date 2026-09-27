@@ -411,8 +411,13 @@ first direct call carrying `image_url` with our key.
 
 ### 3c. `github-issues.ts` additions
 
-Add to `GithubIssuesClient` (and implement): `listIssuesByLabels(labels)` and
-`getIssueWithComments(n, lastComments)`, matching `BugReportGithub`.
+Implement `listIssuesByLabels(labels)` and `getIssueWithComments(n, lastComments)`, matching
+`BugReportGithub`. **Do not add them to the `GithubIssuesClient` interface** (amended 2026-09-27: typed
+`GithubIssuesClient` stubs in `orphan-triage.test.ts`, `unlock-fixed-orphans.test.ts` and others
+would stop compiling). Leave that interface unchanged. Change the return type of
+`createGithubIssuesClient` to `GithubIssuesClient & BugReportGithub` (import the type from
+`../domain/bug-report-types`). The orphan-triage consumers keep their narrower type; the worker
+depends only on `BugReportGithub`.
 
 - `listIssuesByLabels`: GitHub's `labels=` filter is **AND** for a comma list, so query **each
   label separately** with `state=all&per_page=100`, follow pagination until a page returns fewer
