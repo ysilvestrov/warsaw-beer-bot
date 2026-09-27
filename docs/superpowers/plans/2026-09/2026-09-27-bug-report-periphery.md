@@ -22,8 +22,10 @@ Facts verified in code before writing this plan (2026-09-27). If any has changed
   command.
 - `src/bot/commands/city-gate.wiring.test.ts` is the house pattern for "registration order is an
   invariant": a real-Telegraf integration test plus a source-level guard on `src/index.ts`.
-- `src/bot/commands/catalog.ts` is the single source of `/help` and the Telegram menu. Its tests use
-  `COMMAND_CATALOG.length`, not a literal, so adding an entry breaks no test.
+- `src/bot/commands/catalog.ts` is the single source of `/help` and the Telegram menu. Most of its
+  tests use `COMMAND_CATALOG.length`, **but** `catalog.test.ts` › "the native menu is unaffected by
+  #399" asserts the full command list as a literal array. It must gain `'report'` in P2 (corrected
+  2026-09-27; Codex stopped P1 on the earlier wording).
 - i18n: `src/i18n/types.ts` `Messages` + `src/i18n/locales/{uk,pl,en}.ts`.
   `src/i18n/index.test.ts` asserts that all three locales have exactly the same keys.
 - `ADMIN_TELEGRAM_ID` is `z.string().optional()` in `src/config/env.ts`.
@@ -146,7 +148,8 @@ repeated limit check in `submit`; each must fail a named test.
 
 Files: new `src/bot/commands/report.ts` + `report.test.ts`; `src/i18n/types.ts`,
 `src/i18n/locales/{uk,pl,en}.ts`; `src/bot/commands/catalog.ts` (one entry
-`{ command: 'report', descKey: 'cmd.report' }` before `help`); new
+`{ command: 'report', descKey: 'cmd.report' }` before `help`) and `src/bot/commands/catalog.test.ts`
+(add `'report'` at the same position in the literal list of the #399 menu test — nothing else); new
 `src/bot/bug-report-media.ts` + test.
 
 ### `createReportCommand(deps: ReportCommandDeps): Composer<BotContext>`
