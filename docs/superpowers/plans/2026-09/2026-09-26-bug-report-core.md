@@ -196,6 +196,10 @@ assumed the head was pinned in one test only):
    the test re-applies v37. The current version never checks that.
 3. Add a v38 test that asserts `WHERE version = 38` is recorded and the four tables' columns.
 
+A second head pin (`scripts/dispose-legacy-orphan.test.ts`, `schemaVersion: 37`) was removed on
+`feat/bug-report` by the controller (commit after `d94155e`); merge `feat/bug-report` into the task
+branch before running the gate.
+
 Every rewind test (`DELETE … WHERE version >= N`) re-runs v38. That is why v38 uses
 `IF NOT EXISTS` for every table and index, as v29/v32/v34/v35 do.
 
