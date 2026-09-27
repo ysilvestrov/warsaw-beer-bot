@@ -138,7 +138,7 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
       let outcome: ReportOutcome;
       if (value.kind === 'new') {
         const issueNumber = await deps.github.createIssue({
-          title: value.fields.title, body: renderIssueBody(value.fields, ctx),
+          title: value.fields.title, body: renderIssueBody(value.fields, ctx, value.related),
           labels: [...value.labels, value.severity, value.effort],
         });
         store.markDone(db, report.id, { verdict: 'new', issueNumber, processedAt, related: null });

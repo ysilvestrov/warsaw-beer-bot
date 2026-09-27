@@ -5,6 +5,16 @@ import {
 import { redactFields } from './bug-report-redact';
 import { clampFields } from './bug-report-template';
 
+// Related issues are hints: discard invalid entries without re-judging the verdict.
+function relatedIssues(raw: RawVerdict, candidates: IssueDetail[]): number[] {
+  const shown = new Set(candidates.map((candidate) => candidate.number));
+  const result: number[] = [];
+  for (const number of raw.related) {
+    if (shown.has(number) && number !== raw.issueNumber && !result.includes(number)) result.push(number);
+  }
+  return result.slice(0, 3);
+}
+
 export function validateVerdict(
   raw: RawVerdict, candidates: IssueDetail[], source: ReportSource,
 ): ValidationResult {
@@ -36,8 +46,8 @@ export function validateVerdict(
     if (source === 'extension') selected.add('extension-bug');
     if (selected.size === 0) selected.add('bug');
     const labels = [...AREA_LABELS.filter((label) => selected.has(label)), USER_REPORT_LABEL];
-    return { ok: true, value: { kind: 'new', fields, labels, severity: raw.severity, effort: raw.effort } };
+    return { ok: true, value: { kind: 'new', fields, labels, severity: raw.severity, effort: raw.effort, related: relatedIssues(raw, candidates) } };
   }
 
-  return { ok: true, value: { kind: raw.verdict, issue: issue!, fields } };
+  return { ok: true, value: { kind: raw.verdict, issue: issue!, fields, related: relatedIssues(raw, candidates) } };
 }

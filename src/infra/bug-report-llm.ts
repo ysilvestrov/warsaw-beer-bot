@@ -37,7 +37,13 @@ severity (1 = worst), judged only against a correct answer to the user and money
 - Severity-3: a MISSING answer (beer without a rating, stale data, a failure with a workaround).
 - Severity-4: cosmetics, wording, convenience.
 effort: S = likely a small local fix, M = needs design, L = cause unclear. This is an estimate.
-For not_a_bug, set severity Severity-4 and effort effort/S; they are ignored.`;
+For not_a_bug, set severity Severity-4 and effort effort/S; they are ignored.
+
+related: numbers of CANDIDATE ISSUES that are not the same defect but that a developer
+fixing this report should read — the same feature or screen, the same symptom in another
+place, or an earlier fix of a similar symptom that may have regressed or been incomplete.
+At most 3. Never the issue_number itself. Empty when no candidate is genuinely related; do
+not list a candidate just because it was shown to you.`;
 
 const textField = (limit: number) => ({ type: 'string', description: `At most ${limit} characters.` });
 const stringItems = (count: number, limit: number) => ({
@@ -48,7 +54,7 @@ export const VERDICT_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: [
     'verdict', 'issue_number', 'title', 'summary', 'where', 'subjects', 'expected',
-    'actual', 'steps', 'screen_evidence', 'new_evidence', 'labels', 'severity', 'effort',
+    'actual', 'steps', 'screen_evidence', 'new_evidence', 'labels', 'severity', 'effort', 'related',
   ],
   properties: {
     verdict: { type: 'string', enum: VERDICTS },
@@ -60,6 +66,7 @@ export const VERDICT_SCHEMA = {
     labels: { type: 'array', items: { type: 'string', enum: AREA_LABELS } },
     severity: { type: 'string', enum: SEVERITIES },
     effort: { type: 'string', enum: EFFORTS },
+    related: { type: 'array', items: { type: 'integer' } },
   },
 };
 
@@ -102,7 +109,8 @@ function parseVerdict(content: string): RawVerdict {
   const wrongType = (['verdict', 'title', 'summary', 'where', 'expected', 'actual', 'new_evidence',
     'severity', 'effort'] as const).find((k) => !isString(raw[k]))
     ?? (['subjects', 'steps', 'screen_evidence', 'labels'] as const).find((k) => !isStrings(raw[k]))
-    ?? (raw.issue_number === null || Number.isInteger(raw.issue_number) ? undefined : 'issue_number');
+    ?? (raw.issue_number === null || Number.isInteger(raw.issue_number) ? undefined : 'issue_number')
+    ?? (Array.isArray(raw.related) && raw.related.every((n) => Number.isInteger(n)) ? undefined : 'related');
   if (wrongType) throw new InvalidVerdictOutputError(`Wrong type for ${wrongType}`);
   return {
     verdict: raw.verdict, issueNumber: raw.issue_number,
@@ -110,7 +118,7 @@ function parseVerdict(content: string): RawVerdict {
     subjects: raw.subjects, expected: raw.expected, actual: raw.actual,
     steps: raw.steps, screenEvidence: raw.screen_evidence,
     newEvidence: raw.new_evidence, labels: raw.labels,
-    severity: raw.severity, effort: raw.effort,
+    severity: raw.severity, effort: raw.effort, related: raw.related,
   } as RawVerdict;
 }
 

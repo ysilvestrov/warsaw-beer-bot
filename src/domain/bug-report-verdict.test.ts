@@ -14,7 +14,7 @@ const closedIssue: IssueDetail = {
 const raw: RawVerdict = {
   verdict: 'new', issueNumber: null, labels: [], severity: 'Severity-2', effort: 'effort/S',
   title: ' A title ', summary: 'Call +48 123 456 789', where: '', subjects: [],
-  expected: '', actual: '', steps: [], screenEvidence: [], newEvidence: '',
+  expected: '', actual: '', steps: [], screenEvidence: [], newEvidence: '', related: [],
 };
 const fields = {
   title: 'A title', summary: 'Call [приховано]', where: '', subjects: [],
@@ -68,34 +68,46 @@ test('rejects a title empty after trimming', () => {
 
 test('accepts a new issue with filtered area labels and redacted fields', () => {
   expect(validateVerdict({ ...raw, labels: ['matcher-bug', 'wontfix'] }, [], 'bot'))
-    .toEqual({ ok: true, value: { kind: 'new', fields, labels: ['matcher-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S' } });
+    .toEqual({ ok: true, value: { kind: 'new', fields, labels: ['matcher-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S', related: [] } });
 });
 
 test('adds bug when a bot new issue has no valid area labels', () => {
   expect(validateVerdict(raw, [], 'bot')).toEqual({
-    ok: true, value: { kind: 'new', fields, labels: ['bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S' },
+    ok: true, value: { kind: 'new', fields, labels: ['bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S', related: [] },
   });
 });
 
 test('adds extension-bug for extension new issues', () => {
   expect(validateVerdict(raw, [], 'extension')).toEqual({
-    ok: true, value: { kind: 'new', fields, labels: ['extension-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S' },
+    ok: true, value: { kind: 'new', fields, labels: ['extension-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S', related: [] },
   });
 });
 
 test('orders and deduplicates extension labels', () => {
   expect(validateVerdict({ ...raw, labels: ['extension-bug', 'bug', 'bug'] }, [], 'extension'))
-    .toEqual({ ok: true, value: { kind: 'new', fields, labels: ['bug', 'extension-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S' } });
+    .toEqual({ ok: true, value: { kind: 'new', fields, labels: ['bug', 'extension-bug', 'user-report'], severity: 'Severity-2', effort: 'effort/S', related: [] } });
 });
 
 test('returns the original open candidate for a valid duplicate', () => {
   expect(validateVerdict({ ...raw, verdict: 'duplicate_open', issueNumber: 12 }, [openIssue], 'bot'))
-    .toEqual({ ok: true, value: { kind: 'duplicate_open', issue: openIssue, fields } });
+    .toEqual({ ok: true, value: { kind: 'duplicate_open', issue: openIssue, fields, related: [] } });
 });
 
 test('returns the original closed candidate for a valid duplicate', () => {
   expect(validateVerdict({ ...raw, verdict: 'duplicate_closed', issueNumber: 13 }, [closedIssue], 'bot'))
-    .toEqual({ ok: true, value: { kind: 'duplicate_closed', issue: closedIssue, fields } });
+    .toEqual({ ok: true, value: { kind: 'duplicate_closed', issue: closedIssue, fields, related: [] } });
+});
+
+test('related keeps shown candidates only, without repeats, in model order, at most three', () => {
+  const c14 = { ...openIssue, number: 14 };
+  const c15 = { ...openIssue, number: 15 };
+  expect(validateVerdict({ ...raw, related: [99, 13, 13, 12, 15, 14] }, [openIssue, closedIssue, c14, c15], 'bot'))
+    .toMatchObject({ ok: true, value: { kind: 'new', related: [13, 12, 15] } });
+});
+
+test('related never repeats the duplicate target', () => {
+  expect(validateVerdict({ ...raw, verdict: 'duplicate_open', issueNumber: 12, related: [12, 13] }, [openIssue, closedIssue], 'bot'))
+    .toEqual({ ok: true, value: { kind: 'duplicate_open', issue: openIssue, fields, related: [13] } });
 });
 
 test('accepts not_a_bug without issue fields', () => {

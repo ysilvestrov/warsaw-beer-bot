@@ -25,7 +25,7 @@ const raw: RawVerdict = {
   verdict: 'new', issueNumber: null, labels: ['bug'], severity: 'Severity-3',
   effort: 'effort/M', title: 'Wrong beer shown', summary: 'The rating belongs to another beer',
   where: 'Bot tap list', subjects: ['Beer A'], expected: 'Beer A rating',
-  actual: 'Beer B rating', steps: ['Open tap list'], screenEvidence: [], newEvidence: 'Different rating',
+  actual: 'Beer B rating', steps: ['Open tap list'], screenEvidence: [], newEvidence: 'Different rating', related: [],
 };
 
 let db: DB;
