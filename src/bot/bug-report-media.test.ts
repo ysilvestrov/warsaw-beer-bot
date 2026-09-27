@@ -62,7 +62,7 @@ const report: BugReportRow = {
   id: 7, telegramId: 101, chatId: 202, statusMessageId: 303, locale: 'en', city: 'warszawa',
   source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown', createdAt: '2026-09-27T12:00:00.000Z',
   status: 'done', attempts: 0, lastError: null, candidatesTruncated: false,
-  deferredNotified: false, verdict: 'new', issueNumber: 42, processedAt: '2026-09-27T12:01:00.000Z',
+  deferredNotified: false, verdict: 'new', issueNumber: 42, processedAt: '2026-09-27T12:01:00.000Z', jevJson: null, related: null,
 };
 
 test.each([

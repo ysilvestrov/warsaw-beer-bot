@@ -84,7 +84,7 @@ test('dailyStatus includes the report digest and pause from persisted state', as
     telegramId: 101, chatId: 202, statusMessageId: 303, locale: 'uk', city: 'warszawa',
     source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown', createdAt: '2026-06-21T06:30:00.000Z',
   });
-  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-06-21T06:40:00.000Z' });
+  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-06-21T06:40:00.000Z', related: null });
   setJobState(db, BUG_REPORT_PAUSED_KEY,
     '{"since":"2026-06-21T06:50:00.000Z","status":401}');
   const sent: string[] = [];

@@ -189,7 +189,7 @@ test('two invalid verdicts fail without a GitHub write', async () => {
 test('the daily cap processes the twentieth report and defers the next only once', async () => {
   for (let i = 0; i < 19; i++) {
     const id = addReport();
-    deps.store.markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: NOW });
+    deps.store.markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: NOW, related: null });
   }
   const twentieth = addReport();
   const deferred = addReport();
@@ -207,7 +207,7 @@ test('the daily cap processes the twentieth report and defers the next only once
 test('a report processed one millisecond before Warsaw day start does not count toward the cap', async () => {
   const previous = addReport();
   deps.store.markDone(db, previous, {
-    verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-25T21:59:59.999Z',
+    verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-09-25T21:59:59.999Z', related: null,
   });
   const current = addReport();
   deps.dailyCap = 1;

@@ -36,6 +36,11 @@ function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
   ]) db.exec(`ALTER TABLE enrich_failures DROP COLUMN ${name}`);
 }
 
+function dropV39AuditColumns(db: ReturnType<typeof openDb>): void {
+  db.exec('ALTER TABLE bug_reports DROP COLUMN related_json');
+  db.exec('ALTER TABLE bug_reports DROP COLUMN jev_json');
+}
+
 function dropV37ObservationColumns(db: ReturnType<typeof openDb>): void {
   db.exec('ALTER TABLE enrich_failures DROP COLUMN rescued_real_failure_count');
   db.exec('ALTER TABLE enrich_failures DROP COLUMN real_failure_count');
@@ -49,6 +54,7 @@ describe('schema migrations', () => {
       .toEqual({ version: 37 });
     db.exec('ALTER TABLE enrich_failures DROP COLUMN rescued_real_failure_count');
     db.exec('ALTER TABLE enrich_failures DROP COLUMN real_failure_count');
+    dropV39AuditColumns(db);
     db.prepare('DELETE FROM schema_version WHERE version >= 37').run();
     migrate(db);
     const columns = (db.prepare('PRAGMA table_info(enrich_failures)').all() as { name: string }[])
@@ -115,12 +121,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..38 on a fresh db, with no gaps', () => {
+  it('records every migration 1..39 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 38 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 39 }, (_, i) => i + 1));
     db.close();
   });
 
@@ -134,7 +140,7 @@ describe('schema migrations', () => {
     expect(columns('bug_report_drafts')).toEqual([
       'telegram_id', 'step', 'source', 'category', 'text', 'media_json', 'updated_at',
     ]);
-    expect(columns('bug_reports')).toEqual([
+    expect(columns('bug_reports').slice(0, 18)).toEqual([
       'id', 'telegram_id', 'chat_id', 'status_message_id', 'locale', 'city', 'source',
       'category', 'text', 'status', 'attempts', 'last_error', 'candidates_truncated',
       'deferred_notified', 'verdict', 'issue_number', 'created_at', 'processed_at',
@@ -143,6 +149,17 @@ describe('schema migrations', () => {
       'report_id', 'idx', 'kind', 'path', 'bytes', 'pruned_at',
     ]);
     expect(columns('bug_report_bans')).toEqual(['telegram_id', 'banned_at']);
+    db.close();
+  });
+
+  it('migration v39 records its version and appends the two audit columns to bug_reports', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 39').get())
+      .toEqual({ version: 39 });
+    const columns = (db.prepare('PRAGMA table_info(bug_reports)').all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns.slice(18)).toEqual(['jev_json', 'related_json']);
     db.close();
   });
 
@@ -433,6 +450,7 @@ describe('schema migrations', () => {
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
       // v31 (#616) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо з тієї ж причини.
       db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
+      dropV39AuditColumns(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 22').run();
 
       // Two beers: one pinned via match_links, one not.
@@ -488,6 +506,7 @@ describe('schema migrations', () => {
       db.exec('ALTER TABLE api_usage DROP COLUMN mcp_beers');
       // v31 (#616) теж перезапускається у вікні відкату і ALTER'ить beers — скидаємо з тієї ж причини.
       db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
+      dropV39AuditColumns(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 23').run();
 
       db.prepare(
@@ -568,6 +587,7 @@ describe('schema migrations', () => {
       // Rewind to v23 so the v24 migration runs against real legacy data.
       db.exec(`CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY);`);
       migrate(db);
+      dropV39AuditColumns(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 24').run();
       // v26 (#379) also re-runs in this rewind window (>= 24) but ALTERs
       // user_profiles, not enrich_failures, so the manual rebuild below doesn't
@@ -695,6 +715,7 @@ describe('schema migrations', () => {
       `);
       dropV37ObservationColumns(db);
       dropV36ProofColumns(db);
+      dropV39AuditColumns(db);
       db.prepare('DELETE FROM schema_version WHERE version >= 33').run();
       for (const id of [1, 2, 3, 4]) seedBeer(db, id);
 
@@ -771,6 +792,7 @@ describe('v31 rating_checked_at (#616)', () => {
     db.exec('ALTER TABLE beers DROP COLUMN rating_checked_at');
     dropV37ObservationColumns(db);
     dropV36ProofColumns(db);
+    dropV39AuditColumns(db);
     db.prepare('DELETE FROM schema_version WHERE version >= 31').run();
     db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, rating_global, normalized_name, normalized_brewery, rating_refresh_at, rating_refresh_count)
                 VALUES (1, 6869890, 'Prototype', 'Funky Fluid', 0, 'prototype', 'funky fluid', '2026-09-12T01:30:00.000Z', 4),
