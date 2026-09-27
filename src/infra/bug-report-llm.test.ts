@@ -2,6 +2,7 @@ import { expect, test, vi } from 'vitest';
 import type { IssueDetail, JudgeInput } from '../domain/bug-report-types';
 import { InvalidVerdictOutputError } from '../domain/bug-report-types';
 import { createOpenAiJudge, renderJudgeInput, VERDICT_SCHEMA, VERDICT_SYSTEM_PROMPT } from './bug-report-llm';
+import { isTransient } from '../domain/transient-error';
 
 const botInput: JudgeInput = {
   source: 'bot', category: 'route', text: 'Route misses a pub',
@@ -130,4 +131,17 @@ test('judge reports HTTP 500 as HttpStatusError without retrying', async () => {
   await expect(createOpenAiJudge({ apiKey: 'key', model: 'gpt-test', fetchImpl }).judge(botInput))
     .rejects.toMatchObject({ name: 'HttpStatusError', status: 500 });
   expect(fetchImpl).toHaveBeenCalledTimes(1);
+});
+
+// Resolves only when the request's signal aborts, like a real fetch on a hung socket.
+const hangingFetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+  init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+}));
+
+test('the judge aborts a hung request after timeoutMs with a transient TimeoutError', async () => {
+  const error = await createOpenAiJudge({ apiKey: 'k', model: 'm', fetchImpl: hangingFetch as never, timeoutMs: 20 })
+    .judge({ source: 'bot', category: 'other', text: 'x', latestExtensionVersion: null, candidates: [], images: [] })
+    .catch((e: unknown) => e);
+  expect((error as Error).name).toBe('TimeoutError');
+  expect(isTransient(error)).toBe(true);
 });

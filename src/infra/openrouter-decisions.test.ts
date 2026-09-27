@@ -1,6 +1,7 @@
 import { expect, test, vi } from 'vitest';
 import type { IssueCandidate } from '../domain/bug-report-types';
 import { candidateCriteria, createJevSelector, fitCandidates } from './openrouter-decisions';
+import { isTransient } from '../domain/transient-error';
 
 const open: IssueCandidate = {
   number: 10, title: 'Missing badge', state: 'open',
@@ -93,4 +94,16 @@ test('Jev rejects a missing probabilities object as a plain Error', async () => 
   await expect(createJevSelector({ apiKey: 'secret', model: 'jev-model', fetchImpl })
     .select({ source: 'bot', category: 'other', text: 'Broken' }, []))
     .rejects.toThrow('Jev response has no probabilities');
+});
+
+// Resolves only when the request's signal aborts, like a real fetch on a hung socket.
+const hangingFetch = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+  init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+}));
+
+test('Jev aborts a hung request after timeoutMs with a transient TimeoutError', async () => {
+  const error = await createJevSelector({ apiKey: 'k', model: 'm', fetchImpl: hangingFetch as never, timeoutMs: 20 })
+    .select({ source: 'bot', category: 'other', text: 'x' }, [open]).catch((e: unknown) => e);
+  expect((error as Error).name).toBe('TimeoutError');
+  expect(isTransient(error)).toBe(true);
 });

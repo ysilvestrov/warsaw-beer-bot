@@ -107,6 +107,7 @@ function parseVerdict(content: string): RawVerdict {
 
 export function createOpenAiJudge(cfg: {
   apiKey: string; model: string; endpoint?: string; fetchImpl?: typeof fetch; maxCompletionTokens?: number;
+  timeoutMs?: number;
 }): VerdictJudge {
   const fetchImpl = cfg.fetchImpl ?? fetch;
   return {
@@ -114,6 +115,8 @@ export function createOpenAiJudge(cfg: {
       const url = `${(cfg.endpoint ?? 'https://api.openai.com/v1').replace(/\/$/, '')}/chat/completions`;
       const response = await fetchImpl(url, {
         method: 'POST',
+        // Same reason as the Jev client: never let a hung call pin the worker.
+        signal: AbortSignal.timeout(cfg.timeoutMs ?? 120_000),
         headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: cfg.model,
