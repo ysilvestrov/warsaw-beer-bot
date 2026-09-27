@@ -67,7 +67,7 @@ test('buildBugReportLine puts a paused warning first even with zero activity', (
   expect(buildBugReportLine(emptyReportSummary,
     { since: '2026-09-27T12:34:00.000Z', status: 402 },
     'ysilvestrov/warsaw-beer-bot')).toBe([
-    '⚠️ скарги на паузі з 12:34 UTC: ключ відхилено (402)',
+    '⚠️ скарги на паузі з 2026-09-27 12:34 UTC: ключ відхилено (402)',
     'скарги за добу: оброблено 0 (нових 0, відкритих дублікатів 0, закритих дублікатів 0, не-баг 0), у черзі 0, потребують перевірки 0, збоїв 0',
   ].join('\n'));
 });
@@ -92,7 +92,7 @@ test('dailyStatus includes the report digest and pause from persisted state', as
     notifyAdmin: async (msg) => { sent.push(msg); }, now: () => new Date('2026-06-21T07:00:00.000Z') });
   expect(sent).toHaveLength(1);
   expect(sent[0]).toContain([
-    '• ⚠️ скарги на паузі з 06:50 UTC: ключ відхилено (401)',
+    '• ⚠️ скарги на паузі з 2026-06-21 06:50 UTC: ключ відхилено (401)',
     'скарги за добу: оброблено 1 (нових 0, відкритих дублікатів 0, закритих дублікатів 0, не-баг 1), у черзі 0, потребують перевірки 0, збоїв 0',
   ].join('\n'));
 });

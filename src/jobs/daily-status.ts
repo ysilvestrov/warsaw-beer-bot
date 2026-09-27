@@ -17,7 +17,7 @@ export function buildBugReportLine(
   if (s.processed === 0 && s.queued === 0 && paused === null) return null;
   const lines: string[] = [];
   if (paused) {
-    lines.push(`⚠️ скарги на паузі з ${paused.since.slice(11, 16)} UTC: ключ відхилено (${paused.status})`);
+    lines.push(`⚠️ скарги на паузі з ${paused.since.slice(0, 16).replace('T', ' ')} UTC: ключ відхилено (${paused.status})`);
   }
   lines.push(`скарги за добу: оброблено ${s.processed} (нових ${s.byVerdict.new}, відкритих дублікатів ${s.byVerdict.duplicate_open}, закритих дублікатів ${s.byVerdict.duplicate_closed}, не-баг ${s.byVerdict.not_a_bug}), у черзі ${s.queued}, потребують перевірки ${s.needsReview.length}, збоїв ${s.failed.length}`);
   for (const link of s.closedLinks) {

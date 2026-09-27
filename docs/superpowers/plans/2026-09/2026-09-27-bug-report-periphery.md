@@ -120,7 +120,7 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
   `report.limit`. This check repeats the one in `start` because the user may have parallel drafts
   or sent several reports meanwhile. Otherwise `draft: null`, `submission` filled, **no** replies:
   the caller sends `report.accepted` itself, because it needs that message's id.
-- Every result that keeps a draft sets `updatedAt = now.toISOString()`.
+- Every result that **advances or answers** the draft sets `updatedAt = now.toISOString()`. Ignored events and pass-throughs return the stored draft untouched (corrected at review, 2026-09-27: the earlier wording contradicted "draft unchanged" and let ordinary bot use keep a stale draft alive forever).
 - `passThrough` is `false` unless a rule above says `true`.
 
 Tests: every rule above, each as its own test with literal expectations (`toEqual` on the whole
