@@ -128,17 +128,19 @@ describe('missingExpectedKeys', () => {
   };
   test('reports all expected keys when none set', () => {
     const env = loadEnv({ ...base });
-    expect(missingExpectedKeys(env).map((m) => m.key).sort()).toEqual(
-      [
+    const keys = missingExpectedKeys(env).map((m) => m.key);
+    for (const key of [
         'ADMIN_API_TOKEN',
         'ADMIN_TELEGRAM_ID',
         'ANTHROPIC_API_KEY',
         'BRAVE_API_KEY',
+        'BUG_REPORT_MEDIA_DIR',
         'GITHUB_TOKEN',
+        'OPENAI_API_KEY',
+        'OPENROUTER_API_KEY',
         'UNTAPPD_SESSION_COOKIE',
         'WEBSHARE_PROXY',
-      ],
-    );
+      ]) expect(keys).toContain(key);
   });
   test('empty array when all expected keys present', () => {
     const env = loadEnv({
@@ -150,6 +152,9 @@ describe('missingExpectedKeys', () => {
       GITHUB_TOKEN: 'gh',
       ANTHROPIC_API_KEY: 'sk-ant',
       BRAVE_API_KEY: 'bk',
+      BUG_REPORT_MEDIA_DIR: '/tmp/bug-reports',
+      OPENAI_API_KEY: 'sk-openai',
+      OPENROUTER_API_KEY: 'sk-openrouter',
     });
     expect(missingExpectedKeys(env)).toEqual([]);
   });
@@ -164,6 +169,42 @@ describe('missingExpectedKeys', () => {
     const keys = EXPECTED_PROD_KEYS.map((e) => e.key);
     expect(keys).not.toContain('TELEGRAM_BOT_TOKEN');
     expect(keys).not.toContain('DATABASE_PATH');
+  });
+});
+
+describe('env: bug reports', () => {
+  const base = {
+    TELEGRAM_BOT_TOKEN: '0123456789', DATABASE_PATH: '/tmp/x.db',
+    OSRM_BASE_URL: 'http://localhost', NOMINATIM_USER_AGENT: 'ua',
+  };
+
+  test('bug report models have defaults and credentials remain optional', () => {
+    const env = loadEnv(base);
+    expect(env.BUG_REPORT_SELECT_MODEL).toBe('typesafe/jev-1.13');
+    expect(env.BUG_REPORT_VERDICT_MODEL).toBe('gpt-5.6-luna');
+    expect(env.OPENROUTER_API_KEY).toBeUndefined();
+    expect(env.BUG_REPORT_MEDIA_DIR).toBeUndefined();
+  });
+
+  test('bug report settings accept overrides', () => {
+    const env = loadEnv({ ...base, OPENROUTER_API_KEY: 'or-key', OPENAI_API_KEY: 'oa-key',
+      BUG_REPORT_SELECT_MODEL: 'selection', BUG_REPORT_VERDICT_MODEL: 'verdict',
+      BUG_REPORT_MEDIA_DIR: '/srv/reports' });
+    expect(env.OPENROUTER_API_KEY).toBe('or-key');
+    expect(env.OPENAI_API_KEY).toBe('oa-key');
+    expect(env.BUG_REPORT_SELECT_MODEL).toBe('selection');
+    expect(env.BUG_REPORT_VERDICT_MODEL).toBe('verdict');
+    expect(env.BUG_REPORT_MEDIA_DIR).toBe('/srv/reports');
+  });
+
+  test('missing keys identify /report once for each missing credential', () => {
+    const missing = missingExpectedKeys(loadEnv(base));
+    for (const key of ['OPENROUTER_API_KEY', 'OPENAI_API_KEY', 'BUG_REPORT_MEDIA_DIR']) {
+      expect(missing.map((entry) => entry.key)).toContain(key);
+      expect(missing.filter((entry) => entry.key === key)).toHaveLength(1);
+    }
+    expect(missing.find((entry) => entry.key === 'OPENAI_API_KEY')?.disables)
+      .toContain('/report bug reports');
   });
 });
 

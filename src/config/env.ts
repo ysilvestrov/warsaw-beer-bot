@@ -29,6 +29,10 @@ const Schema = z.object({
   TRIAGE_LLM_MODEL: z.string().min(1).default('claude-opus-4-8'),
   ANTHROPIC_API_KEY: z.string().optional(),
   OPENAI_API_KEY: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
+  BUG_REPORT_SELECT_MODEL: z.string().min(1).default('typesafe/jev-1.13'),
+  BUG_REPORT_VERDICT_MODEL: z.string().min(1).default('gpt-5.6-luna'),
+  BUG_REPORT_MEDIA_DIR: z.string().optional(),
   GITHUB_TOKEN: z.string().optional(),
   GITHUB_REPO: z.string().min(1).default('ysilvestrov/warsaw-beer-bot'),
   // Optional diagnostic archive of raw triage LLM I/O; unset ⇒ archive disabled.
@@ -49,9 +53,12 @@ export const EXPECTED_PROD_KEYS = [
   { key: 'WEBSHARE_PROXY', disables: 'proxied Untappd traffic (block protection)' },
   { key: 'ADMIN_TELEGRAM_ID', disables: 'daily status digest + admin alerts' },
   { key: 'ADMIN_API_TOKEN', disables: 'admin HTTP endpoints (enrich-failures review)' },
-  { key: 'GITHUB_TOKEN', disables: 'orphan-triage job (GitHub issue filing)' },
+  { key: 'GITHUB_TOKEN', disables: 'orphan-triage job (GitHub issue filing) and /report bug reports' },
   { key: 'ANTHROPIC_API_KEY', disables: 'orphan-triage job (LLM analysis; not needed if TRIAGE_LLM_PROVIDER=openai)' },
   { key: 'BRAVE_API_KEY', disables: 'Brave web fallback resolver for 0-candidate lookups (#139)' },
+  { key: 'OPENROUTER_API_KEY', disables: '/report bug reports' },
+  { key: 'OPENAI_API_KEY', disables: '/report bug reports and OpenAI orphan-triage LLM when selected' },
+  { key: 'BUG_REPORT_MEDIA_DIR', disables: '/report bug reports' },
 ] as const satisfies ReadonlyArray<{ key: keyof Env; disables: string }>;
 
 // Expected keys that are unset or empty-string in the parsed env.
