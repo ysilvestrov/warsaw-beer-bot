@@ -88,6 +88,16 @@ describe('createCatalogCache', () => {
     expect((await pending).byUntappdId.get(222)?.id).toBe(1);
   });
 
+  it('finishes a request during continuous version changes once its starting version is covered', async () => {
+    let version = 0;
+    const load = vi.fn(() => [{ ...rows[0], untappd_id: version }, rows[1]]);
+    const cache = make({ getVersion: () => version++, load });
+    await cache.get();
+    const result = await cache.get();
+    expect(result.byUntappdId.get(4)?.id).toBe(1);
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   it('single-flights concurrent cold gets — prepare runs once', async () => {
     const d = deferred<void>();
     const prepare = vi.fn(async (r: CatalogBeerWithRating[]) => {

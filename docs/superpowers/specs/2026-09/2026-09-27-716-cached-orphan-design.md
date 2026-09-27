@@ -11,7 +11,9 @@ database already held their links. A normal reload kept the search badges;
 
 ## Decision
 
-1. A catalog version change makes `/match` wait for the shared catalog rebuild.
+1. A catalog version change makes `/match` wait for the shared catalog rebuild
+   until it covers the version observed when the request began. Later writes
+   belong to later requests, so a write burst cannot hold one request forever.
    A TTL-only expiry may continue to serve stale data while rebuilding. The
    rebuild stays single-flight. A failed rebuild fails the request instead of
    claiming an outdated catalog is current.
@@ -30,7 +32,7 @@ database already held their links. A normal reload kept the search badges;
 
 | Recorded fact | Proof required |
 | --- | --- |
-| The process catalog snapshot is current for a version | A successful rebuild from `loadCatalog`/`loadAliases` at that version; `get()` awaits it after a version change. |
+| The process catalog snapshot covers the request's starting version | A successful rebuild from `loadCatalog`/`loadAliases` that captured at least that version; `get()` awaits it after a version change. |
 | A candidate is already linked | The live `beers.untappd_id` on the selected row, with the existing disposition, not-a-beer and bid guards. |
 | A browser cache entry now names a linked beer | A fresh `/match` response with `matched_beer.untappd_id`, written only if the old cache entry still matches. |
 
