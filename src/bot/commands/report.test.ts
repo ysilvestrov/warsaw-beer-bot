@@ -8,7 +8,7 @@ import { createTranslator } from '../../i18n';
 import type { Locale } from '../../i18n/types';
 import { openDb, type DB } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { getDraft, isBanned, saveDraft } from '../../storage/bug_report_drafts';
+import { getDraft, isBanned, saveDraft, setBan } from '../../storage/bug_report_drafts';
 import { getReport, listMedia } from '../../storage/bug_reports';
 import { ensureProfile, setUserCity } from '../../storage/user_profiles';
 import type { BotContext } from '../index';
@@ -278,4 +278,29 @@ test('a group photo from a user with a live media draft passes downstream and le
   await h.send(photoUpdate(1, 101, 'group'));
   expect(h.downstream).toEqual(['photo']);
   expect(getDraft(db, 101)).toEqual(draft);
+});
+
+test('the draft survives until the report row exists, so a crash mid-download loses nothing', async () => {
+  const draftAtDownload: boolean[] = [];
+  const h = harness('en', async (id: string) => {
+    draftAtDownload.push(getDraft(db, 101) !== null);
+    return Buffer.from(id);
+  });
+  saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
+    media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }], updatedAt: '2026-09-27T11:59:00.000Z' });
+  await h.send(action(1, 101, 'report:send'));
+  expect(draftAtDownload).toEqual([true]);
+  expect(getDraft(db, 101)).toBeNull();
+  expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 1 });
+});
+
+test('a user banned after opening the draft cannot submit it', async () => {
+  const h = harness();
+  saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
+    media: [], updatedAt: '2026-09-27T11:59:00.000Z' });
+  setBan(db, 101, '2026-09-27T11:59:30.000Z');
+  await h.send(action(1, 101, 'report:send'));
+  expect(h.replies.map((r) => r.text)).toEqual(['Reports are unavailable for you.']);
+  expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 0 });
+  expect(h.triggered()).toBe(0);
 });

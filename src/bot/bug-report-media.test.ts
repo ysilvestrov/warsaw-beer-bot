@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, statSync, symlinkSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,6 +14,20 @@ test('writeReportMediaSync writes the bytes under report ID and index', () => {
   const result = writeReportMediaSync({ dir, reportId: 12, idx: 1, ext: 'jpg', data: Buffer.from('data') });
   expect(result).toEqual({ path: join(dir, '12', '1.jpg'), bytes: 4 });
   expect(readFileSync(join(dir, '12', '1.jpg'), 'utf8')).toBe('data');
+});
+
+test('media is owner-only: directory 0700, file 0600', () => {
+  writeReportMediaSync({ dir, reportId: 12, idx: 1, ext: 'jpg', data: Buffer.from('data') });
+  expect(statSync(join(dir, '12')).mode & 0o777).toBe(0o700);
+  expect(statSync(join(dir, '12', '1.jpg')).mode & 0o777).toBe(0o600);
+});
+
+test('a write that fails after the file was opened leaves no untracked file behind', () => {
+  mkdirSync(join(dir, '12'));
+  symlinkSync('/dev/full', join(dir, '12', '1.jpg')); // open succeeds, write fails with ENOSPC
+  const result = writeReportMediaSync({ dir, reportId: 12, idx: 1, ext: 'jpg', data: Buffer.from('data') });
+  expect(result).toEqual({ path: join(dir, '12', '1.jpg'), bytes: 0 });
+  expect(() => lstatSync(join(dir, '12', '1.jpg'))).toThrow(/ENOENT/);
 });
 
 test('writeReportMediaSync records zero bytes and writes nothing for a failed download', () => {

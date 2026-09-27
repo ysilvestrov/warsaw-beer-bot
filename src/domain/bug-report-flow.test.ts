@@ -24,7 +24,6 @@ test('start replaces a live draft and asks for a source below the daily limit', 
 });
 
 test.each([
-  [{ ...start, privateChat: false, available: false, banned: true, submittedToday: 3 }, 'report.private_only'],
   [{ ...start, available: false, banned: true, submittedToday: 3 }, 'report.unavailable'],
   [{ ...start, banned: true, submittedToday: 3 }, 'report.banned'],
   [{ ...start, submittedToday: 3 }, 'report.limit'],
@@ -42,7 +41,7 @@ test.each([
   { type: 'pick_source', source: 'bot' },
   { type: 'pick_category', category: 'other' },
   { type: 'media_done' },
-  { type: 'submit', submittedToday: 0 },
+  { type: 'submit', submittedToday: 0, banned: false },
 ] as FlowEvent[])(
   '$type on a missing draft reports expiry', (event) => {
     expect(stepFlow(null, event, NOW)).toEqual({
@@ -174,20 +173,31 @@ test('media_done outside the media step is ignored', () => {
 });
 
 test('submit below the daily limit returns a submission without replies', () => {
-  expect(stepFlow(confirm, { type: 'submit', submittedToday: 2 }, NOW)).toEqual({
+  expect(stepFlow(confirm, { type: 'submit', submittedToday: 2, banned: false }, NOW)).toEqual({
     draft: null, replies: [], passThrough: false,
     submission: { source: 'bot', category: 'wrong_beer', text: '1234567890', media: [media] },
   });
 });
 
 test('submit rechecks the daily limit and deletes the draft at three reports', () => {
-  expect(stepFlow(confirm, { type: 'submit', submittedToday: 3 }, NOW)).toEqual({
+  expect(stepFlow(confirm, { type: 'submit', submittedToday: 3, banned: false }, NOW)).toEqual({
     draft: null, replies: [{ key: 'report.limit' }], passThrough: false,
   });
 });
 
 test('submit outside the confirm step is ignored', () => {
-  expect(stepFlow(mediaDraft, { type: 'submit', submittedToday: 0 }, NOW)).toEqual({
+  expect(stepFlow(mediaDraft, { type: 'submit', submittedToday: 0, banned: false }, NOW)).toEqual({
     draft: mediaDraft, replies: [], passThrough: false,
   });
+});
+
+test('a ban issued while the draft was open blocks submit and drops the draft', () => {
+  expect(stepFlow(confirm, { type: 'submit', submittedToday: 0, banned: true }, NOW)).toEqual({
+    draft: null, replies: [{ key: 'report.banned' }], passThrough: false,
+  });
+});
+
+test('a group /report wins over every other check and keeps the stored private draft untouched', () => {
+  expect(stepFlow(mediaDraft, { type: 'start', submittedToday: 3, banned: true, available: false, privateChat: false }, NOW))
+    .toEqual({ draft: mediaDraft, replies: [{ key: 'report.private_only' }], passThrough: false });
 });
