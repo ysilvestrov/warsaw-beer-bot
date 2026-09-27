@@ -3,7 +3,7 @@ import { runOverlay, type SendMatch, type EnrichOrphans, type CacheMatchResults 
 import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
 import { clearKeys, setCachedMany, setCachedIfMatching } from '../cache/client';
-import { setCachedMany as setCachedManyDirect } from '../cache/store';
+import { getCached, setCachedMany as setCachedManyDirect } from '../cache/store';
 import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { stateFromMatch } from './card-state';
@@ -125,10 +125,16 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
             return draw({ kind: 'working' });
           case 'refreshed': {
             const previous = resultByKey.get(key);
-            if (!previous) return;
-            void setCachedIfMatching(key, previous, ev.result).then((written) => {
-              if (written) draw(stateFromMatch(ev.result, { enrichmentPossible: false }));
-            }).catch(() => undefined);
+            const refreshed = stateFromMatch(ev.result, { enrichmentPossible: false });
+            if (!previous) return draw(refreshed);
+            const fallback = fallbackByKey.get(key) ?? refreshed;
+            void setCachedIfMatching(key, previous, ev.result).then(async (written) => {
+              if (written) return draw(refreshed);
+              // A newer cache answer or a concurrent clear wins; never leave the
+              // card queued after the recheck has finished.
+              const current = await getCached(key);
+              draw(current ? stateFromMatch(current, { enrichmentPossible: false }) : fallback);
+            }).catch(() => draw(fallback));
             return;
           }
           case 'found':
