@@ -171,6 +171,7 @@ export const en: Messages = {
   'report.btn.cancel': 'Cancel',
   'report.confirm': 'Review your report:\n{source} · {category}\n\n{text}\n\nMedia: {media}\n\nA summary of your description will be published publicly on GitHub. Screenshots and videos will not be public — only developers can see them on the server. Do not include personal information in your description.',
   'report.accepted': 'Received, analyzing…',
+  'report.retry': 'The report could not be accepted — press “Send” again.',
   'report.cancelled': 'Report cancelled.',
   'report.expired': 'This draft has expired — start again with /report',
   'report.limit': 'You have already sent 3 reports today, the daily maximum. Try tomorrow.',

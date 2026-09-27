@@ -164,6 +164,7 @@ export interface Messages {
   'report.btn.cancel': string;
   'report.confirm': string;
   'report.accepted': string;
+  'report.retry': string;
   'report.cancelled': string;
   'report.expired': string;
   'report.limit': string;

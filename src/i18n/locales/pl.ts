@@ -171,6 +171,7 @@ export const pl: Messages = {
   'report.btn.cancel': 'Anuluj',
   'report.confirm': 'Sprawdź zgłoszenie:\n{source} · {category}\n\n{text}\n\nMedia: {media}\n\nStreszczenie opisu zostanie opublikowane publicznie na GitHub. Zrzuty ekranu i filmy nie będą publiczne — zobaczą je tylko programiści na serwerze. Nie wpisuj danych osobowych w opisie.',
   'report.accepted': 'Przyjęto, analizuję…',
+  'report.retry': 'Nie udało się przyjąć zgłoszenia — naciśnij „Wyślij” jeszcze raz.',
   'report.cancelled': 'Zgłoszenie anulowane.',
   'report.expired': 'Ten szkic wygasł — zacznij ponownie: /report',
   'report.limit': 'Dziś wysłano już 3 zgłoszenia — to dzienny limit. Spróbuj jutro.',
