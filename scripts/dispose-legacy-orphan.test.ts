@@ -56,7 +56,8 @@ describe('dispose-legacy-orphan CLI (#695)', () => {
     const lines: string[] = [];
     runDisposeLegacyOrphan(args, { db, print: (line) => lines.push(line) });
     expect(JSON.parse(lines[0])).toMatchObject({
-      apply: false, readyToApply: true, schemaVersion: 37,
+      // readyToApply is this test's fact; the schema head is pinned only in schema.test.ts.
+      apply: false, readyToApply: true,
       key: { breweryText: 'de cam', nameText: 'abrikoos 2018', abvKey: '6' },
       orphan: { id: 29955 }, failure: { issueNumber: 677 },
     });
