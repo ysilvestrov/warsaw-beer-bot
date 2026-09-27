@@ -45,14 +45,16 @@ describe('schema migrations', () => {
   it('upgrades an already-recorded v36 database with a distinct observation generation', () => {
     const db = openDb(':memory:');
     migrate(db);
-    expect(db.prepare('SELECT MAX(version) AS version FROM schema_version').get())
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 37').get())
       .toEqual({ version: 37 });
     db.exec('ALTER TABLE enrich_failures DROP COLUMN rescued_real_failure_count');
     db.exec('ALTER TABLE enrich_failures DROP COLUMN real_failure_count');
-    db.prepare('DELETE FROM schema_version WHERE version = 37').run();
+    db.prepare('DELETE FROM schema_version WHERE version >= 37').run();
     migrate(db);
-    expect(db.prepare(`SELECT real_failure_count, rescued_real_failure_count
-      FROM enrich_failures LIMIT 1`).all()).toEqual([]);
+    const columns = (db.prepare('PRAGMA table_info(enrich_failures)').all() as { name: string }[])
+      .map((column) => column.name);
+    expect(columns).toContain('real_failure_count');
+    expect(columns).toContain('rescued_real_failure_count');
   });
 
   it('v35 keeps inactive legacy-card decisions unique while retaining reopened history', () => {
@@ -113,12 +115,34 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..37 on a fresh db, with no gaps', () => {
+  it('records every migration 1..38 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 37 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 38 }, (_, i) => i + 1));
+    db.close();
+  });
+
+  it('migration v38 records its version and creates the four bug report tables', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 38').get())
+      .toEqual({ version: 38 });
+    const columns = (table: string): string[] =>
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((column) => column.name);
+    expect(columns('bug_report_drafts')).toEqual([
+      'telegram_id', 'step', 'source', 'category', 'text', 'media_json', 'updated_at',
+    ]);
+    expect(columns('bug_reports')).toEqual([
+      'id', 'telegram_id', 'chat_id', 'status_message_id', 'locale', 'city', 'source',
+      'category', 'text', 'status', 'attempts', 'last_error', 'candidates_truncated',
+      'deferred_notified', 'verdict', 'issue_number', 'created_at', 'processed_at',
+    ]);
+    expect(columns('bug_report_media')).toEqual([
+      'report_id', 'idx', 'kind', 'path', 'bytes', 'pruned_at',
+    ]);
+    expect(columns('bug_report_bans')).toEqual(['telegram_id', 'banned_at']);
     db.close();
   });
 
