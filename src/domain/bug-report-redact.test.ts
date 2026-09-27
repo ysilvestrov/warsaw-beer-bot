@@ -16,7 +16,7 @@ test.each([
   'Przekład #9 16°', '0.33л', 'Kronenbourg 1664', '95 ₴',
   '2026-09-26', '2026-09-26 12:30', '1999-12-31', 'a @ b', '@ab',
   'https://untappd.com/b/volta-anima/123456', '12345678',
-  '123--456-789', '1234567890123456',
+  '123--456-789', '1234567890123456', 'рейтинги 4.0 4.1 4.2 4.0 4.2',
 ])('preserves non-personal value %s', (value) => {
   expect(redact(value)).toBe(value);
 });
