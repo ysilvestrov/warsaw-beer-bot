@@ -32,7 +32,7 @@ export function fitCandidates(
 }
 
 export function createJevSelector(cfg: {
-  apiKey: string; model: string; fetchImpl?: typeof fetch; maxTokens?: number;
+  apiKey: string; model: string; fetchImpl?: typeof fetch; maxTokens?: number; timeoutMs?: number;
 }): IssueSelector {
   const fetchImpl = cfg.fetchImpl ?? fetch;
   return {
@@ -41,6 +41,9 @@ export function createJevSelector(cfg: {
       const criteria = candidateCriteria(kept);
       const response = await fetchImpl('https://openrouter.ai/api/alpha/decisions', {
         method: 'POST',
+        // A hung request would hold the worker's re-entrancy flag forever; the abort surfaces
+        // as TimeoutError, which isTransient classifies as retriable.
+        signal: AbortSignal.timeout(cfg.timeoutMs ?? 30_000),
         headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: cfg.model,
