@@ -1,17 +1,38 @@
 import type pino from 'pino';
 import type { DB } from '../storage/db';
+import type { BugReportSummary } from '../domain/bug-report-types';
 import { collectStatus, type StatusMetrics } from '../storage/stats';
 import { getJobState, setJobState } from '../storage/job_state';
+import { summarizeSince } from '../storage/bug_reports';
 import { warsawDateAndHour } from '../domain/warsaw-time';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
+import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+
+export function buildBugReportLine(
+  s: BugReportSummary, paused: { since: string; status: number } | null, repo: string,
+): string | null {
+  if (s.processed === 0 && s.queued === 0 && paused === null) return null;
+  const lines: string[] = [];
+  if (paused) {
+    lines.push(`⚠️ скарги на паузі з ${paused.since.slice(11, 16)} UTC: ключ відхилено (${paused.status})`);
+  }
+  lines.push(`скарги за добу: оброблено ${s.processed} (нових ${s.byVerdict.new}, відкритих дублікатів ${s.byVerdict.duplicate_open}, закритих дублікатів ${s.byVerdict.duplicate_closed}, не-баг ${s.byVerdict.not_a_bug}), у черзі ${s.queued}, потребують перевірки ${s.needsReview.length}, збоїв ${s.failed.length}`);
+  for (const link of s.closedLinks) {
+    lines.push(`  R-${link.reportId} → https://github.com/${repo}/issues/${link.issueNumber}`);
+  }
+  const review = [...s.needsReview, ...s.failed];
+  if (review.length > 0) lines.push(`  перевірити: ${review.map((id) => `R-${id}`).join(', ')}`);
+  return lines.join('\n');
+}
 
 export function buildStatusMessage(
   m: StatusMetrics, date: string,
   triageLine?: string | null, saturatedLine?: string | null,
   withheldLine?: string | null,
+  bugReportLine?: string | null,
 ): string {
   const matchPct = m.beersTotal > 0 ? Math.round((m.beersMatched / m.beersTotal) * 100) : 0;
   const scrapeLine = m.lastScrapeHoursAgo === null
@@ -35,6 +56,7 @@ export function buildStatusMessage(
     // zero unlocks while issues closed means the mechanism is dead.
     `• Замок: ${group(m.lockedRows)} під замком · ${group(m.unlocked7d)} розімкнено/7д · ${group(m.verdictsOutlived7d)} вердиктів пережили фікс/7д · ${group(m.unrescuedRows)} unrescued (${group(m.unlockedUnadjudicated7d)} без негативного маркера/7д)`,
     ...(withheldLine ? [`• ${withheldLine}`] : []),
+    ...(bugReportLine ? [`• ${bugReportLine}`] : []),
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,
@@ -78,6 +100,7 @@ export interface DailyStatusDeps {
   log: pino.Logger;
   notifyAdmin?: (msg: string) => Promise<void>;
   now?: () => Date;
+  repo?: string;
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
@@ -136,7 +159,21 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
       }
     } catch { /* malformed state — ignore */ }
   }
-  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine, withheldLine);
+  let bugReportLine: string | null = null;
+  if (deps.repo) {
+    const rawPaused = getJobState(db, BUG_REPORT_PAUSED_KEY);
+    let paused: { since: string; status: number } | null = null;
+    if (rawPaused) {
+      try { paused = JSON.parse(rawPaused) as { since: string; status: number }; }
+      catch { /* malformed state — ignore */ }
+    }
+    bugReportLine = buildBugReportLine(
+      summarizeSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()),
+      paused, deps.repo,
+    );
+  }
+  const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine, withheldLine,
+    bugReportLine);
   try {
     await notifyAdmin(text);
     setJobState(db, DAILY_STATUS_KEY, dateKey);
