@@ -178,15 +178,31 @@ drop `<` escaping; each must fail a named test.
 
 ## Task 2 — migration v38 + storage
 
-Files: `src/storage/schema.ts` (append migration 38), `src/storage/schema.test.ts` (bump the single
-schema-head assertion — the test commented "The ONLY assertion on the schema head" — to 38, and add
-a v38 test that asserts `WHERE version = 38` exists and the four tables' columns), new
+Files: `src/storage/schema.ts` (append migration 38), `src/storage/schema.test.ts`, new
 `src/storage/bug_reports.ts` + `bug_reports.test.ts`.
+
+Changes to `schema.test.ts` (amended 2026-09-27 after Codex stopped on a contradiction — the plan had
+assumed the head was pinned in one test only):
+
+1. Bump the single schema-head test (commented "The ONLY assertion on the schema head") to 38.
+2. Fix the v37 test `upgrades an already-recorded v36 database with a distinct observation
+   generation` (#711), which breaks the CLAUDE.md rule twice: it pins the head
+   (`MAX(version) = 37`) and rewinds with `DELETE … WHERE version = 37`. With v38 present,
+   `migrate()` compares against `MAX(version) = 38` and would skip v37, so the test would pass
+   while asserting nothing. Replace the head assertion with the test's own fact — `SELECT version
+   FROM schema_version WHERE version = 37` equals `{ version: 37 }` — and rewind with
+   `WHERE version >= 37`, like the v22/v23 tests do. After the second `migrate()`, assert that
+   the v37 columns (`real_failure_count`, `rescued_real_failure_count`) exist again. This proves
+   the test re-applies v37. The current version never checks that.
+3. Add a v38 test that asserts `WHERE version = 38` is recorded and the four tables' columns.
+
+Every rewind test (`DELETE … WHERE version >= N`) re-runs v38. That is why v38 uses
+`IF NOT EXISTS` for every table and index, as v29/v32/v34/v35 do.
 
 ### Migration 38
 
 ```sql
-CREATE TABLE bug_report_drafts (
+CREATE TABLE IF NOT EXISTS bug_report_drafts (
   telegram_id INTEGER PRIMARY KEY,
   step        TEXT NOT NULL,
   source      TEXT,
@@ -195,7 +211,7 @@ CREATE TABLE bug_report_drafts (
   media_json  TEXT NOT NULL DEFAULT '[]',
   updated_at  TEXT NOT NULL
 );
-CREATE TABLE bug_reports (
+CREATE TABLE IF NOT EXISTS bug_reports (
   id                    INTEGER PRIMARY KEY AUTOINCREMENT,
   telegram_id           INTEGER NOT NULL,
   chat_id               INTEGER NOT NULL,
@@ -215,10 +231,10 @@ CREATE TABLE bug_reports (
   created_at            TEXT NOT NULL,
   processed_at          TEXT
 );
-CREATE INDEX idx_bug_reports_user_created ON bug_reports(telegram_id, created_at);
-CREATE INDEX idx_bug_reports_status ON bug_reports(status);
-CREATE INDEX idx_bug_reports_processed ON bug_reports(processed_at);
-CREATE TABLE bug_report_media (
+CREATE INDEX IF NOT EXISTS idx_bug_reports_user_created ON bug_reports(telegram_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status);
+CREATE INDEX IF NOT EXISTS idx_bug_reports_processed ON bug_reports(processed_at);
+CREATE TABLE IF NOT EXISTS bug_report_media (
   report_id INTEGER NOT NULL REFERENCES bug_reports(id) ON DELETE CASCADE,
   idx       INTEGER NOT NULL,
   kind      TEXT NOT NULL CHECK (kind IN ('photo','video')),
@@ -227,7 +243,7 @@ CREATE TABLE bug_report_media (
   pruned_at TEXT,
   PRIMARY KEY (report_id, idx)
 );
-CREATE TABLE bug_report_bans (
+CREATE TABLE IF NOT EXISTS bug_report_bans (
   telegram_id INTEGER PRIMARY KEY,
   banned_at   TEXT NOT NULL
 );
