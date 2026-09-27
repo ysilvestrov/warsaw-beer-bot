@@ -13,6 +13,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+// 401/402/403 mean OUR key was refused (revoked, out of credit, not allowed), not that this
+// report is bad. Failing the row would fail the whole queue in one run and tell every user
+// "could not process"; instead the queue waits, attempts untouched, until the key is fixed.
+const CREDENTIAL_STATUSES = new Set([401, 402, 403]);
+
+function isCredentialRefusal(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return typeof status === 'number' && CREDENTIAL_STATUSES.has(status);
+}
+
 function imageMime(path: string): string | null {
   const extension = path.toLowerCase().split('.').pop();
   if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
@@ -147,6 +157,10 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
         await notify(report, { kind: 'needs_review' });
         deps.log.error({ reportId: report.id, error }, 'Bug report publish uncertain');
         return true;
+      }
+      if (isCredentialRefusal(error)) {
+        deps.log.error({ reportId: report.id, error }, 'Bug report upstream refused our credentials; queue paused');
+        return false;
       }
       const attempts = store.recordAttemptError(db, report.id, message);
       if (!isTransient(error) || attempts >= maxAttempts) {

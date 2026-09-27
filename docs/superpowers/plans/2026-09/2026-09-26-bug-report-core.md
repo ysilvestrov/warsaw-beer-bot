@@ -531,6 +531,10 @@ count the cap with `>`; keep the cache after `new`; each must fail a named test 
 
 ---
 
+**Amended at review (2026-09-27):** 401/402/403 before `publishing` pause the queue instead of
+failing the row (spec § Ідемпотентність, п. 6). Controller commit on `feat/bug-report`. Test 9 keeps
+400 as the permanent-failure case.
+
 ## After Task 4 — end-to-end review of the core (controller)
 
 Whole-branch diff against the spec; the four tasks' mutation checks re-run on the merged branch;

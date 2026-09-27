@@ -320,3 +320,30 @@ test('notification failure does not change status or prevent the next report', a
   expect(deps.github.createIssue).toHaveBeenCalledTimes(2);
   expect(deps.log.warn).toHaveBeenCalledOnce();
 });
+
+test.each([401, 402, 403])('a %i from the selector pauses the queue without spending an attempt', async (status) => {
+  const first = addReport();
+  const second = addReport();
+  vi.mocked(deps.selector.select).mockRejectedValueOnce(new HttpStatusError('refused', status));
+  await run();
+  expect(row(first)).toMatchObject({ status: 'queued', attempts: 0, processedAt: null });
+  expect(row(second)).toMatchObject({ status: 'queued', attempts: 0 });
+  expect(outcomes).toEqual([]);
+  expect(deps.selector.select).toHaveBeenCalledOnce();
+});
+
+test('a 402 from the judge pauses the queue the same way', async () => {
+  const id = addReport();
+  vi.mocked(deps.judge.judge).mockRejectedValueOnce(new HttpStatusError('out of credit', 402));
+  await run();
+  expect(row(id)).toMatchObject({ status: 'queued', attempts: 0 });
+  expect(outcomes).toEqual([]);
+});
+
+test('a 403 on the GitHub write after publishing still needs review', async () => {
+  const id = addReport();
+  vi.mocked(deps.github.createIssue).mockRejectedValueOnce(new HttpStatusError('forbidden', 403));
+  await run();
+  expect(row(id)).toMatchObject({ status: 'needs_review', attempts: 0 });
+  expect(outcomes).toEqual([{ id, outcome: { kind: 'needs_review' } }]);
+});
