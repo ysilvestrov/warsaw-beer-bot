@@ -71,10 +71,15 @@ export function createNotifier(deps: {
       default:
         text = t(`report.done.${outcome.kind}`);
     }
-    if (report.statusMessageId === null) {
-      await deps.telegram.sendMessage(report.chatId, text);
-    } else {
-      await deps.telegram.editMessageText(report.chatId, report.statusMessageId, undefined, text);
+    if (report.statusMessageId !== null) {
+      try {
+        await deps.telegram.editMessageText(report.chatId, report.statusMessageId, undefined, text);
+        return;
+      } catch {
+        // The "analysing…" message may be gone (deleted by the user); the result must still
+        // arrive, and nothing revisits a finished report, so send it as a new message.
+      }
     }
+    await deps.telegram.sendMessage(report.chatId, text);
   };
 }

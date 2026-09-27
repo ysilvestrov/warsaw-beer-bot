@@ -104,10 +104,20 @@ test('createNotifier falls back to English for an unknown stored locale', async 
   expect(edits).toEqual([[202, 303, undefined, 'This does not look like a bug in the bot or extension.']]);
 });
 
-test('createNotifier propagates Telegram edit errors', async () => {
+test('a refused edit (status message deleted) falls back to a new message', async () => {
+  const sends: unknown[][] = [];
   const notifier = createNotifier({ repo: 'example/repo', telegram: {
-    editMessageText: async () => { throw new Error('Telegram edit refused'); },
-    sendMessage: async () => { throw new Error('send should not be used'); },
+    editMessageText: async () => { throw new Error('message to edit not found'); },
+    sendMessage: async (...args: unknown[]) => { sends.push(args); return {} as never; },
   } as never });
-  await expect(notifier(report, { kind: 'not_a_bug' })).rejects.toThrow('Telegram edit refused');
+  await notifier(report, { kind: 'not_a_bug' });
+  expect(sends).toEqual([[202, 'This does not look like a bug in the bot or extension.']]);
+});
+
+test('when the fallback message also fails, the error propagates to the worker', async () => {
+  const notifier = createNotifier({ repo: 'example/repo', telegram: {
+    editMessageText: async () => { throw new Error('message to edit not found'); },
+    sendMessage: async () => { throw new Error('bot was blocked by the user'); },
+  } as never });
+  await expect(notifier(report, { kind: 'not_a_bug' })).rejects.toThrow('bot was blocked by the user');
 });

@@ -62,16 +62,15 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
     const telegramId = ctx.from!.id;
     const now = deps.now();
     const result = stepFlow(getDraft(db, telegramId), event, now);
-    // A submission keeps its draft until the report row exists: a crash during the downloads
-    // must leave the user a confirm screen to press again, not an "accepted" with nothing behind it.
-    if (!result.submission) {
-      if (result.draft) saveDraft(db, telegramId, result.draft);
-      else deleteDraft(db, telegramId);
-    }
+    // Synchronous, before the first await: a submit claims its draft here. Telegraf handles
+    // updates concurrently, so a double-tapped "Send" must find the draft already gone (the
+    // second press gets "expired"), or it files the same report twice. The cost — a crash
+    // during the downloads loses that report — is accepted in the spec.
+    if (result.draft) saveDraft(db, telegramId, result.draft);
+    else deleteDraft(db, telegramId);
     for (const reply of result.replies) await renderReply(ctx, reply);
     if (result.submission) {
       if (!deps.available || !deps.mediaDir) {
-        deleteDraft(db, telegramId);
         await ctx.reply(ctx.t('report.unavailable'));
         return;
       }
@@ -84,19 +83,23 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
       // No `await` from here to triggerWorker: the worker runs in this process, and a report
       // visible before its media rows would be judged without screenshots and published as
       // "no media".
-      const reportId = insertReport(db, {
-        telegramId, chatId: ctx.chat!.id, statusMessageId: accepted.message_id,
-        locale: ctx.locale, city: getUserCity(db, telegramId),
-        source: result.submission.source, category: result.submission.category,
-        text: result.submission.text, createdAt: now.toISOString(),
-      });
-      for (const [idx, media] of result.submission.media.entries()) {
-        const saved = writeReportMediaSync({
-          dir: mediaDir, reportId, idx, ext: media.ext, data: buffers[idx],
+      const submission = result.submission;
+      // One transaction: a crash or DB error between the report row and its media rows rolls
+      // both back, so no restart can find a queued report missing its evidence.
+      db.transaction(() => {
+        const reportId = insertReport(db, {
+          telegramId, chatId: ctx.chat!.id, statusMessageId: accepted.message_id,
+          locale: ctx.locale, city: getUserCity(db, telegramId),
+          source: submission.source, category: submission.category,
+          text: submission.text, createdAt: now.toISOString(),
         });
-        addMedia(db, { reportId, idx, kind: media.kind, ...saved });
-      }
-      deleteDraft(db, telegramId);
+        for (const [idx, media] of submission.media.entries()) {
+          const saved = writeReportMediaSync({
+            dir: mediaDir, reportId, idx, ext: media.ext, data: buffers[idx],
+          });
+          addMedia(db, { reportId, idx, kind: media.kind, ...saved });
+        }
+      })();
       deps.triggerWorker();
     }
     if (result.passThrough) await next();

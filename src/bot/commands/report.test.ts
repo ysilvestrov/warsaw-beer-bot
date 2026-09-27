@@ -280,18 +280,27 @@ test('a group photo from a user with a live media draft passes downstream and le
   expect(getDraft(db, 101)).toEqual(draft);
 });
 
-test('the draft survives until the report row exists, so a crash mid-download loses nothing', async () => {
-  const draftAtDownload: boolean[] = [];
-  const h = harness('en', async (id: string) => {
-    draftAtDownload.push(getDraft(db, 101) !== null);
-    return Buffer.from(id);
-  });
+test('a double-tapped Send files exactly one report; the second press finds the draft claimed', async () => {
+  const h = harness('en', async (id: string) => Buffer.from(id));
   saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
     media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }], updatedAt: '2026-09-27T11:59:00.000Z' });
-  await h.send(action(1, 101, 'report:send'));
-  expect(draftAtDownload).toEqual([true]);
-  expect(getDraft(db, 101)).toBeNull();
+  await Promise.all([h.send(action(1, 101, 'report:send')), h.send(action(2, 101, 'report:send'))]);
   expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 1 });
+  expect(h.triggered()).toBe(1);
+  expect(h.replies.map((r) => r.text).sort()).toEqual([
+    'Received, analyzing…', 'This draft has expired — start again with /report',
+  ].sort());
+});
+
+test('a failure while recording media rolls back the report row too', async () => {
+  const h = harness('en', async (id: string) => Buffer.from(id));
+  db.exec(`CREATE TRIGGER fail_media BEFORE INSERT ON bug_report_media
+    BEGIN SELECT RAISE(ABORT, 'disk full'); END;`);
+  saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
+    media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }], updatedAt: '2026-09-27T11:59:00.000Z' });
+  await h.send(action(1, 101, 'report:send')).catch(() => undefined);
+  expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 0 });
+  expect(h.triggered()).toBe(0);
 });
 
 test('a user banned after opening the draft cannot submit it', async () => {
