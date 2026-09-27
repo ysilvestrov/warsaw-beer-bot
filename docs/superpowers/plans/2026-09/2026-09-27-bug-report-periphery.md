@@ -33,7 +33,7 @@ Facts verified in code before writing this plan (2026-09-27). If any has changed
 - The latest published extension version is `getJobState(db, ANNOUNCED_VERSION_KEY)` from
   `src/jobs/announce-release.ts` (live value `0.20.0`). `extension_releases` is retired (#267), so
   never read it.
-- `buildStatusMessage(m, date, triageLine?, saturatedLine?, withheldLine?)` in
+- `buildStatusMessage(m, date, triageLine?, saturatedLine?, withheldLine?, bugReportLine?)` (the last one added by P3) in
   `src/jobs/daily-status.ts` takes optional trailing lines, and 21 test call sites use it.
 - The Telegram file download pattern (`ctx.telegram.getFileLink` + `fetch`) lives in
   `src/bot/commands/import.ts`.
@@ -205,7 +205,11 @@ The composer handles:
 
 `createNotifier(deps: { telegram: Pick<Telegram, 'editMessageText' | 'sendMessage'>; repo: string })`
 returns `(report: BugReportRow, outcome: ReportOutcome) => Promise<void>`:
-- translator = `createTranslator(report.locale)`;
+- translator = `createTranslator(toLocale(report.locale) ?? 'en')`. `toLocale` is from
+  `src/storage/user_profiles.ts`, and `'en'` is the house fallback for an unknown language (see
+  `detect-locale.ts`). The submit path always stores `ctx.locale`, so the fallback only matters for
+  a hand-edited row. Test: locale `'xx'` gives the English text. (Decided 2026-09-27 after Codex
+  stopped on `string` vs `Locale`.)
 - text by outcome kind:
   - `created` → `report.done.created`;
   - `duplicate_open` → `report.done.duplicate_open`;
