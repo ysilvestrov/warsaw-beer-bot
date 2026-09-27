@@ -315,6 +315,34 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     expect(el.querySelector('[data-beerbadge]')!.textContent).toContain('4.1');
   });
 
+  it('keeps a newer cached badge when a refresh has no initial match result', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const older: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: 4.1, untappd_id: 44 },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    const newer: MatchResult = {
+      ...older, matched_beer: { ...older.matched_beer!, rating_global: 4.6, untappd_id: 46 },
+    };
+    await setCached('k0', newer);
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string }, cb: (reply: unknown) => void) => {
+        if (msg.type === 'enrich:candidates') cb({ candidates: [
+          { brewery: 'B', name: 'N', eligible: false, linked: true },
+        ] });
+        else if (msg.type === 'match') cb({ type: 'match:ok', results: [older] });
+        else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N') }]);
+    await until(() => el.querySelector('[data-beerbadge]')?.textContent?.includes('4.6') === true);
+    expect(await getCached('k0')).toEqual(newer);
+  });
+
   it('draws the newer cached answer when a linked refresh loses its conditional write', async () => {
     await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
     const orphan: MatchResult = {

@@ -126,14 +126,24 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
           case 'refreshed': {
             const previous = resultByKey.get(key);
             const refreshed = stateFromMatch(ev.result, { enrichmentPossible: false });
-            if (!previous) return draw(refreshed);
+            const drawCachedOr = async (otherwise: CardState) => {
+              try {
+                const current = await getCached(key);
+                draw(current ? stateFromMatch(current, { enrichmentPossible: false }) : otherwise);
+              } catch {
+                draw(otherwise);
+              }
+            };
+            if (!previous) {
+              void drawCachedOr(refreshed);
+              return;
+            }
             const fallback = fallbackByKey.get(key) ?? refreshed;
             void setCachedIfMatching(key, previous, ev.result).then(async (written) => {
               if (written) return draw(refreshed);
               // A newer cache answer or a concurrent clear wins; never leave the
               // card queued after the recheck has finished.
-              const current = await getCached(key);
-              draw(current ? stateFromMatch(current, { enrichmentPossible: false }) : fallback);
+              await drawCachedOr(fallback);
             }).catch(() => draw(fallback));
             return;
           }
