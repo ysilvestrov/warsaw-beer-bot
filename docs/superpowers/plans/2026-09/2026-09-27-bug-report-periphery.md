@@ -303,6 +303,16 @@ private-chat guard on media; skip `triggerWorker`; each must fail a named test.
 
 ---
 
+**Amended at review (2026-09-27, controller):**
+- `saveReportMedia` is replaced by `downloadMedia` (async) + `writeReportMediaSync` (sync).
+  Submission downloads first; then `insertReport`, the file writes and `addMedia` run with no
+  `await` between them. Before this, a cron tick in the gap judged the report without its
+  screenshots.
+- The file extension passes through `safeExt`, because `mime_type` is client-supplied and
+  `image/../../x` escaped the media directory.
+- A new test covers a group photo from a user with a live draft. The old group test passed without
+  the guard.
+
 ## P3 — worker pause signal, digest line, media pruning (parallel with P1)
 
 Files: `src/jobs/bug-report-worker.ts` + test (pause state only), `src/jobs/daily-status.ts` + test,

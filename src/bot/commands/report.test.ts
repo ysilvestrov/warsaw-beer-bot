@@ -255,3 +255,27 @@ test('/cancel deletes a live draft', async () => {
   expect(getDraft(db, 101)).toBeNull();
   expect(h.replies.map((r) => r.text)).toEqual(['Report cancelled.']);
 });
+
+test('media is downloaded before the report row exists, so the worker never sees it half-built', async () => {
+  const rowsAtDownload: unknown[] = [];
+  const h = harness('en', async (id: string) => {
+    rowsAtDownload.push(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get());
+    return Buffer.from(id);
+  });
+  saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
+    media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }, { fileId: 'b', kind: 'photo', fileSize: 1, ext: 'jpg' }],
+    updatedAt: '2026-09-27T11:59:00.000Z' });
+  await h.send(action(1, 101, 'report:send'));
+  expect(rowsAtDownload).toEqual([{ n: 0 }, { n: 0 }]);
+  expect(listMedia(db, 1).map((m) => m.bytes)).toEqual([1, 1]);
+});
+
+test('a group photo from a user with a live media draft passes downstream and leaves the draft', async () => {
+  const h = harness();
+  const draft = { step: 'media' as const, source: 'bot' as const, category: 'wrong_beer' as const,
+    text: 'Wrong beer shown', media: [], updatedAt: '2026-09-27T11:59:00.000Z' };
+  saveDraft(db, 101, draft);
+  await h.send(photoUpdate(1, 101, 'group'));
+  expect(h.downstream).toEqual(['photo']);
+  expect(getDraft(db, 101)).toEqual(draft);
+});

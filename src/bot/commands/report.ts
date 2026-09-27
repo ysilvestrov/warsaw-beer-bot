@@ -12,7 +12,7 @@ import { warsawDayStartUtc } from '../../domain/warsaw-time';
 import { addMedia, countSubmittedSince, insertReport } from '../../storage/bug_reports';
 import { clearBan, deleteDraft, getDraft, isBanned, saveDraft, setBan } from '../../storage/bug_report_drafts';
 import { getUserCity } from '../../storage/user_profiles';
-import { saveReportMedia } from '../bug-report-media';
+import { downloadMedia, writeReportMediaSync } from '../bug-report-media';
 
 export interface ReportCommandDeps {
   available: boolean;
@@ -71,6 +71,14 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
         return;
       }
       const accepted = await ctx.reply(ctx.t('report.accepted'));
+      const buffers: (Buffer | null)[] = [];
+      for (const media of result.submission.media) {
+        buffers.push(await downloadMedia(media.fileId, deps.downloadFile));
+      }
+      const mediaDir = deps.mediaDir;
+      // No `await` from here to triggerWorker: the worker runs in this process, and a report
+      // visible before its media rows would be judged without screenshots and published as
+      // "no media".
       const reportId = insertReport(db, {
         telegramId, chatId: ctx.chat!.id, statusMessageId: accepted.message_id,
         locale: ctx.locale, city: getUserCity(db, telegramId),
@@ -78,8 +86,8 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
         text: result.submission.text, createdAt: now.toISOString(),
       });
       for (const [idx, media] of result.submission.media.entries()) {
-        const saved = await saveReportMedia({
-          dir: deps.mediaDir, reportId, idx, media, download: deps.downloadFile,
+        const saved = writeReportMediaSync({
+          dir: mediaDir, reportId, idx, ext: media.ext, data: buffers[idx],
         });
         addMedia(db, { reportId, idx, kind: media.kind, ...saved });
       }
