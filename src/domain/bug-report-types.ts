@@ -66,6 +66,7 @@ export interface RawVerdict extends TemplateFields {
   labels: string[];
   severity: Severity;
   effort: Effort;
+  related: number[];
 }
 
 // ---------------------------------------------------------------------------
@@ -112,9 +113,9 @@ export interface ReportContext {
 // ---------------------------------------------------------------------------
 
 export type ValidatedVerdict =
-  | { kind: 'new'; fields: TemplateFields; labels: string[]; severity: Severity; effort: Effort }
-  | { kind: 'duplicate_open'; issue: IssueDetail; fields: TemplateFields }
-  | { kind: 'duplicate_closed'; issue: IssueDetail; fields: TemplateFields }
+  | { kind: 'new'; fields: TemplateFields; labels: string[]; severity: Severity; effort: Effort; related: number[] }
+  | { kind: 'duplicate_open'; issue: IssueDetail; fields: TemplateFields; related: number[] }
+  | { kind: 'duplicate_closed'; issue: IssueDetail; fields: TemplateFields; related: number[] }
   | { kind: 'not_a_bug' };
 
 export type ValidationResult =

@@ -13,7 +13,7 @@ const validOutput = {
   summary: 'Маршрут пропускає паб', where: 'Маршрут', subjects: ['Паб'],
   expected: 'Паб у маршруті', actual: 'Паб відсутній', steps: ['Побудувати маршрут'],
   screen_evidence: ['Паба не видно'], new_evidence: '', labels: ['bug'],
-  severity: 'Severity-3', effort: 'effort/M',
+  severity: 'Severity-3', effort: 'effort/M', related: [12],
 };
 
 function response(status: number, body: unknown) {
@@ -65,10 +65,11 @@ ${'C'.repeat(1500)}`);
 test('VERDICT_SCHEMA requires every snake-case field and forbids extras', () => {
   expect(VERDICT_SCHEMA.required).toEqual([
     'verdict', 'issue_number', 'title', 'summary', 'where', 'subjects', 'expected',
-    'actual', 'steps', 'screen_evidence', 'new_evidence', 'labels', 'severity', 'effort',
+    'actual', 'steps', 'screen_evidence', 'new_evidence', 'labels', 'severity', 'effort', 'related',
   ]);
   expect(VERDICT_SCHEMA.additionalProperties).toBe(false);
   expect(VERDICT_SCHEMA.properties.issue_number).toEqual({ type: ['integer', 'null'] });
+  expect(VERDICT_SCHEMA.properties.related).toEqual({ type: 'array', items: { type: 'integer' } });
 });
 
 test('judge sends strict schema and two image parts without unsupported request keys', async () => {
@@ -111,7 +112,7 @@ test('judge maps every snake-case field to RawVerdict camel case', async () => {
     summary: 'Маршрут пропускає паб', where: 'Маршрут', subjects: ['Паб'],
     expected: 'Паб у маршруті', actual: 'Паб відсутній', steps: ['Побудувати маршрут'],
     screenEvidence: ['Паба не видно'], newEvidence: '', labels: ['bug'],
-    severity: 'Severity-3', effort: 'effort/M',
+    severity: 'Severity-3', effort: 'effort/M', related: [12],
   });
 });
 
@@ -123,11 +124,17 @@ test.each([
   ['labels of the wrong type', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, labels: null }) } }] }],
   ['a non-string array item', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, steps: ['ok', 3] }) } }] }],
   ['a fractional issue number', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, issue_number: 1.5 }) } }] }],
+  ['related of the wrong type', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, related: null }) } }] }],
+  ['a fractional related number', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, related: [1.5] }) } }] }],
   ['a numeric title', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, title: 7 }) } }] }],
 ])('judge rejects %s as InvalidVerdictOutputError', async (_case, body) => {
   const fetchImpl = vi.fn().mockResolvedValue(response(200, body));
   const result = createOpenAiJudge({ apiKey: 'key', model: 'gpt-test', fetchImpl }).judge(botInput);
   await expect(result).rejects.toBeInstanceOf(InvalidVerdictOutputError);
+});
+
+test('the prompt defines related', () => {
+  expect(VERDICT_SYSTEM_PROMPT).toContain('related: numbers of CANDIDATE ISSUES that are not the same defect');
 });
 
 test('judge reports HTTP 500 as HttpStatusError without retrying', async () => {

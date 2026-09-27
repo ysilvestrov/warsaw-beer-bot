@@ -14,7 +14,7 @@ const bot: ReportContext = {
 };
 
 test('renders a full bot issue with steps and screenshot evidence', () => {
-  expect(renderIssueBody(fields, bot)).toBe(`## Симптом
+  expect(renderIssueBody(fields, bot, [])).toBe(`## Симптом
 Пиво показує чужий рейтинг
 
 **Де:** Картка пива
@@ -43,7 +43,7 @@ test('renders extension issue without empty optional sections and with stored me
   expect(renderIssueBody({ ...fields, steps: [], screenEvidence: [] }, {
     ...bot, source: 'extension', category: 'no_badge', city: null,
     latestExtensionVersion: '0.16.0', mediaStored: 2,
-  })).toBe(`## Симптом
+  }, [])).toBe(`## Симптом
 Пиво показує чужий рейтинг
 
 **Де:** Картка пива
@@ -64,7 +64,7 @@ Severity і effort — оцінка агента.
 test('renders missing extension version and failed media', () => {
   expect(renderIssueBody({ ...fields, summary: '', where: '', subjects: [], expected: '', actual: '', steps: [], screenEvidence: [] }, {
     ...bot, source: 'extension', category: 'other', city: null, mediaFailed: 1,
-  })).toBe(`## Симптом
+  }, [])).toBe(`## Симптом
 —
 
 **Де:** —
@@ -79,6 +79,34 @@ test('renders missing extension version and failed media', () => {
 
 Severity і effort — оцінка агента.
 Скарга R-7 · медіа: не збережено (1)
+<!-- bug-report:7 -->`);
+});
+
+test('related issues render as one line right before the context section', () => {
+  expect(renderIssueBody(fields, bot, [539, 666])).toBe(`## Симптом
+Пиво показує чужий рейтинг
+
+**Де:** Картка пива
+**Об'єкти:** Броварня, Пиво
+**Очікувано:** Рейтинг 4.2
+**Фактично:** Рейтинг 3.1
+
+## Кроки
+1. Відкрити картку
+2. Подивитися рейтинг
+
+## Видно на скріншотах
+- Видно 3.1
+
+**Схожі (оцінка агента):** #539, #666
+
+## Контекст
+| Джерело | Категорія | Версія розширення | Місто | Мова |
+|---|---|---|---|---|
+| Бот | Не те пиво / чужий рейтинг | — | Варшава | uk |
+
+Severity і effort — оцінка агента.
+Скарга R-7 · медіа: немає
 <!-- bug-report:7 -->`);
 });
 
@@ -103,7 +131,7 @@ test('renders a duplicate comment with empty new evidence and no severity line',
 });
 
 test('reports failed media alongside stored files', () => {
-  expect(renderIssueBody(fields, { ...bot, mediaStored: 2, mediaFailed: 1 }))
+  expect(renderIssueBody(fields, { ...bot, mediaStored: 2, mediaFailed: 1 }, []))
     .toContain('Скарга R-7 · медіа: 2 файл(и), лише на сервері: `bug-reports/7/`, не збережено: 1');
 });
 

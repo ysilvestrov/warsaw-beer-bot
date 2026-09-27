@@ -47,10 +47,12 @@ function media(ctx: ReportContext): string {
   return ctx.mediaFailed > 0 ? `не збережено (${ctx.mediaFailed})` : 'немає';
 }
 
-function issueSections(f: TemplateFields, ctx: ReportContext, includeEstimate: boolean): string {
+function issueSections(f: TemplateFields, ctx: ReportContext, includeEstimate: boolean, related: number[]): string {
   const steps = f.steps.length > 0 ? `\n\n## Кроки\n${f.steps.map((step, i) => `${i + 1}. ${step}`).join('\n')}` : '';
   const screens = f.screenEvidence.length > 0
     ? `\n\n## Видно на скріншотах\n${f.screenEvidence.map((line) => `- ${line}`).join('\n')}` : '';
+  const relatedLine = related.length > 0
+    ? `\n\n**Схожі (оцінка агента):** ${related.map((number) => `#${number}`).join(', ')}` : '';
   const version = ctx.source === 'bot' ? '—' : ctx.latestExtensionVersion
     ? `невідома (остання опублікована: ${ctx.latestExtensionVersion})` : 'невідома';
   const estimate = includeEstimate ? '\nSeverity і effort — оцінка агента.' : '';
@@ -60,7 +62,7 @@ ${shown(f.summary)}
 **Де:** ${shown(f.where)}
 **Об'єкти:** ${f.subjects.length > 0 ? f.subjects.join(', ') : '—'}
 **Очікувано:** ${shown(f.expected)}
-**Фактично:** ${shown(f.actual)}${steps}${screens}
+**Фактично:** ${shown(f.actual)}${steps}${screens}${relatedLine}
 
 ## Контекст
 | Джерело | Категорія | Версія розширення | Місто | Мова |
@@ -71,10 +73,10 @@ ${estimate}
 <!-- bug-report:${ctx.reportId} -->`;
 }
 
-export function renderIssueBody(f: TemplateFields, ctx: ReportContext): string {
-  return issueSections(f, ctx, true);
+export function renderIssueBody(f: TemplateFields, ctx: ReportContext, related: number[]): string {
+  return issueSections(f, ctx, true, related);
 }
 
 export function renderDuplicateComment(f: TemplateFields, ctx: ReportContext): string {
-  return `**Нове в цій скарзі:** ${shown(f.newEvidence)}\n\n${issueSections(f, ctx, false)}`;
+  return `**Нове в цій скарзі:** ${shown(f.newEvidence)}\n\n${issueSections(f, ctx, false, [])}`;
 }
