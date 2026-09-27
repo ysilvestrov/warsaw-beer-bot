@@ -80,9 +80,9 @@ test('a late text expires the draft and passes through', () => {
     { type: 'text', text: '1234567890' }, NOW)).toEqual({ draft: null, replies: [], passThrough: true });
 });
 
-test('pick_source at another step is ignored but refreshes the live draft', () => {
+test('pick_source at another step is ignored and leaves the draft untouched', () => {
   expect(stepFlow(textDraft, { type: 'pick_source', source: 'extension' }, NOW)).toEqual({
-    draft: { ...textDraft, updatedAt: ISO }, replies: [], passThrough: false,
+    draft: textDraft, replies: [], passThrough: false,
   });
 });
 
@@ -95,25 +95,25 @@ test('pick_category accepts a category for the selected source', () => {
 
 test('a bot draft rejects extension-only no_badge', () => {
   expect(stepFlow(category, { type: 'pick_category', category: 'no_badge' }, NOW)).toEqual({
-    draft: { ...category, updatedAt: ISO }, replies: [], passThrough: false,
+    draft: category, replies: [], passThrough: false,
   });
 });
 
 test('pick_category outside the category step is ignored', () => {
   expect(stepFlow(textDraft, { type: 'pick_category', category: 'other' }, NOW)).toEqual({
-    draft: { ...textDraft, updatedAt: ISO }, replies: [], passThrough: false,
+    draft: textDraft, replies: [], passThrough: false,
   });
 });
 
 test('/newbeers at the text step passes through without changing the draft fields', () => {
   expect(stepFlow(textDraft, { type: 'text', text: '/newbeers' }, NOW)).toEqual({
-    draft: { ...textDraft, updatedAt: ISO }, replies: [], passThrough: true,
+    draft: textDraft, replies: [], passThrough: true,
   });
 });
 
 test('text at a different step passes through', () => {
   expect(stepFlow(mediaDraft, { type: 'text', text: 'another description' }, NOW)).toEqual({
-    draft: { ...mediaDraft, updatedAt: ISO }, replies: [], passThrough: true,
+    draft: mediaDraft, replies: [], passThrough: true,
   });
 });
 
@@ -132,7 +132,7 @@ test('ten trimmed characters move to media', () => {
 
 test('media at a different step passes through', () => {
   expect(stepFlow(textDraft, { type: 'media', media }, NOW)).toEqual({
-    draft: { ...textDraft, updatedAt: ISO }, replies: [], passThrough: true,
+    draft: textDraft, replies: [], passThrough: true,
   });
 });
 
@@ -169,7 +169,7 @@ test('media_done summarizes the draft with translation parameters', () => {
 
 test('media_done outside the media step is ignored', () => {
   expect(stepFlow(confirm, { type: 'media_done' }, NOW)).toEqual({
-    draft: { ...confirm, updatedAt: ISO }, replies: [], passThrough: false,
+    draft: confirm, replies: [], passThrough: false,
   });
 });
 
@@ -188,6 +188,6 @@ test('submit rechecks the daily limit and deletes the draft at three reports', (
 
 test('submit outside the confirm step is ignored', () => {
   expect(stepFlow(mediaDraft, { type: 'submit', submittedToday: 0 }, NOW)).toEqual({
-    draft: { ...mediaDraft, updatedAt: ISO }, replies: [], passThrough: false,
+    draft: mediaDraft, replies: [], passThrough: false,
   });
 });

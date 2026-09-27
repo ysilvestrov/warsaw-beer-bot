@@ -82,7 +82,7 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
       };
     case 'text': {
       if (draft.step !== 'text' || event.text.startsWith('/')) {
-        return { draft, replies: [], passThrough: true };
+        return { draft: stored, replies: [], passThrough: true };
       }
       const trimmed = event.text.trim();
       if (trimmed.length < MIN_TEXT) {
@@ -94,7 +94,7 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
       };
     }
     case 'media':
-      if (draft.step !== 'media') return { draft, replies: [], passThrough: true };
+      if (draft.step !== 'media') return { draft: stored, replies: [], passThrough: true };
       if (event.media.fileSize !== null && event.media.fileSize > MAX_MEDIA_BYTES) {
         return { draft, replies: [{ key: 'report.media_too_big' }], passThrough: false };
       }
@@ -124,5 +124,8 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
         submission: { source: draft.source!, category: draft.category!, text: draft.text!, media: draft.media },
       };
   }
-  return { draft, replies: [], passThrough: false };
+  // Ignored events and pass-throughs return the STORED draft: only an interaction with the
+  // report itself extends its life. Otherwise ordinary use of the bot would keep a stale draft
+  // alive forever, and an unrelated file sent hours later would land in an old report.
+  return { draft: stored, replies: [], passThrough: false };
 }
