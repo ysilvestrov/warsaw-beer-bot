@@ -1,3 +1,4 @@
+import { rmSync } from 'node:fs';
 import { Composer, Markup } from 'telegraf';
 import type { BotContext } from '../index';
 import type { Messages } from '../../i18n/types';
@@ -61,7 +62,8 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
     const db = ctx.deps.db;
     const telegramId = ctx.from!.id;
     const now = deps.now();
-    const result = stepFlow(getDraft(db, telegramId), event, now);
+    const stored = getDraft(db, telegramId);
+    const result = stepFlow(stored, event, now);
     // Synchronous, before the first await: a submit claims its draft here. Telegraf handles
     // updates concurrently, so a double-tapped "Send" must find the draft already gone (the
     // second press gets "expired"), or it files the same report twice. The cost — a crash
@@ -84,9 +86,11 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
       // visible before its media rows would be judged without screenshots and published as
       // "no media".
       const submission = result.submission;
+      const written: string[] = [];
       // One transaction: a crash or DB error between the report row and its media rows rolls
       // both back, so no restart can find a queued report missing its evidence.
-      db.transaction(() => {
+      try {
+        db.transaction(() => {
         const reportId = insertReport(db, {
           telegramId, chatId: ctx.chat!.id, statusMessageId: accepted.message_id,
           locale: ctx.locale, city: getUserCity(db, telegramId),
@@ -97,9 +101,20 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
           const saved = writeReportMediaSync({
             dir: mediaDir, reportId, idx, ext: media.ext, data: buffers[idx],
           });
+          if (saved.bytes > 0) written.push(saved.path);
           addMedia(db, { reportId, idx, kind: media.kind, ...saved });
         }
-      })();
+        })();
+      } catch (error) {
+        // A thrown error (not a crash) after the claim: give the draft back at the confirm step so
+        // one more press retries, and remove files the rolled-back rows no longer track. This
+        // cannot reopen the double-tap: the draft returns only after this press has failed.
+        for (const path of written) rmSync(path, { force: true });
+        if (stored) saveDraft(db, telegramId, { ...stored, updatedAt: now.toISOString() });
+        ctx.deps.log.error({ err: error, telegramId }, 'bug report submission failed');
+        await ctx.reply(ctx.t('report.retry'));
+        return;
+      }
       deps.triggerWorker();
     }
     if (result.passThrough) await next();

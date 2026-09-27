@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -75,7 +76,7 @@ function harness(locale: Locale = 'en', downloadFile = async (id: string) => Buf
   let answered = 0;
   let messageId = 1000;
   bot.use((ctx, next) => {
-    ctx.deps = { db, env: { ADMIN_TELEGRAM_ID: '999' }, log: {} } as never;
+    ctx.deps = { db, env: { ADMIN_TELEGRAM_ID: '999' }, log: { error: () => {}, warn: () => {}, info: () => {} } } as never;
     ctx.locale = locale;
     ctx.t = createTranslator(locale);
     ctx.reply = (async (value: string, extra?: unknown) => {
@@ -292,15 +293,22 @@ test('a double-tapped Send files exactly one report; the second press finds the 
   ].sort());
 });
 
-test('a failure while recording media rolls back the report row too', async () => {
+test('a DB failure while recording media rolls back the row, removes the file and gives the draft back for a retry', async () => {
   const h = harness('en', async (id: string) => Buffer.from(id));
   db.exec(`CREATE TRIGGER fail_media BEFORE INSERT ON bug_report_media
     BEGIN SELECT RAISE(ABORT, 'disk full'); END;`);
   saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
     media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }], updatedAt: '2026-09-27T11:59:00.000Z' });
-  await h.send(action(1, 101, 'report:send')).catch(() => undefined);
+  await h.send(action(1, 101, 'report:send'));
   expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 0 });
   expect(h.triggered()).toBe(0);
+  expect(existsSync(join(mediaDir, '1', '0.jpg'))).toBe(false);
+  expect(getDraft(db, 101)?.step).toBe('confirm');
+  expect(h.replies.at(-1)?.text).toBe('The report could not be accepted — press “Send” again.');
+  db.exec('DROP TRIGGER fail_media');
+  await h.send(action(2, 101, 'report:send'));
+  expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 1 });
+  expect(h.triggered()).toBe(1);
 });
 
 test('a user banned after opening the draft cannot submit it', async () => {
