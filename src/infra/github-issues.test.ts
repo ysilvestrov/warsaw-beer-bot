@@ -185,3 +185,14 @@ test('getIssueWithComments makes no comments request when count is zero', async 
 function response(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
+
+test('a hung GitHub request aborts after timeoutMs with a transient TimeoutError', async () => {
+  // Resolves only when the request's signal aborts, like a real fetch on a hung socket.
+  const hanging = vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+    init.signal!.addEventListener('abort', () => reject(init.signal!.reason));
+  }));
+  const error = await createGithubIssuesClient({ token: 't', repo: 'o/r', fetchImpl: hanging as never, timeoutMs: 20 })
+    .getIssueWithComments(1, 3).catch((e: unknown) => e);
+  expect((error as Error).name).toBe('TimeoutError');
+  expect(isTransient(error)).toBe(true);
+});

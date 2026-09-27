@@ -25,6 +25,7 @@ export function createGithubIssuesClient(cfg: {
   token: string;
   repo: string;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }): GithubIssuesClient & BugReportGithub {
   const fetchImpl = cfg.fetchImpl ?? fetch;
   const base = `https://api.github.com/repos/${cfg.repo}`;
@@ -38,7 +39,9 @@ export function createGithubIssuesClient(cfg: {
 
   async function call<T>(url: string, init?: RequestInit): Promise<T> {
     // NOTE: `headers` wins over `init` here — callers must not pass init.headers.
-    const res = await fetchImpl(url, { ...init, headers });
+    // The bug-report worker holds a re-entrancy flag for the whole run, so one hung request
+    // would stop every later run; the abort surfaces as a transient TimeoutError.
+    const res = await fetchImpl(url, { ...init, headers, signal: AbortSignal.timeout(cfg.timeoutMs ?? 30_000) });
     if (!res.ok) {
       const text = await res.text().catch(() => '');
       // Typed so the caller (orphan-triage) can tell a retriable 5xx from a

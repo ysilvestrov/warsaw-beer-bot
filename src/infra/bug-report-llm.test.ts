@@ -120,6 +120,10 @@ test.each([
   ['length finish', { choices: [{ finish_reason: 'length', message: { content: JSON.stringify(validOutput) } }] }],
   ['invalid JSON', { choices: [{ finish_reason: 'stop', message: { content: '{' } }] }],
   ['missing required key', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, title: undefined }) } }] }],
+  ['labels of the wrong type', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, labels: null }) } }] }],
+  ['a non-string array item', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, steps: ['ok', 3] }) } }] }],
+  ['a fractional issue number', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, issue_number: 1.5 }) } }] }],
+  ['a numeric title', { choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ...validOutput, title: 7 }) } }] }],
 ])('judge rejects %s as InvalidVerdictOutputError', async (_case, body) => {
   const fetchImpl = vi.fn().mockResolvedValue(response(200, body));
   const result = createOpenAiJudge({ apiKey: 'key', model: 'gpt-test', fetchImpl }).judge(botInput);
