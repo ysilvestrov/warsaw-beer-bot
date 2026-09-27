@@ -1,4 +1,5 @@
 import type { OpenIssue } from '../domain/triage-analysis';
+import type { BugReportGithub, IssueCandidate, IssueDetail } from '../domain/bug-report-types';
 import { HttpStatusError } from '../domain/transient-error';
 
 export interface GithubIssuesClient {
@@ -24,7 +25,7 @@ export function createGithubIssuesClient(cfg: {
   token: string;
   repo: string;
   fetchImpl?: typeof fetch;
-}): GithubIssuesClient {
+}): GithubIssuesClient & BugReportGithub {
   const fetchImpl = cfg.fetchImpl ?? fetch;
   const base = `https://api.github.com/repos/${cfg.repo}`;
   const headers = {
@@ -68,6 +69,62 @@ export function createGithubIssuesClient(cfg: {
         // life carrying a large enumerated cohort.
         createdAt: r.created_at,
       }));
+    },
+    async listIssuesByLabels(labels) {
+      type Raw = {
+        number: number; title: string; state: IssueCandidate['state'];
+        labels: { name: string }[]; created_at: string; closed_at: string | null;
+        pull_request?: unknown;
+      };
+      const byNumber = new Map<number, IssueCandidate>();
+      for (const label of labels) {
+        let page = 1;
+        let raw: Raw[];
+        do {
+          raw = await call<Raw[]>(
+            `${base}/issues?state=all&labels=${encodeURIComponent(label)}&per_page=100&page=${page}`,
+          );
+          for (const issue of raw) {
+            if (issue.pull_request) continue;
+            byNumber.set(issue.number, {
+              number: issue.number, title: issue.title, state: issue.state,
+              labels: issue.labels.map((item) => item.name), createdAt: issue.created_at,
+              closedAt: issue.closed_at,
+            });
+          }
+          page += 1;
+        } while (raw.length === 100);
+      }
+      return [...byNumber.values()].sort((a, b) => b.number - a.number);
+    },
+    async getIssueWithComments(issueNumber, lastComments) {
+      type RawIssue = {
+        number: number; title: string; body: string | null;
+        state: IssueDetail['state']; state_reason: IssueDetail['stateReason'];
+        labels: { name: string }[]; created_at: string; closed_at: string | null;
+        comments: number;
+      };
+      type RawComment = { body: string | null; created_at: string };
+      const issue = await call<RawIssue>(`${base}/issues/${issueNumber}`);
+      const comments: RawComment[] = [];
+      if (lastComments > 0 && issue.comments > 0) {
+        const firstPage = Math.max(1, Math.floor((issue.comments - lastComments) / 100) + 1);
+        const lastPage = Math.ceil(issue.comments / 100);
+        for (let page = firstPage; page <= lastPage; page += 1) {
+          comments.push(...await call<RawComment[]>(
+            `${base}/issues/${issueNumber}/comments?per_page=100&page=${page}`,
+          ));
+        }
+      }
+      return {
+        number: issue.number, title: issue.title, state: issue.state,
+        labels: issue.labels.map((label) => label.name),
+        createdAt: issue.created_at, closedAt: issue.closed_at,
+        body: issue.body ?? '', stateReason: issue.state_reason,
+        comments: lastComments > 0 ? comments.slice(-lastComments).map((comment) => ({
+          body: comment.body ?? '', createdAt: comment.created_at,
+        })) : [],
+      };
     },
     async createIssue(i) {
       const r = await call<{ number: number }>(`${base}/issues`, {
