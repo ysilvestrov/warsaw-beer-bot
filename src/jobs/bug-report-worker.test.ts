@@ -290,7 +290,7 @@ test('bot reports pass null version to the judge and render an empty version', a
   addReport();
   await run();
   expect(vi.mocked(deps.judge.judge).mock.calls[0][0].latestExtensionVersion).toBeNull();
-  expect(vi.mocked(deps.github.createIssue).mock.calls[0][0].body).toContain('| Бот |');
+  expect(vi.mocked(deps.github.createIssue).mock.calls[0][0].body).toMatch(/\| Бот \| [^|]+ \| — \|/);
   expect(deps.latestExtensionVersion).not.toHaveBeenCalled();
 });
 

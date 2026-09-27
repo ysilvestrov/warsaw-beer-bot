@@ -95,6 +95,15 @@ function parseVerdict(content: string): RawVerdict {
     || VERDICT_SCHEMA.required.some((key) => !Object.hasOwn(raw, key))) {
     throw new InvalidVerdictOutputError('Missing verdict field');
   }
+  // Strict json_schema should make these impossible, but a wrong type here would surface later
+  // as a TypeError, which the worker treats as permanent instead of re-judging.
+  const isString = (v: unknown): boolean => typeof v === 'string';
+  const isStrings = (v: unknown): boolean => Array.isArray(v) && v.every(isString);
+  const wrongType = (['verdict', 'title', 'summary', 'where', 'expected', 'actual', 'new_evidence',
+    'severity', 'effort'] as const).find((k) => !isString(raw[k]))
+    ?? (['subjects', 'steps', 'screen_evidence', 'labels'] as const).find((k) => !isStrings(raw[k]))
+    ?? (raw.issue_number === null || Number.isInteger(raw.issue_number) ? undefined : 'issue_number');
+  if (wrongType) throw new InvalidVerdictOutputError(`Wrong type for ${wrongType}`);
   return {
     verdict: raw.verdict, issueNumber: raw.issue_number,
     title: raw.title, summary: raw.summary, where: raw.where,
