@@ -269,7 +269,9 @@ housekeeping one at the bottom:
   "broken".
 - **"Refresh this page"** (the outlined button) — resets the overlay cache for
   the **current** page and redraws the badges (handy if the shop loaded new
-  items, or you just ran `/import`). The result lands in the caption right
+  items, or you just ran `/import`). With beer search enabled, a beer that reached
+  the catalog after the first check swaps its magnifier for the rating on an
+  ordinary page reload. The result lands in the caption right
   below the button: `Nothing to refresh — no beers found on this page.` when
   the extension didn't find any beer cards there, or `Refreshed — 3 beers will
   be rechecked.` when it did. On a page the extension doesn't support, the
@@ -354,6 +356,7 @@ Supporter.
 | Badges don't appear | 1) Are you on a supported site from the list above? 2) Have you run `/import`? 3) Reload the page. |
 | Ran `/extension` again — it stopped working | The old token was invalidated. Paste the **new** token in the settings and **Save**. |
 | Changed the API URL — it's not fetching | During **Save** the browser asks for host permission — allow it (or add the permission via `chrome://extensions → Details`). |
+| Something else is wrong: a wrong beer or rating, a missing badge, a button that does nothing | Send `/report` to the bot, choose **Extension**, describe what you saw and attach a screenshot. The bot checks whether it is already known and replies with a link. Screenshots stay on our server and are not published. |
 
 ---
 
