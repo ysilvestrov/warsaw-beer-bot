@@ -5,7 +5,8 @@ import { HttpStatusError } from '../domain/transient-error';
 import { openDb, type DB } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { bugReportStore } from '../storage/bug_reports';
-import { createBugReportWorker } from './bug-report-worker';
+import { getJobState, setJobState } from '../storage/job_state';
+import { BUG_REPORT_PAUSED_KEY, createBugReportWorker } from './bug-report-worker';
 
 const NOW = '2026-09-26T12:00:00.000Z';
 const report: NewBugReport = {
@@ -346,4 +347,63 @@ test('a 403 on the GitHub write after publishing still needs review', async () =
   await run();
   expect(row(id)).toMatchObject({ status: 'needs_review', attempts: 0 });
   expect(outcomes).toEqual([{ id, outcome: { kind: 'needs_review' } }]);
+});
+
+test('the first credential refusal records a pause with time and status', async () => {
+  addReport();
+  vi.mocked(deps.selector.select).mockRejectedValueOnce(new HttpStatusError('refused', 401));
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBe(
+    '{"since":"2026-09-26T12:00:00.000Z","status":401}',
+  );
+});
+
+test('a second credential refusal in a later run preserves the original pause', async () => {
+  addReport();
+  vi.mocked(deps.selector.select)
+    .mockRejectedValueOnce(new HttpStatusError('refused', 401))
+    .mockRejectedValueOnce(new HttpStatusError('out of credit', 402));
+  await run();
+  deps.now = () => new Date('2026-09-26T13:00:00.000Z');
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBe(
+    '{"since":"2026-09-26T12:00:00.000Z","status":401}',
+  );
+});
+
+test('a successful report clears the credential pause', async () => {
+  addReport();
+  setJobState(db, BUG_REPORT_PAUSED_KEY,
+    '{"since":"2026-09-26T11:00:00.000Z","status":403}');
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBeNull();
+});
+
+test('a terminal not-a-bug report also clears the credential pause', async () => {
+  addReport();
+  setJobState(db, BUG_REPORT_PAUSED_KEY,
+    '{"since":"2026-09-26T11:00:00.000Z","status":403}');
+  vi.mocked(deps.judge.judge).mockResolvedValueOnce({
+    ...raw, verdict: 'not_a_bug', issueNumber: null,
+  });
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBeNull();
+});
+
+test('a transient 503 does not create a pause', async () => {
+  addReport();
+  vi.mocked(deps.selector.select).mockRejectedValueOnce(new HttpStatusError('unavailable', 503));
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBeNull();
+});
+
+test('a transient 503 does not clear an existing credential pause', async () => {
+  addReport();
+  setJobState(db, BUG_REPORT_PAUSED_KEY,
+    '{"since":"2026-09-26T11:00:00.000Z","status":401}');
+  vi.mocked(deps.selector.select).mockRejectedValueOnce(new HttpStatusError('unavailable', 503));
+  await run();
+  expect(getJobState(db, BUG_REPORT_PAUSED_KEY)).toBe(
+    '{"since":"2026-09-26T11:00:00.000Z","status":401}',
+  );
 });

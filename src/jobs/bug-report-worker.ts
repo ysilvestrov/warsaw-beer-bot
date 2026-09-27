@@ -8,6 +8,9 @@ import { renderDuplicateComment, renderIssueBody } from '../domain/bug-report-te
 import { validateVerdict } from '../domain/bug-report-verdict';
 import { isTransient } from '../domain/transient-error';
 import { warsawDayStartUtc } from '../domain/warsaw-time';
+import { deleteJobState, getJobState, setJobState } from '../storage/job_state';
+
+export const BUG_REPORT_PAUSED_KEY = 'bug_report_paused';
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -90,6 +93,10 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
   }
 
   async function processReport(report: BugReportRow): Promise<boolean> {
+    const finished = (): true => {
+      deleteJobState(db, BUG_REPORT_PAUSED_KEY);
+      return true;
+    };
     let publishing = false;
     try {
       const selected = await deps.selector.select(
@@ -111,14 +118,14 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
       if ('error' in judged) {
         store.markFailed(db, report.id, { error: judged.error, processedAt: deps.now().toISOString() });
         await notify(report, { kind: 'failed' });
-        return true;
+        return finished();
       }
       const value = judged.value;
       const processedAt = deps.now().toISOString();
       if (value.kind === 'not_a_bug') {
         store.markDone(db, report.id, { verdict: 'not_a_bug', issueNumber: null, processedAt });
         await notify(report, { kind: 'not_a_bug' });
-        return true;
+        return finished();
       }
       const ctx: ReportContext = {
         reportId: report.id, source: report.source, category: report.category,
@@ -149,16 +156,21 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
             };
       }
       await notify(report, outcome);
-      return true;
+      return finished();
     } catch (error) {
       const message = errorMessage(error);
       if (publishing) {
         store.markNeedsReview(db, report.id, deps.now().toISOString());
         await notify(report, { kind: 'needs_review' });
         deps.log.error({ reportId: report.id, error }, 'Bug report publish uncertain');
-        return true;
+        return finished();
       }
       if (isCredentialRefusal(error)) {
+        if (getJobState(db, BUG_REPORT_PAUSED_KEY) === null) {
+          setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({
+            since: deps.now().toISOString(), status: (error as { status: number }).status,
+          }));
+        }
         deps.log.error({ reportId: report.id, error }, 'Bug report upstream refused our credentials; queue paused');
         return false;
       }
@@ -166,7 +178,7 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
       if (!isTransient(error) || attempts >= maxAttempts) {
         store.markFailed(db, report.id, { error: message, processedAt: deps.now().toISOString() });
         await notify(report, { kind: 'failed' });
-        return true;
+        return finished();
       }
       deps.log.warn({ reportId: report.id, error, attempts }, 'Bug report processing will retry');
       return false;
