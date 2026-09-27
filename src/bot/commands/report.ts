@@ -109,8 +109,13 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
         // A thrown error (not a crash) after the claim: give the draft back at the confirm step so
         // one more press retries, and remove files the rolled-back rows no longer track. This
         // cannot reopen the double-tap: the draft returns only after this press has failed.
-        for (const path of written) rmSync(path, { force: true });
-        if (stored) saveDraft(db, telegramId, { ...stored, updatedAt: now.toISOString() });
+        for (const path of written) {
+          try { rmSync(path, { force: true }); } catch { /* recovery must still reach the draft */ }
+        }
+        // Only if the user has not started a new draft meanwhile (possible during the downloads).
+        if (stored && !getDraft(db, telegramId)) {
+          saveDraft(db, telegramId, { ...stored, updatedAt: now.toISOString() });
+        }
         ctx.deps.log.error({ err: error, telegramId }, 'bug report submission failed');
         await ctx.reply(ctx.t('report.retry'));
         return;

@@ -321,3 +321,17 @@ test('a user banned after opening the draft cannot submit it', async () => {
   expect(db.prepare('SELECT COUNT(*) AS n FROM bug_reports').get()).toEqual({ n: 0 });
   expect(h.triggered()).toBe(0);
 });
+
+test('a failed submit does not overwrite a newer draft started during the downloads', async () => {
+  let h!: ReturnType<typeof harness>;
+  h = harness('en', async (id: string) => {
+    await h.send(command(9, 101, '/report')); // a new draft appears while the first submit downloads
+    return Buffer.from(id);
+  });
+  db.exec(`CREATE TRIGGER fail_media BEFORE INSERT ON bug_report_media
+    BEGIN SELECT RAISE(ABORT, 'disk full'); END;`);
+  saveDraft(db, 101, { step: 'confirm', source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown',
+    media: [{ fileId: 'a', kind: 'photo', fileSize: 1, ext: 'jpg' }], updatedAt: '2026-09-27T11:59:00.000Z' });
+  await h.send(action(1, 101, 'report:send'));
+  expect(getDraft(db, 101)?.step).toBe('source');
+});
