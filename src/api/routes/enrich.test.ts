@@ -86,6 +86,8 @@ test('sealed old card never writes through either enrich route; ABV-corrected ca
   };
   expect((await (await post(app, '/enrich/candidates', { beers: [card] })).json()).candidates[0])
     .toMatchObject({ brewery: card.brewery, name: card.name, eligible: false });
+  expect((await (await post(app, '/enrich/candidates', { beers: [card] })).json()).candidates[0].linked)
+    .toBeUndefined();
   expect(await (await post(app, '/enrich/result', {
     ...card, bid: 3615616, algolia: { hits: [] }, pageUrl: 'https://flasker.com.ua/',
   })).json()).toEqual({ status: 'not_found' });
@@ -176,6 +178,7 @@ describe('POST /enrich/candidates', () => {
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'PINTA', name: 'Atak Chmielu' }] });
     const body = await res.json();
     expect(body.candidates[0].eligible).toBe(false);
+    expect(body.candidates[0].linked).toBe(true);
   });
 
   it('is not eligible when recently searched (backoff active)', async () => {
@@ -189,6 +192,7 @@ describe('POST /enrich/candidates', () => {
     const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Bar', name: 'Foo' }] });
     const body = await res.json();
     expect(body.candidates[0].eligible).toBe(false);
+    expect(body.candidates[0].linked).toBeUndefined();
   });
 
   // #421. Red if someone adds the fix-keyed lock here for symmetry with the enrich pools.
@@ -360,6 +364,7 @@ describe('POST /enrich/candidates', () => {
       linkedRow(db, 6708599, source);
       const body = await (await candidatesForMadBrew(app, 6648348)).json();
       expect(body.candidates[0].eligible).toBe(false);
+      expect(body.candidates[0].linked).toBeUndefined();
     },
   );
 
@@ -375,6 +380,7 @@ describe('POST /enrich/candidates', () => {
     linkedRow(db, 6708599, 'search');
     const body = await (await candidatesForMadBrew(app, 6708599)).json();
     expect(body.candidates[0].eligible).toBe(false);
+    expect(body.candidates[0].linked).toBe(true);
   });
 
   it('is not eligible for a linked row when the shop publishes no bid', async () => {
@@ -382,6 +388,7 @@ describe('POST /enrich/candidates', () => {
     linkedRow(db, 6708599, 'search');
     const body = await (await candidatesForMadBrew(app)).json();
     expect(body.candidates[0].eligible).toBe(false);
+    expect(body.candidates[0].linked).toBe(true);
   });
 
   it('#614 answers a card with an alias with its canonical row and mints no orphan', async () => {
@@ -433,6 +440,7 @@ describe('POST /enrich/candidates', () => {
       .run(new Date(Date.now() - 3600_000).toISOString(), id);
     const body = await (await candidatesForMadBrew(app, 6648348)).json();
     expect(body.candidates[0].eligible).toBe(false);
+    expect(body.candidates[0].linked).toBeUndefined();
   });
 
   it('still applies the not_a_beer triage veto to a contradicted link', async () => {

@@ -6,6 +6,7 @@ import { clearKeys, setCachedMany, setCachedIfMatching } from '../cache/client';
 import { setCachedMany as setCachedManyDirect } from '../cache/store';
 import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
+import { stateFromMatch } from './card-state';
 import { getSettings } from '../shared/config';
 import type { SiteAdapter } from '../sites/types';
 import type { MatchReply, MatchMessage } from '../background/index';
@@ -93,6 +94,7 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
     await runEnrichment(beers, {
       getCandidates: async (bs) =>
         (await sendBg<{ candidates: EnrichCandidate[] }>({ type: 'enrich:candidates', beers: bs }))?.candidates ?? [],
+      refreshLinked: sendMatch,
       fetchSearch: async (algolia) =>
         (await sendBg<{ algolia: AlgoliaResponse | null }>({ type: 'enrich:fetch', algolia }))?.algolia ?? null,
       submitResult: async (brewery, name, algolia, facts, query) =>
@@ -108,10 +110,9 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
       // #648: дошук повідомляє події, а в бейдж їх перекладає одне це місце. Так уся мапа
       // «що сталося → що людина бачить» лишається там само, де стан із `/match`.
       //
-      // Відома межа: `found` після дошуку не знає, чи людина це пиво пила — `/enrich/result`
-      // статусу «пив» не несе, тож картка до й після перезавантаження може виглядати
-      // по-різному. Це не регрес цього issue (так було завжди); фіксить #666, який навчить
-      // дошук оновлювати кеш.
+      // `found` після Untappd-дошуку не знає, чи людина це пиво пила:
+      // `/enrich/result` не повертає цього статусу. `refreshed` бере повну відповідь
+      // `/match`, тож уже злінковане пиво показує і цей статус, і особистий рейтинг.
       onEvent: (key, ev) => {
         const els = elsByKey.get(key);
         if (!els) return;
@@ -122,6 +123,14 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
         switch (ev.kind) {
           case 'searching':
             return draw({ kind: 'working' });
+          case 'refreshed': {
+            const previous = resultByKey.get(key);
+            if (!previous) return;
+            void setCachedIfMatching(key, previous, ev.result).then((written) => {
+              if (written) draw(stateFromMatch(ev.result, { enrichmentPossible: false }));
+            }).catch(() => undefined);
+            return;
+          }
           case 'found':
             const previous = resultByKey.get(key);
             const previousBeer = previous?.matched_beer;

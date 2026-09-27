@@ -54,15 +54,38 @@ describe('createCatalogCache', () => {
     expect(load).toHaveBeenCalledTimes(1);
   });
 
-  it('serves stale then rebuilds in the background after a version bump (SWR)', async () => {
+  it('waits for a new snapshot after a version bump', async () => {
     let version = 0;
-    const load = vi.fn(() => rows);
+    const updated = [{ ...rows[0], untappd_id: 222 }, rows[1]];
+    const load = vi.fn(() => version === 0 ? rows : updated);
     const cache = make({ getVersion: () => version, load });
-    await cache.get();               // cold build at version 0
-    version = 1;                     // catalog changed
-    await cache.get();               // returns stale immediately, triggers bg rebuild
-    await cache.idle();              // wait for the background rebuild
+    await cache.get();
+    version = 1;
+    const fresh = await cache.get();
+    expect(fresh.byId.get(1)?.untappd_id).toBe(222);
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not answer a version-changed request before its rebuild finishes', async () => {
+    let version = 0;
+    const gate = deferred<void>();
+    const updated = [{ ...rows[0], untappd_id: 222 }, rows[1]];
+    const cache = make({
+      getVersion: () => version,
+      load: () => version === 0 ? rows : updated,
+      prepare: async (r) => {
+        if (version === 1) await gate.promise;
+        return prepareCatalogChunked(r);
+      },
+    });
+    await cache.get();
+    version = 1;
+    let answered = false;
+    const pending = cache.get().then((value) => { answered = true; return value; });
+    await Promise.resolve();
+    expect(answered).toBe(false);
+    gate.resolve();
+    expect((await pending).byUntappdId.get(222)?.id).toBe(1);
   });
 
   it('single-flights concurrent cold gets — prepare runs once', async () => {
@@ -85,7 +108,8 @@ describe('createCatalogCache', () => {
     const cache = make({ getVersion: () => 0, load, now: () => clock, ttlMs: 5000 });
     await cache.get();               // built at t=1000
     clock = 7000;                    // > ttl later
-    await cache.get();               // stale by TTL → triggers rebuild
+    const stale = await cache.get();  // stale by TTL → triggers rebuild
+    expect(stale.byId.get(1)?.untappd_id).toBe(111);
     await cache.idle();
     expect(load).toHaveBeenCalledTimes(2);
   });
@@ -104,18 +128,15 @@ describe('createCatalogCache', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it('routes a background rebuild failure to onError and keeps serving the stale value', async () => {
+  it('surfaces a version rebuild failure and retries on the next request', async () => {
     let version = 0;
     const load = vi.fn(() => rows).mockImplementationOnce(() => rows);
     load.mockImplementationOnce(() => { throw new Error('load boom'); });
-    const onError = vi.fn();
-    const cache = make({ getVersion: () => version, load, onError });
-    const first = await cache.get();  // cold build at version 0 (1st load succeeds)
-    version = 1;                      // catalog changed
-    const stale = await cache.get();  // returns stale, triggers bg rebuild (2nd load throws)
-    await cache.idle();               // wait for the failed background rebuild
-    expect(onError).toHaveBeenCalledTimes(1);
-    expect(stale).toBe(first);        // still served the stale value, no throw
+    const cache = make({ getVersion: () => version, load });
+    await cache.get();
+    version = 1;
+    await expect(cache.get()).rejects.toThrow('load boom');
+    expect((await cache.get()).byId.get(1)?.untappd_id).toBe(111);
   });
 
   it('propagates a cold build failure to the caller without poisoning the cache', async () => {

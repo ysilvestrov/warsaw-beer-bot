@@ -19,8 +19,7 @@ export interface CachedCatalog {
 }
 
 export interface CatalogCache {
-  // Returns the shared catalog (possibly stale), triggering a background rebuild
-  // when the version has moved or the TTL has expired (stale-while-revalidate).
+  // Version changes wait for a fresh catalog; TTL-only expiry uses stale-while-revalidate.
   get(): Promise<CachedCatalog>;
   // Resolves when no background rebuild is in flight. Test seam to await SWR completion.
   idle(): Promise<void>;
@@ -99,15 +98,18 @@ export function createCatalogCache(db: DB, opts: CatalogCacheOptions = {}): Cata
   }
 
   return {
-    get() {
+    async get() {
       // Cold: no cached value yet — await (and surface) the build.
-      if (current === null) return rebuild(false);
-      const stale = current.version !== getVersion() || now() - current.builtAt > ttlMs;
+      if (current === null) await rebuild(false);
+      // A write can land while a build is running. Recheck its captured version
+      // before returning so the first request after that write sees the new link.
+      while (current!.version !== getVersion()) await rebuild(false);
+      const stale = now() - current!.builtAt > ttlMs;
       // SWR: kick off the rebuild in the background and serve stale immediately. The
       // failure is already routed to onError inside rebuild(); the trailing catch keeps
       // this fire-and-forget promise from becoming an unhandled rejection (→ crash).
       if (stale && !rebuilding) rebuild(true).catch(() => {});
-      return Promise.resolve(current.value);
+      return current!.value;
     },
     idle() {
       // Never reject: idle() is a barrier, not an error channel (that's onError's job).
