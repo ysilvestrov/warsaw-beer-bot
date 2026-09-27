@@ -4,7 +4,7 @@ import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
 import { clearKeys, setCachedMany, setCachedIfMatching } from '../cache/client';
 import { getCached, setCachedMany as setCachedManyDirect } from '../cache/store';
-import { isSeen, renderState, type CardState } from './badge';
+import { BADGE_MARKER, isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { stateFromMatch } from './card-state';
 import { getSettings } from '../shared/config';
@@ -75,6 +75,7 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
     // #648: стан, яким картка стане, якщо дошук не знайде нічого кращого. Його порахував
     // `runOverlay` з відповіді `/match` — дошук цієї відповіді не бачить узагалі.
     const fallbackByKey = new Map<string, CardState>(queued.map((o) => [o.key, o.state]));
+    const badgeAtStart = new Map(queued.map((o) => [o.el, o.el.querySelector(`[${BADGE_MARKER}]`)]));
     const identityByKey = new Map(queued.map((o) => [o.key, { brewery: o.brewery, name: o.name }]));
     const resultByKey = new Map(queued.flatMap((o) => o.result ? [[o.key, o.result] as const] : []));
     // Питаємо один раз на ключ: інакше кожен дублікат коштував би власного слота з
@@ -135,7 +136,14 @@ export const enrichOrphans: EnrichOrphans = (orphans) => {
               }
             };
             if (!previous) {
-              void drawCachedOr(refreshed);
+              // This path has no cache answer to compare. Only repaint badges
+              // still owned by this run; another overlay may already have
+              // painted a newer answer on the same element.
+              for (const el of els) {
+                if (el.querySelector(`[${BADGE_MARKER}]`) === badgeAtStart.get(el)) {
+                  renderState(el, refreshed);
+                }
+              }
               return;
             }
             const fallback = fallbackByKey.get(key) ?? refreshed;
