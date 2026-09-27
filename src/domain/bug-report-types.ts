@@ -215,10 +215,14 @@ export interface SelectInput {
   text: string;
 }
 
+export interface JevResponse { model: string; probabilities: Record<string, number> }
+export interface SelectResult { numbers: number[]; truncated: boolean; response: JevResponse }
+
 export interface IssueSelector {
   // Returns up to 5 candidate issue numbers, most probable first, `none` removed.
   // `truncated` = the candidate list had to be cut to fit the model's context.
-  select(input: SelectInput, candidates: IssueCandidate[]): Promise<{ numbers: number[]; truncated: boolean }>;
+  // `response` is Jev's raw answer, persisted for audit.
+  select(input: SelectInput, candidates: IssueCandidate[]): Promise<SelectResult>;
 }
 
 export interface VerdictImage {

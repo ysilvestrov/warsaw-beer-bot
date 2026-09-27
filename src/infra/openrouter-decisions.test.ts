@@ -49,7 +49,9 @@ test('Jev sends the exact decision request and returns four keys when none ranks
   }));
   const result = await createJevSelector({ apiKey: 'secret', model: 'jev-model', fetchImpl })
     .select({ source: 'extension', category: 'no_badge', text: 'Badge missing' }, candidates);
-  expect(result).toEqual({ numbers: [4, 2, 1, 3], truncated: false });
+  expect(result).toEqual({ numbers: [4, 2, 1, 3], truncated: false,
+    response: { model: 'jev-model', probabilities: { i4: 0.5, i2: 0.4, none: 0.3, i1: 0.2, i3: 0.1 } },
+  });
   expect(fetchImpl).toHaveBeenCalledTimes(1);
   const [url, init] = fetchImpl.mock.calls[0];
   expect(url).toBe('https://openrouter.ai/api/alpha/decisions');
@@ -78,7 +80,21 @@ test('Jev breaks equal probability ties by key and ignores unknown keys', async 
   }));
   const result = await createJevSelector({ apiKey: 'secret', model: 'jev-model', fetchImpl })
     .select({ source: 'bot', category: 'other', text: 'Broken' }, [open, { ...open, number: 9 }]);
-  expect(result).toEqual({ numbers: [10, 9], truncated: false });
+  expect(result).toEqual({ numbers: [10, 9], truncated: false,
+    response: { model: 'jev-model', probabilities: { i10: 0.5, i9: 0.5, i999: 0.6, none: 0.4 } },
+  });
+});
+
+test('none ranked third does not cost a candidate: the top five are real issues', async () => {
+  const candidates = [1, 2, 3, 4, 5, 6].map((number) => ({ ...open, number, title: `Issue ${number}` }));
+  const fetchImpl = vi.fn().mockResolvedValue(response(200, {
+    answers: { duplicate_of: { probabilities: {
+      i1: 0.3, i2: 0.2, none: 0.15, i3: 0.12, i4: 0.1, i5: 0.08, i6: 0.05,
+    } } },
+  }));
+  const result = await createJevSelector({ apiKey: 'secret', model: 'jev-model', fetchImpl })
+    .select({ source: 'extension', category: 'no_badge', text: 'Badge missing' }, candidates);
+  expect(result.numbers).toEqual([1, 2, 3, 4, 5]);
 });
 
 test('Jev reports HTTP 429 as HttpStatusError without retrying', async () => {

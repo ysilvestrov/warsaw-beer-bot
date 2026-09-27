@@ -62,12 +62,13 @@ export function createJevSelector(cfg: {
       if (!probabilities || typeof probabilities !== 'object' || Array.isArray(probabilities)) {
         throw new Error('Jev response has no probabilities');
       }
+      // Drop `none` and unknown keys before taking five real candidates.
       const numbers = Object.entries(probabilities)
+        .filter(([key]) => key !== 'none' && Object.hasOwn(criteria, key))
         .sort(([aKey, a], [bKey, b]) => b - a || aKey.localeCompare(bKey))
         .slice(0, 5)
-        .filter(([key]) => key !== 'none' && Object.hasOwn(criteria, key))
         .map(([key]) => Number(key.slice(1)));
-      return { numbers, truncated };
+      return { numbers, truncated, response: { model: cfg.model, probabilities } };
     },
   };
 }

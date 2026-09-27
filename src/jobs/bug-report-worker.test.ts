@@ -54,7 +54,7 @@ beforeEach(() => {
       createIssue: vi.fn(async () => 991),
       commentOnIssue: vi.fn(async () => undefined),
     },
-    selector: { select: vi.fn(async () => ({ numbers: [77], truncated: false })) },
+    selector: { select: vi.fn(async () => ({ numbers: [77], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.6, none: 0.4 } } })) },
     judge: { judge: vi.fn(async () => raw) },
     readFile: vi.fn(async (path) => Buffer.from('contents:' + path)),
     notify: vi.fn(async (r, outcome) => { outcomes.push({ id: r.id, outcome }); }),
@@ -91,7 +91,7 @@ test('open duplicate comments on the selected issue and reports its number', asy
 test.each([['completed', true], ['not_planned', false]] as const)(
   'closed duplicate with state reason %s reports fixed = %s', async (reason, fixed) => {
     const id = addReport();
-    vi.mocked(deps.selector.select).mockResolvedValue({ numbers: [78], truncated: false });
+    vi.mocked(deps.selector.select).mockResolvedValue({ numbers: [78], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.6, none: 0.4 } } });
     vi.mocked(deps.github.getIssueWithComments).mockResolvedValue({ ...closedIssue, stateReason: reason });
     vi.mocked(deps.judge.judge).mockResolvedValue({ ...raw, verdict: 'duplicate_closed', issueNumber: 78 });
     await run();
@@ -248,7 +248,7 @@ test.each([[600_000, 1], [600_001, 2]] as const)(
 
 test('a truncated selection marks only its report', async () => {
   const id = addReport();
-  vi.mocked(deps.selector.select).mockResolvedValue({ numbers: [77], truncated: true });
+  vi.mocked(deps.selector.select).mockResolvedValue({ numbers: [77], truncated: true, response: { model: 'jev-test', probabilities: { i77: 0.6, none: 0.4 } } });
   await run();
   expect(row(id)?.candidatesTruncated).toBe(true);
 });
@@ -299,7 +299,7 @@ test('a second run during an active run does not process the same row', async ()
   addReport();
   let release!: () => void;
   vi.mocked(deps.selector.select).mockImplementationOnce(() => new Promise((resolve) => {
-    release = () => resolve({ numbers: [77], truncated: false });
+    release = () => resolve({ numbers: [77], truncated: false, response: { model: 'jev-test', probabilities: { i77: 0.6, none: 0.4 } } });
   }));
   const worker = createBugReportWorker(deps);
   const first = worker.runOnce();
