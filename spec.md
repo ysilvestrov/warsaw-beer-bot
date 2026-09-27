@@ -674,7 +674,7 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 | `media_json` | TEXT NOT NULL DEFAULT `'[]'` | Масив Telegram file ID, типу, розміру й розширення; до 3 файлів |
 | `updated_at` | TEXT NOT NULL | ISO UTC; після 30 хв без дій чернетка прострочена |
 
-### 3.18 `bug_reports` — подані скарги (v38)
+### 3.18 `bug_reports` — подані скарги (v38, v39)
 | Поле | Тип | Правило |
 |---|---|---|
 | `id` | INTEGER | PK AUTOINCREMENT; публічний маркер `R-{id}` |
@@ -689,6 +689,8 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 | `candidates_truncated`, `deferred_notified` | INTEGER NOT NULL DEFAULT 0 | Ознака обрізаного списку кандидатів і вже надісланого повідомлення про відкладення |
 | `verdict` | TEXT NULL | `new`, `duplicate_open`, `duplicate_closed`, `not_a_bug`; CHECK |
 | `issue_number` | INTEGER NULL | Номер пов'язаного issue, якщо є |
+| `jev_json` | TEXT NULL | v39. Сира відповідь Jev останньої спроби: `{"model","probabilities"}` з ключами `i<номер>` і `none`; пишеться до виклику судді, для аудиту вердикту |
+| `related_json` | TEXT NULL | v39. JSON-масив номерів споріднених issue від судді після валідації; `NULL` для `not_a_bug` і необроблених |
 | `created_at`, `processed_at` | TEXT / TEXT NULL | ISO UTC; перше рахує ліміт користувача, друге — глобальну стелю й дайджест |
 
 Індекси: `(telegram_id, created_at)`, `status`, `processed_at`. Перехід у
@@ -1056,6 +1058,12 @@ OpenRouter, OpenAI, GitHub або каталог медіа, команда ві
 | `duplicate_open` | Додати переказ у відкритий issue, не міняючи його лейблів; дати посилання |
 | `duplicate_closed` | Додати переказ у закритий issue, не відкриваючи його; дати посилання й дату закриття. «Виправлено» казати лише для `state_reason = completed`, із застереженням про оновлення |
 | `not_a_bug` | Не писати на GitHub; пояснити, що це не помилка бота чи розширення |
+
+Для `new` і дублікатів модель може назвати до трьох споріднених кандидатів — не той
+самий дефект, але те, що варто прочитати разом. Код лишає тільки показані їй кандидати,
+без номера дубліката. Новий issue дістає рядок «Схожі (оцінка агента): #N»; коментар до
+дубліката — ні. Відповідь кроку вибору кандидатів і споріднені issue зберігаються в
+рядку скарги для аудиту вердикту.
 
 До GitHub-запису ставиться `publishing`; після збою процесу в цьому стані
 скарга йде в `needs_review` без автоповтору. Транзієнтні збої до запису

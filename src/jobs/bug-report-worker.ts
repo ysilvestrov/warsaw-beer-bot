@@ -103,6 +103,11 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
         { source: report.source, category: report.category, text: report.text },
         await candidates(),
       );
+      // Persist before later steps can fail; a retry replaces the previous answer.
+      store.setJevResponse(db, report.id, JSON.stringify(selected.response));
+      deps.log.info({
+        reportId: report.id, top: selected.numbers, none: selected.response.probabilities.none ?? null,
+      }, 'Bug report candidates');
       if (selected.truncated) store.setCandidatesTruncated(db, report.id);
       const details: IssueDetail[] = [];
       for (const number of selected.numbers) {
@@ -121,6 +126,11 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
         return finished();
       }
       const value = judged.value;
+      deps.log.info({
+        reportId: report.id, verdict: value.kind,
+        issueNumber: value.kind === 'duplicate_open' || value.kind === 'duplicate_closed' ? value.issue.number : null,
+        related: value.kind === 'not_a_bug' ? null : value.related,
+      }, 'Bug report verdict');
       const processedAt = deps.now().toISOString();
       if (value.kind === 'not_a_bug') {
         store.markDone(db, report.id, { verdict: 'not_a_bug', issueNumber: null, processedAt, related: null });
@@ -141,13 +151,13 @@ export function createBugReportWorker(deps: BugReportWorkerDeps): BugReportWorke
           title: value.fields.title, body: renderIssueBody(value.fields, ctx, value.related),
           labels: [...value.labels, value.severity, value.effort],
         });
-        store.markDone(db, report.id, { verdict: 'new', issueNumber, processedAt, related: null });
+        store.markDone(db, report.id, { verdict: 'new', issueNumber, processedAt, related: value.related });
         candidateCache = null;
         outcome = { kind: 'created', issueNumber };
       } else {
         const issueNumber = value.issue.number;
         await deps.github.commentOnIssue(issueNumber, renderDuplicateComment(value.fields, ctx));
-        store.markDone(db, report.id, { verdict: value.kind, issueNumber, processedAt, related: null });
+        store.markDone(db, report.id, { verdict: value.kind, issueNumber, processedAt, related: value.related });
         outcome = value.kind === 'duplicate_open'
           ? { kind: 'duplicate_open', issueNumber }
           : {
