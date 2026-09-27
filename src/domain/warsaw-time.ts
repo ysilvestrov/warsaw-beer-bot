@@ -19,3 +19,11 @@ export function previousDate(date: string): string {
   d.setUTCDate(d.getUTCDate() - 1);
   return d.toISOString().slice(0, 10);
 }
+
+export function warsawDayStartUtc(now: Date): string {
+  const { date } = warsawDateAndHour(now);
+  const utcMidnight = new Date(`${date}T00:00:00Z`);
+  const offsetHours = warsawDateAndHour(utcMidnight).hour;
+  utcMidnight.setUTCHours(utcMidnight.getUTCHours() - offsetHours);
+  return utcMidnight.toISOString();
+}

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { previousDate, warsawDateAndHour } from './warsaw-time';
+import { previousDate, warsawDateAndHour, warsawDayStartUtc } from './warsaw-time';
 
 test('summer (CEST = UTC+2): date and hour extraction', () => {
   expect(warsawDateAndHour(new Date('2026-07-05T05:30:00Z')))
@@ -29,4 +29,14 @@ test('previousDate: non-leap February', () => {
 });
 test('previousDate: leap February', () => {
   expect(previousDate('2028-03-01')).toBe('2028-02-29');
+});
+
+test.each([
+  ['2026-09-26T21:59:59.000Z', '2026-09-25T22:00:00.000Z'],
+  ['2026-09-26T22:00:00.000Z', '2026-09-26T22:00:00.000Z'],
+  ['2026-01-15T10:00:00.000Z', '2026-01-14T23:00:00.000Z'],
+  ['2026-03-29T12:00:00.000Z', '2026-03-28T23:00:00.000Z'],
+  ['2026-10-25T12:00:00.000Z', '2026-10-24T22:00:00.000Z'],
+])('Warsaw day start for %s is %s', (now, start) => {
+  expect(warsawDayStartUtc(new Date(now))).toBe(start);
 });
