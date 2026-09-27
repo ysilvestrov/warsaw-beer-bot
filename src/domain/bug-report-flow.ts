@@ -26,7 +26,7 @@ export type FlowEvent =
   | { type: 'text'; text: string }
   | { type: 'media'; media: DraftMedia }
   | { type: 'media_done' }
-  | { type: 'submit'; submittedToday: number };
+  | { type: 'submit'; submittedToday: number; banned: boolean };
 export interface Submission { source: ReportSource; category: ReportCategory; text: string; media: DraftMedia[] }
 export interface FlowResult {
   draft: Draft | null;
@@ -47,7 +47,10 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
   const reply = (key: string): FlowResult => ({ draft: null, replies: [{ key }], passThrough: false });
 
   if (event.type === 'start') {
-    if (!event.privateChat) return reply('report.private_only');
+    // A group /report must not cost the user their private draft: keep what is stored.
+    if (!event.privateChat) {
+      return { draft: stored, replies: [{ key: 'report.private_only' }], passThrough: false };
+    }
     if (!event.available) return reply('report.unavailable');
     if (event.banned) return reply('report.banned');
     if (event.submittedToday >= DAILY_USER_LIMIT) return reply('report.limit');
@@ -118,6 +121,8 @@ export function stepFlow(stored: Draft | null, event: FlowEvent, now: Date): Flo
       };
     case 'submit':
       if (draft.step !== 'confirm') break;
+      // A ban issued while the draft was open applies at submit too, not only at /report.
+      if (event.banned) return reply('report.banned');
       if (event.submittedToday >= DAILY_USER_LIMIT) return reply('report.limit');
       return {
         draft: null, replies: [], passThrough: false,

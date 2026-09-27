@@ -62,11 +62,16 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
     const telegramId = ctx.from!.id;
     const now = deps.now();
     const result = stepFlow(getDraft(db, telegramId), event, now);
-    if (result.draft) saveDraft(db, telegramId, result.draft);
-    else deleteDraft(db, telegramId);
+    // A submission keeps its draft until the report row exists: a crash during the downloads
+    // must leave the user a confirm screen to press again, not an "accepted" with nothing behind it.
+    if (!result.submission) {
+      if (result.draft) saveDraft(db, telegramId, result.draft);
+      else deleteDraft(db, telegramId);
+    }
     for (const reply of result.replies) await renderReply(ctx, reply);
     if (result.submission) {
       if (!deps.available || !deps.mediaDir) {
+        deleteDraft(db, telegramId);
         await ctx.reply(ctx.t('report.unavailable'));
         return;
       }
@@ -91,6 +96,7 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
         });
         addMedia(db, { reportId, idx, kind: media.kind, ...saved });
       }
+      deleteDraft(db, telegramId);
       deps.triggerWorker();
     }
     if (result.passThrough) await next();
@@ -143,7 +149,7 @@ export function createReportCommand(deps: ReportCommandDeps): Composer<BotContex
     } else if (kind === 'done') {
       event = { type: 'media_done' };
     } else if (kind === 'send') {
-      event = { type: 'submit', submittedToday: submittedToday(ctx) };
+      event = { type: 'submit', submittedToday: submittedToday(ctx), banned: isBanned(ctx.deps.db, ctx.from.id) };
     } else if (kind === 'cancel') {
       event = { type: 'cancel' };
     } else {

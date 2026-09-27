@@ -1,4 +1,4 @@
-import { closeSync, fsyncSync, mkdirSync, openSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Telegram } from 'telegraf';
 import type { BugReportRow, ReportOutcome } from '../domain/bug-report-types';
@@ -31,8 +31,9 @@ export function writeReportMediaSync(args: {
   const path = join(reportDir, `${args.idx}.${safeExt(args.ext)}`);
   if (!args.data) return { path, bytes: 0 };
   try {
-    mkdirSync(reportDir, { recursive: true });
-    const fd = openSync(path, 'w');
+    // Owner-only regardless of the process umask: the spec promises media is not public.
+    mkdirSync(reportDir, { recursive: true, mode: 0o700 });
+    const fd = openSync(path, 'w', 0o600);
     try {
       writeFileSync(fd, args.data);
       fsyncSync(fd);
@@ -41,6 +42,8 @@ export function writeReportMediaSync(args: {
     }
     return { path, bytes: args.data.length };
   } catch {
+    // A half-written file recorded as bytes = 0 would be invisible to pruning forever.
+    try { unlinkSync(path); } catch { /* nothing was created */ }
     return { path, bytes: 0 };
   }
 }
