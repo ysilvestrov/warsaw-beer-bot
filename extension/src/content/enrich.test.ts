@@ -68,6 +68,37 @@ const ladderCandidatesAfterFirst = () =>
 const zeroHits = () => vi.fn(async () => ({ hits: [] as { bid: number }[] }));
 
 describe('runEnrichment', () => {
+  it('rechecks linked candidates in one match call without searching Untappd', async () => {
+    const result = {
+      raw: { brewery: 'B', name: 'N0' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N0', rating_global: 4.1, untappd_id: 44 },
+      is_drunk: true, drunk_uncertain: false, user_rating: 4.5, source: 'exact' as const, searched: true,
+    };
+    const refreshLinked = vi.fn(async () => [result]);
+    const d = deps({
+      getCandidates: vi.fn(async () => [
+        { brewery: 'B', name: 'N0', eligible: false, linked: true as const, algolia: rung('q:N0') },
+      ]),
+      refreshLinked,
+    });
+    await runEnrichment([{ ...beers(1)[0], abv: 5.5, bid: 44, brand: 'B' }], d);
+    expect(refreshLinked).toHaveBeenCalledWith([{ brewery: 'B', name: 'N0', abv: 5.5, bid: 44, brand: 'B' }]);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'refreshed', result }]);
+    expect(d.fetchSearch).toHaveBeenCalledTimes(0);
+  });
+
+  it('keeps the prior badge when a linked recheck returns no link', async () => {
+    const d = deps({
+      getCandidates: vi.fn(async () => [
+        { brewery: 'B', name: 'N0', eligible: false, linked: true as const, algolia: rung('q:N0') },
+      ]),
+      refreshLinked: vi.fn(async () => []),
+    });
+    await runEnrichment(beers(1), d);
+    expect(forKey(d, 'k0')).toEqual([{ kind: 'settled' }]);
+    expect(d.fetchSearch).toHaveBeenCalledTimes(0);
+  });
+
   it('registers all orphans but searches at most MAX_SEARCHES_PER_PAGE (no abstain on big pages)', async () => {
     const d = deps();
     await runEnrichment(beers(MAX_SEARCHES_PER_PAGE + 5), d); // 25 orphans, all eligible

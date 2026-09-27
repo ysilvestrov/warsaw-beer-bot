@@ -54,6 +54,8 @@ export interface EnrichCandidate {
   brewery: string;
   name: string;
   eligible: boolean;
+  /** The selected row already has a non-contradicted Untappd link. */
+  linked?: true;
   /** The wide rung — what this field has always carried (#391). */
   algolia: AlgoliaQuery;
   /**

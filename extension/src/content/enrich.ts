@@ -1,4 +1,4 @@
-import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult } from '../api/types';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
 import { usableAbv } from '../shared/abv';
 
 export const MAX_SEARCHES_PER_PAGE = 20;
@@ -42,6 +42,7 @@ export interface OrphanFacts {
 export type EnrichEvent =
   | { kind: 'searching' }
   | { kind: 'found'; untappdId: number; ratingGlobal: number | null }
+  | { kind: 'refreshed'; result: MatchResult }
   | { kind: 'settled' }
   | { kind: 'deferred' }
   | { kind: 'failed'; reason: 'blocked' | 'network' };
@@ -50,6 +51,7 @@ export interface EnrichDeps {
   getCandidates: (
     beers: ({ brewery: string; name: string } & OrphanFacts)[],
   ) => Promise<EnrichCandidate[]>;
+  refreshLinked?: (beers: RawBeer[]) => Promise<MatchResult[]>;
   fetchSearch: (algolia: AlgoliaQuery) => Promise<AlgoliaResponse | null>;
   submitResult: (
     brewery: string,
@@ -134,10 +136,39 @@ export async function runEnrichment(orphans: OrphanBeer[], deps: EnrichDeps): Pr
   // #648: картка, яку сервер не вважає вартою пошуку, вже має відповідь — вона просто не
   // покращиться. Без цього циклу вона лишалася б на «в черзі» назавжди, бо `/match`
   // намалював їй чергу саме під обіцянку дошуку, а дошук її мовчки не бере.
+  const linked: OrphanBeer[] = [];
   for (const cand of candidates) {
     if (cand.eligible) continue;
     const beer = byPair.get(pairKey(cand.brewery, cand.name));
-    if (beer) emit(beer.key, { kind: 'settled' });
+    if (!beer) continue;
+    if (cand.linked && deps.refreshLinked) {
+      if (!linked.some((queued) => queued.key === beer.key)) linked.push(beer);
+    } else emit(beer.key, { kind: 'settled' });
+  }
+  if (linked.length && deps.refreshLinked) {
+    try {
+      const refreshed = await deps.refreshLinked(linked.map((beer) => {
+        const abv = usableAbv(beer.abv);
+        const brand = beer.brand?.trim();
+        const bid = beer.bid;
+        // Match uses the same published-identity gate as the first page request.
+        const published = bid !== undefined && Number.isSafeInteger(bid) && bid > 0 && brand
+          ? { bid, brand } : {};
+        return {
+          brewery: beer.brewery, name: beer.name,
+          ...(abv !== undefined ? { abv } : {}), ...published,
+        };
+      }));
+      linked.forEach((beer, i) => {
+        const result = refreshed[i];
+        if (result?.raw.brewery === beer.brewery && result.raw.name === beer.name &&
+            result.matched_beer?.untappd_id != null) {
+          emit(beer.key, { kind: 'refreshed', result });
+        } else emit(beer.key, { kind: 'settled' });
+      });
+    } catch {
+      for (const beer of linked) emit(beer.key, { kind: 'settled' });
+    }
   }
 
   const delayMs = deps.delayMs ?? DEFAULT_DELAY_MS;

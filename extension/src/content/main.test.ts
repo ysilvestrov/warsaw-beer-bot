@@ -254,6 +254,43 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     });
   });
 
+  it('replaces a cached search badge with a linked match and preserves personal rating', async () => {
+    await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
+    const orphan: MatchResult = {
+      raw: { brewery: 'B', name: 'N' },
+      matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
+      is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    };
+    const linked: MatchResult = {
+      ...orphan,
+      matched_beer: { ...orphan.matched_beer!, rating_global: 4.1, untappd_id: 44 },
+      is_drunk: true, user_rating: 4.5,
+    };
+    await setCached('k0', orphan);
+    const sent: string[] = [];
+    vi.mocked(chrome.runtime.sendMessage).mockImplementation(
+      ((msg: { type: string; key?: string; expected?: MatchResult; result?: MatchResult }, cb: (reply: unknown) => void) => {
+        sent.push(msg.type);
+        if (msg.type === 'enrich:candidates') cb({ candidates: [
+          { brewery: 'B', name: 'N', eligible: false, linked: true,
+            algolia: { appId: 'APP', searchKey: 'KEY', indexName: 'beer', query: 'q', hitsPerPage: 5 } },
+        ] });
+        else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
+        else if (msg.type === 'cache:set-if-matching') {
+          void setCachedIfMatching(msg.key!, msg.expected!, msg.result!).then((written) => cb({ written }));
+        } else cb(undefined);
+        return undefined;
+      }) as never,
+    );
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    enrichOrphans([{ key: 'k0', el, brewery: 'B', name: 'N', state: fallbackState('B', 'N'), result: orphan }]);
+    await until(() => el.querySelector('[data-beerbadge] [data-icon="check"]') !== null);
+    expect(await getCached('k0')).toEqual(linked);
+    expect(el.querySelector('[data-beerbadge]')!.getAttribute('aria-label')).toContain('4,5');
+    expect(sent).toEqual(['enrich:candidates', 'match', 'cache:set-if-matching']);
+  });
+
   it('does not overwrite a refreshed match when an older enrichment finishes', async () => {
     await chrome.storage.local.set({ enrichEnabled: true, token: 't' });
     const orphan: MatchResult = {

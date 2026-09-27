@@ -1171,15 +1171,16 @@ exact-матчів. Серверна помилка → `500 { error: "internal"
 `/match` при цьому **нічого не пише**: провенанс, злиття й репарація лишаються за `/enrich/result`.
 Рядок логу `match fallback stats` несе лічильники `bid: { sent, exact, conflict, aliasKept }`.
 
-**Кеш каталогу (eventual consistency, #277).** `/match` матчить по спільному
+**Кеш каталогу (#277, #716).** `/match` матчить по спільному
 процес-рівневому кешу підготовленого каталогу (`catalog-cache.ts`), інвалідованому
 монотонним лічильником (`catalog-version.ts`), який бампають записи в каталог — і
 storage-мутатори (`upsertBeerByBid`, `ensureOrphan`, `recordLookupSuccess`, `mergeIntoCanonical`,
 `applyHydratedRatings`, `recordProfileBeer` — останні два лише коли рейтинг/стиль/ABV справді змінились), і raw-SQL записи в cron/maintenance-джобах
 (`cleanup-polluted-ontap`, `dedupe-brewery-aliases`). Стратегія —
-stale-while-revalidate: після зміни каталогу перезбірка йде у фоні (single-flight),
-тож щойно записане пиво може з'явитися в результатах із затримкою до ~2 с (плюс один
-запит); є й 5-хв TTL-бекстоп. Контракт запиту/відповіді незмінний.
+після зміни версії каталогу `/match` чекає на новий знімок (single-flight),
+включно із записами, що надійшли під час перезбірки. Невдала перезбірка дає помилку
+запиту. Лише 5-хв TTL-бекстоп без зміни версії працює як stale-while-revalidate.
+Контракт запиту/відповіді незмінний.
 
 **Пам'ять злиття (#614).** Перед матчером картка шукається серед аліасів (§3.6.1) за точним ключем —
 `cardText(brewery)`, `cardText(name)`, `cardAbv(abv)`; влучання на рядок з `untappd_id` дає `source: "exact"` з
@@ -1599,9 +1600,14 @@ Bearer <token>"`) і Codex CLI (`bearer_token_env_var`). Токен — той �
 Auth like `/match`. `/enrich/candidates` приймає `{beers:[{brewery,name}]}` (+ опційний
 `bid` на кожному пиві, #384 — лише перевіряє суперечність зі збереженим лінком, гейт
 далі верифікує), апсертить кожне нове пиво як orphan (`untappd_id` NULL) і повертає
-`{candidates:[{brewery,name,eligible,algolia,algoliaNarrow?}]}`, де `eligible` = backoff-due
+`{candidates:[{brewery,name,eligible,linked?,algolia,algoliaNarrow?}]}`, де `eligible` = backoff-due
 (`isEligible`) і **не** `not_a_beer`, та (пиво ще orphan **або** — #384 — воно вже лінковане,
 але надісланий `bid` суперечить збереженому і той лінк не `curated`/`checkin` — нижче).
+Опційне `linked: true` означає, що вибраний рядок уже має несуперечливий Untappd ID;
+воно приходить лише з `eligible: false`, без активного `not_a_beer` чи disposition.
+Клієнт із кешованою сиротою тоді повторює `/match` одним пакетом для таких карток
+і замінює запис у кеші лише якщо відповідь містить ID і старий запис досі актуальний.
+Якщо перевірка не вдалася, попередній бейдж лишається. Старі клієнти ігнорують поле.
 `algolia` містить публічні параметри `{appId,searchKey,indexName:"beer",query,hitsPerPage}`;
 його `query` будується через `cleanSearchQuery(brewery,name)` і лишається серверним
 контрактом. Додатково (#391) відповідь несе опційний `algoliaNarrow` — той самий об'єкт із

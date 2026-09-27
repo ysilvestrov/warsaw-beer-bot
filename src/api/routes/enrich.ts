@@ -222,13 +222,14 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         // never re-offered, so a rejected bid costs one search slot per ~8h per browser.
         const contradicts =
           b.bid !== undefined && row.untappd_id != null && row.untappd_id !== b.bid;
+        const notABeer = isNotABeer(deps.db, row.id);
         // #614: суперечливий bid на картці з аліасом стосується лише аліасу, а не провенансу канонічного
         // рядка (канонічний рядок випитого пива зазвичай 'checkin'), тож refusesBidOverride його не блокує.
         // Вето not_a_beer і бекоф канонічного рядка діють, як для репарації злінкованого рядка.
         const eligible =
           (row.untappd_id == null ||
             (contradicts && (row.viaAlias || !refusesBidOverride(row.untappd_id_source)))) &&
-          !isNotABeer(deps.db, row.id) &&
+          !notABeer &&
           isEligible(now, row.untappd_lookup_at, row.untappd_lookup_count,
             RECURRING_CLASSES.includes(reviewClassOf(deps.db, row.id) ?? ''));
         // #421: the fix-keyed lock is deliberately ABSENT here. This search runs in the
@@ -247,6 +248,8 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
           brewery: b.brewery,
           name: b.name,
           eligible,
+          ...(!eligible && row.untappd_id != null && !contradicts &&
+            !notABeer ? { linked: true } : {}),
           algolia: algoliaQuery(deps, rungs[rungs.length - 1]),
           ...(narrow ? { algoliaNarrow: algoliaQuery(deps, narrow) } : {}),
         };

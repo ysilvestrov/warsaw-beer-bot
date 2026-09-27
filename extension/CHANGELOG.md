@@ -25,6 +25,7 @@
 
 ## [Unreleased]
 
+- Fixed search badges staying on beers that already have a rating after you reload a shop page with beer search enabled. Their rating and your drinking status now appear without using “Refresh this page”.
 - Hover over any badge to read what it means in words, including an uncertain match, instead of having to infer it from the icons.
 
 ## [0.20.0] - 2026-09-20
