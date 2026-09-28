@@ -49,6 +49,8 @@ export interface Messages {
   'import.starting': string;
   'import.progress': string;             // {total}
   'import.done': string;                 // {total}, {format}
+  'import.account_changed': string; // {total}, {username}
+  'import.unlinked': string;
   'import.failed': string;              // {total}, {message}
 
   // newbeers

@@ -47,6 +47,8 @@ export const uk: Messages = {
   'import.starting': '⏳ Починаю імпорт…',
   'import.progress': '⏳ Імпортовано {total}…',
   'import.done': '✅ Імпортовано {total} чекінів ({format}).',
+  'import.account_changed': '⏹ Імпорт для {username} зупинено: акаунт змінився. Збережено {total} рядків; запустіть імпорт знову для поточного акаунта.',
+  'import.unlinked': 'історії до прив’язки',
   'import.failed': '❌ Помилка після {total} рядків: {message}',
 
   // newbeers

@@ -47,6 +47,8 @@ export const pl: Messages = {
   'import.starting': '⏳ Rozpoczynam import…',
   'import.progress': '⏳ Zaimportowano {total}…',
   'import.done': '✅ Zaimportowano {total} check-inów ({format}).',
+  'import.account_changed': '⏹ Import dla {username} zatrzymano, bo konto się zmieniło. Zapisano {total} wierszy; rozpocznij nowy import dla bieżącego konta.',
+  'import.unlinked': 'historii sprzed połączenia',
   'import.failed': '❌ Błąd po {total} wpisach: {message}',
 
   // newbeers

@@ -1,3 +1,4 @@
+import { getHistoryOwner, isCurrentHistoryOwner, type HistoryOwner } from '../../storage/history-owner';
 import type { DB } from '../../storage/db';
 import type { Checkin } from '../../sources/untappd/export';
 import { upsertBeerByBid, ensureOrphan } from '../../storage/beers';
@@ -14,8 +15,16 @@ import { normalizeBrewery, normalizeName } from '../../domain/normalize';
 // більше НЕ заявляє покриття: злиття рядків лишається (це доведено самим фактом їхнього
 // парсингу), а заявку про суцільність історії робить лише перший живий обхід розширення
 // (`checkin_coverage`, §3.15 spec.md) — той самий механізм, що замінив сид міграції 29.
-export function importCheckins(db: DB, telegramId: number, rows: Checkin[]): void {
+export class ImportAccountChangedError extends Error {
+  constructor() { super('Untappd account changed during import'); }
+}
+
+export function importCheckins(db: DB, telegramId: number, rows: Checkin[], owner?: HistoryOwner): void {
   db.transaction(() => {
+    const captured = owner ?? getHistoryOwner(db, telegramId);
+    if (captured.telegramId !== telegramId || !isCurrentHistoryOwner(db, captured)) {
+      throw new ImportAccountChangedError();
+    }
     for (const r of rows) {
       // #617: рядок із bid — ідентичність за bid (лише заповнення фактів, без перейменування);
       // без bid ідентичності немає — сирота, яка злінкованого пива не торкається.
@@ -34,11 +43,12 @@ export function importCheckins(db: DB, telegramId: number, rows: Checkin[]): voi
       mergeCheckin(db, {
         checkin_id: r.checkin_id,
         telegram_id: telegramId,
+        account_key: captured.accountKey,
         beer_id: beerId,
         user_rating: r.rating_score,
         checkin_at: r.created_at,
         venue: r.venue_name,
       });
     }
-  })();
+  }).immediate();
 }

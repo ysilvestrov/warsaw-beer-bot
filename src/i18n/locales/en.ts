@@ -47,6 +47,8 @@ export const en: Messages = {
   'import.starting': '⏳ Starting import…',
   'import.progress': '⏳ Imported {total}…',
   'import.done': '✅ Imported {total} check-ins ({format}).',
+  'import.account_changed': '⏹ Import for {username} stopped because the account changed. Saved {total} rows; start a new import for the current account.',
+  'import.unlinked': 'unlinked history',
   'import.failed': '❌ Failed after {total} records: {message}',
 
   // newbeers

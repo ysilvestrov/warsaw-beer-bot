@@ -9,7 +9,8 @@ import {
 } from '../../sources/untappd/export';
 import { ensureProfile } from '../../storage/user_profiles';
 import { withBusyRetry } from '../../storage/busy-retry';
-import { importCheckins } from './import-checkins';
+import { getHistoryOwner, isCurrentHistoryOwner } from '../../storage/history-owner';
+import { importCheckins, ImportAccountChangedError } from './import-checkins';
 
 const BATCH_SIZE = 500;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -39,6 +40,7 @@ importCommand.on('document', async (ctx) => {
   }
 
   ensureProfile(ctx.deps.db, ctx.from.id);
+  const owner = getHistoryOwner(ctx.deps.db, ctx.from.id);
 
   const link = await ctx.telegram.getFileLink(doc.file_id);
   const res = await fetch(link.toString());
@@ -66,7 +68,7 @@ importCommand.on('document', async (ctx) => {
     for await (const row of iterExport(stream, format)) {
       batch.push(row);
       if (batch.length >= BATCH_SIZE) {
-        await withBusyRetry(() => importCheckins(db, telegramId, batch));
+        await withBusyRetry(() => importCheckins(db, telegramId, batch, owner));
         total += batch.length;
         batch = [];
         if (Date.now() - lastReport > PROGRESS_INTERVAL_MS) {
@@ -76,12 +78,19 @@ importCommand.on('document', async (ctx) => {
       }
     }
     if (batch.length) {
-      await withBusyRetry(() => importCheckins(db, telegramId, batch));
+      await withBusyRetry(() => importCheckins(db, telegramId, batch, owner));
       total += batch.length;
     }
+    if (!isCurrentHistoryOwner(db, owner)) throw new ImportAccountChangedError();
     await report(ctx.t('import.done', { total, format: format.toUpperCase() }));
   } catch (e) {
+    if (e instanceof ImportAccountChangedError) {
+      await report(ctx.t('import.account_changed', { total, username: owner.accountKey || ctx.t('import.unlinked') }));
+      return;
+    }
     await report(ctx.t('import.failed', { total, message: (e as Error).message }));
     throw e;
+  } finally {
+    stream.destroy();
   }
 });
