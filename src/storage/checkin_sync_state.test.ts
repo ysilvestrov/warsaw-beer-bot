@@ -14,7 +14,7 @@ beforeEach(() => {
 
 describe('getSyncState', () => {
   it('returns an empty state for a user with no rows', () => {
-    expect(getSyncState(db, 1)).toEqual({ deepest_max_id: null, complete: false, profile_total: null });
+    expect(getSyncState(db, 1)).toEqual({ deepest_max_id: null, complete: false, profile_total: null, updated_at: null });
   });
 
   // #587: курсор більше не зберігається — він ПОХІДНИЙ від покриття, тож збрехати не може.
@@ -37,5 +37,12 @@ describe('getSyncState', () => {
     recordProfileTotal(db, 1, 10);
     addCoverage(db, 1, 100, 200);
     expect(getSyncState(db, 1).complete).toBe(false);
+  });
+
+  it('returns the stored last sync activity without interpreting it as completeness', () => {
+    recordProfileTotal(db, 1, 12634);
+    db.prepare('UPDATE checkin_sync_state SET updated_at = ? WHERE telegram_id = 1')
+      .run('2026-09-03 22:19:05');
+    expect(getSyncState(db, 1).updated_at).toBe('2026-09-03 22:19:05');
   });
 });
