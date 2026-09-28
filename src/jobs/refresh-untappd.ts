@@ -6,6 +6,7 @@ import { isBlockPage, isBlockStatus } from '../sources/untappd/block';
 import { parseUserBeersPage } from '../sources/untappd/scraper';
 import { allProfiles, getProfile } from '../storage/user_profiles';
 import { upsertBeerByBid, recordProfileBeer } from '../storage/beers';
+import { accountKeyFor } from '../storage/history-owner';
 import { markHad } from '../storage/untappd_had';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { noopBreaker, type CircuitBreaker } from '../domain/untappd-circuit';
@@ -102,7 +103,7 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
               untappd_id_source: 'checkin',
             });
           }
-          markHad(db, p.telegram_id, beerId, tickNow.toISOString(), it.their_rating);
+          markHad(db, p.telegram_id, beerId, tickNow.toISOString(), it.their_rating, accountKeyFor(p.untappd_username));
         }
         return true;
       }).immediate();

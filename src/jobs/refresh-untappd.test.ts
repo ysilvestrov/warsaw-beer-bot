@@ -742,3 +742,16 @@ describe('refreshAllUntappd', () => {
     expect(result.ok).toBe(2);
   });
 });
+
+
+test('case-only linking during scrape records observations under the captured lowercase owner', async () => {
+  const db = fresh(); ensureProfile(db, 1); setUntappdUsername(db, 1, 'old');
+  const http: Http = { async get() {
+    setUntappdUsername(db, 1, 'OLD');
+    return PAGE_ONE_BEER(101, 'Atak', 'Pinta', '4.12');
+  } };
+  expect(await refreshAllUntappd({ db, log: silentLog, http })).toEqual({ ok: 1, rotated: 0 });
+  expect(db.prepare('SELECT telegram_id, account_key, user_rating FROM untappd_had').all())
+    .toEqual([{ telegram_id: 1, account_key: 'old', user_rating: 4 }]);
+  db.close();
+});

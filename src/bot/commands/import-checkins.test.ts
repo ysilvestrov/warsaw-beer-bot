@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { ensureProfile } from '../../storage/user_profiles';
+import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { countCheckins } from '../../storage/checkins';
 import { coverageFor } from '../../storage/checkin_coverage';
-import { importCheckins } from './import-checkins';
+import { getHistoryOwner } from '../../storage/history-owner';
+import { importCheckins, ImportAccountChangedError } from './import-checkins';
 import type { Checkin } from '../../sources/untappd/export';
 import { getBeer } from '../../storage/beers';
 import { seedBeer } from '../../storage/seed-beer.testing';
@@ -80,5 +81,34 @@ describe('importCheckins', () => {
     expect(r.abv).toBeCloseTo(6.5);
     expect(r.rating_global).toBeCloseTo(3.9);
     expect(r.style).toBe('IPA');
+  });
+});
+
+
+describe('#611 captured import owner', () => {
+  it.each([['b'], ['b', 'a']])('rejects a captured A batch after %s before catalog writes', (...switches) => {
+    setUntappdUsername(db, 1, 'a');
+    const owner = getHistoryOwner(db, 1);
+    for (const username of switches) setUntappdUsername(db, 1, username);
+    expect(() => importCheckins(db, 1, [row({})], owner)).toThrow(ImportAccountChangedError);
+    expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM checkins').all()).toEqual([]);
+  });
+
+  it('first linking invalidates a pending unlinked batch', () => {
+    const owner = getHistoryOwner(db, 1);
+    importCheckins(db, 1, [row({ checkin_id: '100' })], owner);
+    setUntappdUsername(db, 1, 'a');
+    expect(() => importCheckins(db, 1, [row({ checkin_id: '101' })], owner)).toThrow(ImportAccountChangedError);
+    expect(db.prepare('SELECT account_key, checkin_id FROM checkins').all()).toEqual([{ account_key: 'a', checkin_id: '100' }]);
+  });
+
+  it('another user switching does not invalidate the captured account', () => {
+    setUntappdUsername(db, 1, 'a');
+    const owner = getHistoryOwner(db, 1);
+    ensureProfile(db, 2); setUntappdUsername(db, 2, 'b');
+    importCheckins(db, 1, [row({ rating_score: 0 })], owner);
+    expect(db.prepare('SELECT telegram_id, account_key, user_rating FROM checkins').all())
+      .toEqual([{ telegram_id: 1, account_key: 'a', user_rating: 0 }]);
   });
 });
