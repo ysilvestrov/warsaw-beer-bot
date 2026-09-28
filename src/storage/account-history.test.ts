@@ -1,6 +1,10 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as historyOwner from './history-owner';
 import { openDb } from './db';
 import { migrate } from './schema';
-import { ensureProfile } from './user_profiles';
+import { ensureProfile, setUntappdUsername } from './user_profiles';
 import { seedBeer } from './seed-beer.testing';
 import { mergeCheckin, countCheckins, oldestCheckinId, latestRatingsByBeer, countDistinctBeers, latestCheckinAt, hasBeenDrunk } from './checkins';
 import { markHad, triedBeerIds, countHadWithoutCheckins } from './untappd_had';
@@ -57,4 +61,44 @@ test('records the account-history migration', () => {
   expect(db.prepare('SELECT version FROM schema_version WHERE version = 41').get()).toEqual({ version: 41 });
   expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   db.close();
+});
+
+test.each(['ratings', 'tried', 'sync'] as const)('%s uses one SQLite snapshot when another connection switches accounts', (kind) => {
+  const dir = mkdtempSync(join(tmpdir(), 'history-snapshot-'));
+  const db = openDb(join(dir, 'bot.db'));
+  migrate(db);
+  const other = openDb(join(dir, 'bot.db'));
+  ensureProfile(db, 1);
+  setUntappdUsername(db, 1, 'a');
+  const a = seedBeer(db, { name: 'A', brewery: 'Pinta', normalized_name: 'a', normalized_brewery: 'pinta' });
+  const b = seedBeer(db, { name: 'B', brewery: 'Pinta', normalized_name: 'b', normalized_brewery: 'pinta' });
+  mergeCheckin(db, { telegram_id: 1, account_key: 'a', checkin_id: '123', beer_id: a,
+    user_rating: 4, checkin_at: '2026-09-01T00:00:00Z', venue: null });
+  markHad(db, 1, b, '2026-09-01T00:00:00Z', 3, 'a');
+  markHad(db, 1, a, '2026-09-01T00:00:00Z', 1, 'b');
+  addCoverage(db, 1, 100, 200, 'a');
+  addCoverage(db, 1, 500, 600, 'b');
+  recordProfileTotal(db, 1, 100, 'a');
+  recordProfileTotal(db, 1, 30, 'b');
+  const original = historyOwner.getHistoryOwner;
+  const spy = vi.spyOn(historyOwner, 'getHistoryOwner').mockImplementationOnce((connection, id) => {
+    const owner = original(connection, id);
+    setUntappdUsername(other, 1, 'b');
+    return owner;
+  });
+  try {
+    const reads = {
+      ratings: () => [...latestRatingsByBeer(db, 1)],
+      tried: () => [...triedBeerIds(db, 1)],
+      sync: () => { const s = getSyncState(db, 1); return [s.profile_total, s.deepest_max_id]; },
+    };
+    const expected = { ratings: [[a, 4], [b, 3]], tried: [a, b], sync: [100, '100'] };
+    expect(reads[kind]()).toEqual(expected[kind]);
+    expect(original(other, 1).accountKey).toBe('b');
+  } finally {
+    spy.mockRestore();
+    other.close();
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
