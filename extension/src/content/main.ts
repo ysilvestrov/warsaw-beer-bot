@@ -1,9 +1,9 @@
 import { pickAdapter } from '../sites/registry';
-import { runOverlay, type SendMatch, type EnrichOrphans, type CacheMatchResults } from './index';
+import { runOverlay, type SendMatch, type EnrichOrphans, type CacheMatchResults, type ReadMatchCache } from './index';
 import { observeReRender, type ReRenderOptions } from './rerender';
 import { refreshCards } from './refresh';
-import { clearKeys, setCachedMany, setCachedIfMatching } from '../cache/client';
-import { getCached, setCachedMany as setCachedManyDirect } from '../cache/store';
+import { clearKeys, setCachedMany, setCachedIfMatching, getCached, getCachedMany } from '../cache/client';
+import { getCached as getCachedDirect, setCachedMany as setCachedManyDirect } from '../cache/store';
 import { isSeen, renderState, type CardState } from './badge';
 import { runEnrichment, type OrphanBeer } from './enrich';
 import { stateFromMatch } from './card-state';
@@ -196,8 +196,9 @@ export function startOverlay(
   opts?: ReRenderOptions,
   enrich?: EnrichOrphans,
   cacheSetMany: CacheMatchResults = setCachedManyDirect,
+  cacheGetMany: ReadMatchCache = keys => Promise.all(keys.map(key => getCachedDirect(key))),
 ): () => void {
-  const run = () => runOverlay(doc, adapter, send, enrich, cacheSetMany);
+  const run = () => runOverlay(doc, adapter, send, enrich, cacheSetMany, cacheGetMany);
 
   const hasUnprocessed = () => {
     const scope = adapter.reRenderContainerSelector
@@ -218,7 +219,7 @@ export function startOverlay(
 const pageUrl = new URL(window.location.href);
 const adapter = pickAdapter(pageUrl);
 if (adapter && !adapter.isNonBeerPage?.(pageUrl)) {
-  startOverlay(document, adapter, sendMatch, undefined, enrichOrphans, setCachedMany);
+  startOverlay(document, adapter, sendMatch, undefined, enrichOrphans, setCachedMany, getCachedMany);
   // Popup → "Refresh this page": drop the visible cards' cache entries and re-run
   // the overlay so badges reflect fresh server state without waiting out the TTL.
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -227,7 +228,7 @@ if (adapter && !adapter.isNonBeerPage?.(pageUrl)) {
       try {
         const keys = await refreshCards(document, adapter);
         await clearKeys(keys);
-        await runOverlay(document, adapter, sendMatch, enrichOrphans, setCachedMany);
+        await runOverlay(document, adapter, sendMatch, enrichOrphans, setCachedMany, getCachedMany);
         sendResponse({ ok: true, cleared: keys.length });
       } catch (err) {
         // Always answer so the popup never hangs on "Refreshing…".

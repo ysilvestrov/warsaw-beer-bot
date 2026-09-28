@@ -33,3 +33,16 @@ export async function setCachedIfMatching(
 ): Promise<boolean> {
   return (await send<{ written: boolean }>({ type: 'cache:set-if-matching', key, expected, result })).written;
 }
+
+export async function getCachedMany(keys: string[]): Promise<(MatchResult | null)[]> {
+  try {
+    const reply = await send<{ results: (MatchResult | null)[] }>({ type: 'cache:get-many', keys });
+    return reply?.results?.length === keys.length ? reply.results : keys.map(() => null);
+  } catch {
+    return keys.map(() => null);
+  }
+}
+
+export async function getCached(key: string): Promise<MatchResult | null> {
+  return (await getCachedMany([key]))[0] ?? null;
+}

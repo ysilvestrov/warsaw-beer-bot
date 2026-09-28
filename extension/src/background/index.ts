@@ -2,8 +2,8 @@ import { getSettings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
 import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
-import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer, CheckinSyncState } from '../api/types';
-import { clearAll, clearKeys, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, MatchCacheBinding, RawBeer, CheckinSyncState } from '../api/types';
+import { clearAll, clearKeys, getCached, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 
 export interface MatchMessage {
   type: 'match';
@@ -22,39 +22,69 @@ function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
   return result;
 }
 
-function hasPersonalFacts(result: MatchResult): boolean {
-  return result.is_drunk || result.drunk_uncertain || result.user_rating !== null;
+async function currentCacheBinding(): Promise<MatchCacheBinding> {
+  const { token, baseUrl } = await getSettings();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([baseUrl, token])));
+  const credential = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  let username = '';
+  let linkRevision = 0;
+  if (token) {
+    try {
+      const state = await getCheckinSyncState(baseUrl, token);
+      if (!Number.isSafeInteger(state.linkRevision) || state.linkRevision < 0) throw new ApiError('server');
+      username = state.username.toLowerCase();
+      linkRevision = state.linkRevision;
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== 'not_linked') throw error;
+    }
+  }
+  const latest = await getSettings();
+  if (latest.token !== token || latest.baseUrl !== baseUrl) throw new ApiError('unauthorized');
+  return { username, linkRevision, credential };
+}
+
+function sameCacheBinding(a: MatchCacheBinding | undefined, b: MatchCacheBinding): boolean {
+  return a?.username === b.username && a.linkRevision === b.linkRevision && a.credential === b.credential;
+}
+
+export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult | null)[]> {
+  if (keys.length === 0) return [];
+  try {
+    const binding = await currentCacheBinding();
+    const results = await Promise.all(keys.map(key => getCached(key)));
+    return results.map(result => result && sameCacheBinding(result.cacheBinding, binding) ? result : null);
+  } catch {
+    return keys.map(() => null);
+  }
 }
 
 export const handleCacheSet = (key: string, result: MatchResult) =>
   enqueueCacheMutation(async () => {
-    const { token } = await getSettings();
-    if (token || !hasPersonalFacts(result)) await setCached(key, result);
+    if (sameCacheBinding(result.cacheBinding, await currentCacheBinding())) await setCached(key, result);
   });
 export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) =>
   enqueueCacheMutation(async () => {
-    const { token } = await getSettings();
-    await setCachedMany(entries.filter(entry => token || !hasPersonalFacts(entry.result)));
+    const binding = await currentCacheBinding();
+    await setCachedMany(entries.filter(entry => sameCacheBinding(entry.result.cacheBinding, binding)));
   });
 export const handleCacheClearKeys = (keys: string[]) =>
   enqueueCacheMutation(async () => { await clearKeys(keys); });
 export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
 export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
   enqueueCacheMutation(async () => {
-    const { token } = await getSettings();
-    if (!token && (hasPersonalFacts(expected) || hasPersonalFacts(result))) return false;
+    const binding = await currentCacheBinding();
+    if (!sameCacheBinding(expected.cacheBinding, binding) || !sameCacheBinding(result.cacheBinding, binding)) return false;
     return setCachedIfMatching(key, expected, result);
   });
 
 export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
-  const generation = syncGeneration;
-  const { token, baseUrl } = await getSettings();
   try {
+    const binding = await currentCacheBinding();
+    const { token, baseUrl } = await getSettings();
     const results = await postMatch(baseUrl, token, msg.cards);
-    const current = await getSettings();
-    if (current.token !== token || current.baseUrl !== baseUrl) throw new ApiError('unauthorized');
-    if (generation !== syncGeneration) throw new ApiError('server');
-    return { type: 'match:ok', results };
+    const current = await currentCacheBinding();
+    if (!sameCacheBinding(binding, current)) throw new ApiError(binding.credential !== current.credential ? 'unauthorized' : 'server');
+    return { type: 'match:ok', results: results.map(result => ({ ...result, cacheBinding: binding })) };
   } catch (e) {
     const rawCode = e instanceof ApiError ? e.code : 'server';
     const code: 'unauthorized' | 'server' | 'network' =
@@ -407,6 +437,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (t === 'enrich:fetch') { handleEnrichFetch(message as EnrichFetchMessage).then(sendResponse); return true; }
   if (t === 'enrich:candidates') { handleEnrichCandidates(message as EnrichCandidatesMessage).then(sendResponse); return true; }
   if (t === 'enrich:result') { handleEnrichResult(message as EnrichResultMessage).then(sendResponse); return true; }
+  if (t === 'cache:get-many') { handleCacheGetMany(message.keys).then(results => sendResponse({ results })); return true; }
   if (t === 'cache:set') { handleCacheSet(message.key, message.result).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:set-many') { handleCacheSetMany(message.entries).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }
   if (t === 'cache:clear-keys') { handleCacheClearKeys(message.keys).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false })); return true; }

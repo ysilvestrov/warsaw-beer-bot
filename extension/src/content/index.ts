@@ -7,6 +7,7 @@ import { markSeen, renderState, type CardState } from './badge';
 import { stateFromMatch } from './card-state';
 
 export type SendMatch = (cards: RawBeer[]) => Promise<MatchResult[]>;
+export type ReadMatchCache = (keys: string[]) => Promise<(MatchResult | null)[]>;
 export type CacheMatchResults = (entries: { key: string; result: MatchResult }[]) => Promise<void>;
 
 export type EnrichOrphans = (
@@ -133,6 +134,7 @@ export async function runOverlay(
   sendMatch: SendMatch,
   enrich?: EnrichOrphans,
   cacheSetMany: CacheMatchResults = async (entries) => { await Promise.all(entries.map(({ key, result }) => setCached(key, result))); },
+  cacheGetMany: ReadMatchCache = keys => Promise.all(keys.map(key => getCached(key))),
 ): Promise<void> {
   try {
     if (adapter.waitForGrid) await adapter.waitForGrid(doc);
@@ -161,6 +163,10 @@ export async function runOverlay(
       await adapter.loadCardDetails(cards);
     }
 
+    const cacheKeys = [...new Set(cards.filter(card => !card.nonBeer && !(adapter.loadDetailsBeforeCache && card.skip))
+      .map(card => keyByCard.get(card)).filter((key): key is string => key !== undefined))];
+    const cacheResults = await cacheGetMany(cacheKeys);
+    const cachedByKey = new Map(cacheKeys.map((key, i) => [key, cacheResults[i]]));
     const misses: { el: HTMLElement; key: string; card: Card }[] = [];
     const cachedOrphans: { el: HTMLElement; key: string; card: Card; result: MatchResult }[] = [];
     for (const card of cards) {
@@ -182,7 +188,7 @@ export async function runOverlay(
 
       const key = keyByCard.get(card);
       if (key === undefined) continue;
-      const cached = await getCached(key);
+      const cached = cachedByKey.get(key);
       if (cached?.matched_beer != null) {
         const enrichmentPossible = Boolean(enrich && canEnrich(cached, card));
         renderState(card.el, stateFromMatch(cached, { enrichmentPossible }));

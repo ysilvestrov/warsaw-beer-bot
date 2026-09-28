@@ -1,3 +1,4 @@
+import { webcrypto } from 'node:crypto';
 import * as cacheStore from '../cache/store';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
@@ -9,9 +10,13 @@ import { getCached } from '../cache/store';
 import type { MatchResult } from '../api/types';
 import * as client from '../api/client';
 
+const cacheBinding = { username: 'bob', linkRevision: 1,
+  credential: '8fcd28f26dd7e324a7a53831dfc51f99d8295dab948dca99e5ccf8a8a4d0cdbc' };
+
 const sessionStore = new Map<string, unknown>();
 
 beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto);
   sessionStore.clear();
   Object.assign(chrome.storage, {
     session: {
@@ -50,7 +55,7 @@ describe('cache mutation queue', () => {
   const orphan: MatchResult = {
     raw: { brewery: 'B', name: 'N' },
     matched_beer: { id: 4, brewery: 'B', name: 'N', rating_global: null, untappd_id: null },
-    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true,
+    is_drunk: false, drunk_uncertain: false, user_rating: null, source: 'exact', searched: true, cacheBinding,
   };
 
   it('does not let an older enrichment overwrite a newer match', async () => {
@@ -96,7 +101,7 @@ describe('handleMatch', () => {
     const cards = Array.from({ length: 200 }, (_, i) => ({ brewery: 'B', name: String(i) }));
     vi.spyOn(client, 'postMatch').mockResolvedValue([orphan]);
 
-    await expect(handleMatch({ type: 'match', cards })).resolves.toEqual({ type: 'match:ok', results: [orphan] });
+    await expect(handleMatch({ type: 'match', cards })).resolves.toEqual({ type: 'match:ok', results: [{ ...orphan, cacheBinding }] });
     expect(client.postMatch).toHaveBeenCalledTimes(1);
     expect(client.postMatch).toHaveBeenCalledWith('https://api.test', 'tok', cards);
   });
@@ -335,7 +340,7 @@ describe('#611 cached sync reports', () => {
     await chrome.storage.session.set({ checkinSync: completed });
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ ...current, deepest_max_id: null, serverCount: 0, profileTotal: null, complete: false });
     await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-      is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+      is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
     expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
       serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
     expect(await getCached('old-personal')).toBe(null);
@@ -413,7 +418,7 @@ test('starting B directly clears cached A personal matches before reporting B pr
     mergedThisRun: 5, outcome: 'done', complete: true,
     binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } } });
   await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
   vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'other', linkRevision: 2,
     deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
   vi.stubGlobal('fetch', async () => new Response('<html></html>'));
@@ -429,7 +434,7 @@ test('a start without credentials cannot retain an earlier completion', async ()
     mergedThisRun: 5, outcome: 'done', complete: true,
     binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } } });
   await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
   await setSettings({ token: '' });
   await handleCheckinSyncStart();
   expect(await getCached('old-personal')).toBe(null);
@@ -446,7 +451,7 @@ test('clearing credentials invalidates cached personal data and aborts an active
   await handleCheckinSyncStart();
   await vi.waitFor(() => expect(fetchFeed).toHaveBeenCalledTimes(1));
   await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true, cacheBinding });
   const signal = fetchFeed.mock.calls[0][1].signal!;
   await setSettings({ token: '' });
   expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
@@ -473,14 +478,15 @@ test('a delayed old-token match is not returned after credentials are removed', 
   await setSettings({ token: '' });
   await handleCheckinSyncStatus();
   resolveMatch([{ raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true }]);
+    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true, cacheBinding }]);
   expect(await response).toEqual({ type: 'match:err', code: 'unauthorized' });
 });
 
 test('late personal cache writes cannot repopulate cleared credentials, while global matches still cache', async () => {
   const personal: MatchResult = { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
-    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true };
-  const global: MatchResult = { ...personal, is_drunk: false, user_rating: null };
+    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true, cacheBinding };
+  const global: MatchResult = { ...personal, is_drunk: false, user_rating: null,
+    cacheBinding: { username: '', linkRevision: 0, credential: 'bfc0241d7945d212b82c069d6153ed25e97f7f351bdf09a7f098c5e3f2f839ee' } };
   await handleCacheSet('conditional', personal);
   await setSettings({ token: '' });
   await handleCheckinSyncStatus();
@@ -512,4 +518,97 @@ test('a cache removal failure still returns and persists a no-token status reply
     serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
   expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
     mergedThisRun: 0, outcome: 'error', complete: false });
+});
+
+const scopedPersonal: MatchResult = { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+  is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true, cacheBinding };
+
+test('late cache writes from A are rejected after a same-token switch to B, including negative personal answers', async () => {
+  vi.mocked(client.getCheckinSyncState).mockResolvedValue({ username: 'alice', linkRevision: 2,
+    deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+  const negative = { ...scopedPersonal, is_drunk: false, user_rating: null };
+  await handleCacheSet('late', scopedPersonal);
+  await handleCacheSetMany([{ key: 'late-negative', result: negative }]);
+  await cacheStore.setCached('conditional', scopedPersonal);
+  expect(await handleCacheSetIfMatching('conditional', scopedPersonal, negative)).toBe(false);
+  expect(await getCached('late')).toBe(null);
+  expect(await getCached('late-negative')).toBe(null);
+});
+
+test('a delayed match detects backend ABA with unchanged extension credentials', async () => {
+  let resolveMatch!: (results: MatchResult[]) => void;
+  const post = vi.spyOn(client, 'postMatch').mockReturnValue(new Promise(resolve => { resolveMatch = resolve; }));
+  const response = handleMatch({ type: 'match', cards: [{ brewery: 'B', name: 'N' }] });
+  await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  vi.mocked(client.getCheckinSyncState).mockResolvedValue({ username: 'bob', linkRevision: 3,
+    deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+  resolveMatch([scopedPersonal]);
+  expect(await response).toEqual({ type: 'match:err', code: 'server' });
+});
+
+test('a normal sync start does not invalidate a pending match for the unchanged account', async () => {
+  let resolveMatch!: (results: MatchResult[]) => void;
+  const post = vi.spyOn(client, 'postMatch').mockReturnValue(new Promise(resolve => { resolveMatch = resolve; }));
+  const response = handleMatch({ type: 'match', cards: [{ brewery: 'B', name: 'N' }] });
+  await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  let feedStarted!: () => void;
+  const started = new Promise<void>(resolve => { feedStarted = resolve; });
+  vi.stubGlobal('fetch', vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    feedStarted();
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+  })));
+  await handleCheckinSyncStart();
+  await started;
+  resolveMatch([scopedPersonal]);
+  expect(await response).toEqual({ type: 'match:ok', results: [scopedPersonal] });
+  await handleCheckinSyncStop();
+  await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
+});
+
+test('retained cache entries are unreadable after failed cleanup and a token change', async () => {
+  await cacheStore.setCached('retained', scopedPersonal);
+  await setSettings({ token: '' });
+  vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache removal failed'));
+  await handleCheckinSyncStatus();
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['retained', 'absent'])).toEqual([null, null]);
+  expect(await getCached('retained')).toEqual(scopedPersonal);
+});
+
+test('a cache batch reads only current bound entries and checks server identity once', async () => {
+  await cacheStore.setCached('current', scopedPersonal);
+  await cacheStore.setCached('legacy', { ...scopedPersonal, cacheBinding: undefined });
+  await cacheStore.setCached('aba', { ...scopedPersonal, cacheBinding: { ...cacheBinding, linkRevision: 0 } });
+  vi.mocked(client.getCheckinSyncState).mockClear();
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['current', 'legacy', 'aba'])).toEqual([scopedPersonal, null, null]);
+  expect(client.getCheckinSyncState).toHaveBeenCalledTimes(1);
+});
+
+test('a nonempty replacement token rejects old cache writes and reads', async () => {
+  await cacheStore.setCached('old', scopedPersonal);
+  await setSettings({ token: 'replacement-token' });
+  await handleCacheSet('late', scopedPersonal);
+  await handleCacheSetMany([{ key: 'late-batch', result: scopedPersonal }]);
+  expect(await handleCacheSetIfMatching('old', scopedPersonal, scopedPersonal)).toBe(false);
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['old', 'late', 'late-batch'])).toEqual([null, null, null]);
+});
+
+test('failed binding verification is a cache miss, and an empty scan does not probe the server', async () => {
+  await cacheStore.setCached('old', scopedPersonal);
+  vi.mocked(client.getCheckinSyncState).mockRejectedValue(new client.ApiError('network'));
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['old'])).toEqual([null]);
+  vi.mocked(client.getCheckinSyncState).mockClear();
+  expect(await handleCacheGetMany([])).toEqual([]);
+  expect(client.getCheckinSyncState).toHaveBeenCalledTimes(0);
+});
+
+test('current negative personal results are cached and read with their binding intact', async () => {
+  const negative = { ...scopedPersonal, is_drunk: false, user_rating: null };
+  await handleCacheSet('negative', negative);
+  expect(await handleCacheSetIfMatching('negative', negative, scopedPersonal)).toBe(true);
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['negative'])).toEqual([scopedPersonal]);
 });
