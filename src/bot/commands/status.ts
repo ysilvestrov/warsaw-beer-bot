@@ -4,6 +4,7 @@ import { getProfile, getUserCity, getUserLanguage } from '../../storage/user_pro
 import { getFilters } from '../../storage/user_filters';
 import { countCheckins, countDistinctBeers, latestCheckinAt } from '../../storage/checkins';
 import { getSyncState } from '../../storage/checkin_sync_state';
+import { countHadWithoutCheckins } from '../../storage/untappd_had';
 import { buildStatusMessage, type StatusView } from './status-build';
 
 export const statusCommand = new Composer<BotContext>();
@@ -24,6 +25,8 @@ statusCommand.command('status', async (ctx) => {
     profileTotal: sync.profile_total,
     distinctBeers: countDistinctBeers(db, id),
     lastCheckinAt: latestCheckinAt(db, id),
+    lastSyncAt: sync.updated_at,
+    hadWithoutCheckins: countHadWithoutCheckins(db, id),
   };
 
   await ctx.replyWithHTML(buildStatusMessage(ctx.t, view));

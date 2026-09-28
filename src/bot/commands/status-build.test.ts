@@ -14,6 +14,8 @@ const base: StatusView = {
   profileTotal: 11290,
   distinctBeers: 842,
   lastCheckinAt: '2024-05-05 20:00:00',
+  lastSyncAt: '2026-09-03 22:19:05',
+  hadWithoutCheckins: 0,
 };
 
 describe('summarizeFilters', () => {
@@ -69,9 +71,37 @@ describe('buildStatusMessage', () => {
     expect(out).toContain(t('status.no_checkins'));
   });
 
-  it('appends ✅ to the count line when synced >= profileTotal (caught up)', () => {
-    const out = buildStatusMessage(t, { ...base, synced: 12428, profileTotal: 12428 });
-    expect(out).toContain('12428 / 12428 ✅');
+  it.each([12428, 12429])('does not claim completeness when synced is %s and total is 12428', (synced) => {
+    const out = buildStatusMessage(t, { ...base, synced, profileTotal: 12428 });
+    expect(out).toContain(`${synced} / 12428`);
+    expect(out).not.toContain('✅');
+    expect(out).toContain('Last sync activity: 2026-09-03 22:19:05 UTC');
+    expect(out).toContain('Untappd total is from the last sync.');
+  });
+
+  it('states that no extension sync has run when sync activity is unknown', () => {
+    const out = buildStatusMessage(t, { ...base, profileTotal: null, lastSyncAt: null });
+    expect(out).toContain('No extension sync yet.');
+    expect(out).not.toContain('UTC');
+    expect(out).not.toContain('Untappd total is from the last sync.');
+  });
+
+  it('reports missing beer check-ins without claiming when the beers were consumed', () => {
+    const out = buildStatusMessage(t, { ...base, hadWithoutCheckins: 53 });
+    expect(out).toContain('Beers known to the server without imported check-ins: 53. Run “Sync my check-ins” in the extension.');
+    expect(buildStatusMessage(t, base)).not.toContain('without imported check-ins');
+  });
+
+  it.each([
+    ['uk', 'Остання активність синхронізації: 2026-09-03 22:19:05 UTC', 'Пив, відомих серверу без імпортованих чекінів: 53.'],
+    ['pl', 'Ostatnia aktywność synchronizacji: 2026-09-03 22:19:05 UTC', 'Piwa znane serwerowi bez zaimportowanych check-inów: 53.'],
+    ['en', 'Last sync activity: 2026-09-03 22:19:05 UTC', 'Beers known to the server without imported check-ins: 53.'],
+  ] as const)('localizes sync activity and missing-beer evidence in %s', (locale, syncLine, missingLine) => {
+    const out = buildStatusMessage(createTranslator(locale), { ...base, hadWithoutCheckins: 53 });
+    expect(out).toContain(syncLine);
+    expect(out).toContain(missingLine);
+    expect(out).toContain('Sync my check-ins');
+    expect(out).not.toContain('✅');
   });
 
   it('does not append ✅ when synced exceeds profileTotal is false (behind)', () => {

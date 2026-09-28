@@ -14,6 +14,8 @@ export interface StatusView {
   profileTotal: number | null;
   distinctBeers: number;
   lastCheckinAt: string | null; // ISO-ish; only the date part is shown
+  lastSyncAt: string | null;    // SQLite CURRENT_TIMESTAMP (UTC)
+  hadWithoutCheckins: number;
 }
 
 export function summarizeFilters(t: Translator, f: Filters | null): string {
@@ -66,15 +68,20 @@ export function buildStatusMessage(t: Translator, view: StatusView): string {
     return lines.join('\n');
   }
   lines.push(esc(t('status.username', { username: view.username ?? '' })));
-  const caughtUp = view.profileTotal != null && view.synced >= view.profileTotal;
   lines.push(
     esc(
       view.profileTotal != null
-        ? t('status.checkins_of', { synced: view.synced, total: view.profileTotal }) +
-            (caughtUp ? ' ✅' : '')
+        ? t('status.checkins_of', { synced: view.synced, total: view.profileTotal })
         : t('status.checkins', { synced: view.synced }),
     ),
   );
+  if (view.profileTotal != null) lines.push(esc(t('status.profile_total_hint')));
+  lines.push(esc(view.lastSyncAt
+    ? t('status.last_sync', { date: view.lastSyncAt.replace('T', ' ').slice(0, 19) })
+    : t('status.no_sync')));
+  if (view.hadWithoutCheckins > 0) {
+    lines.push(esc(t('status.had_without_checkins', { count: view.hadWithoutCheckins })));
+  }
   lines.push(esc(t('status.distinct_beers', { count: view.distinctBeers })));
   lines.push(
     esc(

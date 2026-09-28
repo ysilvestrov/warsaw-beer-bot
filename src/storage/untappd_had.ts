@@ -31,3 +31,14 @@ export function triedBeerIds(db: DB, telegramId: number): Set<number> {
   for (const id of hadBeerIds(db, telegramId)) out.add(id);
   return out;
 }
+
+// Counts beers, not missing check-ins. last_seen_at cannot date consumption.
+export function countHadWithoutCheckins(db: DB, telegramId: number): number {
+  const row = db.prepare(
+    `SELECT COUNT(*) AS n FROM untappd_had h
+     WHERE h.telegram_id = ? AND NOT EXISTS (
+       SELECT 1 FROM checkins c WHERE c.telegram_id = h.telegram_id AND c.beer_id = h.beer_id
+     )`,
+  ).get(telegramId) as { n: number };
+  return row.n;
+}

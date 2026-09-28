@@ -122,6 +122,10 @@ export interface Messages {
   'status.username': string;          // {username}
   'status.checkins': string;          // {synced}
   'status.checkins_of': string;       // {synced}, {total}
+  'status.profile_total_hint': string;
+  'status.last_sync': string;         // {date}, UTC
+  'status.no_sync': string;
+  'status.had_without_checkins': string; // {count}, beers (not check-ins)
   'status.distinct_beers': string;    // {count}
   'status.last_checkin': string;      // {date}
   'status.no_checkins': string;

@@ -2,7 +2,7 @@ import { openDb } from './db';
 import { migrate } from './schema';
 import { seedBeer } from './seed-beer.testing';
 import { mergeCheckin } from './checkins';
-import { markHad, hadBeerIds, triedBeerIds } from './untappd_had';
+import { markHad, hadBeerIds, triedBeerIds, countHadWithoutCheckins } from './untappd_had';
 
 function fresh() {
   const db = openDb(':memory:');
@@ -100,6 +100,26 @@ describe('hadBeerIds', () => {
     expect(hadBeerIds(db, 42)).toEqual(new Set([a, b]));
     expect(hadBeerIds(db, 99)).toEqual(new Set([c]));
   });
+});
+
+test('counts beers without this user’s check-ins regardless of observation time or rating', () => {
+  const db = fresh();
+  const a = seedNamedBeer(db, 'A');
+  const b = seedNamedBeer(db, 'B');
+  const c = seedNamedBeer(db, 'C');
+  expect(countHadWithoutCheckins(db, 1)).toBe(0);
+  markHad(db, 1, a, '2026-01-01T00:00:00Z', 4.25);
+  markHad(db, 1, b, '2026-09-28T00:00:00Z');
+  markHad(db, 2, c, '2026-09-28T00:00:00Z');
+  mergeCheckin(db, { telegram_id: 2, beer_id: a, checkin_id: '1',
+    user_rating: null, checkin_at: '2026-01-01T00:00:00Z', venue: null });
+  expect(countHadWithoutCheckins(db, 1)).toBe(2);
+  mergeCheckin(db, { telegram_id: 1, beer_id: b, checkin_id: '2',
+    user_rating: null, checkin_at: '2026-01-01T00:00:00Z', venue: null });
+  mergeCheckin(db, { telegram_id: 1, beer_id: b, checkin_id: '3',
+    user_rating: 4, checkin_at: '2026-02-01T00:00:00Z', venue: null });
+  expect(countHadWithoutCheckins(db, 1)).toBe(1);
+  expect(countHadWithoutCheckins(db, 2)).toBe(1);
 });
 
 describe('triedBeerIds', () => {

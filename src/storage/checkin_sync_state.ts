@@ -6,19 +6,21 @@ export interface SyncState {
   /** #587: застаріле. Ніхто більше не пише — дно стрічки недоказове (див. спеку). */
   complete: boolean;
   profile_total: number | null;
+  updated_at: string | null;
 }
 
 // #587: курсор більше не зберігається окремо. Він ПОХІДНИЙ від покриття — найглибший
 // доведений id, — тож не існує місця, де можна було б ствердити глибину, якої не досягли.
 export function getSyncState(db: DB, telegramId: number): SyncState {
   const row = db
-    .prepare('SELECT complete, profile_total FROM checkin_sync_state WHERE telegram_id = ?')
-    .get(telegramId) as { complete: number; profile_total: number | null } | undefined;
+    .prepare('SELECT complete, profile_total, updated_at FROM checkin_sync_state WHERE telegram_id = ?')
+    .get(telegramId) as { complete: number; profile_total: number | null; updated_at: string } | undefined;
   const deepest = deepestCoveredId(db, telegramId);
   return {
     deepest_max_id: deepest === null ? null : String(deepest),
     complete: row?.complete === 1,
     profile_total: row?.profile_total ?? null,
+    updated_at: row?.updated_at ?? null,
   };
 }
 
