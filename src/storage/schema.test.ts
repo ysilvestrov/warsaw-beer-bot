@@ -1,5 +1,6 @@
 import { openDb } from './db';
 import { migrate, V24_NOT_A_BEER_IDS } from './schema';
+import { restoreV40History } from './history-v40.testing';
 import { upsertPub } from './pubs';
 import { createSnapshot, insertTaps } from './snapshots';
 
@@ -37,6 +38,7 @@ function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
 }
 
 function dropV39AuditColumns(db: ReturnType<typeof openDb>): void {
+  restoreV40History(db);
   // Replays of v39 or earlier must also undo all later column additions.
   db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
   db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
@@ -55,6 +57,7 @@ describe('schema migrations', () => {
     migrate(db);
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 40').get())
       .toEqual({ version: 40 });
+    restoreV40History(db);
     db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
     db.exec('ALTER TABLE user_profiles DROP COLUMN untappd_link_revision');
     db.prepare('DELETE FROM schema_version WHERE version = 40').run();
@@ -146,12 +149,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..40 on a fresh db, with no gaps', () => {
+  it('records every migration 1..41 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 41 }, (_, i) => i + 1));
     db.close();
   });
 

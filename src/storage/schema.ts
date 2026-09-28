@@ -101,6 +101,67 @@ export const V24_REBUILD_SQL = `
   ALTER TABLE enrich_failures_v24 RENAME TO enrich_failures;
 `;
 
+// #611: confirmed legacy ownership is the currently linked username. Keep the
+// exact SQL exported for replay against a literal v40 fixture.
+export const V41_ACCOUNT_HISTORY_SQL = `
+  CREATE TEMP TABLE v41_checkin_sequence AS SELECT seq FROM sqlite_sequence WHERE name = 'checkins';
+  CREATE TABLE checkins_v41 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, checkin_id TEXT NOT NULL,
+    telegram_id INTEGER NOT NULL, account_key TEXT NOT NULL DEFAULT '',
+    beer_id INTEGER REFERENCES beers(id), user_rating REAL, checkin_at TEXT NOT NULL, venue TEXT,
+    UNIQUE(telegram_id, account_key, checkin_id)
+  );
+  INSERT INTO checkins_v41
+    SELECT id, checkin_id, telegram_id,
+      COALESCE((SELECT lower(untappd_username) FROM user_profiles p WHERE p.telegram_id = old.telegram_id), ''),
+      beer_id, user_rating, checkin_at, venue FROM checkins old;
+  DROP TABLE checkins;
+  ALTER TABLE checkins_v41 RENAME TO checkins;
+  INSERT INTO sqlite_sequence(name, seq)
+    SELECT 'checkins', 0 WHERE NOT EXISTS(SELECT 1 FROM sqlite_sequence WHERE name = 'checkins');
+  UPDATE sqlite_sequence SET seq = MAX(seq, COALESCE((SELECT seq FROM v41_checkin_sequence), 0)) WHERE name = 'checkins';
+  DROP TABLE v41_checkin_sequence;
+  CREATE INDEX idx_checkins_user_beer ON checkins(telegram_id, account_key, beer_id);
+  CREATE TABLE untappd_had_v41 (
+    telegram_id INTEGER NOT NULL, account_key TEXT NOT NULL DEFAULT '',
+    beer_id INTEGER NOT NULL REFERENCES beers(id) ON DELETE CASCADE,
+    last_seen_at TEXT NOT NULL, user_rating REAL CHECK(user_rating IS NULL OR user_rating BETWEEN 0 AND 5),
+    PRIMARY KEY(telegram_id, account_key, beer_id)
+  );
+  INSERT INTO untappd_had_v41
+    SELECT telegram_id,
+      COALESCE((SELECT lower(untappd_username) FROM user_profiles p WHERE p.telegram_id = old.telegram_id), ''),
+      beer_id, last_seen_at, user_rating FROM untappd_had old;
+  DROP TABLE untappd_had;
+  ALTER TABLE untappd_had_v41 RENAME TO untappd_had;
+  CREATE INDEX idx_untappd_had_telegram ON untappd_had(telegram_id, account_key);
+  CREATE TABLE checkin_coverage_v41 (
+    telegram_id INTEGER NOT NULL REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+    account_key TEXT NOT NULL DEFAULT '', from_id INTEGER NOT NULL, to_id INTEGER NOT NULL,
+    PRIMARY KEY(telegram_id, account_key, from_id)
+  );
+  INSERT INTO checkin_coverage_v41
+    SELECT telegram_id,
+      COALESCE((SELECT lower(untappd_username) FROM user_profiles p WHERE p.telegram_id = old.telegram_id), ''),
+      from_id, to_id FROM checkin_coverage old;
+  DROP TABLE checkin_coverage;
+  ALTER TABLE checkin_coverage_v41 RENAME TO checkin_coverage;
+  CREATE TABLE checkin_sync_state_v41 (
+    telegram_id INTEGER NOT NULL REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+    account_key TEXT NOT NULL DEFAULT '', deepest_max_id TEXT,
+    complete INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    profile_total INTEGER, PRIMARY KEY(telegram_id, account_key)
+  );
+  INSERT INTO checkin_sync_state_v41
+    SELECT telegram_id,
+      COALESCE((SELECT lower(untappd_username) FROM user_profiles p WHERE p.telegram_id = old.telegram_id), ''),
+      deepest_max_id, complete, updated_at, profile_total FROM checkin_sync_state old;
+  DROP TABLE checkin_sync_state;
+  ALTER TABLE checkin_sync_state_v41 RENAME TO checkin_sync_state;
+  ALTER TABLE user_profiles ADD COLUMN legacy_sync_revision INTEGER;
+  UPDATE user_profiles SET legacy_sync_revision = untappd_link_revision WHERE untappd_username IS NOT NULL;
+`;
+
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
@@ -751,6 +812,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE user_profiles ADD COLUMN untappd_link_revision INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  { version: 41, sql: V41_ACCOUNT_HISTORY_SQL },
 ];
 
 export function migrate(db: DB): void {
