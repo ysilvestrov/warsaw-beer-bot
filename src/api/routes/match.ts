@@ -61,8 +61,10 @@ export function matchRoute(app: Hono<ApiEnv>, deps: ApiDeps, cache: CatalogCache
     // Anonymous callers get global-only results: empty drunk/ratings sets mean
     // is_drunk=false, user_rating=null, but matched_beer still carries the global
     // rating + untappd_id (⭐/⚪ badges render unchanged).
-    const drunkSet = telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId);
-    const ratings = telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId);
+    const { drunkSet, ratings } = deps.db.transaction(() => ({
+      drunkSet: telegramId === null ? new Set<number>() : triedBeerIds(deps.db, telegramId),
+      ratings: telegramId === null ? new Map<number, number>() : latestRatingsByBeer(deps.db, telegramId),
+    }))();
 
     const { results, fallback, bid } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, {
       aliases,

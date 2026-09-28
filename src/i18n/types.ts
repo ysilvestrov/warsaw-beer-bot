@@ -39,6 +39,7 @@ export interface Messages {
 
   // link
   'link.usage': string;
+  'link.switched': string;               // {username}
   'link.success': string;                // {username}
 
   // import

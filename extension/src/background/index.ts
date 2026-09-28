@@ -215,7 +215,7 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
-    await writeSyncStatus({ ...cur, running: false, outcome: 'error' });
+    await enqueueSyncStatus(emptySyncStatus('error'), ++syncGeneration);
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
 
@@ -252,6 +252,10 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
           if (generation !== syncGeneration) controller.abort();
           if (Number.isSafeInteger(state.linkRevision) && state.linkRevision >= 0) {
             binding = { username: state.username.toLowerCase(), linkRevision: state.linkRevision, token, baseUrl };
+            if (!cur.binding || cur.binding.username !== binding.username
+              || cur.binding.linkRevision !== binding.linkRevision || cur.binding.token !== token || cur.binding.baseUrl !== baseUrl) {
+              await handleCacheClearAll();
+            }
             await enqueueSyncStatus({ binding, running: true, serverCount: state.serverCount,
               profileTotal: state.profileTotal, mergedThisRun: 0, outcome: null, complete: false }, generation);
           }

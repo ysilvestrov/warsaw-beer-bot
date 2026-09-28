@@ -54,21 +54,21 @@ describe('createTranslator', () => {
   test('interpolates parameters in uk', () => {
     const t = createTranslator('uk');
     expect(t('link.success', { username: 'yuriy' })).toBe(
-      "✅ Прив'язано до untappd.com/user/yuriy",
+      "✅ Прив’язано до untappd.com/user/yuriy. Показую історію цього акаунта. Щоб оновити її, натисніть “Sync my check-ins” у розширенні або скористайтеся /import.",
     );
   });
 
   test('interpolates parameters in pl', () => {
     const t = createTranslator('pl');
     expect(t('link.success', { username: 'yuriy' })).toBe(
-      '✅ Powiązano z untappd.com/user/yuriy',
+      '✅ Powiązano z untappd.com/user/yuriy. Pokazuję historię tego konta. Aby ją zaktualizować, użyj “Sync my check-ins” w rozszerzeniu lub /import.',
     );
   });
 
   test('interpolates parameters in en', () => {
     const t = createTranslator('en');
     expect(t('link.success', { username: 'yuriy' })).toBe(
-      '✅ Linked to untappd.com/user/yuriy',
+      '✅ Linked to untappd.com/user/yuriy. Showing this account’s history. Use “Sync my check-ins” in the extension or /import to update it.',
     );
   });
 

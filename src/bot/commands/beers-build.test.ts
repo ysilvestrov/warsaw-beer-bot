@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as had from '../../storage/untappd_had';
+import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
 import { upsertPub } from '../../storage/pubs';
@@ -259,4 +264,26 @@ describe('buildBeersMessage — ok rendering', () => {
     if (out.kind !== 'ok') return;
     expect(out.html).not.toContain('<a href=');
   });
+});
+
+
+test('/beers uses one account snapshot for its drunk badge and rating', () => {
+  const dir = mkdtempSync(join(tmpdir(), '611-beers-'));
+  const db = openDb(join(dir, 'bot.db')); migrate(db); ensureProfile(db, 1); setUntappdUsername(db, 1, 'account-a');
+  const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+  const snap = createSnapshot(db, pubId, '2026-09-28T12:00:00Z');
+  const beerId = seedBeer(db, { untappd_id: 9001, name: 'Atak Chmielu', brewery: 'PINTA',
+    normalized_name: 'atak chmielu', normalized_brewery: 'pinta' });
+  upsertMatch(db, 'PINTA', 'Atak Chmielu', beerId, 1);
+  insertTaps(db, snap, [{ tap_number: 1, beer_ref: 'Atak Chmielu', brewery_ref: 'PINTA',
+    abv: null, ibu: null, style: null, u_rating: null }]);
+  markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 0);
+  const other = openDb(join(dir, 'bot.db'));
+  const original = had.triedBeerIds;
+  const spy = vi.spyOn(had, 'triedBeerIds').mockImplementationOnce((...args) => {
+    const result = original(...args); setUntappdUsername(other, 1, 'account-b'); return result;
+  });
+  try {
+    expect(base(db, 'kufel')).toMatchObject({ kind: 'ok', html: expect.stringContaining(' • ✅ 0.0') });
+  } finally { spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true }); }
 });

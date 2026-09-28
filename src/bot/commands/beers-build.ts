@@ -50,8 +50,10 @@ export function buildBeersMessage(deps: BeersDeps): BeersResult {
 
   const taps = tapsForSnapshotWithBeer(db, snap.id);
   if (taps.length === 0) return { kind: 'empty', pub: pub.name };
-  const triedIds = triedBeerIds(db, deps.telegramId);
-  const personalRatings = latestRatingsByBeer(db, deps.telegramId);
+  const { triedIds, personalRatings } = db.transaction(() => ({
+    triedIds: triedBeerIds(db, deps.telegramId),
+    personalRatings: latestRatingsByBeer(db, deps.telegramId),
+  }))();
 
   const address = pub.address ? ` — ${escapeHtml(pub.address)}` : '';
   const header = t('beers.header', {

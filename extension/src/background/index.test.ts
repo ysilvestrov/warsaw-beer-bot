@@ -405,3 +405,30 @@ test('queued progress and a terminal reply from A cannot restore A after a verif
     serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
   expect(sessionStore.get('checkinSync')).toMatchObject({ binding: { username: 'other', linkRevision: 2 }, serverCount: 0, complete: false });
 });
+
+
+test('starting B directly clears cached A personal matches before reporting B progress', async () => {
+  await chrome.storage.session.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
+    mergedThisRun: 5, outcome: 'done', complete: true,
+    binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } } });
+  await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+  vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'other', linkRevision: 2,
+    deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+  vi.stubGlobal('fetch', async () => new Response('<html></html>'));
+  vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({ merged: 0, alreadyKnown: 0, pageSize: 0,
+    nextMaxId: null, nextCursor: null, profileTotal: null, serverCount: 0, complete: false });
+  await handleCheckinSyncStart();
+  await vi.waitFor(() => expect(sessionStore.get('checkinSync')).toMatchObject({ running: false, outcome: 'done' }));
+  expect(await getCached('old-personal')).toBe(null);
+});
+
+test('a start without credentials cannot retain an earlier completion', async () => {
+  await chrome.storage.session.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
+    mergedThisRun: 5, outcome: 'done', complete: true,
+    binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } } });
+  await setSettings({ token: '' });
+  await handleCheckinSyncStart();
+  expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
+    mergedThisRun: 0, outcome: 'error', complete: false });
+});

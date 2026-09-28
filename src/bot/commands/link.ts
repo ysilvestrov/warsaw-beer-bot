@@ -1,6 +1,6 @@
 import { Composer } from 'telegraf';
 import type { BotContext } from '../index';
-import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
+import { ensureProfile, getProfile, setUntappdUsername } from '../../storage/user_profiles';
 
 // Accepts a bare username, or an untappd.com profile URL with or without the scheme and
 // with or without `www.` — the three forms spec.md §`/link` promises, `link.usage` tells
@@ -30,6 +30,10 @@ linkCommand.command('link', async (ctx) => {
     return;
   }
   ensureProfile(ctx.deps.db, ctx.from.id);
-  setUntappdUsername(ctx.deps.db, ctx.from.id, parsed.username);
-  await ctx.reply(ctx.t('link.success', { username: parsed.username }));
+  const switched = ctx.deps.db.transaction(() => {
+    const previous = getProfile(ctx.deps.db, ctx.from.id)?.untappd_username;
+    setUntappdUsername(ctx.deps.db, ctx.from.id, parsed.username);
+    return !!previous && previous.toLowerCase() !== parsed.username.toLowerCase();
+  }).immediate();
+  await ctx.reply(ctx.t(switched ? 'link.switched' : 'link.success', { username: parsed.username }));
 });

@@ -15,7 +15,7 @@
 - Continue in `/home/ysi/warsaw-bb-codex/.worktrees/issue-611`, branch `fix/issue-611`, core head `c6617ea`.
 - Separate histories remain keyed by `(telegram_id, account_key)`. Keep A → B → A restoration, first-link adoption, zero ratings and established coverage. Never derive coverage from imports or equal counts.
 - A case-only relink does not change revision; every genuine switch does, including ABA.
-- Existing migration mapping rests on the user's confirmation about the four history owners. Recheck the affected population before deployment; resolve ambiguous/new ownership individually.
+- Existing migration mapping rests on the user's confirmation about all six history owners (extended at final preflight). Recheck the affected population before deployment; resolve ambiguous/new ownership individually.
 - No account picker, deletion, username-rename recognition, traversal redesign or unrelated refactor.
 - Preserve the main checkout's `AGENTS.md` monitoring reminder outside this branch.
 - Each implementation task: failing focused regressions, smallest implementation, passing focused tests, full `npm test && npm run typecheck`, then a local commit. For extension changes also run its test/typecheck/build gate.
@@ -40,7 +40,7 @@ isCurrentHistoryOwner(db, owner): boolean
 **Consumes:** reviewed owner helpers, `getProfile`, explicit-key history repositories.
 **Produces:** GET state includes `linkRevision: number`; POST accepts optional `linkRevision: number` and rejects stale contexts before any mutation.
 
-- [ ] Add endpoint regressions using existing `setup`, `get`, `post`, `PAGE_ONE` and `PAGE_BOTTOM`: fresh/unchanged binding accepts legacy pages; matching revision accepts pages; stale A and ABA revisions return exactly `409 {error:'account_changed'}`; missing revision after a switch returns exactly `409 {error:'sync_context_required'}`. Case-only relink preserves acceptance. Invalid revisions (null, negative, fraction, unsafe integer, string) fail validation. Unlinked profiles retain `not_linked`.
+- [x] Add endpoint regressions using existing `setup`, `get`, `post`, `PAGE_ONE` and `PAGE_BOTTOM`: fresh/unchanged binding accepts legacy pages; matching revision accepts pages; stale A and ABA revisions return exactly `409 {error:'account_changed'}`; missing revision after a switch returns exactly `409 {error:'sync_context_required'}`. Case-only relink preserves acceptance. Invalid revisions (null, negative, fraction, unsafe integer, string) fail validation. Unlinked profiles retain `not_linked`.
 
 ```ts
 const { db, app } = setup();
@@ -54,8 +54,8 @@ expect(await res.json()).toEqual({ error: 'account_changed' });
 
 Assert exact history, coverage, sync-state and catalog rows before/after rejected requests, including empty pages. An error response alone cannot establish no mutation. Test GET username/revision/count/state consistency under an injected switch from a second WAL connection.
 
-- [ ] Run the endpoint suite and verify the failures concern missing context guards.
-- [ ] Extend `SyncBody` with `z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()`. Wrap the GET response's profile/owner/count/state reads in a read transaction. Wrap POST's current-profile check, empty-page branch, catalog/history writes and response-derived counts/ranges in one immediate transaction. Preserve existing block/cursor/no-session behavior.
+- [x] Run the endpoint suite and verify the failures concern missing context guards.
+- [x] Extend `SyncBody` with `z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional()`. Wrap the GET response's profile/owner/count/state reads in a read transaction. Wrap POST's current-profile check, empty-page branch, catalog/history writes and response-derived counts/ranges in one immediate transaction. Preserve existing block/cursor/no-session behavior.
 
 Inside that transaction, after the existing linked-profile check and before mutations:
 
@@ -69,7 +69,7 @@ if (linkRevision === undefined && profile.legacy_sync_revision !== owner.linkRev
 
 Pass `owner.accountKey` to every check-in/count/coverage/total operation, and `account_key: owner.accountKey` to `mergeCheckin`. Construct the accepted response within the same transaction. Returning an HTTP Response from the synchronous transaction callback preserves Hono's existing handler contract.
 
-- [ ] Make §feed/API guarantees in `spec.md` concrete; do not change the caught-up rule. Run focused tests and the backend gate, then commit `fix(api): reject stale Untappd sync contexts (#611)`.
+- [x] Make §feed/API guarantees in `spec.md` concrete; do not change the caught-up rule. Run focused tests and the backend gate, then commit `fix(api): reject stale Untappd sync contexts (#611)`.
 
 ### Task 2: Bind imports and scraper observations to their starting account
 
@@ -78,9 +78,9 @@ Pass `owner.accountKey` to every check-in/count/coverage/total operation, and `a
 **Consumes:** `HistoryOwner`, immediate guard and explicit writer keys.
 **Produces:** `importCheckins(db, telegramId, rows, owner?)` where omitted owner is captured inside the synchronous batch transaction for existing callers; exported `ImportAccountChangedError` identifies interrupted attribution. The async command always supplies its original owner.
 
-- [ ] Add failing batch tests: captured A rejects after B or ABA, with zero new catalog/history rows; captured unlinked import rejects after first-link adoption; committed earlier batches remain under A and are restored on relink; another Telegram user's changes do not interrupt it. Extend the existing delayed-scraper regression to assert all observations stay with their captured owner.
-- [ ] Add command tests with a mocked export stream/file download: switch during download, between batches, and during busy retry. Assert exact committed counts, interruption copy and no success message for the newly active account. Do not mock `importCheckins` away: run it against real SQLite.
-- [ ] Run those suites and confirm stale-owner failures. Implement the batch guard before beer upserts:
+- [x] Add failing batch tests: captured A rejects after B or ABA, with zero new catalog/history rows; captured unlinked import rejects after first-link adoption; committed earlier batches remain under A and are restored on relink; another Telegram user's changes do not interrupt it. Extend the existing delayed-scraper regression to assert all observations stay with their captured owner.
+- [x] Add command tests with a mocked export stream/file download: switch during download, between batches, and during busy retry. Assert exact committed counts, interruption copy and no success message for the newly active account. Do not mock `importCheckins` away: run it against real SQLite.
+- [x] Run those suites and confirm stale-owner failures. Implement the batch guard before beer upserts:
 
 ```ts
 export class ImportAccountChangedError extends Error {
@@ -95,8 +95,8 @@ if (captured.telegramId !== telegramId || !isCurrentHistoryOwner(db, captured))
 
 Capture the command owner immediately after `ensureProfile`, before the first awaited download call. Pass the same owner through every `withBusyRetry` batch attempt. Increment `total` only after a committed batch. Catch the typed interruption separately, stop/destroy the export stream, report the committed count and captured account, and return without the normal success message. Recheck the binding before terminal success; preserve existing handling of parse/network failures.
 
-- [ ] In `refresh-untappd`, retain the existing immediate username/revision guard and pass the normalized captured key to `markHad`; test delayed A/B/ABA responses and case-only changes. Add interruption text in all three locales; user copy says which import stopped and how many rows were saved, without implementation vocabulary.
-- [ ] Run focused tests/backend gate, update the ingestion guarantees in `spec.md`, commit `fix(bot): bind imported and scraped history to its account (#611)`.
+- [x] In `refresh-untappd`, retain the existing immediate username/revision guard and pass the normalized captured key to `markHad`; test delayed A/B/ABA responses and case-only changes. Add interruption text in all three locales; user copy says which import stopped and how many rows were saved, without implementation vocabulary.
+- [x] Run focused tests/backend gate, update the ingestion guarantees in `spec.md`, commit `fix(bot): bind imported and scraped history to its account (#611)`.
 
 ### Task 3: Send revisions and isolate extension status
 
@@ -105,8 +105,8 @@ Capture the command owner immediately after `ensureProfile`, before the first aw
 **Consumes:** task 1 GET `linkRevision`, POST revision and the two new 409 codes.
 **Produces:** `CheckinSyncState.linkRevision: number`; `submitPage(html,maxId,linkRevision)`; `SyncStatus` includes `account_changed` and `sync_context_required`; cached run reports carry their binding.
 
-- [ ] Add failing client tests for exact POST JSON including revision and parsing each 409 response by its JSON error code. Preserve `not_linked`; unknown/malformed errors remain generic server errors. Append the revision parameter to `postCheckinSyncPage` after existing parameters so signal/timeout callers are not silently reordered.
-- [ ] Add sync-runner regressions: every submitted page carries the initially fetched revision; missing/invalid server revision prevents fetching/submitting; both new errors stop immediately, produce no subsequent pages or successful completion, and preserve the run's committed merged count.
+- [x] Add failing client tests for exact POST JSON including revision and parsing each 409 response by its JSON error code. Preserve `not_linked`; unknown/malformed errors remain generic server errors. Append the revision parameter to `postCheckinSyncPage` after existing parameters so signal/timeout callers are not silently reordered.
+- [x] Add sync-runner regressions: every submitted page carries the initially fetched revision; missing/invalid server revision prevents fetching/submitting; both new errors stop immediately, produce no subsequent pages or successful completion, and preserve the run's committed merged count.
 
 ```ts
 submitPage: (html, maxId, linkRevision) =>
@@ -116,28 +116,40 @@ submitPage: (html, maxId, linkRevision) =>
 
 Set `complete` false for context errors even when cached counts happen to agree. The runner must not reinterpret the rejected old run as a new account's success.
 
-- [ ] Add background/popup regressions: completed A status is not displayed for B or ABA; legacy stored reports without binding are discarded; same binding retains status; failed current-state validation cannot establish a cached completion; worker recovery and queued progress writes cannot restore an obsolete binding.
-- [ ] Store captured username/revision with each progress/terminal report and compare against a fresh authenticated state before reuse. Also compare the run's settings/token/base URL with current settings, so changing credentials cannot reuse another user's report. On mismatch, invalidate the old report and clear personal match cache through existing `handleCacheClearAll`; expose current counts only from the fresh state. Serialize status writes through the existing chain. Do not add polling, account-picker UI or a new cache architecture.
-- [ ] Display specific popup messages for account change/update requirement. Add one user-facing Unreleased changelog entry describing wrong-account history/sync status and its corrected behavior. Update the install guide with preserved/restored histories and the old-client update requirement after changing accounts. Do not publish to the store.
-- [ ] Run `npm test && npm run typecheck` in the backend, and `npm --prefix extension test && npm --prefix extension run typecheck && npm --prefix extension run build`; commit `fix(extension): scope check-in sync to the linked account (#611)`.
+- [x] Add background/popup regressions: completed A status is not displayed for B or ABA; legacy stored reports without binding are discarded; same binding retains status; failed current-state validation cannot establish a cached completion; worker recovery and queued progress writes cannot restore an obsolete binding.
+- [x] Store captured username/revision with each progress/terminal report and compare against a fresh authenticated state before reuse. Also compare the run's settings/token/base URL with current settings, so changing credentials cannot reuse another user's report. On mismatch, invalidate the old report and clear personal match cache through existing `handleCacheClearAll`; expose current counts only from the fresh state. Serialize status writes through the existing chain. Do not add polling, account-picker UI or a new cache architecture.
+- [x] Display specific popup messages for account change/update requirement. Add one user-facing Unreleased changelog entry describing wrong-account history/sync status and its corrected behavior. Update the install guide with preserved/restored histories and the old-client update requirement after changing accounts. Do not publish to the store.
+- [x] Run `npm test && npm run typecheck` in the backend, and `npm --prefix extension test && npm --prefix extension run typecheck && npm --prefix extension run build`; commit `fix(extension): scope check-in sync to the linked account (#611)`.
 
 ### Task 4: Whole-branch integration, bot messages and shipping preparation
 
-**Files:** `src/bot/commands/link.ts`, `link.test.ts`, `src/i18n/locales/{uk,pl,en}.ts`; `src/api/routes/match.test.ts`, `src/api/mcp/match-tool.test.ts`, `src/bot/commands/status.test.ts`; `spec.md`; review evidence and deployment preflight document under `docs/reviews/`.
+**Files:** `src/api/routes/match.ts`, `src/api/mcp/match-tool.ts`, `src/bot/commands/{beers-build,status}.ts` and their tests (snapshot defects reproduced during integration); `src/bot/commands/link.ts`, `link.test.ts`, `src/i18n/locales/{uk,pl,en}.ts`; `src/api/routes/match.test.ts`, `src/api/mcp/match-tool.test.ts`, `src/bot/commands/status.test.ts`; `spec.md`; review evidence and deployment preflight document under `docs/reviews/`.
 
 **Consumes:** completed guarded ingestion and revision-aware client from tasks 1–3.
 **Produces:** end-to-end evidence for #611 and a concrete branch ready for the user's PR decision.
 
-- [ ] Add failing `/link` message tests for first link, case-only link, real switch and restoration; implement plain localized copy explaining that the selected account's history is shown, the other history is saved, and sync/update may be needed. Keep the existing username parser.
-- [ ] Add `/match`, MCP and bot-status regressions using real repositories: A ratings/drunk/counts exclude B, fresh B with fewer check-ins does not inherit caught-up state, B's observations do not alter A, and A is restored on relink. Assert exact response fields (including zero ratings and unknown-vs-not-drunk MCP evidence), rather than only storage results.
-- [ ] Verify one whole sequence through accepted feed page A → switch B → delayed rejected A page → accepted B page → switch A → restored counts/coverage. Include ABA stale-page rejection and two users with the same username/check-in IDs. Reuse existing fixture pages and authenticated endpoint setup; do not duplicate production traversal logic in tests.
-- [ ] Run focused regressions, full backend test/typecheck/build and extension test/typecheck/build. Review the entire branch against the approved design, migration/ingestion contracts and all user-visible copy. Apply valid findings with regression tests and repeat affected gates. Record external-review failure explicitly if independent corroboration is unavailable; do not report an absent receipt as approval.
-- [ ] Finish `spec.md`: remove the core-incomplete note only after every pending guarantee has implementation and integration evidence. Verify every row of the design's claims/evidence table has its guard or provenance.
-- [ ] Prepare a read-only production preflight and SQLite backup/replay procedure based on the core verification. Confirm migration 41 is still free on current upstream; if not, append the account-history migration after upstream's head without renumbering existing migrations. Recheck that ownership provenance still covers the affected users. Any new ambiguous history requires an individual decision before deployment.
-- [ ] Document rollback using the pre-migration database backup plus matching binary; the old binary must never run against the migrated schema. Use `deploy/README.md` procedures and verify runtime health after an authorized deployment. Store submission remains a maintainer action; any later release PR must merge before `npm run release:store`.
-- [ ] Commit the verified final copy/tests/docs. Ask whether to create a PR. Once authorized, fetch `origin/main`, rebase if moved, repeat the full gates after any rebase, push and open the PR. Wait for CI and AI-review results, evaluate comments technically and address valid findings before reporting readiness. No deployment/issue closure solely because the PR exists.
+- [x] Add failing `/link` message tests for first link, case-only link, real switch and restoration; implement plain localized copy explaining that the selected account's history is shown, the other history is saved, and sync/update may be needed. Keep the existing username parser.
+- [x] Add `/match`, MCP and bot-status regressions using real repositories: A ratings/drunk/counts exclude B, fresh B with fewer check-ins does not inherit caught-up state, B's observations do not alter A, and A is restored on relink. Assert exact response fields (including zero ratings and unknown-vs-not-drunk MCP evidence), rather than only storage results.
+- [x] Verify one whole sequence through accepted feed page A → switch B → delayed rejected A page → accepted B page → switch A → restored counts/coverage. Include ABA stale-page rejection and two users with the same username/check-in IDs. Reuse existing fixture pages and authenticated endpoint setup; do not duplicate production traversal logic in tests.
+- [x] Run focused regressions, full backend test/typecheck/build and extension test/typecheck/build. Review the entire branch against the approved design, migration/ingestion contracts and all user-visible copy. Apply valid findings with regression tests and repeat affected gates. Record external-review failure explicitly if independent corroboration is unavailable; do not report an absent receipt as approval.
+- [x] Finish `spec.md`: remove the core-incomplete note only after every pending guarantee has implementation and integration evidence. Verify every row of the design's claims/evidence table has its guard or provenance.
+- [x] Prepare a read-only production preflight and SQLite backup/replay procedure based on the core verification. Confirm migration 41 is still free on current upstream; if not, append the account-history migration after upstream's head without renumbering existing migrations. Recheck that ownership provenance still covers the affected users. Any new ambiguous history requires an individual decision before deployment.
+- [x] Document rollback using the pre-migration database backup plus matching binary; the old binary must never run against the migrated schema. Use `deploy/README.md` procedures and verify runtime health after an authorized deployment. Store submission remains a maintainer action; any later release PR must merge before `npm run release:store`.
+- [x] Commit the verified final copy/tests/docs and present the PR decision after local verification.
+- [ ] Once PR creation is authorized, fetch `origin/main`, rebase if moved, repeat the full gates after any rebase, push and open the PR. Wait for CI and AI-review results, evaluate comments technically and address valid findings before reporting readiness. No deployment/issue closure solely because the PR exists.
 - [ ] After an authorized deployment succeeds and health is verified, remove only clean worktrees/branches whose PR is confirmed merged; preserve unrelated/dirty work and raw resource-monitoring artifacts.
 
 ## Completion boundary
 
 This plan is ready for execution after user acceptance. #611 is complete only when guarded ingestion, legacy compatibility, binding-scoped extension reports, exact integration tests and whole-branch review are done. Production deployment and closing the issue follow the user's authorized shipping flow; they are not implied by planning or by the core's green tests.
+
+
+## Execution record — 2026-09-28
+
+Tasks 1–3 committed as `e368e30`, `8217901`, `89eaf9c`. Task 4 adds the complete feed A/B/ABA sequence, matching/MCP/status restoration evidence and localized `/link` copy. Integration reproduced four response-level snapshot defects; the minimal read transactions cover `/match`, MCP, `/status` and `/beers`. Extension review reproduced direct-start cache retention and no-token completion retention; both now have passing regressions.
+
+Final gates: backend **3901 passed, one skipped**, typecheck/build exit 0; extension **819 passed**, typecheck/build exit 0. Whole-branch review and repeat production-copy replay are recorded in `docs/reviews/2026-09-28-611-periphery.md`. No source code changed after those final gates.
+
+The read-only preflight found four check-in owners and **two additional had-only owners**. Their population/bindings have not changed since the core copy, but a zero revision is not provenance. The user explicitly confirmed both had-only accounts also never changed; ownership provenance now covers all six owners. Migration 41 is free at fetched upstream `a56143c`. Backup/replay and rollback instructions are in `docs/reviews/2026-09-28-611-deployment-preflight.md`.
+
+Local implementation is complete. PR creation, deployment, store publishing and post-deployment cleanup remain separate steps requiring the user's shipping decision.

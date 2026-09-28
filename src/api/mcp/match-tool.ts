@@ -78,8 +78,20 @@ export async function runMatchTool(
   beers: MatchInput[],
 ): Promise<MatchToolRun> {
   const { prepared, byId, aliases } = await catalog.get();
-  const drunkSet = triedBeerIds(db, telegramId);       // two-source model: checkins ∪ untappd_had
-  const ratings = latestRatingsByBeer(db, telegramId);
+  // Materialize all personal evidence before asynchronous matching can yield.
+  const { drunkSet, ratings, profile } = db.transaction(() => {
+    const drunkSet = triedBeerIds(db, telegramId); // checkins ∪ untappd_had
+    return {
+      drunkSet,
+      ratings: latestRatingsByBeer(db, telegramId),
+      profile: {
+        checkins_known: countCheckins(db, telegramId),
+        untappd_had_known: hadBeerIds(db, telegramId).size,
+        latest_checkin_at: latestCheckinAt(db, telegramId),
+        drunk_set_empty: drunkSet.size === 0,
+      },
+    };
+  })();
   const { results, fallback } = await matchBeerList(prepared, byId, drunkSet, ratings, beers, {
     aliases,
     isInactiveCard: (item) => findActiveDispositionForCard(db, item.brewery, item.name, item.abv ?? null) !== null,
@@ -90,12 +102,7 @@ export async function runMatchTool(
   return {
     fallback,
     output: {
-      profile: {
-        checkins_known: countCheckins(db, telegramId),
-        untappd_had_known: hadBeerIds(db, telegramId).size,
-        latest_checkin_at: latestCheckinAt(db, telegramId),
-        drunk_set_empty: drunkSetEmpty,
-      },
+      profile,
       results: results.map((r) => ({
         input: r.raw,
         status: statusFor(r, drunkSetEmpty),

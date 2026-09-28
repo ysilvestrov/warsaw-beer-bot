@@ -1,6 +1,7 @@
+import * as matching from '../../domain/match-list';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { ensureProfile } from '../../storage/user_profiles';
+import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { mergeCheckin } from '../../storage/checkins';
 import { markHad } from '../../storage/untappd_had';
 import { prepareCatalog, FULL_FALLBACK_BUDGET } from '../../domain/matcher';
@@ -230,4 +231,43 @@ describe('runMatchTool', () => {
     expect(text).toContain('not_searched');
     expect(text).toContain('search budget');
   });
+});
+
+
+test('MCP keeps personal evidence and results together when the account switches during matching', async () => {
+  const db = db0(); setUntappdUsername(db, 1, 'account-a');
+  mergeCheckin(db, { checkin_id: 'c1', telegram_id: 1, beer_id: 105,
+    user_rating: 4, checkin_at: '2026-01-05T18:00:00Z', venue: null });
+  const original = matching.matchBeerList;
+  const spy = vi.spyOn(matching, 'matchBeerList').mockImplementation(async (...args) => {
+    const result = await original(...args);
+    setUntappdUsername(db, 1, 'account-b');
+    return result;
+  });
+  try {
+    const { output } = await runMatchTool(db, cacheOf(CATALOG), 1, [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }]);
+    expect(output.profile).toEqual({ checkins_known: 1, untappd_had_known: 0,
+      latest_checkin_at: '2026-01-05 18:00:00', drunk_set_empty: false });
+    expect(output.results[0]).toMatchObject({ status: 'drunk', your_rating: 4 });
+  } finally { spy.mockRestore(); db.close(); }
+});
+
+test('MCP reports unknown for fresh B, preserves zero had ratings and restores A evidence', async () => {
+  const db = db0(); setUntappdUsername(db, 1, 'account-a');
+  mergeCheckin(db, { checkin_id: 'c1', telegram_id: 1, beer_id: 105,
+    user_rating: 4, checkin_at: '2026-01-05T18:00:00Z', venue: null });
+  const beers = [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }, { brewery: 'PINTA', name: 'Atak Chmielu' }];
+  setUntappdUsername(db, 1, 'account-b');
+  const fresh = (await runMatchTool(db, cacheOf(CATALOG), 1, beers)).output;
+  expect(fresh.profile).toEqual({ checkins_known: 0, untappd_had_known: 0, latest_checkin_at: null, drunk_set_empty: true });
+  expect(fresh.results.map(r => [r.status, r.your_rating])).toEqual([['unknown', null], ['unknown', null]]);
+  markHad(db, 1, 200, '2026-09-28T03:00:00Z', 0);
+  const b = (await runMatchTool(db, cacheOf(CATALOG), 1, beers)).output;
+  expect(b.results.map(r => [r.status, r.your_rating])).toEqual([['not_drunk', null], ['drunk', 0]]);
+  expect(b.profile).toEqual({ checkins_known: 0, untappd_had_known: 1, latest_checkin_at: null, drunk_set_empty: false });
+  setUntappdUsername(db, 1, 'account-a');
+  const a = (await runMatchTool(db, cacheOf(CATALOG), 1, beers)).output;
+  expect(a.profile).toEqual({ checkins_known: 1, untappd_had_known: 0, latest_checkin_at: '2026-01-05 18:00:00', drunk_set_empty: false });
+  expect(a.results.map(r => [r.status, r.your_rating])).toEqual([['drunk', 4], ['not_drunk', null]]);
+  db.close();
 });

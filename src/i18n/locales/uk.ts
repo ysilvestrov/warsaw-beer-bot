@@ -33,7 +33,8 @@ export const uk: Messages = {
 
   // link
   'link.usage': 'Використання: /link <username> (або повний URL untappd.com/user/<username>)',
-  'link.success': "✅ Прив'язано до untappd.com/user/{username}",
+  'link.success': "✅ Прив’язано до untappd.com/user/{username}. Показую історію цього акаунта. Щоб оновити її, натисніть “Sync my check-ins” у розширенні або скористайтеся /import.",
+  'link.switched': "✅ Прив’язано до untappd.com/user/{username}. Показую історію цього акаунта; історію попереднього збережено окремо. Щоб оновити її, натисніть “Sync my check-ins” у розширенні або скористайтеся /import.",
 
   // import
   'import.prompt':

@@ -1,8 +1,12 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as had from '../../storage/untappd_had';
 import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
 import { migrate } from '../../storage/schema';
-import { ensureProfile } from '../../storage/user_profiles';
+import { ensureProfile, setUntappdUsername } from '../../storage/user_profiles';
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { mergeIntoCanonical } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
@@ -16,10 +20,10 @@ import { createCatalogCache, type CatalogCache } from '../../domain/catalog-cach
 import { cardAbv, cardText } from '../../domain/card-text';
 import { insertLegacyDisposition, closeLegacyDisposition } from '../../storage/legacy-orphan-dispositions';
 
-function setup(log?: pino.Logger) {
+function setup(log?: pino.Logger, path = ':memory:') {
   const warn = vi.fn();
   const appLog = log ?? ({ ...pino({ level: 'silent' }), warn } as never);
-  const db = openDb(':memory:');
+  const db = openDb(path);
   migrate(db);
   ensureProfile(db, 1);
   ensureProfile(db, 2);
@@ -298,4 +302,40 @@ describe('POST /match', () => {
       beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni', bid: 9001 }],
     })).status).toBe(200);
   });
+});
+
+
+test('/match retains one account snapshot when another WAL connection relinks between personal reads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), '611-match-'));
+  const { db, appAs } = setup(undefined, join(dir, 'bot.db'));
+  const other = openDb(join(dir, 'bot.db'));
+  setUntappdUsername(db, 1, 'account-a');
+  const original = had.triedBeerIds;
+  const spy = vi.spyOn(had, 'triedBeerIds').mockImplementation((...args) => {
+    const result = original(...args);
+    setUntappdUsername(other, 1, 'account-b');
+    return result;
+  });
+  try {
+    const body = await (await post(appAs(1), { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] })).json();
+    expect({ drunk: body.results[0].is_drunk, rating: body.results[0].user_rating })
+      .toEqual({ drunk: true, rating: 4 });
+  } finally { spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true }); }
+});
+
+test('/match restores A and keeps B and another Telegram user’s zero rating separate', async () => {
+  const { db, appAs, panIpani } = setup();
+  setUntappdUsername(db, 1, 'account-a');
+  setUntappdUsername(db, 2, 'account-a');
+  markHad(db, 2, panIpani, '2026-09-28T03:00:00Z', 0);
+  const body = { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] };
+  const result = async (id: number) => (await (await post(appAs(id), body)).json()).results[0];
+  setUntappdUsername(db, 1, 'account-b');
+  expect(await result(1)).toMatchObject({ is_drunk: false, user_rating: null });
+  markHad(db, 1, panIpani, '2026-09-28T03:00:00Z', 0);
+  expect(await result(1)).toMatchObject({ is_drunk: true, user_rating: 0 });
+  setUntappdUsername(db, 1, 'account-a');
+  expect(await result(1)).toMatchObject({ is_drunk: true, user_rating: 4 });
+  expect(await result(2)).toMatchObject({ is_drunk: true, user_rating: 0 });
+  db.close();
 });
