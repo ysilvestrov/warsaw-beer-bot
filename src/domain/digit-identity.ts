@@ -109,6 +109,10 @@ const IDAHO_HOP = /(?<![\p{L}\p{N}])Idaho\s*7(?![\p{L}\p{N}])/giu;
 const FRACTION_HOP = /(?<![\p{L}\p{N}])(?:EXP\s*)?(\d+)\s*\/\s*(\d+)(?![\p{L}\p{N}])/giu;
 const POLISH_FRACTIONS = new Set(['2/20', '3/20', '5/39']);
 const FRACTION_MARKER = /(?:#|\b(?:no|nr|batch|series|kegged|bottled|released|date)\.?)\s*$/i;
+const TAP_CODE = /(?<![\p{L}\p{N}])TAP[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
+const LAB_CODE = /(?<![\p{L}\p{N}])LAB[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
+const EL_CODE = /(?<![\p{L}\p{N}])EL[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
+const HORSESHOE_CODE = /(?<![\p{L}\p{N}])53\s*M(?![\p{L}\p{N}])/giu;
 
 function maskSpans(name: string, spans: readonly Span[]): string {
   const chars = name.split('');
@@ -233,13 +237,41 @@ function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side)
   return spans;
 }
 
+function findSeriesCodeSpans(name: string, context?: DigitIdentityContext): CodeSpan[] {
+  if (!context) return [];
+  const scan = maskSpans(name, findNoiseSpans(name));
+  const families: { brand: string[]; pattern: RegExp; kind: 'tap' | 'hard'; namespace: string }[] = [
+    { brand: ['schneider', 'weisse'], pattern: TAP_CODE, kind: 'tap', namespace: 'TAP' },
+    { brand: ['pracownia', 'piwa'], pattern: LAB_CODE, kind: 'hard', namespace: 'LAB' },
+    { brand: ['moersleutel'], pattern: EL_CODE, kind: 'hard', namespace: 'EL' },
+    { brand: ['hop', 'brook'], pattern: HORSESHOE_CODE, kind: 'hard', namespace: '53M' },
+  ];
+  const spans: CodeSpan[] = [];
+  for (const family of families) {
+    if (!hasBrand(context, family.brand)) continue;
+    for (const match of scan.matchAll(family.pattern)) {
+      const span = { start: match.index, end: match.index + match[0].length };
+      if (!completeCode(scan, span)) continue;
+      spans.push({ ...span, kind: family.kind,
+        id: family.namespace === '53M' ? '53M' : `${family.namespace}:${canon(match[1])}` });
+    }
+  }
+  return spans;
+}
+
 function readProfile(name: string, context?: DigitIdentityContext, side?: Side): NameDigits {
   const branded = maskSpans(name, findBrandNumberSpans(name, context));
-  const spans = findHopSpans(branded, context, side);
+  const spans = [...findHopSpans(branded, context, side), ...findSeriesCodeSpans(branded, context)];
   const ordinary = readOrdinaryNameDigits(maskSpans(branded, spans));
   ordinary.hasLetters = readOrdinaryNameDigits(name).hasLetters;
-  const hops = [...new Set(spans.map((span) => span.id))].sort();
-  return { ...ordinary, ...(hops.length > 0 ? { hops } : {}) };
+  const hops = [...new Set(spans.filter((span) => span.kind === 'hop').map((span) => span.id))].sort();
+  const tapCodes = [...new Set(spans.filter((span) => span.kind === 'tap').map((span) => span.id))].sort();
+  const hardCodes = spans.filter((span) => span.kind === 'hard').map((span) => span.id).sort();
+  return { ...ordinary,
+    ...(hops.length > 0 ? { hops } : {}),
+    ...(tapCodes.length > 0 ? { tapCodes } : {}),
+    ...(hardCodes.length > 0 ? { hardCodes } : {}),
+  };
 }
 
 export function readNameDigits(name: string): NameDigits {
@@ -326,6 +358,9 @@ export function digitIdentity(
     candidate = readProfile(context.candidate.name, context, 'candidate');
   }
   if (differentNonEmptySets(input.hops ?? [], candidate.hops ?? [])) return 'different';
+  if (differentNonEmptySets(input.tapCodes ?? [], candidate.tapCodes ?? [])) return 'different';
+  if (minus(input.hardCodes ?? [], candidate.hardCodes ?? []).length > 0) return 'different';
+  const candidateCodeOnly = minus(candidate.hardCodes ?? [], input.hardCodes ?? []);
   if (czechGradesContradict(input, candidate, context)) return 'different';
   // 1. Every hard number of the input must pair off with the candidate's numbers, or be covered by its grade or
   //    soft number.
@@ -333,6 +368,7 @@ export function digitIdentity(
     return 'different';
   }
   const candidateOnly = minus(minus(candidate.numbers, input.numbers), [...input.grades, ...input.soft]);
+  const hasCandidateOnly = candidateOnly.length > 0 || candidateCodeOnly.length > 0;
   // A candidate-only number is a fallback only while the input carries no number of its own that the candidate
   // lacks — a soft number (`Trappistes Rochefort 10` is not `Trappistes Rochefort 6`) or a version (`Potion #2.0`
   // is not `Potion #18`). Grades are extract, not a number.
@@ -340,7 +376,7 @@ export function digitIdentity(
     ...minus(input.soft, [...candidate.numbers, ...candidate.soft, ...candidate.grades]),
     ...minus(input.versions, candidate.versions),
   ];
-  if (candidateOnly.length > 0 && inputOwnUnmatched.length > 0) return 'different';
+  if (hasCandidateOnly && inputOwnUnmatched.length > 0) return 'different';
   // 2. Grades and soft numbers never split on their own — except where they are the only number carrier.
   if (input.soft.length > 0 && candidate.soft.length > 0 && input.soft.join(' ') !== candidate.soft.join(' ')) {
     return 'different';
@@ -361,7 +397,7 @@ export function digitIdentity(
   // A number only the candidate carries is the weaker fallback, whatever the years say.
   // #663: Untappd appends numbers to names (batch, edition, variant), but a purely numeric candidate
   // (e.g. `21`, `15`) has no letters and cannot be an appended variant of an input.
-  if (candidateOnly.length > 0) {
+  if (hasCandidateOnly) {
     if (!candidate.hasLetters) return 'different';
     return 'number-fallback';
   }

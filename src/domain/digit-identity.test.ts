@@ -443,3 +443,81 @@ test('peer reversal retains the catalog and swaps brewery/style sides', () => {
   })).toBe(true);
 });
 });
+
+describe('#664 contextual series codes', () => {
+test.each<[string, string, string | null, DigitIdentity]>([
+  ['NOTLAB29', 'NOTLAB30', 'Pracownia Piwa', 'same'],
+  ['LAB29suffix', 'LAB30suffix', 'Pracownia Piwa', 'same'],
+  ['LAB29', 'LAB30', null, 'same'],
+  ['TAP04', 'TAP07', null, 'same'],
+  ['LAB29.5', 'LAB30.5', 'Pracownia Piwa', 'same'],
+  ['LAB 29.5', 'Porter', 'Pracownia Piwa', 'different'],
+  ['LAB29/30', 'LAB29', 'Pracownia Piwa', 'different'],
+  ['Beer TAP 4.5', 'Beer TAP04', 'Schneider Weisse', 'different'],
+  ['Beer #4 TAP04', 'Beer TAP04', 'Schneider Weisse', 'different'],
+  ['Beer #29 LAB29', 'Beer LAB29', 'Pracownia Piwa', 'different'],
+  ['Beer LAB29 LAB29', 'Beer LAB29', 'Pracownia Piwa', 'different'],
+  ['Beer LAB 12°', 'Beer', 'Pracownia Piwa', 'same'],
+  ['Beer LAB 7%', 'Beer', 'Pracownia Piwa', 'same'],
+  ['Beer TAP04 TAP04', 'Beer TAP04', 'Schneider Weisse', 'same'],
+  ['53M Horseshoe', 'Horseshoe', null, 'same'],
+])('keeps boundaries and independent numbers in %s', (a, b, brewery, expected) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b), {
+    input: { name: a, brewery }, candidate: { name: b, brewery },
+    knownBreweries: ['Pracownia Piwa', 'Schneider Weisse', 'Moersleutel', 'Hop Brook'],
+  })).toBe(expected);
+});
+
+test.each<[string, string, string, boolean]>([
+  ['LAB29 Porter', 'Porter', 'Pracownia Piwa', false],
+  ['Porter', 'LAB29 Porter', 'Pracownia Piwa', false],
+  ['Aventinus TAP06', 'Aventinus', 'Schneider Weisse G. Schneider & Sohn', true],
+  ['Aventinus', 'Aventinus TAP06', 'Schneider Weisse G. Schneider & Sohn', true],
+  ['Original TAP04', 'Original TAP07', 'Schneider Weisse', false],
+])('peers %s / %s → %s', (a, b, brewery, expected) => {
+  expect(digitsCompatibleAsPeers(a, b, {
+    input: { name: a, brewery }, candidate: { name: b, brewery },
+  })).toBe(expected);
+});
+
+test('only an explicit full family brand qualifies compact codes', () => {
+  expect(digitIdentity(readNameDigits('LAB29'), readNameDigits('LAB30'), {
+    input: { name: 'LAB29', brewery: 'Other' },
+    candidate: { name: 'LAB30', brewery: 'Pracownia Piwa' },
+  })).toBe('different');
+  expect(digitIdentity(readNameDigits('LAB29'), readNameDigits('LAB30'), {
+    input: { name: 'LAB29', brewery: 'Other Pracownia Piwa' },
+    candidate: { name: 'LAB30', brewery: 'Pracownia Piwarnia' },
+  })).toBe('same');
+});
+test.each<[string, string, string, DigitIdentity, DigitIdentity]>([
+  ['TAP 4 Mein Festweisse', 'Festweisse (TAP04)', 'Schneider Weisse', 'same', 'same'],
+  ['Original TAP07', 'Original TAP04', 'Schneider Weisse', 'different', 'different'],
+  ['Aventinus TAP06', 'Aventinus', 'Schneider Weisse', 'same', 'same'],
+  ['Beer TAP 4', 'Beer TAP 5', 'Other', 'different', 'different'],
+  ['Beer TAP 4', 'Beer', 'Other', 'different', 'number-fallback'],
+  ['LAB29', 'LAB30', 'Pracownia Piwa', 'different', 'different'],
+  ['LAB29', 'LAB 029', 'Pracownia Piwa', 'same', 'same'],
+  ['LAB9', 'LAB10', 'Pracownia Piwa', 'different', 'different'],
+  ['LAB29 Porter', 'Porter', 'Pracownia Piwa', 'different', 'number-fallback'],
+  ['EL-1762 Pineapple', 'EL-1622 Pineapple', 'Moersleutel Craft Brewery', 'different', 'different'],
+  ['EL-1762 Pineapple', 'EL1762 Pineapple', 'Moersleutel Craft Brewery', 'same', 'same'],
+  ['EL-1762 Pineapple', 'Pineapple', 'Moersleutel Craft Brewery', 'different', 'number-fallback'],
+  ['53 M Horseshoe', '53M Horseshoe', 'Hop Brook Brewery', 'same', 'same'],
+  ['53M Horseshoe', 'Horseshoe', 'Hop Brook Brewery', 'different', 'number-fallback'],
+  ['53 M Horseshoe', '53 N Horseshoe', 'Hop Brook Brewery', 'different', 'different'],
+  ['Beer LAB29', 'Beer EL29', 'Pracownia Piwa / Moersleutel', 'different', 'different'],
+  ['Beer #29', 'Beer LAB29', 'Pracownia Piwa', 'different', 'different'],
+  ['Beer 10', 'Beer LAB29', 'Pracownia Piwa', 'different', 'different'],
+  ['Beer 9.0', 'Beer LAB29', 'Pracownia Piwa', 'different', 'different'],
+  ['Beer 2024', 'Beer LAB29 2025', 'Pracownia Piwa', 'different', 'different'],
+  ['Beer', 'Beer LAB29 2025', 'Pracownia Piwa', 'number-fallback', 'different'],
+])('%s / %s, %s → %s / %s', (a, b, brewery, forward, reverse) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b), {
+    input: { name: a, brewery }, candidate: { name: b, brewery },
+  })).toBe(forward);
+  expect(digitIdentity(readNameDigits(b), readNameDigits(a), {
+    input: { name: b, brewery }, candidate: { name: a, brewery },
+  })).toBe(reverse);
+});
+});
