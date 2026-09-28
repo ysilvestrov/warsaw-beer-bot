@@ -130,8 +130,8 @@ function findNoiseSpans(name: string): Span[] {
 
 // Do not turn a prefix of a decimal, fraction, or date into an integer code.
 function completeCode(name: string, span: Span): boolean {
-  return !/[\d][.,/]\s*$/.test(name.slice(0, span.start))
-    && !/^\s*[.,/]\s*\d/.test(name.slice(span.end));
+  return !/(?:\d[.,]|\d\s*\/\s*)$/.test(name.slice(0, span.start))
+    && !/^(?:[.,]\d|\s*\/\s*\d)/.test(name.slice(span.end));
 }
 
 function localRegion(name: string, span: Span): string {
@@ -161,10 +161,11 @@ function hasBrand(context: DigitIdentityContext, prefix: readonly string[]): boo
 }
 
 function findBrandNumberSpans(name: string, context?: DigitIdentityContext): Span[] {
-  if (!context) return [];
+  if (!context || !/\d/.test(name)) return [];
   const brands = [
     ...explicitBrands(context),
-    ...(context.knownBreweries ?? []).flatMap((label) => label.split(BREWERY_COLLAB_SEP).map(brandTokens)),
+    ...(context.knownBreweries ?? []).filter((label) => /\d/.test(label))
+      .flatMap((label) => label.split(BREWERY_COLLAB_SEP).map(brandTokens)),
   ].filter((tokens) => tokens.some((token) => /^\d+$/.test(token))
     && tokens.some((token) => /\p{L}/u.test(token)));
   const tokens = [...name.matchAll(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu)]

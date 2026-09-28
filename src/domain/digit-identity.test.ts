@@ -295,6 +295,10 @@ describe('#664 hop codes', () => {
     ['Polish Hops (3/20)', [], ['20', '3'], [], []],
     ['HBC472 x 3/20', ['HBC:472', 'PolishHops:3/20'], [], [], []],
     ['HBC472 and 3/20', ['HBC:472'], ['20', '3'], [], []],
+    ['HBC472, EXP 3/20', ['HBC:472', 'PolishHops:3/20'], [], [], []],
+    ['HBC472, 3/20', ['HBC:472'], ['20', '3'], [], []],
+    ['7, EXP 3/20', ['PolishHops:3/20'], ['7'], [], []],
+    ['2026 / 3/20', [], ['20', '3'], [], []],
   ])('keeps code boundaries and ordinary digits in %s', (name, hops, numbers, soft, grades) => {
     const read = readNameDigits(name);
     expect(read.hops ?? []).toEqual(hops);
