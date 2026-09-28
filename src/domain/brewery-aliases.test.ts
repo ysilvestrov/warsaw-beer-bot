@@ -94,7 +94,7 @@ describe('#318 gate-miss alias batch', () => {
     ['prerov', 'zubr'],
     ['bakalar', 'tradicni v rakovniku'],
     ['dzik', 'cydrownia'],
-    ['panipani', 'trzech kumpli'],
+    ['pan ipani', 'trzech kumpli'],
     ['vibrant pour', 'vibrantpour'],
     ['smoothiemaker', 'mad brew'],
     ['drofa', 'дрофа'],
