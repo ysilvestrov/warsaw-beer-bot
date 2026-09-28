@@ -73,8 +73,8 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
     // same/year-fallback merge: the merge deletes the orphan, so a number only the canonical row carries would be
     // a guess made permanent (as in resolvableOrphan and /enrich).
     const identity = digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name), {
-      input: { name: c.orphan_name, style: c.orphan_style },
-      candidate: { name: c.canonical_name, style: c.canonical_style },
+      input: { name: c.orphan_name, style: c.orphan_style, brewery: c.orphan_brewery },
+      candidate: { name: c.canonical_name, style: c.canonical_style, brewery: c.canonical_brewery },
     });
     if (identity !== 'same' && identity !== 'year-fallback') continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);

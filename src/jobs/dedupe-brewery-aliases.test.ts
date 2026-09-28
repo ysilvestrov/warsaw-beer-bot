@@ -468,3 +468,18 @@ test('#611 preserves active and archived observations through this merge path', 
   expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
   db.close();
 });
+
+test('#664 dedupe refuses candidate-only LAB8 and preserves the orphan link', () => {
+  const db = fresh();
+  const canonical = seedBeer(db, { untappd_id: 100, name: 'LAB 8 Porter', brewery: 'Pracownia Piwa / Moersleutel',
+    style: 'Porter', abv: 6, rating_global: 3.5, normalized_name: 'lab', normalized_brewery: 'pracownia piwa moersleutel' });
+  const orphan = seedBeer(db, { untappd_id: null, name: 'LAB Porter', brewery: 'Pracownia Piwa',
+    style: 'Porter', abv: 6, rating_global: null, normalized_name: 'lab', normalized_brewery: 'pracownia piwa' });
+  upsertMatch(db, null, 'LAB Porter', orphan, 1);
+  expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 0, beersDeleted: 0 });
+  expect(db.prepare('SELECT id, name, untappd_id FROM beers ORDER BY id').all()).toEqual([
+    { id: canonical, name: 'LAB 8 Porter', untappd_id: 100 }, { id: orphan, name: 'LAB Porter', untappd_id: null },
+  ]);
+  expect(getMatch(db, null, 'LAB Porter')?.untappd_beer_id).toBe(orphan);
+  db.close();
+});
