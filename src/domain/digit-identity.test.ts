@@ -259,3 +259,16 @@ test.each<[string, string, string, DigitIdentity]>([
   expect(digitIdentity(readNameDigits(a), readNameDigits(b), context)).toBe(expected);
 });
 });
+
+
+describe('#665 contextual orphan peers', () => {
+  test('known style on either peer rejects differing degrees', () => {
+    expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°', {
+      input: { name: 'Konrad 10°' }, candidate: { name: 'Konrad 12°', style: 'Svetlý Ležák' },
+    })).toBe(false);
+    expect(digitsCompatibleAsPeers('Konrad 12°', 'Konrad 10°', {
+      input: { name: 'Konrad 12°', style: 'Svetlý Ležák' }, candidate: { name: 'Konrad 10°' },
+    })).toBe(false);
+    expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°')).toBe(true);
+  });
+});

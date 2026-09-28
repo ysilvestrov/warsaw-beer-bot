@@ -141,9 +141,12 @@ function withRelayQuery(
 // рядка #20. Картка без номера отримує свою сироту; пошук і злиття дійдуть до нумерованого канонічного рядка.
 const ROW_TIERS = ['same', 'year-fallback'] as const;
 
-function pickRowByDigits(cardName: string, rows: BeerRow[]): BeerRow | null {
+function pickRowByDigits(cardName: string, rows: BeerRow[], cardStyle?: string | null): BeerRow | null {
   const card = readNameDigits(cardName);
-  const judged = rows.map((row) => ({ row, identity: digitIdentity(card, readNameDigits(row.name)) }));
+  const judged = rows.map((row) => ({ row, identity: digitIdentity(card, readNameDigits(row.name), {
+    input: { name: cardName, style: cardStyle },
+    candidate: { name: row.name, style: row.style },
+  }) }));
   for (const tier of ROW_TIERS) {
     const hit = judged.find((j) => j.identity === tier);
     if (hit) return hit.row;
@@ -169,7 +172,7 @@ function ensureBeerRow(
       ? styleNameIdentity(r.name, r.normalized_brewery) === cardStyle
       : r.name.trim().toLowerCase() === name.trim().toLowerCase();
   });
-  const existing = pickRowByDigits(name, candidates);
+  const existing = pickRowByDigits(name, candidates, facts.style);
   if (existing) {
     const { abvGained, changed } = fillOrphanFacts(db, existing.id, facts);
     if (abvGained) rearmLookup(db, existing.id);

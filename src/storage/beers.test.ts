@@ -2311,3 +2311,58 @@ describe('#614 findAliasTarget / card alias move', () => {
     expect(db.prepare('SELECT beer_id, abv_key FROM beer_aliases').all()).toEqual([{ beer_id: canonicalId, abv_key: '11' }]);
   });
 });
+
+
+describe('#665 contextual persistent orphan identity', () => {
+  test.each([['Svetlý Ležák', null], [null, 'Czech Lager']])(
+    'distinct degree peers stay separate with styles %s / %s', (oldStyle, newStyle) => {
+      const db = fresh();
+      try {
+        const twelve = ensureOrphan(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°',
+          style: oldStyle, normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        const ten = ensureOrphan(db, { brewery: 'KONRAD Brewery', name: 'Konrad 10°',
+          style: newStyle, normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        expect(db.prepare('SELECT name, untappd_id FROM beers ORDER BY id').all()).toEqual([
+          { name: 'Konrad 12°', untappd_id: null }, { name: 'Konrad 10°', untappd_id: null },
+        ]);
+        expect(ensureOrphan(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°',
+          style: 'Czech Lager', normalized_brewery: 'konrad', normalized_name: 'konrad' })).toBe(twelve);
+        expect(upsertBeerByBid(db, { untappd_id: 227734, untappd_id_source: 'checkin',
+          brewery: 'KONRAD Brewery', name: 'Konrad 10°', style: 'Czech Lager',
+          normalized_brewery: 'konrad', normalized_name: 'konrad' })).toBe(ten);
+        expect(db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(twelve))
+          .toEqual({ untappd_id: null });
+      } finally { db.close(); }
+    },
+  );
+
+  test.each([['Svetlý Ležák', null], [null, 'Czech Lager']])(
+    'a sole twelve orphan never receives the ten bid with styles %s / %s', (oldStyle, bidStyle) => {
+      const db = fresh();
+      try {
+        const twelve = ensureOrphan(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°',
+          style: oldStyle, normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        upsertBeerByBid(db, { untappd_id: 227734, untappd_id_source: 'checkin',
+          brewery: 'KONRAD Brewery', name: 'Konrad 10°', style: bidStyle,
+          normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        expect(db.prepare('SELECT untappd_id FROM beers WHERE id = ?').get(twelve))
+          .toEqual({ untappd_id: null });
+        expect(db.prepare('SELECT name FROM beers WHERE untappd_id = 227734').get())
+          .toEqual({ name: 'Konrad 10°' });
+        expect(upsertBeerByBid(db, { untappd_id: 158057, untappd_id_source: 'checkin',
+          brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: 'Czech Lager',
+          normalized_brewery: 'konrad', normalized_name: 'konrad' })).toBe(twelve);
+      } finally { db.close(); }
+    },
+  );
+
+  test('style-less degree peers retain the old reuse rule', () => {
+    const db = fresh();
+    try {
+      const first = ensureOrphan(db, { brewery: 'Konrad', name: 'Konrad 12°',
+        normalized_brewery: 'konrad', normalized_name: 'konrad' });
+      expect(ensureOrphan(db, { brewery: 'Konrad', name: 'Konrad 10°',
+        normalized_brewery: 'konrad', normalized_name: 'konrad' })).toBe(first);
+    } finally { db.close(); }
+  });
+});

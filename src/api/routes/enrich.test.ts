@@ -1489,3 +1489,42 @@ describe('#663 ensureBeerRow isolates style-only cards by styleNameIdentity', ()
     expect(beerCount(db)).toBe(2);
   });
 });
+
+
+describe('#665 card row identity with Czech grades', () => {
+  test.each([['Czech Lager', undefined], [null, 'Czech Lager']])(
+    'candidates create a ten orphan rather than reuse twelve, styles %s / %s', async (rowStyle, cardStyle) => {
+      const { db, app } = setup();
+      try {
+        seedBeer(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: rowStyle,
+          normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        const res = await post(app, '/enrich/candidates', {
+          beers: [{ brewery: 'KONRAD Brewery', name: 'Konrad 10°', style: cardStyle }],
+        });
+        expect(res.status).toBe(200);
+        expect((await res.json()).candidates[0].eligible).toBe(true);
+        expect(db.prepare('SELECT name, untappd_id FROM beers ORDER BY id').all()).toEqual([
+          { name: 'Konrad 12°', untappd_id: null }, { name: 'Konrad 10°', untappd_id: null },
+        ]);
+      } finally { db.close(); }
+    },
+  );
+
+  test('a ten result never writes its bid into the twelve row', async () => {
+    const { db, app } = setup();
+    try {
+      const twelve = seedBeer(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: 'Czech Lager',
+        normalized_brewery: 'konrad', normalized_name: 'konrad' });
+      const res = await post(app, '/enrich/result', { brewery: 'KONRAD Brewery', name: 'Konrad 10°',
+        algolia: { hits: [{ bid: 227734, beer_name: 'Konrad 10°', brewery_name: 'KONRAD Brewery',
+          type_name: 'Czech Lager', beer_abv: 4, rating_score: 3.5 }], nbHits: 1 } });
+      expect(res.status).toBe(200);
+      const result = await res.json();
+      expect(result.status).toBe('matched');
+      expect(result.untappd_id).toBe(227734);
+      expect(getBeer(db, twelve)!.untappd_id).toBeNull();
+      expect(db.prepare('SELECT name FROM beers WHERE untappd_id = 227734').get())
+        .toEqual({ name: 'Konrad 10°' });
+    } finally { db.close(); }
+  });
+});

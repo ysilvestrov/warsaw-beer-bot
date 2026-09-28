@@ -29,7 +29,7 @@ Core head46f62a8 implements U1/U2/S1. The independently verified P2 is resolved 
 **Consumes:** DigitIdentityContext, digitIdentity.
 **Produces:** backwards-compatible optional peer context and contextual row choices.
 
-- [ ] Add these peer/storage regressions before implementation:
+- [x] Add these peer/storage regressions before implementation:
 
 ~~~ts
 expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°', {
@@ -108,7 +108,7 @@ expect(db.prepare('SELECT name, untappd_id FROM beers ORDER BY id').all()).toEqu
 ~~~
 Equal12° positive control must merge one/delete one. Preserve existing check-in/link redirection tests.
 
-- [ ] Capture assertion failures. Implement optional peer context with reversed roles:
+- [x] Capture assertion failures. Implement optional peer context with reversed roles:
 ~~~ts
 export function digitsCompatibleAsPeers(a: string, b: string, context?: DigitIdentityContext): boolean {
   const digitsA = readNameDigits(a);
@@ -152,7 +152,7 @@ const identity = digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.c
 ~~~
 Keep same/year-fallback as its only merge tiers.
 
-- [ ] Focused green, omission mutations of peer/resolution/API contexts, full gate, review, commit.
+- [x] Focused green, omission mutations of peer/resolution/API contexts, full gate, review, commit.
 
 ## P2 — production matching and search propagation
 
@@ -305,3 +305,5 @@ Core contextual identity and post-veto evidence are already implemented. Authori
 
 No peripheral production file was modified while writing this plan.
 
+
+P1 receipt: nine named regressions failed before implementation;391 focused tests pass. Peer/resolution/API omission mutations fail assertions and were restored. Full gate3711passed,1skipped/typecheck passed. Styles come from the same selected rows; peer roles reverse together, while persistent callers retain same/year-fallback tiers. Authoritative id/alias/pin paths are unchanged. Logs:/tmp/issue-665-p1-{red,green,gate,mutation-peer,mutation-resolution,mutation-api}.log.

@@ -10,9 +10,11 @@ interface PairCandidate {
   canonical_id: number;
   canonical_brewery: string;
   canonical_name: string;
+  canonical_style: string | null;
   orphan_id: number;
   orphan_brewery: string;
   orphan_name: string;
+  orphan_style: string | null;
 }
 
 export interface DedupeResult {
@@ -33,9 +35,11 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
          a.id AS canonical_id,
          a.brewery AS canonical_brewery,
          a.name AS canonical_name,
+         a.style AS canonical_style,
          b.id AS orphan_id,
          b.brewery AS orphan_brewery,
-         b.name AS orphan_name
+         b.name AS orphan_name,
+         b.style AS orphan_style
        FROM beers a
        JOIN beers b
          ON a.normalized_name = b.normalized_name
@@ -67,7 +71,10 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
     // wrong beer for good. The orphan is the tap text (input), the canonical row Untappd's (candidate). Only
     // same/year-fallback merge: the merge deletes the orphan, so a number only the canonical row carries would be
     // a guess made permanent (as in resolvableOrphan and /enrich).
-    const identity = digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name));
+    const identity = digitIdentity(readNameDigits(c.orphan_name), readNameDigits(c.canonical_name), {
+      input: { name: c.orphan_name, style: c.orphan_style },
+      candidate: { name: c.canonical_name, style: c.canonical_style },
+    });
     if (identity !== 'same' && identity !== 'year-fallback') continue;
     if (!pairsByOrphan.has(c.orphan_id)) pairsByOrphan.set(c.orphan_id, c);
   }

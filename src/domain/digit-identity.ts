@@ -210,8 +210,10 @@ export function digitIdentity(
  * `number-fallback` one way is always `different` the other way (its candidate-only number is the reverse
  * direction's uncovered input number), so no separate check is needed.
  */
-export function digitsCompatibleAsPeers(a: string, b: string): boolean {
+export function digitsCompatibleAsPeers(a: string, b: string, context?: DigitIdentityContext): boolean {
   const digitsA = readNameDigits(a);
   const digitsB = readNameDigits(b);
-  return digitIdentity(digitsA, digitsB) !== 'different' && digitIdentity(digitsB, digitsA) !== 'different';
+  const reverse = context ? { input: context.candidate, candidate: context.input } : undefined;
+  return digitIdentity(digitsA, digitsB, context) !== 'different'
+    && digitIdentity(digitsB, digitsA, reverse) !== 'different';
 }
