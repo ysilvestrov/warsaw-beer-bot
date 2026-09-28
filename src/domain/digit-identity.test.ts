@@ -299,6 +299,11 @@ describe('#664 hop codes', () => {
     ['HBC472, 3/20', ['HBC:472'], ['20', '3'], [], []],
     ['7, EXP 3/20', ['PolishHops:3/20'], ['7'], [], []],
     ['2026 / 3/20', [], ['20', '3'], [], []],
+    ['HBC 12° 472', [], ['472'], [], ['12']],
+    ['HBC 7% 472', [], ['472'], [], []],
+    ['HBC 7 ABV 472', [], ['472'], [], []],
+    ['HBC 472/20%', [], ['472'], [], []],
+    ['🍺 HBC472', ['HBC:472'], [], [], []],
   ])('keeps code boundaries and ordinary digits in %s', (name, hops, numbers, soft, grades) => {
     const read = readNameDigits(name);
     expect(read.hops ?? []).toEqual(hops);
@@ -363,6 +368,13 @@ test('fraction codes are not reduced to an unproven numerical equivalent', () =>
   expect(unknown.hops ?? []).toEqual([]);
   expect(unknown.numbers).toEqual(['1']);
   expect(unknown.soft).toEqual(['10']);
+});
+
+test('a spaced three-part date is not a PolishHops fraction', () => {
+  expect(digitIdentity(readNameDigits('IPA 2026 / 3/20'), readNameDigits('IPA'), {
+    input: { name: 'IPA 2026 / 3/20', brewery: 'PolishHops' },
+    candidate: { name: 'IPA', brewery: 'PolishHops' },
+  })).toBe('different');
 });
 });
 
@@ -463,6 +475,8 @@ test.each<[string, string, string | null, DigitIdentity]>([
   ['Beer LAB29 LAB29', 'Beer LAB29', 'Pracownia Piwa', 'different'],
   ['Beer LAB 12°', 'Beer', 'Pracownia Piwa', 'same'],
   ['Beer LAB 7%', 'Beer', 'Pracownia Piwa', 'same'],
+  ['Beer LAB 12° 29', 'Beer LAB29 12°', 'Pracownia Piwa', 'different'],
+  ['Beer TAP 12° 4', 'Beer TAP04 12°', 'Schneider Weisse', 'different'],
   ['Beer TAP04 TAP04', 'Beer TAP04', 'Schneider Weisse', 'same'],
   ['53M Horseshoe', 'Horseshoe', null, 'same'],
 ])('keeps boundaries and independent numbers in %s', (a, b, brewery, expected) => {

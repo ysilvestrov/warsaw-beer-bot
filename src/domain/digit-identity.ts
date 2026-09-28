@@ -114,10 +114,10 @@ const LAB_CODE = /(?<![\p{L}\p{N}])LAB[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
 const EL_CODE = /(?<![\p{L}\p{N}])EL[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
 const HORSESHOE_CODE = /(?<![\p{L}\p{N}])53\s*M(?![\p{L}\p{N}])/giu;
 
-function maskSpans(name: string, spans: readonly Span[]): string {
+function maskSpans(name: string, spans: readonly Span[], fill = ' '): string {
   const chars = name.split('');
   for (const span of spans) {
-    for (let i = span.start; i < span.end; i++) chars[i] = ' ';
+    for (let i = span.start; i < span.end; i++) chars[i] = fill;
   }
   return chars.join('');
 }
@@ -196,21 +196,22 @@ function findBrandNumberSpans(name: string, context?: DigitIdentityContext): Spa
 }
 
 function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side): CodeSpan[] {
-  const scan = maskSpans(name, findNoiseSpans(name));
+  // A blocker keeps stripped ABV/grades from joining a prefix to unrelated digits.
+  const scan = maskSpans(name, findNoiseSpans(name), '#');
   const spans: CodeSpan[] = [];
   for (const match of scan.matchAll(PREFIX_HOP)) {
     const span = { start: match.index, end: match.index + match[0].length };
-    if (completeCode(scan, span)) spans.push({ ...span, kind: 'hop', id: `${match[1].toUpperCase()}:${canon(match[2])}` });
+    if (completeCode(name, span)) spans.push({ ...span, kind: 'hop', id: `${match[1].toUpperCase()}:${canon(match[2])}` });
   }
   for (const match of scan.matchAll(IDAHO_HOP)) {
     const span = { start: match.index, end: match.index + match[0].length };
-    if (completeCode(scan, span)) spans.push({ ...span, kind: 'hop', id: 'Idaho:7' });
+    if (completeCode(name, span)) spans.push({ ...span, kind: 'hop', id: 'Idaho:7' });
   }
   const pending: CodeSpan[] = [];
   for (const match of scan.matchAll(FRACTION_HOP)) {
     const span = { start: match.index, end: match.index + match[0].length };
     const fraction = `${canon(match[1])}/${canon(match[2])}`;
-    if (!POLISH_FRACTIONS.has(fraction) || !completeCode(scan, span)
+    if (!POLISH_FRACTIONS.has(fraction) || !completeCode(name, span)
       || FRACTION_MARKER.test(scan.slice(0, span.start))) continue;
     const code: CodeSpan = { ...span, kind: 'hop', id: `PolishHops:${fraction}` };
     if (/^EXP/i.test(match[0]) || hasPolishHopsLabel(localRegion(scan, span))
@@ -240,7 +241,7 @@ function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side)
 
 function findSeriesCodeSpans(name: string, context?: DigitIdentityContext): CodeSpan[] {
   if (!context) return [];
-  const scan = maskSpans(name, findNoiseSpans(name));
+  const scan = maskSpans(name, findNoiseSpans(name), '#');
   const families: { brand: string[]; pattern: RegExp; kind: 'tap' | 'hard'; namespace: string }[] = [
     { brand: ['schneider', 'weisse'], pattern: TAP_CODE, kind: 'tap', namespace: 'TAP' },
     { brand: ['pracownia', 'piwa'], pattern: LAB_CODE, kind: 'hard', namespace: 'LAB' },
@@ -252,7 +253,7 @@ function findSeriesCodeSpans(name: string, context?: DigitIdentityContext): Code
     if (!hasBrand(context, family.brand)) continue;
     for (const match of scan.matchAll(family.pattern)) {
       const span = { start: match.index, end: match.index + match[0].length };
-      if (!completeCode(scan, span)) continue;
+      if (!completeCode(name, span)) continue;
       spans.push({ ...span, kind: family.kind,
         id: family.namespace === '53M' ? '53M' : `${family.namespace}:${canon(match[1])}` });
     }
