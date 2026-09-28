@@ -3,6 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import { getProfile } from '../../storage/user_profiles';
+import { getHistoryOwner } from '../../storage/history-owner';
 import { upsertBeerByBid } from '../../storage/beers';
 import { mergeCheckin, countCheckins, checkinExists, oldestCheckinId } from '../../storage/checkins';
 import { getSyncState, recordProfileTotal } from '../../storage/checkin_sync_state';
@@ -19,35 +20,47 @@ import {
 } from '../middleware/payload-limit';
 
 const SyncBody = z.object({
+  linkRevision: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional(),
   html: z.string().max(CHECKINS_HTML_LIMIT_CHARS),
   maxId: z.string().max(CURSOR_LIMIT_CHARS).nullable().optional(),
 });
 
 export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
-  app.get('/checkins/sync/state', (c) => {
+  app.get('/checkins/sync/state', (c) => deps.db.transaction(() => {
     const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
-    const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
+    const profile = getProfile(deps.db, telegramId);
+    const username = profile?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
-    const state = getSyncState(deps.db, telegramId);
+    const owner = getHistoryOwner(deps.db, telegramId);
+    const state = getSyncState(deps.db, telegramId, owner.accountKey);
     return c.json({
       username,
+      linkRevision: owner.linkRevision,
       deepest_max_id: state.deepest_max_id,
       complete: state.complete,
-      serverCount: countCheckins(deps.db, telegramId),
+      serverCount: countCheckins(deps.db, telegramId, owner.accountKey),
       profileTotal: null,
     });
-  });
+  })());
 
   app.post(
     '/checkins/sync',
     payloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES, 'route'),
     zValidator('json', SyncBody, payloadSizeValidationHook(deps) as never),
-    (c) => {
+    (c) => deps.db.transaction(() => {
     const telegramId = c.get('telegramId')!; // auth middleware guarantees a value
-    const username = getProfile(deps.db, telegramId)?.untappd_username ?? null;
+    const profile = getProfile(deps.db, telegramId);
+    const username = profile?.untappd_username ?? null;
     if (!username) return c.json({ error: 'not_linked' }, 409);
 
-    const { html, maxId } = c.req.valid('json');
+    const { html, maxId, linkRevision } = c.req.valid('json');
+    const owner = getHistoryOwner(deps.db, telegramId);
+    if (linkRevision !== undefined && linkRevision !== owner.linkRevision) {
+      return c.json({ error: 'account_changed' }, 409);
+    }
+    if (linkRevision === undefined && profile!.legacy_sync_revision !== owner.linkRevision) {
+      return c.json({ error: 'sync_context_required' }, 409);
+    }
     if (isBlockPage(html)) return c.json({ error: 'blocked' }, 502);
 
     const page = parseCheckinFeedPage(html);
@@ -67,7 +80,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     // законна (там і справді може нічого не бути), вище — суперечить нашим власним даним,
     // бо принаймні той чекін мав би повернутися. Отже вище — це мертва сесія або блок.
     if (page.checkins.length === 0) {
-      const oldestKnown = oldestCheckinId(deps.db, telegramId);
+      const oldestKnown = oldestCheckinId(deps.db, telegramId, owner.accountKey);
       if (cursor !== null && oldestKnown !== null && cursor > oldestKnown) {
         return c.json({ error: 'no_session' }, 422);
       }
@@ -77,8 +90,8 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         pageSize: 0,
         nextMaxId: null,
         nextCursor: null,
-        profileTotal: page.profileTotal ?? getSyncState(deps.db, telegramId).profile_total,
-        serverCount: countCheckins(deps.db, telegramId),
+        profileTotal: page.profileTotal ?? getSyncState(deps.db, telegramId, owner.accountKey).profile_total,
+        serverCount: countCheckins(deps.db, telegramId, owner.accountKey),
         complete: false,
       });
     }
@@ -105,9 +118,9 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
     let merged = 0;
     let alreadyKnown = 0;
 
-    deps.db.transaction(() => {
+    {
       for (const ci of page.checkins) {
-        const existed = checkinExists(deps.db, telegramId, ci.checkin_id);
+        const existed = checkinExists(deps.db, telegramId, ci.checkin_id, owner.accountKey);
         // #617: ідентичність за bid. Стрічка фактів не несе (null), а upsertBeerByBid порожнім
         // значенням нічого не стирає, не перейменовує рядок і лише посилює провенанс.
         const beerId = upsertBeerByBid(deps.db, {
@@ -124,6 +137,7 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
         mergeCheckin(deps.db, {
           checkin_id: ci.checkin_id,
           telegram_id: telegramId,
+          account_key: owner.accountKey,
           beer_id: beerId,
           user_rating: ci.user_rating,
           checkin_at: ci.checkin_at,
@@ -135,20 +149,20 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
 
       // Верхня межа доведеного — курсор, що породив сторінку; для сторінки профілю
       // (курсора немає) вище найновішого елемента не доведено нічого.
-      addCoverage(deps.db, telegramId, oldest, cursor ?? newest);
-      recordProfileTotal(deps.db, telegramId, page.profileTotal);
-    })();
+      addCoverage(deps.db, telegramId, oldest, cursor ?? newest, owner.accountKey);
+      recordProfileTotal(deps.db, telegramId, page.profileTotal, owner.accountKey);
+    }
 
-    const serverCount = countCheckins(deps.db, telegramId);
-    const state = getSyncState(deps.db, telegramId);
-    const covering = rangeContaining(deps.db, telegramId, oldest);
+    const serverCount = countCheckins(deps.db, telegramId, owner.accountKey);
+    const state = getSyncState(deps.db, telegramId, owner.accountKey);
+    const covering = rangeContaining(deps.db, telegramId, oldest, owner.accountKey);
 
     // Лічильники зійшлися — шукати нижче нічого. Це не твердження про дно стрічки
     // (його довести не можна), а констатація «роботи немає». Але самого збігу чисел
     // не досить: `profile_total` міг ЗМЕНШИТИСЯ (користувач видалив чекін на Untappd,
     // наш рядок лишився) — тому коротке замикання вимагає ще й того, щоб покриття
     // було одним суцільним діапазоном: якщо дір нема, то й іти нікуди.
-    const ranges = coverageFor(deps.db, telegramId);
+    const ranges = coverageFor(deps.db, telegramId, owner.accountKey);
     const caughtUp = state.profile_total !== null
       && serverCount >= state.profile_total
       && ranges.length === 1;
@@ -170,6 +184,6 @@ export function checkinsRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       serverCount,
       complete: false,
     });
-    },
+    }).immediate(),
   );
 }
