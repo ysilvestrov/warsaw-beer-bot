@@ -565,24 +565,25 @@ test('a normal sync start does not invalidate a pending match for the unchanged 
   await vi.waitFor(async () => expect((await handleCheckinSyncStatus()).running).toBe(false));
 });
 
-test('retained cache entries are unreadable after failed cleanup and a token change', async () => {
+test.each(['start', 'status'] as const)('retained cache entries are unreadable after failed %s cleanup and a token change', async (operation) => {
   await cacheStore.setCached('retained', scopedPersonal);
   await setSettings({ token: '' });
   vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache removal failed'));
-  await handleCheckinSyncStatus();
+  const operations = { start: handleCheckinSyncStart, status: handleCheckinSyncStatus };
+  await operations[operation]();
   const { handleCacheGetMany } = await import('./index');
   expect(await handleCacheGetMany(['retained', 'absent'])).toEqual([null, null]);
   expect(await getCached('retained')).toEqual(scopedPersonal);
 });
 
-test('a cache batch reads only current bound entries and checks server identity once', async () => {
+test('a cache batch reads only current bound entries and verifies identity around storage', async () => {
   await cacheStore.setCached('current', scopedPersonal);
   await cacheStore.setCached('legacy', { ...scopedPersonal, cacheBinding: undefined });
   await cacheStore.setCached('aba', { ...scopedPersonal, cacheBinding: { ...cacheBinding, linkRevision: 0 } });
   vi.mocked(client.getCheckinSyncState).mockClear();
   const { handleCacheGetMany } = await import('./index');
   expect(await handleCacheGetMany(['current', 'legacy', 'aba'])).toEqual([scopedPersonal, null, null]);
-  expect(client.getCheckinSyncState).toHaveBeenCalledTimes(1);
+  expect(client.getCheckinSyncState).toHaveBeenCalledTimes(2);
 });
 
 test('a nonempty replacement token rejects old cache writes and reads', async () => {
@@ -611,4 +612,30 @@ test('current negative personal results are cached and read with their binding i
   expect(await handleCacheSetIfMatching('negative', negative, scopedPersonal)).toBe(true);
   const { handleCacheGetMany } = await import('./index');
   expect(await handleCacheGetMany(['negative'])).toEqual([scopedPersonal]);
+});
+
+test('a switch while cache storage is pending makes the whole batch a miss', async () => {
+  let resolveRead!: (result: MatchResult) => void;
+  const read = vi.spyOn(cacheStore, 'getCached').mockReturnValue(new Promise(resolve => { resolveRead = resolve; }));
+  const { handleCacheGetMany } = await import('./index');
+  const response = handleCacheGetMany(['delayed']);
+  await vi.waitFor(() => expect(read).toHaveBeenCalledExactlyOnceWith('delayed'));
+  vi.mocked(client.getCheckinSyncState).mockResolvedValue({ username: 'alice', linkRevision: 2,
+    deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+  resolveRead(scopedPersonal);
+  expect(await response).toEqual([null]);
+});
+
+test('restoring identical credentials reuses only the unchanged account, while backend ABA rejects retained entries', async () => {
+  await cacheStore.setCached('same-owner', scopedPersonal);
+  await setSettings({ token: '' });
+  vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache removal failed'));
+  await handleCheckinSyncStatus();
+  const { handleCacheGetMany } = await import('./index');
+  expect(await handleCacheGetMany(['same-owner'])).toEqual([null]);
+  await setSettings({ token: 'tok' });
+  expect(await handleCacheGetMany(['same-owner'])).toEqual([scopedPersonal]);
+  vi.mocked(client.getCheckinSyncState).mockResolvedValue({ username: 'bob', linkRevision: 3,
+    deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null });
+  expect(await handleCacheGetMany(['same-owner'])).toEqual([null]);
 });
