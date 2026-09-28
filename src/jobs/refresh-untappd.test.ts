@@ -117,7 +117,9 @@ describe('refreshAllUntappd', () => {
     expect(db.prepare('SELECT COUNT(*) AS n FROM beers WHERE untappd_id = 101').get()).toEqual({ n: 1 });
   });
 
-  test.each(['N/A', '4bad'])('keeps an observed rating when a scrape returns %s', async (raw) => {
+  test.each([
+    ['Their Rating (N/A)', '0'], ['Their Rating (4)', 'N/A'], ['Their Rating (4)', '4bad'],
+  ])('keeps an observed rating when a scrape returns %s with %s', async (label, raw) => {
     const db = fresh();
     ensureProfile(db, 1);
     setUntappdUsername(db, 1, 'someone');
@@ -125,6 +127,7 @@ describe('refreshAllUntappd', () => {
     markHad(db, 1, beerId, '2026-09-27T03:00:00Z', 4.25);
     const http = fakeHttp({
       'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12')
+        .replace('Their Rating (4)', label)
         .replace('data-rating="4"', `data-rating="${raw}"`),
     });
     await refreshAllUntappd({ db, log: silentLog, http });

@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+- Beers marked as already tried could be missing your rating until you ran “Sync my check-ins”. Your rating can now appear after the bot’s daily Untappd update.
+
 ## [0.21.0] - 2026-09-27
 
 - Fixed search badges staying on beers that already have a rating after you reload a shop page with beer search enabled. Their rating and your drinking status now appear without using “Refresh this page”.

@@ -204,6 +204,24 @@ describe('repairLegacyCard (#696)', () => {
     expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
   });
 
+  it('preserves profile ratings during had transfer, preferring a rated canonical row', () => {
+    const { db, input } = fixture();
+    db.prepare(`INSERT INTO beers (id, untappd_id, brewery, name, abv, normalized_brewery, normalized_name)
+      VALUES (77, 3615616, 'Geuzestekerij De Cam', 'Abrikoos Rabarber 2018', 7,
+              'geuzestekerij de cam', 'abrikoos rabarber')`).run();
+    db.prepare(`INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at, user_rating)
+      VALUES (1, 29955, '2026-09-23T00:00:00Z', 4), (1, 77, '2026-09-22T00:00:00Z', 5),
+             (2, 29955, '2026-09-21T00:00:00Z', 4.25),
+             (3, 29955, '2026-09-21T00:00:00Z', 0), (3, 77, '2026-09-23T00:00:00Z', NULL)`).run();
+    applyLegacyCardRepair(db, input, previewLegacyCardRepair(db, input));
+    expect(db.prepare('SELECT telegram_id, beer_id, last_seen_at, user_rating FROM untappd_had ORDER BY telegram_id').all())
+      .toEqual([
+        { telegram_id: 1, beer_id: 77, last_seen_at: '2026-09-23T00:00:00Z', user_rating: 5 },
+        { telegram_id: 2, beer_id: 77, last_seen_at: '2026-09-21T00:00:00Z', user_rating: 4.25 },
+        { telegram_id: 3, beer_id: 77, last_seen_at: '2026-09-23T00:00:00Z', user_rating: 0 },
+      ]);
+  });
+
   it('returns a no-op only for the same audited repair and still-live alias', () => {
     const { db, input } = fixture();
     const preview = previewLegacyCardRepair(db, input);

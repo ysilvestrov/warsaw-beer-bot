@@ -7,6 +7,14 @@ const fixturePath = path.join(__dirname, '../../../tests/fixtures/untappd/user-b
 const html = fs.readFileSync(fixturePath, 'utf8');
 
 describe('parseUserBeersPage', () => {
+  test('an explicit unavailable personal rating is not a zero-star rating', () => {
+    const page = `<div class="beer-item" data-bid="42"><div class="beer-details">
+      <div class="ratings"><div class="you"><p>Their Rating (N/A)</p>
+        <div class="caps" data-rating="0"></div>
+      </div></div></div></div>`;
+    expect(parseUserBeersPage(page)[0].their_rating).toBeNull();
+  });
+
   test.each([
     ['0', 0], ['5', 5], [' 4.25 ', 4.25], ['4.25soon', null],
     ['-1', null], ['5.01', null], ['N/A', null], ['', null], ['Infinity', null],
