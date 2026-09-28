@@ -193,7 +193,9 @@ describe('refreshAllUntappd', () => {
       expect(db.prepare('SELECT user_rating FROM untappd_had').all()).toEqual([{ user_rating: 4 }]);
       setUntappdUsername(other, 1, 'new');
       expect(readProfile(db, 1)?.untappd_username).toBe('new');
-      expect(db.prepare('SELECT user_rating FROM untappd_had').all()).toEqual([{ user_rating: null }]);
+      expect(db.prepare('SELECT account_key, user_rating FROM untappd_had').all())
+        .toEqual([{ account_key: 'old', user_rating: 4 }]);
+      expect([...latestRatingsByBeer(db, 1)]).toEqual([]);
     } finally {
       spy.mockRestore();
       other.close();
