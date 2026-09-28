@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as profiles from '../../storage/user_profiles';
 import { Hono } from 'hono';
 import pino from 'pino';
 import { openDb } from '../../storage/db';
@@ -60,8 +64,8 @@ const RAW_TOKEN_NO_USER = 'test-checkins-token-no-user';
 const TELEGRAM_ID = 1;
 const TELEGRAM_ID_NO_USERNAME = 2;
 
-function setup() {
-  const db = openDb(':memory:');
+function setup(path = ':memory:') {
+  const db = openDb(path);
   migrate(db);
 
   // User with linked Untappd username
@@ -496,5 +500,75 @@ describe('POST /checkins/sync — beer identity (#617)', () => {
     const id = seed(db, 42, 'Some IPA (old shop name)', 'Some Brewery');
     await post(app, '/checkins/sync', { html: PAGE_ONE, maxId: null }, RAW_TOKEN);
     expect(beerById(db, id).name).toBe('Some IPA (old shop name)');
+  });
+});
+
+
+describe('#611 sync binding', () => {
+  it.each([
+    { switches: ['other'], html: PAGE_ONE, revision: 1, error: 'account_changed' },
+    { switches: ['other', 'bob'], html: PAGE_ONE, revision: 1, error: 'account_changed' },
+    { switches: ['other'], html: PAGE_BOTTOM, revision: 1, error: 'account_changed' },
+    { switches: ['other', 'bob'], html: PAGE_BOTTOM, revision: 1, error: 'account_changed' },
+    { switches: ['other'], html: PAGE_ONE, revision: undefined, error: 'sync_context_required' },
+    { switches: ['other', 'bob'], html: PAGE_BOTTOM, revision: undefined, error: 'sync_context_required' },
+  ])('rejects $error after $switches without any catalog/history mutation', async ({ switches, html, revision, error }) => {
+    const { db, app } = setup();
+    await post(app, '/checkins/sync', { html: PAGE_ONE }, RAW_TOKEN);
+    for (const username of switches) setUntappdUsername(db, TELEGRAM_ID, username);
+    const snapshot = () => ['beers', 'checkins', 'untappd_had', 'checkin_coverage', 'checkin_sync_state']
+      .map(table => db.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all());
+    const before = snapshot();
+    const res = await post(app, '/checkins/sync', { html, linkRevision: revision }, RAW_TOKEN);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error });
+    expect(snapshot()).toEqual(before);
+    db.close();
+  });
+
+  it.each([null, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1'])('rejects malformed revision %s without writes', async revision => {
+    const { db, app } = setup();
+    const res = await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: revision }, RAW_TOKEN);
+    expect(res.status).toBe(400);
+    expect(db.prepare('SELECT * FROM checkins').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
+    expect(coverageFor(db, TELEGRAM_ID)).toEqual([]);
+    db.close();
+  });
+
+  it('reports the active revision and accepts case-only legacy and revision-aware sync', async () => {
+    const { db, app } = setup();
+    setUntappdUsername(db, TELEGRAM_ID, 'BOB');
+    const state = await get(app, '/checkins/sync/state', RAW_TOKEN);
+    expect(await state.json()).toEqual({ username: 'BOB', linkRevision: 1, deepest_max_id: null,
+      complete: false, serverCount: 0, profileTotal: null });
+    expect((await post(app, '/checkins/sync', { html: PAGE_ONE }, RAW_TOKEN)).status).toBe(200);
+    expect((await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN)).status).toBe(200);
+    setUntappdUsername(db, TELEGRAM_ID, 'other');
+    expect((await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 2 }, RAW_TOKEN)).status).toBe(200);
+    expect(db.prepare('SELECT account_key, checkin_id FROM checkins ORDER BY account_key').all())
+      .toEqual([{ account_key: 'bob', checkin_id: '555' }, { account_key: 'other', checkin_id: '555' }]);
+    db.close();
+  });
+
+  it('GET constructs one coherent state while another WAL connection relinks', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sync-binding-'));
+    const { db, app } = setup(join(dir, 'bot.db'));
+    const other = openDb(join(dir, 'bot.db'));
+    await post(app, '/checkins/sync', { html: PAGE_ONE }, RAW_TOKEN);
+    const original = profiles.getProfile;
+    const spy = vi.spyOn(profiles, 'getProfile').mockImplementationOnce((connection, id) => {
+      const profile = original(connection, id);
+      setUntappdUsername(other, id, 'other');
+      return profile;
+    });
+    try {
+      const res = await get(app, '/checkins/sync/state', RAW_TOKEN);
+      expect(await res.json()).toEqual({ username: 'bob', linkRevision: 1, deepest_max_id: '555',
+        complete: false, serverCount: 1, profileTotal: null });
+      expect(original(other, TELEGRAM_ID)?.untappd_username).toBe('other');
+    } finally {
+      spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

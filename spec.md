@@ -464,7 +464,7 @@ API/MCP не змінюються. При зміні прив'язаного use
 |------|-----|-----------|------|
 | `telegram_id` | INTEGER | PK | ключ ідентичності |
 | `untappd_username` | TEXT | nullable | прив'язаний профіль |
-| `legacy_sync_revision` | INTEGER | nullable (v41) | ревізія початкової прив'язки для сумісності старого sync-клієнта; перевірка на наступному етапі #611 |
+| `legacy_sync_revision` | INTEGER | nullable (v41) | ревізія початкової прив'язки для сумісності старого sync-клієнта; без revision допускається лише початкова прив’язка |
 | `created_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | |
 | `language` | TEXT | nullable (v3) | `uk`/`pl`/`en`; авто-детект, override через `/lang` |
 | `city` | TEXT | nullable (v14) | обране місто; `NULL` або невідомий slug → `OUTSIDE_CITY` (`'outside-pl'`, #399) |
@@ -1964,7 +1964,7 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 у браузері — байдуже). Робиться у сесії користувача (а не серверним кукі), щоб **розподілити
 навантаження** на його квоту й не наражатися на бан (пор. §3.7, #72/#89).
 
-`GET /checkins/sync/state` повертає `{ username, deepest_max_id, complete, serverCount, profileTotal }`.
+`GET /checkins/sync/state` повертає `{ username, linkRevision, deepest_max_id, complete, serverCount, profileTotal }`.
 З #587 `deepest_max_id` — похідне з `checkin_coverage` (§3.15): `MIN(from_id)`, та сама
 семантика («найглибший курсор, з якого варто продовжувати»), що й раніше; `complete` — та
 сама колонка, ехо якої тут повертається, застаріла з #587 (нічого нове більше не встановлює
@@ -1977,7 +1977,7 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 Ендпоінт лишається довідковим для стану — сам обхід веде поле **`nextCursor`** у відповіді
 `POST`, не цей маршрут.
 
-`POST /checkins/sync` приймає `{ html, maxId? }` (обрізана клієнтом сторінка стрічки + курсор,
+`POST /checkins/sync` приймає `{ html, maxId?, linkRevision? }` (обрізана клієнтом сторінка стрічки + курсор,
 що її породив). Сервер: детектить блок-сторінку (спільний `block.ts`) → `502 { error: "blocked" }`
 (курсор не чіпає); валідує курсор — не `/^\d+$/` (нечисловий, з пробілами, `0x…`, `5e2`) →
 `400 { error: "bad_cursor" }`; парсить `parseCheckinFeedPage(html)`; на кожен чекін `upsertBeerByBid`
@@ -1988,6 +1988,15 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 доведений діапазон сторінки в `checkin_coverage` (§3.15) і оновлює `checkin_sync_state.profile_total`
 (§3.14). Повертає `{ merged, alreadyKnown, pageSize, nextMaxId, nextCursor, profileTotal,
 serverCount, complete }` (`complete` — застаріле поле проводу, завжди `false`).
+
+**Прив’язка сторінки (#611).** `linkRevision` — безпечне невід’ємне ціле число.
+Перед будь-якими змінами каталогу, історії чи покриття сервер перевіряє ревізію
+в одній immediate-транзакції з записами й побудовою відповіді. Запізніла ревізія,
+зокрема після A → B → A, дає `409 account_changed`. Старий клієнт без ревізії
+допускається лише поки поточна ревізія дорівнює `legacy_sync_revision`; після
+перемикання дає `409 sync_context_required`. Перевірка діє і для порожньої
+сторінки. GET повертає username, ревізію, кількість і стан з одного snapshot.
+Ревізія захищає покоління прив’язки, а не доводить автентичність довільного HTML.
 
 **Порожня сторінка й `422 no_session`.** Порожня відповідь на курсорі, за яким лежить наш
 власний найстаріший відомий чекін (`maxId > oldestCheckinId`), суперечить нашим даним — той
