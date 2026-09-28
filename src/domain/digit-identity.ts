@@ -133,15 +133,19 @@ function singleIntegerGrade(grades: readonly string[]): number | null {
   return Number.isInteger(value) && value >= 7 && value <= 20 ? value : null;
 }
 
+export function explicitGradesContradict(input: NameDigits, candidate: NameDigits): boolean {
+  const a = singleIntegerGrade(input.grades);
+  const b = singleIntegerGrade(candidate.grades);
+  return a !== null && b !== null && a !== b;
+}
+
 export function czechGradesContradict(
   input: NameDigits,
   candidate: NameDigits,
   context?: DigitIdentityContext,
 ): boolean {
   if (!context) return false;
-  const a = singleIntegerGrade(input.grades);
-  const b = singleIntegerGrade(candidate.grades);
-  if (a === null || b === null || a === b) return false;
+  if (!explicitGradesContradict(input, candidate)) return false;
   if (!hasCzechLagerStyle(context.input.style) && !hasCzechLagerStyle(context.candidate.style)) return false;
   if (isAleStyle(context.input.name, context.input.style ?? null)
     || isAleStyle(context.candidate.name, context.candidate.style ?? null)) return false;
