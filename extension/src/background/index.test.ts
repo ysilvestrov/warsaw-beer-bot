@@ -1,3 +1,4 @@
+import * as cacheStore from '../cache/store';
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   feedUrl, handleCacheSet, handleCacheSetMany, handleCacheSetIfMatching,
@@ -458,6 +459,57 @@ test('clearing credentials invalidates cached personal data and aborts an active
   expect(aborted).toBe(true);
   expect(cached).toBe(null);
   expect(post).not.toHaveBeenCalled();
+  expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
+    mergedThisRun: 0, outcome: 'error', complete: false });
+});
+
+
+test('a delayed old-token match is not returned after credentials are removed', async () => {
+  let resolveMatch!: (results: MatchResult[]) => void;
+  const pending = new Promise<MatchResult[]>(resolve => { resolveMatch = resolve; });
+  const post = vi.spyOn(client, 'postMatch').mockReturnValue(pending);
+  const response = handleMatch({ type: 'match', cards: [{ brewery: 'B', name: 'N' }] });
+  await vi.waitFor(() => expect(post).toHaveBeenCalledTimes(1));
+  await setSettings({ token: '' });
+  await handleCheckinSyncStatus();
+  resolveMatch([{ raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true }]);
+  expect(await response).toEqual({ type: 'match:err', code: 'unauthorized' });
+});
+
+test('late personal cache writes cannot repopulate cleared credentials, while global matches still cache', async () => {
+  const personal: MatchResult = { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+    is_drunk: true, drunk_uncertain: false, user_rating: 0, source: 'exact', searched: true };
+  const global: MatchResult = { ...personal, is_drunk: false, user_rating: null };
+  await handleCacheSet('conditional', personal);
+  await setSettings({ token: '' });
+  await handleCheckinSyncStatus();
+  await handleCacheSet('single', personal);
+  await handleCacheSetMany([{ key: 'batch-personal', result: personal }, { key: 'global', result: global }]);
+  await cacheStore.setCached('conditional', personal);
+  expect(await handleCacheSetIfMatching('conditional', personal, personal)).toBe(false);
+  expect(await getCached('single')).toBe(null);
+  expect(await getCached('batch-personal')).toBe(null);
+  expect(await getCached('global')).toEqual(global);
+});
+
+test('a cache removal failure does not preserve a completed report on no-token start', async () => {
+  await chrome.storage.session.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
+    mergedThisRun: 5, outcome: 'done', complete: true } });
+  await setSettings({ token: '' });
+  vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache storage failed'));
+  expect(await handleCheckinSyncStart()).toEqual({ type: 'checkin-sync:started', alreadyRunning: false });
+  expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
+    mergedThisRun: 0, outcome: 'error', complete: false });
+});
+
+test('a cache removal failure still returns and persists a no-token status reply', async () => {
+  await chrome.storage.session.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
+    mergedThisRun: 5, outcome: 'done', complete: true } });
+  await setSettings({ token: '' });
+  vi.spyOn(cacheStore, 'clearAll').mockRejectedValueOnce(new Error('cache storage failed'));
+  expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
   expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
     mergedThisRun: 0, outcome: 'error', complete: false });
 });
