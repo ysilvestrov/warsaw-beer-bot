@@ -81,8 +81,8 @@ export function evaluateCandidate(input: GateInput, cand: GateCandidate): GateSt
   // → `Dr. Hazy #4`). The input is the orphan's text, the candidate Untappd's; a number only Untappd writes stays
   // acceptable, as in lookupBeer — this path runs only when the search found nothing, so there is no better tier.
   if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name), {
-    input: { name: input.name, style: input.style },
-    candidate: { name: cand.beer_name, style: cand.style },
+    input: { name: input.name, style: input.style, brewery: input.brewery },
+    candidate: { name: cand.beer_name, style: cand.style, brewery: cand.brewery_name },
   }) === 'different') return 'reject:digits';
   if (nameGatePass(input, cand)) return 'accept';
   if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';

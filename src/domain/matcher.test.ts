@@ -1556,3 +1556,30 @@ describe('#665 Polish wheat replay control', () => {
       .toEqual({ id: 256, confidence: 1, source: 'fuzzy' });
   });
 });
+
+
+describe('#664 contextual consumer identity', () => {
+  test('LAB8 stays hard on the normalized exact path', () => {
+    expect(matchBeer({ brewery: 'Pracownia Piwa', name: 'LAB 8 Porter', abv: 6 }, [
+      c({ id: 1, brewery: 'Pracownia Piwa', name: 'LAB Porter', abv: 6 }),
+    ])).toBeNull();
+  });
+  test('different compact CF codes cannot win the fuzzy path', () => {
+    expect(matchBeer({ brewery: 'Charles Faram', name: 'Hop Heats CF317', abv: 6 }, [
+      c({ id: 1, brewery: 'Charles Faram', name: 'Hop Heats CF338', abv: 6 }),
+    ])).toBeNull();
+  });
+  test('adding a catalogue collaborator explains only its full brand span', () => {
+    const prepared = prepareCatalog([c({ id: 1, brewery: 'Imprint', name: 'Blurries North', abv: 6 })]);
+    const input = { brewery: 'Imprint', name: 'Blurries / 450 North', abv: 6 };
+    expect(matchPrepared(input, prepared)).toBeNull();
+    prepared.add(prepareBeer(c({ id: 2, brewery: '450 North', name: 'Other Beer' })));
+    expect(matchPrepared(input, prepared)?.id).toBe(1);
+    expect(matchPrepared({ ...input, name: 'Blurries #450' }, prepared)).toBeNull();
+  });
+  test('a brewery fragment cannot hide the series number beside it', () => {
+    expect(matchBeer({ brewery: '3 Fonteinen', name: '3 Fonteinen Oude Geuze #3', abv: 6 }, [
+      c({ id: 1, brewery: '3 Fonteinen', name: 'Oude Geuze', abv: 6 }),
+    ])).toBeNull();
+  });
+});
