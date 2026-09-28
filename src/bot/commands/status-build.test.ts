@@ -76,14 +76,14 @@ describe('buildStatusMessage', () => {
     expect(out).toContain(`${synced} / 12428`);
     expect(out).not.toContain('✅');
     expect(out).toContain('Last sync activity: 2026-09-03 22:19:05 UTC');
-    expect(out).toContain('Untappd total is from the last sync.');
+    expect(out).toContain('Untappd total is the last known value.');
   });
 
   it('states that no extension sync has run when sync activity is unknown', () => {
     const out = buildStatusMessage(t, { ...base, profileTotal: null, lastSyncAt: null });
     expect(out).toContain('No extension sync yet.');
     expect(out).not.toContain('UTC');
-    expect(out).not.toContain('Untappd total is from the last sync.');
+    expect(out).not.toContain('Untappd total is the last known value.');
   });
 
   it('reports missing beer check-ins without claiming when the beers were consumed', () => {

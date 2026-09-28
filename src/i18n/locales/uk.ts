@@ -114,7 +114,7 @@ export const uk: Messages = {
   'status.username': 'Акаунт: {username}',
   'status.checkins': 'Синхронізовано чекінів: {synced}',
   'status.checkins_of': 'Синхронізовано чекінів: {synced} / {total}',
-  'status.profile_total_hint': 'Загальна кількість на Untappd — з останньої синхронізації.',
+  'status.profile_total_hint': 'Загальна кількість на Untappd — останнє відоме значення.',
   'status.last_sync': 'Остання активність синхронізації: {date} UTC',
   'status.no_sync': 'Синхронізація через розширення ще не запускалась.',
   'status.had_without_checkins': 'Пив, відомих серверу без імпортованих чекінів: {count}. Запусти «Sync my check-ins» у розширенні.',

@@ -114,7 +114,7 @@ export const pl: Messages = {
   'status.username': 'Konto: {username}',
   'status.checkins': 'Zsynchronizowane meldunki: {synced}',
   'status.checkins_of': 'Zsynchronizowane meldunki: {synced} / {total}',
-  'status.profile_total_hint': 'Łączna liczba na Untappd pochodzi z ostatniej synchronizacji.',
+  'status.profile_total_hint': 'Łączna liczba na Untappd to ostatnia znana wartość.',
   'status.last_sync': 'Ostatnia aktywność synchronizacji: {date} UTC',
   'status.no_sync': 'Synchronizacja przez rozszerzenie nie została jeszcze uruchomiona.',
   'status.had_without_checkins': 'Piwa znane serwerowi bez zaimportowanych check-inów: {count}. Uruchom „Sync my check-ins” w rozszerzeniu.',

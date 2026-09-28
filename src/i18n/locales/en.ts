@@ -114,7 +114,7 @@ export const en: Messages = {
   'status.username': 'Account: {username}',
   'status.checkins': 'Check-ins synced: {synced}',
   'status.checkins_of': 'Check-ins synced: {synced} / {total}',
-  'status.profile_total_hint': 'Untappd total is from the last sync.',
+  'status.profile_total_hint': 'Untappd total is the last known value.',
   'status.last_sync': 'Last sync activity: {date} UTC',
   'status.no_sync': 'No extension sync yet.',
   'status.had_without_checkins': 'Beers known to the server without imported check-ins: {count}. Run “Sync my check-ins” in the extension.',

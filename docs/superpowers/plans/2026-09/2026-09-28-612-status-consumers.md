@@ -77,3 +77,21 @@ verification uses the archived real Untappd fixture plus focused edge cases.
 
 Implementation is committed locally. PR creation and deployment await the user's
 separate decision; the existing #611 account-history behavior remains unchanged.
+
+## PR #724 review corrections
+
+The user authorized push and PR creation. AI review identified an account-link
+ABA race and a status hint tying a retained total to the latest sync activity.
+
+- [x] Extend the design with a persisted account-link revision: increment only
+  for real username changes, then compare before scrape writes. Start at zero
+  without claiming any past link history.
+- [x] Reproduce old → new → old during the HTTP request and retained totals after
+  a null-total sync in failing tests before implementation.
+- [x] Extend unreleased migration v40 with the revision column and verify
+  migration replay and unchanged case-only links. Change all three locale hints
+  to say last known total, without associating it with the activity timestamp.
+- [x] Full gate: 3622 passed, one existing skip; typecheck passed. Repeat v39 →
+  v40 migration twice on a fresh read-only production backup: hashes of every old
+  column in beers, checkins, had, profiles, sync state and coverage unchanged;
+  no non-null ratings or nonzero revisions invented, integrity ok, FK check empty.
