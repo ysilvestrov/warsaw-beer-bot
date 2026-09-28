@@ -125,6 +125,21 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['harpagan', 'poznanskie rzemieslnicze'],                           // 37475 Lager 11° -> bid 6716261, 4.5% (#679)
   ['baraba', 'remedicum'],                                            // 37801 POMERANCOVA 11° -> bid 5910606, 4.3% (#679)
   ['murphys', 'heineken ireland'],                                    // 37909 Murphys -> bid 5932, 4.0% (#679)
+  // Cluster batch: parent/portfolio brand, cider producer, and divergent brewery suffix resolution (#417, #483, #462, #302, #338, #659).
+  // Each pair is proven against an orphan in enrich_failures and rescues it live.
+  ['transcend', 'transcend beer crafters'],              // 37946 Citracalifragilisticexpialidocious -> bid 6086381, 7.0% (#417)
+  ['schladminger', 'schladming'],                         // 35098 12° Märzen -> bid 121832, 5.1% (#417)
+  ['maisels weisse', 'gebr maisel'],                      // 35109 12° Dunkel -> bid 62309, 5.1% (#417)
+  ['nymburg', 'nymburk'],                                 // 30422 Francinuv -> bid 397490, 5.0% (#417)
+  ['platan', 'protivin'],                                 // 30059 Platan Jedenáctka -> bid 309422 (4.6%), 34990 Jedenactka 11° (#417)
+  ['eeuwige', 'de eeuwige jeugd'],                        // 35035 Bullebak (7.7%), 35101 Gladjanus -> bid 1605620 (5.2%) (#302)
+  ['sonnenbrau', 'sonnen brau mursbach'],                 // 34734 Kellebier -> bid 183267, 4.7% = 4.7% (#483)
+  ['st bernard', 'st bernardus'],                         // 34958 St. Bernardus Tripel 18° -> bid 481, 8.0% = 8.0% (#462)
+  ['hosl', 'privatbrauerei hosl'],                        // 37962 Abt Andreas -> bid 198241, 5.4% vs 4.9% (#659)
+  ['perennial', 'perennial artisan ales'],                // 38063 Colourant (2026) -> bid 5452613, 14.0% (#338)
+  ['stiegl', 'stieglbrauerei zu salzburg'],               // 35115 12° Weisse Naturtrüb -> bid 80, 5.1% (#302)
+  ['maryensztad', 'maryensztadt'],                        // 12269 Mi to żyto -> bid 6357167, 5.7% = 5.7% (#417)
+  ['braurei eichhorn', 'eichhorn dorfleins'],             // 34816 Kellerbier -> bid 343881, 5.0% vs 5.2% (#483)
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
