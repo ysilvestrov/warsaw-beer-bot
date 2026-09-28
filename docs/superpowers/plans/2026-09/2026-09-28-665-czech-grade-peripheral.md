@@ -262,7 +262,7 @@ Preserve pre-recovery orphan selection and non-transitivity tests; no canonical 
 **Consumes:** complete P1–P3.
 **Produces:** judged selection changes and row-by-row recovery evidence, not a production migration.
 
-- [ ] Take one consistent SQLite backup using better-sqlite3 backup from readonly:true/fileMustExist:true. Do not copy the live db without its WAL. Export base4964f00 with git archive to /tmp/issue-665-base and link its node_modules to existing dependencies. Import the OLD matcher from the base export, so CURRENT aliases cannot contaminate baseline.
+- [x] Take one consistent SQLite backup using better-sqlite3 backup from readonly:true/fileMustExist:true. Do not copy the live db without its WAL. Export base4964f00 with git archive to /tmp/issue-665-base and link its node_modules to existing dependencies. Import the OLD matcher from the base export, so CURRENT aliases cannot contaminate baseline.
 
 Use the same loadCatalog(snapshotDb) rows for both prepared matchers. Replay all latest taps with:
 ~~~sql
@@ -276,7 +276,7 @@ ORDER BY t.snapshot_id, t.id;
 For each tap call resolveTapIdentity, skip non-keep results like ingest, and pass identical brewery/name/abv/style to old/new matchPrepared. Record every differing id/source/confidence and saved pin/merge state. Ingest currently calls without explicit fallback budget; use the same for this replay. Label a separate bounded-batch /match replay using identical limits/scopes on both sides. Use the actual request schema for input metadata; do not supply stored tap.style if the wire request does not carry it.
 
 - [ ] Judge every changed id individually. Inventory all five Konrad/Vratislavice rows and alias-opened changes separately. Keep the constructed shorter-sibling and permitted non-Czech controls. Unknown changes block shipping; counts are not correctness evidence.
-- [ ] Create a SECOND writable copy for recovery. Inventory all incoming rows:
+- [x] Create a SECOND writable copy for recovery. Inventory all incoming rows:
 ~~~sql
 SELECT * FROM match_links WHERE untappd_beer_id = 37334 ORDER BY brewery_ref, ontap_ref;
 SELECT * FROM checkins WHERE beer_id = 37334;
@@ -293,7 +293,7 @@ mergeIntoCanonical(copyDb, 37334, 31849, rehearsalAt);
 ~~~
 Read back every affected link/check-in/alias. Tens must remain45 and not acquire a remembered twelve merge; confirmed twelves must point31849. Unknown check-ins cannot be silently repointed by the merge. Record exact preconditions and copied-db results. Do not execute mutation calls against production.
 
-- [ ] Freshly query issue665 ownership. If it has rows at close time, run existing two-step adjudicate probe/apply with canaries and individual judgments. No blanket remap or review_class change.
+- [x] Freshly query issue665 ownership. If it has rows at close time, run existing two-step adjudicate probe/apply with canaries and individual judgments. No blanket remap or review_class change.
 - [ ] Whole-branch review includes inline U1/U2/S1/P1/P2/P3, approved specs, mutation receipts and recovery evidence. Fix valid findings, rerun affected tests/full gate after code changes. Old peer receipt is not fresh amended-head corroboration.
 - [ ] Final full gate and clean tree; present complete fix for PR approval. After confirmation fetch main, rebase if moved, repeat full gate after rebase, push/open PR and wait for review/checks.
 
@@ -311,3 +311,5 @@ P1 receipt: nine named regressions failed before implementation;391 focused test
 P2 receipt: eleven assertion regressions fail before implementation;343 focused tests pass. Eight omission mutations catch lookup input/candidate style, original retry name, refresh catalog/input, cleanup input, relay and cron context loss. Full gate3725passed,1skipped/typecheck passed. Cleanup required style in BOTH cleanPool and allOntap source SELECTs, proven by the input-only regression. Logs:/tmp/issue-665-p2-{red,green,gate,mutation-*}.log.
 
 P3 receipt: two named alias/canonical-twelve regressions fail before the pair;352 focused tests pass. Full gate3728passed,1skipped/typecheck passed. Only the finite confirmed pair was added; spec.md reflects approved context, post-veto evidence and unchanged authoritative paths. Logs:/tmp/issue-665-p3-{red,green,gate}.log.
+
+P4 partial receipt: repeated clean-head same-snapshot replay, live canaries and exact copied-database recovery passed. Litovel wheat-style selection change blocks shipping; recommended pszeniczne marker amendment is awaiting approval. Full evidence and limitations: 2026-09-28-665-replay-recovery.md. No production writes or new independent final-head review.
