@@ -572,3 +572,36 @@ describe('#611 sync binding', () => {
     }
   });
 });
+
+
+test('feed A → B → A restores proven coverage, rejects delayed/ABA pages and isolates equal usernames across users', async () => {
+  const { db, app } = setup();
+  const a = await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN);
+  expect(a.status).toBe(200);
+  expect(await a.json()).toMatchObject({ serverCount: 1, profileTotal: 3, nextCursor: '555' });
+  setUntappdUsername(db, 1, 'other');
+  expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN)).json()).toMatchObject({
+    username: 'other', linkRevision: 2, serverCount: 0, profileTotal: null, deepest_max_id: null });
+  const delayed = await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN);
+  expect(delayed.status).toBe(409); expect(await delayed.json()).toEqual({ error: 'account_changed' });
+  const b = await post(app, '/checkins/sync', { html: feedPage('100', 43, 'B Beer', 'B Brewery'), linkRevision: 2 }, RAW_TOKEN);
+  expect(await b.json()).toMatchObject({ serverCount: 1, profileTotal: 1, nextCursor: null });
+  setUntappdUsername(db, 1, 'bob');
+  expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN)).json()).toMatchObject({
+    username: 'bob', linkRevision: 3, serverCount: 1, profileTotal: null, deepest_max_id: '555' });
+  const aba = await post(app, '/checkins/sync', { html: PAGE_BOTTOM, linkRevision: 1 }, RAW_TOKEN);
+  expect(aba.status).toBe(409); expect(await aba.json()).toEqual({ error: 'account_changed' });
+  setUntappdUsername(db, 2, 'bob');
+  expect(await (await get(app, '/checkins/sync/state', RAW_TOKEN_NO_USER)).json()).toMatchObject({ serverCount: 0, profileTotal: null });
+  expect((await post(app, '/checkins/sync', { html: PAGE_ONE, linkRevision: 1 }, RAW_TOKEN_NO_USER)).status).toBe(200);
+  expect(db.prepare('SELECT telegram_id, account_key, checkin_id FROM checkins ORDER BY telegram_id, account_key').all()).toEqual([
+    { telegram_id: 1, account_key: 'bob', checkin_id: '555' },
+    { telegram_id: 1, account_key: 'other', checkin_id: '100' },
+    { telegram_id: 2, account_key: 'bob', checkin_id: '555' },
+  ]);
+  expect(getSyncState(db, 1, 'bob').profile_total).toBe(3);
+  expect(getSyncState(db, 1, 'other').profile_total).toBe(1);
+  expect(coverageFor(db, 1, 'bob')).toEqual([{ from_id: 555, to_id: 555 }]);
+  expect(coverageFor(db, 1, 'other')).toEqual([{ from_id: 100, to_id: 100 }]);
+  db.close();
+});

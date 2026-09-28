@@ -12,22 +12,24 @@ export const statusCommand = new Composer<BotContext>();
 statusCommand.command('status', async (ctx) => {
   const db = ctx.deps.db;
   const id = ctx.from.id;
-  const profile = getProfile(db, id);
-  const sync = getSyncState(db, id);
+  const view = db.transaction(() => {
+    const profile = getProfile(db, id);
+    const sync = getSyncState(db, id);
 
-  const view: StatusView = {
-    city: getUserCity(db, id),
-    language: getUserLanguage(db, id),
-    filters: getFilters(db, id),
-    linked: !!profile?.untappd_username,
-    username: profile?.untappd_username ?? null,
-    synced: countCheckins(db, id),
-    profileTotal: sync.profile_total,
-    distinctBeers: countDistinctBeers(db, id),
-    lastCheckinAt: latestCheckinAt(db, id),
-    lastSyncAt: sync.updated_at,
-    hadWithoutCheckins: countHadWithoutCheckins(db, id),
-  };
+    return {
+      city: getUserCity(db, id),
+      language: getUserLanguage(db, id),
+      filters: getFilters(db, id),
+      linked: !!profile?.untappd_username,
+      username: profile?.untappd_username ?? null,
+      synced: countCheckins(db, id),
+      profileTotal: sync.profile_total,
+      distinctBeers: countDistinctBeers(db, id),
+      lastCheckinAt: latestCheckinAt(db, id),
+      lastSyncAt: sync.updated_at,
+      hadWithoutCheckins: countHadWithoutCheckins(db, id),
+    } satisfies StatusView;
+  })();
 
   await ctx.replyWithHTML(buildStatusMessage(ctx.t, view));
 });

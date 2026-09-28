@@ -1,3 +1,8 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as profiles from '../../storage/user_profiles';
+import { Context, Telegram } from 'telegraf';
 import { Telegraf } from 'telegraf';
 import type { BotContext } from '../index';
 import { openDb } from '../../storage/db';
@@ -49,5 +54,53 @@ test('/status exposes the historical sync time and had-only evidence from its us
   expect(replies[0]).toContain('Untappd total is the last known value.');
   expect(replies[0]).toContain('Beers known to the server without imported check-ins: 1.');
   expect(replies[0]).not.toContain('✅');
+  db.close();
+});
+
+
+function statusContext(db: ReturnType<typeof openDb>) {
+  const ctx = new Context({ update_id: 1, message: { message_id: 1, date: 1,
+    chat: { id: 1, type: 'private', first_name: 'Test' }, from: { id: 1, is_bot: false, first_name: 'Test' },
+    text: '/status', entities: [{ type: 'bot_command', offset: 0, length: 7 }] } }, new Telegram('test'), {} as never);
+  Object.assign(ctx, { deps: { db }, t: createTranslator('en') });
+  vi.spyOn(ctx, 'replyWithHTML').mockResolvedValue({ message_id: 2 } as never);
+  return ctx;
+}
+
+test('/status keeps username and history in one snapshot across a concurrent relink', async () => {
+  const dir = mkdtempSync(join(tmpdir(), '611-status-'));
+  const db = openDb(join(dir, 'bot.db')); migrate(db); ensureProfile(db, 1);
+  setUntappdUsername(db, 1, 'account-a');
+  mergeCheckin(db, { telegram_id: 1, checkin_id: 'one', beer_id: null, user_rating: 0,
+    checkin_at: '2026-01-05T18:00:00Z', venue: null });
+  recordProfileTotal(db, 1, 2);
+  const other = openDb(join(dir, 'bot.db'));
+  const original = profiles.getProfile;
+  const spy = vi.spyOn(profiles, 'getProfile').mockImplementationOnce((...args) => {
+    const p = original(...args); setUntappdUsername(other, 1, 'account-b'); return p;
+  });
+  try {
+    const ctx = statusContext(db);
+    await statusCommand.middleware()(ctx as never, async () => {});
+    expect(ctx.replyWithHTML).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(ctx.replyWithHTML).mock.calls[0][0]).toContain('account-a');
+    expect(vi.mocked(ctx.replyWithHTML).mock.calls[0][0]).toContain('Check-ins synced: 1 / 2');
+  } finally { spy.mockRestore(); other.close(); db.close(); rmSync(dir, { recursive: true }); }
+});
+
+test('/status uses B’s empty counts and restores A’s prior total on return', async () => {
+  const db = openDb(':memory:'); migrate(db); ensureProfile(db, 1); setUntappdUsername(db, 1, 'account-a');
+  mergeCheckin(db, { telegram_id: 1, checkin_id: 'one', beer_id: null, user_rating: 0,
+    checkin_at: '2026-01-05T18:00:00Z', venue: null });
+  recordProfileTotal(db, 1, 2);
+  setUntappdUsername(db, 1, 'account-b');
+  const b = statusContext(db); await statusCommand.middleware()(b as never, async () => {});
+  expect(vi.mocked(b.replyWithHTML).mock.calls[0][0]).toContain('account-b');
+  expect(vi.mocked(b.replyWithHTML).mock.calls[0][0]).toContain('Check-ins synced: 0');
+  expect(vi.mocked(b.replyWithHTML).mock.calls[0][0]).not.toContain(' / 2');
+  setUntappdUsername(db, 1, 'account-a');
+  const a = statusContext(db); await statusCommand.middleware()(a as never, async () => {});
+  expect(vi.mocked(a.replyWithHTML).mock.calls[0][0]).toContain('account-a');
+  expect(vi.mocked(a.replyWithHTML).mock.calls[0][0]).toContain('Check-ins synced: 1 / 2');
   db.close();
 });

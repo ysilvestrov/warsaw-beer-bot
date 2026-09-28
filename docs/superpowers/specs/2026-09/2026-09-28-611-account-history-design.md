@@ -1,6 +1,6 @@
 # #611 — Separate history for each linked Untappd account
 
-Status: proposed design for user review; implementation has not started.
+Status: approved; core and periphery implemented locally. Deployment remains a separate authorized step.
 
 Issue: https://github.com/ysilvestrov/warsaw-beer-bot/issues/611
 
@@ -8,7 +8,7 @@ Issue: https://github.com/ysilvestrov/warsaw-beer-bot/issues/611
 
 Changing `/link` must never make one account's check-ins, ratings, or feed coverage describe another account. Preserve each account's history and restore it when the user links that account again. Account switching is exceptional: protection against mistakes and support for testing, rather than a new account-management product.
 
-The user chose separate histories and confirmed that the four existing production users with check-ins have not changed accounts. Accordingly, the migration assigns their existing history to their currently linked username without asking them to confirm it. This is an operator-confirmed provenance decision, not an inference from counts or revision values.
+The user chose separate histories and confirmed that the four existing production users with check-ins have not changed accounts, then explicitly extended that confirmation to both had-only owners during final preflight. Accordingly, the migration assigns their existing history to their currently linked username without asking them to confirm it. This is an operator-confirmed provenance decision, not an inference from counts or revision values.
 
 No account picker or delete-history feature is added. `/link` remains the switching interface. First linking and linking the same username remain straightforward; username comparison is case-insensitive.
 
@@ -18,7 +18,7 @@ A replay against the existing storage functions in an in-memory database seeded 
 
 `setUntappdUsername` already increments `untappd_link_revision` for a case-insensitive change and clears scraped ratings (#612), but preserves all history. The feed endpoint receives only HTML and a cursor: it cannot know whether a request was fetched before a relink. The scheduled profile scraper already checks username and revision in an immediate transaction before recording observations.
 
-Production read-only inspection on 2026-09-28 found 46,577 check-ins across four users, all currently linked. These numbers describe scope only; they do not prove the rows' provenance. The user's explicit confirmation is the migration's evidence for that provenance.
+Production read-only inspection on 2026-09-28 found 46,577 check-ins across four users, all currently linked. Final preflight also identified two had-only owners (no imported check-ins); the user explicitly confirmed that neither changed accounts. These numbers describe scope only; they do not prove the rows' provenance. The user's explicit confirmation is the migration's evidence for that provenance.
 
 Imports currently work without a linked username, and the parsed export does not carry a verified account identity. Canonical beer merges and the legacy-card repair path also touch history; they must preserve account ownership.
 
@@ -77,7 +77,7 @@ Capture a read-only preflight summary and make a database backup before deployme
 
 | Stored fact | Claim | Evidence or guard |
 | --- | --- | --- |
-| Migrated named `account_key` | Existing rows belong to the user's current username | User explicitly confirmed unchanged accounts for the four existing history owners; deployment preflight must verify the affected population has not become ambiguous |
+| Migrated named `account_key` | Existing rows belong to the user's current username | User explicitly confirmed unchanged accounts for all six existing history owners (four check-in owners plus two had-only owners); deployment preflight must verify the population and bindings remain covered |
 | Empty-key rows | User imported history before linking; named account unknown | No linked profile at import start; do not assert external identity |
 | Adopted first-link rows | User selected the account to own pre-link imports | First `/link` action and atomic transfer; does not prove the export's identity independently |
 | New check-in / scraped observation owner | Captured account selected for this operation | Explicit owner plus revision validation in the writing transaction |

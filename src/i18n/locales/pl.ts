@@ -33,7 +33,8 @@ export const pl: Messages = {
 
   // link
   'link.usage': 'Użycie: /link <username> (lub pełny URL untappd.com/user/<username>)',
-  'link.success': '✅ Powiązano z untappd.com/user/{username}',
+  'link.success': "✅ Powiązano z untappd.com/user/{username}. Pokazuję historię tego konta. Aby ją zaktualizować, użyj “Sync my check-ins” w rozszerzeniu lub /import.",
+  'link.switched': "✅ Powiązano z untappd.com/user/{username}. Pokazuję historię tego konta; historia poprzedniego jest zapisana osobno. Aby ją zaktualizować, użyj “Sync my check-ins” w rozszerzeniu lub /import.",
 
   // import
   'import.prompt':
