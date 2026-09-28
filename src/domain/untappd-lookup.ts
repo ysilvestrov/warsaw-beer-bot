@@ -425,6 +425,12 @@ function swappedBrandNameScore(
 ): number | null {
   const targetTokens = nameTokens(targetValue);
   if (targetTokens.length === 0) return null;
+  const candidateCleanTokens = nameTokens(
+    stripBreweryFromName(
+      baseNormalize(stripSearchNoise(candidate.beer_name)),
+      normalizeBrewery(candidate.brewery_name),
+    ),
+  );
   const candidateNameTokens = nameTokens(normalizeName(candidate.beer_name));
   const candidateBreweryAliases = breweryAliases(candidate.brewery_name);
 
@@ -432,6 +438,9 @@ function swappedBrandNameScore(
     aliasTokensCoveredBy(candidateNameTokens, inputBreweryAliases) &&
     aliasTokensCoveredBy(targetTokens, candidateBreweryAliases)
   ) {
+    if (aliasTokensCoveredTwoWay(candidateCleanTokens, inputBreweryAliases)) {
+      return 0.74;
+    }
     return 0.72;
   }
   return null;

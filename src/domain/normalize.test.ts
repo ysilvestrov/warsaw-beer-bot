@@ -428,6 +428,18 @@ describe('AleBrowar brand glue (#327)', () => {
   });
 });
 
+describe('PanIPAni brand unwelding (#660)', () => {
+  test('welded PanIPAni unwelds to spaced Pan IPAni', () => {
+    expect(normalizeBrewery('PanIPAni Brewery')).toBe('pan ipani');
+    expect(normalizeBrewery('PanIPAni')).toBe('pan ipani');
+    expect(normalizeBrewery('panipani')).toBe('pan ipani');
+    expect(normalizeBrewery('Pan IPAni Brewery')).toBe('pan ipani');
+  });
+  test('search query preserves spaced Pan IPAni', () => {
+    expect(cleanSearchQuery('PanIPAni Brewery', 'Trzech Kumpli')).toBe('Pan IPAni Trzech Kumpli');
+  });
+});
+
 describe('minipivovar brewery noise (#318)', () => {
   test('minipivovar is stripped so it matches the bare brand', () => {
     expect(normalizeBrewery('Minipivovar Skřečoňský žabák')).toBe('skreconsky zabak');

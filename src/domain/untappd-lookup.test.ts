@@ -1971,6 +1971,28 @@ describe('#405 Sub-cohort A3: swapped brewery and beer name', () => {
     expect(out.result.bid).toBe(6757171);
   });
 
+  test('matched: welded PanIPAni Brewery / Trzech Kumpli resolves via swappedBrandNameScore (#660)', async () => {
+    const search = fakeSearch(() => [
+      {
+        bid: 1000186,
+        beer_name: 'Pan IPAni',
+        brewery_name: 'Browar Trzech Kumpli',
+        style: 'IPA - White / Wheat',
+        abv: 6.0,
+        global_rating: 3.81,
+      },
+    ]);
+    const out = await lookupBeer({
+      brewery: 'PanIPAni Brewery',
+      name: 'Trzech Kumpli',
+      abv: 6.0,
+      search,
+    });
+    expect(out.kind).toBe('matched');
+    assert(out.kind === 'matched');
+    expect(out.result.bid).toBe(1000186);
+  });
+
   test('not_found: swapped resolution refuses incompatible ABV contradiction', async () => {
     const search = fakeSearch(() => [
       {
