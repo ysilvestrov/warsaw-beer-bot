@@ -22,20 +22,39 @@ function enqueueCacheMutation<T>(work: () => Promise<T>): Promise<T> {
   return result;
 }
 
+function hasPersonalFacts(result: MatchResult): boolean {
+  return result.is_drunk || result.drunk_uncertain || result.user_rating !== null;
+}
+
 export const handleCacheSet = (key: string, result: MatchResult) =>
-  enqueueCacheMutation(async () => { await setCached(key, result); });
+  enqueueCacheMutation(async () => {
+    const { token } = await getSettings();
+    if (token || !hasPersonalFacts(result)) await setCached(key, result);
+  });
 export const handleCacheSetMany = (entries: { key: string; result: MatchResult }[]) =>
-  enqueueCacheMutation(() => setCachedMany(entries));
+  enqueueCacheMutation(async () => {
+    const { token } = await getSettings();
+    await setCachedMany(entries.filter(entry => token || !hasPersonalFacts(entry.result)));
+  });
 export const handleCacheClearKeys = (keys: string[]) =>
   enqueueCacheMutation(async () => { await clearKeys(keys); });
 export const handleCacheClearAll = () => enqueueCacheMutation(() => clearAll());
 export const handleCacheSetIfMatching = (key: string, expected: MatchResult, result: MatchResult) =>
-  enqueueCacheMutation(() => setCachedIfMatching(key, expected, result));
+  enqueueCacheMutation(async () => {
+    const { token } = await getSettings();
+    if (!token && (hasPersonalFacts(expected) || hasPersonalFacts(result))) return false;
+    return setCachedIfMatching(key, expected, result);
+  });
 
 export async function handleMatch(msg: MatchMessage): Promise<MatchReply> {
+  const generation = syncGeneration;
   const { token, baseUrl } = await getSettings();
   try {
-    return { type: 'match:ok', results: await postMatch(baseUrl, token, msg.cards) };
+    const results = await postMatch(baseUrl, token, msg.cards);
+    const current = await getSettings();
+    if (current.token !== token || current.baseUrl !== baseUrl) throw new ApiError('unauthorized');
+    if (generation !== syncGeneration) throw new ApiError('server');
+    return { type: 'match:ok', results };
   } catch (e) {
     const rawCode = e instanceof ApiError ? e.code : 'server';
     const code: 'unauthorized' | 'server' | 'network' =
@@ -216,7 +235,7 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const { token, baseUrl } = await getSettings();
   if (!token) {
     const generation = ++syncGeneration;
-    await handleCacheClearAll();
+    await handleCacheClearAll().catch(() => undefined);
     await enqueueSyncStatus(emptySyncStatus('error'), generation);
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
@@ -340,7 +359,7 @@ export async function handleCheckinSyncStatus() {
     if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
     const invalidationGeneration = ++syncGeneration;
     syncAbortController?.abort();
-    await handleCacheClearAll();
+    await handleCacheClearAll().catch(() => undefined);
     await enqueueSyncStatus(emptySyncStatus('error'), invalidationGeneration).catch(() => undefined);
     return syncStatusReply(emptySyncStatus('error'));
   }
