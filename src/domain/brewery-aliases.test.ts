@@ -259,3 +259,9 @@ describe('Cluster 5 bounded brewery-typo alias batch', () => {
   );
 });
 
+
+
+test('#665 Konrad and its authoritative Vratislavice brewery are direct symmetric aliases', () => {
+  expect(aliasNeighbors('konrad')).toEqual(['vratislavice nad nisou']);
+  expect(aliasNeighbors('vratislavice nad nisou')).toEqual(['konrad']);
+});

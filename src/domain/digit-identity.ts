@@ -8,12 +8,20 @@
 // The rules below are measured, not guessed (spec 2026-09-16-636-digit-identity-design.md, prototype over
 // 1 658 known-different pairs, 55 known-same pairs and 1 494 live tap links).
 
+import { baseNormalize } from './normalize';
+import { isAleStyle } from './czech-grade';
+
+export interface DigitIdentityContext {
+  input: { name: string; style?: string | null };
+  candidate: { name: string; style?: string | null };
+}
+
 export interface NameDigits {
   /** Hard numbers (`#7`, `vol.4`, `002` → `2`, `1664`): a leftover one on either side means a different beer. */
   numbers: string[];
   /** Unmarked integers 8–14 (`Svijanský Máz 11`): a Czech grade written without `°`; soft like a grade. */
   soft: string[];
-  /** Degree grades (`12°`, `12,5°` → `12.5`): extract, not identity — they only confirm a number. */
+  /** Degree grades (`12°`, `12,5°` → `12.5`): extract by default; explicit Czech lager context can split them. */
   grades: string[];
   /** Release versions `N.0` (`Ambrosia 9.0`): tell beers apart only when both sides carry one. */
   versions: string[];
@@ -110,6 +118,40 @@ function softContradictsGrade(x: NameDigits, y: NameDigits): boolean {
   );
 }
 
+function hasCzechLagerStyle(style: string | null | undefined): boolean {
+  const words = new Set(baseNormalize(style ?? '').split(' ').filter(Boolean));
+  const czech = words.has('czech') || words.has('bohemian');
+  const lager = words.has('lager') || words.has('pils') || words.has('pilsner');
+  const colour = ['svetly', 'svetle', 'tmavy', 'polotmave'].some((word) => words.has(word));
+  return (czech && lager) || (words.has('lezak') && colour);
+}
+
+function singleIntegerGrade(grades: readonly string[]): number | null {
+  const values = [...new Set(grades.map(Number))];
+  if (values.length !== 1) return null;
+  const value = values[0];
+  return Number.isInteger(value) && value >= 7 && value <= 20 ? value : null;
+}
+
+export function explicitGradesContradict(input: NameDigits, candidate: NameDigits): boolean {
+  const a = singleIntegerGrade(input.grades);
+  const b = singleIntegerGrade(candidate.grades);
+  return a !== null && b !== null && a !== b;
+}
+
+export function czechGradesContradict(
+  input: NameDigits,
+  candidate: NameDigits,
+  context?: DigitIdentityContext,
+): boolean {
+  if (!context) return false;
+  if (!explicitGradesContradict(input, candidate)) return false;
+  if (!hasCzechLagerStyle(context.input.style) && !hasCzechLagerStyle(context.candidate.style)) return false;
+  if (isAleStyle(context.input.name, context.input.style ?? null)
+    || isAleStyle(context.candidate.name, context.candidate.style ?? null)) return false;
+  return true;
+}
+
 /**
  * `input` is the text being matched (a tap, a shop card); `candidate` is a row that might be it (a catalog row, an
  * Untappd search hit). The roles are not symmetric: Untappd appends numbers shops leave out — batch, anniversary,
@@ -118,7 +160,12 @@ function softContradictsGrade(x: NameDigits, y: NameDigits): boolean {
  * input names another beer (`Funky Monkey #2` is not `Funky Monkey`). Measured on 815 search-linked rows and the live
  * tap links (spec 2026-09-16-636, «Асиметрія ролей»).
  */
-export function digitIdentity(input: NameDigits, candidate: NameDigits): DigitIdentity {
+export function digitIdentity(
+  input: NameDigits,
+  candidate: NameDigits,
+  context?: DigitIdentityContext,
+): DigitIdentity {
+  if (czechGradesContradict(input, candidate, context)) return 'different';
   // 1. Every hard number of the input must pair off with the candidate's numbers, or be covered by its grade or
   //    soft number.
   if (minus(minus(input.numbers, candidate.numbers), [...candidate.grades, ...candidate.soft]).length > 0) {
@@ -167,8 +214,10 @@ export function digitIdentity(input: NameDigits, candidate: NameDigits): DigitId
  * `number-fallback` one way is always `different` the other way (its candidate-only number is the reverse
  * direction's uncovered input number), so no separate check is needed.
  */
-export function digitsCompatibleAsPeers(a: string, b: string): boolean {
+export function digitsCompatibleAsPeers(a: string, b: string, context?: DigitIdentityContext): boolean {
   const digitsA = readNameDigits(a);
   const digitsB = readNameDigits(b);
-  return digitIdentity(digitsA, digitsB) !== 'different' && digitIdentity(digitsB, digitsA) !== 'different';
+  const reverse = context ? { input: context.candidate, candidate: context.input } : undefined;
+  return digitIdentity(digitsA, digitsB, context) !== 'different'
+    && digitIdentity(digitsB, digitsA, reverse) !== 'different';
 }

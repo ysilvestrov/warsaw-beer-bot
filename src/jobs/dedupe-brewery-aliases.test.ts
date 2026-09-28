@@ -431,3 +431,23 @@ describe('dedupeBreweryAliases', () => {
     expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 0, beersDeleted: 0 });
   });
 });
+
+
+describe('#665 Czech grades in alias deduplication', () => {
+  test.each([
+    ['Konrad 10°', { pairsMerged: 0, beersDeleted: 0 }, 2, [{ name: 'Konrad 12°', untappd_id: null }]],
+    ['Konrad 12°', { pairsMerged: 1, beersDeleted: 1 }, 1, []],
+  ])('canonical %s determines whether twelve is merged', (canonicalName, expected, count, orphanRows) => {
+    const db = fresh();
+    try {
+      const insert = db.prepare(`INSERT INTO beers
+        (untappd_id, brewery, name, style, normalized_name, normalized_brewery) VALUES (?, ?, ?, ?, ?, ?)`);
+      insert.run(158057, 'Konrad / Konrad Brewery', canonicalName, 'Czech Lager', 'konrad', 'konrad konrad');
+      const orphan = Number(insert.run(null, 'KONRAD Brewery', 'Konrad 12°', null, 'konrad', 'konrad').lastInsertRowid);
+      expect(dedupeBreweryAliases(db, silentLog)).toEqual(expected);
+      expect(db.prepare('SELECT COUNT(*) AS n FROM beers').get()).toEqual({ n: count });
+      expect(db.prepare('SELECT name, untappd_id FROM beers WHERE id = ?').all(orphan))
+        .toEqual(orphanRows);
+    } finally { db.close(); }
+  });
+});

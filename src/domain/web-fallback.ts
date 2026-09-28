@@ -6,7 +6,8 @@ import { tryConsumeWebSearchQuota } from '../storage/web_search_quota';
 import { isWebFallbackBlocked } from '../storage/enrich_failures';
 import { utcDay } from './utc-day';
 import { normalizeName } from './normalize';
-import { digitIdentity, readNameDigits } from './digit-identity';
+import { digitIdentity, explicitGradesContradict, readNameDigits } from './digit-identity';
+import { isAleStyle } from './czech-grade';
 import {
   ABV_TOLERANCE,
   breweryAliases,
@@ -23,7 +24,8 @@ import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 const NAME_FUZZY_THRESHOLD = 0.85;
 const RE_WEB_COOLDOWN_DAYS = 30;
 
-interface GateInput { brewery: string; name: string; abv: number | null }
+interface GateInput { brewery: string; name: string; abv: number | null; style?: string | null }
+type GateCandidate = ResolvedBeer & { style?: string | null };
 
 function breweryStrict(input: GateInput, cand: ResolvedBeer): boolean {
   return breweryAliasesMatch(breweryAliases(cand.brewery_name), breweryAliases(input.brewery));
@@ -65,7 +67,7 @@ export type GateStage = 'accept' | 'reject:brewery' | 'reject:digits' | 'reject:
 // a match or the post-hydration 'reject:abv' below) — and the call-level verdicts
 // runWebFallback reports. Typed narrowly (not `string`) so a typo in either is a
 // compile error; #349 will consume these strings programmatically.
-type RejectStage = Exclude<GateStage, 'accept' | 'needs-abv'> | 'reject:abv';
+type RejectStage = Exclude<GateStage, 'accept' | 'needs-abv'> | 'reject:abv' | 'reject:style';
 type CallVerdict = 'matched' | 'rejected' | 'no-candidates' | 'error';
 
 // Refined B1, split so the ABV-dependent stage is separable: brewery-strict is
@@ -73,12 +75,15 @@ type CallVerdict = 'matched' | 'rejected' | 'no-candidates' | 'error';
 // distinctive token overlap, which alone is not enough — it must be corroborated
 // by ABV ('needs-abv'). Never accept on abv alone. Hydration-free by construction,
 // so runWebFallback can call it before paying for hydrateAbv.
-export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateStage {
+export function evaluateCandidate(input: GateInput, cand: GateCandidate): GateStage {
   if (!breweryStrict(input, cand)) return 'reject:brewery';
   // #636: both name signals below read digit-free names, so another number of the series passes them (`Dr.Hazy #7`
   // → `Dr. Hazy #4`). The input is the orphan's text, the candidate Untappd's; a number only Untappd writes stays
   // acceptable, as in lookupBeer — this path runs only when the search found nothing, so there is no better tier.
-  if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name)) === 'different') return 'reject:digits';
+  if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name), {
+    input: { name: input.name, style: input.style },
+    candidate: { name: cand.beer_name, style: cand.style },
+  }) === 'different') return 'reject:digits';
   if (nameGatePass(input, cand)) return 'accept';
   if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';
   return 'needs-abv';
@@ -86,19 +91,19 @@ export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateSta
 
 // Whole-gate verdict for an ALREADY-hydrated candidate. Thin wrapper over the
 // core so the two can no longer drift.
-export function gateWebCandidate(input: GateInput, cand: ResolvedBeer): boolean {
+export function gateWebCandidate(input: GateInput, cand: GateCandidate): boolean {
   const stage = evaluateCandidate(input, cand);
   if (stage === 'accept') return true;
   if (stage !== 'needs-abv') return false;
   return abvCorroborates(input.abv, cand.abv);
 }
 
-function toSearchResult(cand: ResolvedBeer): SearchResult {
+function toSearchResult(cand: GateCandidate): SearchResult {
   return {
     bid: cand.bid,
     beer_name: cand.beer_name,
     brewery_name: cand.brewery_name,
-    style: null,
+    style: cand.style ?? null,
     abv: cand.abv,
     global_rating: null,
   };
@@ -107,7 +112,7 @@ function toSearchResult(cand: ResolvedBeer): SearchResult {
 export interface WebFallbackDeps {
   db: DB;
   resolver: WebResolver;
-  hydrate: BeerSearch; // server-side Algolia — the ONLY source of candidate abv (Brave supplies none)
+  hydrate: BeerSearch; // server-side Algolia — candidate ABV and verified conflict style (Brave supplies neither)
   cap: number;
   log: pino.Logger;
   now?: () => Date;
@@ -127,9 +132,28 @@ async function hydrateAbv(hydrate: BeerSearch, cand: ResolvedBeer): Promise<numb
   }
 }
 
+function needsGradeStyle(input: GateInput, cand: GateCandidate): boolean {
+  return !cand.style?.trim()
+    && explicitGradesContradict(readNameDigits(input.name), readNameDigits(cand.beer_name))
+    && !isAleStyle(input.name, input.style ?? null)
+    && !isAleStyle(cand.beer_name, cand.style ?? null);
+}
+
+// Unlike best-effort ABV hydration, style evidence may only come from this bid.
+async function hydrateGradeStyle(hydrate: BeerSearch, cand: ResolvedBeer): Promise<SearchResult | null> {
+  try {
+    const record = hydrate.hydrateByBid
+      ? (await hydrate.hydrateByBid([cand.bid])).get(cand.bid)
+      : (await hydrate.search(cand.beer_name)).find((hit) => hit.bid === cand.bid);
+    return record?.bid === cand.bid && record.style?.trim() ? record : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function runWebFallback(
   deps: WebFallbackDeps,
-  input: { beerId: number; brewery: string; name: string; abv: number | null },
+  input: { beerId: number; brewery: string; name: string; abv: number | null; style?: string | null },
 ): Promise<SearchResult | null> {
   const now = (deps.now ?? (() => new Date()))();
 
@@ -198,8 +222,23 @@ export async function runWebFallback(
       'web-fallback call',
     );
 
-  for (const cand of candidates) {
-    const stage = evaluateCandidate(input, cand);
+  for (const resolved of candidates) {
+    let cand: GateCandidate = resolved;
+    let stage = evaluateCandidate(input, cand);
+    let gradeStyleHydrated = false;
+    if ((stage === 'accept' || stage === 'needs-abv') && needsGradeStyle(input, cand)) {
+      const record = await hydrateGradeStyle(deps.hydrate, cand);
+      if (!record) {
+        rejected.push({
+          bid: cand.bid, beer_name: cand.beer_name, brewery_name: cand.brewery_name,
+          stage: 'reject:style', inputAbv: input.abv, candAbv: cand.abv,
+        });
+        continue;
+      }
+      cand = { ...cand, style: record.style, abv: record.abv ?? cand.abv };
+      gradeStyleHydrated = true;
+      stage = evaluateCandidate(input, cand);
+    }
     if (stage === 'accept') {
       logCall('matched', cand.bid);
       return toSearchResult(cand);
@@ -211,7 +250,7 @@ export async function runWebFallback(
       });
       continue;
     }
-    const abv = await hydrateAbv(deps.hydrate, cand);
+    const abv = gradeStyleHydrated ? cand.abv : await hydrateAbv(deps.hydrate, cand);
     if (abvCorroborates(input.abv, abv)) {
       logCall('matched', cand.bid);
       return toSearchResult({ ...cand, abv });

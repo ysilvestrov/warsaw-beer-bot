@@ -123,7 +123,7 @@ async function main(): Promise<void> {
         if (!beer) return Promise.resolve(null);
         return runWebFallback(
           { db, resolver: braveResolver, hydrate: algoliaSearch, cap: env.WEB_SEARCH_DAILY_CAP, log },
-          { beerId, brewery: beer.brewery, name: beer.name, abv: beer.abv ?? null },
+          { beerId, brewery: beer.brewery, name: beer.name, abv: beer.abv ?? null, style: beer.style },
         );
       }
     : null;

@@ -327,3 +327,18 @@ describe('recurring backoff tail (#421)', () => {
     expect(out).toBe('skipped');
   });
 });
+
+
+test('#665 cron forwards orphan style before the lookup can merge another grade', async () => {
+  const db = fresh();
+  try {
+    const beerId = seedBeer(db, { brewery: 'KONRAD Brewery', name: 'Alpha 10°', style: 'Czech Lager',
+      normalized_brewery: 'konrad', normalized_name: 'alpha' });
+    await enrichOneOrphan({ db, log: silentLog, search: { search: async () => [{
+      bid: 158057, brewery_name: 'KONRAD Brewery', beer_name: 'Alpha 12°',
+      style: null, abv: 5.2, global_rating: 3.5,
+    }] } }, beerId);
+    expect(db.prepare('SELECT name, untappd_id FROM beers WHERE id = ?').all(beerId))
+      .toEqual([{ name: 'Alpha 10°', untappd_id: null }]);
+  } finally { db.close(); }
+});

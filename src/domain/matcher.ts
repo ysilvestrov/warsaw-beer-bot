@@ -1,7 +1,7 @@
 import { Searcher, fuzzy } from 'fast-fuzzy';
 import { normalizeName, normalizeBrewery, baseNormalize, BREWERY_COLLAB_SEP, COLLAB_SEP, NAME_COLLAB_SEP, BREWERY_NOISE } from './normalize';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
-import { digitIdentity, readNameDigits } from './digit-identity';
+import { czechGradesContradict, digitIdentity, readNameDigits, type DigitIdentityContext } from './digit-identity';
 import { styleNameIdentity, stripBreweryFromName } from './style-identity';
 
 export { BREWERY_COLLAB_SEP, COLLAB_SEP, NAME_COLLAB_SEP } from './normalize';
@@ -12,6 +12,7 @@ export interface CatalogBeer {
   brewery: string;
   name: string;
   abv: number | null;
+  style?: string | null;
 }
 
 export interface MatchResult {
@@ -319,7 +320,7 @@ export function nameTokensDiverge(a: string, b: string): boolean {
 }
 
 export function matchPrepared(
-  input: { brewery: string; name: string; abv?: number | null },
+  input: { brewery: string; name: string; abv?: number | null; style?: string | null },
   prepared: PreparedCatalog,
   budget?: FallbackBudget,
 ): MatchResult | null {
@@ -328,6 +329,24 @@ export function matchPrepared(
   const inputKeys = nameKeys(input.name, input.brewery);   // #117
   const inputStyleIdentity = nn === '' ? styleNameIdentity(input.name, inputAliases[0] ?? '') : '';
   const wantAbv = input.abv ?? null;
+  const inputDigits = readNameDigits(input.name);
+  const contextFor = (candidate: PreparedBeer): DigitIdentityContext => ({
+    input: { name: input.name, style: input.style },
+    candidate: { name: candidate.name, style: candidate.style },
+  });
+  const gradeAllows = (candidate: PreparedBeer) => inputDigits.grades.length === 0
+    || !czechGradesContradict(inputDigits, readNameDigits(candidate.name), contextFor(candidate));
+  let gradeVetoed = false;
+  const keepGrade = (candidate: PreparedBeer): boolean => {
+    const allowed = gradeAllows(candidate);
+    if (!allowed) gradeVetoed = true;
+    return allowed;
+  };
+  const confirmsGrade = (candidate: PreparedBeer): boolean => {
+    const digits = readNameDigits(candidate.name);
+    const values = new Set([...digits.grades, ...digits.soft].map(Number));
+    return values.size === 1 && values.has(Number(inputDigits.grades[0]));
+  };
 
   // Brewery-matching rows, via the first-token index (was a full O(catalog) scan).
   // Computed once and reused by both the exact filter and the fuzzy pool below.
@@ -350,6 +369,7 @@ export function matchPrepared(
       }
       return true;
     })
+    .filter(keepGrade)
     .sort((a, b) => b.id - a.id);
 
   // Split-invariant second try (#169): only when the boundary-trusting exact path found
@@ -373,7 +393,7 @@ export function matchPrepared(
           const canonName = stripBreweryFromName(cand.nameNorm, cand.breweryNorm);
           return remainder !== '' && sortedTokens(remainder) === sortedTokens(canonName);
         }),
-      );
+      ).filter(keepGrade);
       if (anchored.length) exacts = anchored.sort((a, b) => b.id - a.id);
     }
   }
@@ -385,12 +405,11 @@ export function matchPrepared(
     const wantAbv = input.abv ?? null;
     const abvFits = (c: PreparedBeer) =>
       wantAbv !== null && c.abv !== null && Math.abs(c.abv - wantAbv) <= ABV_TOLERANCE;
-    const inputDigits = readNameDigits(input.name);
     const same: PreparedBeer[] = [];
     const yearFallback: PreparedBeer[] = [];
     const numberFallback: PreparedBeer[] = [];
     for (const c of exacts) {
-      const identity = digitIdentity(inputDigits, readNameDigits(c.name));
+      const identity = digitIdentity(inputDigits, readNameDigits(c.name), contextFor(c));
       if (identity === 'same') same.push(c);
       else if (identity === 'year-fallback') yearFallback.push(c);
       else if (identity === 'number-fallback') numberFallback.push(c);
@@ -456,19 +475,22 @@ export function matchPrepared(
     }
     searcher = prepared.fullSearcher();
   }
-  const results = searcher.search(`${seedBrewery} ${nn}`);
+  const eligible = searcher.search(`${seedBrewery} ${nn}`).filter((result) => keepGrade(result.item));
+  // #665: rejecting a grade is not evidence that a grade-less sibling is the input.
+  // Complete the veto pass before requiring positive evidence, even if the rejected
+  // result comes after the shortest-key sibling in fuzzy score order.
+  const results = gradeVetoed ? eligible.filter((result) => confirmsGrade(result.item)) : eligible;
   if (!results.length) return null;
   // #636: the fuzzy key has no digits either — rows of one series (same digit-free key) tie at the top score, and
   // the searcher returns them in catalog order. Among THOSE rows, `same`/`year-fallback` beats `number-fallback`;
   // `different` never wins. A tied row of another name is not considered: which of two different names wins a tie
   // is not a digit question, and the diverge check below keeps judging the first one, as before.
-  const inputDigits = readNameDigits(input.name);
   let best: (typeof results)[number] | null = null;
   let bestRank = Infinity;
   for (const r of results) {
     if (r.score !== results[0].score) break;
     if (r.item.nameNorm !== results[0].item.nameNorm) continue;
-    const identity = digitIdentity(inputDigits, readNameDigits(r.item.name));
+    const identity = digitIdentity(inputDigits, readNameDigits(r.item.name), contextFor(r.item));
     const rank = identity === 'different' ? Infinity : identity === 'number-fallback' ? 1 : 0;
     if (rank < bestRank) { best = r; bestRank = rank; }
     if (bestRank === 0) break;
@@ -493,7 +515,7 @@ export function hasCuratedAlias(brewery: string): boolean {
 // Back-compat single-beer entry point. Prepares the catalog per call, so callers
 // that match many beers should call prepareCatalog once and loop matchPrepared.
 export function matchBeer(
-  input: { brewery: string; name: string; abv?: number | null },
+  input: { brewery: string; name: string; abv?: number | null; style?: string | null },
   catalog: CatalogBeer[],
 ): MatchResult | null {
   return matchPrepared(input, prepareCatalog(catalog));

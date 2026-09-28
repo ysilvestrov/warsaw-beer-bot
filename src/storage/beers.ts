@@ -80,12 +80,12 @@ export interface BidBeerInput {
 function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_source: UntappdIdSource | null } | null {
   const orphans = db
     .prepare(
-      `SELECT b.id, b.name, b.abv, b.untappd_id_source FROM beers b
+      `SELECT b.id, b.name, b.style, b.abv, b.untappd_id_source FROM beers b
         WHERE b.untappd_id IS NULL AND b.normalized_brewery = ? AND b.normalized_name = ?
           AND NOT ${inactiveLegacyOrphanPredicate}`,
     )
     .all(b.normalized_brewery, b.normalized_name) as {
-      id: number; name: string; abv: number | null; untappd_id_source: UntappdIdSource | null;
+      id: number; name: string; style: string | null; abv: number | null; untappd_id_source: UntappdIdSource | null;
     }[];
   const bidDigits = readNameDigits(b.name);
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
@@ -100,7 +100,10 @@ function resolvableOrphan(db: DB, b: BidBeerInput): { id: number; untappd_id_sou
         : o.name.trim().toLowerCase() === b.name.trim().toLowerCase();
       if (!match) return false;
     }
-    const identity = digitIdentity(readNameDigits(o.name), bidDigits);
+    const identity = digitIdentity(readNameDigits(o.name), bidDigits, {
+      input: { name: o.name, style: o.style },
+      candidate: { name: b.name, style: b.style },
+    });
     return identity === 'same' || identity === 'year-fallback';
   });
   return compatible.length === 1 ? compatible[0] : null;
@@ -194,15 +197,18 @@ export interface OrphanBeerInput {
 export function ensureOrphan(db: DB, b: OrphanBeerInput): number {
   const orphans = db
     .prepare(
-      `SELECT b.id, b.name, b.abv FROM beers b
+      `SELECT b.id, b.name, b.style, b.abv FROM beers b
         WHERE b.untappd_id IS NULL AND b.normalized_brewery = ? AND b.normalized_name = ?
           AND NOT ${inactiveLegacyOrphanPredicate}
         ORDER BY b.id`,
     )
-    .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string; abv: number | null }[];
+    .all(b.normalized_brewery, b.normalized_name) as { id: number; name: string; style: string | null; abv: number | null }[];
   const inputStyle = b.normalized_name === '' ? styleNameIdentity(b.name, b.normalized_brewery) : '';
   const existing = orphans.find((o) => {
-    if (!digitsCompatibleAsPeers(o.name, b.name)) return false;
+    if (!digitsCompatibleAsPeers(o.name, b.name, {
+      input: { name: o.name, style: o.style },
+      candidate: { name: b.name, style: b.style },
+    })) return false;
     if (b.normalized_name !== '') return true;
     if (b.abv != null && o.abv != null && Math.abs(b.abv - o.abv) > ABV_TOLERANCE) {
       return false;
@@ -300,6 +306,7 @@ export interface CatalogRow {
   id: number;
   brewery: string;
   name: string;
+  style: string | null;
   abv: number | null;
   rating_global: number | null;
   untappd_id: number | null;
@@ -307,7 +314,7 @@ export interface CatalogRow {
 
 export function loadCatalog(db: DB): CatalogRow[] {
   return db
-    .prepare(`SELECT b.id, b.brewery, b.name, b.abv, b.rating_global, b.untappd_id
+    .prepare(`SELECT b.id, b.brewery, b.name, b.style, b.abv, b.rating_global, b.untappd_id
       FROM beers b WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as CatalogRow[];
 }

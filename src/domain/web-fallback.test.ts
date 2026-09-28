@@ -5,7 +5,7 @@ import { migrate } from '../storage/schema';
 import { seedBeer } from '../storage/seed-beer.testing';
 import { evaluateCandidate, gateWebCandidate, runWebFallback } from './web-fallback';
 import type { ResolvedBeer, WebResolver } from '../sources/websearch/resolver';
-import type { BeerSearch } from '../sources/untappd/search';
+import type { BeerSearch, HydratedBeer } from '../sources/untappd/search';
 import pino from 'pino';
 import { recordEnrichFailure, setEnrichFailureReview } from '../storage/enrich_failures';
 
@@ -376,5 +376,216 @@ describe('lookupWithFallback', () => {
   it('is a no-op passthrough when fallback is null (feature-flag off)', async () => {
     const out = await lookupWithFallback(async () => notFoundEmpty, 42, null);
     expect(out).toBe(notFoundEmpty);
+  });
+});
+
+
+describe('#665 input Czech style in web fallback', () => {
+  const input = { brewery: 'KONRAD Brewery', name: 'Konrad 10°', abv: null, style: 'Czech Lager' };
+  const candidate: ResolvedBeer = { bid: 158057, brewery_name: 'KONRAD Brewery', beer_name: 'Konrad 12°', abv: null };
+  test('input-only style rejects different degrees and allows equal ones', () => {
+    expect(evaluateCandidate(input, candidate)).toBe('reject:digits');
+    expect(gateWebCandidate(input, candidate)).toBe(false);
+    expect(gateWebCandidate({ ...input, name: 'Konrad 12°' }, candidate)).toBe(true);
+  });
+  test('the spent fallback never returns the wrong-grade result', async () => {
+    const db = freshDb();
+    try {
+      const beerId = seed(db, input.brewery, input.name);
+      expect(await runWebFallback({ db, log, cap: 90, hydrate: noHydrate,
+        resolver: { resolve: async () => [candidate] } }, { beerId, ...input })).toBeNull();
+    } finally { db.close(); }
+  });
+});
+
+
+describe('#665 verified candidate style in web fallback', () => {
+  const input = { brewery: 'KONRAD Brewery', name: 'Konrad 10°', abv: 4 };
+  const twelve: ResolvedBeer = { bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery', abv: null };
+  const record: HydratedBeer = { ...twelve, style: 'Czech Lager', abv: 5.2,
+    global_rating: 3.5, beer_slug: 'konrad-12', brewery_alias: [] };
+
+  async function probe(hydrate: BeerSearch, card: { brewery: string; name: string; abv: number | null; style?: string | null } = input, candidates = [twelve]) {
+    const db = freshDb();
+    try {
+      const beerId = seed(db, card.brewery, card.name);
+      const info = vi.fn();
+      const sr = await runWebFallback({ db, hydrate, resolver: { resolve: async () => candidates },
+        cap: 90, log: { ...log, info } as never,
+        now: () => new Date('2026-09-28T13:00:00Z') }, { beerId, ...card });
+      return { sr, rejected: info.mock.calls[0][0].rejected,
+        quota: db.prepare('SELECT count FROM web_search_quota').get(),
+        stamp: db.prepare('SELECT web_tried_at FROM beers WHERE id = ?').get(beerId) };
+    } finally { db.close(); }
+  }
+
+  test('candidate-only Czech style rejects an exact-name wrong grade by exact bid', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, record]]));
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid });
+    expect(out.sr).toBeNull();
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:digits', inputAbv: 4, candAbv: 5.2 }]);
+    expect(out.quota).toEqual({ count: 1 });
+    expect(out.stamp).toEqual({ web_tried_at: '2026-09-28T13:00:00.000Z' });
+  });
+
+  test.each(['Wheat Beer - Hefeweizen', 'Pszeniczne', 'Lager - Pale'])(
+    'verified %s keeps non-Czech conflicting grades soft', async (style) => {
+      const byBid = vi.fn(async () => new Map([[158057, { ...record, style }]]));
+      const out = await probe({ search: async () => [], hydrateByBid: byBid });
+      expect(out.sr).toEqual({ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+        style, abv: 5.2, global_rating: null });
+      expect(out.rejected).toEqual([]);
+      expect(byBid.mock.calls).toEqual([[[158057]]]);
+    });
+
+  test.each<[string, Map<number, HydratedBeer | null>]>([
+    ['missing entry', new Map()],
+    ['explicit missing record', new Map([[158057, null]])],
+    ['null style', new Map([[158057, { ...record, style: null }]])],
+    ['empty style', new Map([[158057, { ...record, style: '  ' }]])],
+    ['wrong record bid', new Map([[158057, { ...record, bid: 999 }]])],
+    ['wrong map key', new Map([[999, record]])],
+  ])('unverified style (%s) cannot accept a conflicting grade', async (_label, records) => {
+    const out = await probe({ search: async () => [], hydrateByBid: async () => records });
+    expect(out.sr).toBeNull();
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:style', inputAbv: 4, candAbv: null }]);
+  });
+
+  test('a hydration error leaves the conflict unresolved without throwing', async () => {
+    const out = await probe({ search: async () => [], hydrateByBid: async () => { throw new Error('blocked'); } });
+    expect(out.sr).toBeNull();
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:style', inputAbv: 4, candAbv: null }]);
+  });
+
+  test('search-only hydration takes the exact bid rather than the first result', async () => {
+    const search = vi.fn(async () => [{ ...record, bid: 999, style: 'Wheat' }, record]);
+    const out = await probe({ search });
+    expect(out.sr).toBeNull();
+    expect(search.mock.calls).toEqual([['Konrad 12°']]);
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:digits', inputAbv: 4, candAbv: 5.2 }]);
+  });
+
+  test('search-only results for another bid provide no style evidence', async () => {
+    const out = await probe({ search: async () => [{ ...record, bid: 999, style: 'Wheat' }] });
+    expect(out.sr).toBeNull();
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:style', inputAbv: 4, candAbv: null }]);
+  });
+
+  test('rejection does not mask a remaining same-grade candidate', async () => {
+    const ten = { ...twelve, bid: 45, beer_name: 'Konrad 10°' };
+    const byBid = vi.fn(async () => new Map([[158057, record]]));
+    const out = await probe({ search: async () => [], hydrateByBid: byBid }, input, [twelve, ten]);
+    expect(out.sr).toEqual({ ...ten, style: null, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+  });
+
+  test.each<[string, string]>([
+    ['Konrad 12°', 'Konrad 12°'],
+    ['Konrad 12°', 'Konrad 12.0°'],
+    ['Konrad 10°', 'Konrad'],
+    ['Konrad 10° 11°', 'Konrad 12°'],
+    ['Konrad 10°', 'Konrad 11° 12°'],
+    ['Konrad 14.5°', 'Konrad 12°'],
+    ['Konrad 6°', 'Konrad 12°'],
+    ['Konrad 12°', 'Konrad 21°'],
+    ['Konrad IPA 10°', 'Konrad IPA 12°'],
+  ])('no additional call without an eligible explicit conflict: %s / %s', async (name, candidateName) => {
+    const byBid = vi.fn(async () => new Map());
+    const search = vi.fn(async () => []);
+    await probe({ search, hydrateByBid: byBid }, { ...input, name }, [{ ...twelve, beer_name: candidateName }]);
+    expect(byBid.mock.calls).toEqual([]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test.each(['Wheat', 'Pszeniczne', 'IPA'])('known input %s preserves acceptance without extra calls', async (style) => {
+    const byBid = vi.fn(async () => new Map());
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, { ...input, style });
+    expect(out.sr).toEqual({ ...twelve, style: null, global_rating: null });
+    expect(byBid.mock.calls).toEqual([]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test.each(['Konrad 7°', 'Konrad 20°', 'Konrad 10° 10.0°'])(
+    'unique integer boundary/duplicate conflicts require verified style: %s', async (name) => {
+      const byBid = vi.fn(async () => new Map([[158057, record]]));
+      const out = await probe({ search: async () => [], hydrateByBid: byBid }, { ...input, name });
+      expect(out.sr).toBeNull();
+      expect(byBid.mock.calls).toEqual([[[158057]]]);
+      expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
+        stage: 'reject:digits', inputAbv: 4, candAbv: 5.2 }]);
+    });
+
+  test('an already rejected name causes no hydration', async () => {
+    const byBid = vi.fn(async () => new Map());
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, input, [{ ...twelve, beer_name: 'Completely Different 12°' }]);
+    expect(out.sr).toBeNull();
+    expect(byBid.mock.calls).toEqual([]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test('an already rejected brewery causes no hydration', async () => {
+    const byBid = vi.fn(async () => new Map());
+    const out = await probe({ search: async () => [], hydrateByBid: byBid }, input, [{ ...twelve, brewery_name: 'Pinta' }]);
+    expect(out.sr).toBeNull();
+    expect(byBid.mock.calls).toEqual([]);
+  });
+
+  const crossInput = { brewery: 'KONRAD Brewery', name: 'Jabłko Owocowe 10°', abv: 4 };
+  const cross = { ...twelve, beer_name: 'Apple Owocowe 12°' };
+
+  test('candidate-only Czech style also rejects the token-overlap branch', async () => {
+    expect(evaluateCandidate(crossInput, cross)).toBe('needs-abv');
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, beer_name: cross.beer_name, abv: 4 }]]));
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, crossInput, [cross]);
+    expect(out.sr).toBeNull();
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test('the token-overlap branch reuses verified same-bid ABV', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: 4 }]]));
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, crossInput, [cross]);
+    expect(out.sr).toEqual({ ...cross, style: 'Fruit Beer', abv: 4, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test('nullable style metadata preserves an already known ABV in the token-overlap branch', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, crossInput, [{ ...cross, abv: 4 }]);
+    expect(out.sr).toEqual({ ...cross, style: 'Fruit Beer', abv: 4, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test('nullable style metadata preserves an already known ABV in the exact-name branch', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
+    const out = await probe({ search: async () => [], hydrateByBid: byBid }, input, [{ ...twelve, abv: 4 }]);
+    expect(out.sr).toEqual({ ...twelve, style: 'Fruit Beer', abv: 4, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+  });
+
+  test('missing verified ABV cannot corroborate token overlap or cause another lookup', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
+    const search = vi.fn(async () => [{ ...record, style: 'Fruit Beer', abv: 4 }]);
+    const out = await probe({ search, hydrateByBid: byBid }, crossInput, [cross]);
+    expect(out.sr).toBeNull();
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+    expect(out.rejected).toEqual([{ bid: 158057, beer_name: 'Apple Owocowe 12°', brewery_name: 'KONRAD Brewery',
+      stage: 'reject:abv', inputAbv: 4, candAbv: null }]);
   });
 });

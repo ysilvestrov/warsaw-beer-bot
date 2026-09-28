@@ -45,6 +45,18 @@ describe('isAleStyle', () => {
     expect(isAleStyle('Nazwa Stout 11', null)).toBe(true);
   });
 
+  test.each<[string, string | null]>([
+    ['Litovel 12°', 'Pszeniczne'],
+    ['Litovel 12°', 'PSZENICZNE / Hefeweizen'],
+    ['Litovel Pszeniczne 12°', null],
+  ])('recognizes the observed Polish wheat marker in %s / %s', (name, style) => {
+    expect(isAleStyle(name, style)).toBe(true);
+  });
+
+  test('the Polish wheat marker matches a complete token', () => {
+    expect(isAleStyle('Niepszeniczne 12°', 'Czech Lager')).toBe(false);
+  });
+
   test('false for a pale lager', () => {
     expect(isAleStyle('Ležák 11%', 'Czech Pale Lager')).toBe(false);
     expect(isAleStyle('Kamenická 10', null)).toBe(false);

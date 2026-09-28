@@ -12,6 +12,7 @@ const POLLUTION_RE = /\d+(?:[.,]\d+)?\s*[°%]| — /;
 const MERGE_THRESHOLD = 0.9;
 
 interface BeerRow extends CatalogBeer {
+  style: string | null;
   normalized_name: string;
   untappd_id: number | null;
 }
@@ -28,7 +29,7 @@ type Plan = MergePlan | RewritePlan;
 export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<CleanupResult> {
   const allOntap = db
     .prepare(
-      `SELECT b.id, b.name, b.brewery, b.abv, b.normalized_name, b.untappd_id
+      `SELECT b.id, b.name, b.brewery, b.style, b.abv, b.normalized_name, b.untappd_id
          FROM beers b
         WHERE b.untappd_id IS NULL AND NOT ${inactiveLegacyOrphanPredicate}`,
     )
@@ -49,7 +50,7 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
   }
 
   const cleanPool = db
-    .prepare(`SELECT b.id, b.name, b.brewery, b.abv FROM beers b
+    .prepare(`SELECT b.id, b.name, b.brewery, b.style, b.abv FROM beers b
       WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as CatalogBeer[];
   const pool = cleanPool.filter((c) => !pollutedIds.has(c.id));
@@ -62,7 +63,7 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
     const cleanedNorm = normalizeName(cleaned);
     if (cleanedNorm === p.normalized_name) continue;
 
-    const match = matchPrepared({ brewery: p.brewery, name: cleaned, abv: p.abv }, preparedPool);
+    const match = matchPrepared({ brewery: p.brewery, name: cleaned, abv: p.abv, style: p.style }, preparedPool);
     if (match && match.confidence >= MERGE_THRESHOLD) {
       plans.push({ kind: 'merge', pollutedId: p.id, targetId: match.id });
     } else {

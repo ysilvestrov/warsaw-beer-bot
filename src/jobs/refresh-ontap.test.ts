@@ -932,3 +932,28 @@ describe('refreshOntap multi-city', () => {
     expect(getMatch(db, RITTMAYER, 'Hefeweizen')?.merged_at).not.toBeNull();
   });
 });
+
+
+describe('#665 Czech style reaches production tap matching', () => {
+  test.each<[string | null, string]>([['Czech Lager', ''], [null, 'Czech Lager']])(
+    'catalog style %s / tap style %s cannot let twelve capture ten', async (style, tapStyle) => {
+    const db = openDb(':memory:');
+    migrate(db);
+    try {
+      const tenId = seedBeer(db, { untappd_id: 227734, brewery: 'Pivovar Konrad Brewery',
+        name: 'Konrad Svetlé Výčepní 10', style, abv: 4,
+        normalized_brewery: 'konrad', normalized_name: normalizeName('Konrad Svetlé Výčepní 10') });
+      seedBeer(db, { brewery: 'KONRAD Brewery', name: 'Konrad 12°', style, abv: 5.2,
+        normalized_brewery: 'konrad', normalized_name: 'konrad' });
+      const http: Http = { async get(url) {
+        if (url === 'https://ontap.pl/warszawa') return `<div onclick="location.assign('https://mixed.ontap.pl/')"><div class="panel-body">Mixed Pub 1 taps</div></div>`;
+        if (url === 'https://mixed.ontap.pl/') return '<html><head><meta property="og:title" content="Mixed Pub / ontap.pl"></head><body>'
+          + panel(1, 'KONRAD Brewery', 'KONRAD 10°', tapStyle) + '</body></html>';
+        throw new Error(`Unexpected URL ${url}`);
+      } };
+      await refreshOntap({ db, http, log: silentLog, search: { search: async () => [] },
+        geocoder: async () => null, lookupEnabled: false, cities: CITIES.filter((city) => city.slug === 'warszawa') });
+      expect(getMatch(db, 'KONRAD Brewery', 'KONRAD 10°')?.untappd_beer_id).toBe(tenId);
+    } finally { db.close(); }
+  });
+});

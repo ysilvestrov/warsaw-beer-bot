@@ -1,4 +1,4 @@
-import { digitIdentity, digitsCompatibleAsPeers, readNameDigits, type DigitIdentity } from './digit-identity';
+import { czechGradesContradict, digitIdentity, digitsCompatibleAsPeers, readNameDigits, type DigitIdentity, type DigitIdentityContext } from './digit-identity';
 
 // #636. Every pair below is a real catalog or tap name from the prod probe (spec 2026-09-16), so a rule change
 // that "looks harmless" has to explain which measured beer it moves.
@@ -166,5 +166,113 @@ describe('digitsCompatibleAsPeers — ensureOrphan (the #617 numericTokensCompat
   ])('%s  ↔  %s  →  %s', (a, b, expected) => {
     expect(digitsCompatibleAsPeers(a, b)).toBe(expected);
     expect(digitsCompatibleAsPeers(b, a)).toBe(expected);
+  });
+});
+
+describe('#665 Czech lager grade identity', () => {
+  const judged = (
+    input: string, candidate: string,
+    inputStyle: string | null, candidateStyle: string | null,
+  ): DigitIdentity => digitIdentity(readNameDigits(input), readNameDigits(candidate), {
+    input: { name: input, style: inputStyle },
+    candidate: { name: candidate, style: candidateStyle },
+  });
+
+  test('Konrad ten degrees is not the twelve-degree orphan', () => {
+    expect(judged('KONRAD 10°', 'Konrad 12°', null, 'Svetlý Ležák')).toBe('different');
+    expect(judged('Konrad 12°', 'KONRAD 10°', 'Svetlý Ležák', null)).toBe('different');
+  });
+
+  test.each<[string, string, string | null, string | null, DigitIdentity]>([
+    ['CERNA HORA LEZAK 12°', 'Černa Hora 11°', null, 'Svetlý Ležák', 'different'],
+    ['Beer 12°', 'Beer 11°', null, 'Pilsner - Czech / Bohemian', 'different'],
+    ['Beer 10°', 'Beer 12°', 'Lager - Světlé (Czech Pale)', null, 'different'],
+    ['Beer 10°', 'Beer 12°', null, 'Bohemian Pils', 'different'],
+    ['Beer 10°', 'Beer 12°', null, 'Tmavy Lezak', 'different'],
+    ['Beer 10°', 'Beer 12°', null, 'Světlý Ležák / Jasny Lager', 'different'],
+    ['Beer 7°', 'Beer 20°', null, 'Czech Lager', 'different'],
+    ['Beer 6°', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 12°', 'Beer 21°', null, 'Czech Lager', 'same'],
+    ['Beer 12°', 'Beer 12,0°', null, 'Czech Lager', 'same'],
+    ['Beer 12.0°', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10*', 'Beer 12°', null, 'Czech Lager', 'different'],
+    ['Beer 10°·4%', 'Beer 12°·5%', null, 'Czech Lager', 'different'],
+    ['Beer 14,5°', 'Beer 14°', null, 'Czech Lager', 'same'],
+    ['Beer 10° 10.0°', 'Beer 12°', null, 'Czech Lager', 'different'],
+    ['Beer 10° 11°', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer 11° 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer 12°', null, null, 'same'],
+    ['Beer 10°', 'Beer 12°', null, 'Lager', 'same'],
+    ['Beer 10°', 'Beer 12°', null, 'Pilsner', 'same'],
+    ['Beer 10°', 'Beer 12°', null, 'Czech', 'same'],
+    ['Beer 10°', 'Beer 12°', null, 'Ležák', 'same'],
+    ['Beer 10°', 'Beer 12°', 'IPA', 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer 12°', 'Pszeniczne', 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer 12°', 'Czech Lager', 'Pszeniczne', 'same'],
+    ['Beer Pszeniczne 10°', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer Pszeniczne 12°', 'Czech Lager', null, 'same'],
+    ['Beer IPA 10°', 'Beer IPA 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer Stout 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10°', 'Beer 12°', null, 'Czech IPA', 'same'],
+    ['Beer 10°', 'Beer', null, 'Czech Lager', 'same'],
+    ['Beer 10%', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 10 abv', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 0,5l', 'Beer 12°', null, 'Czech Lager', 'same'],
+    ['Beer 2026', 'Beer 12°', null, 'Czech Lager', 'year-fallback'],
+    ['Beer #10', 'Beer 12°', null, 'Czech Lager', 'different'],
+    ['Beer 10', 'Beer 12°', null, 'Czech Lager', 'different'],
+    ['Beer #3 10°', 'Beer #4 10°', null, 'Czech Lager', 'different'],
+    ['Beer 10° 2024', 'Beer 10° 2025', null, 'Czech Lager', 'different'],
+    ['', '', null, 'Czech Lager', 'same'],
+  ])('%s / %s with styles %s / %s → %s', (a, b, sa, sb, expected) => {
+    expect(judged(a, b, sa, sb)).toBe(expected);
+  });
+
+test('the contextual grade veto is symmetric with only one known style', () => {
+  const a = readNameDigits('Beer 7°');
+  const b = readNameDigits('Beer 20°');
+  const context: DigitIdentityContext = {
+    input: { name: 'Beer 7°', style: 'Czech Lager' },
+    candidate: { name: 'Beer 20°' },
+  };
+  expect(czechGradesContradict(a, b, context)).toBe(true);
+  expect(czechGradesContradict(b, a, {
+    input: context.candidate, candidate: context.input,
+  })).toBe(true);
+});
+
+test('absence of context preserves old identity and does not hide hard-number conflicts', () => {
+  expect(digitIdentity(readNameDigits('Beer 10°'), readNameDigits('Beer 12°'))).toBe('same');
+  expect(czechGradesContradict(readNameDigits('Beer #3'), readNameDigits('Beer #4'))).toBe(false);
+  expect(digitIdentity(readNameDigits('Beer #3'), readNameDigits('Beer #4'))).toBe('different');
+});
+
+test.each<[string, string, string, DigitIdentity]>([
+  ['Białe IPA 16°', 'Białe IPA 14°', 'IPA', 'same'],
+  ['Flying Machine 19°', 'Flying Machine 20°', 'IPA - Imperial / Double New England / Hazy', 'same'],
+  ['Kwas My Lemoncello 16,5°', '16° Kwas My Lemoncello Sour Ale', 'Sour', 'same'],
+  ['Mini Młot 8°', 'Mini Młot 9°', 'IPA', 'same'],
+  ["There's no Wi-Fi in my garden 14,5°", "There's no wi-fi in my garden 14°", 'IPA', 'same'],
+  ['Sztanga 2026 12°', 'Sztanga 11°', 'Kölsch', 'year-fallback'],
+  ['Lizard King 11°', 'Lizard King 9°', 'Sour - Fruited Gose', 'same'],
+])('non-Czech grades remain soft: %s / %s', (a, b, style, expected) => {
+  const context: DigitIdentityContext = {
+    input: { name: a }, candidate: { name: b, style },
+  };
+  expect(czechGradesContradict(readNameDigits(a), readNameDigits(b), context)).toBe(false);
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b), context)).toBe(expected);
+});
+});
+
+
+describe('#665 contextual orphan peers', () => {
+  test('known style on either peer rejects differing degrees', () => {
+    expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°', {
+      input: { name: 'Konrad 10°' }, candidate: { name: 'Konrad 12°', style: 'Svetlý Ležák' },
+    })).toBe(false);
+    expect(digitsCompatibleAsPeers('Konrad 12°', 'Konrad 10°', {
+      input: { name: 'Konrad 12°', style: 'Svetlý Ležák' }, candidate: { name: 'Konrad 10°' },
+    })).toBe(false);
+    expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°')).toBe(true);
   });
 });

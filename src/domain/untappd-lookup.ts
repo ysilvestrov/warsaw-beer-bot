@@ -49,6 +49,7 @@ export type LookupOutcome =
 export interface LookupArgs {
   brewery: string;
   name: string;
+  style?: string | null;
   abv?: number | null;
   search: BeerSearch;
 }
@@ -476,6 +477,8 @@ export async function lookupBeer(
   // #636: the #271/#353 retries call back with a shortened name (` #N` tail cut, brackets and grades dropped); the
   // digit filter must keep judging by the digits of the ORIGINAL name, or `Juicy Trap #19` would match `Juicy Trap`.
   originalDigits?: NameDigits,
+  // The same raw text supplies the ale-name veto even after retry stripping.
+  originalName?: string,
 ): Promise<LookupOutcome> {
   const { brewery, name, abv = null } = args;
   const inputBreweryAliases = breweryAliases(brewery);
@@ -511,6 +514,8 @@ export async function lookupBeer(
   }
   const targetNames = fuzzyTargets(name, brewery);
   const inputDigits = originalDigits ?? readNameDigits(name);
+  const identityName = originalName ?? name;
+  const inputContext = { name: identityName, style: args.style };
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
@@ -532,7 +537,10 @@ export async function lookupBeer(
     // otherwise the search could pick `Juicy Trap #20` where the matcher takes `Juicy Trap`, and merge memory
     // would keep the search's choice. The unfiltered list stays in seenCandidates as triage evidence.
     const judged = unfiltered.map((result) => ({
-      result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name)),
+      result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name), {
+        input: inputContext,
+        candidate: { name: result.beer_name, style: result.style },
+      }),
     }));
     // A `number-fallback` hit is dropped only when a better-tier hit of the SAME SERIES is present — the same
     // digit-free name at a matching candidate brewery (`Juicy Trap` beside `Juicy Trap #20`). Another brewery's
@@ -947,7 +955,7 @@ export async function lookupBeer(
   if (!headRetried && seenCandidates.length === 0) {
     const head = headBeforeTail(name);
     if (head) {
-      const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried, inputDigits);
+      const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried, inputDigits, identityName);
       if (retry.kind === 'not_found') {
         return {
           kind: 'not_found',
@@ -965,7 +973,7 @@ export async function lookupBeer(
   if (!descriptorRetried && seenCandidates.length === 0) {
     const stripped = stripDescriptorAndPackaging(name);
     if (stripped) {
-      const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true, inputDigits);
+      const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true, inputDigits, identityName);
       if (retry.kind === 'matched') {
         if (
           isAlcoholClassMismatch(abv, name, retry.result) ||
