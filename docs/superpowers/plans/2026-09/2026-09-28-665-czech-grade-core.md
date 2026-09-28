@@ -486,7 +486,7 @@ Stage only the five files listed for U2; commit subject: `fix(matcher): exclude 
 
 ## Whole-core review checkpoint
 
-- [ ] Review the entire diff from 4964f00, including U1 implemented inline and U2. Apply the code-review workflow sequentially in the main thread as AGENTS.md requires. Include correctness, API type compatibility, data-integrity and performance lenses; this is a rule shared by data writes even though those callers are not wired yet.
+- [x] Review the entire diff from 4964f00, including U1 implemented inline and U2. Apply the code-review workflow sequentially in the main thread as AGENTS.md requires. Include correctness, API type compatibility, data-integrity and performance lenses; this is a rule shared by data writes even though those callers are not wired yet.
 - [x] The review package must include the approved spec, this plan, named red/green receipts, mutation outcomes, full-gate results and the original Konrad reproduction. Specifically challenge whether a style-less caller still behaves as before and whether the searcher returns all above-threshold candidates.
 - [ ] Fix valid core findings, repeat the affected tests and full gate after changes, and record the review receipt. Do not call #665 fixed, push a release or close the issue at this checkpoint.
 - [ ] Only after this review, write the separate peripheral implementation plan against the actual core signatures. It must cover all identity-recording rows in the spec's evidence table, the verified Konrad alias, `spec.md`, one-snapshot old/new catalog replay and row-by-row recovery before merging 37334. No task code for that work is prewritten here.
@@ -512,4 +512,4 @@ Execution is sequential in the existing worktree using `superpowers:executing-pl
 
 U1 completed in `6100506`; U2 completed in `7d95afc`. Final gate: 3679 tests passed, one skipped, typecheck passed. All four omission mutations fail their intended assertions and were restored before the gate.
 
-U3 remains pending independent adversarial review. Local review found no actionable defects; the automatic approval review denied the external Claude launch for lack of explicit authorization to send the payload to Anthropic. No peer job was created. Detailed coverage and receipts: [core review](2026-09-28-665-core-review.md). Peripheral planning has not started.
+U3 independent review completed after explicit one-time user authorization of the Anthropic transfer. Claude raised one P2 selection defect; the actual fast-fuzzy probe confirms a shorter grade-less sibling can win instead of45. The core is not ready until the finding is resolved. See [core review](2026-09-28-665-core-review.md) and the [draft design clarification](../../specs/2026-09/2026-09-28-665-core-review-amendment.md). Peripheral planning has not started.
