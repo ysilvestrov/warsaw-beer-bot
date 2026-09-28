@@ -37,6 +37,8 @@ function dropV36ProofColumns(db: ReturnType<typeof openDb>): void {
 }
 
 function dropV39AuditColumns(db: ReturnType<typeof openDb>): void {
+  // Replays of v39 or earlier must also undo all later column additions.
+  db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
   db.exec('ALTER TABLE bug_reports DROP COLUMN related_json');
   db.exec('ALTER TABLE bug_reports DROP COLUMN jev_json');
 }
@@ -47,6 +49,24 @@ function dropV37ObservationColumns(db: ReturnType<typeof openDb>): void {
 }
 
 describe('schema migrations', () => {
+  it('v40 upgrades existing had rows without inventing personal ratings', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 40').get())
+      .toEqual({ version: 40 });
+    db.exec('ALTER TABLE untappd_had DROP COLUMN user_rating');
+    db.prepare('DELETE FROM schema_version WHERE version = 40').run();
+    seedBeer(db, 1);
+    db.prepare('INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at) VALUES (42, 1, ?)')
+      .run('2026-09-03T03:00:00Z');
+    migrate(db);
+    migrate(db);
+    expect(db.prepare('SELECT telegram_id, beer_id, last_seen_at, user_rating FROM untappd_had').all())
+      .toEqual([{ telegram_id: 42, beer_id: 1, last_seen_at: '2026-09-03T03:00:00Z', user_rating: null }]);
+    expect(() => db.prepare('UPDATE untappd_had SET user_rating = 5.1').run()).toThrow(/CHECK/);
+    expect(db.prepare('PRAGMA foreign_key_check').all()).toEqual([]);
+  });
+
   it('upgrades an already-recorded v36 database with a distinct observation generation', () => {
     const db = openDb(':memory:');
     migrate(db);
@@ -121,12 +141,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..39 on a fresh db, with no gaps', () => {
+  it('records every migration 1..40 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 39 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 40 }, (_, i) => i + 1));
     db.close();
   });
 
