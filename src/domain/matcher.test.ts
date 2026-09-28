@@ -1541,3 +1541,18 @@ describe('#665 canonical Konrad after duplicate recovery', () => {
     expect(breweryAliasesMatch(breweryAliases('KONRAD Brewery'), breweryAliases('Svijany'))).toBe(false);
   });
 });
+
+
+describe('#665 Polish wheat replay control', () => {
+  test('Litovel wheat input keeps its pre-existing selection after an unrelated Czech grade candidate', () => {
+    const rows = [
+      c({ id: 256, brewery: 'Litovel', name: 'Litovel Dark', style: 'Lager - Tmavé (Czech Dark)', abv: 3.8 }),
+      c({ id: 419, brewery: 'Litovel', name: 'Litovel Pšeničné pivo', style: 'Wheat Beer - Hefeweizen', abv: 4.7 }),
+      c({ id: 30255, brewery: 'Litovel', name: 'Litovel Gustav 13°', style: 'Lager - Polotmavé (Czech Amber)', abv: 6.1 }),
+      c({ id: 35306, brewery: 'Litovel', name: 'Litovel Bohatá 12', style: 'Lager - Světlé (Czech Pale)', abv: 5 }),
+    ];
+    // This pins preservation of the baseline result, not a claim that Dark is wheat beer.
+    expect(matchBeer({ brewery: 'Litovel Brewery', name: 'Litovel 12°', style: 'Pszeniczne', abv: 4.7 }, rows))
+      .toEqual({ id: 256, confidence: 1, source: 'fuzzy' });
+  });
+});

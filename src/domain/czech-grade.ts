@@ -24,6 +24,7 @@ const ALE_STYLE_WORDS: ReadonlySet<string> = new Set([
   'ipa', 'apa', 'neipa', 'dipa', 'tipa', 'aipa',
   'gose', 'stout', 'porter', 'sour', 'saison',
   'lambic', 'weizen', 'wheat', 'witbier', 'barleywine',
+  'pszeniczne', // #665: Polish wheat style observed in the Litovel tap replay.
 ]);
 
 // Dark-beer markers (Czech pale is the default). A plain grade must not grab a dark variant.

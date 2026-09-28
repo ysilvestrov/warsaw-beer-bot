@@ -1,7 +1,7 @@
 # #665 — replay and copied-database recovery
 
 Date: 2026-09-28. Code under review: ca6552e0c1fa041a813ef566b7f13ac2645a0370.
-Status: Konrad recovery verified on a copy; shipping blocked by an unapproved non-Czech selection change. No production writes, push, PR, deployment or issue close.
+Initial status at ca6552e: Konrad recovery verified on a copy; shipping blocked by a non-Czech selection change. The approved resolution and current validation are recorded at the end. No production writes, push, PR, deployment or issue close.
 
 ## Same-snapshot replay
 
@@ -24,9 +24,9 @@ Catalog row30255 is Gustav 13°, Czech Amber Lager. It passes the fuzzy score th
 
 The latest-tap snapshot has several Polish wheat labels, including Pszeniczne24 times, PSZENICZNE4 times and other compound labels. The query and probe are retained below. This finding is not a request to add every translation or redesign style matching.
 
-Recommended amendment, pending user approval: add the observed normalized token pszeniczne to the existing ale marker list. Verify raw-name/style markers on both sides, contextual grade identity, matcher preservation for the observed Litovel input, and search-grade fallback exclusion. This changes a shared rule; it must be approved and documented before implementation. It preserves the pre-existing Litovel match rather than claiming Dark256 is the correct wheat beer. The baseline wheat-versus-dark mismatch is separate evidence, not resolved by this proposal. Requests without style remain an explicit evidence limitation.
+Amendment approved by user choice1 after this receipt: add the observed normalized token pszeniczne to the existing ale marker list. Verify raw-name/style markers on both sides, contextual grade identity, matcher preservation for the observed Litovel input, and search-grade fallback exclusion. This changes a shared rule; it must be approved and documented before implementation. It preserves the pre-existing Litovel match rather than claiming Dark256 is the correct wheat beer. The baseline wheat-versus-dark mismatch is separate evidence, not resolved by this proposal. Requests without style remain an explicit evidence limitation.
 
-No code for this amendment has been written.
+Implementation sequence: add exact regressions for Polish markers in raw names/styles on either side, actual Litovel selection and existing search-grade fallback; observe assertion failures; add only pszeniczne to ALE_STYLE_WORDS; run focused tests, same-snapshot replay and the full gate. Record the style-less request limitation separately. No additional translations or ranking changes are approved.
 
 ## Live search evidence
 
@@ -66,3 +66,17 @@ A fresh readonly production query after the rehearsal found no enrich_failures o
 The main-thread whole-branch inspection covered U1/U2/S1/P1/P2/P3: identity/context roles, complete candidate filtering, SQL/cache delivery, authoritative API routes, retry raw text, production loaders, cleanup and dedupe writes. Existing pins/bids/aliases retain their authoritative paths. The replay finding above is unresolved; this is not a passing whole-branch review receipt. A fresh independent review of this head has not run. The earlier one-time Claude authorization and receipt cover the old core only.
 
 Temporary local artifacts: /tmp/issue-665-{snapshot.ts,replay.db,full-replay.ts,replay-results.json,replay.log,marker-probe.ts,live-confirm.ts,live-confirm.log,recovery.ts,recovery.db,recovery.log}; /tmp/issue-665-p3-gate.log. They contain copied operational data and are not committed. The durable observations are recorded in this document.
+
+## Approved Polish-marker resolution
+
+The user approved the recommended amendment (choice1). Only pszeniczne was added to the existing ALE_STYLE_WORDS; names and styles use the unchanged normalization/token boundaries. The approved design and spec.md now record the observed marker. No other translations, normalizer changes or fuzzy ranking rules were added.
+
+Twelve regressions cover raw-name/style markers, complete-token boundaries, both contextual identity roles, lookup behavior on either side, search-grade fallback rejection and preserved Litovel selection. The first four-row matcher fixture accidentally omitted Litovel prefixes that are present in the production names, so that initial fixture returned null rather than reproducing production. It was corrected to the actual raw names; with the marker removed, the corrected test returned35306 instead of256. The marker was restored and the complete focused/full gates were rerun. The initial mismatched fixture is not counted as reproducing the production defect. Other named marker/identity/lookup assertions also failed before implementation; the separate fallback test failed matched versus not_found as intended.
+
+Focused tests:547 passed. Full gate:3740 passed,1 skipped; npm run typecheck passed both configurations. git diff --check passed. Logs: /tmp/issue-665-polish-{red,fallback-red,matcher-red,green,gate,replay}.log.
+
+On the same 34,916-row/1,699-tap snapshot, the final ingest replay has exactly one change: KONRAD10°37334/exact/1 ->45/fuzzy/1. Litovel with Pszeniczne remains256/fuzzy/1, preserving baseline behavior. This removes the introduced wheat-style regression; it does not resolve the pre-existing baseline Dark-versus-wheat mismatch.
+
+The bounded style-less replay retains two changes, with identical budget counters. KONRAD10° changes as above. Litovel12° selects35306/Bohatá12/fuzzy/1 after rejecting explicit13° and requiring the approved positive soft12 evidence. That selection follows the approved candidate-style contract for requests with no ale marker; it is not evidence that the actual wheat tap is a pale lager. The wire request omits style, so this marker cannot change that selection. The omission and baseline mismatch remain recorded limitations; no schema expansion or claim of rescuing Litovel is included in this fix.
+
+Whole-branch main-thread review covered the identity/ranking, API/storage, metadata/SQL, retry, mutation-test, transaction and budget paths. The only observed introduced style regression is resolved. The original independent core finding was resolved by the approved positive-evidence guard. A fresh final-head AI review remains required on the PR; the old Claude receipt is not presented as a final-head review. Local code is verified and reviewable; pushing/PR creation still requires the user confirmation mandated by AGENTS.md.

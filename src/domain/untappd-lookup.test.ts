@@ -618,6 +618,14 @@ describe('lookupBeer', () => {
     expect(out.kind).toBe('not_found');
   });
 
+  test('#665 grade fallback does not interpret Polish wheat as a pale lager', async () => {
+    const search = fakeSearch(() => [
+      { bid: 61, beer_name: 'Pšeničné 11', brewery_name: 'Nachmelená Opice', style: 'Pszeniczne', abv: 4.6, global_rating: 3.5 },
+    ]);
+    const out = await lookupBeer({ brewery: 'Nachmelená Opice', name: 'Jedenactka', search });
+    expect(out.kind).toBe('not_found');
+  });
+
   test('#321 grade: dark candidate excluded for a plain (pale-default) bare-number grade', async () => {
     // Bare "10" normalizes to empty, so no earlier name stage fires — this routes purely
     // through the grade stage, where the dark candidate must be excluded (pale is default).
@@ -2224,6 +2232,8 @@ describe('#665 Czech grade lookup context', () => {
     [null, 'Czech Lager', 'Alpha 12°', 'not_found'],
     ['Czech Lager', null, 'Alpha 10°', 'matched'],
     ['IPA', 'Czech Lager', 'Alpha 12°', 'matched'],
+    ['Pszeniczne', 'Czech Lager', 'Alpha 12°', 'matched'],
+    ['Czech Lager', 'Pszeniczne', 'Alpha 12°', 'matched'],
   ])('styles %s / %s against %s yield %s', async (inputStyle, candidateStyle, name, kind) => {
     const out = await lookupBeer({ brewery: 'KONRAD Brewery', name: 'Alpha 10°', style: inputStyle,
       search: fakeSearch(() => [{ bid: 158057, beer_name: name, brewery_name: 'KONRAD Brewery',

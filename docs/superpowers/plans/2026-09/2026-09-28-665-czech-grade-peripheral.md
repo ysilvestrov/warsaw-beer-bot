@@ -275,7 +275,7 @@ ORDER BY t.snapshot_id, t.id;
 ~~~
 For each tap call resolveTapIdentity, skip non-keep results like ingest, and pass identical brewery/name/abv/style to old/new matchPrepared. Record every differing id/source/confidence and saved pin/merge state. Ingest currently calls without explicit fallback budget; use the same for this replay. Label a separate bounded-batch /match replay using identical limits/scopes on both sides. Use the actual request schema for input metadata; do not supply stored tap.style if the wire request does not carry it.
 
-- [ ] Judge every changed id individually. Inventory all five Konrad/Vratislavice rows and alias-opened changes separately. Keep the constructed shorter-sibling and permitted non-Czech controls. Unknown changes block shipping; counts are not correctness evidence.
+- [x] Judge every changed id individually. Inventory all five Konrad/Vratislavice rows and alias-opened changes separately. Keep the constructed shorter-sibling and permitted non-Czech controls. Unknown changes block shipping; counts are not correctness evidence.
 - [x] Create a SECOND writable copy for recovery. Inventory all incoming rows:
 ~~~sql
 SELECT * FROM match_links WHERE untappd_beer_id = 37334 ORDER BY brewery_ref, ontap_ref;
@@ -313,3 +313,5 @@ P2 receipt: eleven assertion regressions fail before implementation;343 focused 
 P3 receipt: two named alias/canonical-twelve regressions fail before the pair;352 focused tests pass. Full gate3728passed,1skipped/typecheck passed. Only the finite confirmed pair was added; spec.md reflects approved context, post-veto evidence and unchanged authoritative paths. Logs:/tmp/issue-665-p3-{red,green,gate}.log.
 
 P4 partial receipt: repeated clean-head same-snapshot replay, live canaries and exact copied-database recovery passed. Litovel wheat-style selection change blocks shipping; recommended pszeniczne marker amendment is awaiting approval. Full evidence and limitations: 2026-09-28-665-replay-recovery.md. No production writes or new independent final-head review.
+
+P4 resolution: user approved pszeniczne; focused547/full3740 passed,1 skipped, both typechecks passed. Repeated ingest replay has only the correct Konrad change; style-less requests retain the documented Litovel evidence limitation. Copy recovery remains verified. Main-thread review complete; fresh final-head AI review will be required on the PR. PR creation awaits confirmation.
