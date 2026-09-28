@@ -112,6 +112,19 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   // Each pair is proven against an orphan in enrich_failures and rescues it live.
   ['racborz', 'zamkowy raciborz'],                                    // 386 Raciborskie Klasyczne -> bid 4525184, 5.0% = 5.0%
   ['bayerischer banhof', 'bayerischer bahnhof gasthaus gosebrauerei'], // 30145 Oryginal Leipziger Gose -> bid 19030, 4.6% = 4.6%
+  // Cluster 3 batch: parent/portfolio brand, cider producer, and divergent brewery suffix resolution (#417, #485, #554, #679).
+  // Each pair is proven against an orphan in enrich_failures and rescues it live.
+  ['cydr dzik', 'cydrownia'],                                         // 288 Cydr półsłodki -> bid 5441672, 4.5% = 4.5% (#485)
+  ['coors', 'blue moon'],                                             // 316 Blue Moon Belgian White Ale -> bid 3839, 5.4% (#417)
+  ['san miguel', 'grupo mahou san miguel'],                           // 35041 Lager 0,0% Bezalko -> bid 68137, 0.0% = 0.0% (#554)
+  ['schneider weisse', 'schneider weisse g schneider sohn'],           // 35122 12° TAP 7 Original Weissbier -> bid 16335, 5.4% (#554)
+  ['beliny krakonos', 'krakonos'],                                    // 35189 Krakonoš 11° -> bid 654837, 4.4% (#554)
+  ['gouden carolus', 'het anker'],                                    // 35221 24° Strong Dark Ale Whisky Infused -> bid 10703, 11.7% (#554)
+  ['stara zajezdnia krakow by desilva', 'stara zajezdnia krakow'],    // 37542 AIPA 15° -> bid 1472876, 7.0% (#679)
+  ['x mark', 'x marks the hops'],                                     // 25924 Flavoured Beer Agave CAN -> bid 6786704, 0.0% (#679)
+  ['harpagan', 'poznanskie rzemieslnicze'],                           // 37475 Lager 11° -> bid 6716261, 4.5% (#679)
+  ['baraba', 'remedicum'],                                            // 37801 POMERANCOVA 11° -> bid 5910606, 4.3% (#679)
+  ['murphys', 'heineken ireland'],                                    // 37909 Murphys -> bid 5932, 4.0% (#679)
 ];
 
 // normForm -> directly-paired forms. Built once at module load.

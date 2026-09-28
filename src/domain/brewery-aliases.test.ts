@@ -10,6 +10,7 @@ const KNOWN_HUBS = new Set([
   'arcyksiazecy zamkowy cieszyn',
   'tradicni v rakovniku',
   'kauno alus',
+  'cydrownia',
 ]);
 
 // KNOWN_HUBS is the single exemption authority for all three batch blocks below —
@@ -265,3 +266,41 @@ test('#665 Konrad and its authoritative Vratislavice brewery are direct symmetri
   expect(aliasNeighbors('konrad')).toEqual(['vratislavice nad nisou']);
   expect(aliasNeighbors('vratislavice nad nisou')).toEqual(['konrad']);
 });
+
+describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['cydr dzik', 'cydrownia'],
+    ['coors', 'blue moon'],
+    ['san miguel', 'grupo mahou san miguel'],
+    ['schneider weisse', 'schneider weisse g schneider sohn'],
+    ['beliny krakonos', 'krakonos'],
+    ['gouden carolus', 'het anker'],
+    ['stara zajezdnia krakow by desilva', 'stara zajezdnia krakow'],
+    ['x mark', 'x marks the hops'],
+    ['harpagan', 'poznanskie rzemieslnicze'],
+    ['baraba', 'remedicum'],
+    ['murphys', 'heineken ireland'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+
+  test('cydrownia is a hub over Dzik and Cydr Dzik labels', () => {
+    expect(aliasNeighbors('cydrownia').sort()).toEqual(['cydr dzik', 'dzik']);
+  });
+
+  test('spokes of cydrownia are not neighbours of each other', () => {
+    expect(aliasNeighbors('cydr dzik')).not.toContain('dzik');
+    expect(aliasNeighbors('dzik')).not.toContain('cydr dzik');
+  });
+});
+
