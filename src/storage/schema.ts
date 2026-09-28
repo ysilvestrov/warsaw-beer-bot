@@ -742,6 +742,14 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
       ALTER TABLE bug_reports ADD COLUMN related_json TEXT;
     `,
   },
+  {
+    version: 40,
+    // #612: profile personal ratings are per-user observations, not check-ins.
+    sql: `
+      ALTER TABLE untappd_had ADD COLUMN user_rating REAL
+        CHECK (user_rating IS NULL OR user_rating BETWEEN 0 AND 5);
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {

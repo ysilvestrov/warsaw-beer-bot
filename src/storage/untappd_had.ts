@@ -6,13 +6,17 @@ export function markHad(
   telegramId: number,
   beerId: number,
   at: string,
+  userRating?: number | null,
 ): void {
+  const rating = typeof userRating === 'number' && Number.isFinite(userRating)
+    && userRating >= 0 && userRating <= 5 ? userRating : null;
   db.prepare(
-    `INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at)
-     VALUES (?, ?, ?)
+    `INSERT INTO untappd_had (telegram_id, beer_id, last_seen_at, user_rating)
+     VALUES (?, ?, ?, ?)
      ON CONFLICT(telegram_id, beer_id) DO UPDATE SET
-       last_seen_at = excluded.last_seen_at`,
-  ).run(telegramId, beerId, at);
+       last_seen_at = excluded.last_seen_at,
+       user_rating = COALESCE(excluded.user_rating, untappd_had.user_rating)`,
+  ).run(telegramId, beerId, at, rating);
 }
 
 export function hadBeerIds(db: DB, telegramId: number): Set<number> {

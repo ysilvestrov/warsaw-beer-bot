@@ -24,6 +24,25 @@ function seedNamedBeer(db: ReturnType<typeof fresh>, name: string): number {
 }
 
 describe('markHad', () => {
+  test('stores and updates personal ratings, including zero, without crossing users', () => {
+    const db = fresh();
+    const beerId = seedNamedBeer(db, 'Atak');
+    markHad(db, 42, beerId, '2026-09-28T03:00:00Z', 4.25);
+    markHad(db, 99, beerId, '2026-09-28T03:00:00Z', 5);
+    markHad(db, 42, beerId, '2026-09-29T03:00:00Z', 0);
+    expect(db.prepare('SELECT telegram_id, user_rating FROM untappd_had ORDER BY telegram_id').all())
+      .toEqual([{ telegram_id: 42, user_rating: 0 }, { telegram_id: 99, user_rating: 5 }]);
+  });
+
+  test.each([null, undefined, NaN, Infinity, -0.1, 5.1])('retains an observed rating when the next value is %s', (rating) => {
+    const db = fresh();
+    const beerId = seedNamedBeer(db, 'Atak');
+    markHad(db, 42, beerId, '2026-09-28T03:00:00Z', 4.25);
+    markHad(db, 42, beerId, '2026-09-29T03:00:00Z', rating);
+    expect(db.prepare('SELECT user_rating, last_seen_at FROM untappd_had').get())
+      .toEqual({ user_rating: 4.25, last_seen_at: '2026-09-29T03:00:00Z' });
+  });
+
   test('inserts a new (user, beer) pair', () => {
     const db = fresh();
     const beerId = seedNamedBeer(db, 'Atak');

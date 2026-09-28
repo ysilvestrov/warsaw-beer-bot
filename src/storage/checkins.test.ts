@@ -2,6 +2,7 @@ import { openDb } from './db';
 import { migrate } from './schema';
 import { mergeCheckin, checkinsForUser, hasBeenDrunk, latestRatingsByBeer, countCheckins, checkinExists, latestCheckinAt, countDistinctBeers, oldestCheckinId } from './checkins';
 import { seedBeer } from './seed-beer.testing';
+import { markHad } from './untappd_had';
 
 function setup() {
   const db = openDb(':memory:'); migrate(db);
@@ -32,6 +33,32 @@ test('hasBeenDrunk ignores other users', () => {
 });
 
 describe('latestRatingsByBeer', () => {
+  it('uses profile ratings for had-only beers and unrated check-ins', () => {
+    const { db, beerId } = setup();
+    markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 4.25);
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 4.25]]));
+    mergeCheckin(db, { checkin_id: 'c1', telegram_id: 1, beer_id: beerId,
+      user_rating: null, checkin_at: '2026-09-28T04:00:00Z', venue: null });
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 4.25]]));
+    expect(latestRatingsByBeer(db, 2)).toEqual(new Map());
+  });
+
+  it('prefers a check-in rating, including zero, over a later profile observation', () => {
+    const { db, beerId } = setup();
+    mergeCheckin(db, { checkin_id: 'c1', telegram_id: 1, beer_id: beerId,
+      user_rating: 0, checkin_at: '2026-09-01T04:00:00Z', venue: null });
+    markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 4.25);
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 0]]));
+  });
+
+  it('returns a zero profile rating but omits unknown profile ratings', () => {
+    const { db, beerId } = setup();
+    markHad(db, 1, beerId, '2026-09-28T03:00:00Z');
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map());
+    markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 0);
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 0]]));
+  });
+
   it('returns the most recent non-null rating per beer for the user', () => {
     const db = openDb(':memory:'); migrate(db);
     const beerA = seedBeer(db, { name: 'A', brewery: 'B', normalized_name: 'a', normalized_brewery: 'b' });
