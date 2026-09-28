@@ -634,3 +634,20 @@ describe('stripDescriptorAndPackaging (#353)', () => {
     expect(stripDescriptorAndPackaging('CAN')).toBeNull();
   });
 });
+
+
+describe('#664 search series markers', () => {
+  test.each<[string, string, string]>([
+    ['Messorem', 'Temporalis #0061', 'Messorem Temporalis #0061'],
+    ['Dziki Wschod', '10th Anniversary no.5', 'Dziki Wschod 10th Anniversary #5'],
+    ['Dziki Wschod', '10th Anniversary nr.5', 'Dziki Wschod 10th Anniversary #5'],
+    ['Dziki Wschod', 'ONLY TAPS #21', 'Dziki Wschod ONLY TAPS #21'],
+    ['52 North', 'Beer #52', '52 North Beer #52'],
+    ['Pinta', 'Beer #2024', 'Pinta Beer #2024'],
+    ['Pinta', 'Beer#5 Mango', 'Pinta Beer #5 Mango'],
+    ['Pinta', 'Beer #5.0', 'Pinta Beer #5.0'],
+    ['Pinta', 'n Beer', 'Pinta Beer'],
+  ])('%s / %s', (brewery, name, expected) => {
+    expect(cleanSearchQuery(brewery, name)).toBe(expected);
+  });
+});

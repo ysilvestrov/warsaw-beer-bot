@@ -1,4 +1,6 @@
 import assert from 'node:assert';
+import { vi } from 'vitest';
+import { buildSearchUrl } from '../sources/untappd/search';
 import { lookupBeer } from './untappd-lookup';
 import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
@@ -474,16 +476,13 @@ describe('lookupBeer', () => {
     });
   });
 
-  test('#271 head-retry: zero candidates + comma/#N tail retries with the head and matches', async () => {
-    // #636: a candidate WITHOUT the number the shop wrote is another beer, even on the head retry — so the head
-    // retry is exercised with a candidate that carries it. Known cost (spec «Обмеження»): the row #271 was filed for,
-    // 31170, is a shop numbering Untappd does not use, and that real beer is now refused.
+  test('#271 head-retry: an unnumbered comma tail still retries with the head and matches', async () => {
     const search = fakeSearch((q) =>
       q === 'Pinta Fantazja'
-        ? [{ bid: 7000, beer_name: 'Fantazja #1', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
+        ? [{ bid: 7000, beer_name: 'Fantazja', brewery_name: 'Pinta', style: 'Sour', abv: 5, global_rating: 3.7 }]
         : [],
     );
-    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja #1, Pastry Sour z Guavą, Mango', search });
+    const out = await lookupBeer({ brewery: 'Pinta', name: 'Fantazja, Pastry Sour z Guavą, Mango', search });
     expect(out.kind).toBe('matched');
     assert(out.kind === 'matched');
     expect(out.result.bid).toBe(7000);
@@ -2175,10 +2174,10 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.kind).toBe('not_found');
   });
 
-  test('control: a retry still matches when the digits agree', async () => {
+  test('control: a series retry still matches when the full identity agrees', async () => {
     const out = await lookupBeer({
-      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #4',
-      search: zeroOnDigits([hit(5899401, 'Dr. Hazy #4')]),
+      brewery: 'Piwne Podziemie Brewery', name: 'Dr.Hazy #4 HBC472',
+      search: fakeSearch((q) => q === 'Piwne Podziemie DrHazy #4' ? [hit(5899401, 'Dr.Hazy #4 HBC472')] : []),
     });
     expect(out.kind).toBe('matched');
   });
@@ -2337,4 +2336,97 @@ test('#664 lookup rejects missing hard LAB8 and retains the returned evidence', 
   expect(out.kind).toBe('not_found');
   assert(out.kind === 'not_found');
   expect(out.candidates).toEqual([hit]);
+});
+
+
+describe('#664 numbered-series retry', () => {
+  test.each<[string, string, string[]]>([
+    ['Messorem', 'Temporalis #0061 Citra Dynaboost Nectaron Strata Hyperboost', ['Messorem Temporalis #0061 Citra Dynaboost Nectaron Strata Hyperboost', 'Messorem Temporalis #0061']],
+    ['Dziki Wschod', '10th Anniversary no.5 Citrus', ['Dziki Wschod 10th Anniversary #5 Citrus', 'Dziki Wschod 10th Anniversary #5']],
+    ['Dziki Wschod', '10th Anniversary nr.5 Citrus', ['Dziki Wschod 10th Anniversary #5 Citrus', 'Dziki Wschod 10th Anniversary #5']],
+    ['Other', 'Beer #5', ['Other Beer #5']],
+    ['Other', 'Beer #5 #6 Citrus', ['Other Beer #5 #6 Citrus']],
+    ['Other', 'Beer #5 2024 Citrus', ['Other Beer #5 Citrus']],
+    ['Other', 'Beer #5 9.0 Citrus', ['Other Beer #5 9.0 Citrus']],
+    ['Other', 'Beer #5 11 Citrus', ['Other Beer #5 11 Citrus']],
+    ['Other', 'Beer #5 29 Citrus', ['Other Beer #5 29 Citrus']],
+    ['Pracownia Piwa', 'Beer #5 LAB8 Citrus', ['Pracownia Piwa Beer #5 LAB8 Citrus']],
+    ['Moersleutel', 'Beer #5 EL29 Citrus', ['Moersleutel Beer #5 EL29 Citrus']],
+    ['Other', 'Beer #5 HBC472 Citrus', ['Other Beer #5 HBC472 Citrus', 'Other Beer #5']],
+    ['Other', 'Beer #5 14°', ['Other Beer #5']],
+    ['Other', '#5 Citrus', ['Other #5 Citrus']],
+    ['Other', 'Beer #5.0 Citrus', ['Other Beer #5.0 Citrus']],
+    ['Alpha / Beta', 'Beer #005 Citrus', ['Alpha Beer #005 Citrus', 'Beta Beer #005 Citrus', 'Alpha Beer #005', 'Beta Beer #005']],
+    ['Alpha / Alpha', 'Beer #005 Citrus', ['Alpha Beer #005 Citrus', 'Alpha Beer #005 Citrus', 'Alpha Beer #005']],
+  ])('query sequence for %s / %s', async (brewery, name, queries) => {
+    const search = { search: vi.fn().mockResolvedValue([]) };
+    const out = await lookupBeer({ brewery, name, search });
+    expect(out).toEqual({ kind: 'not_found', candidates: [], searchUrls: queries.map(buildSearchUrl) });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(queries);
+  });
+
+  test.each<[string, string, number]>([
+    ['Beer #0062', 'Other', 6],
+    ['Beer #0061', 'Wrong Brewery', 6],
+    ['Beer #0061', 'Other', 12],
+    ['Beer #0061', 'Other', 0.5],
+  ])('shortened discovery cannot accept %s / %s / %s', async (beer_name, brewery_name, abv) => {
+    const candidate: SearchResult = { bid: 1, beer_name, brewery_name, abv, style: 'IPA', global_rating: 3.5 };
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([candidate]) };
+    const out = await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', abv: 6, search });
+    expect(out.kind).toBe('not_found');
+    assert(out.kind === 'not_found');
+    expect(out.candidates).toEqual([candidate]);
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
+  });
+
+  test('a discovered candidate still matches the full original name', async () => {
+    const candidate: SearchResult = { bid: 1, beer_name: 'Beer #0061 HBC472', brewery_name: 'Other', abv: 6, style: 'IPA', global_rating: 3.5 };
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([candidate]) };
+    expect(await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', abv: 6, search })).toEqual({ kind: 'matched', result: candidate });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
+  });
+
+  test('returned but rejected candidates do not authorize shortening', async () => {
+    const candidate: SearchResult = { bid: 1, beer_name: 'Beer #0062 HBC472', brewery_name: 'Other', abv: 6, style: 'IPA', global_rating: 3.5 };
+    const search = { search: vi.fn().mockResolvedValue([candidate]) };
+    const out = await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search });
+    expect(out.kind).toBe('not_found');
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472']);
+  });
+
+  test('blocked full search does not shorten', async () => {
+    const search = { search: vi.fn().mockRejectedValue(new HttpError(403, 'blocked')) };
+    const out = await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search });
+    expect(out.kind).toBe('blocked');
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472']);
+  });
+  test('blocked series search retains its own URL and stops', async () => {
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockRejectedValue(new HttpError(403, 'blocked')) };
+    expect(await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search })).toEqual({
+      kind: 'blocked', searchUrl: buildSearchUrl('Other Beer #0061'),
+    });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
+  });
+  test('transient full search does not shorten', async () => {
+    const error = new Error('temporary');
+    const search = { search: vi.fn().mockRejectedValue(error) };
+    expect(await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search })).toEqual({ kind: 'transient', error });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472']);
+  });
+  test('series discovery cannot drop distinctive flavours from the matching input', async () => {
+    const candidate: SearchResult = { bid: 1, beer_name: 'Beer #0061 Blueberry Chocolate', brewery_name: 'Other', abv: 6, style: 'IPA', global_rating: 3.5 };
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([candidate]) };
+    const out = await lookupBeer({ brewery: 'Other', name: 'Beer #0061 Strawberry Cinnamon', abv: 6, search });
+    expect(out.kind).toBe('not_found');
+    assert(out.kind === 'not_found');
+    expect(out.candidates).toEqual([candidate]);
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 Strawberry Cinnamon', 'Other Beer #0061']);
+  });
+  test('transient series search stays transient', async () => {
+    const error = new Error('temporary');
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockRejectedValue(error) };
+    expect(await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search })).toEqual({ kind: 'transient', error });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
+  });
 });

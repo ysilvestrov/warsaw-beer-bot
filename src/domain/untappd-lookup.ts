@@ -77,6 +77,25 @@ function headBeforeTail(name: string): string | null {
   return head && head !== name.trim() ? head : null;
 }
 
+const SERIES_MARKER = /(?:#\s*|\b(?:no|nr)\.\s*)(\d+)(?![\p{L}\p{N}]|[.,]\d)/giu;
+const HAS_SERIES_MARKER = /(?:#|\b(?:no|nr)\.)\s*\d/i;
+
+function numberedSeriesHead(name: string, brewery: string): string | null {
+  const markers = [...name.matchAll(SERIES_MARKER)];
+  if (markers.length !== 1) return null;
+  const marker = markers[0];
+  const prefix = name.slice(0, marker.index).trim();
+  const tail = name.slice(marker.index + marker[0].length).trim();
+  if (!prefix || !tail) return null;
+  const head = `${prefix} #${marker[1]}`;
+  const tailDigits = readNameDigits(tail);
+  if (tailDigits.numbers.length || tailDigits.soft.length || tailDigits.versions.length || tailDigits.years.length) return null;
+  if (digitIdentity(readNameDigits(name), readNameDigits(head), {
+    input: { name, brewery }, candidate: { name: head, brewery },
+  }) !== 'same') return null;
+  return head;
+}
+
 // #353: Guards on the descriptor-retry path. An input with a non-alcoholic descriptor or ABV <= 0.7
 // must never match an alcoholic candidate (>= 2.0%) and vice versa.
 const NON_ALCOHOLIC_REGEX = /\b(?:bezalkoholow\w*|non[- ]?alcoholic|alkofrei|alkoholfrei|nealko|0[,.]0%?|zero)\b/i;
@@ -525,8 +544,10 @@ export async function lookupBeer(
   const inputDigits = originalDigits ?? readNameDigits(name);
   const identityName = originalName ?? name;
   const inputContext = { name: identityName, style: args.style, brewery: args.brewery };
+  const hasExplicitSeriesMarker = HAS_SERIES_MARKER.test(identityName);
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
+  const triedQueries = new Set<string>();
   const seenCandidates: SearchResult[] = [];
   const notFound = (): LookupOutcome => ({
     kind: 'not_found',
@@ -932,6 +953,7 @@ export async function lookupBeer(
 
   for (const part of parts) {
     for (const query of searchQueryLadder(part, name)) {
+      triedQueries.add(query);
       triedUrls.push(buildSearchUrl(query)); // human-readable debug URL for enrich_failures
 
       let results: SearchResult[];
@@ -956,12 +978,40 @@ export async function lookupBeer(
     }
   }
 
+  // #664: shorten only the query. This invocation's matchAgainst closure retains the full input.
+  const seriesHead = !headRetried && !descriptorRetried && seenCandidates.length === 0
+    ? numberedSeriesHead(name, brewery) : null;
+  if (seriesHead) {
+    for (const part of parts) {
+      const query = searchQueryLadder(part, seriesHead)[0];
+      if (triedQueries.has(query)) continue;
+      triedQueries.add(query);
+      triedUrls.push(buildSearchUrl(query));
+      let results: SearchResult[];
+      try {
+        results = await args.search.search(query);
+      } catch (error) {
+        if (error instanceof HttpError && isBlockStatus(error.status)) {
+          return { kind: 'blocked', searchUrl: buildSearchUrl(query) };
+        }
+        return { kind: 'transient', error };
+      }
+      seenCandidates.push(...results);
+      const outcome = matchAgainst(results);
+      if (outcome?.kind === 'matched' && (
+        isAlcoholClassMismatch(abv, identityName, outcome.result)
+        || isDescriptorAbvMismatch(abv, outcome.result.abv)
+      )) return notFound();
+      if (outcome) return outcome;
+    }
+  }
+
   // #271 fallback: the search returned zero candidates across every brewery part — a genuine
   // query-zeroing (a matcher rejection would leave seenCandidates non-empty and is NOT retried).
   // If the name has a comma/#N flavour-list tail, retry the WHOLE lookup once with the head only,
   // so the tail cannot AND-zero the Algolia search. Matching then evaluates the head (brewery gate
   // unchanged) — this is what lets a short Untappd name match. Single retry (headRetried guard).
-  if (!headRetried && seenCandidates.length === 0) {
+  if (!hasExplicitSeriesMarker && !headRetried && seenCandidates.length === 0) {
     const head = headBeforeTail(name);
     if (head) {
       const retry = await lookupBeer({ ...args, name: head }, true, descriptorRetried, inputDigits, identityName);
@@ -979,7 +1029,7 @@ export async function lookupBeer(
   // #353 fallback: the search returned zero candidates across every brewery part due to
   // trailing style descriptors or packaging/format tokens over-constraining Algolia's AND-query.
   // Retry once with descriptors/packaging stripped, protected by alcohol-class and ABV guards.
-  if (!descriptorRetried && seenCandidates.length === 0) {
+  if (!hasExplicitSeriesMarker && !descriptorRetried && seenCandidates.length === 0) {
     const stripped = stripDescriptorAndPackaging(name);
     if (stripped) {
       const retry = await lookupBeer({ ...args, name: stripped }, headRetried, true, inputDigits, identityName);

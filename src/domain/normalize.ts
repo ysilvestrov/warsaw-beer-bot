@@ -249,7 +249,7 @@ export function stripSearchNoise(s: string): string {
 export function stripQueryTokenNoise(s: string): string {
   return s
     .replace(/(?<!\d)\.|\.(?!\d)/g, '')
-    .replace(/\b(?:19|20)\d{2}\b/g, ' ')
+    .replace(/(?<!#)\b(?:19|20)\d{2}\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -260,6 +260,7 @@ export function stripQueryTokenNoise(s: string): string {
 // them (`nameTokens` in untappd-lookup.ts keeps length >= 2), so dropping them here removes a
 // query ↔ name-normalisation asymmetry and can only widen the candidate pool, never narrow it.
 const MIN_QUERY_TOKEN_LENGTH = 2;
+const SEARCH_SERIES_MARKER = /(?:#\s*|\b(?:no|nr)\.\s*)(\d+)(?![\p{L}\p{N}]|[.,]\d)/giu;
 
 // Retention fold for the narrow rung. Identical to foldToken except that it keeps every
 // Unicode letter and digit instead of `[a-z0-9]`, so a Cyrillic token measures its real
@@ -288,7 +289,8 @@ function buildSearchQuery(
     stripSearchNoise(stripLegalForm(canonicalizeBreweryBrand(brewery)))
       .replace(SUPERSCRIPT_FOOTNOTE, ''),
   );
-  const cleanName = stripQueryTokenNoise(stripSearchNoise(name));
+  const markedName = name.replace(SEARCH_SERIES_MARKER, (_, digits: string) => ` #${digits} `);
+  const cleanName = stripQueryTokenNoise(stripSearchNoise(markedName));
 
   // Brewery brand tokens: split collab separators (defensive — detaches glued junk like
   // "collab/"), then whitespace; drop BREWERY_NOISE and empty folds; dedup by fold.
@@ -308,7 +310,8 @@ function buildSearchQuery(
   const nameTokens: string[] = [];
   for (const tok of cleanName.replace(/\//g, ' ').split(/\s+/)) {
     const f = fold(tok);
-    if (!f || f.length < MIN_QUERY_TOKEN_LENGTH || BREWERY_NOISE.has(f)) continue;
+    const markedNumber = /^#\d+$/.test(tok);
+    if (!f || (!markedNumber && f.length < MIN_QUERY_TOKEN_LENGTH) || BREWERY_NOISE.has(f)) continue;
     nameTokens.push(tok);
   }
 
@@ -318,8 +321,8 @@ function buildSearchQuery(
   // them is harmless while dropping them destroyed the beer name.
   let start = 0;
   let end = nameTokens.length;
-  while (start < end && brandFolds.has(fold(nameTokens[start]))) start++;
-  while (end > start && brandFolds.has(fold(nameTokens[end - 1]))) end--;
+  while (start < end && !/^#\d+$/.test(nameTokens[start]) && brandFolds.has(fold(nameTokens[start]))) start++;
+  while (end > start && !/^#\d+$/.test(nameTokens[end - 1]) && brandFolds.has(fold(nameTokens[end - 1]))) end--;
 
   const out = [...brandTokens, ...nameTokens.slice(start, end)];
   // Last resort: never emit an empty query.
