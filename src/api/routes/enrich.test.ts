@@ -1542,3 +1542,17 @@ test('#665 relay forwards stored input style into candidate lookup', async () =>
       .toEqual([{ name: 'Alpha 10°', untappd_id: null }]);
   } finally { db.close(); }
 });
+
+
+test('#664 unnumbered LAB card does not take a linked LAB8 row', async () => {
+  const { db, app } = setup();
+  db.prepare(`INSERT INTO beers (untappd_id, name, brewery, normalized_name, normalized_brewery, untappd_id_source)
+    VALUES (100, 'LAB 8 Porter', 'Pracownia Piwa', 'lab', 'pracownia piwa', 'checkin')`).run();
+  const res = await post(app, '/enrich/candidates', { beers: [{ brewery: 'Pracownia Piwa', name: 'LAB Porter' }] });
+  expect((await res.json()).candidates[0].eligible).toBe(true);
+  expect(db.prepare('SELECT name, untappd_id, untappd_id_source FROM beers ORDER BY id').all()).toEqual([
+    { name: 'LAB 8 Porter', untappd_id: 100, untappd_id_source: 'checkin' },
+    { name: 'LAB Porter', untappd_id: null, untappd_id_source: null },
+  ]);
+  db.close();
+});

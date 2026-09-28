@@ -2381,3 +2381,41 @@ test('#611 preserves active and archived observations through this merge path', 
   expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
   db.close();
 });
+
+describe('#664 persistence tiers', () => {
+  test.each<[string, string, string]>([
+    ['LAB Porter', 'LAB 8 Porter', 'lab'],
+    ['LAB Porter', 'LAB 9 Porter', 'lab'],
+    ['LAB Porter', 'LAB 10 Porter', 'lab'],
+    ['EL Porter', 'EL-29 Porter', 'el'],
+    ['Special', 'Special #8', 'special'],
+  ])(
+    'peers retain %s separately from %s', (base, name, normalized_name) => {
+      const db = fresh();
+      const brewery = 'Pracownia Piwa / Moersleutel';
+      const normal = { brewery, normalized_brewery: normalizeBrewery(brewery), normalized_name };
+      ensureOrphan(db, { ...normal, name: base });
+      ensureOrphan(db, { ...normal, name });
+      expect(db.prepare('SELECT name FROM beers ORDER BY id').all()).toEqual([{ name: base }, { name }]);
+      db.close();
+    },
+  );
+  test('candidate-only LAB8 does not permanently adopt an unnumbered orphan', () => {
+    const db = fresh();
+    const normal = { brewery: 'Pracownia Piwa', normalized_brewery: 'pracownia piwa', normalized_name: 'lab' };
+    ensureOrphan(db, { ...normal, name: 'LAB Porter' });
+    upsertBeerByBid(db, { ...normal, name: 'LAB 8 Porter', untappd_id: 100, untappd_id_source: 'bid' });
+    expect(db.prepare('SELECT name, untappd_id FROM beers ORDER BY id').all()).toEqual([
+      { name: 'LAB Porter', untappd_id: null }, { name: 'LAB 8 Porter', untappd_id: 100 },
+    ]);
+    db.close();
+  });
+  test('Schneider TAP omission remains compatible for peers', () => {
+    const db = fresh();
+    const normal = { brewery: 'Schneider Weisse', normalized_brewery: 'schneider weisse', normalized_name: 'aventinus tap' };
+    ensureOrphan(db, { ...normal, name: 'Aventinus TAP' });
+    ensureOrphan(db, { ...normal, name: 'Aventinus TAP 8' });
+    expect(db.prepare('SELECT name FROM beers ORDER BY id').all()).toEqual([{ name: 'Aventinus TAP' }]);
+    db.close();
+  });
+});
