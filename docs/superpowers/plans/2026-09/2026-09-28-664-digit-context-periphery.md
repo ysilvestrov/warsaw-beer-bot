@@ -65,7 +65,7 @@ The core's final gate passed 4002 tests, one skipped, and typecheck. Frozen repl
 **Consumes:** Reviewed kernel and existing `PreparedCatalog`, `LookupArgs`, `GateInput`/candidate types.
 **Produces:** Brewery-qualified comparisons in all three paths, with unchanged return types and acceptance levels. `PreparedCatalog.knownBreweries: readonly string[]` contains deduplicated numeric raw brewery labels from its own rows; `add()` updates that same collection. Add optional `knownBreweries?: readonly string[]` to lookup/gate inputs only if the caller already supplies a catalogue.
 
-- [ ] **Step 1: Add rejecting consumer fixtures that reached the old name gate.** Use identical brewery, ABV and long shared name; differing compact CF codes must reject in fuzzy, and LAB8 missing on the candidate must reject when the surrounding words are exact after normalization. Pin exact and fuzzy paths separately using the existing `c` helper:
+- [x] **Step 1: Add rejecting consumer fixtures that reached the old name gate.** Use identical brewery, ABV and long shared name; differing compact CF codes must reject in fuzzy, and LAB8 missing on the candidate must reject when the surrounding words are exact after normalization. Pin exact and fuzzy paths separately using the existing `c` helper:
 
 ```ts
 test('LAB8 stays hard on the normalized exact path', () => {
@@ -82,9 +82,9 @@ test('different compact CF codes cannot win the fuzzy path', () => {
 
 For lookup use the existing `fakeSearch` and a complete hit `{ bid: 1, beer_name: 'LAB Porter', brewery_name: 'Pracownia Piwa', style: 'Porter', abv: 6, global_rating: 3.5 }`; input `LAB 8 Porter` must return `kind = 'not_found'` and retain that exact rejected candidate as evidence. For `evaluateCandidate`, the same pair must return `'reject:digits'`. Add a candidate-side numeric brewery fragment and #3 beside a known 3 Fonteinen brand. Keep existing #725 retry/style fixtures unchanged.
 
-- [ ] **Step 2: Run `npx vitest run src/domain/matcher.test.ts src/domain/untappd-lookup.test.ts src/domain/web-fallback.test.ts`.** Confirm a new context-dependent assertion fails, not an import/type error. CF recognition is global and may already reject before this task; that row protects integration rather than supplying its RED proof.
+- [x] **Step 2: Run `npx vitest run src/domain/matcher.test.ts src/domain/untappd-lookup.test.ts src/domain/web-fallback.test.ts`.** Confirm a new context-dependent assertion fails, not an import/type error. CF recognition is global and may already reject before this task; that row protects integration rather than supplying its RED proof.
 
-- [ ] **Step 3: Extend context literals using the existing raw values.** In `matchPrepared`:
+- [x] **Step 3: Extend context literals using the existing raw values.** In `matchPrepared`:
 
 ```ts
 const contextFor = (candidate: PreparedBeer): DigitIdentityContext => ({
@@ -98,8 +98,8 @@ Build the numeric catalogue label collection inside `makePreparedCatalog` from r
 
 In lookup set `inputContext = { name: identityName, style: args.style, brewery: args.brewery }`; candidate context uses `result.beer_name`, `result.style`, `result.brewery_name`. In web use `input.brewery` and `cand.brewery_name` in every initial/post-hydration digit evaluation. Preserve candidate styles from the verified same-bid hydration; do not replace an original input name with query text.
 
-- [ ] **Step 4: Verify positive omission and negative identity independently.** Ordinary #N asymmetry, Duvel 6.66, Czech degree evidence with catalogue context, absent optional catalogue, and unrelated equal-ABV names retain existing outcomes. A new candidate found or allowed by digits is not automatically a successful name match; record any remaining name-gate miss without broadening it.
-- [ ] **Step 5: Focused GREEN, full gate, named-file commit:** `fix(domain): deliver brewery context to matching consumers (#664) (U4)`.
+- [x] **Step 4: Verify positive omission and negative identity independently.** Ordinary #N asymmetry, Duvel 6.66, Czech degree evidence with catalogue context, absent optional catalogue, and unrelated equal-ABV names retain existing outcomes. A new candidate found or allowed by digits is not automatically a successful name match; record any remaining name-gate miss without broadening it.
+- [x] **Step 5: Focused GREEN, full gate, named-file commit:** `fix(domain): deliver brewery context to matching consumers (#664) (U4)`.
 
 ## Task 2 (U5): Context before row selection, bid resolution, peers, and dedupe
 
@@ -108,15 +108,15 @@ In lookup set `inputContext = { name: identityName, style: args.style, brewery: 
 **Consumes:** Existing `BeerInput`/`BidBeerInput`/`BeerRow`, `PairCandidate` raw breweries, and reviewed kernel. No dependency on U4's prepared catalogue is needed.
 **Produces:** Existing persistence decisions use the same explicit pair context; public storage return values, source ranks, inactive-orphan filtering and transactions stay unchanged.
 
-- [ ] **Step 1: Test the missing LAB8 against the unnumbered LAB row in real in-memory SQLite.** These names deliberately share the genuine normalized key `lab porter`; the test must exercise the digit guard, not be rejected by an unrelated SQL-key mismatch:
+- [x] **Step 1: Test the missing LAB8 against the unnumbered LAB row in real in-memory SQLite.** These names deliberately share the genuine normalized key `lab`; the test must exercise the digit guard, not be rejected by an unrelated SQL-key mismatch:
 
 ```ts
 test('peers retain separate unnumbered LAB and LAB8 orphans', () => {
   const db = fresh();
   ensureOrphan(db, { brewery: 'Pracownia Piwa', name: 'LAB Porter',
-    normalized_brewery: 'pracownia piwa', normalized_name: 'lab porter' });
+    normalized_brewery: 'pracownia piwa', normalized_name: 'lab' });
   ensureOrphan(db, { brewery: 'Pracownia Piwa', name: 'LAB 8 Porter',
-    normalized_brewery: 'pracownia piwa', normalized_name: 'lab porter' });
+    normalized_brewery: 'pracownia piwa', normalized_name: 'lab' });
   expect(db.prepare('SELECT name FROM beers ORDER BY id').all()).toEqual([
     { name: 'LAB Porter' }, { name: 'LAB 8 Porter' },
   ]);
@@ -126,10 +126,10 @@ test('peers retain separate unnumbered LAB and LAB8 orphans', () => {
 
 For bid resolution seed orphan `LAB Porter`, then call `upsertBeerByBid` with `LAB 8 Porter`, bid 100, source `'bid'`, same normalized pair; assert stored rows exactly `{ name: 'LAB Porter', untappd_id: null }`, `{ name: 'LAB 8 Porter', untappd_id: 100 }`. This pins rejection of candidate-only hard-code number-fallback before permanent adoption.
 
-Extend the existing `/enrich/result` row-selection tests with a linked `LAB 8 Porter` and an unnumbered `LAB Porter` card: the card must retain its own orphan rather than write into the numbered row. In dedupe seed canonical `LAB 8 Porter` under `Pracownia Piwa / Moersleutel`, orphan `LAB Porter` under `Pracownia Piwa`; both have `normalized_name = 'lab porter'`. Assert result `{ pairsMerged: 0, beersDeleted: 0 }`, both row names/bids, and any existing match link still pointing to its original row.
+Extend the existing `/enrich/result` row-selection tests with a linked `LAB 8 Porter` and an unnumbered `LAB Porter` card: the card must retain its own orphan rather than write into the numbered row. In dedupe seed canonical `LAB 8 Porter` under `Pracownia Piwa / Moersleutel`, orphan `LAB Porter` under `Pracownia Piwa`; both have `normalized_name = 'lab'`. Assert result `{ pairsMerged: 0, beersDeleted: 0 }`, both row names/bids, and any existing match link still pointing to its original row.
 
-- [ ] **Step 2: Run `npx vitest run src/storage/beers.test.ts src/api/routes/enrich.test.ts src/jobs/dedupe-brewery-aliases.test.ts`.** The LAB8 adoption/peer regression must fail on the old context delivery.
-- [ ] **Step 3: Carry raw brewery fields from the actual compared rows.** Add `b.brewery` to both orphan SQL selects in `resolvableOrphan` and `ensureOrphan` and their row types. Compare `o.brewery` against `b.brewery`, retaining `o.style`/`b.style`; never substitute their normalized bucket label for the source brewery.
+- [x] **Step 2: Run `npx vitest run src/storage/beers.test.ts src/api/routes/enrich.test.ts src/jobs/dedupe-brewery-aliases.test.ts`.** The LAB8 adoption/peer regression must fail on the old context delivery.
+- [x] **Step 3: Carry raw brewery fields from the actual compared rows.** Add `b.brewery` to both orphan SQL selects in `resolvableOrphan` and `ensureOrphan` and their row types. Compare `o.brewery` against `b.brewery`, retaining `o.style`/`b.style`; never substitute their normalized bucket label for the source brewery.
 
 ```ts
 // resolvableOrphan and ensureOrphan context:
@@ -141,8 +141,8 @@ Change private `pickRowByDigits` to `pickRowByDigits(cardName: string, rows: Bee
 
 There is no catalogue snapshot in these private storage comparisons: use explicit pair labels and their collaboration parts. Do not add a per-row `loadCatalog` or a second catalogue cache. If a future caller has a catalogue, it can pass it through a separately justified scope; that omission does not permit guessed brand neutrality now.
 
-- [ ] **Step 4: Preserve strict tiers and peer reversal.** Add marked #8, one-sided unmarked TAP8 in explicit Schneider context, differing LAB9/LAB10, EL namespace, Czech styles, and inactive/curated row controls to their reachable existing fixtures. Check stored bid/source and link rows exactly after each operation. Do not weaken normalized candidate-pool or ABV gates to manufacture a rescue.
-- [ ] **Step 5: Focused GREEN, full gate, named-file commit:** `fix(storage): retain contextual numerical identity before adoption (#664) (U5)`.
+- [x] **Step 4: Preserve strict tiers and peer reversal.** Add marked #8, one-sided unmarked TAP8 in explicit Schneider context, differing LAB9/LAB10, EL namespace, Czech styles, and inactive/curated row controls to their reachable existing fixtures. Check stored bid/source and link rows exactly after each operation. Do not weaken normalized candidate-pool or ABV gates to manufacture a rescue.
+- [x] **Step 5: Focused GREEN, full gate, named-file commit:** `fix(storage): retain contextual numerical identity before adoption (#664) (U5)`.
 
 ## Task 3 (U6): One numbered-series attempt with the original matching input
 
@@ -151,7 +151,7 @@ There is no catalogue snapshot in these private storage comparisons: use explici
 **Consumes:** Existing `searchQueryLadder`, `cleanSearchQuery`, `readNameDigits`, raw `LookupArgs` and `matchAgainst` closure. This task does not require a new matcher stage.
 **Produces:** Private `numberedSeriesHead(name: string, brewery: string): string | null` in lookup, and marker preservation in query construction. Existing public outcome types remain unchanged.
 
-- [ ] **Step 1: Pin exact query strings and search sequence.** Add literal normalizer cases:
+- [x] **Step 1: Pin exact query strings and search sequence.** Add literal normalizer cases:
 
 ```ts
 test.each<[string, string, string]>([
@@ -168,8 +168,8 @@ Use a fake search that records its actual query argument and returns no hits. Fo
 
 Fixtures must also cover: full query already equals shortened query (one call); two explicit markers; a second hard number/year/version/soft number/hard LAB or EL code after the marker (no shortened attempt); confirmed HBC code tail (shortening allowed); ordinal `10th` before #5 retained; no leading beer text; and an unnumbered old #271 comma-tail fixture unchanged. Pin collaborative brewery parts and deduped actual call arrays.
 
-- [ ] **Step 2: Run focused RED.** `npx vitest run src/domain/normalize.test.ts src/domain/untappd-lookup.test.ts`; confirm marker/call-sequence failures.
-- [ ] **Step 3: Preserve markers in the existing builder.** Canonicalize only explicit integer `#`, `no.` and `nr.` spans before name token cleanup, using captured raw digits rather than `canon`. Keep each marker as a whitespace token `#<raw digits>`; retain it even when `fold(tok).length === 1`. All ordinary short-token/noise filtering remains unchanged:
+- [x] **Step 2: Run focused RED.** `npx vitest run src/domain/normalize.test.ts src/domain/untappd-lookup.test.ts`; confirm marker/call-sequence failures.
+- [x] **Step 3: Preserve markers in the existing builder.** Canonicalize only explicit integer `#`, `no.` and `nr.` spans before name token cleanup, using captured raw digits rather than `canon`. Keep each marker as a whitespace token `#<raw digits>`; retain it even when `fold(tok).length === 1`. All ordinary short-token/noise filtering remains unchanged:
 
 ```ts
 const SEARCH_SERIES_MARKER = /(?:#\s*|\b(?:no|nr)\.\s*)(\d+)(?![\p{L}\p{N}]|[.,]\d)/giu;
@@ -182,7 +182,7 @@ if (!f || (!markedNumber && f.length < MIN_QUERY_TOKEN_LENGTH) || BREWERY_NOISE.
 
 Do not strip that token as a leading/trailing duplicate brewery token. Existing separate #0061 token naturally retains its zeros; no./nr. are canonicalized both in full and shortened queries. Do not treat `10th` as a series marker or globally retain all one-character tokens. Keep Unicode narrow-query behavior; a single extra query uses `searchQueryLadder(part, head)[0]` and does not add a second Latin-fold series rung.
 
-- [ ] **Step 4: Identify safe shortening from raw spans before cleanup.** Collect explicit integer markers with raw offsets and full digit boundaries (exclude decimal/version continuations). Require exactly one marker and nonempty leading beer text. The head includes the marker's original digits and excludes its following descriptor tail. Refuse shortening when `readNameDigits(tail)` has any ordinary numbers, soft numbers, versions, or years; grades/ABV/confirmed hop codes are descriptors. Additionally compare the full name to the head with same raw brewery context; a different result detects contextual LAB/EL/53M hard codes invisible to the context-free reader. Use the already-reviewed predicate, not a duplicate typed-code classifier:
+- [x] **Step 4: Identify safe shortening from raw spans before cleanup.** Collect explicit integer markers with raw offsets and full digit boundaries (exclude decimal/version continuations). Require exactly one marker and nonempty leading beer text. The head includes the marker's original digits and excludes its following descriptor tail. Refuse shortening when `readNameDigits(tail)` has any ordinary numbers, soft numbers, versions, or years; grades/ABV/confirmed hop codes are descriptors. Additionally compare the full name to the head with same raw brewery context; a different result detects contextual LAB/EL/53M hard codes invisible to the context-free reader. Use the already-reviewed predicate, not a duplicate typed-code classifier:
 
 ```ts
 const SERIES_MARKER = /(?:#\s*|\b(?:no|nr)\.\s*)(\d+)(?![\p{L}\p{N}]|[.,]\d)/giu;
@@ -207,26 +207,26 @@ function numberedSeriesHead(name: string, brewery: string): string | null {
 
 Keep a broader `hasExplicitSeriesMarker` flag for suppressing number-losing fallbacks, including numbered inputs for which this helper returns null. Do not allow a failed shortening check to route a multi-number input into `headBeforeTail`.
 
-- [ ] **Step 5: Add the series loop after the existing full loop, before recursive fallbacks.** It runs only when `seenCandidates.length === 0`. Iterate the existing `parts`, build one query per part, skip an already-tried query string, and use the existing search try/catch, candidate recording, and `matchAgainst` function. The new call remains in the original invocation, so its name gates and digit context see the original full input, not `head`. Return blocked/transient in the same way as full search. A returned candidate goes through existing staging; rejection is not permission for a weaker query.
+- [x] **Step 5: Add the series loop after the existing full loop, before recursive fallbacks.** It runs only when `seenCandidates.length === 0`. Iterate the existing `parts`, build one query per part, skip an already-tried query string, and use the existing search try/catch, candidate recording, and `matchAgainst` function. The new call remains in the original invocation, so its name gates and digit context see the original full input, not `head`. Return blocked/transient in the same way as full search. A returned candidate goes through existing staging; rejection is not permission for a weaker query.
 
 Wrap #271/#353 recursive retries in `!hasExplicitSeriesMarker` so none later strips a numbered input. For unnumbered inputs retain their current behavior and original raw digit context. Add no recursion merely to change series query text. Search URLs/candidates record actual attempted queries and returned candidates, not synthetic identity assertions.
 
-- [ ] **Step 6: Prove discovery and acceptance separately.** Mock a full zero response then a candidate with wrong #0062: must return `not_found` and retain the candidate. Mock #0061 with a mismatching brewery or incompatible alcohol/ABV: existing gates reject. For `ONLY TAPS #21 GRIT`, make the shortened query return `Only On Taps #21`; assert the actual full-name gate's result and reject any acceptance introduced solely by replacing its input with the head. If the unchanged fuzzy gate already accepts the full original pair, record that evidence and return to design for any stronger GRIT policy; do not invent a new token veto here.
+- [x] **Step 6: Prove discovery and acceptance separately.** Mock a full zero response then a candidate with wrong #0062: must return `not_found` and retain the candidate. Mock #0061 with a mismatching brewery or incompatible alcohol/ABV: existing gates reject. For `ONLY TAPS #21 GRIT`, make the shortened query return `Only On Taps #21`; assert the actual full-name gate's result and reject any acceptance introduced solely by replacing its input with the head. If the unchanged fuzzy gate already accepts the full original pair, record that evidence and return to design for any stronger GRIT policy; do not invent a new token veto here.
 
 Also assert no series retry when the full response contains candidates but all are rejected; blocked/transient responses do not call search again; no duplicate query; all-Latin empty inputs and unnumbered lookups retain the old ladder. Include a controlled accepted fixture whose full name already satisfies the existing name gate, proving the new query can discover a match without changing identity thresholds.
-- [ ] **Step 7: Focused GREEN, full gate, named-file commit:** `fix(search): preserve numbered-series identity on bounded retries (#664) (U6)`.
+- [x] **Step 7: Focused GREEN, full gate, named-file commit:** `fix(search): preserve numbered-series identity on bounded retries (#664) (U6)`.
 
 ## Task 4: Contract synchronization, integration measurements, and branch review
 
 **Files:** `spec.md`, this plan's execution report; inspect all modified consumer tests and the approved design.
 **Consumes:** Passing U4/U5/U6 gates and the frozen core baseline. **Produces:** Documented delivered contract and review evidence; no automatic PR or deployment.
 
-- [ ] **Step 1: Update the affected Ukrainian spec paragraphs.** Numerical reading: finite proven hop namespaces/fractions, namespace-aware sets, contextual TAP versus hard LAB/EL/53M, exact brewery source spans/Sir James 101, Duvel 6.66 retained. Context: original names/styles/raw pair breweries, catalogue only where available, strict consumer tiers and peers reversal. Lookup: canonical raw marker digits, one extra series query per part only after full zero, no subsequent number loss, original full match input, actual returned-candidate/error evidence. Remove the statement that all glued codes are ignored universally; retain it for unknown forms. Preserve existing #725 paragraphs.
-- [ ] **Step 2: Audit every call site.** Run `rg -n 'digitIdentity\(|digitsCompatibleAsPeers\(' src`. Check each actual raw brewery source and style, including all recursive lookup arguments and web hydration calls. Record which paths supply an existing catalogue versus explicit pair context. Read `src/jobs/untappd-enrich.ts` and API lookup callers to verify their raw `LookupArgs` already retain brewery/name/style; no edits are needed solely to repeat data they already pass.
-- [ ] **Step 3: Run the last full gate after the last code correction and whole-branch review.** Use `compound-engineering:ce-code-review` sequentially per AGENTS.md; include U1–U6, both inline core corrections, docs, strict storage tiers, search call bounds and #725. Fix evidenced findings with RED/GREEN, full gate and named-file commits. Do not repeat an unchanged passing gate merely to refresh a timestamp.
-- [ ] **Step 4: Measure read-only query and complete-match outcomes separately.** Use existing configured Algolia/search access without printing credentials. Re-probe the full and shortened Temporalis #0061, no.5/#5, and ONLY TAPS #21 GRIT examples from the design. Record query strings, search calls, returned bids, complete `lookupBeer` outcomes and rejection gate evidence. Do not invoke write-producing enrichment commands. A single shortened result remains only search evidence.
-- [ ] **Step 5: Repeat frozen replay and inspect every changed pair/direction.** Run `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs compare`; preserve the original corpus file. Report diagnostic groups separately and explain exact brand/code spans for each transition. Run live integration against read-only data or an isolated disposable DB, never production mutations. Keep unknown/blocked results as unknown/blocked; do not infer rescue counts from candidates alone.
-- [ ] **Step 6: Record completeness and limits.** Map all design sections to implemented tasks, list any full-name/pool gates that still miss despite improved digit context, and record no new persistent fact without its individual match evidence. Before any later issue closure the separate AGENTS adjudication procedure remains mandatory. Only after the full branch is reviewable ask about PR creation under the repository policy; no PR or deployment is part of executing this plan by default.
+- [x] **Step 1: Update the affected Ukrainian spec paragraphs.** Numerical reading: finite proven hop namespaces/fractions, namespace-aware sets, contextual TAP versus hard LAB/EL/53M, exact brewery source spans/Sir James 101, Duvel 6.66 retained. Context: original names/styles/raw pair breweries, catalogue only where available, strict consumer tiers and peers reversal. Lookup: canonical raw marker digits, one extra series query per part only after full zero, no subsequent number loss, original full match input, actual returned-candidate/error evidence. Remove the statement that all glued codes are ignored universally; retain it for unknown forms. Preserve existing #725 paragraphs.
+- [x] **Step 2: Audit every call site.** Run `rg -n 'digitIdentity\(|digitsCompatibleAsPeers\(' src`. Check each actual raw brewery source and style, including all recursive lookup arguments and web hydration calls. Record which paths supply an existing catalogue versus explicit pair context. Read `src/jobs/untappd-enrich.ts` and API lookup callers to verify their raw `LookupArgs` already retain brewery/name/style; no edits are needed solely to repeat data they already pass.
+- [x] **Step 3: Run the last full gate after the last code correction and whole-branch review.** Use `compound-engineering:ce-code-review` sequentially per AGENTS.md; include U1–U6, both inline core corrections, docs, strict storage tiers, search call bounds and #725. Fix evidenced findings with RED/GREEN, full gate and named-file commits. Do not repeat an unchanged passing gate merely to refresh a timestamp.
+- [x] **Step 4: Measure read-only query and complete-match outcomes separately.** Use existing configured Algolia/search access without printing credentials. Re-probe the full and shortened Temporalis #0061, no.5/#5, and ONLY TAPS #21 GRIT examples from the design. Record query strings, search calls, returned bids, complete `lookupBeer` outcomes and rejection gate evidence. Do not invoke write-producing enrichment commands. A single shortened result remains only search evidence.
+- [x] **Step 5: Repeat frozen replay and inspect every changed pair/direction.** Run `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs compare`; preserve the original corpus file. Report diagnostic groups separately and explain exact brand/code spans for each transition. Run live integration against read-only data or an isolated disposable DB, never production mutations. Keep unknown/blocked results as unknown/blocked; do not infer rescue counts from candidates alone.
+- [x] **Step 6: Record completeness and limits.** Map all design sections to implemented tasks, list any full-name/pool gates that still miss despite improved digit context, and record no new persistent fact without its individual match evidence. Before any later issue closure the separate AGENTS adjudication procedure remains mandatory. Only after the full branch is reviewable ask about PR creation under the repository policy; no PR or deployment is part of executing this plan by default.
 
 ## Planning self-review
 
@@ -237,3 +237,45 @@ Also assert no series retry when the full response contains candidates but all a
 - A series query uses the existing narrow Unicode rung exactly once; it preserves #5 and zeros, while original full-name matching remains distinct from discovery. GRIT is not guaranteed rescued or rejected without measuring the unchanged name gate.
 - The concrete `numberedSeriesHead` snippet was extracted into `/tmp/664-planned-series-head.ts` and executed against the reviewed kernel: 13 literal cases passed, including zeros, no./nr., second markers/numbers/years/versions, contextual LAB8, omitted heads and degree descriptors. This validates the planning example, not implementation of the consumer/search task.
 - No new behavior outside the approved classification/query contracts, extension work, schema changes, historical repair, or speculative cache state is planned.
+
+
+## Execution report — 2026-09-28
+
+Completed sequentially in the existing isolated worktree. No independent subagent or model review was performed: AGENTS.md maps review dispatch to the main thread. The local whole-branch review covers base `1cb7f45` through source head `6374854`, including U1–U3 and both inline core corrections, then U4–U6. No unresolved new code defect was found. This is a local review result, not the repository's later AI PR review receipt.
+
+| Unit | Commit | Focused verification | Full gate (`npm test && npm run typecheck`) |
+|---|---|---|---|
+| U4 | `44eb7d7` | 474 passed; four actual context-dependent RED failures first | 4008 passed, one skipped; exit 0 |
+| U5 | `57233d3` | 271 passed; five actual RED failures plus a separate API RED | 4017 passed, one skipped; exit 0 |
+| U6 | `6374854` | 362 passed; 27 initial RED failures and a separate #2024 RED | 4054 passed, one skipped; exit 0 |
+
+All full gates ran with source files held unchanged. The final gate covers 212 passing test files and one skipped file. Only documentation changed after it. `git diff --check` passes. Logs remain under `/tmp/664-u4-*`, `/tmp/664-u5-*`, `/tmp/664-u6-*`; local review artifacts are `/tmp/664-periphery-review/`.
+
+Requirements trace: design §§1–2 were delivered by U1–U3; §4 by U4/U5; §3 by U6; §5 by the spec synchronization, consumer audit, replay and live measurements here. Exact/fuzzy lookup/web get raw pair labels; the prepared matcher additionally supplies its own deduplicated numeric catalogue labels and updates them in `add`. Storage, API row selection and dedupe use explicit pair labels. No catalogue is guessed. Cron/API lookup callers already pass original brewery/name/style; web hydration re-runs the same gate with the verified style. Peer reversal swaps brewery/style/name together. Storage adoption/dedupe and API row selection still accept only same/year-fallback; no transaction, source rank or public response changed. Existing #725 grade/style evidence remains intact.
+
+### Corrections to planning examples and coverage limits
+
+- `normalizeName('LAB Porter')` is `lab`, not `lab porter`. The integration SQL fixtures and this plan were corrected to the real key. The API test initially passed without exercising the guard; restoring the old API implementation after fixing the fixture produced an actual failing eligible/row outcome before the final correction.
+- The raw pair `Blurries / 450 North` versus `Blurries` still misses the existing full-name gate even when the digit context accepts it. The catalogue-add regression uses `Blurries North`, whose actual normalized key reaches the intended digit decision. No name threshold was weakened to manufacture a rescue.
+- Two old numbered tests expected the removed number-losing #271 query. They now cover the unchanged unnumbered comma retry and the new numbered retry with agreeing full identity. Bare years keep their previous query cleanup; a marked #2024 is preserved.
+- Additional rejection tests cover wrong series number, brewery, ABV and alcohol class; distinctive flavour mismatch; candidate-returned suppression; exact query counts and zeros; contextual tail codes; full/series blocked and transient outcomes. Source review confirmed no shortened matching input or extra Latin rung.
+
+### Read-only live integration
+
+Measured through the complete `lookupBeer` with Algolia on 2026-09-28; actual query/candidate records are `/tmp/664-periphery-live.jsonl`. No enrichment application or database mutation ran.
+
+| Input | Actual queries and returned candidate evidence | Complete outcome |
+|---|---|---|
+| Messorem / Temporalis #0061 Citra Dynaboost Nectaron Strata Hyperboost | Full query: zero. `Messorem Temporalis #0061`: bid 6776487, Temporalis #0061, Messorem, ABV 10 | matched 6776487 |
+| Dziki Wschod / 10th Anniversary no.5 | Canonical full `Dziki Wschod 10th Anniversary #5`: bid 6636879, 10th Anniversary #5: Sunset Guava Farmhouse, Browar Dziki Wschód, ABV 4.5; no retry | matched 6636879 |
+| Dziki Wschod / ONLY TAPS #21 GRIT 14° | Full `Dziki Wschod ONLY TAPS #21 GRIT`: zero. `Dziki Wschod ONLY TAPS #21`: bid 6886811, Only On Taps #21, Browar Dziki Wschód, ABV 6 | matched 6886811 by the existing full-name gate; identity remains unproven |
+
+Direct shortened queries independently returned those same bids. The first two complete outcomes are measured matches, not a count of repaired database rows. GRIT remains a separately recorded existing name-gate limitation: a controlled probe before U6 already accepted the full original GRIT name against this candidate. The user explicitly chose to preserve the current gate and record the problem separately. See `docs/664-grit-name-gate-follow-up.md`; no new token veto was introduced.
+
+### Frozen replay and review result
+
+Compared to the unchanged `f9882eb` baseline corpus: 4140 pairs, 8280 directional verdicts, zero transitions. Diagnostic groups remain distinct-bid 2175, auto-link 1869, pin-or-merge 96, all with zero changed directions. Artifact: `/tmp/664-periphery-transitions.jsonl`. No changed pair requires an explanation; the old corpus has sparse coverage of the new typed codes and does not prove consumer adoption or any rescue count.
+
+Local review checked source offsets/non-joining masks, finite namespaces and continuation boundaries, exact brand spans, context and peer reversal, catalogue-update cost, optional interfaces, SQL source fields, strict permanent-adoption tiers, full-name matching, query budgets/error handling, literal regression assertions, API return compatibility and project scope. Core review fixes `9407eb6` and `0bcc021` remain included. No independent review is claimed.
+
+No production writes, historical-link repair, row remapping, issue closure, migration, extension change, push, PR or deployment occurred. Before issue closure, the separate live adjudication/apply procedure remains required. The branch is ready for the user's PR decision, subject to fetching/rebasing and the full gate if main moved.
