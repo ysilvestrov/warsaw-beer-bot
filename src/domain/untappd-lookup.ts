@@ -524,7 +524,7 @@ export async function lookupBeer(
   const targetNames = fuzzyTargets(name, brewery);
   const inputDigits = originalDigits ?? readNameDigits(name);
   const identityName = originalName ?? name;
-  const inputContext = { name: identityName, style: args.style };
+  const inputContext = { name: identityName, style: args.style, brewery: args.brewery };
   const parts = brewerySearchParts(brewery);
   const triedUrls: string[] = [];
   const seenCandidates: SearchResult[] = [];
@@ -548,7 +548,7 @@ export async function lookupBeer(
     const judged = unfiltered.map((result) => ({
       result, identity: digitIdentity(inputDigits, readNameDigits(result.beer_name), {
         input: inputContext,
-        candidate: { name: result.beer_name, style: result.style },
+        candidate: { name: result.beer_name, style: result.style, brewery: result.brewery_name },
       }),
     }));
     // A `number-fallback` hit is dropped only when a better-tier hit of the SAME SERIES is present — the same

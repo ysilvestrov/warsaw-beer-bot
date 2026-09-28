@@ -589,3 +589,10 @@ describe('#665 verified candidate style in web fallback', () => {
       stage: 'reject:abv', inputAbv: 4, candAbv: null }]);
   });
 });
+
+
+test('#664 web gate reads explicit brewery context for hard LAB8', () => {
+  expect(evaluateCandidate({ brewery: 'Pracownia Piwa', name: 'LAB 8 Porter', abv: 6 },
+    { bid: 1, beer_name: 'LAB Porter', brewery_name: 'Pracownia Piwa', abv: 6, style: 'Porter' },
+  )).toBe('reject:digits');
+});

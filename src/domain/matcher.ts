@@ -65,6 +65,7 @@ type PreparedSearcher = ReturnType<typeof defaultBuildSearcher>;
 // 20k-row index; if no beer falls through, it is never built.
 export interface PreparedCatalog {
   beers: PreparedBeer[];
+  knownBreweries: readonly string[];
   // Catalog rows whose brewery aliases match `inputAliases`, via a first-token
   // index instead of a full linear scan. Set-equal to
   // `beers.filter((c) => breweryAliasesMatch(c.aliases, inputAliases))`.
@@ -108,6 +109,8 @@ export function makePreparedCatalog(
   build: (rows: PreparedBeer[]) => PreparedSearcher = defaultBuildSearcher,
 ): PreparedCatalog {
   let full: PreparedSearcher | undefined;
+  const knownBreweries: string[] = [];
+  const knownBrands = new Set<string>();
 
   // First-token index: bucket each row under the first token of each of its brewery
   // aliases. Aliases of one row are contiguous, so a tail check dedupes a row that has
@@ -117,6 +120,10 @@ export function makePreparedCatalog(
   // processed together, so the tail check dedupes a row whose aliases share a first token.
   // Shared by the initial eager build and add() (#278).
   const indexRow = (b: PreparedBeer): void => {
+    if (/\d/.test(b.brewery) && !knownBrands.has(b.brewery)) {
+      knownBrands.add(b.brewery);
+      knownBreweries.push(b.brewery);
+    }
     for (const alias of b.aliases) {
       const key = aliasFirstToken(alias);
       let bucket = byFirstToken.get(key);
@@ -128,6 +135,7 @@ export function makePreparedCatalog(
 
   return {
     beers,
+    knownBreweries,
     breweryCandidates: (inputAliases) => {
       const seen = new Set<PreparedBeer>();
       const out: PreparedBeer[] = [];
@@ -331,8 +339,9 @@ export function matchPrepared(
   const wantAbv = input.abv ?? null;
   const inputDigits = readNameDigits(input.name);
   const contextFor = (candidate: PreparedBeer): DigitIdentityContext => ({
-    input: { name: input.name, style: input.style },
-    candidate: { name: candidate.name, style: candidate.style },
+    input: { name: input.name, style: input.style, brewery: input.brewery },
+    candidate: { name: candidate.name, style: candidate.style, brewery: candidate.brewery },
+    knownBreweries: prepared.knownBreweries,
   });
   const gradeAllows = (candidate: PreparedBeer) => inputDigits.grades.length === 0
     || !czechGradesContradict(inputDigits, readNameDigits(candidate.name), contextFor(candidate));

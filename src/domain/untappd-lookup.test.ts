@@ -2329,3 +2329,12 @@ describe('#665 Czech grade lookup context', () => {
     });
   });
 });
+
+
+test('#664 lookup rejects missing hard LAB8 and retains the returned evidence', async () => {
+  const hit: SearchResult = { bid: 1, beer_name: 'LAB Porter', brewery_name: 'Pracownia Piwa', style: 'Porter', abv: 6, global_rating: 3.5 };
+  const out = await lookupBeer({ brewery: 'Pracownia Piwa', name: 'LAB 8 Porter', abv: 6, search: fakeSearch(() => [hit]) });
+  expect(out.kind).toBe('not_found');
+  assert(out.kind === 'not_found');
+  expect(out.candidates).toEqual([hit]);
+});
