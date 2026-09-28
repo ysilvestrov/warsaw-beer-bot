@@ -17,8 +17,16 @@ export function ensureProfile(db: DB, telegramId: number): void {
 }
 
 export function setUntappdUsername(db: DB, telegramId: number, username: string): void {
-  db.prepare('UPDATE user_profiles SET untappd_username = ? WHERE telegram_id = ?')
-    .run(username, telegramId);
+  db.transaction(() => {
+    const previous = getProfile(db, telegramId)?.untappd_username;
+    if (previous?.toLowerCase() !== username.toLowerCase()) {
+      // #612: profile ratings belong to the linked account. Existing check-in
+      // history/reset semantics (#611) are separate from these new observations.
+      db.prepare('UPDATE untappd_had SET user_rating = NULL WHERE telegram_id = ?').run(telegramId);
+    }
+    db.prepare('UPDATE user_profiles SET untappd_username = ? WHERE telegram_id = ?')
+      .run(username, telegramId);
+  })();
 }
 
 export function getProfile(db: DB, telegramId: number): ProfileRow | null {

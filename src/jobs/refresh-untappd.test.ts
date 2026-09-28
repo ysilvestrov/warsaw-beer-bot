@@ -10,6 +10,8 @@ import { refreshAllUntappd } from './refresh-untappd';
 import { createCircuitBreaker } from '../domain/untappd-circuit';
 import { catalogVersion } from '../storage/catalog-version';
 import { normalizeName, normalizeBrewery } from '../domain/normalize';
+import { latestRatingsByBeer, countCheckins } from '../storage/checkins';
+import { markHad } from '../storage/untappd_had';
 
 const silentLog = pino({ level: 'silent' });
 
@@ -81,6 +83,79 @@ const PAGE_ONE_BEER_ABV = (
 // so the normalized form matches the literal lowercased input.
 
 describe('refreshAllUntappd', () => {
+  test('persists a profile rating without inventing check-ins or sync coverage', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const beerId = insertBeer(db, 101, 'Atak Chmielu', 'Pinta', 3.5);
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12'),
+    });
+    await refreshAllUntappd({ db, log: silentLog, http, now: () => new Date('2026-09-28T03:00:00Z') });
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 4]]));
+    expect(db.prepare('SELECT user_rating, last_seen_at FROM untappd_had').get())
+      .toEqual({ user_rating: 4, last_seen_at: '2026-09-28T03:00:00.000Z' });
+    expect(countCheckins(db, 1)).toBe(0);
+    expect(db.prepare('SELECT * FROM checkin_coverage').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM checkin_sync_state').all()).toEqual([]);
+  });
+
+  test('persists ratings for new bids and keeps profile owners separate', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 1, 'one');
+    setUntappdUsername(db, 2, 'two');
+    const http = fakeHttp({
+      'https://untappd.com/user/one/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12'),
+      'https://untappd.com/user/two/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12')
+        .replace('data-rating="4"', 'data-rating="0"'),
+    });
+    await refreshAllUntappd({ db, log: silentLog, http });
+    expect(db.prepare('SELECT telegram_id, user_rating FROM untappd_had ORDER BY telegram_id').all())
+      .toEqual([{ telegram_id: 1, user_rating: 4 }, { telegram_id: 2, user_rating: 0 }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM beers WHERE untappd_id = 101').get()).toEqual({ n: 1 });
+  });
+
+  test.each(['N/A', '4bad'])('keeps an observed rating when a scrape returns %s', async (raw) => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const beerId = insertBeer(db, 101, 'Atak Chmielu', 'Pinta', 3.5);
+    markHad(db, 1, beerId, '2026-09-27T03:00:00Z', 4.25);
+    const http = fakeHttp({
+      'https://untappd.com/user/someone/beers': PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12')
+        .replace('data-rating="4"', `data-rating="${raw}"`),
+    });
+    await refreshAllUntappd({ db, log: silentLog, http });
+    expect(latestRatingsByBeer(db, 1)).toEqual(new Map([[beerId, 4.25]]));
+  });
+
+  test('ignores a response for an account that was relinked during the request', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'old');
+    const http: Http = { async get() {
+      setUntappdUsername(db, 1, 'new');
+      return PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12');
+    } };
+    await refreshAllUntappd({ db, log: silentLog, http });
+    expect(db.prepare('SELECT * FROM untappd_had').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
+  });
+
+  test.each([403, 503])('a failed HTTP %s scrape does not overwrite profile ratings', async (status) => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'someone');
+    const beerId = insertBeer(db, 101, 'Atak Chmielu', 'Pinta', 3.5);
+    markHad(db, 1, beerId, '2026-09-27T03:00:00Z', 4.25);
+    const http: Http = { async get(url) { throw new HttpError(status, url); } };
+    await refreshAllUntappd({ db, log: silentLog, http });
+    expect(db.prepare('SELECT user_rating, last_seen_at FROM untappd_had').get())
+      .toEqual({ user_rating: 4.25, last_seen_at: '2026-09-27T03:00:00Z' });
+  });
+
   test('inserts a new beer with rating_global from /beers', async () => {
     const db = fresh();
     ensureProfile(db, 1);

@@ -16,9 +16,9 @@ export interface ScrapedBeer {
 const MAX_ITEMS = 25;
 
 function parseRating(raw: string | undefined): number | null {
-  if (!raw) return null;
-  const n = parseFloat(raw);
-  return Number.isFinite(n) ? n : null;
+  if (raw === undefined || !/^\s*\d+(?:\.\d+)?\s*$/.test(raw)) return null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 5 ? n : null;
 }
 
 function parseAbv(raw: string): number | null {

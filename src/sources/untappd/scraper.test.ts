@@ -7,6 +7,17 @@ const fixturePath = path.join(__dirname, '../../../tests/fixtures/untappd/user-b
 const html = fs.readFileSync(fixturePath, 'utf8');
 
 describe('parseUserBeersPage', () => {
+  test.each([
+    ['0', 0], ['5', 5], [' 4.25 ', 4.25], ['4.25soon', null],
+    ['-1', null], ['5.01', null], ['N/A', null], ['', null], ['Infinity', null],
+  ])('personal rating %s must parse to %s', (raw, expected) => {
+    const page = `<div class="beer-item" data-bid="42"><div class="beer-details">
+      <div class="ratings"><div class="you"><p>Their Rating</p>
+        <div class="caps" data-rating="${raw}"></div>
+      </div></div></div></div>`;
+    expect(parseUserBeersPage(page)[0].their_rating).toBe(expected);
+  });
+
   test('parses every .beer-item in the fixture', () => {
     const items = parseUserBeersPage(html);
     expect(items).toHaveLength(25);
