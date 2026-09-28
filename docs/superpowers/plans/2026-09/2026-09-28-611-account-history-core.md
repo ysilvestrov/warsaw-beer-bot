@@ -80,11 +80,11 @@ Preserve existing signatures of `checkinsForUser`, `latestRatingsByBeer`, `hasBe
 
 **Produces:** the shared contracts above; `ProfileRow.legacy_sync_revision: number | null`; owner-scoped uniqueness and reads. Preserve the existing `/link` implementation until task 2.
 
-- [ ] Write failing migration regressions using a literal v40 fixture containing `user_profiles`, `beers`, and all four old history tables, with foreign keys enabled. Seed linked username `Old_Name`, revision 3, and unlinked user 2. Execute the exported new migration SQL itself, not a copy of its transformation algorithm. Assert complete preserved rows, including IDs, nulls, dates, personal rating 0, and existing coverage; expect linked key `old_name`, unlinked key `''`, linked legacy baseline 3 and unlinked baseline null.
-- [ ] Add a normal fresh-DB migration test asserting `SELECT version FROM schema_version WHERE version = 41` yields exactly `{ version: 41 }`, plus `PRAGMA foreign_key_check` returning `[]`. Re-running `migrate` preserves the exact seeded rows.
-- [ ] Add repository regressions with explicit owners before relying on `/link`: the same Telegram user stores check-in `123` in keys `a` and `b`; another user stores `123` in key `a`. Assert all three distinct rows exist. Set the active profile username directly to `a`, then `b`, and assert exact check-in counts, rating maps, tried sets, oldest IDs, profile totals, and coverage for each owner.
-- [ ] Run `npm test -- src/storage/schema.test.ts src/storage/history-owner.test.ts src/storage/checkins.test.ts src/storage/untappd_had.test.ts src/storage/checkin_coverage.test.ts src/storage/checkin_sync_state.test.ts`. Confirm failures concern missing key/isolation, not fixture corruption.
-- [ ] Implement the migration with replacement tables using the existing schema's full column definitions, defaults, checks, and foreign-key actions. Keep check-in IDs and preserve autoincrement high-water state, including when the greatest historical ID was deleted. Copy using this owner expression:
+- [x] Write failing migration regressions using a literal v40 fixture containing `user_profiles`, `beers`, and all four old history tables, with foreign keys enabled. Seed linked username `Old_Name`, revision 3, and unlinked user 2. Execute the exported new migration SQL itself, not a copy of its transformation algorithm. Assert complete preserved rows, including IDs, nulls, dates, personal rating 0, and existing coverage; expect linked key `old_name`, unlinked key `''`, linked legacy baseline 3 and unlinked baseline null.
+- [x] Add a normal fresh-DB migration test asserting `SELECT version FROM schema_version WHERE version = 41` yields exactly `{ version: 41 }`, plus `PRAGMA foreign_key_check` returning `[]`. Re-running `migrate` preserves the exact seeded rows.
+- [x] Add repository regressions with explicit owners before relying on `/link`: the same Telegram user stores check-in `123` in keys `a` and `b`; another user stores `123` in key `a`. Assert all three distinct rows exist. Set the active profile username directly to `a`, then `b`, and assert exact check-in counts, rating maps, tried sets, oldest IDs, profile totals, and coverage for each owner.
+- [x] Run `npm test -- src/storage/schema.test.ts src/storage/history-owner.test.ts src/storage/checkins.test.ts src/storage/untappd_had.test.ts src/storage/checkin_coverage.test.ts src/storage/checkin_sync_state.test.ts`. Confirm failures concern missing key/isolation, not fixture corruption.
+- [x] Implement the migration with replacement tables using the existing schema's full column definitions, defaults, checks, and foreign-key actions. Keep check-in IDs and preserve autoincrement high-water state, including when the greatest historical ID was deleted. Copy using this owner expression:
 
 ```sql
 COALESCE((SELECT lower(p.untappd_username)
@@ -99,7 +99,7 @@ UPDATE user_profiles SET legacy_sync_revision = untappd_link_revision
  WHERE untappd_username IS NOT NULL;
 ```
 
-- [ ] Implement owner resolution and modify all history inserts/conflict targets/selects. Representative check-in SQL:
+- [x] Implement owner resolution and modify all history inserts/conflict targets/selects. Representative check-in SQL:
 
 ```sql
 INSERT INTO checkins
@@ -113,10 +113,10 @@ ON CONFLICT(telegram_id, account_key, checkin_id) DO UPDATE SET
 ```
 
   Preserve timestamp canonicalization and existing rating semantics. For `countHadWithoutCheckins`, add `h.account_key = ?` and `c.account_key = h.account_key`; a check-in in archived A must not hide B's scraped-only beer. Every coverage overlap query and delete includes the owner. `getSyncState` passes the same explicit key to `deepestCoveredId`.
-- [ ] Update the legacy repair's existing observation-copy SQL mechanically in this task: include `account_key` in its insert/select and use `ON CONFLICT(telegram_id, account_key, beer_id)`. Otherwise the new schema breaks this existing path and the full gate before task 3. Task 3 replaces that compatible inline statement with the shared owner-preserving operation; it owns changes to the other deletion paths.
-- [ ] Update raw-SQL fixtures/conflict targets that assume old keys. A fixture writing history for a linked user must specify that account's key explicitly; omission must not accidentally put it in the empty bucket. Historical migration replays in `schema.test.ts` must genuinely start from the intended schema: add an explicit test-only v40 history fixture restoration helper before undoing/replaying older migrations, preserving any rows needed by that test. Reuse it in `dropV39AuditColumns`, the v40 replay, and every earlier replay that currently starts from a fully migrated database. Do not merely delete a version marker while leaving v41 tables and columns installed. Existing earlier tests still assert their own migration facts.
-- [ ] Update `spec.md` table keys and active-history semantics. Do not claim async stale responses are protected yet.
-- [ ] Run focused tests, then `npm test && npm run typecheck`; inspect `git diff --check`. Commit task-owned files with `feat(storage): partition Untappd history by linked account (#611)`.
+- [x] Update the legacy repair's existing observation-copy SQL mechanically in this task: include `account_key` in its insert/select and use `ON CONFLICT(telegram_id, account_key, beer_id)`. Otherwise the new schema breaks this existing path and the full gate before task 3. Task 3 replaces that compatible inline statement with the shared owner-preserving operation; it owns changes to the other deletion paths.
+- [x] Update raw-SQL fixtures/conflict targets that assume old keys. A fixture writing history for a linked user must specify that account's key explicitly; omission must not accidentally put it in the empty bucket. Historical migration replays in `schema.test.ts` must genuinely start from the intended schema: add an explicit test-only v40 history fixture restoration helper before undoing/replaying older migrations, preserving any rows needed by that test. Reuse it in `dropV39AuditColumns`, the v40 replay, and every earlier replay that currently starts from a fully migrated database. Do not merely delete a version marker while leaving v41 tables and columns installed. Existing earlier tests still assert their own migration facts.
+- [x] Update `spec.md` table keys and active-history semantics. Do not claim async stale responses are protected yet.
+- [x] Run focused tests, then `npm test && npm run typecheck`; inspect `git diff --check`. Commit task-owned files with `feat(storage): partition Untappd history by linked account (#611)`.
 
 ### Task 2: Make `/link` transitions atomic and reversible
 
@@ -126,11 +126,11 @@ ON CONFLICT(telegram_id, account_key, checkin_id) DO UPDATE SET
 
 **Produces:** existing `setUntappdUsername(db, telegramId, username): void` with a complete immediate transaction. No new public bot command or response shape in this core stage.
 
-- [ ] Replace the #612 test that expects another account's scraped ratings to be cleared. Seed A with check-in `123`, rating 4, scraped-only beer rating 0, profile total 100, and coverage 1000–1099. Switch to B and assert active count 0, ratings `[]`, tried IDs `[]`, null cursor/total, and unchanged archived A rows. Seed B, switch back to A, and assert restoration of all A values with none of B's observations.
-- [ ] Add case-only, fresh empty account, unlinked import adoption, same username across two Telegram users, and A → B → A revision tests. Exact revision progression for first link/A/B/A is 1/2/3; case-only remains 1. The first-link legacy baseline is 1 and remains 1 through all later switches. A captured owner from the first A binding must fail `isCurrentHistoryOwner` after returning to A.
-- [ ] Add adoption collision tests: a pre-existing named destination and an empty bucket both contain check-in `123`. Preserve the named non-null beer/rating/venue, fill only missing fields from the unbound row, and keep the named timestamp unless it is absent in a deliberately constructed legacy fixture. Scraped collisions retain the later observation and its non-null rating, with deterministic named-destination precedence at equal observation time. First linking must not create or transfer unbound coverage or sync totals as evidence for the named account. Normally unbound imports have neither; treat unexpected unbound sync metadata as unproven and leave it archived.
-- [ ] Run `npm test -- src/storage/user_profiles.test.ts src/storage/history-owner.test.ts`; see the old clearing/retention semantics fail the new isolation/restoration assertions.
-- [ ] Implement `setUntappdUsername` using `.immediate()` and this transition order:
+- [x] Replace the #612 test that expects another account's scraped ratings to be cleared. Seed A with check-in `123`, rating 4, scraped-only beer rating 0, profile total 100, and coverage 1000–1099. Switch to B and assert active count 0, ratings `[]`, tried IDs `[]`, null cursor/total, and unchanged archived A rows. Seed B, switch back to A, and assert restoration of all A values with none of B's observations.
+- [x] Add case-only, fresh empty account, unlinked import adoption, same username across two Telegram users, and A → B → A revision tests. Exact revision progression for first link/A/B/A is 1/2/3; case-only remains 1. The first-link legacy baseline is 1 and remains 1 through all later switches. A captured owner from the first A binding must fail `isCurrentHistoryOwner` after returning to A.
+- [x] Add adoption collision tests: a pre-existing named destination and an empty bucket both contain check-in `123`. Preserve the named non-null beer/rating/venue, fill only missing fields from the unbound row, and keep the named timestamp unless it is absent in a deliberately constructed legacy fixture. Scraped collisions retain the later observation and its non-null rating, with deterministic named-destination precedence at equal observation time. First linking must not create or transfer unbound coverage or sync totals as evidence for the named account. Normally unbound imports have neither; treat unexpected unbound sync metadata as unproven and leave it archived.
+- [x] Run `npm test -- src/storage/user_profiles.test.ts src/storage/history-owner.test.ts`; see the old clearing/retention semantics fail the new isolation/restoration assertions.
+- [x] Implement `setUntappdUsername` using `.immediate()` and this transition order:
 
 ```ts
 const previous = getProfile(db, telegramId);
@@ -142,9 +142,9 @@ const same = accountKeyFor(previous?.untappd_username ?? null) === accountKeyFor
 ```
 
   For adoption use owner-keyed `INSERT ... SELECT ... WHERE account_key = ''` with explicit collision handling, followed by deletion of only the adopted empty-key check-ins and scraped observations. Keep all other owners unchanged. Never clear named account ratings, coverage, or totals. Keep the entire transition, including adoption and profile update, inside one writer transaction.
-- [ ] Add a rollback regression that forces the adoption write to fail (a temporary SQLite trigger raises `ABORT` for the destination insert), and assert profile username/revision/baseline and all old rows remain exactly unchanged. Add a two-connection binding test with a temporary database to validate visibility of the completed transition and invalidation of a captured old owner.
-- [ ] Update `spec.md` to replace #612's rating-clearing rule with archived preservation; explain empty-bucket adoption and username-key limitations. User-visible success copy remains a periphery requirement.
-- [ ] Run focused tests and the full backend gate; commit with `fix(storage): preserve and restore history on account switches (#611)`.
+- [x] Add a rollback regression that forces the adoption write to fail (a temporary SQLite trigger raises `ABORT` for the destination insert), and assert profile username/revision/baseline and all old rows remain exactly unchanged. Add a two-connection binding test with a temporary database to validate visibility of the completed transition and invalidation of a captured old owner.
+- [x] Update `spec.md` to replace #612's rating-clearing rule with archived preservation; explain empty-bucket adoption and username-key limitations. User-visible success copy remains a periphery requirement.
+- [x] Run focused tests and the full backend gate; commit with `fix(storage): preserve and restore history on account switches (#611)`.
 
 ### Task 3: Preserve every owner's observations through beer repair and merges
 
@@ -160,9 +160,9 @@ export function mergeHadBeerReferences(db: DB, fromBeerId: number, toBeerId: num
 
 The helper is called inside each existing caller's transaction, before deleting the source beer. It preserves all owners and fills a missing canonical rating from the source; it does not resolve an active profile or open another connection.
 
-- [ ] In existing merge tests seed observations for user 1/account A, user 1/account B, and user 2/account A. Include a target collision for only user 1/account A. Exercise each actual merge entry point; assert exact surviving `(telegram_id, account_key, beer_id, last_seen_at, user_rating)` tuples, redirected check-ins, and deleted source beer. Switching A/B after the merge must restore each account's own tried/rating results.
-- [ ] Run the existing focused suites: `npm test -- src/storage/untappd_had.test.ts src/storage/beers.test.ts src/domain/pin-match.test.ts src/domain/repair-legacy-card.test.ts src/jobs/dedupe-brewery-aliases.test.ts src/jobs/cleanup-polluted-ontap.test.ts`. Expected failures are missing/cross-owner observations or an old conflict target.
-- [ ] Add the helper using the following conflict rule, matching the current legacy repair's canonical-rating precedence:
+- [x] In existing merge tests seed observations for user 1/account A, user 1/account B, and user 2/account A. Include a target collision for only user 1/account A. Exercise each actual merge entry point; assert exact surviving `(telegram_id, account_key, beer_id, last_seen_at, user_rating)` tuples, redirected check-ins, and deleted source beer. Switching A/B after the merge must restore each account's own tried/rating results.
+- [x] Run the existing focused suites: `npm test -- src/storage/untappd_had.test.ts src/storage/beers.test.ts src/domain/pin-match.test.ts src/domain/repair-legacy-card.test.ts src/jobs/dedupe-brewery-aliases.test.ts src/jobs/cleanup-polluted-ontap.test.ts`. Expected failures are missing/cross-owner observations or an old conflict target.
+- [x] Add the helper using the following conflict rule, matching the current legacy repair's canonical-rating precedence:
 
 ```sql
 INSERT INTO untappd_had
@@ -175,8 +175,8 @@ ON CONFLICT(telegram_id, account_key, beer_id) DO UPDATE SET
 ```
 
   Call it from `mergeIntoCanonical`, the canonical-merge branch of `pinMatch`, and both cleanup jobs before their `DELETE FROM beers`. Replace the legacy repair's inline old-key copy with this helper; if `mergeIntoCanonical` already performs the copy, remove the redundant repair copy instead. Keep existing reference redirection, dispositions, alias behavior, and catalog-version bumps intact.
-- [ ] Add a transaction failure regression through a real caller: a forced delete failure must not leave partially copied observations or redirected check-ins. Preserve existing FK behavior; never disable foreign keys to make the merge pass.
-- [ ] Run focused suites and the full backend gate; commit with `fix(storage): preserve account history across catalog merges (#611)`.
+- [x] Add a transaction failure regression through a real caller: a forced delete failure must not leave partially copied observations or redirected check-ins. Preserve existing FK behavior; never disable foreign keys to make the merge pass.
+- [x] Run focused suites and the full backend gate; commit with `fix(storage): preserve account history across catalog merges (#611)`.
 
 ### Task 4: Review the entire core before planning clients and ingestion
 
@@ -186,20 +186,29 @@ ON CONFLICT(telegram_id, account_key, beer_id) DO UPDATE SET
 
 **Produces:** a core review receipt with resolved findings and exact final interfaces for the periphery. This is a stage gate, not a shipping gate.
 
-- [ ] Review the whole diff against the design with the repository's `ce-code-review` workflow and sequential tool mapping. Include migration safety, correctness, API compatibility of transitional repository parameters, and all catalog deletion paths. Explicitly identify unimplemented periphery guarantees so review does not mistake the core for a deployable fix.
-- [ ] Search all non-test source for history SQL and source-beer deletion; verify each user-facing reader has an owner predicate and each relevant merge preserves all owners. Commands:
+- [x] Review the whole diff against the design with the repository's `ce-code-review` workflow and sequential tool mapping. Include migration safety, correctness, API compatibility of transitional repository parameters, and all catalog deletion paths. Explicitly identify unimplemented periphery guarantees so review does not mistake the core for a deployable fix.
+- [x] Search all non-test source for history SQL and source-beer deletion; verify each user-facing reader has an owner predicate and each relevant merge preserves all owners. Commands:
 
 ```bash
 rg -n 'FROM checkins|JOIN checkins|FROM untappd_had|JOIN untappd_had|FROM checkin_coverage|FROM checkin_sync_state|DELETE FROM beers' src --glob '*.ts' --glob '!*.test.ts'
 git diff origin/main -- src/storage src/domain src/jobs spec.md
 ```
 
-- [ ] Test migration on a safely copied production database obtained with SQLite's backup API, not an ordinary copy of a live WAL database. Assert per-user assignment, exact selected rows and coverage, foreign-key validity, and ID allocation preservation. Keep all access read-only against production; application writers run only against the copy. Do not use this check to establish external provenance: that remains the user's confirmation.
-- [ ] Resolve valid findings, repeat the affected focused tests and full gate after changes, and record the final commit plus commands/results. No PR or production deployment from this stage.
-- [ ] Write the separate periphery plan only after review, using the reviewed `HistoryOwner`, baseline and writer interfaces. Include imports and scraper captured ownership, GET/POST `linkRevision`, `account_changed` and `sync_context_required`, legacy baseline enforcement, extension handling/cached-status isolation, `/link` messages in all locales, guide/changelog updates, and `/match`/MCP/whole-branch regressions. The final shipping stage must ask whether to create a PR, refresh/rebase `main`, rerun the full gate after a rebase, and wait for CI/AI review before reporting readiness.
+- [x] Test migration on a safely copied production database obtained with SQLite's backup API, not an ordinary copy of a live WAL database. Assert per-user assignment, exact selected rows and coverage, foreign-key validity, and ID allocation preservation. Keep all access read-only against production; application writers run only against the copy. Do not use this check to establish external provenance: that remains the user's confirmation.
+- [x] Resolve valid findings, repeat the affected focused tests and full gate after changes, and record the final commit plus commands/results. No PR or production deployment from this stage.
+- [x] Write the separate periphery plan only after review, using the reviewed `HistoryOwner`, baseline and writer interfaces. Include imports and scraper captured ownership, GET/POST `linkRevision`, `account_changed` and `sync_context_required`, legacy baseline enforcement, extension handling/cached-status isolation, `/link` messages in all locales, guide/changelog updates, and `/match`/MCP/whole-branch regressions. The final shipping stage must ask whether to create a PR, refresh/rebase `main`, rerun the full gate after a rebase, and wait for CI/AI review before reporting readiness.
 
 ## Completion evidence and remaining work
 
 Core is complete only when task 4 has no unresolved core defects and the exact tested migration and repository interfaces are recorded. This plan never asserts that #611 is fixed for end users. The later periphery must close asynchronous cross-account writes and cached-client-state gaps before deployment.
 
 Spec coverage is intentional: storage/ownership, scoped reads, reversible transitions, and catalog preservation are here; ingestion/API/client behavior and deployment are deferred explicitly to the reviewed next stage. Execute sequentially; do not write that next plan against a mechanism that has not yet been built and reviewed.
+
+
+## Executed stage record — 2026-09-28
+
+Tasks 1–4 completed sequentially in the isolated worktree. Commits: `aff502a` (migration/repositories), `7c4af24` (link adoption/switching), `87d7c0b` (catalog merges), `9c4d0cc` (review-discovered mixed-snapshot correction), `c6617ea` (owner contracts). The final full gate passed 3869 tests with one pre-existing skip; typecheck passed. Focused red/green evidence and exact production-copy migration results are in [the review record](../../../reviews/2026-09-28-611-core.md). Planned test selections were also covered by the full gate; the owner test file was added during final review.
+
+Review used the repository's sequential main-context mapping. The cross-model job produced no receipt by its shared deadline and ended `died-without-result`; it was collected and cleaned up. Independent corroboration is unavailable, not silently counted as approval. No unresolved core defect remains in the local review.
+
+The [periphery plan](2026-09-28-611-account-history-periphery.md) was written only after that review finished. It has not been executed or approved for execution yet. Core remains intentionally unshippable; no push, PR, production mutation, deployment or issue closure occurred.
