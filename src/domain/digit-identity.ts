@@ -12,8 +12,9 @@ import { baseNormalize } from './normalize';
 import { isAleStyle } from './czech-grade';
 
 export interface DigitIdentityContext {
-  input: { name: string; style?: string | null };
-  candidate: { name: string; style?: string | null };
+  input: { name: string; style?: string | null; brewery?: string | null };
+  candidate: { name: string; style?: string | null; brewery?: string | null };
+  knownBreweries?: readonly string[];
 }
 
 export interface NameDigits {
@@ -29,6 +30,9 @@ export interface NameDigits {
   years: string[];
   /** #663: Whether the name contains any letter characters outside of stripped ABV/grade/noise. */
   hasLetters: boolean;
+  hops?: string[];
+  tapCodes?: string[];
+  hardCodes?: string[];
 }
 
 // `same` > `year-fallback` > `number-fallback` > `different`. The two fallbacks are "acceptable when nothing better
@@ -64,7 +68,7 @@ function canon(raw: string): string {
   return frac === undefined ? trimmed : `${trimmed}.${frac}`;
 }
 
-export function readNameDigits(name: string): NameDigits {
+function readOrdinaryNameDigits(name: string): NameDigits {
   let s = name.replace(ABV, ' ').replace(ABV_LABELLED, ' ');
   const grades = [...s.matchAll(GRADE)].map((m) => canon(m[1]));
   s = s
@@ -94,6 +98,108 @@ export function readNameDigits(name: string): NameDigits {
     years: [...years].sort(),
     hasLetters: /\p{L}/u.test(s),
   };
+}
+
+type Span = { start: number; end: number };
+type CodeSpan = Span & { kind: 'hop' | 'tap' | 'hard'; id: string };
+type Side = 'input' | 'candidate';
+
+const PREFIX_HOP = /(?<![\p{L}\p{N}])(HBC|BRU|NZH|YCR|PŁ|CF)[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
+const IDAHO_HOP = /(?<![\p{L}\p{N}])Idaho\s*7(?![\p{L}\p{N}])/giu;
+const FRACTION_HOP = /(?<![\p{L}\p{N}])(?:EXP\s*)?(\d+)\s*\/\s*(\d+)(?![\p{L}\p{N}])/giu;
+const POLISH_FRACTIONS = new Set(['2/20', '3/20', '5/39']);
+const FRACTION_MARKER = /(?:#|\b(?:no|nr|batch|series|kegged|bottled|released|date)\.?)\s*$/i;
+
+function maskSpans(name: string, spans: readonly Span[]): string {
+  const chars = name.split('');
+  for (const span of spans) {
+    for (let i = span.start; i < span.end; i++) chars[i] = ' ';
+  }
+  return chars.join('');
+}
+
+function findNoiseSpans(name: string): Span[] {
+  return [ABV, ABV_LABELLED, GRADE].flatMap((pattern) =>
+    [...name.matchAll(pattern)].map((match) => ({ start: match.index, end: match.index + match[0].length })),
+  );
+}
+
+// Do not turn a prefix of a decimal, fraction, or date into an integer code.
+function completeCode(name: string, span: Span): boolean {
+  return !/[\d][.,/]\s*$/.test(name.slice(0, span.start))
+    && !/^\s*[.,/]\s*\d/.test(name.slice(span.end));
+}
+
+function localRegion(name: string, span: Span): string {
+  const separators = [...name.matchAll(/[()[\];,]|\s+-\s+/g)];
+  const start = separators.filter((m) => m.index + m[0].length <= span.start).at(-1);
+  const end = separators.find((m) => m.index >= span.end);
+  return name.slice(start ? start.index + start[0].length : 0, end?.index ?? name.length);
+}
+
+function hasPolishHopsLabel(name: string): boolean {
+  return /(?:^| )polish ?hops(?: |$)/.test(baseNormalize(name));
+}
+
+function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side): CodeSpan[] {
+  const scan = maskSpans(name, findNoiseSpans(name));
+  const spans: CodeSpan[] = [];
+  for (const match of scan.matchAll(PREFIX_HOP)) {
+    const span = { start: match.index, end: match.index + match[0].length };
+    if (completeCode(scan, span)) spans.push({ ...span, kind: 'hop', id: `${match[1].toUpperCase()}:${canon(match[2])}` });
+  }
+  for (const match of scan.matchAll(IDAHO_HOP)) {
+    const span = { start: match.index, end: match.index + match[0].length };
+    if (completeCode(scan, span)) spans.push({ ...span, kind: 'hop', id: 'Idaho:7' });
+  }
+  const pending: CodeSpan[] = [];
+  for (const match of scan.matchAll(FRACTION_HOP)) {
+    const span = { start: match.index, end: match.index + match[0].length };
+    const fraction = `${canon(match[1])}/${canon(match[2])}`;
+    if (!POLISH_FRACTIONS.has(fraction) || !completeCode(scan, span)
+      || FRACTION_MARKER.test(scan.slice(0, span.start))) continue;
+    const code: CodeSpan = { ...span, kind: 'hop', id: `PolishHops:${fraction}` };
+    if (/^EXP/i.test(match[0]) || hasPolishHopsLabel(localRegion(scan, span))
+      || (context && side && hasPolishHopsLabel(context[side].brewery ?? ''))) spans.push(code);
+    else pending.push(code);
+  }
+  // Only an explicit connector chain can transfer a code claim to an unlabelled fraction.
+  let added = true;
+  while (added) {
+    added = false;
+    for (let i = pending.length - 1; i >= 0; i--) {
+      const code = pending[i];
+      const connected = spans.some((seed) => {
+        const gap = seed.end <= code.start ? scan.slice(seed.end, code.start)
+          : code.end <= seed.start ? scan.slice(code.end, seed.start) : '';
+        return /^\s*(?:x|&|\+)\s*$/i.test(gap);
+      });
+      if (connected) {
+        spans.push(code);
+        pending.splice(i, 1);
+        added = true;
+      }
+    }
+  }
+  return spans;
+}
+
+function readProfile(name: string, context?: DigitIdentityContext, side?: Side): NameDigits {
+  const spans = findHopSpans(name, context, side);
+  const ordinary = readOrdinaryNameDigits(maskSpans(name, spans));
+  ordinary.hasLetters = readOrdinaryNameDigits(name).hasLetters;
+  const hops = [...new Set(spans.map((span) => span.id))].sort();
+  return { ...ordinary, ...(hops.length > 0 ? { hops } : {}) };
+}
+
+export function readNameDigits(name: string): NameDigits {
+  return readProfile(name);
+}
+
+function differentNonEmptySets(a: readonly string[], b: readonly string[]): boolean {
+  const left = [...new Set(a)].sort();
+  const right = [...new Set(b)].sort();
+  return left.length > 0 && right.length > 0 && left.join('|') !== right.join('|');
 }
 
 // Multiset difference: every element of `xs` not paired off with an element of `ys`.
@@ -165,6 +271,11 @@ export function digitIdentity(
   candidate: NameDigits,
   context?: DigitIdentityContext,
 ): DigitIdentity {
+  if (context) {
+    input = readProfile(context.input.name, context, 'input');
+    candidate = readProfile(context.candidate.name, context, 'candidate');
+  }
+  if (differentNonEmptySets(input.hops ?? [], candidate.hops ?? [])) return 'different';
   if (czechGradesContradict(input, candidate, context)) return 'different';
   // 1. Every hard number of the input must pair off with the candidate's numbers, or be covered by its grade or
   //    soft number.

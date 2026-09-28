@@ -276,3 +276,88 @@ describe('#665 contextual orphan peers', () => {
     expect(digitsCompatibleAsPeers('Konrad 10°', 'Konrad 12°')).toBe(true);
   });
 });
+
+describe('#664 hop codes', () => {
+  test.each<[string, string[], string[], string[], string[]]>([
+    ['DUMB FRUIT 11', [], [], ['11'], []],
+    ['IPA 3/20', [], ['20', '3'], [], []],
+    ['NOTHBC472', [], [], [], []],
+    ['HBC472suffix', [], [], [], []],
+    ['Idaho 8', [], [], ['8'], []],
+    ['', [], [], [], []],
+    ['PŁ167 (kegged 3/20)', ['PŁ:167'], ['20', '3'], [], []],
+    ['HBC 12°', [], [], [], ['12']],
+    ['HBC 7%', [], [], [], []],
+    ['HBC 7 ABV', [], [], [], []],
+    ['HBC 472.5', [], ['472.5'], [], []],
+    ['HBC 472/630', [], ['472', '630'], [], []],
+    ['EXP 3/20/2026', [], ['20', '3'], [], []],
+    ['Polish Hops (3/20)', [], ['20', '3'], [], []],
+    ['HBC472 x 3/20', ['HBC:472', 'PolishHops:3/20'], [], [], []],
+    ['HBC472 and 3/20', ['HBC:472'], ['20', '3'], [], []],
+  ])('keeps code boundaries and ordinary digits in %s', (name, hops, numbers, soft, grades) => {
+    const read = readNameDigits(name);
+    expect(read.hops ?? []).toEqual(hops);
+    expect(read.numbers).toEqual(numbers);
+    expect(read.soft).toEqual(soft);
+    expect(read.grades).toEqual(grades);
+  });
+test('the hop token is consumed once and does not hide the series number', () => {
+  const read = readNameDigits('Temporalis #0056 HBC 1183 Citra Dynaboost');
+  expect(read.numbers).toEqual(['56']);
+  expect(read.hops).toEqual(['HBC:1183']);
+});
+
+test.each<[string, string, DigitIdentity]>([
+  ['Temporalis #0056 HBC 1183', 'Temporalis #0056', 'same'],
+  ['Temporalis #0056 HBC 1183', 'Temporalis #0057', 'different'],
+  ['Single Hop HBC472', 'Single Hop HBC-472', 'same'],
+  ['Single Hop HBC 472', 'Single Hop HBC 630', 'different'],
+  ['Hop Heats CF317', 'Hop Heats CF338', 'different'],
+  ['Hop Heats CF317', 'Hop Heats HBC317', 'different'],
+  ['IPA BRU-1', 'IPA BRU1', 'same'],
+  ['IPA NZH-107', 'IPA NZH 107', 'same'],
+  ['IPA YCR 1320', 'IPA YCR1320', 'same'],
+  ['IPA PŁ-167', 'IPA PŁ167', 'same'],
+  ['IPA Idaho 7', 'IPA Idaho7', 'same'],
+  ['IPA HBC472 HBC472', 'IPA HBC472', 'same'],
+  ['IPA HBC472 BRU1', 'IPA BRU1 HBC472', 'same'],
+  ['IPA HBC472 BRU1', 'IPA HBC472', 'different'],
+  ['DUMB FRUIT 11', 'DUMB FRUIT', 'same'], // 11 remains an ordinary soft number
+  ['DUMB FRUIT #11', 'DUMB FRUIT', 'different'],
+  ['Duvel 6.66', 'Duvel', 'different'],
+  ['Duvel 6.66%', 'Duvel', 'same'],
+  ['Beer 0,5l', 'Beer', 'same'],
+])('%s / %s → %s', (a, b, expected) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b))).toBe(expected);
+});
+
+test.each<[string, string, string | null, DigitIdentity]>([
+  ['IPA EXP 3/20', 'IPA', null, 'same'],
+  ['IPA EXP3/20', 'IPA 3/20', 'PolishHops', 'same'],
+  ['Polish Hops: 3/20', 'IPA', null, 'same'],
+  ['IPA 2/20', 'IPA', 'ReCraft / PolishHops Brewery', 'same'],
+  ['IPA 5/39', 'IPA', 'PolishHops', 'same'],
+  ['IPA PŁ167 x 3/20 x 2/20', 'IPA PŁ-167 x EXP 3/20 x EXP 2/20', null, 'same'],
+  ['IPA EXP 2/20', 'IPA EXP 3/20', null, 'different'],
+  ['IPA EXP 2/20', 'IPA EXP 1/10', null, 'number-fallback'],
+  ['IPA 3/20', 'IPA', 'ReCraft', 'different'],
+  ['Polish Hops #3/20', 'IPA', null, 'different'],
+  ['Polish Hops series 3/20', 'IPA', null, 'different'],
+  ['Polish Hops (kegged 3/20)', 'IPA', null, 'different'],
+  ['Polish Hops 3/20/2026', 'IPA', null, 'different'],
+  ['Free IPA PŁ167 x 3/20 x 2/2', 'Free IPA PŁ167 x EXP 3/20', null, 'different'],
+])('%s / %s, brewery %s → %s', (a, b, brewery, expected) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b), {
+    input: { name: a, brewery }, candidate: { name: b, brewery },
+  })).toBe(expected);
+});
+
+test('fraction codes are not reduced to an unproven numerical equivalent', () => {
+  expect(readNameDigits('IPA EXP 2/20').hops).toEqual(['PolishHops:2/20']);
+  const unknown = readNameDigits('IPA EXP 1/10');
+  expect(unknown.hops ?? []).toEqual([]);
+  expect(unknown.numbers).toEqual(['1']);
+  expect(unknown.soft).toEqual(['10']);
+});
+});
