@@ -1,6 +1,6 @@
 # #665 Czech Grade Identity — Core Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. AGENTS.md requires sequential work in the main thread; do not dispatch subagents. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. AGENTS.md requires sequential work in the main thread; do not dispatch subagents. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make the existing matcher select Konrad 10°'s correct catalog row instead of the newer Konrad 12° orphan, using the agreed Czech lager context.
 
@@ -81,7 +81,7 @@ export function digitIdentity(
 
 Raw names in context are the same texts used to read the digits; they supply the existing ale-name veto. An omitted context keeps every existing caller's behavior unchanged. Do not add fields to `NameDigits`, change `readNameDigits` or extend the peer function in this task; its caller integration is peripheral work.
 
-- [ ] **Step 1: Add the failing regression in the existing digit-identity test file.**
+- [x] **Step 1: Add the failing regression in the existing digit-identity test file.**
 
 Append the following tests; add `DigitIdentityContext` to the type import. Keep the existing `identity` helper and its measured tables unchanged.
 
@@ -146,12 +146,12 @@ describe('#665 Czech lager grade identity', () => {
 
 Import only the existing runtime exports in this red step; the new context type is erased by transpilation. The decisive regression must fail with received `same`, expected `different`. Do not import a missing runtime helper until Step 3 exports it.
 
-- [ ] **Step 2: Capture red for the named reproduction.**
+- [x] **Step 2: Capture red for the named reproduction.**
 
 Run `npm test -- src/domain/digit-identity.test.ts -t 'Konrad ten degrees'`.
 Vitest transpiles the new optional argument before typechecking; the intended failure is the old `same` result. If setup fails, correct setup and rerun before writing the predicate.
 
-- [ ] **Step 3: Implement the shared predicate and optional comparator context.**
+- [x] **Step 3: Implement the shared predicate and optional comparator context.**
 
 Import `baseNormalize` and `isAleStyle`; add the context interface above. Add these private helpers and exported predicate to `digit-identity.ts`:
 
@@ -195,7 +195,7 @@ if (czechGradesContradict(input, candidate, context)) return 'different';
 
 Keep every existing guard below it intact. Amend the grade comment to describe the optional Czech context while retaining the default extract semantics. Do not call `extractGrade`: its bare-integer/first-hit behavior is a different contract.
 
-- [ ] **Step 4: Verify both directions explicitly and direct helper behavior.**
+- [x] **Step 4: Verify both directions explicitly and direct helper behavior.**
 
 Add `czechGradesContradict` to the import and the following tests to the same describe block (the named test already checks both directions of the real reproduction). These pin input-only context, candidate-only context and a false-helper/old-rule distinction without deriving expectations from another function:
 
@@ -238,7 +238,7 @@ test.each<[string, string, string, DigitIdentity]>([
 
 Run `npm test -- src/domain/digit-identity.test.ts`. All old measured tables and new cases must pass. The helper is not a replacement for all numeric identity: tests of hard numbers and years must remain intact.
 
-- [ ] **Step 5: Run the full gate, review and commit U1.**
+- [x] **Step 5: Run the full gate, review and commit U1.**
 
 Run `npm test && npm run typecheck`. Review the two-file diff for parser changes and accidental default-rule changes. Stage only `src/domain/digit-identity.ts` and `src/domain/digit-identity.test.ts`; commit subject: `fix(identity): reject conflicting Czech lager grades with explicit style context (#665)`.
 
@@ -250,7 +250,7 @@ Run `npm test && npm run typecheck`. Review the two-file diff for parser changes
 
 **Produces:** `CatalogBeer.style?: string | null`; `CatalogRow.style: string | null`; optional style on both public matcher input signatures. SQL-loaded styles reach `PreparedBeer` and `CatalogBeerWithRating` by their existing inheritance/spread. Public API JSON stays unchanged.
 
-- [ ] **Step 1: Add matcher regression tests before implementation.**
+- [x] **Step 1: Add matcher regression tests before implementation.**
 
 Use the existing `c` helper (it will accept style after the optional field is added). Append:
 
@@ -319,12 +319,12 @@ describe('#665 Czech grade conflicts cannot preempt an eligible row', () => {
 
 The injected full-search scores test ordering and memoization; it is not evidence for a new cross-brewery production match. The real Konrad tests use the real fast-fuzzy searcher.
 
-- [ ] **Step 2: Capture the right red failure.**
+- [x] **Step 2: Capture the right red failure.**
 
 Run `npm test -- src/domain/matcher.test.ts -t 'the ten-degree input selects id 45'`.
 Expected: received id 37334/exact rather than id 45/fuzzy. Do not accept a test setup/type import failure as the receipt.
 
-- [ ] **Step 3: Add the cache delivery regression and amend the existing SQL contract test.**
+- [x] **Step 3: Add the cache delivery regression and amend the existing SQL contract test.**
 
 In `src/storage/beers.test.ts`'s existing `describe('loadCatalog')`, rename the test to include style and replace its assertion with:
 
@@ -370,7 +370,7 @@ describe('#665 catalog style reaches the matcher from SQL', () => {
 Run `npm test -- src/storage/beers.test.ts src/domain/catalog-cache.test.ts -t 'loadCatalog|catalog style'`.
 Expected: current SELECT omits `style`; the new exact style assertion fails. This test reads the real default SQL loader and real cache, not an injected style-bearing array. The two seed names have different normalized names, so `seedBeer` does not collapse them into one row.
 
-- [ ] **Step 4: Deliver style and wire the one shared eligibility predicate into all matcher paths.**
+- [x] **Step 4: Deliver style and wire the one shared eligibility predicate into all matcher paths.**
 
 In `src/storage/beers.ts`, add `style: string | null` to `CatalogRow` and change only the catalog projection:
 
@@ -443,7 +443,7 @@ const results = searcher.search(`${seedBrewery} ${nn}`)
 
 The empty-list guard and the existing numeric-tier top-score loop now see eligible results. Filtering preserves the surviving scores/order and permits a lower-scoring row once the higher one is vetoed. The shared full searcher remains memoized, and a nonempty original brewery bucket still uses the brewery searcher even when every resulting hit is vetoed.
 
-- [ ] **Step 5: Verify focused regressions and mutation sensitivity.**
+- [x] **Step 5: Verify focused regressions and mutation sensitivity.**
 
 Run `npm test -- src/domain/digit-identity.test.ts src/domain/matcher.test.ts src/storage/beers.test.ts src/domain/catalog-cache.test.ts`.
 
@@ -478,7 +478,7 @@ test('a vetoed anchor proceeds to the existing full fuzzy path', () => {
 
 The injected search result tests the route, not a factual cross-brewery beer link: both candidates belong to the actual prepared catalog, and the different brewery keeps the eligible result out of the anchor bucket. The real anchor test covers the final miss, and the real Konrad test covers correct selection. Under the anchor omission mutation, the existing early exact refusal prevents the full search, so this test fails. Add it before mutation verification, verify green, and include it in the same matcher test file.
 
-- [ ] **Step 6: Run the full gate, review and commit U2.**
+- [x] **Step 6: Run the full gate, review and commit U2.**
 
 Restore all mutations. Run `npm test && npm run typecheck` and `git diff --check`. Review the SQL projection, input type parity, unchanged default-budget behavior, both exact-entry filters and full-search memoization. Do not amend unrelated old assertions.
 
@@ -487,7 +487,7 @@ Stage only the five files listed for U2; commit subject: `fix(matcher): exclude 
 ## Whole-core review checkpoint
 
 - [ ] Review the entire diff from 4964f00, including U1 implemented inline and U2. Apply the code-review workflow sequentially in the main thread as AGENTS.md requires. Include correctness, API type compatibility, data-integrity and performance lenses; this is a rule shared by data writes even though those callers are not wired yet.
-- [ ] The review package must include the approved spec, this plan, named red/green receipts, mutation outcomes, full-gate results and the original Konrad reproduction. Specifically challenge whether a style-less caller still behaves as before and whether the searcher returns all above-threshold candidates.
+- [x] The review package must include the approved spec, this plan, named red/green receipts, mutation outcomes, full-gate results and the original Konrad reproduction. Specifically challenge whether a style-less caller still behaves as before and whether the searcher returns all above-threshold candidates.
 - [ ] Fix valid core findings, repeat the affected tests and full gate after changes, and record the review receipt. Do not call #665 fixed, push a release or close the issue at this checkpoint.
 - [ ] Only after this review, write the separate peripheral implementation plan against the actual core signatures. It must cover all identity-recording rows in the spec's evidence table, the verified Konrad alias, `spec.md`, one-snapshot old/new catalog replay and row-by-row recovery before merging 37334. No task code for that work is prewritten here.
 
@@ -507,3 +507,9 @@ Stage only the five files listed for U2; commit subject: `fix(matcher): exclude 
 Self-review before execution: all task interfaces above are defined by U1; U2 adds optional `style` before full typecheck; the cache uses real DB loading; no production file has yet been modified by planning. Run test commands only during execution, not to validate this document.
 
 Execution is sequential in the existing worktree using `superpowers:executing-plans`. First task starts with its named red regression; the whole-core review is the boundary before peripheral planning.
+
+## Execution status — 2026-09-28
+
+U1 completed in `6100506`; U2 completed in `7d95afc`. Final gate: 3679 tests passed, one skipped, typecheck passed. All four omission mutations fail their intended assertions and were restored before the gate.
+
+U3 remains pending independent adversarial review. Local review found no actionable defects; the automatic approval review denied the external Claude launch for lack of explicit authorization to send the payload to Anthropic. No peer job was created. Detailed coverage and receipts: [core review](2026-09-28-665-core-review.md). Peripheral planning has not started.
