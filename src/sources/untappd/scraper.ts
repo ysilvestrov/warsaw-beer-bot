@@ -56,7 +56,10 @@ export function parseUserBeersPage(html: string): ScrapedBeer[] {
     details.find('.ratings .you').each((_, you) => {
       const label = $(you).find('p').first().text().trim();
       const raw = $(you).find('.caps[data-rating]').first().attr('data-rating');
-      if (/^Their Rating/i.test(label)) their_rating = parseRating(raw);
+      if (/^Their Rating/i.test(label)) {
+        // An explicit N/A label is unavailable, even if its display caps carry 0.
+        their_rating = /\(N\/A\)/i.test(label) ? null : parseRating(raw);
+      }
       // #616: глобальний рейтинг Untappd — «0/N/A = менш ніж 10 оцінок», округлення до 2 знаків.
       else if (/^Global Rating/i.test(label)) {
         // Відповідь Untappd — лише читабельне число в data-rating (0 = менш ніж 10 оцінок) або явний

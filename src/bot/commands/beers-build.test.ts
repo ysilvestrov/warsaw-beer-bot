@@ -5,6 +5,7 @@ import { createSnapshot, insertTaps } from '../../storage/snapshots';
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { upsertMatch } from '../../storage/match_links';
 import { mergeCheckin } from '../../storage/checkins';
+import { markHad } from '../../storage/untappd_had';
 import { createTranslator } from '../../i18n';
 import { buildBeersMessage } from './beers-build';
 
@@ -19,6 +20,23 @@ const base = (db: ReturnType<typeof fresh>, pubQuery?: string, telegramId = 1) =
   buildBeersMessage({ db, locale: 'uk' as const, t, pubQuery, city: 'warszawa', telegramId });
 
 describe('buildBeersMessage — resolution', () => {
+  test('a pub beer displays a profile rating when no rated check-in exists', () => {
+    const db = fresh();
+    const pubId = upsertPub(db, { slug: 'p', name: 'Kufel', address: null, lat: null, lon: null, city: 'warszawa' });
+    const snap = createSnapshot(db, pubId, '2026-09-28T12:00:00Z');
+    const beerId = seedBeer(db, {
+      untappd_id: 9001, name: 'Atak Chmielu', brewery: 'PINTA',
+      normalized_name: 'atak chmielu', normalized_brewery: 'pinta',
+    });
+    upsertMatch(db, 'PINTA', 'Atak Chmielu', beerId, 1.0);
+    insertTaps(db, snap, [{ tap_number: 1, beer_ref: 'Atak Chmielu', brewery_ref: 'PINTA',
+      abv: null, ibu: null, style: null, u_rating: null }]);
+    markHad(db, 1, beerId, '2026-09-28T03:00:00Z', 4.25);
+    const result = base(db, 'kufel');
+    expect(result).toMatchObject({ kind: 'ok', html: expect.stringContaining(' • ✅ 4.3') });
+    db.close();
+  });
+
   test('missing argument returns no_arg', () => {
     const db = fresh();
     expect(base(db)).toEqual({ kind: 'no_arg' });

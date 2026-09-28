@@ -6,6 +6,7 @@ import { ensureProfile } from '../../storage/user_profiles';
 import { seedBeer } from '../../storage/seed-beer.testing';
 import { mergeIntoCanonical } from '../../storage/beers';
 import { mergeCheckin } from '../../storage/checkins';
+import { markHad } from '../../storage/untappd_had';
 import { normalizeName, normalizeBrewery } from '../../domain/normalize';
 import { matchRoute } from './match';
 import type { ApiEnv } from '../types';
@@ -57,6 +58,22 @@ function post(app: Hono<ApiEnv>, body: unknown) {
 }
 
 describe('POST /match', () => {
+  it('exposes profile ratings only for the exact match and authenticated owner', async () => {
+    const { appAs, appAnon, panIpani, db } = setup();
+    markHad(db, 1, panIpani, '2026-09-28T03:00:00Z', 5);
+    markHad(db, 2, panIpani, '2026-09-28T03:00:00Z', 0);
+    const body = { beers: [{ brewery: 'Trzech Kumpli', name: 'Pan IPAni' }] };
+    const one = await (await post(appAs(1), body)).json();
+    const two = await (await post(appAs(2), body)).json();
+    const anon = await (await post(appAnon(), body)).json();
+    expect(one.results[0].user_rating).toBe(4);
+    expect(two.results[0].user_rating).toBe(0);
+    expect(two.results[0].is_drunk).toBe(true);
+    expect(anon.results[0].user_rating).toBeNull();
+    expect(anon.results[0].is_drunk).toBe(false);
+    db.close();
+  });
+
   it('vetoes a sealed old card and stale cached row, while a distinct live card still matches', async () => {
     const { appAnon, db } = setup();
     const old = seedBeer(db, {

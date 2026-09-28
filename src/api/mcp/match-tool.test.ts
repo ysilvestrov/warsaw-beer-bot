@@ -48,6 +48,22 @@ function db0() {
 }
 
 describe('runMatchTool', () => {
+  it('uses a had-only profile rating on exact matches but withholds it on fuzzy matches', async () => {
+    const db = db0();
+    markHad(db, 1, 200, '2026-09-28T03:00:00Z', 4.25);
+    const { output } = await runMatchTool(db, cacheOf(CATALOG), 1, [
+      { brewery: 'PINTA', name: 'Atak Chmielu' },
+      { brewery: 'PINTA', name: 'Atak Chmiel' },
+    ]);
+    expect(output.results.map((r) => ({ confidence: r.confidence, rating: r.your_rating })))
+      .toEqual([{ confidence: 'exact', rating: 4.25 }, { confidence: 'fuzzy', rating: null }]);
+    const { output: other } = await runMatchTool(db, cacheOf(CATALOG), 2, [
+      { brewery: 'PINTA', name: 'Atak Chmielu' },
+    ]);
+    expect(other.results[0].your_rating).toBeNull();
+    db.close();
+  });
+
   it('does not disclose a sealed row from an old catalog snapshot', async () => {
     const db = db0();
     const old = { id: 300, brewery: 'De Cam', name: 'Abrikoos 2018', abv: 6,
