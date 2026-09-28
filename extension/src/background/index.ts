@@ -215,7 +215,9 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
 
   const { token, baseUrl } = await getSettings();
   if (!token) {
-    await enqueueSyncStatus(emptySyncStatus('error'), ++syncGeneration);
+    const generation = ++syncGeneration;
+    await handleCacheClearAll();
+    await enqueueSyncStatus(emptySyncStatus('error'), generation);
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
 
@@ -334,7 +336,14 @@ function syncStatusReply(s: StoredSyncStatus) {
 export async function handleCheckinSyncStatus() {
   const generation = syncGeneration;
   const settings = await getSettings();
-  if (!settings.token) return syncStatusReply(emptySyncStatus('error'));
+  if (!settings.token) {
+    if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
+    const invalidationGeneration = ++syncGeneration;
+    syncAbortController?.abort();
+    await handleCacheClearAll();
+    await enqueueSyncStatus(emptySyncStatus('error'), invalidationGeneration).catch(() => undefined);
+    return syncStatusReply(emptySyncStatus('error'));
+  }
   let current: CheckinSyncState;
   try {
     current = await getCheckinSyncState(settings.baseUrl, settings.token);

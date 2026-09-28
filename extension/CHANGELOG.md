@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+- After removing your API token, “Sync my check-ins” could keep running and old personal ratings could remain visible. Removing the token now stops the sync and clears those saved ratings.
+
 - After changing your linked Untappd account, “Sync my check-ins” could show the previous account’s progress or finish too early. It now uses the selected account’s history and stops if you change accounts during a sync.
 
 - Beers marked as already tried could be missing your rating until you ran “Sync my check-ins”. Your rating can now appear after the bot’s daily Untappd update.
