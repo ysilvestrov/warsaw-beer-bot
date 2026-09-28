@@ -140,6 +140,12 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['stiegl', 'stieglbrauerei zu salzburg'],               // 35115 12° Weisse Naturtrüb -> bid 80, 5.1% (#302)
   ['maryensztad', 'maryensztadt'],                        // 12269 Mi to żyto -> bid 6357167, 5.7% = 5.7% (#417)
   ['braurei eichhorn', 'eichhorn dorfleins'],             // 34816 Kellerbier -> bid 343881, 5.0% vs 5.2% (#483)
+  // #658 / Cluster #2: brand-as-brewery for conglomerate lines and series brands
+  ['kwak', 'bosteels'],                                   // 26101 Pauwel -> Pauwel Kwak (bid 358)
+  ['kozel', 'velke popovice'],                            // 35038 Kozel Dark -> Kozel Černý / Dark (bid 70150)
+  ['pilsner urquell', 'plzensky prazdroj'],               // 25926 Pilsner Urquell -> Plzeňský Prazdroj
+  ['corona extra', 'grupo modelo'],                       // 25927 Corona Extra -> Grupo Modelo
+  ['cappuccino', 'mad brew'],                             // 29924 Cappuccino Night Pulse -> Mad Brew
 ];
 
 // normForm -> directly-paired forms. Built once at module load.
