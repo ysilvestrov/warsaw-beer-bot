@@ -1,3 +1,4 @@
+import { mergeHadBeerReferences } from './untappd_had';
 import type { DB } from './db';
 import { bumpCatalogVersion } from './catalog-version';
 import { digitIdentity, digitsCompatibleAsPeers, readNameDigits } from '../domain/digit-identity';
@@ -532,6 +533,7 @@ export function mergeIntoCanonical(
         ).run(canonicalId, source.brewery, source.name, breweryText, nameText, abvKey, at);
       }
     }
+    mergeHadBeerReferences(db, orphanId, canonicalId);
     db.prepare('DELETE FROM beers WHERE id = ?').run(orphanId);
   })();
   if (bumpVersion) bumpCatalogVersion();

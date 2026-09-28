@@ -1,3 +1,4 @@
+import { seedMergeHistory, mergedHistoryRows } from '../storage/history-merge.testing';
 import { describe, test, expect } from 'vitest';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -244,6 +245,25 @@ describe('unpin & list', () => {
   });
 });
 
+test('#611 a failed beer deletion rolls back copied history and redirected check-ins', () => {
+  const db = newDb();
+  const target = seedBeer(db, { untappd_id: 1234, name: 'Target', brewery: 'Pinta', normalized_name: 'target', normalized_brewery: 'pinta' });
+  const source = orphan(db, 'Pinta', 'Source');
+  seedMergeHistory(db, source, target);
+  db.exec(`CREATE TEMP TRIGGER fail_delete BEFORE DELETE ON beers
+    WHEN OLD.id = ${source} BEGIN SELECT RAISE(ABORT, 'delete blocked'); END;`);
+  expect(() => pinMatch(db, source, 1234, AT)).toThrow('delete blocked');
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-01T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'a', beer_id: source, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 4 },
+    { telegram_id: 1, account_key: 'b', beer_id: source, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: source, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: source }]);
+  expect(db.prepare('SELECT id FROM beers ORDER BY id').all()).toEqual([{ id: target }, { id: source }]);
+  db.close();
+});
+
 test('#384: a pin stamps curated so a published bid can never override it', () => {
   const db = newDb();
   const id = seedBeer(db, {
@@ -253,4 +273,20 @@ test('#384: a pin stamps curated so a published bid can never override it', () =
   pinMatch(db, id, 6614460, '2026-08-09T00:00:00Z');
   const row = db.prepare('SELECT untappd_id, untappd_id_source FROM beers WHERE id = ?').get(id);
   expect(row).toEqual({ untappd_id: 6614460, untappd_id_source: 'curated' });
+});
+
+test('#611 preserves active and archived observations through this merge path', () => {
+  const db = newDb();
+  const target = seedBeer(db, { untappd_id: 1234, name: 'Target', brewery: 'Pinta', normalized_name: 'target', normalized_brewery: 'pinta' });
+  const source = orphan(db, 'Pinta', 'Source');
+  seedMergeHistory(db, source, target);
+  pinMatch(db, source, 1234, AT);
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'b', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: target }]);
+  expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
+  db.close();
 });

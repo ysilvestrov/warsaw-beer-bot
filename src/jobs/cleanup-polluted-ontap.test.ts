@@ -1,3 +1,4 @@
+import { seedMergeHistory, mergedHistoryRows } from '../storage/history-merge.testing';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -291,4 +292,20 @@ describe('#665 Czech style reaches cleanup matching', () => {
       } finally { db.close(); }
     },
   );
+});
+
+test('#611 preserves active and archived observations through this merge path', async () => {
+  const db = fresh();
+  const target = seedBeer(db, { untappd_id: 101, name: 'Atak Chmielu', brewery: 'Pinta', normalized_name: 'atak chmielu', normalized_brewery: 'pinta' });
+  const source = seedBeer(db, { name: '12° — Atak Chmielu', brewery: 'Pinta', normalized_name: '12 atak chmielu', normalized_brewery: 'pinta' });
+  seedMergeHistory(db, source, target);
+  expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 0, merged: 1 });
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'b', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: target }]);
+  expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
+  db.close();
 });

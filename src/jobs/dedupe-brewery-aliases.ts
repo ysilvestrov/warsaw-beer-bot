@@ -1,3 +1,4 @@
+import { mergeHadBeerReferences } from '../storage/untappd_had';
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { breweryAliases } from '../domain/matcher';
@@ -99,6 +100,7 @@ export function dedupeBreweryAliases(db: DB, log: pino.Logger): DedupeResult {
         || findActiveDispositionForBeer(db, p.canonical_id)) continue;
       updateLinks.run(p.canonical_id, p.orphan_id);
       updateCheckins.run(p.canonical_id, p.orphan_id);
+      mergeHadBeerReferences(db, p.orphan_id, p.canonical_id);
       deleteBeer.run(p.orphan_id);
       merged++;
     }

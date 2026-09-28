@@ -1,3 +1,4 @@
+import { seedMergeHistory, mergedHistoryRows } from '../storage/history-merge.testing';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { findAliasTarget } from '../storage/beers';
@@ -318,4 +319,22 @@ describe('repairLegacyCard (#696)', () => {
     expect(db.prepare('SELECT issue_number FROM enrich_failures WHERE beer_id = 29955').get())
       .toEqual({ issue_number: 677 });
   });
+});
+
+test('#611 preserves active and archived observations through this merge path', () => {
+  const { db, input } = fixture();
+  const source = input.beerId;
+  db.prepare(`INSERT INTO beers (id, untappd_id, brewery, name, abv, normalized_brewery, normalized_name) VALUES(77, 3615616, 'Geuzestekerij De Cam', 'Abrikoos Rabarber 2018', 7, 'geuzestekerij de cam', 'abrikoos rabarber')`).run();
+  const target = 77;
+  seedMergeHistory(db, source, target);
+  const preview = previewLegacyCardRepair(db, input);
+  expect(applyLegacyCardRepair(db, input, preview)).toEqual({ canonicalId: target, kind: 'merged' });
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'b', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: target }]);
+  expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
+  db.close();
 });
