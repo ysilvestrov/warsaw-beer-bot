@@ -2260,4 +2260,50 @@ describe('#665 Czech grade lookup context', () => {
     assert(out.kind === 'matched');
     expect(out.result.bid).toBe(10);
   });
+
+  describe('Issue #658 brand-as-brewery rescues', () => {
+    test('matches Kwak / Pauwel to Brouwerij Bosteels Pauwel Kwak via curated alias', async () => {
+      const search = fakeSearch(() => [
+        { bid: 358, beer_name: 'Pauwel Kwak', brewery_name: 'Brouwerij Bosteels', style: 'Pale Ale - Belgian', abv: 8.4, global_rating: 3.75, rating_count: 350000 },
+        { bid: 4698810, beer_name: 'Kwak Blonde', brewery_name: 'Brouwerij Bosteels', style: 'Blonde / Golden Ale - Other', abv: 7.4, global_rating: 3.55, rating_count: 30000 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Kwak',
+        name: 'Pauwel',
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(358);
+    });
+
+    test('matches Kozel / 11° Dark Lager to Pivovar Velké Popovice Kozel Černý / Dark via curated alias', async () => {
+      const search = fakeSearch(() => [
+        { bid: 70150, beer_name: 'Kozel Černý / Dark', brewery_name: 'Pivovar Velké Popovice', style: 'Lager - Tmavé (Czech Dark)', abv: 3.8, global_rating: 3.25, rating_count: 100000 },
+        { bid: 4500655, beer_name: 'Kozel Lager Dark 3,5', brewery_name: 'Pivovar Velké Popovice', style: 'Lager - Tmavé (Czech Dark)', abv: 3.5, global_rating: 3.12, rating_count: 5000 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Kozel',
+        name: '11° Dark Lager',
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(70150);
+    });
+
+    test('matches Cappuccino / Night Pulse 12° to Mad Brew Cappuccino Night Pulse via curated alias', async () => {
+      const search = fakeSearch(() => [
+        { bid: 6547618, beer_name: 'Cappuccino Night Pulse', brewery_name: 'Mad Brew', style: 'Stout - Imperial / Double Milk', abv: 12.0, global_rating: 4.15, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Cappuccino',
+        name: 'Night Pulse 12°',
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6547618);
+    });
+  });
 });

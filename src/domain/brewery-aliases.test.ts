@@ -176,8 +176,8 @@ describe('#347 gate-miss alias batch', () => {
   test('jihlava is a hub over the #202 pair and the group owner', () => {
     expect(aliasNeighbors('jihlava').sort()).toEqual(['jezek kwasnicowy', 'lobkowicz']);
   });
-  test('mad brew is a hub over both of its series names', () => {
-    expect(aliasNeighbors('mad brew').sort()).toEqual(['smoothiemaker', 'tomatol']);
+  test('mad brew is a hub over its series names', () => {
+    expect(aliasNeighbors('mad brew').sort()).toEqual(['cappuccino', 'smoothiemaker', 'tomatol']);
   });
   test('the Cieszyn brewery is a hub over both of its shop labels', () => {
     expect(aliasNeighbors('arcyksiazecy zamkowy cieszyn').sort())
@@ -332,5 +332,32 @@ describe('Curated brewery alias batch for parent brands, suffixes, and typos (#4
       expect(aliasNeighbors(form)).toHaveLength(1);
     },
   );
+});
+
+describe('Cluster #2 conglomerate line and series brand alias batch (#658)', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['kwak', 'bosteels'],
+    ['kozel', 'velke popovice'],
+    ['pilsner urquell', 'plzensky prazdroj'],
+    ['corona extra', 'grupo modelo'],
+    ['cappuccino', 'mad brew'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+
+  test('cappuccino is a spoke of mad brew and not a neighbor of smoothiemaker', () => {
+    expect(aliasNeighbors('cappuccino')).toEqual(['mad brew']);
+    expect(aliasNeighbors('cappuccino')).not.toContain('smoothiemaker');
+  });
 });
 
