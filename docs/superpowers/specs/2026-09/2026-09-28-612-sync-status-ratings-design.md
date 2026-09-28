@@ -47,6 +47,8 @@ and make them available through existing personal-rating consumers.
   Increment a persisted `untappd_link_revision` on each case-insensitive account
   change and compare the captured revision before writing. This detects a link
   changing away and back too; case-only edits leave the revision unchanged.
+  The revision read and all resulting writes share an immediate transaction,
+  so another database connection cannot relink between the check and the writes.
   Keep existing check-in/account history behavior outside this change.
 
 ## Claims and evidence

@@ -69,40 +69,44 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
         await onProgress(`👤 untappd: ${i}/${profiles.length} — ${p.untappd_username}`);
         continue;
       }
-      // A /link during the HTTP request must not attach the old account's ratings
-      // to the newly linked profile. No awaits occur between this guard and writes.
-      const currentProfile = getProfile(db, p.telegram_id);
-      if (currentProfile?.untappd_link_revision !== p.untappd_link_revision ||
-          currentProfile.untappd_username?.toLowerCase() !== p.untappd_username?.toLowerCase()) {
-        log.info({ user: p.untappd_username }, 'untappd profile changed during scrape — skipping response');
-        continue;
-      }
       const items = parseUserBeersPage(html);
-      for (const it of items) {
-        const nb = normalizeBrewery(it.brewery_name);
-        const nn = normalizeName(it.beer_name);
-        const existing = findByBid.get(it.bid) as { id: number } | undefined;
-        let beerId: number;
-        if (existing) {
-          // #616: рейтинг зі сторінки — лише коли блок «Global Rating» знайдено (число або «N/A»);
-          // штамп звірки, провенанс 'checkin' і бамп кешу лише при зміні — у recordProfileBeer.
-          recordProfileBeer(db, existing.id, it, tickNow.toISOString());
-          beerId = existing.id;
-        } else {
-          beerId = upsertBeerByBid(db, {
-            untappd_id: it.bid,
-            name: it.beer_name,
-            brewery: it.brewery_name,
-            style: it.style,
-            abv: it.abv,
-            rating_global: it.global_rating,
-            normalized_name: nn,
-            normalized_brewery: nb,
-            untappd_id_source: 'checkin',
-          });
+      // Hold the writer lock from the account check through the observations,
+      // including when /link is handled by another database connection.
+      const recorded = db.transaction(() => {
+        const currentProfile = getProfile(db, p.telegram_id);
+        if (currentProfile?.untappd_link_revision !== p.untappd_link_revision ||
+            currentProfile.untappd_username?.toLowerCase() !== p.untappd_username?.toLowerCase()) {
+          log.info({ user: p.untappd_username }, 'untappd profile changed during scrape — skipping response');
+          return false;
         }
-        markHad(db, p.telegram_id, beerId, tickNow.toISOString(), it.their_rating);
-      }
+        for (const it of items) {
+          const nb = normalizeBrewery(it.brewery_name);
+          const nn = normalizeName(it.beer_name);
+          const existing = findByBid.get(it.bid) as { id: number } | undefined;
+          let beerId: number;
+          if (existing) {
+            // #616: рейтинг зі сторінки — лише коли блок «Global Rating» знайдено (число або «N/A»);
+            // штамп звірки, провенанс 'checkin' і бамп кешу лише при зміні — у recordProfileBeer.
+            recordProfileBeer(db, existing.id, it, tickNow.toISOString());
+            beerId = existing.id;
+          } else {
+            beerId = upsertBeerByBid(db, {
+              untappd_id: it.bid,
+              name: it.beer_name,
+              brewery: it.brewery_name,
+              style: it.style,
+              abv: it.abv,
+              rating_global: it.global_rating,
+              normalized_name: nn,
+              normalized_brewery: nb,
+              untappd_id_source: 'checkin',
+            });
+          }
+          markHad(db, p.telegram_id, beerId, tickNow.toISOString(), it.their_rating);
+        }
+        return true;
+      }).immediate();
+      if (!recorded) continue;
       ok++;
       breaker.onResult(false, tickNow);
     } catch (e) {
