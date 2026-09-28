@@ -427,8 +427,37 @@ test('a start without credentials cannot retain an earlier completion', async ()
   await chrome.storage.session.set({ checkinSync: { running: false, serverCount: 100, profileTotal: 100,
     mergedThisRun: 5, outcome: 'done', complete: true,
     binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' } } });
+  await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
   await setSettings({ token: '' });
   await handleCheckinSyncStart();
+  expect(await getCached('old-personal')).toBe(null);
+  expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
+    mergedThisRun: 0, outcome: 'error', complete: false });
+});
+
+test('clearing credentials invalidates cached personal data and aborts an active old-token sync', async () => {
+  let resolveFeed!: (response: Response) => void;
+  const feed = new Promise<Response>(resolve => { resolveFeed = resolve; });
+  const fetchFeed = vi.fn((_url: string, _init: RequestInit) => feed);
+  vi.stubGlobal('fetch', fetchFeed);
+  const post = vi.spyOn(client, 'postCheckinSyncPage');
+  await handleCheckinSyncStart();
+  await vi.waitFor(() => expect(fetchFeed).toHaveBeenCalledTimes(1));
+  await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+    is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+  const signal = fetchFeed.mock.calls[0][1].signal!;
+  await setSettings({ token: '' });
+  expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+  const aborted = signal.aborted;
+  const cached = await getCached('old-personal');
+  resolveFeed(new Response('<html></html>'));
+  await handleCheckinSyncStop();
+  await vi.waitFor(async () => expect(await handleCheckinSyncStop()).toEqual({ type: 'checkin-sync:stopped', stopped: false }));
+  expect(aborted).toBe(true);
+  expect(cached).toBe(null);
+  expect(post).not.toHaveBeenCalled();
   expect(sessionStore.get('checkinSync')).toEqual({ running: false, serverCount: 0, profileTotal: null,
     mergedThisRun: 0, outcome: 'error', complete: false });
 });
