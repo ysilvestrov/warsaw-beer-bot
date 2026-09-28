@@ -6,6 +6,7 @@ export interface ProfileRow {
   telegram_id: number;
   untappd_username: string | null;
   untappd_link_revision: number;
+  legacy_sync_revision: number | null;
   language: string | null;
   city: string | null;
   created_at: string;

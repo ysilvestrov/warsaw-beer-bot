@@ -249,13 +249,21 @@ src/
 | `id` | INTEGER | PK AUTOINCREMENT | |
 | `checkin_id` | TEXT | NOT NULL | merge-ключ з Untappd |
 | `telegram_id` | INTEGER | NOT NULL | власник |
+| `account_key` | TEXT | NOT NULL DEFAULT '' (v41) | username у нижньому регістрі або порожній ключ імпорту |
 | `beer_id` | INTEGER | → `beers(id)`, nullable | |
 | `user_rating` | REAL | nullable | особиста оцінка |
 | `checkin_at` | TEXT | NOT NULL | |
 | `venue` | TEXT | nullable | |
-| | | **UNIQUE(telegram_id, checkin_id)** | ідемпотентність імпорту |
+| | | **UNIQUE(telegram_id, account_key, checkin_id)** | ідемпотентність імпорту |
 
-Індекс: `idx_checkins_user_beer (telegram_id, beer_id)`.
+Індекс: `idx_checkins_user_beer (telegram_id, account_key, beer_id)`.
+
+З #611 історія ключована парою `(telegram_id, account_key)`. `account_key` —
+username у нижньому регістрі; порожній ключ зберігає імпорти до першого `/link`.
+Читається лише активний акаунт. Міграція 41 переносить старі рядки на поточні
+username за явним підтвердженням оператора, що ці користувачі не міняли акаунти.
+Гарантії проти запізнілих відповідей імпорту/extension-синхронізації ще належать
+до наступного етапу #611; ядро окремо не деплоїться.
 
 ### 3.6 `match_links` — ontap-пиво ↔ каталог
 | Поле | Тип | Обмеження | Опис |
@@ -421,12 +429,13 @@ issue/картку, відсутність конфліктного аліаса
 | Поле | Тип | Обмеження | Опис |
 |------|-----|-----------|------|
 | `telegram_id` | INTEGER | NOT NULL | |
+| `account_key` | TEXT | NOT NULL DEFAULT '' (v41) | акаунт власника |
 | `beer_id` | INTEGER | NOT NULL → `beers(id)` **ON DELETE CASCADE** | |
 | `last_seen_at` | TEXT | NOT NULL | |
 | `user_rating` | REAL | nullable; 0–5 (v40) | особиста оцінка зі сторінки пив профілю; не оцінка конкретного чекіну |
-| | | **PK (telegram_id, beer_id)** | |
+| | | **PK (telegram_id, account_key, beer_id)** | |
 
-Індекс: `idx_untappd_had_telegram (telegram_id)`.
+Індекс: `idx_untappd_had_telegram (telegram_id, account_key)`.
 Заповнюється скрейпером (`markHad`); рядок пива шукається за bid зі сторінки `/beers`, а не за нормалізованою назвою — інакше позначка «пив» лягала б на вінтаж-близнюка (#617). Об'єднання з `checkins` дає повний
 «drunk-set» — див. §5.2.
 
@@ -455,6 +464,7 @@ API/MCP не змінюються. При зміні прив'язаного use
 |------|-----|-----------|------|
 | `telegram_id` | INTEGER | PK | ключ ідентичності |
 | `untappd_username` | TEXT | nullable | прив'язаний профіль |
+| `legacy_sync_revision` | INTEGER | nullable (v41) | ревізія початкової прив'язки для сумісності старого sync-клієнта; перевірка на наступному етапі #611 |
 | `created_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | |
 | `language` | TEXT | nullable (v3) | `uk`/`pl`/`en`; авто-детект, override через `/lang` |
 | `city` | TEXT | nullable (v14) | обране місто; `NULL` або невідомий slug → `OUTSIDE_CITY` (`'outside-pl'`, #399) |
@@ -623,7 +633,8 @@ Untappd; пропустити його туди означало б дозвол
 ### 3.14 `checkin_sync_state` — прогрес-лічильник extension-синхронізації чекінів (v13)
 | Поле | Тип | Обмеження | Опис |
 |------|-----|-----------|------|
-| `telegram_id` | INTEGER | PK → `user_profiles(telegram_id)` **ON DELETE CASCADE** | власник |
+| `telegram_id` | INTEGER | частина PK → `user_profiles(telegram_id)` **ON DELETE CASCADE** | власник |
+| `account_key` | TEXT | NOT NULL DEFAULT '', частина PK (v41) | акаунт власника |
 | `deepest_max_id` | TEXT | nullable | **з #587 більше не колонка-джерело курсора** — API-поле того самого імені тепер похідне, `MIN(from_id)` з `checkin_coverage` (§3.15); колонка лишається в схемі не record-of-truth |
 | `complete` | INTEGER | NOT NULL DEFAULT 0 | **застаріле з #587: більше не пишеться.** Дно стрічки недоказове (порожня сторінка й мертва сесія за вмістом нерозрізненні — див. §3.15), тому жодне місце більше не стверджує факт про нього. Колонка лишається (дропати нема сенсу — нею ніхто не користується, `/status` перестав її показувати ще в #190), завжди `0` для рядків, створених після #587 |
 | `updated_at` | TEXT | NOT NULL DEFAULT CURRENT_TIMESTAMP | час останньої активності extension-синхронізації, UTC; не доказ завершення |
@@ -641,10 +652,11 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 | Поле | Тип | Обмеження | Опис |
 |------|-----|-----------|------|
 | `telegram_id` | INTEGER | NOT NULL → `user_profiles(telegram_id)` **ON DELETE CASCADE** | власник |
-| `from_id` | INTEGER | NOT NULL, разом з `telegram_id` — PK | найстаріший доведено покритий `checkin_id` діапазону (включно) |
+| `account_key` | TEXT | NOT NULL DEFAULT '', частина PK (v41) | акаунт власника |
+| `from_id` | INTEGER | NOT NULL, разом з `telegram_id` та `account_key` — PK | найстаріший доведено покритий `checkin_id` діапазону (включно) |
 | `to_id` | INTEGER | NOT NULL | найновіший доведено покритий `checkin_id` діапазону (включно) |
 
-Інваріант: діапазони одного користувача **не перетинаються і не дотикаються** (усе, що
+Інваріант: діапазони однієї пари користувач/акаунт **не перетинаються і не дотикаються** (усе, що
 дотикається — зокрема впритул, `to_id + 1 = from_id` сусіднього — зливається в один рядок
 під час запису). Зазвичай один рядок на користувача; кілька — рівно стільки, скільки в нього
 незакритих дір.
@@ -740,7 +752,7 @@ Per-user стан для **extension check-in sync** (див. §4, `POST /checki
 ```
 user_profiles 1───* checkins        (telegram_id)
 user_profiles 1───1 user_filters    (telegram_id, CASCADE)
-user_profiles 1───1 checkin_sync_state (telegram_id, CASCADE)
+user_profiles 1───* checkin_sync_state (telegram_id, account_key, CASCADE)
 user_profiles 1───* checkin_coverage (telegram_id, CASCADE)
 user_profiles 1───* untappd_had     (telegram_id)
 user_profiles 1───* api_tokens      (telegram_id, CASCADE; ротація тримає 1 активний)
@@ -796,6 +808,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 37 | `enrich_failures.real_failure_count`/`rescued_real_failure_count` (#697) — окреме покоління реальних провалів, без бекфілу; мережевий `blocked` не змінює його. Новий позитивний replay звіряє покоління при apply навіть на БД, яка раніше вже записала v36 |
 | 38 | `bug_report_drafts`, `bug_reports`, `bug_report_media`, `bug_report_bans` — діалог, черга, приватні вкладення і бан скарг на помилки; без бекфілу |
 | 40 | `untappd_had.user_rating` (#612) — nullable особиста оцінка профілю (0–5), резервна до оцінки чекіну; без бекфілу. `user_profiles.untappd_link_revision` починається з 0 й збільшується при зміні акаунта, щоб відкинути стару відповідь скрейпу навіть після зміни туди й назад |
+| 41 | `account_key` у чотирьох таблицях історії, складені ключі та `legacy_sync_revision`; старі дані збережено за поточним акаунтом, лічильник AUTOINCREMENT чекінів збережено |
 
 ---
 
@@ -837,7 +850,7 @@ side-effect-free. Джерело тексту — `buildHelpText` з `src/bot/co
 до **20 MB** (ліміт Telegram `getFile`; великий JSON → запакувати в ZIP).
 **Під капотом:** streaming-парсер (`csv-parse` / `stream-json` / `yauzl`),
 вставка батчами по **500** у `db.transaction`, живий лічильник прогресу.
-Ідемпотентний за `UNIQUE(telegram_id, checkin_id)`. Рядок пива — через `upsertBeerByBid`
+Ідемпотентний за `UNIQUE(telegram_id, account_key, checkin_id)`. Рядок пива — через `upsertBeerByBid`
 (рядок експорту з bid: `style`/`abv`/`rating_global` лише заповнюють порожнє, без перейменування)
 або `ensureOrphan` (рядок без bid; злінкованого пива не торкається), #617.
 
@@ -1958,7 +1971,7 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 за **bid** (канонічний `untappd_id`; не знайдено — резолвить **єдину** сироту з тією самою нормалізованою
 парою й цифрами назви `same`/`year-fallback` щодо назви bid (#636), інакше новий рядок; факти не стираються, назва не змінюється,
 провенанс лише посилюється, #617) → локальний
-`beers.id`, далі `mergeCheckin` (ідемпотентно за `UNIQUE(telegram_id, checkin_id)`); зливає
+`beers.id`, далі `mergeCheckin` (ідемпотентно за `UNIQUE(telegram_id, account_key, checkin_id)`); зливає
 доведений діапазон сторінки в `checkin_coverage` (§3.15) і оновлює `checkin_sync_state.profile_total`
 (§3.14). Повертає `{ merged, alreadyKnown, pageSize, nextMaxId, nextCursor, profileTotal,
 serverCount, complete }` (`complete` — застаріле поле проводу, завжди `false`).

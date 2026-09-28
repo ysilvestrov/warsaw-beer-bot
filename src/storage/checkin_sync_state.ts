@@ -1,4 +1,5 @@
 import type { DB } from './db';
+import { getHistoryOwner } from './history-owner';
 import { deepestCoveredId } from './checkin_coverage';
 
 export interface SyncState {
@@ -11,11 +12,11 @@ export interface SyncState {
 
 // #587: курсор більше не зберігається окремо. Він ПОХІДНИЙ від покриття — найглибший
 // доведений id, — тож не існує місця, де можна було б ствердити глибину, якої не досягли.
-export function getSyncState(db: DB, telegramId: number): SyncState {
+export function getSyncState(db: DB, telegramId: number, accountKey?: string): SyncState {
   const row = db
-    .prepare('SELECT complete, profile_total, updated_at FROM checkin_sync_state WHERE telegram_id = ?')
-    .get(telegramId) as { complete: number; profile_total: number | null; updated_at: string } | undefined;
-  const deepest = deepestCoveredId(db, telegramId);
+    .prepare('SELECT complete, profile_total, updated_at FROM checkin_sync_state WHERE telegram_id = ? AND account_key = ?')
+    .get(telegramId, accountKey ?? getHistoryOwner(db, telegramId).accountKey) as { complete: number; profile_total: number | null; updated_at: string } | undefined;
+  const deepest = deepestCoveredId(db, telegramId, accountKey);
   return {
     deepest_max_id: deepest === null ? null : String(deepest),
     complete: row?.complete === 1,
@@ -26,12 +27,12 @@ export function getSyncState(db: DB, telegramId: number): SyncState {
 
 // Єдине, що ще пишеться в цю таблицю: останній відомий лік чекінів у профілі Untappd.
 // COALESCE — щоб сторінка-фрагмент (у якої статистики немає) не стирала значення.
-export function recordProfileTotal(db: DB, telegramId: number, profileTotal: number | null): void {
+export function recordProfileTotal(db: DB, telegramId: number, profileTotal: number | null, accountKey?: string): void {
   db.prepare(
-    `INSERT INTO checkin_sync_state (telegram_id, deepest_max_id, complete, profile_total, updated_at)
-       VALUES (?, NULL, 0, ?, CURRENT_TIMESTAMP)
-     ON CONFLICT(telegram_id) DO UPDATE SET
+    `INSERT INTO checkin_sync_state (telegram_id, account_key, deepest_max_id, complete, profile_total, updated_at)
+       VALUES (?, ?, NULL, 0, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT(telegram_id, account_key) DO UPDATE SET
        profile_total = COALESCE(excluded.profile_total, checkin_sync_state.profile_total),
        updated_at = CURRENT_TIMESTAMP`,
-  ).run(telegramId, profileTotal);
+  ).run(telegramId, accountKey ?? getHistoryOwner(db, telegramId).accountKey, profileTotal);
 }
