@@ -304,3 +304,33 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
   });
 });
 
+describe('Curated brewery alias batch for parent brands, suffixes, and typos (#417, #483, #462, #302, #338, #659)', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['transcend', 'transcend beer crafters'],
+    ['schladminger', 'schladming'],
+    ['maisels weisse', 'gebr maisel'],
+    ['nymburg', 'nymburk'],
+    ['platan', 'protivin'],
+    ['eeuwige', 'de eeuwige jeugd'],
+    ['sonnenbrau', 'sonnen brau mursbach'],
+    ['st bernard', 'st bernardus'],
+    ['hosl', 'privatbrauerei hosl'],
+    ['perennial', 'perennial artisan ales'],
+    ['stiegl', 'stieglbrauerei zu salzburg'],
+    ['maryensztad', 'maryensztadt'],
+    ['braurei eichhorn', 'eichhorn dorfleins'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically with no extra neighbours', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toEqual([untappd]);
+    expect(aliasNeighbors(untappd)).toEqual([shop]);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+});
+
