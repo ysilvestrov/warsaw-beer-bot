@@ -1,4 +1,8 @@
 import { vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as userProfiles from '../storage/user_profiles';
 import pino from 'pino';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
@@ -159,6 +163,43 @@ describe('refreshAllUntappd', () => {
     expect(await refreshAllUntappd({ db, log: silentLog, http })).toEqual({ ok: 0, rotated: 0 });
     expect(db.prepare('SELECT * FROM untappd_had').all()).toEqual([]);
     expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
+  });
+
+  test('holds the account lock from the revision read through rating writes', async () => {
+    const dir = mkdtempSync(join(tmpdir(), '612-link-race-'));
+    const db = openDb(join(dir, 'test.db'));
+    migrate(db);
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'old');
+    const other = openDb(join(dir, 'test.db'));
+    other.pragma('busy_timeout = 0');
+    const readProfile = userProfiles.getProfile;
+    const attempts: string[] = [];
+    const spy = vi.spyOn(userProfiles, 'getProfile').mockImplementation((connection, id) => {
+      const profile = readProfile(connection, id);
+      try {
+        setUntappdUsername(other, id, 'new');
+        attempts.push('committed');
+      } catch (error) {
+        attempts.push((error as { code: string }).code);
+      }
+      return profile;
+    });
+    try {
+      const http = fakeHttp({ 'https://untappd.com/user/old/beers': PAGE_ONE_BEER(101, 'Atak', 'Pinta', '4.12') });
+      expect(await refreshAllUntappd({ db, log: silentLog, http })).toEqual({ ok: 1, rotated: 0 });
+      expect(attempts).toEqual(['SQLITE_BUSY']);
+      expect(readProfile(db, 1)?.untappd_username).toBe('old');
+      expect(db.prepare('SELECT user_rating FROM untappd_had').all()).toEqual([{ user_rating: 4 }]);
+      setUntappdUsername(other, 1, 'new');
+      expect(readProfile(db, 1)?.untappd_username).toBe('new');
+      expect(db.prepare('SELECT user_rating FROM untappd_had').all()).toEqual([{ user_rating: null }]);
+    } finally {
+      spy.mockRestore();
+      other.close();
+      db.close();
+      rmSync(dir, { recursive: true });
+    }
   });
 
   test.each([403, 503])('a failed HTTP %s scrape does not overwrite profile ratings', async (status) => {

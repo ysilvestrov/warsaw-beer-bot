@@ -95,3 +95,9 @@ ABA race and a status hint tying a retained total to the latest sync activity.
   v40 migration twice on a fresh read-only production backup: hashes of every old
   column in beers, checkins, had, profiles, sync state and coverage unchanged;
   no non-null ratings or nonzero revisions invented, integrity ok, FK check empty.
+
+The next review identified a second-connection race between the revision read
+and writes. A two-connection SQLite test reproduced a successful concurrent
+relink before the fix; an immediate transaction now holds the writer lock across
+the guard and page writes, and the test verifies the competing relink is blocked
+until those writes finish, then clears the ratings after acquiring the lock.
