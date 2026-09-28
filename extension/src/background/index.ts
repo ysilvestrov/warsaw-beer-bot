@@ -2,7 +2,7 @@ import { getSettings } from '../shared/config';
 import { ENRICH_ORIGINS } from '../shared/enrich-permissions';
 import { postMatch, postEnrichCandidates, postEnrichResult, ApiError, getCheckinSyncState, postCheckinSyncPage } from '../api/client';
 import { runCheckinSync, type SyncOutcome, type SyncProgress } from './handle-checkin-sync';
-import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer } from '../api/types';
+import type { AlgoliaQuery, AlgoliaResponse, EnrichCandidate, EnrichResult, MatchResult, RawBeer, CheckinSyncState } from '../api/types';
 import { clearAll, clearKeys, setCached, setCachedIfMatching, setCachedMany } from '../cache/store';
 
 export interface MatchMessage {
@@ -121,7 +121,15 @@ export interface CheckinSyncStopMessage { type: 'checkin-sync:stop' }
 const SYNC_PAGE_CAP = 200;
 const SYNC_STATE_KEY = 'checkinSync';
 
+interface SyncBinding {
+  username: string;
+  linkRevision: number;
+  token: string;
+  baseUrl: string;
+}
+
 interface StoredSyncStatus {
+  binding?: SyncBinding | null;
   running: boolean;
   serverCount: number;
   profileTotal: number | null;
@@ -141,9 +149,12 @@ async function readSyncStatus(): Promise<StoredSyncStatus> {
   };
 }
 
+let syncGeneration = 0;
 let syncWriteChain: Promise<void> = Promise.resolve();
-function enqueueSyncStatus(s: StoredSyncStatus): Promise<void> {
-  syncWriteChain = syncWriteChain.catch(() => undefined).then(() => writeSyncStatus(s));
+function enqueueSyncStatus(s: StoredSyncStatus, generation = syncGeneration): Promise<void> {
+  syncWriteChain = syncWriteChain.catch(() => undefined).then(async () => {
+    if (generation === syncGeneration) await writeSyncStatus(s);
+  });
   return syncWriteChain;
 }
 
@@ -208,11 +219,13 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
 
+  const generation = ++syncGeneration;
+  let binding: SyncBinding | null = null;
   syncRunning = true;
   const controller = new AbortController();
   syncAbortController = controller;
   try {
-    await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+    await enqueueSyncStatus({ running: true, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false, binding }, generation);
   } catch (error) {
     syncRunning = false;
     syncAbortController = null;
@@ -224,16 +237,26 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
     try {
       const onProgress = (p: SyncProgress) => {
         void enqueueSyncStatus({
+          binding,
           running: true,
           serverCount: p.serverCount,
           profileTotal: p.profileTotal,
           mergedThisRun: p.mergedThisRun,
           outcome: null,
           complete: false,
-        });
+        }, generation).catch(() => undefined);
       };
       const outcome = await runCheckinSync({
-        getState: () => getCheckinSyncState(baseUrl, token),
+        getState: async () => {
+          const state = await getCheckinSyncState(baseUrl, token);
+          if (generation !== syncGeneration) controller.abort();
+          if (Number.isSafeInteger(state.linkRevision) && state.linkRevision >= 0) {
+            binding = { username: state.username.toLowerCase(), linkRevision: state.linkRevision, token, baseUrl };
+            await enqueueSyncStatus({ binding, running: true, serverCount: state.serverCount,
+              profileTotal: state.profileTotal, mergedThisRun: 0, outcome: null, complete: false }, generation);
+          }
+          return state;
+        },
         fetchFeed: async (username, maxId) => {
           // more_feed is XHR-only: without X-Requested-With Untappd 307-redirects it to
           // /home. A redirect on that endpoint means the request wasn't honoured (e.g.
@@ -250,13 +273,14 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
           }
           return res.text();
         },
-        submitPage: (html, maxId) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal),
+        submitPage: (html, maxId, linkRevision) => postCheckinSyncPage(baseUrl, token, html, maxId, controller.signal, undefined, linkRevision),
         onProgress,
         sleep: (ms) => abortableDelay(ms, controller.signal),
         pageCap: SYNC_PAGE_CAP,
         signal: controller.signal,
       });
       terminalStatus = {
+        binding,
         running: false,
         serverCount: outcome.serverCount,
         profileTotal: outcome.profileTotal,
@@ -264,12 +288,12 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
         outcome: outcome.status,
         complete: outcome.complete,
       };
-      await enqueueSyncStatus(terminalStatus);
+      await enqueueSyncStatus(terminalStatus, generation);
     } catch {
       if (terminalStatus) {
-        await enqueueSyncStatus(terminalStatus).catch(() => undefined);
+        await enqueueSyncStatus(terminalStatus, generation).catch(() => undefined);
       } else {
-        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+        await enqueueSyncStatus({ running: false, serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false, binding }, generation);
       }
     } finally {
       syncRunning = false;
@@ -292,14 +316,57 @@ export async function handleCheckinSyncStop(): Promise<{ type: 'checkin-sync:sto
   return { type: 'checkin-sync:stopped', stopped: true };
 }
 
-export async function handleCheckinSyncStatus(): Promise<{ type: 'checkin-sync:status:ok' } & StoredSyncStatus> {
-  const status = await readSyncStatus();
-  if (status.running && !syncStartPromise && !syncRunning && !syncAbortController) {
-    const recovered = { ...status, running: false, outcome: 'error' as const };
-    await enqueueSyncStatus(recovered).catch(() => undefined);
-    return { type: 'checkin-sync:status:ok', ...recovered };
+function emptySyncStatus(outcome: StoredSyncStatus['outcome'] = null, state?: CheckinSyncState): StoredSyncStatus {
+  return { running: false, serverCount: state?.serverCount ?? 0, profileTotal: state?.profileTotal ?? null,
+    mergedThisRun: 0, outcome, complete: false };
+}
+
+// Credentials are worker-only; never return the private binding in a popup/content reply.
+function syncStatusReply(s: StoredSyncStatus) {
+  return { type: 'checkin-sync:status:ok' as const, running: s.running, serverCount: s.serverCount,
+    profileTotal: s.profileTotal, mergedThisRun: s.mergedThisRun, outcome: s.outcome, complete: s.complete };
+}
+
+export async function handleCheckinSyncStatus() {
+  const generation = syncGeneration;
+  const settings = await getSettings();
+  if (!settings.token) return syncStatusReply(emptySyncStatus('error'));
+  let current: CheckinSyncState;
+  try {
+    current = await getCheckinSyncState(settings.baseUrl, settings.token);
+  } catch (error) {
+    return syncStatusReply(emptySyncStatus(error instanceof ApiError && error.code === 'not_linked' ? 'not_linked' : 'error'));
   }
-  return { type: 'checkin-sync:status:ok', ...status };
+  if (!Number.isSafeInteger(current.linkRevision) || current.linkRevision < 0) {
+    return syncStatusReply(emptySyncStatus('sync_context_required'));
+  }
+  const latestSettings = await getSettings();
+  const orphaned = !syncStartPromise && !syncRunning && !syncAbortController;
+  const status = await readSyncStatus();
+  if (generation !== syncGeneration || latestSettings.token !== settings.token || latestSettings.baseUrl !== settings.baseUrl) {
+    return syncStatusReply(emptySyncStatus());
+  }
+  if (!status.binding && (syncStartPromise || syncRunning)) {
+    return syncStatusReply({ ...emptySyncStatus(null, current), running: true });
+  }
+  const binding = status.binding;
+  const matches = binding && binding.username === current.username.toLowerCase()
+    && binding.linkRevision === current.linkRevision && binding.token === settings.token && binding.baseUrl === settings.baseUrl;
+  if (!matches) {
+    const invalidationGeneration = ++syncGeneration;
+    syncAbortController?.abort();
+    await handleCacheClearAll();
+    const fresh = { ...emptySyncStatus(binding ? 'account_changed' : null, current),
+      binding: { username: current.username.toLowerCase(), linkRevision: current.linkRevision, token: settings.token, baseUrl: settings.baseUrl } };
+    await enqueueSyncStatus(fresh, invalidationGeneration).catch(() => undefined);
+    return syncStatusReply(invalidationGeneration === syncGeneration ? fresh : emptySyncStatus());
+  }
+  if (status.running && orphaned) {
+    const recovered = { ...status, running: false, outcome: 'error' as const, complete: false };
+    await enqueueSyncStatus(recovered, generation).catch(() => undefined);
+    return syncStatusReply(recovered);
+  }
+  return syncStatusReply(status);
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

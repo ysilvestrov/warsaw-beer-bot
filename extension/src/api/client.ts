@@ -1,6 +1,6 @@
 import type { AlgoliaResponse, CheckinSyncPageResult, CheckinSyncState, EnrichCandidate, EnrichResult, MatchResponse, MatchResult, RawBeer } from './types';
 
-export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked' | 'no_session';
+export type ApiErrorCode = 'unauthorized' | 'server' | 'network' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required';
 
 export class ApiError extends Error {
   constructor(public code: ApiErrorCode, message?: string) {
@@ -139,20 +139,28 @@ export async function postCheckinSyncPage(
   maxId: string | null,
   signal?: AbortSignal,
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  linkRevision?: number,
 ): Promise<CheckinSyncPageResult> {
   let res: Response;
   try {
     res = await fetchWithTimeout(`${trimBase(baseUrl)}/checkins/sync`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html, maxId }),
+      body: JSON.stringify({ html, maxId, linkRevision }),
       signal,
     }, timeoutMs);
   } catch {
     throw new ApiError('network');
   }
   if (res.status === 401) throw new ApiError('unauthorized');
-  if (res.status === 409) throw new ApiError('not_linked');
+  if (res.status === 409) {
+    const body = await res.json().catch(() => null) as { error?: unknown } | null;
+    const code = body?.error;
+    if (code === 'not_linked' || code === 'account_changed' || code === 'sync_context_required') {
+      throw new ApiError(code);
+    }
+    throw new ApiError('server');
+  }
   if (res.status === 502) throw new ApiError('blocked');
   // #587: 422 контрадикторить наші власні дані (порожня сторінка вище найстарішого
   // check-in'у, що ми маємо) — сесія Untappd мертва, а не дно стрічки.

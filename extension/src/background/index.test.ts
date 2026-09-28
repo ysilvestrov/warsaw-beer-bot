@@ -21,6 +21,7 @@ beforeEach(async () => {
     },
   });
   await setSettings({ token: 'tok', baseUrl: 'https://api.test' });
+  vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100 });
 });
 
 afterEach(() => {
@@ -103,7 +104,7 @@ describe('handleMatch', () => {
 describe('check-in sync controls', () => {
   it('stops the active run and records a cancelled outcome', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     let markFeedStarted!: () => void;
     const feedStarted = new Promise<void>((resolve) => { markFeedStarted = resolve; });
@@ -125,7 +126,7 @@ describe('check-in sync controls', () => {
 
   it('aborts an in-flight backend page submit', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     let markBackendStarted!: () => void;
     const backendStarted = new Promise<void>((resolve) => { markBackendStarted = resolve; });
@@ -159,6 +160,7 @@ describe('check-in sync controls', () => {
     await chrome.storage.session.set({
       checkinSync: {
         running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
+        binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' },
       },
     });
 
@@ -172,6 +174,7 @@ describe('check-in sync controls', () => {
     await chrome.storage.session.set({
       checkinSync: {
         running: true, serverCount: 12, profileTotal: 100, mergedThisRun: 4, outcome: null, complete: false,
+        binding: { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' },
       },
     });
     let releaseFirstRead!: () => void;
@@ -180,7 +183,7 @@ describe('check-in sync controls', () => {
     });
     vi.mocked(chrome.storage.session.get).mockImplementationOnce(async () => firstRead);
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
@@ -211,8 +214,8 @@ describe('check-in sync controls', () => {
 
   it('replies after an initial status write fails and allows a later start', async () => {
     vi.mocked(chrome.storage.session.set).mockRejectedValueOnce(new Error('session storage unavailable'));
-    const getSyncState = vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
@@ -230,7 +233,7 @@ describe('check-in sync controls', () => {
       type: 'checkin-sync:started', alreadyRunning: false,
     });
     await vi.waitFor(async () => {
-      expect(getSyncState).toHaveBeenCalledOnce();
+      expect(client.postCheckinSyncPage).toHaveBeenCalledTimes(1);
       expect(await handleCheckinSyncStatus()).toMatchObject({ running: false, outcome: 'done' });
     });
   });
@@ -246,7 +249,7 @@ describe('check-in sync controls', () => {
       for (const [key, value] of Object.entries(values)) sessionStore.set(key, value);
     });
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
@@ -279,8 +282,8 @@ describe('check-in sync controls', () => {
       }
       for (const [key, value] of Object.entries(values)) sessionStore.set(key, value);
     });
-    const getSyncState = vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>feed</html>', { status: 200 })));
     vi.spyOn(client, 'postCheckinSyncPage').mockResolvedValue({
@@ -297,12 +300,12 @@ describe('check-in sync controls', () => {
     await expect(handleCheckinSyncStart()).resolves.toEqual({
       type: 'checkin-sync:started', alreadyRunning: false,
     });
-    await vi.waitFor(() => expect(getSyncState).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(client.postCheckinSyncPage).toHaveBeenCalledTimes(2));
   });
 
   it('wakes the delay when stopped instead of fetching another page', async () => {
     vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({
-      username: 'bob', deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
+      username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 100,
     });
     const fetchMock = vi.fn(async () => new Response('<html>feed</html>', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -319,4 +322,86 @@ describe('check-in sync controls', () => {
     });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+});
+
+
+describe('#611 cached sync reports', () => {
+  const binding = { username: 'bob', linkRevision: 1, token: 'tok', baseUrl: 'https://api.test' };
+  const completed = { running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done', complete: true, binding };
+  it.each([
+    { username: 'other', linkRevision: 2 }, { username: 'bob', linkRevision: 3 },
+  ])('never reuses A completion for $username revision $linkRevision', async current => {
+    await chrome.storage.session.set({ checkinSync: completed });
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ ...current, deepest_max_id: null, serverCount: 0, profileTotal: null, complete: false });
+    await handleCacheSet('old-personal', { raw: { brewery: 'B', name: 'N' }, matched_beer: null,
+      is_drunk: true, drunk_uncertain: false, user_rating: 4, source: 'exact', searched: true });
+    expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
+    expect(await getCached('old-personal')).toBe(null);
+  });
+  it('retains a verified report without exposing credentials in the popup reply', async () => {
+    await chrome.storage.session.set({ checkinSync: completed });
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'BOB', linkRevision: 1, deepest_max_id: null, serverCount: 100, profileTotal: null, complete: false });
+    expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+      serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome: 'done', complete: true });
+  });
+  it('cannot establish a cached completion when current state is unavailable', async () => {
+    await chrome.storage.session.set({ checkinSync: completed });
+    vi.spyOn(client, 'getCheckinSyncState').mockRejectedValue(new Error('offline'));
+    expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+      serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'error', complete: false });
+  });
+  it('discards an old report without a binding', async () => {
+    const { binding: _binding, ...legacy } = completed;
+    await chrome.storage.session.set({ checkinSync: legacy });
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'bob', linkRevision: 1, deepest_max_id: null, serverCount: 12, profileTotal: null, complete: false });
+    expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+      serverCount: 12, profileTotal: null, mergedThisRun: 0, outcome: null, complete: false });
+  });
+  it('does not reuse a report after credentials change, even with the same username and revision', async () => {
+    await chrome.storage.session.set({ checkinSync: completed });
+    await setSettings({ token: 'another-user' });
+    vi.spyOn(client, 'getCheckinSyncState').mockResolvedValue({ username: 'bob', linkRevision: 1, deepest_max_id: null, serverCount: 0, profileTotal: null, complete: false });
+    expect(await handleCheckinSyncStatus()).toMatchObject({ serverCount: 0, mergedThisRun: 0, complete: false, outcome: 'account_changed' });
+  });
+});
+
+test('a delayed status validation does not replace a completed run with an obsolete running report', async () => {
+  const state = { username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 12, profileTotal: 13 };
+  let releaseValidation!: (s: typeof state) => void;
+  const validation = new Promise<typeof state>(resolve => { releaseValidation = resolve; });
+  vi.spyOn(client, 'getCheckinSyncState').mockResolvedValueOnce(state).mockImplementationOnce(() => validation);
+  vi.stubGlobal('fetch', async () => new Response('feed'));
+  let releasePage!: (s: never) => void;
+  const page = new Promise<never>(resolve => { releasePage = resolve; });
+  const submit = vi.spyOn(client, 'postCheckinSyncPage').mockImplementationOnce(() => page);
+  await handleCheckinSyncStart();
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+  const reading = handleCheckinSyncStatus();
+  await vi.waitFor(() => expect(client.getCheckinSyncState).toHaveBeenCalledTimes(2));
+  releasePage({ merged: 1, alreadyKnown: 0, pageSize: 1, nextMaxId: null, nextCursor: null,
+    profileTotal: 13, serverCount: 13, complete: false } as never);
+  await vi.waitFor(() => expect(sessionStore.get('checkinSync')).toMatchObject({ outcome: 'done' }));
+  releaseValidation(state);
+  expect(await reading).toEqual({ type: 'checkin-sync:status:ok', running: false,
+    serverCount: 13, profileTotal: 13, mergedThisRun: 1, outcome: 'done', complete: true });
+});
+
+test('queued progress and a terminal reply from A cannot restore A after a verified switch to B', async () => {
+  const a = { username: 'bob', linkRevision: 1, deepest_max_id: null, complete: false, serverCount: 99, profileTotal: 100 };
+  const b = { username: 'other', linkRevision: 2, deepest_max_id: null, complete: false, serverCount: 0, profileTotal: null };
+  vi.spyOn(client, 'getCheckinSyncState').mockResolvedValueOnce(a).mockResolvedValue(b);
+  vi.stubGlobal('fetch', async () => new Response('feed'));
+  let releasePage!: (s: never) => void;
+  const page = new Promise<never>(resolve => { releasePage = resolve; });
+  const submit = vi.spyOn(client, 'postCheckinSyncPage').mockImplementationOnce(() => page);
+  await handleCheckinSyncStart();
+  await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1));
+  expect(await handleCheckinSyncStatus()).toMatchObject({ serverCount: 0, complete: false, outcome: 'account_changed' });
+  releasePage({ merged: 1, alreadyKnown: 0, pageSize: 1, nextMaxId: null, nextCursor: null,
+    profileTotal: 100, serverCount: 100, complete: false } as never);
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(await handleCheckinSyncStatus()).toEqual({ type: 'checkin-sync:status:ok', running: false,
+    serverCount: 0, profileTotal: null, mergedThisRun: 0, outcome: 'account_changed', complete: false });
+  expect(sessionStore.get('checkinSync')).toMatchObject({ binding: { username: 'other', linkRevision: 2 }, serverCount: 0, complete: false });
 });

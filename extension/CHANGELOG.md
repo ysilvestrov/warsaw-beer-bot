@@ -25,6 +25,8 @@
 
 ## [Unreleased]
 
+- After changing your linked Untappd account, “Sync my check-ins” could show the previous account’s progress or finish too early. It now uses the selected account’s history and stops if you change accounts during a sync.
+
 - Beers marked as already tried could be missing your rating until you ran “Sync my check-ins”. Your rating can now appear after the bot’s daily Untappd update.
 
 ## [0.21.0] - 2026-09-27

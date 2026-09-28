@@ -73,6 +73,7 @@ export interface EnrichResult {
 
 export interface CheckinSyncState {
   username: string;
+  linkRevision: number;
   deepest_max_id: string | null;
   complete: boolean;
   serverCount: number;

@@ -6,7 +6,7 @@ export interface SyncProgress {
   mergedThisRun: number;
 }
 
-export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'error';
+export type SyncStatus = 'done' | 'capped' | 'cancelled' | 'not_linked' | 'blocked' | 'no_session' | 'account_changed' | 'sync_context_required' | 'error';
 
 export interface SyncOutcome {
   status: SyncStatus;
@@ -19,7 +19,7 @@ export interface SyncOutcome {
 export interface CheckinSyncDeps {
   getState: () => Promise<CheckinSyncState>;
   fetchFeed: (username: string, maxId: string | null) => Promise<string>;
-  submitPage: (html: string, maxId: string | null) => Promise<CheckinSyncPageResult>;
+  submitPage: (html: string, maxId: string | null, linkRevision: number) => Promise<CheckinSyncPageResult>;
   onProgress: (p: SyncProgress) => void;
   sleep: (ms: number) => Promise<void>;
   pageCap: number;
@@ -48,6 +48,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     const code = errCode(e);
     return finish(code === 'not_linked' ? 'not_linked' : 'error');
   }
+  if (!Number.isSafeInteger(state.linkRevision) || state.linkRevision < 0) return finish('sync_context_required');
   serverCount = state.serverCount;
   profileTotal = state.profileTotal;
   if (deps.signal?.aborted) return finish('cancelled');
@@ -68,10 +69,11 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
     if (deps.signal?.aborted) return finish('cancelled');
     let res: CheckinSyncPageResult;
     try {
-      res = await deps.submitPage(html, cursor);
+      res = await deps.submitPage(html, cursor, state.linkRevision);
     } catch (e) {
       if (deps.signal?.aborted) return finish('cancelled');
       const code = errCode(e);
+      if (code === 'account_changed' || code === 'sync_context_required') return finish(code);
       if (code === 'blocked') return finish('blocked');
       if (code === 'not_linked') return finish('not_linked');
       if (code === 'no_session') return finish('no_session');
@@ -97,7 +99,7 @@ export async function runCheckinSync(deps: CheckinSyncDeps): Promise<SyncOutcome
   function finish(status: SyncStatus): SyncOutcome {
     // #587: «повністю» — це збіг лічильників, а не дно стрічки: дно недоказове, бо
     // порожню відповідь віддає і воно, і мертва сесія.
-    const complete = profileTotal !== null && serverCount >= profileTotal;
+    const complete = status !== 'account_changed' && status !== 'sync_context_required' && profileTotal !== null && serverCount >= profileTotal;
     return { status, complete, serverCount, profileTotal, mergedThisRun };
   }
 }
