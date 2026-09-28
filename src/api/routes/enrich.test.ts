@@ -1528,3 +1528,17 @@ describe('#665 card row identity with Czech grades', () => {
     } finally { db.close(); }
   });
 });
+
+
+test('#665 relay forwards stored input style into candidate lookup', async () => {
+  const { db, app } = setup();
+  try {
+    const res = await post(app, '/enrich/result', { brewery: 'KONRAD Brewery', name: 'Alpha 10°', style: 'Czech Lager',
+      algolia: { hits: [{ bid: 158057, beer_name: 'Alpha 12°', brewery_name: 'KONRAD Brewery',
+        beer_abv: 5.2, rating_score: 3.5 }], nbHits: 1 } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).status).toBe('not_found');
+    expect(db.prepare('SELECT name, untappd_id FROM beers').all())
+      .toEqual([{ name: 'Alpha 10°', untappd_id: null }]);
+  } finally { db.close(); }
+});

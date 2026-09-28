@@ -119,7 +119,7 @@ export async function refreshOntap(deps: Deps): Promise<void> {
             continue;
           }
           const { brewery, name } = identity;
-          const m = matchPrepared({ brewery, name, abv: t.abv }, prepared);
+          const m = matchPrepared({ brewery, name, abv: t.abv, style: t.style }, prepared);
           let beerId: number;
           let isFreshOrphan = false;
           if (m && !findActiveDispositionForBeer(db, m.id)) {
@@ -217,9 +217,9 @@ function isRememberedMerge(db: DB, link: MatchRow | null): boolean {
   return getBeer(db, link.untappd_beer_id)?.untappd_id != null;
 }
 
-function listBeerCatalog(db: DB): { id: number; brewery: string; name: string; abv: number | null }[] {
+function listBeerCatalog(db: DB): { id: number; brewery: string; name: string; style: string | null; abv: number | null }[] {
   return db
-    .prepare(`SELECT b.id, b.brewery, b.name, b.abv FROM beers b
+    .prepare(`SELECT b.id, b.brewery, b.name, b.style, b.abv FROM beers b
       WHERE NOT ${inactiveLegacyOrphanPredicate}`)
-    .all() as { id: number; brewery: string; name: string; abv: number | null }[];
+    .all() as { id: number; brewery: string; name: string; style: string | null; abv: number | null }[];
 }

@@ -39,7 +39,7 @@ export async function enrichOneOrphan(
   }
 
   const outcome = await lookupWithFallback(
-    () => lookupBeer({ brewery: beer.brewery, name: beer.name, abv: beer.abv, search: deps.search }),
+    () => lookupBeer({ brewery: beer.brewery, name: beer.name, abv: beer.abv, style: beer.style, search: deps.search }),
     beerId,
     deps.webFallback ?? null,
   );

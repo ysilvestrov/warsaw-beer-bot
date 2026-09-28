@@ -23,7 +23,7 @@ import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 const NAME_FUZZY_THRESHOLD = 0.85;
 const RE_WEB_COOLDOWN_DAYS = 30;
 
-interface GateInput { brewery: string; name: string; abv: number | null }
+interface GateInput { brewery: string; name: string; abv: number | null; style?: string | null }
 
 function breweryStrict(input: GateInput, cand: ResolvedBeer): boolean {
   return breweryAliasesMatch(breweryAliases(cand.brewery_name), breweryAliases(input.brewery));
@@ -78,7 +78,10 @@ export function evaluateCandidate(input: GateInput, cand: ResolvedBeer): GateSta
   // #636: both name signals below read digit-free names, so another number of the series passes them (`Dr.Hazy #7`
   // → `Dr. Hazy #4`). The input is the orphan's text, the candidate Untappd's; a number only Untappd writes stays
   // acceptable, as in lookupBeer — this path runs only when the search found nothing, so there is no better tier.
-  if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name)) === 'different') return 'reject:digits';
+  if (digitIdentity(readNameDigits(input.name), readNameDigits(cand.beer_name), {
+    input: { name: input.name, style: input.style },
+    candidate: { name: cand.beer_name },
+  }) === 'different') return 'reject:digits';
   if (nameGatePass(input, cand)) return 'accept';
   if (!sharedLongToken(tokens(input.name), tokens(cand.beer_name))) return 'reject:name-token';
   return 'needs-abv';
@@ -129,7 +132,7 @@ async function hydrateAbv(hydrate: BeerSearch, cand: ResolvedBeer): Promise<numb
 
 export async function runWebFallback(
   deps: WebFallbackDeps,
-  input: { beerId: number; brewery: string; name: string; abv: number | null },
+  input: { beerId: number; brewery: string; name: string; abv: number | null; style?: string | null },
 ): Promise<SearchResult | null> {
   const now = (deps.now ?? (() => new Date()))();
 

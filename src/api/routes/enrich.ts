@@ -371,7 +371,7 @@ export function enrichRoute(app: Hono<ApiEnv>, deps: ApiDeps): void {
       : htmlSearch(html!);
     const outcome = withRelayQuery(
       await lookupWithFallback(
-        () => lookupBeer({ brewery, name, abv: row.abv, search }),
+        () => lookupBeer({ brewery, name, abv: row.abv, style: row.style, search }),
         row.id,
         deps.webFallback ?? null,
       ),

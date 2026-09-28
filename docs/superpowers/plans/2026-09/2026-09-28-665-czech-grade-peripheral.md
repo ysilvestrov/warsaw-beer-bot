@@ -160,7 +160,7 @@ Keep same/year-fallback as its only merge tiers.
 **Consumes:** implemented optional core context.
 **Produces:** optional LookupArgs/GateInput style and style-bearing production catalog loaders.
 
-- [ ] Add input-only lookup regression:
+- [x] Add input-only lookup regression:
 ~~~ts
 const bad = {
   bid: 158057, beer_name: 'Konrad 12°', brewery_name: 'KONRAD Brewery',
@@ -206,7 +206,7 @@ expect(getRow(db, pollutedId)?.untappd_id).toBeNull();
 ~~~
 Repeat input-only style. Source must not be deleted into twelve.
 
-- [ ] Capture red. LookupArgs gains style?:string|null. lookupBeer gains optional fifth originalName?:string after existing originalDigits. Context:
+- [x] Capture red. LookupArgs gains style?:string|null. lookupBeer gains optional fifth originalName?:string after existing originalDigits. Context:
 ~~~ts
 const identityName = originalName ?? name;
 const inputContext = { name: identityName, style: args.style };
@@ -228,7 +228,7 @@ src/index.ts forwards already loaded beer.style. No extra fetch.
 
 Refresh listBeerCatalog adds b.style and style:string|null in return/cast, and matchPrepared receives style:t.style. Cleanup cleanPool selects b.style and matchPrepared receives style:p.style. Verify prepared orphan additions already retain style without a new code path.
 
-- [ ] Focused green, input/candidate/retry omission mutations, full gate, review and commit.
+- [x] Focused green, input/candidate/retry omission mutations, full gate, review and commit.
 
 ## P3 — alias and spec.md
 
@@ -307,3 +307,5 @@ No peripheral production file was modified while writing this plan.
 
 
 P1 receipt: nine named regressions failed before implementation;391 focused tests pass. Peer/resolution/API omission mutations fail assertions and were restored. Full gate3711passed,1skipped/typecheck passed. Styles come from the same selected rows; peer roles reverse together, while persistent callers retain same/year-fallback tiers. Authoritative id/alias/pin paths are unchanged. Logs:/tmp/issue-665-p1-{red,green,gate,mutation-peer,mutation-resolution,mutation-api}.log.
+
+P2 receipt: eleven assertion regressions fail before implementation;343 focused tests pass. Eight omission mutations catch lookup input/candidate style, original retry name, refresh catalog/input, cleanup input, relay and cron context loss. Full gate3725passed,1skipped/typecheck passed. Cleanup required style in BOTH cleanPool and allOntap source SELECTs, proven by the input-only regression. Logs:/tmp/issue-665-p2-{red,green,gate,mutation-*}.log.

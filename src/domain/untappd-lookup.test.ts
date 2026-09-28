@@ -2216,3 +2216,38 @@ describe('#636 lookupBeer drops candidates of another number or vintage before a
     expect(out.result.bid).toBe(6819481);
   });
 });
+
+
+describe('#665 Czech grade lookup context', () => {
+  test.each<[string | null, string | null, string, string]>([
+    ['Czech Lager', null, 'Alpha 12°', 'not_found'],
+    [null, 'Czech Lager', 'Alpha 12°', 'not_found'],
+    ['Czech Lager', null, 'Alpha 10°', 'matched'],
+    ['IPA', 'Czech Lager', 'Alpha 12°', 'matched'],
+  ])('styles %s / %s against %s yield %s', async (inputStyle, candidateStyle, name, kind) => {
+    const out = await lookupBeer({ brewery: 'KONRAD Brewery', name: 'Alpha 10°', style: inputStyle,
+      search: fakeSearch(() => [{ bid: 158057, beer_name: name, brewery_name: 'KONRAD Brewery',
+        style: candidateStyle, abv: 5.2, global_rating: 3.5 }]) });
+    expect(out.kind).toBe(kind);
+  });
+
+  test('descriptor retry keeps the original explicit grade', async () => {
+    const bad: SearchResult = { bid: 158057, beer_name: 'Alpha 12°', brewery_name: 'KONRAD Brewery',
+      style: 'Czech Lager', abv: 5.2, global_rating: 3.5 };
+    const out = await lookupBeer({ brewery: 'KONRAD Brewery', name: 'Alpha 10° Světlý Ležák',
+      search: fakeSearch((q) => /le[zž][aá]k/i.test(q) ? [] : [bad]) });
+    expect(out.kind).toBe('not_found');
+    assert(out.kind === 'not_found');
+    expect(out.candidates).toEqual([bad]);
+  });
+
+  test('descriptor retry keeps the original raw-name ale veto', async () => {
+    const good: SearchResult = { bid: 10, beer_name: 'Rainbow of Death 14°', brewery_name: 'Pivovar Mazák',
+      style: 'Czech Lager', abv: 6.5, global_rating: 4 };
+    const out = await lookupBeer({ brewery: 'Mazák', name: '16° Rainbow of Death West Coast IPA',
+      search: fakeSearch((q) => /West/.test(q) ? [] : [good]) });
+    expect(out.kind).toBe('matched');
+    assert(out.kind === 'matched');
+    expect(out.result.bid).toBe(10);
+  });
+});

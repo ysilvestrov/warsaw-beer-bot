@@ -378,3 +378,22 @@ describe('lookupWithFallback', () => {
     expect(out).toBe(notFoundEmpty);
   });
 });
+
+
+describe('#665 input Czech style in web fallback', () => {
+  const input = { brewery: 'KONRAD Brewery', name: 'Konrad 10°', abv: null, style: 'Czech Lager' };
+  const candidate: ResolvedBeer = { bid: 158057, brewery_name: 'KONRAD Brewery', beer_name: 'Konrad 12°', abv: null };
+  test('input-only style rejects different degrees and allows equal ones', () => {
+    expect(evaluateCandidate(input, candidate)).toBe('reject:digits');
+    expect(gateWebCandidate(input, candidate)).toBe(false);
+    expect(gateWebCandidate({ ...input, name: 'Konrad 12°' }, candidate)).toBe(true);
+  });
+  test('the spent fallback never returns the wrong-grade result', async () => {
+    const db = freshDb();
+    try {
+      const beerId = seed(db, input.brewery, input.name);
+      expect(await runWebFallback({ db, log, cap: 90, hydrate: noHydrate,
+        resolver: { resolve: async () => [candidate] } }, { beerId, ...input })).toBeNull();
+    } finally { db.close(); }
+  });
+});

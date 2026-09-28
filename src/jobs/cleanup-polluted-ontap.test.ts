@@ -274,3 +274,21 @@ describe('cleanupPollutedOntap', () => {
     expect(getRow(db, untappdRowId)?.name).toBe('Some Brewery Stuff 14°·5%');
   });
 });
+
+
+describe('#665 Czech style reaches cleanup matching', () => {
+  test.each([['Czech Lager', null], [null, 'Czech Lager']])(
+    'styles %s / %s prevent deletion into a different-grade row', async (catalogStyle, inputStyle) => {
+      const db = fresh();
+      try {
+        seedBeer(db, { untappd_id: 158057, brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: catalogStyle,
+          normalized_brewery: 'konrad', normalized_name: 'konrad' });
+        const pollutedId = seedBeer(db, { brewery: 'KONRAD Brewery', name: 'KONRAD Brewery Konrad 10°·4%',
+          style: inputStyle, normalized_brewery: 'konrad', normalized_name: 'konrad brewery konrad 10 4' });
+        expect(await cleanupPollutedOntap(db, silentLog)).toEqual({ rewritten: 1, merged: 0 });
+        expect(getRow(db, pollutedId)?.name).toBe('Konrad 10°');
+        expect(getRow(db, pollutedId)?.untappd_id).toBeNull();
+      } finally { db.close(); }
+    },
+  );
+});
