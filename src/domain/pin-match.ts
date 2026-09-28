@@ -1,3 +1,4 @@
+import { mergeHadBeerReferences } from '../storage/untappd_had';
 import type { DB } from '../storage/db';
 import { bumpCatalogVersion } from '../storage/catalog-version';
 import { dropAliasesOnRelink } from '../storage/beers';
@@ -41,6 +42,7 @@ export function pinMatch(db: DB, beerId: number, untappdId: number, at: string):
       // CASCADE, so with foreign_keys=ON a checkin on the orphan would abort the DELETE.
       // Point them at the canonical row (its real Untappd identity) before removing the orphan.
       db.prepare('UPDATE checkins SET beer_id = ? WHERE beer_id = ?').run(canonical.id, beerId);
+      mergeHadBeerReferences(db, beerId, canonical.id);
       db.prepare('DELETE FROM beers WHERE id = ?').run(beerId); // enrich_failures CASCADE-drop
       bumpCatalogVersion();
       return { kind: 'merged', canonicalId: canonical.id, redirected: info.changes as number };

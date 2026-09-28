@@ -269,13 +269,6 @@ export function applyLegacyCardRepair(
       canonicalId = Number(created.lastInsertRowid);
     }
 
-    db.prepare(`
-      INSERT INTO untappd_had (telegram_id, account_key, beer_id, last_seen_at, user_rating)
-        SELECT telegram_id, account_key, ?, last_seen_at, user_rating FROM untappd_had WHERE beer_id = ?
-      ON CONFLICT (telegram_id, account_key, beer_id) DO UPDATE SET
-        last_seen_at = MAX(untappd_had.last_seen_at, excluded.last_seen_at),
-        user_rating = COALESCE(untappd_had.user_rating, excluded.user_rating)
-    `).run(canonicalId, input.beerId);
     mergeIntoCanonical(db, input.beerId, canonicalId, input.at, {
       brewery: o.brewery, name: o.name, abv: input.cardAbv, byBid: true,
     }, false);

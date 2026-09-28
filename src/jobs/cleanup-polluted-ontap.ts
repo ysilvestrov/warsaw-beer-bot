@@ -1,3 +1,4 @@
+import { mergeHadBeerReferences } from '../storage/untappd_had';
 import type pino from 'pino';
 import type { DB } from '../storage/db';
 import { extractBeerName } from '../sources/ontap/identity';
@@ -91,6 +92,7 @@ export async function cleanupPollutedOntap(db: DB, log: pino.Logger): Promise<Cl
       if (plan.kind === 'merge') {
         updateLinks.run(plan.targetId, plan.pollutedId);
         updateCheckins.run(plan.targetId, plan.pollutedId);
+        mergeHadBeerReferences(db, plan.pollutedId, plan.targetId);
         deleteBeer.run(plan.pollutedId);
         merged++;
       } else {

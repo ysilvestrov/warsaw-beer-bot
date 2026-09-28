@@ -1,3 +1,4 @@
+import { seedMergeHistory, mergedHistoryRows } from '../storage/history-merge.testing';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import pino from 'pino';
@@ -450,4 +451,20 @@ describe('#665 Czech grades in alias deduplication', () => {
         .toEqual(orphanRows);
     } finally { db.close(); }
   });
+});
+
+test('#611 preserves active and archived observations through this merge path', () => {
+  const db = fresh();
+  const target = seedBeer(db, { untappd_id: 1905189, name: 'Juicilicious', brewery: 'Piwne Podziemie / Beer Underground', normalized_name: 'juicilicious', normalized_brewery: 'piwne podziemie beer underground' });
+  const source = seedBeer(db, { name: 'Juicilicious', brewery: 'Piwne Podziemie Brewery', normalized_name: 'juicilicious', normalized_brewery: 'piwne podziemie' });
+  seedMergeHistory(db, source, target);
+  expect(dedupeBreweryAliases(db, silentLog)).toEqual({ pairsMerged: 1, beersDeleted: 1 });
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'b', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: target }]);
+  expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
+  db.close();
 });

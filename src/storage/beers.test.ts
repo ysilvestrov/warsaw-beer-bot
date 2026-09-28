@@ -1,3 +1,4 @@
+import { seedMergeHistory, mergedHistoryRows } from './history-merge.testing';
 import { openDb } from './db';
 import { migrate } from './schema';
 import { upsertBeerByBid, ensureOrphan, findBeerByNormalized, loadCatalog, readWebTriedAt, stampWebTried } from './beers';
@@ -2365,4 +2366,18 @@ describe('#665 contextual persistent orphan identity', () => {
         normalized_brewery: 'konrad', normalized_name: 'konrad' })).toBe(first);
     } finally { db.close(); }
   });
+});
+
+test('#611 preserves active and archived observations through this merge path', () => {
+  const { db, canonicalId: target, orphanId: source } = mergeFixture();
+  seedMergeHistory(db, source, target);
+  mergeIntoCanonical(db, source, target, '2026-09-28T00:00:00Z');
+  expect(mergedHistoryRows(db)).toEqual([
+    { telegram_id: 1, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 3 },
+    { telegram_id: 1, account_key: 'b', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 0 },
+    { telegram_id: 2, account_key: 'a', beer_id: target, last_seen_at: '2026-09-02T00:00:00Z', user_rating: 2 },
+  ]);
+  expect(db.prepare('SELECT account_key, beer_id FROM checkins').all()).toEqual([{ account_key: 'b', beer_id: target }]);
+  expect(db.prepare('SELECT id FROM beers WHERE id = ?').get(source)).toBe(undefined);
+  db.close();
 });

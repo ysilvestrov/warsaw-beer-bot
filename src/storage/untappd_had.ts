@@ -2,6 +2,17 @@ import type { DB } from './db';
 import { getHistoryOwner } from './history-owner';
 import { drunkBeerIds } from './checkins';
 
+// The caller holds the catalog-mutation transaction and deletes the source
+// only after this copy. Canonical ratings take precedence within each owner.
+export function mergeHadBeerReferences(db: DB, fromBeerId: number, toBeerId: number): void {
+  db.prepare(`INSERT INTO untappd_had(telegram_id, account_key, beer_id, last_seen_at, user_rating)
+    SELECT telegram_id, account_key, ?, last_seen_at, user_rating FROM untappd_had WHERE beer_id = ?
+    ON CONFLICT(telegram_id, account_key, beer_id) DO UPDATE SET
+      last_seen_at = MAX(untappd_had.last_seen_at, excluded.last_seen_at),
+      user_rating = COALESCE(untappd_had.user_rating, excluded.user_rating)`)
+    .run(toBeerId, fromBeerId);
+}
+
 export function markHad(
   db: DB,
   telegramId: number,
