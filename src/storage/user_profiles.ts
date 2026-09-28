@@ -5,6 +5,7 @@ import { OUTSIDE_CITY, isSelectableCity } from '../domain/cities';
 export interface ProfileRow {
   telegram_id: number;
   untappd_username: string | null;
+  untappd_link_revision: number;
   language: string | null;
   city: string | null;
   created_at: string;
@@ -23,6 +24,8 @@ export function setUntappdUsername(db: DB, telegramId: number, username: string)
       // #612: profile ratings belong to the linked account. Existing check-in
       // history/reset semantics (#611) are separate from these new observations.
       db.prepare('UPDATE untappd_had SET user_rating = NULL WHERE telegram_id = ?').run(telegramId);
+      db.prepare('UPDATE user_profiles SET untappd_link_revision = untappd_link_revision + 1 WHERE telegram_id = ?')
+        .run(telegramId);
     }
     db.prepare('UPDATE user_profiles SET untappd_username = ? WHERE telegram_id = ?')
       .run(username, telegramId);

@@ -748,6 +748,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     sql: `
       ALTER TABLE untappd_had ADD COLUMN user_rating REAL
         CHECK (user_rating IS NULL OR user_rating BETWEEN 0 AND 5);
+      ALTER TABLE user_profiles ADD COLUMN untappd_link_revision INTEGER NOT NULL DEFAULT 0;
     `,
   },
 ];

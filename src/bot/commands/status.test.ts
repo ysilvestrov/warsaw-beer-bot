@@ -24,6 +24,9 @@ test('/status exposes the historical sync time and had-only evidence from its us
   recordProfileTotal(db, 1, 1);
   db.prepare('UPDATE checkin_sync_state SET updated_at = ? WHERE telegram_id = 1')
     .run('2026-09-03 22:19:05');
+  recordProfileTotal(db, 1, null);
+  db.prepare('UPDATE checkin_sync_state SET updated_at = ? WHERE telegram_id = 1')
+    .run('2026-09-28 08:00:00');
 
   const replies: string[] = [];
   const bot = new Telegraf<BotContext>('123:FAKE');
@@ -42,7 +45,8 @@ test('/status exposes the historical sync time and had-only evidence from its us
     entities: [{ type: 'bot_command', offset: 0, length: 7 }] } });
   expect(replies).toHaveLength(1);
   expect(replies[0]).toContain('Check-ins synced: 1 / 1');
-  expect(replies[0]).toContain('Last sync activity: 2026-09-03 22:19:05 UTC');
+  expect(replies[0]).toContain('Last sync activity: 2026-09-28 08:00:00 UTC');
+  expect(replies[0]).toContain('Untappd total is the last known value.');
   expect(replies[0]).toContain('Beers known to the server without imported check-ins: 1.');
   expect(replies[0]).not.toContain('✅');
   db.close();

@@ -147,6 +147,20 @@ describe('refreshAllUntappd', () => {
     expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
   });
 
+  test('ignores a response when the account changes away and back during the request', async () => {
+    const db = fresh();
+    ensureProfile(db, 1);
+    setUntappdUsername(db, 1, 'old');
+    const http: Http = { async get() {
+      setUntappdUsername(db, 1, 'new');
+      setUntappdUsername(db, 1, 'old');
+      return PAGE_ONE_BEER(101, 'Atak Chmielu', 'Pinta', '4.12');
+    } };
+    expect(await refreshAllUntappd({ db, log: silentLog, http })).toEqual({ ok: 0, rotated: 0 });
+    expect(db.prepare('SELECT * FROM untappd_had').all()).toEqual([]);
+    expect(db.prepare('SELECT * FROM beers').all()).toEqual([]);
+  });
+
   test.each([403, 503])('a failed HTTP %s scrape does not overwrite profile ratings', async (status) => {
     const db = fresh();
     ensureProfile(db, 1);

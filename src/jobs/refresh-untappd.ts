@@ -71,7 +71,9 @@ export async function refreshAllUntappd(deps: Deps): Promise<RefreshUntappdResul
       }
       // A /link during the HTTP request must not attach the old account's ratings
       // to the newly linked profile. No awaits occur between this guard and writes.
-      if (getProfile(db, p.telegram_id)?.untappd_username?.toLowerCase() !== p.untappd_username?.toLowerCase()) {
+      const currentProfile = getProfile(db, p.telegram_id);
+      if (currentProfile?.untappd_link_revision !== p.untappd_link_revision ||
+          currentProfile.untappd_username?.toLowerCase() !== p.untappd_username?.toLowerCase()) {
         log.info({ user: p.untappd_username }, 'untappd profile changed during scrape — skipping response');
         continue;
       }

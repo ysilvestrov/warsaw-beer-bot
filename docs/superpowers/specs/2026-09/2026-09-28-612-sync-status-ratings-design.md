@@ -44,6 +44,9 @@ and make them available through existing personal-rating consumers.
   The existing account setter does not reset history (#611 is separate). Clear
   only the new profile rating field when the linked username changes, and ignore
   a scrape response whose profile owner changed while the request was in flight.
+  Increment a persisted `untappd_link_revision` on each case-insensitive account
+  change and compare the captured revision before writing. This detects a link
+  changing away and back too; case-only edits leave the revision unchanged.
   Keep existing check-in/account history behavior outside this change.
 
 ## Claims and evidence
@@ -53,6 +56,7 @@ and make them available through existing personal-rating consumers.
 | Stored check-in count | Rows in `checkins` for this user | Says nothing about new or deleted remote check-ins |
 | Observed profile total | Profile HTML from the last sync | Historical observation, not today's total |
 | Last sync time | Existing sync-state write timestamp | Does not establish completeness |
+| Account link revision | Atomic increment by the account setter on a real username change | Migration starts at zero; no claim about past changes |
 | Beer was tried | Profile's `/beers` card and its bid | No check-in ID or consumption timestamp |
 | Profile personal rating | `Their Rating` numeric value on that profile's beer card | Not assumed to be latest individual check-in rating |
 | Last observed time | Time of the successful scrape | Observation time, not drinking time |
