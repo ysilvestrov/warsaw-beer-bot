@@ -52,6 +52,7 @@ export async function handleCacheGetMany(keys: string[]): Promise<(MatchResult |
   try {
     const binding = await currentCacheBinding();
     const results = await Promise.all(keys.map(key => getCached(key)));
+    if (!sameCacheBinding(binding, await currentCacheBinding())) return keys.map(() => null);
     return results.map(result => result && sameCacheBinding(result.cacheBinding, binding) ? result : null);
   } catch {
     return keys.map(() => null);
@@ -265,7 +266,13 @@ async function beginCheckinSync(): Promise<CheckinSyncStartReply> {
   const { token, baseUrl } = await getSettings();
   if (!token) {
     const generation = ++syncGeneration;
-    await handleCacheClearAll().catch(() => undefined);
+    try {
+      await handleCacheClearAll();
+    } catch (error) {
+      // Physical cleanup may fail. Every production read still validates the
+      // credential/account binding, so retained entries cannot cross accounts.
+      console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
+    }
     await enqueueSyncStatus(emptySyncStatus('error'), generation);
     return { type: 'checkin-sync:started', alreadyRunning: false };
   }
@@ -389,7 +396,13 @@ export async function handleCheckinSyncStatus() {
     if (generation !== syncGeneration) return syncStatusReply(emptySyncStatus());
     const invalidationGeneration = ++syncGeneration;
     syncAbortController?.abort();
-    await handleCacheClearAll().catch(() => undefined);
+    try {
+      await handleCacheClearAll();
+    } catch (error) {
+      // Physical cleanup may fail. Every production read still validates the
+      // credential/account binding, so retained entries cannot cross accounts.
+      console.warn('[beer-overlay] cache cleanup failed; stale bindings remain unreadable', error);
+    }
     await enqueueSyncStatus(emptySyncStatus('error'), invalidationGeneration).catch(() => undefined);
     return syncStatusReply(emptySyncStatus('error'));
   }
