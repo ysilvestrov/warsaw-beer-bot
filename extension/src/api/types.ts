@@ -16,7 +16,15 @@ export interface MatchedBeer {
   untappd_id: number | null;
 }
 
+export interface MatchCacheBinding {
+  username: string;
+  linkRevision: number;
+  credential: string;
+}
+
 export interface MatchResult {
+  /** Worker-proven binding; old unscoped cache entries cannot be reused. */
+  cacheBinding?: MatchCacheBinding;
   raw: { brewery: string; name: string };
   matched_beer: MatchedBeer | null;
   is_drunk: boolean;

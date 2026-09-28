@@ -1045,3 +1045,15 @@ describe('runOverlay progressive match chunks (#667)', () => {
     expect(names).toEqual(expect.arrayContaining(['Cached', 'Fresh 0', 'Fresh 200']));
   });
 });
+
+it('reads visible beer cache entries in one batch through the supplied guarded reader', async () => {
+  const first = { el: cardEl(), brewery: 'PINTA', name: 'First' };
+  const second = { el: cardEl(), brewery: 'PINTA', name: 'Second' };
+  const read = vi.fn(async () => [drunkResult('PINTA', 'First'), drunkResult('PINTA', 'Second')]);
+  const send = vi.fn();
+  await runOverlay(document, adapterFor([first, second]), send, undefined, vi.fn(), read);
+  expect(read).toHaveBeenCalledExactlyOnceWith(['pinta|first', 'pinta|second']);
+  expect(send).toHaveBeenCalledTimes(0);
+  expect(first.el.querySelector('[data-beerbadge] [data-icon="check"]')).not.toBeNull();
+  expect(second.el.querySelector('[data-beerbadge] [data-icon="check"]')).not.toBeNull();
+});

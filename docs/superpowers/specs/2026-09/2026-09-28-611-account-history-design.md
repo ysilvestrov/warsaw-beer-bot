@@ -85,6 +85,7 @@ Capture a read-only preflight summary and make a database backup before deployme
 | Profile total | Last observed total for this account | Accepted page for the captured binding; never another account's last value |
 | Link revision | Current binding generation | Increment on every genuine switch, including A → B → A; case-only link does not increment |
 | Legacy sync baseline | Untagged clients may write only to the original accepted binding | Migration/first-link baseline; never advanced on a switch |
+| Cached extension match | Result belongs to the current credentials and account binding | Worker captures a credential digest and fresh server username/revision before and after matching; cache reads and writes compare against fresh binding, including negative personal answers. Failed deletion cannot make a mismatched entry readable |
 | Cached extension sync report | Outcome of a run for a particular binding | Captured revision/username; current-state comparison before reuse |
 | Drunk status / personal rating | Active account has a stored observation of this beer | Owner-scoped check-ins and scraped observations; archived owners excluded |
 
@@ -101,3 +102,7 @@ Keep this specification whole. The first implementation plan covers the core own
 ## Out of scope
 
 Account pickers, account deletion, verification of arbitrary export ownership, stable numeric Untappd user identity, a rewrite of sync traversal, and changes to token ownership are outside #611. Tokens remain bound to their Telegram user; all their history responses reflect that user's active account.
+
+## PR review follow-up: match cache
+
+The live PR replay exposed delayed content-script cache writes after credential/account changes, failed physical cache deletion, and ordinary sync starts invalidating unrelated matches. Reuse the existing binding identity for match caching: attach only a credential digest (never the token), username and revision to worker-produced results; verify server identity before/after a match, and before cache reads/writes. Read visible-card caches in one batch so a catalog scan checks the server binding once, rather than once per card. Missing/failed binding verification is a cache miss. Old unscoped entries are misses. Sync-run generation does not decide match validity.

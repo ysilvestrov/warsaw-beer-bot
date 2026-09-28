@@ -319,10 +319,13 @@ describe('enrichOrphans relays shop facts to the service worker', () => {
     };
     await setCached('k0', newer);
     vi.mocked(chrome.runtime.sendMessage).mockImplementation(
-      ((msg: { type: string; key?: string; expected?: MatchResult; result?: MatchResult }, cb: (reply: unknown) => void) => {
+      ((msg: { type: string; key?: string; keys?: string[]; expected?: MatchResult; result?: MatchResult }, cb: (reply: unknown) => void) => {
         if (msg.type === 'enrich:candidates') cb({ candidates: [
           { brewery: 'B', name: 'N', eligible: false, linked: true },
         ] });
+        else if (msg.type === 'cache:get-many') {
+          void Promise.all(msg.keys!.map(key => getCached(key))).then(results => cb({ results }));
+        }
         else if (msg.type === 'match') cb({ type: 'match:ok', results: [linked] });
         else if (msg.type === 'cache:set-if-matching') {
           void setCachedIfMatching(msg.key!, msg.expected!, msg.result!).then((written) => cb({ written }));
