@@ -31,7 +31,7 @@
 | This plan and its design | Scope, evidence, progress; mark task checkboxes after their gates |
 
 Worktree: `/home/ysi/warsaw-beer-bot/.worktrees/664-digit-context-design`, branch
-`docs/664-digit-context-design`, clean baseline at `2ca8cd5` (source base `a56143c`).
+`docs/664-digit-context-design`, planning baseline at `2ca8cd5` (source base `a56143c`). Execution rebased onto `1cb7f45`; the frozen pre-code baseline is `f9882eb`.
 Baseline already verified: 3867 tests passed, one skipped. Fetch/rebase if execution
 starts after `main` moves, preserve the design/plan commits, and verify the resulting baseline.
 The worktree already has a symlink to the checkout's `node_modules`; do not install dependencies
@@ -117,8 +117,8 @@ function differentNonEmptySets(a: readonly string[], b: readonly string[]): bool
 **Consumes:** Current ordinary reader, `canon`, `minus`, existing Czech-grade guard.
 **Produces:** Shared interfaces above; `readProfile`/`findHopSpans`; global lexical hop recognition and contextual fractional recognition; original ordinal/ABV/year behavior.
 
-- [ ] **Step 1: Freeze the read-only replay inputs before code changes.** Create the measurement script in the appendix at `/tmp/664-core-replay.cjs`. Run `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs capture`. Keep `/tmp/664-core-corpus.json` and the baseline revision with this session; this is operational evidence, not a committed runtime module. The script reads the available DB, never writes it, and does not access the network.
-- [ ] **Step 2: Add exact tests.** Put these in a new `describe('#664 hop codes')`; all rows are explicit facts, not generated expected results:
+- [x] **Step 1: Freeze the read-only replay inputs before code changes.** Create the measurement script in the appendix at `/tmp/664-core-replay.cjs`. Run `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs capture`. Keep `/tmp/664-core-corpus.json` and the baseline revision with this session; this is operational evidence, not a committed runtime module. The script reads the available DB, never writes it, and does not access the network.
+- [x] **Step 2: Add exact tests.** Put these in a new `describe('#664 hop codes')`; all rows are explicit facts, not generated expected results:
 
 ```ts
 test('the hop token is consumed once and does not hide the series number', () => {
@@ -186,8 +186,8 @@ the plain `same` verdict above must not be mistaken for hop recognition. Pin the
 numbers of bare `IPA 3/20` to `['20', '3']`. Add boundary rows `NOTHBC472`, `HBC472suffix`,
 `Idaho 8`, empty input, and a disconnected `PŁ167 (kegged 3/20)`; none consumes a false hop span.
 
-- [ ] **Step 3: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect failures on HBC extraction and new hop comparisons; distinguish real assertion failures from syntax/import errors.
-- [ ] **Step 4: Implement bounded recognition and wire the predicate.** Rename the old reader; make public `readNameDigits(name)` delegate to `readProfile(name)`; add the optional fields/context. Use Unicode token boundaries and these starting grammars:
+- [x] **Step 3: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect failures on HBC extraction and new hop comparisons; distinguish real assertion failures from syntax/import errors.
+- [x] **Step 4: Implement bounded recognition and wire the predicate.** Rename the old reader; make public `readNameDigits(name)` delegate to `readProfile(name)`; add the optional fields/context. Use Unicode token boundaries and these starting grammars:
 
 ```ts
 const PREFIX_HOP = /(?<![\p{L}\p{N}])(HBC|BRU|NZH|YCR|PŁ|CF)[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
@@ -233,7 +233,7 @@ if (czechGradesContradict(input, candidate, context)) return 'different';
 with `hasLetters` taken from the original ordinary profile. Context-free manually constructed
 `NameDigits` continue to work. No raw source is added to the public reader's ordinary return shape.
 
-- [ ] **Step 5: Verify and commit.** Run the focused test file, then `npm test && npm run typecheck`. Keep all pre-existing #636/#725 expected values. Commit only the two task files: `fix(domain): distinguish proven hop codes from series numbers (#664) (U1)`.
+- [x] **Step 5: Verify and commit.** Run the focused test file, then `npm test && npm run typecheck`. Keep all pre-existing #636/#725 expected values. Commit only the two task files: `fix(domain): distinguish proven hop codes from series numbers (#664) (U1)`.
 
 ### Task 2 (U2): Mask only proven brewery-number occurrences
 
@@ -242,7 +242,7 @@ with `hasLetters` taken from the original ordinary profile. Context-free manuall
 **Consumes:** U1 `readProfile`, `Span`, extended context, and `maskSpans`.
 **Produces:** Private `brandTokens(raw: string): string[]`, `findBrandNumberSpans(name: string, context?: DigitIdentityContext): Span[]`; number-preserving brand tokenization and curated leading `101` handling. Peers retain the shared catalog when reversing.
 
-- [ ] **Step 1: Add contextual regression tests.** Use literal profiles and exact verdicts:
+- [x] **Step 1: Add contextual regression tests.** Use literal profiles and exact verdicts:
 
 ```ts
 test.each<[string, string, string, string, readonly string[], DigitIdentity]>([
@@ -290,8 +290,8 @@ diacritics/legal-form brand variants, brand evidence only from the other side, a
 are present. Reuse the existing #725 tests unchanged. Assert neither the passed profiles nor
 the context arrays change after comparison using explicit before/after object equality.
 
-- [ ] **Step 2: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect the new contextual brand positives and peer-catalog test to fail; ordinary hard-number negatives should already pass.
-- [ ] **Step 3: Implement source-spanned brand masking before hop extraction.** Import only existing `baseNormalize`, `stripLegalForm`, `canonicalizeBreweryBrand`, `BREWERY_NOISE`, and `BREWERY_COLLAB_SEP` from `normalize.ts`; do not import `matcher.ts`, and do not use `normalizeBrewery`, which drops separate digits.
+- [x] **Step 2: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect the new contextual brand positives and peer-catalog test to fail; ordinary hard-number negatives should already pass.
+- [x] **Step 3: Implement source-spanned brand masking before hop extraction.** Import only existing `baseNormalize`, `stripLegalForm`, `canonicalizeBreweryBrand`, `BREWERY_NOISE`, and `BREWERY_COLLAB_SEP` from `normalize.ts`; do not import `matcher.ts`, and do not use `normalizeBrewery`, which drops separate digits.
 
 ```ts
 function brandTokens(raw: string): string[] {
@@ -331,7 +331,7 @@ const reverse = context ? {
 No DB/network work in these functions; `knownBreweries` is supplied data. Their omission means
 no guessed catalog. Name matching/exact identity is not rewritten by this task.
 
-- [ ] **Step 4: Verify and commit.** Focused file, then `npm test && npm run typecheck`. Commit only the two task files: `fix(domain): preserve series numbers beside brewery fragments (#664) (U2)`.
+- [x] **Step 4: Verify and commit.** Focused file, then `npm test && npm run typecheck`. Commit only the two task files: `fix(domain): preserve series numbers beside brewery fragments (#664) (U2)`.
 
 ### Task 3 (U3): Contextual TAP descriptors and hard LAB/EL/53M identifiers
 
@@ -340,7 +340,7 @@ no guessed catalog. Name matching/exact identity is not rewritten by this task.
 **Consumes:** U1 profile metadata and masking, U2 number-preserving brand tokens/context.
 **Produces:** Private `findSeriesCodeSpans(name: string, context?: DigitIdentityContext): CodeSpan[]`; typed code comparison in `digitIdentity`, with no changes to public return levels.
 
-- [ ] **Step 1: Add exact, brewery-qualified tests.** Put these in their own describe block:
+- [x] **Step 1: Add exact, brewery-qualified tests.** Put these in their own describe block:
 
 ```ts
 test.each<[string, string, string, DigitIdentity, DigitIdentity]>([
@@ -382,8 +382,8 @@ and decimal/fraction continuations; do not broaden unknown glued forms. Retain t
 `WFP10` and `BA23.03` documented-limit tests. Pin explicitly that unrelated `#4` beside TAP04
 and unrelated `#29` beside LAB29 remain hard numbers, not consumed twice or covered by code values.
 
-- [ ] **Step 2: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect TAP-format and LAB-code failures; differing `EL-1762`/`EL-1622` must keep its existing rejection.
-- [ ] **Step 3: Add context-qualified grammars to the shared profile.** Owner checks use full leading brand tokens from explicit pair breweries, including split collaboration parts: `schneider weisse`, `pracownia piwa`, `moersleutel`, `hop brook`. Catalog presence alone does not qualify an unrelated title as one of these series. Support existing Schneider labels with trailing words (`G. Schneider & Sohn`, `Brewery`) without substring matching other brands.
+- [x] **Step 2: Run `npx vitest run src/domain/digit-identity.test.ts`.** Expect TAP-format and LAB-code failures; differing `EL-1762`/`EL-1622` must keep its existing rejection.
+- [x] **Step 3: Add context-qualified grammars to the shared profile.** Owner checks use full leading brand tokens from explicit pair breweries, including split collaboration parts: `schneider weisse`, `pracownia piwa`, `moersleutel`, `hop brook`. Catalog presence alone does not qualify an unrelated title as one of these series. Support existing Schneider labels with trailing words (`G. Schneider & Sohn`, `Brewery`) without substring matching other brands.
 
 ```ts
 const TAP_CODE = /(?<![\p{L}\p{N}])TAP[\s-]*(\d+)(?![\p{L}\p{N}])/giu;
@@ -415,7 +415,7 @@ veto and the final fallback/`hasLetters` guard. Preserve year-conflict and Czech
 Do not cover hard codes with numbers/grades, or hard numbers with code values; LAB29 is not
 the ordinary `#29`. Do not add a new fallback level.
 
-- [ ] **Step 4: Verify and commit.** Focused file, then `npm test && npm run typecheck`. Commit only the two task files: `fix(domain): preserve identity of contextual beer codes (#664) (U3)`.
+- [x] **Step 4: Verify and commit.** Focused file, then `npm test && npm run typecheck`. Commit only the two task files: `fix(domain): preserve identity of contextual beer codes (#664) (U3)`.
 
 ### Task 4: Whole-core review and replay before planning periphery
 
@@ -424,11 +424,11 @@ the ordinary `#29`. Do not add a new fallback level.
 **Consumes:** Three passing task gates, the frozen pre-change corpus, and the agreed design.
 **Produces:** Review findings resolved or explicitly recorded; per-row replay transitions with their evidence; permission to write the separate periphery plan only when no core blocker remains.
 
-- [ ] **Step 1: Review the entire branch with `compound-engineering:ce-code-review`, sequentially in the main thread per AGENTS.md.** Check correctness, actual spec coverage, optional-field/API compatibility, role reversal, no mutation of inputs, Unicode/source-span boundaries, false neutrality, and preservation of #725. A green unit test is not proof that every consumer already receives new brewery/catalog fields.
-- [ ] **Step 2: Run the frozen replay:** `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs compare > /tmp/664-core-transitions.jsonl`. This step has no network or DB access. Inspect every changed pair and explain its exact consumed source span/family; report changes per corpus group and role direction. Distinct bids are a diagnostic pool, not proof of distinct beer identity; existing links are observations, not an infallible oracle. No aggregate count authorizes a rule or production write.
-- [ ] **Step 3: Fix valid findings with focused regression tests.** Re-run the affected focused tests and full gate after each logical correction, commit named files, and re-review changed reasoning. An unknown code or required change to a name/brewery/ABV gate returns to design rather than expanding this core.
-- [ ] **Step 4: Confirm the last code state has a passing full gate and no unresolved core findings.** Record the actual commit, test totals, transitions and review conclusions in the execution report. Do not repeat a just-passed full gate without intervening changes.
-- [ ] **Step 5: Write a separate periphery plan against the reviewed code.** Its coverage must include context delivery to both matcher stages, lookup/retries, web fallback, enrich, storage resolution/peers, dedupe; the numbered-series search contract; synchronization of `spec.md`; integration tests and fresh live query/match measurements. These are deferred design requirements, not omitted requirements or permission to ship the core. Preserve all caller-specific acceptance levels and full original names. No PR or deployment from this core checkpoint.
+- [x] **Step 1: Review the entire branch with `compound-engineering:ce-code-review`, sequentially in the main thread per AGENTS.md.** Check correctness, actual spec coverage, optional-field/API compatibility, role reversal, no mutation of inputs, Unicode/source-span boundaries, false neutrality, and preservation of #725. A green unit test is not proof that every consumer already receives new brewery/catalog fields.
+- [x] **Step 2: Run the frozen replay:** `REPO="$PWD" node --require tsx/cjs /tmp/664-core-replay.cjs compare > /tmp/664-core-transitions.jsonl`. This step has no network or DB access. Inspect every changed pair and explain its exact consumed source span/family; report changes per corpus group and role direction. Distinct bids are a diagnostic pool, not proof of distinct beer identity; existing links are observations, not an infallible oracle. No aggregate count authorizes a rule or production write.
+- [x] **Step 3: Fix valid findings with focused regression tests.** Re-run the affected focused tests and full gate after each logical correction, commit named files, and re-review changed reasoning. An unknown code or required change to a name/brewery/ABV gate returns to design rather than expanding this core.
+- [x] **Step 4: Confirm the last code state has a passing full gate and no unresolved core findings.** Record the actual commit, test totals, transitions and review conclusions in the execution report. Do not repeat a just-passed full gate without intervening changes.
+- [x] **Step 5: Write a separate periphery plan against the reviewed code.** Its coverage must include context delivery to both matcher stages, lookup/retries, web fallback, enrich, storage resolution/peers, dedupe; the numbered-series search contract; synchronization of `spec.md`; integration tests and fresh live query/match measurements. These are deferred design requirements, not omitted requirements or permission to ship the core. Preserve all caller-specific acceptance levels and full original names. No PR or deployment from this core checkpoint.
 
 ## Appendix: frozen read-only numerical replay
 
@@ -534,3 +534,39 @@ its prototype predates subsequent asymmetry/year-marker changes and the new appr
   fresh execution baseline before source changes. These counts are observations, not assertions.
 - Ordinary reader shape, context field names, role reversal, noise protection, and unknown
   fraction fallback were checked for consistency. No production implementation was executed.
+
+## Execution report, 2026-09-28
+
+All four core tasks are complete. The scope ends at the reviewed kernel and the separately written periphery plan, not at a shipped #664 fix.
+
+| Task | Commit | Full gate |
+|---|---|---|
+| U1: hops/local fractions | `b0059f3` | 3921 tests passed, one skipped; typecheck passed |
+| U2: source-spanned brand numbers | `d10f479` | 3948 tests passed, one skipped; typecheck passed |
+| U3: contextual TAP/LAB/EL/53M | `9687c18` | 3990 tests passed, one skipped; typecheck passed |
+| Review: code/list boundaries and catalogue work | `9407eb6` | 3994 tests passed, one skipped; typecheck passed |
+| Review: prevent synthetic codes across ABV/grades | `0bcc021` | 4002 tests passed, one skipped; typecheck passed |
+
+Each implementation task had observed assertion failures before its implementation. Final focused suite: 266 passed. The last `npm test && npm run typecheck` exited 0; `git diff --check` passed. No production code changed after that gate.
+
+The whole branch from execution base `1cb7f45` was reviewed sequentially in the main thread per AGENTS.md, including U1/U2/U3 inline code, literal tests, approved design and this plan. Correctness, source offsets/Unicode boundaries, optional API compatibility, peers reversal, non-mutation, #725 preservation, false neutrality, test rigor and catalogue cost were checked. No independent model/subagent review ran. No unresolved core finding remains; this is a local core checkpoint, not approval to ship incomplete consumer wiring.
+
+Resolved review findings:
+
+- Normalizing every catalogue label in every comparison was unnecessary. On the frozen catalogue, 82 of 4187 labels contain digits. Filtering them before normalization and skipping brand scans on digit-free names reduced a diagnostic 100-call draw from 3766.75 ms to 246.39 ms, without a new cache or changed semantics. These single draws are not a throughput guarantee.
+- A comma plus whitespace was wrongly treated as a decimal continuation. Three new boundary assertions failed before the correction in `9407eb6` and passed after it. Spaced slash dates remain excluded.
+- Masking ABV/grades as whitespace in claim scanning could synthesize `HBC472` from `HBC 12° 472`, consuming the original grade. Six added regressions failed before the correction in `0bcc021`. A non-joining blocker now protects these gaps; continuation guards use original text.
+
+Replay baseline `f9882eb20b23f48282b03bbccc53b51f984ef91f` was captured from the available read-only local DB at `2026-09-28T22:14:02.015Z`. Final frozen replay compared 4140 pairs in both directions (8280 verdicts): **zero changed pairs**. There are no changed rows to explain individually.
+
+| Diagnostic group | Pairs | Forward transitions | Reverse transitions |
+|---|---:|---:|---:|
+| distinct-bid | 2175 | 0 | 0 |
+| auto-link | 1869 | 0 | 0 |
+| pin-or-merge | 96 | 0 | 0 |
+
+The pool contains few new code cases; zero transitions is evidence of retained old observations, not proof of all new behavior or any rescued orphan. Literal #664 tests cover the new positive/negative contract. Distinct bids and old links remain diagnostic observations, not an infallible identity oracle. The final replay used frozen JSON only, with no database/network access.
+
+Local artifacts: `/tmp/664-core-corpus.json`, `/tmp/664-core-replay.cjs`, `/tmp/664-core-transitions.jsonl`, `/tmp/664-core-review/report.md`, `/tmp/664-core-review/metadata.json`, and task gate logs. An earlier slow replay of the pre-review implementation was cancelled and replaced by the complete final replay; it supplied no final verdict evidence.
+
+Next plan: [consumer wiring and numbered search](2026-09-28-664-digit-context-periphery.md), written against `0bcc021`. It covers raw context in every consumer, strict row/persistence tiers, the bounded series query, spec.md synchronization, integration tests and fresh read-only query/match measurements. No client/search implementation, PR, deployment, issue closure, row remapping or production write was performed in this core checkpoint.
