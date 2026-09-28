@@ -33,3 +33,9 @@ Seventeen named assertions failed against the old fallback before implementation
 Main-thread review verified exact map key AND record bid, search-only exact-bid filtering, non-empty style, reevaluation before both acceptance branches, ale/unique-grade call boundaries, null-ABV reuse without a second query, remaining-candidate continuation and unchanged quota/cooldown. Global digit identity behavior stays covered by the existing boundary matrix; the extracted predicate uses the same singleIntegerGrade implementation. No public request schema or Brave payload changes.
 
 Logs: /tmp/issue-665-web-style-{red,green,gate}.log; probes /tmp/issue-665-web-review-probe.ts and /tmp/issue-665-live-web-style.{ts,log}. Fresh PR-head AI review remains the W3 publishing check.
+
+## W3 second review correction
+
+Current-head AI review closed the original candidate-style finding and identified loss of an already-known resolver ABV when verified style metadata has null ABV. Two actual fallback regressions failed (token-overlap became null; exact-name returned null ABV). The fix is record.abv ?? cand.abv; a non-null exact-record value still wins, while null no longer erases existing evidence. The earlier both-null test still rejects without another lookup. This preserves the old hydration contract rather than adding another policy.
+
+Focused67 tests passed; full gate3776 passed,1 skipped; both typechecks passed. Logs /tmp/issue-665-web-abv-{red,green,gate}.log. No production writes.

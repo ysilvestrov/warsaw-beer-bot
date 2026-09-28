@@ -14,13 +14,14 @@ Use existing Algolia hydrateByBid([candidate.bid]) when available; adapters with
 
 With verified style, repeat the existing grade/name/brewery gate using the original resolved candidate text and that style. Positive Czech style can reject a different grade; confirmed ale or other non-Czech style keeps the existing soft-grade behavior. No new lager vocabulary or grade parsing rule is added.
 
-Reuse the exact record's ABV for the token-overlap branch, including null; do not make a second ABV request for the same conflict candidate. Propagate verified style and ABV in an accepted SearchResult. Quota/cooldown and per-spent-call logging retain their existing meanings: an unverified style is not evidence of a different beer or a missing Untappd record.
+Use the exact record's ABV when available; if that field is null, preserve the same resolved candidate's already-known ABV. If both are unknown, token overlap remains uncorroborated; do not make a second ABV request for the same conflict candidate. Propagate verified style and ABV in an accepted SearchResult. Quota/cooldown and per-spent-call logging retain their existing meanings: an unverified style is not evidence of a different beer or a missing Untappd record.
 
 ## Claims and evidence
 
 | Recorded fact | Evidence |
 |---|---|
-| Candidate style/ABV belongs to its bid | Exact map key AND record bid, or exact search-result bid; non-empty style |
+| Candidate style belongs to its bid | Exact map key AND record bid, or exact search-result bid; non-empty style |
+| ABV corroboration | Exact record ABV when present, otherwise the same resolved candidate’s already-known ABV; neither missing field invents a value |
 | Conflicting grades identify different Czech lagers | Existing contextual digitIdentity with verified style and original raw names |
 | Candidate accepted after metadata | Repeated existing brewery/name/digit gates; existing ABV corroboration where required |
 | Candidate unverified | Missing/empty style, absent/wrong-id record, or caught error; no claim that beer does not exist |

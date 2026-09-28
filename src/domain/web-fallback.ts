@@ -235,7 +235,7 @@ export async function runWebFallback(
         });
         continue;
       }
-      cand = { ...cand, style: record.style, abv: record.abv };
+      cand = { ...cand, style: record.style, abv: record.abv ?? cand.abv };
       gradeStyleHydrated = true;
       stage = evaluateCandidate(input, cand);
     }

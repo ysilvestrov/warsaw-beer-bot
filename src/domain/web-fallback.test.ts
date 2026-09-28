@@ -562,6 +562,22 @@ describe('#665 verified candidate style in web fallback', () => {
     expect(search.mock.calls).toEqual([]);
   });
 
+  test('nullable style metadata preserves an already known ABV in the token-overlap branch', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
+    const search = vi.fn(async () => []);
+    const out = await probe({ search, hydrateByBid: byBid }, crossInput, [{ ...cross, abv: 4 }]);
+    expect(out.sr).toEqual({ ...cross, style: 'Fruit Beer', abv: 4, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+    expect(search.mock.calls).toEqual([]);
+  });
+
+  test('nullable style metadata preserves an already known ABV in the exact-name branch', async () => {
+    const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
+    const out = await probe({ search: async () => [], hydrateByBid: byBid }, input, [{ ...twelve, abv: 4 }]);
+    expect(out.sr).toEqual({ ...twelve, style: 'Fruit Beer', abv: 4, global_rating: null });
+    expect(byBid.mock.calls).toEqual([[[158057]]]);
+  });
+
   test('missing verified ABV cannot corroborate token overlap or cause another lookup', async () => {
     const byBid = vi.fn(async () => new Map([[158057, { ...record, style: 'Fruit Beer', abv: null }]]));
     const search = vi.fn(async () => [{ ...record, style: 'Fruit Beer', abv: 4 }]);
