@@ -23,11 +23,12 @@ export function addCoverage(db: DB, telegramId: number, from: number, to: number
   if (!Number.isInteger(from) || !Number.isInteger(to) || from > to) {
     throw new Error(`invalid coverage range: ${from}..${to}`);
   }
+  const key = accountKey ?? getHistoryOwner(db, telegramId).accountKey;
   const low = from - 1;
   const high = to + 1;
   const touching = db
     .prepare('SELECT from_id, to_id FROM checkin_coverage WHERE telegram_id = ? AND account_key = ? AND to_id >= ? AND from_id <= ?')
-    .all(telegramId, accountKey ?? getHistoryOwner(db, telegramId).accountKey, low, high) as CoverageRange[];
+    .all(telegramId, key, low, high) as CoverageRange[];
 
   let lo = from;
   let hi = to;
@@ -37,9 +38,9 @@ export function addCoverage(db: DB, telegramId: number, from: number, to: number
   }
 
   db.prepare('DELETE FROM checkin_coverage WHERE telegram_id = ? AND account_key = ? AND to_id >= ? AND from_id <= ?')
-    .run(telegramId, accountKey ?? getHistoryOwner(db, telegramId).accountKey, low, high);
+    .run(telegramId, key, low, high);
   db.prepare('INSERT INTO checkin_coverage (telegram_id, account_key, from_id, to_id) VALUES (?, ?, ?, ?)')
-    .run(telegramId, accountKey ?? getHistoryOwner(db, telegramId).accountKey, lo, hi);
+    .run(telegramId, key, lo, hi);
 }
 
 export function rangeContaining(db: DB, telegramId: number, id: number, accountKey?: string): CoverageRange | null {

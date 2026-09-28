@@ -35,18 +35,21 @@ export function checkinsForUser(db: DB, telegramId: number): CheckinRow[] {
 // keeps the first non-null rating seen for each beer_id. Profile beer ratings
 // are a fallback only: their observation time is not a check-in timestamp.
 export function latestRatingsByBeer(db: DB, telegramId: number): Map<number, number> {
-  const out = new Map<number, number>();
-  for (const c of checkinsForUser(db, telegramId)) {
-    if (c.beer_id === null || c.user_rating === null) continue;
-    if (!out.has(c.beer_id)) out.set(c.beer_id, c.user_rating);
-  }
-  const profileRatings = db.prepare(
-    'SELECT beer_id, user_rating FROM untappd_had WHERE telegram_id = ? AND account_key = ? AND user_rating IS NOT NULL',
-  ).all(telegramId, getHistoryOwner(db, telegramId).accountKey) as { beer_id: number; user_rating: number }[];
-  for (const r of profileRatings) {
-    if (!out.has(r.beer_id)) out.set(r.beer_id, r.user_rating);
-  }
-  return out;
+  // Keep the active owner and all constituent reads in one WAL snapshot.
+  return db.transaction(() => {
+    const out = new Map<number, number>();
+    for (const c of checkinsForUser(db, telegramId)) {
+      if (c.beer_id === null || c.user_rating === null) continue;
+      if (!out.has(c.beer_id)) out.set(c.beer_id, c.user_rating);
+    }
+    const profileRatings = db.prepare(
+      'SELECT beer_id, user_rating FROM untappd_had WHERE telegram_id = ? AND account_key = ? AND user_rating IS NOT NULL',
+    ).all(telegramId, getHistoryOwner(db, telegramId).accountKey) as { beer_id: number; user_rating: number }[];
+    for (const r of profileRatings) {
+      if (!out.has(r.beer_id)) out.set(r.beer_id, r.user_rating);
+    }
+    return out;
+  })();
 }
 
 export function hasBeenDrunk(db: DB, telegramId: number, beerId: number): boolean {

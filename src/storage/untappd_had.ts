@@ -40,9 +40,12 @@ export function hadBeerIds(db: DB, telegramId: number): Set<number> {
 }
 
 export function triedBeerIds(db: DB, telegramId: number): Set<number> {
-  const out = drunkBeerIds(db, telegramId);
-  for (const id of hadBeerIds(db, telegramId)) out.add(id);
-  return out;
+  // Keep the active owner and all constituent reads in one WAL snapshot.
+  return db.transaction(() => {
+    const out = drunkBeerIds(db, telegramId);
+    for (const id of hadBeerIds(db, telegramId)) out.add(id);
+    return out;
+  })();
 }
 
 // Counts beers, not missing check-ins. last_seen_at cannot date consumption.
