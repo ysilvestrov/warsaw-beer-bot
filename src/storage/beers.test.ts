@@ -785,7 +785,7 @@ describe('listRelayLookupCandidates', () => {
 });
 
 describe('loadCatalog', () => {
-  it('returns id, brewery, name, abv, rating_global for every beer', () => {
+  it('returns id, brewery, name, style, abv, rating_global for every beer', () => {
     const db = openDb(':memory:');
     migrate(db);
     const id = seedBeer(db, {
@@ -795,10 +795,11 @@ describe('loadCatalog', () => {
       normalized_brewery: normalizeBrewery('Trzech Kumpli'),
     });
     const cat = loadCatalog(db);
-    expect(cat).toContainEqual({
-      id, brewery: 'Trzech Kumpli', name: 'Pan IPAni', abv: 6.0, rating_global: 3.85,
+    expect(cat).toEqual([{
+      id, brewery: 'Trzech Kumpli', name: 'Pan IPAni', style: 'IPA', abv: 6.0, rating_global: 3.85,
       untappd_id: 9001,
-    });
+    }]);
+    db.close();
   });
 });
 

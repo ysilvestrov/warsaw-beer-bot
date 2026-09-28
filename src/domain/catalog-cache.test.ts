@@ -1,3 +1,4 @@
+import { matchPrepared } from './matcher';
 import { vi } from 'vitest';
 import { createCatalogCache, prepareCatalogChunked, type CatalogCache } from './catalog-cache';
 import type { CatalogBeerWithRating } from './match-list';
@@ -218,5 +219,30 @@ describe('#614 merge memory reaches /match', () => {
     expect(r.source).toBe('exact');
     expect(r.is_drunk).toBe(true);
     expect(r.user_rating).toBe(4.5);
+  });
+});
+
+describe('#665 catalog style reaches the matcher from SQL', () => {
+  it('a cached twelve-degree orphan does not capture a ten-degree tap', async () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    try {
+      const tenId = seedBeer(db, {
+        untappd_id: 227734, brewery: 'Pivovar Konrad Brewery', name: 'Konrad Svetlé Výčepní 10',
+        style: 'Lager - Světlé (Czech Pale)', abv: 4,
+        normalized_brewery: 'konrad', normalized_name: normalizeName('Konrad Svetlé Výčepní 10'),
+      });
+      const twelveId = seedBeer(db, {
+        brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: 'Svetlý Ležák', abv: 5.2,
+        normalized_brewery: 'konrad', normalized_name: normalizeName('Konrad 12°'),
+      });
+      const { prepared, byId } = await createCatalogCache(db).get();
+      expect(byId.get(twelveId)?.style).toBe('Svetlý Ležák');
+      expect(prepared.beers.find((beer) => beer.id === twelveId)?.style).toBe('Svetlý Ležák');
+      expect(matchPrepared({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, prepared))
+        .toEqual({ id: tenId, confidence: 1, source: 'fuzzy' });
+    } finally {
+      db.close();
+    }
   });
 });

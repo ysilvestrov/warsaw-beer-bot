@@ -300,6 +300,7 @@ export interface CatalogRow {
   id: number;
   brewery: string;
   name: string;
+  style: string | null;
   abv: number | null;
   rating_global: number | null;
   untappd_id: number | null;
@@ -307,7 +308,7 @@ export interface CatalogRow {
 
 export function loadCatalog(db: DB): CatalogRow[] {
   return db
-    .prepare(`SELECT b.id, b.brewery, b.name, b.abv, b.rating_global, b.untappd_id
+    .prepare(`SELECT b.id, b.brewery, b.name, b.style, b.abv, b.rating_global, b.untappd_id
       FROM beers b WHERE NOT ${inactiveLegacyOrphanPredicate}`)
     .all() as CatalogRow[];
 }

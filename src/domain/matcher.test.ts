@@ -1369,3 +1369,75 @@ describe('#663 style-only tap names: gate exact matching and forbid fuzzy', () =
   });
 });
 
+
+describe('#665 Czech grade conflicts cannot preempt an eligible row', () => {
+  const ten = c({ id: 45, brewery: 'Pivovar Konrad Brewery',
+    name: 'Konrad Svetlé Výčepní 10', style: 'Lager - Světlé (Czech Pale)', abv: 4 });
+  const twelve = c({ id: 37334, brewery: 'KONRAD Brewery',
+    name: 'Konrad 12°', style: 'Svetlý Ležák', abv: 5.2 });
+
+  test.each([[ten, twelve], [twelve, ten]])('the ten-degree input selects id 45 for order %#', (a, b) => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [a, b]))
+      .toEqual({ id: 45, confidence: 1, source: 'fuzzy' });
+  });
+
+  test('the only known-brewery row has the wrong grade: miss without a full-catalog attempt', () => {
+    const prepared = prepareCatalog([twelve]);
+    const budget = createFallbackBudget(1);
+    expect(matchPrepared({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, prepared, budget)).toBeNull();
+    expect(budget).toEqual({ remaining: 1, attempts: 0, hits: 0, budgetSkipped: 0 });
+  });
+
+  test('matching twelve-degree input retains the existing exact selection', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 12°' }, [ten, twelve]))
+      .toEqual({ id: 37334, confidence: 1, source: 'exact' });
+  });
+
+  test('the split-invariant anchor cannot restore the rejected twelve-degree row', () => {
+    const row = c({ id: 37334, brewery: 'Konrad Liberec', name: 'Konrad 12°',
+      style: 'Czech Lager' });
+    const prepared = prepareCatalog([row]);
+    expect(prepared.breweryCandidates(breweryAliases(''))).toEqual([]);
+    expect(prepared.candidatesByFirstToken('konrad').map((beer) => beer.id)).toEqual([37334]);
+    expect(matchPrepared({ brewery: '', name: 'Konrad Liberec Konrad 10°' }, prepared)).toBeNull();
+  });
+
+  test('full search removes a higher-scoring conflicting grade before picking a lower score', () => {
+    const bad = prepareBeer(c({ id: 12, brewery: 'Czech Brew', name: 'Alpha 12°', style: 'Czech Lager' }));
+    const good = prepareBeer(c({ id: 10, brewery: 'Czech Brew', name: 'Alpha 10°', style: 'Czech Lager' }));
+    const build = vi.fn(() => ({ search: () => [
+      { item: bad, score: 0.95 }, { item: good, score: 0.9 },
+    ] }) as never);
+    const prepared = prepareCatalog([bad, good], build);
+    const budget = createFallbackBudget(2);
+    const input = { brewery: 'Unknown', name: 'Alpha 10°' };
+    expect(matchPrepared(input, prepared, budget)).toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+    expect(matchPrepared(input, prepared, budget)).toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+    expect(build.mock.calls.length).toBe(1);
+    expect(budget).toEqual({ remaining: 0, attempts: 2, hits: 2, budgetSkipped: 0 });
+  });
+
+  test('input-only Czech style supplies context when a catalog row has no style', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°', style: 'Czech Lager' }, [
+      c({ id: 37334, brewery: 'KONRAD Brewery', name: 'Konrad 12°', style: null }),
+    ])).toBeNull();
+  });
+
+  test('existing style-only and hard-number guards remain in effect', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'LAGER 10°' }, [ten])).toBeNull();
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'Konrad #4' }, [
+      c({ id: 3, brewery: 'KONRAD Brewery', name: 'Konrad #3' }),
+    ])).toBeNull();
+  });
+  test('a vetoed anchor proceeds to the existing full fuzzy path', () => {
+    const bad = c({ id: 12, brewery: 'Konrad Liberec', name: 'Konrad 12°', style: 'Czech Lager' });
+    const good = prepareBeer(c({ id: 10, brewery: 'Other Czech Brewery', name: 'Konrad 10°', style: 'Czech Lager' }));
+    const build = vi.fn(() => ({ search: () => [{ item: good, score: 0.9 }] }) as never);
+    const prepared = prepareCatalog([bad, good], build);
+    const budget = createFallbackBudget(1);
+    expect(matchPrepared({ brewery: '', name: 'Konrad Liberec Konrad 10°' }, prepared, budget))
+      .toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+    expect(build.mock.calls.length).toBe(1);
+    expect(budget).toEqual({ remaining: 0, attempts: 1, hits: 1, budgetSkipped: 0 });
+  });
+});
