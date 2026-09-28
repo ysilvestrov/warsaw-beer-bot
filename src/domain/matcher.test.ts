@@ -1524,3 +1524,20 @@ describe('#665 Czech grade conflicts cannot preempt an eligible row', () => {
     expect(budget).toEqual({ remaining: 0, attempts: 1, hits: 1, budgetSkipped: 0 });
   });
 });
+
+
+describe('#665 canonical Konrad after duplicate recovery', () => {
+  const ten = c({ id: 45, brewery: 'Pivovar Konrad Brewery', name: 'Konrad Svetlé Výčepní 10',
+    style: 'Lager - Světlé (Czech Pale)', abv: 4 });
+  const twelve = c({ id: 31849, brewery: 'Pivovar Vratislavice nad Nisou', name: 'Konrad 12°',
+    style: 'Pilsner - Czech / Bohemian', abv: 5.2 });
+  test('the twelve-degree tap reaches its authoritative brewery', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'Konrad 12°' }, [ten, twelve]))
+      .toEqual({ id: 31849, confidence: 1, source: 'exact' });
+  });
+  test('the new brewery alias cannot change the ten into the twelve', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'Konrad 10°' }, [ten, twelve]))
+      .toEqual({ id: 45, confidence: 1, source: 'fuzzy' });
+    expect(breweryAliasesMatch(breweryAliases('KONRAD Brewery'), breweryAliases('Svijany'))).toBe(false);
+  });
+});

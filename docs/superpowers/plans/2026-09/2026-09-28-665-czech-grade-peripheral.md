@@ -235,7 +235,7 @@ Refresh listBeerCatalog adds b.style and style:string|null in return/cast, and m
 **Files:** src/domain/brewery-aliases.ts, spec.md, existing alias/matcher tests.
 **Produces:** the single confirmed pair and accurate specification.
 
-- [ ] Add red:
+- [x] Add red:
 ~~~ts
 expect(aliasNeighbors('konrad')).toEqual(['vratislavice nad nisou']);
 expect(aliasNeighbors('vratislavice nad nisou')).toEqual(['konrad']);
@@ -252,9 +252,9 @@ expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'Konrad 10°' }, [ten, canon
   .toEqual({ id: 45, confidence: 1, source: 'fuzzy' });
 ~~~
 Preserve pre-recovery orphan selection and non-transitivity tests; no canonical priority rule.
-- [ ] Add ['konrad', 'vratislavice nad nisou'] to ALIAS_PAIRS with issue/evidence comment.
-- [ ] Amend spec.md identity section and Plato note with these approved facts: unique explicit integer7–20 on both sides, Czech lager style on either side, no raw-name/style ale markers; equal decimal/duplicate grades equivalent; fractional/missing/ambiguous grades keep old rules; context-free behavior unchanged. Candidate exclusion precedes both exact routes and fuzzy selection; after relevant veto fuzzy requires positive unique matching grade/soft evidence. Preserve other digit rejection order and original brewery bucket/budget. Document peer versus persistent same/year-fallback tiers, stored-style provenance and unchanged authoritative bids/pins. Do not claim missing grade is a contradiction.
-- [ ] Focused green, full gate, review and commit.
+- [x] Add ['konrad', 'vratislavice nad nisou'] to ALIAS_PAIRS with issue/evidence comment.
+- [x] Amend spec.md identity section and Plato note with these approved facts: unique explicit integer7–20 on both sides, Czech lager style on either side, no raw-name/style ale markers; equal decimal/duplicate grades equivalent; fractional/missing/ambiguous grades keep old rules; context-free behavior unchanged. Candidate exclusion precedes both exact routes and fuzzy selection; after relevant veto fuzzy requires positive unique matching grade/soft evidence. Preserve other digit rejection order and original brewery bucket/budget. Document peer versus persistent same/year-fallback tiers, stored-style provenance and unchanged authoritative bids/pins. Do not claim missing grade is a contradiction.
+- [x] Focused green, full gate, review and commit.
 
 ## P4 — replay, recovery rehearsal, review
 
@@ -309,3 +309,5 @@ No peripheral production file was modified while writing this plan.
 P1 receipt: nine named regressions failed before implementation;391 focused tests pass. Peer/resolution/API omission mutations fail assertions and were restored. Full gate3711passed,1skipped/typecheck passed. Styles come from the same selected rows; peer roles reverse together, while persistent callers retain same/year-fallback tiers. Authoritative id/alias/pin paths are unchanged. Logs:/tmp/issue-665-p1-{red,green,gate,mutation-peer,mutation-resolution,mutation-api}.log.
 
 P2 receipt: eleven assertion regressions fail before implementation;343 focused tests pass. Eight omission mutations catch lookup input/candidate style, original retry name, refresh catalog/input, cleanup input, relay and cron context loss. Full gate3725passed,1skipped/typecheck passed. Cleanup required style in BOTH cleanPool and allOntap source SELECTs, proven by the input-only regression. Logs:/tmp/issue-665-p2-{red,green,gate,mutation-*}.log.
+
+P3 receipt: two named alias/canonical-twelve regressions fail before the pair;352 focused tests pass. Full gate3728passed,1skipped/typecheck passed. Only the finite confirmed pair was added; spec.md reflects approved context, post-veto evidence and unchanged authoritative paths. Logs:/tmp/issue-665-p3-{red,green,gate}.log.

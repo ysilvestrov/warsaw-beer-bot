@@ -9,6 +9,8 @@
 // matching here. Grow it only from confirmed orphan-triage misses, one reviewed
 // pair at a time (see docs/debug-orphan-matching.md).
 const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
+  // #665: Konrad 12° bid 158057, live Algolia and orphan candidates_summary agree on Vratislavice.
+  ['konrad', 'vratislavice nad nisou'],
   ['nepomucen', 'nepo'],
   ['napomucen', 'nepo'],
   ['van honsebrouck', 'kasteel vanhonsebrouck'],
