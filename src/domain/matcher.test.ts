@@ -1375,6 +1375,89 @@ describe('#665 Czech grade conflicts cannot preempt an eligible row', () => {
     name: 'Konrad Svetlé Výčepní 10', style: 'Lager - Světlé (Czech Pale)', abv: 4 });
   const twelve = c({ id: 37334, brewery: 'KONRAD Brewery',
     name: 'Konrad 12°', style: 'Svetlý Ležák', abv: 5.2 });
+  const demon = c({ id: 99, brewery: 'KONRAD Brewery',
+    name: 'Konrad Démon', style: 'Lager - Strong', abv: 7.2 });
+
+  test.each([[twelve, demon, ten], [ten, demon, twelve]])(
+    'after a grade veto the supported ten beats a shorter grade-less sibling, order %#', (...rows) => {
+      expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, rows))
+        .toEqual({ id: 45, confidence: 1, source: 'fuzzy' });
+    },
+  );
+
+  test('after a grade veto a grade-less sibling alone cannot supply the ten', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [twelve, demon])).toBeNull();
+  });
+
+  test('multiple conflicting grades do not establish a grade-less sibling as the ten', () => {
+    const eleven = c({ id: 11, brewery: 'KONRAD Brewery', name: 'Konrad 11°', style: 'Czech Lager' });
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [eleven, twelve, demon])).toBeNull();
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [eleven, twelve, demon, ten]))
+      .toEqual({ id: 45, confidence: 1, source: 'fuzzy' });
+  });
+
+  test('without a Czech grade veto the existing fuzzy selection remains unchanged', () => {
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [demon, ten]))
+      .toEqual({ id: 99, confidence: 1, source: 'fuzzy' });
+  });
+
+  test('an unrelated below-threshold grade conflict does not activate the selection guard', () => {
+    const unrelated = c({ id: 12, brewery: 'KONRAD Brewery',
+      name: 'Banana Dragonfruit 12°', style: 'Czech Lager' });
+    expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [unrelated, demon, ten]))
+      .toEqual({ id: 99, confidence: 1, source: 'fuzzy' });
+  });
+
+  test('an exact veto requires evidence even if that row is absent from fuzzy results', () => {
+    const unsupported = prepareBeer(demon);
+    const supported = prepareBeer(ten);
+    const build = () => ({ search: () => [
+      { item: unsupported, score: 0.98 }, { item: supported, score: 0.9 },
+    ] }) as never;
+    expect(matchPrepared({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' },
+      prepareCatalog([twelve, demon, ten], build)))
+      .toEqual({ id: 45, confidence: 0.9, source: 'fuzzy' });
+  });
+
+  test('an anchor veto requires evidence even if that row is absent from fuzzy results', () => {
+    const bad = c({ id: 12, brewery: 'Konrad Liberec', name: 'Konrad 12°', style: 'Czech Lager' });
+    const unsupported = prepareBeer(c({ id: 99, brewery: 'Other Brewery', name: 'Konrad Démon' }));
+    const supported = prepareBeer(c({ id: 10, brewery: 'Other Brewery', name: 'Konrad 10°' }));
+    const build = () => ({ search: () => [
+      { item: unsupported, score: 0.98 }, { item: supported, score: 0.9 },
+    ] }) as never;
+    const budget = createFallbackBudget(1);
+    expect(matchPrepared({ brewery: '', name: 'Konrad Liberec Konrad 10°' },
+      prepareCatalog([bad, unsupported, supported], build), budget))
+      .toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+    expect(budget).toEqual({ remaining: 0, attempts: 1, hits: 1, budgetSkipped: 0 });
+  });
+
+  test.each([
+    'Alpha', 'Alpha 10%', 'Alpha 2026', 'Alpha #10', 'Alpha 10.0',
+    'Alpha 10° 11°', 'Alpha 10.5°', 'Alpha 10° 11',
+  ])('a fuzzy veto excludes unsupported evidence in %s before selecting a lower score', (name) => {
+    const unsupported = prepareBeer(c({ id: 99, brewery: 'Czech Brew', name, style: 'Czech Lager' }));
+    const bad = prepareBeer(c({ id: 12, brewery: 'Czech Brew', name: 'Alpha 12°', style: 'Czech Lager' }));
+    const good = prepareBeer(c({ id: 10, brewery: 'Czech Brew', name: 'Alpha 10°', style: 'Czech Lager' }));
+    const build = () => ({ search: () => [
+      { item: unsupported, score: 0.98 }, { item: bad, score: 0.95 }, { item: good, score: 0.9 },
+    ] }) as never;
+    expect(matchPrepared({ brewery: 'Unknown', name: 'Alpha 10°' },
+      prepareCatalog([unsupported, bad, good], build)))
+      .toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+  });
+
+  test.each(['Alpha 10', 'Alpha 10.0°', 'Alpha 10,0°', 'Alpha 10*', 'Alpha 10° 10'])
+    ('a fuzzy veto accepts unambiguous matching grade evidence in %s', (name) => {
+      const bad = prepareBeer(c({ id: 12, brewery: 'Czech Brew', name: 'Alpha 12°', style: 'Czech Lager' }));
+      const good = prepareBeer(c({ id: 10, brewery: 'Czech Brew', name, style: 'Czech Lager' }));
+      const build = () => ({ search: () => [
+        { item: bad, score: 0.95 }, { item: good, score: 0.9 },
+      ] }) as never;
+      expect(matchPrepared({ brewery: 'Unknown', name: 'Alpha 10°' }, prepareCatalog([bad, good], build)))
+        .toEqual({ id: 10, confidence: 0.9, source: 'fuzzy' });
+    });
 
   test.each([[ten, twelve], [twelve, ten]])('the ten-degree input selects id 45 for order %#', (a, b) => {
     expect(matchBeer({ brewery: 'KONRAD Brewery', name: 'KONRAD 10°' }, [a, b]))

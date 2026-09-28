@@ -1,6 +1,6 @@
 # #665 core review — proposed selection amendment
 
-Status: draft, awaiting user decision. Date:2026-09-28.
+Status: approved by user choice1 on2026-09-28. Date:2026-09-28.
 This supplements the approved identity design; it does not change code or authorize production writes.
 
 ## New evidence
@@ -11,13 +11,13 @@ The current design permits missing grades but also promises that the absence of 
 
 ## Recommended clarification
 
-After a contextual Czech grade veto removes a relevant exact/anchored candidate or an above-threshold fuzzy result, fuzzy selection may use only candidates carrying positive numeric evidence for the input grade. An equal explicit grade (10°/10*) or equal existing soft number (KonradSvetléVýčepní10) provides that evidence. A missing grade, ABV, year or hard batch number does not provide it. Keep the original brewery bucket, fallback budget, scores and memoized searchers.
+After a contextual Czech grade veto removes a relevant exact/anchored candidate or an above-threshold fuzzy result, fuzzy selection may use only candidates carrying positive numeric evidence for the input grade. An equal explicit grade (10°/10*) or equal existing soft number (KonradSvetléVýčepní10) provides that evidence. Evidence must be unambiguous: all explicit grades and soft-number grade signals in the candidate identify the same input value. A missing grade, ABV, year, version or hard batch number does not provide it. Keep the original brewery bucket, fallback budget, scores and memoized searchers.
 
 This is a selection guard for the path newly opened by this Czech veto. It does not change context-free digitIdentity, grade parsing, unrelated fuzzy selections, authoritative bids or human pins. The approved requirement that a missing grade is not itself a digit-identity contradiction remains true; this guard controls whether that candidate is supported enough to win after another grade was explicitly rejected.
 
-With the three-row fixture above,45 should win. With only37334 and grade-less99, the result should be null. If the genuine Untappd candidate omits its grade, this conservative path may miss it. That tradeoff favors a missing answer over a wrong beer and must be explicitly agreed before implementation.
+With the three-row fixture above,45 should win. With only37334 and grade-less99, the result should be null. If the genuine Untappd candidate omits its grade, this conservative path may miss it. That tradeoff favors a missing answer over a wrong beer and was explicitly agreed by user choice1 before implementation.
 
-## Conservative alternative
+## Rejected conservative alternative
 
 Stop at null whenever the contextual veto removes an otherwise matching exact/anchored candidate, without opening fuzzy selection. This prevents an arbitrary sibling from winning but also leaves the original Konrad10° case unmatched even while row45 is available. It restores the previous fail-closed selection boundary; it does not fulfill the preferred goal of selecting45.
 

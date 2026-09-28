@@ -336,6 +336,17 @@ export function matchPrepared(
   });
   const gradeAllows = (candidate: PreparedBeer) => inputDigits.grades.length === 0
     || !czechGradesContradict(inputDigits, readNameDigits(candidate.name), contextFor(candidate));
+  let gradeVetoed = false;
+  const keepGrade = (candidate: PreparedBeer): boolean => {
+    const allowed = gradeAllows(candidate);
+    if (!allowed) gradeVetoed = true;
+    return allowed;
+  };
+  const confirmsGrade = (candidate: PreparedBeer): boolean => {
+    const digits = readNameDigits(candidate.name);
+    const values = new Set([...digits.grades, ...digits.soft].map(Number));
+    return values.size === 1 && values.has(Number(inputDigits.grades[0]));
+  };
 
   // Brewery-matching rows, via the first-token index (was a full O(catalog) scan).
   // Computed once and reused by both the exact filter and the fuzzy pool below.
@@ -344,7 +355,7 @@ export function matchPrepared(
   // Exact-normalized hits — multiple rows are common when Untappd has
   // several vintages of the same beer. Latest id first. #117: also accept an
   // order-insensitive / collab-aware name-key intersection as exact-equivalent.
-  let exacts = breweryMatches.filter(gradeAllows)
+  let exacts = breweryMatches
     .filter((c) => {
       if (nn !== '') {
         return c.nameNorm === nn || intersects(c.keys, inputKeys);
@@ -358,6 +369,7 @@ export function matchPrepared(
       }
       return true;
     })
+    .filter(keepGrade)
     .sort((a, b) => b.id - a.id);
 
   // Split-invariant second try (#169): only when the boundary-trusting exact path found
@@ -374,14 +386,14 @@ export function matchPrepared(
     const combined = normalizeName(`${input.brewery} ${input.name}`);
     const firstToken = combined.split(' ')[0];
     if (firstToken) {
-      const anchored = prepared.candidatesByFirstToken(firstToken).filter(gradeAllows).filter((cand) =>
+      const anchored = prepared.candidatesByFirstToken(firstToken).filter((cand) =>
         cand.aliases.some((alias) => {
           if (!leadingRun(combined, alias)) return false;
           const remainder = stripBreweryFromName(combined, alias);
           const canonName = stripBreweryFromName(cand.nameNorm, cand.breweryNorm);
           return remainder !== '' && sortedTokens(remainder) === sortedTokens(canonName);
         }),
-      );
+      ).filter(keepGrade);
       if (anchored.length) exacts = anchored.sort((a, b) => b.id - a.id);
     }
   }
@@ -463,7 +475,11 @@ export function matchPrepared(
     }
     searcher = prepared.fullSearcher();
   }
-  const results = searcher.search(`${seedBrewery} ${nn}`).filter((result) => gradeAllows(result.item));
+  const eligible = searcher.search(`${seedBrewery} ${nn}`).filter((result) => keepGrade(result.item));
+  // #665: rejecting a grade is not evidence that a grade-less sibling is the input.
+  // Complete the veto pass before requiring positive evidence, even if the rejected
+  // result comes after the shortest-key sibling in fuzzy score order.
+  const results = gradeVetoed ? eligible.filter((result) => confirmsGrade(result.item)) : eligible;
   if (!results.length) return null;
   // #636: the fuzzy key has no digits either — rows of one series (same digit-free key) tie at the top score, and
   // the searcher returns them in catalog order. Among THOSE rows, `same`/`year-fallback` beats `number-fallback`;
