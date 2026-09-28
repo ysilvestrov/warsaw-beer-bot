@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runCheckinSync, type CheckinSyncDeps } from './handle-checkin-sync';
-import type { CheckinSyncPageResult } from '../api/types';
+import type { CheckinSyncPageResult, CheckinSyncState } from '../api/types';
 
 function page(over: Partial<CheckinSyncPageResult>): CheckinSyncPageResult {
   return { merged: 25, alreadyKnown: 0, pageSize: 25, nextMaxId: '1', nextCursor: '1', profileTotal: 100, serverCount: 0, complete: false, ...over };
@@ -10,7 +10,7 @@ function baseDeps(over: Partial<CheckinSyncDeps>): CheckinSyncDeps {
   return {
     // #587: НЕ null — інакше «курсор ігнорується» і «курсор використовується» дають
     // однаковий результат, і повернення старої фази-2 не впіймає жоден тест.
-    getState: async () => ({ username: 'bob', deepest_max_id: '500', complete: true, serverCount: 0, profileTotal: 100 }),
+    getState: async () => ({ username: 'bob', linkRevision: 1, deepest_max_id: '500', complete: true, serverCount: 0, profileTotal: 100 }),
     fetchFeed: async () => '<html>feed</html>',
     submitPage: async () => page({}),
     onProgress: () => {},
@@ -154,5 +154,33 @@ describe('runCheckinSync', () => {
     const out = await runCheckinSync(baseDeps({ submitPage }));
     expect(out.profileTotal).toBe(100);
     expect(out.complete).toBe(true);
+  });
+});
+
+
+describe('#611 binding-aware runner', () => {
+  it('sends the starting revision on every page', async () => {
+    const received: unknown[][] = [];
+    const results = [page({ nextCursor: '500' }), page({ nextCursor: null })];
+    await runCheckinSync(baseDeps({ submitPage: async (...args) => {
+      received.push(args); return results.shift()!;
+    } }));
+    expect(received).toEqual([['<html>feed</html>', null, 1], ['<html>feed</html>', '500', 1]]);
+  });
+  it.each([undefined, null, -1, 0.5, Number.MAX_SAFE_INTEGER + 1, '1'])('does not fetch a feed with invalid revision %s', async linkRevision => {
+    const fetchFeed = vi.fn(async () => 'feed');
+    const submitPage = vi.fn(async () => page({}));
+    const out = await runCheckinSync(baseDeps({ getState: async () => ({
+      username: 'bob', linkRevision, deepest_max_id: null, complete: false, serverCount: 100, profileTotal: 100,
+    } as unknown as CheckinSyncState), fetchFeed, submitPage }));
+    expect(out).toEqual({ status: 'sync_context_required', complete: false, serverCount: 0, profileTotal: null, mergedThisRun: 0 });
+    expect(fetchFeed).not.toHaveBeenCalled(); expect(submitPage).not.toHaveBeenCalled();
+  });
+  it.each(['account_changed', 'sync_context_required'] as const)('stops on %s without claiming completed sync from old counts', async code => {
+    const submitPage = vi.fn().mockResolvedValueOnce(page({ merged: 5, serverCount: 100, profileTotal: 100, nextCursor: '500' }))
+      .mockRejectedValueOnce(Object.assign(new Error(code), { code }));
+    const out = await runCheckinSync(baseDeps({ submitPage }));
+    expect(out).toEqual({ status: code, complete: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5 });
+    expect(submitPage).toHaveBeenCalledTimes(2);
   });
 });

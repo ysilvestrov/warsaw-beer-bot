@@ -29,6 +29,8 @@ export function formatSyncStatus(s: SyncStatusView): string {
     case 'not_linked': return 'Link your Untappd account in the bot first (/link).';
     case 'blocked': return 'Untappd is rate-limiting — try again later.';
     case 'no_session': return 'Untappd session expired — open untappd.com, sign in, then sync again.';
+    case 'account_changed': return 'Untappd account changed — start a new sync for the linked account.';
+    case 'sync_context_required': return 'Update the extension, then start a new sync for the linked account.';
     case 'error': return 'Sync failed — check your connection and token, then retry.';
     case 'capped': return `Synced ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;
     case 'cancelled': return `Sync stopped at ${s.serverCount}${s.profileTotal !== null ? ` of ${s.profileTotal}` : ''}.`;

@@ -232,3 +232,29 @@ describe('postCheckinSyncPage', () => {
     vi.unstubAllGlobals();
   });
 });
+
+
+describe('#611 sync context', () => {
+  it('sends the captured revision without moving the abort-signal argument', async () => {
+    const requests: RequestInit[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      requests.push(init); return new Response('{}');
+    });
+    const controller = new AbortController();
+    controller.abort();
+    await postCheckinSyncPage('http://x', 'tok', '<html>', '100', controller.signal, undefined, 7);
+    expect(JSON.parse(requests[0].body as string)).toEqual({ html: '<html>', maxId: '100', linkRevision: 7 });
+    expect(requests[0].signal?.aborted).toBe(true);
+    vi.unstubAllGlobals();
+  });
+  it.each(['not_linked', 'account_changed', 'sync_context_required'] as const)('retains the 409 code %s', async error => {
+    vi.stubGlobal('fetch', async () => new Response(JSON.stringify({ error }), { status: 409 }));
+    await expect(postCheckinSyncPage('http://x', 'tok', '', null)).rejects.toMatchObject({ code: error });
+    vi.unstubAllGlobals();
+  });
+  it.each(['{}', '{"error":"unexpected"}', 'invalid json'])('treats an unrecognized 409 body as a server error', async body => {
+    vi.stubGlobal('fetch', async () => new Response(body, { status: 409 }));
+    await expect(postCheckinSyncPage('http://x', 'tok', '', null)).rejects.toMatchObject({ code: 'server' });
+    vi.unstubAllGlobals();
+  });
+});

@@ -285,3 +285,11 @@ describe('popup markup', () => {
     expect(link).toContain('display:none');
   });
 });
+
+
+it.each([
+  ['account_changed', 'Untappd account changed — start a new sync for the linked account.'],
+  ['sync_context_required', 'Update the extension, then start a new sync for the linked account.'],
+] as const)('explains %s instead of showing successful completion', (outcome, text) => {
+  expect(formatSyncStatus({ running: false, serverCount: 100, profileTotal: 100, mergedThisRun: 5, outcome, complete: false })).toBe(text);
+});
