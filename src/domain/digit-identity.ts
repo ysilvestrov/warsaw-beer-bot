@@ -8,7 +8,7 @@
 // The rules below are measured, not guessed (spec 2026-09-16-636-digit-identity-design.md, prototype over
 // 1 658 known-different pairs, 55 known-same pairs and 1 494 live tap links).
 
-import { baseNormalize } from './normalize';
+import { baseNormalize, stripLegalForm, canonicalizeBreweryBrand, BREWERY_NOISE, BREWERY_COLLAB_SEP } from './normalize';
 import { isAleStyle } from './czech-grade';
 
 export interface DigitIdentityContext {
@@ -141,6 +141,55 @@ function hasPolishHopsLabel(name: string): boolean {
   return /(?:^| )polish ?hops(?: |$)/.test(baseNormalize(name));
 }
 
+function brandTokens(raw: string): string[] {
+  return baseNormalize(stripLegalForm(canonicalizeBreweryBrand(raw)))
+    .split(' ').filter((token) => token && !BREWERY_NOISE.has(token));
+}
+
+function explicitBrands(context: DigitIdentityContext): string[][] {
+  return [context.input.brewery, context.candidate.brewery].flatMap((label) =>
+    (label ?? '').split(BREWERY_COLLAB_SEP).map(brandTokens),
+  );
+}
+
+function hasBrand(context: DigitIdentityContext, prefix: readonly string[]): boolean {
+  return explicitBrands(context).some((tokens) => prefix.every((token, i) => tokens[i] === token));
+}
+
+function findBrandNumberSpans(name: string, context?: DigitIdentityContext): Span[] {
+  if (!context) return [];
+  const brands = [
+    ...explicitBrands(context),
+    ...(context.knownBreweries ?? []).flatMap((label) => label.split(BREWERY_COLLAB_SEP).map(brandTokens)),
+  ].filter((tokens) => tokens.some((token) => /^\d+$/.test(token))
+    && tokens.some((token) => /\p{L}/u.test(token)));
+  const tokens = [...name.matchAll(/[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu)]
+    .map((match) => ({ token: baseNormalize(match[0]), start: match.index, end: match.index + match[0].length }))
+    .filter(({ token }) => !BREWERY_NOISE.has(token));
+  const noise = findNoiseSpans(name);
+  const spans: Span[] = [];
+  for (const brand of brands) {
+    for (let i = 0; i <= tokens.length - brand.length; i++) {
+      const run = tokens.slice(i, i + brand.length);
+      if (!brand.every((token, j) => run[j].token === token)) continue;
+      for (const token of run) {
+        if (!/^\d+$/.test(token.token) || MARKER_BEFORE.test(name.slice(0, token.start))
+          || !completeCode(name, token)
+          || noise.some((span) => span.start < token.end && token.start < span.end)) continue;
+        spans.push({ start: token.start, end: token.end });
+      }
+    }
+  }
+  if (hasBrand(context, ['sir', 'james'])) {
+    const leading = /^\s*(101)(?=\s)/.exec(name);
+    if (leading && /^(?:mojito|ginger mule|spritz|passionfruit martini|pink g t)(?: |$)/
+      .test(baseNormalize(name.slice(leading[0].length)))) {
+      spans.push({ start: leading[0].length - 3, end: leading[0].length });
+    }
+  }
+  return spans;
+}
+
 function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side): CodeSpan[] {
   const scan = maskSpans(name, findNoiseSpans(name));
   const spans: CodeSpan[] = [];
@@ -185,8 +234,9 @@ function findHopSpans(name: string, context?: DigitIdentityContext, side?: Side)
 }
 
 function readProfile(name: string, context?: DigitIdentityContext, side?: Side): NameDigits {
-  const spans = findHopSpans(name, context, side);
-  const ordinary = readOrdinaryNameDigits(maskSpans(name, spans));
+  const branded = maskSpans(name, findBrandNumberSpans(name, context));
+  const spans = findHopSpans(branded, context, side);
+  const ordinary = readOrdinaryNameDigits(maskSpans(branded, spans));
   ordinary.hasLetters = readOrdinaryNameDigits(name).hasLetters;
   const hops = [...new Set(spans.map((span) => span.id))].sort();
   return { ...ordinary, ...(hops.length > 0 ? { hops } : {}) };
@@ -328,7 +378,7 @@ export function digitIdentity(
 export function digitsCompatibleAsPeers(a: string, b: string, context?: DigitIdentityContext): boolean {
   const digitsA = readNameDigits(a);
   const digitsB = readNameDigits(b);
-  const reverse = context ? { input: context.candidate, candidate: context.input } : undefined;
+  const reverse = context ? { ...context, input: context.candidate, candidate: context.input } : undefined;
   return digitIdentity(digitsA, digitsB, context) !== 'different'
     && digitIdentity(digitsB, digitsA, reverse) !== 'different';
 }

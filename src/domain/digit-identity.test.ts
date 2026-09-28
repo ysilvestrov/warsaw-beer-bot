@@ -361,3 +361,85 @@ test('fraction codes are not reduced to an unproven numerical equivalent', () =>
   expect(unknown.soft).toEqual(['10']);
 });
 });
+
+describe('#664 brewery number spans', () => {
+test('catalog evidence is required for a collaborator number', () => {
+  expect(identity('Blurries / 450 North', 'Blurries')).toBe('different');
+});
+
+test.each<[string, string, string, DigitIdentity]>([
+  ['Brouwerij 3 Fóntéinen Beer', 'Other', '3 Fonteinen Sp. z o.o.', 'same'],
+  ['3 Fonteinen Beer', 'Other', '3 Fonteinen', 'same'],
+  ['#3 Fonteinen Beer', '3 Fonteinen', '3 Fonteinen', 'different'],
+  ['Batch 3 Fonteinen Beer', '3 Fonteinen', '3 Fonteinen', 'different'],
+  ['3° Fonteinen Beer', '3 Fonteinen', '3 Fonteinen', 'same'],
+  ['Beer 450', 'Other', 'Other', 'different'],
+])('uses complete source spans in %s', (a, ab, bb, expected) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits('Beer'), {
+    input: { name: a, brewery: ab }, candidate: { name: 'Beer', brewery: bb },
+    knownBreweries: ['450'],
+  })).toBe(expected);
+});
+
+test('brand/catalog context preserves Czech grade evidence and leaves inputs untouched', () => {
+  const input = readNameDigits('3 Fonteinen Beer #3 10°');
+  const candidate = readNameDigits('Beer #3 12°');
+  const context: DigitIdentityContext = {
+    input: { name: '3 Fonteinen Beer #3 10°', brewery: '3 Fonteinen', style: 'Czech Lager' },
+    candidate: { name: 'Beer #3 12°', brewery: '3 Fonteinen' },
+    knownBreweries: ['450 North'],
+  };
+  expect(digitIdentity(input, candidate, context)).toBe('different');
+  expect(input).toEqual({ numbers: ['3', '3'], soft: [], grades: ['10'], versions: [], years: [], hasLetters: true });
+  expect(candidate).toEqual({ numbers: ['3'], soft: [], grades: ['12'], versions: [], years: [], hasLetters: true });
+  expect(context).toEqual({
+    input: { name: '3 Fonteinen Beer #3 10°', brewery: '3 Fonteinen', style: 'Czech Lager' },
+    candidate: { name: 'Beer #3 12°', brewery: '3 Fonteinen' },
+    knownBreweries: ['450 North'],
+  });
+});
+
+test('numeric brewery spans cannot erase a conflicting Czech grade', () => {
+  expect(digitIdentity(readNameDigits('Claim 10° Beer'), readNameDigits('Beer 12°'), {
+    input: { name: 'Claim 10° Beer', brewery: 'Claim 10', style: 'Czech Lager' },
+    candidate: { name: 'Beer 12°', brewery: 'Claim 10' },
+  })).toBe('different');
+});
+test.each<[string, string, string, string, readonly string[], DigitIdentity]>([
+  ['3 Fonteinen Oude Geuze', 'Oude Geuze', '3 Fonteinen', 'Brouwerij 3 Fonteinen', [], 'same'],
+  ['3 Fonteinen Beer #3', 'Beer', '3 Fonteinen', '3 Fonteinen', [], 'different'],
+  ['3 Fonteinen Beer #3', 'Beer #3', '3 Fonteinen', '3 Fonteinen', [], 'same'],
+  ['3 Fonteinen 3 Fonteinen Beer #3', 'Beer #3', '3 Fonteinen', '3 Fonteinen', [], 'same'],
+  ['Beer 450', 'Beer', 'Imprint', 'Imprint', ['450 North'], 'different'],
+  ['Blurries / 450 North', 'Blurries', 'Imprint', 'Imprint', ['450 North'], 'same'],
+  ['Blurries / 450 Northern', 'Blurries', 'Imprint', 'Imprint', ['450 North'], 'different'],
+  ['Stuffed Schmoojee / Claim 52', 'Stuffed Schmoojee', 'Imprint', 'Imprint', ['Claim 52'], 'same'],
+  ['Claim 52 Beer #52', 'Beer', 'Claim 52', 'Claim 52', [], 'different'],
+  ['101 Mojito', 'Mojito Mocktail', 'Sir.James', 'Sir James 101', [], 'same'],
+  ['101 Ginger Mule', 'Ginger Mule Mocktail', 'Імпортне пиво', 'Sir James 101', [], 'same'],
+  ['#101 Mojito', 'Mojito Mocktail', 'Sir.James', 'Sir James 101', [], 'different'],
+  ['Batch 101 Mojito', 'Mojito Mocktail', 'Sir.James', 'Sir James 101', [], 'different'],
+  ['Mojito 101', 'Mojito Mocktail', 'Sir.James', 'Sir James 101', [], 'different'],
+  ['101 Unknown Product', 'Unknown Product', 'Sir.James', 'Sir James 101', [], 'different'],
+  ['101 Mojito', 'Mojito', 'Other', '101 Cider House', [], 'different'],
+  ['Duvel 6.66', 'Duvel', 'Duvel Moortgat', 'Duvel Moortgat', [], 'different'],
+])('%s / %s → %s', (a, b, ab, bb, knownBreweries, expected) => {
+  expect(digitIdentity(readNameDigits(a), readNameDigits(b), {
+    input: { name: a, brewery: ab }, candidate: { name: b, brewery: bb }, knownBreweries,
+  })).toBe(expected);
+});
+
+test('peer reversal retains the catalog and swaps brewery/style sides', () => {
+  const a = 'Blurries / 450 North';
+  const b = 'Blurries';
+  const context: DigitIdentityContext = {
+    input: { name: a, brewery: 'Imprint' },
+    candidate: { name: b, brewery: 'Imprint', style: 'Sour' },
+    knownBreweries: ['450 North'],
+  };
+  expect(digitsCompatibleAsPeers(a, b, context)).toBe(true);
+  expect(digitsCompatibleAsPeers(b, a, {
+    ...context, input: context.candidate, candidate: context.input,
+  })).toBe(true);
+});
+});
