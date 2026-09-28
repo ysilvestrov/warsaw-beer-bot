@@ -35,6 +35,7 @@ export const BREWERY_NOISE = new Set([
 // (brewery) otherwise leads the name ("Browar Stu Mostów"), never trailing "ale".
 const BRAND_CANONICALIZATIONS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bale\s+browar\b/giu, 'AleBrowar'],
+  [/\bpanipani\b/giu, 'Pan IPAni'],
 ];
 
 export function canonicalizeBreweryBrand(s: string): string {

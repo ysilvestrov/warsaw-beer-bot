@@ -34,7 +34,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['bakalar', 'tradicni v rakovniku'],
   ['dzik', 'cydrownia'],
   // brand-as-brewery (shop put a beer/brand in the brewery field; confirmed 1:1):
-  ['panipani', 'trzech kumpli'],
+  ['pan ipani', 'trzech kumpli'],
   ['smoothiemaker', 'mad brew'],
   // shop (extension) sources:
   ['vibrant pour', 'vibrantpour'],
