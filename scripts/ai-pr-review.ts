@@ -401,7 +401,7 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
     const { inScope, mergedIn } = incrementalScope(sinceDiffSpec, deps.listChangedFiles(decision.prSpec));
     if (mergedIn.length > 0) {
       deps.log(
-        `::notice::AI review: ${mergedIn.length} file(s) changed since the last review are not in this PR's own diff (merged in from the base) — left out of scope.`,
+        `::notice::AI review: ${mergedIn.length} file(s) changed since the last review are not in this PR's own diff (merged in from the base, or reverted to it) — left out of scope.`,
       );
     }
     changedFiles = inScope;
