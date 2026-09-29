@@ -48,6 +48,10 @@ no passwordless cgroup delegation or user systemd. Do not add privileged infrast
 
 Metadata records protocol version, uid, root device/inode, boot_id, supervisor
 PID/starttime and random run identity; a held flock provides a live lease. A bounded
+directory flock coordinates root publication/removal with inventories. A busy
+inventory preserves its prior known leftovers while filesystem sampling continues;
+it never announces recovery from a partial snapshot.
+The
 read-only inventory checks these identities and matching process environment markers
 without printing environment contents. When the supervisor is SIGKILLed, same-boot
 leftovers remain uncertain even with zero observed references: a child can scrub its

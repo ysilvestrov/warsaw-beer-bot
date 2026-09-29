@@ -1,5 +1,6 @@
 """Real subprocess regressions: deletion must follow kernel completion, not PID age."""
 import json
+import fcntl
 import os
 from pathlib import Path
 import signal
@@ -205,6 +206,19 @@ sys.exit({exit_code})
         _, stderr = process.communicate(timeout=10)
         self.assertEqual(process.returncode, 125, stderr.decode())
         self.assertEqual(list(target.iterdir()), [])
+
+    def test_busy_registry_defers_inventory_instead_of_reporting_partial_metadata(self):
+        self.base.mkdir(mode=0o700)
+        handle = os.open(self.base, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = subprocess.run([sys.executable, str(SCRIPT), '--base', str(self.base), '--inspect'],
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 75)
+            self.assertEqual(json.loads(result.stdout), {'status': 'registry_busy', 'retained': True})
+            self.assertEqual(list(self.base.iterdir()), [])
+        finally:
+            os.close(handle)
 
     def test_changed_root_is_retained(self):
         process = self.launch('''

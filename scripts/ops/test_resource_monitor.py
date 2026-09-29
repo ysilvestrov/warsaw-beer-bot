@@ -134,6 +134,16 @@ class ResourceMonitor(unittest.TestCase):
             tick(Path(directory), sample(900), messages.append, [])
             self.assertEqual(len(messages), 2)
 
+    def test_busy_inventory_preserves_previous_leftovers_without_false_recovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            messages = []
+            crashed = [{'name': 'run-a', 'status': 'uncertain_current_boot'}]
+            tick(Path(directory), sample(0), messages.append, crashed)
+            state = tick(Path(directory), sample(300), messages.append, None)
+            self.assertEqual(len(messages), 1)
+            self.assertEqual(state['announced']['runs'], crashed)
+            self.assertEqual(state['runs_inventory_available'], False)
+
 
 if __name__ == '__main__':
     unittest.main()
