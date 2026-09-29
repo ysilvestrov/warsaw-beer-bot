@@ -225,6 +225,11 @@ When making changes:
 5. Verify behavior through tests or reasoning.
 6. Avoid unrelated modifications.
 
+Do not send a final response while the current request still has an authorized,
+safe next action. Perform that action and use commentary for interim progress.
+Send a final response only when the request is complete, the next step requires
+the user's decision or authority, or a concrete blocker is named.
+
 ---
 
 Classifying a Fix: the Light Path
