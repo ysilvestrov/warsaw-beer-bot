@@ -1,9 +1,9 @@
-import { spawnSync } from 'node:child_process';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
-  artifactPaths, renderPrompt, buildReviewerCommand,
+  spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand,
 } from './core';
 
 function git(args: string[]): string {
@@ -42,46 +42,42 @@ function main(argv: string[]): number {
 
   const tmpDir = join(root, 'tmp');
   mkdirSync(tmpDir, { recursive: true });
-  const paths = artifactPaths(tmpDir, reviewer, branch, sha);
+  const runDir = mkdtempSync(runDirPrefix(tmpDir, reviewer, branch, sha));
+  const paths = runArtifacts(runDir);
   writeFileSync(paths.diff, diff);
   const template = readFileSync(join(__dirname, 'prompt.md'), 'utf8');
   const prompt = renderPrompt(template, { base, sha: sha.slice(0, 7), branch, diffPath: paths.diff });
-  const command = buildReviewerCommand({ reviewer, model, prompt, reportPath: paths.report, tmpDir });
+  const command = buildReviewerCommand({ reviewer, model, prompt, reportPath: paths.report, tmpDir: runDir });
 
   // The reviewer runs in a detached worktree of exactly `sha`, so the review describes that SHA by
   // construction — whatever happens in the author's checkout during the (up to 15 min) run (PR #738 review).
-  // A fresh directory per run: two concurrent runs at one SHA must not remove each other's snapshot.
-  const snapshot = mkdtempSync(join(tmpDir, 'cross-review-wt-'));
-  git(['worktree', 'add', '--detach', snapshot, sha]);
-
-  writeFileSync(paths.report, ''); // a stale report from an earlier run at this SHA must not survive a failed one
-  console.error(`cross-review: ${reviewer} reviewing ${branch} @ ${sha.slice(0, 7)} vs ${base} (up to 15 min)…`);
-  const r = (() => {
-    try {
-      return spawnSync(command.cmd, command.args, {
-        cwd: snapshot,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: TIMEOUT_MS,
-        killSignal: 'SIGKILL',
-        maxBuffer: 64 * 1024 * 1024,
-        env: { ...process.env, CROSS_REVIEW_ACTIVE: '1' },
-      });
-    } finally {
-      removeSnapshot(snapshot);
-    }
-  })();
+  git(['worktree', 'add', '--detach', paths.snapshot, sha]);
+  let r: SpawnSyncReturns<string>;
+  try {
+    console.error(`cross-review: ${reviewer} reviewing ${branch} @ ${sha.slice(0, 7)} vs ${base} (up to 15 min)…`);
+    r = spawnSync(command.cmd, command.args, {
+      cwd: paths.snapshot,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: 64 * 1024 * 1024,
+      env: { ...process.env, CROSS_REVIEW_ACTIVE: '1' },
+    });
+  } finally {
+    removeSnapshot(paths.snapshot);
+  }
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}`;
   writeFileSync(paths.log, log);
   if (command.reportFromStdout) writeFileSync(paths.report, r.stdout ?? '');
   const report = existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : '';
 
-  const timedOut = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
-  const spawnError = timedOut
-    ? undefined
-    : (r.error as NodeJS.ErrnoException | undefined)?.code
-      ?? r.error?.message
-      ?? (r.signal && r.status === null ? `killed by ${r.signal}` : undefined);
+  const { timedOut, spawnError } = spawnOutcome({
+    status: r.status,
+    signal: r.signal,
+    errorCode: (r.error as NodeJS.ErrnoException | undefined)?.code,
+    errorMessage: r.error?.message,
+  });
   const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);

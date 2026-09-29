@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, classifyResult, artifactPaths, renderPrompt, buildReviewerCommand } from './core';
+import { parseArgs, isNestedRun, preflight, classifyResult, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand } from './core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -114,16 +114,44 @@ describe('classifyResult', () => {
   });
 });
 
-describe('artifactPaths', () => {
-  test('reviewer leads the name; slashes in the branch become dashes; sha is cut to 7', () => {
-    expect(artifactPaths('/r/tmp', 'codex', 'feat/cross-review', '0123456789abcdef')).toEqual({
-      diff: '/r/tmp/cross-review-codex-feat-cross-review-0123456.diff',
-      report: '/r/tmp/cross-review-codex-feat-cross-review-0123456.md',
-      log: '/r/tmp/cross-review-codex-feat-cross-review-0123456.log',
+describe('runDirPrefix', () => {
+  test('reviewer, branch with slashes as dashes, sha cut to 7, open for the mkdtemp suffix', () => {
+    expect(runDirPrefix('/r/tmp', 'codex', 'feat/cross-review', '0123456789abcdef')).toBe('/r/tmp/cross-review-codex-feat-cross-review-0123456-');
+  });
+});
+
+describe('runArtifacts', () => {
+  test('every artifact of a run lives inside its own directory', () => {
+    expect(runArtifacts('/r/tmp/cross-review-codex-b-0123456-Ab12Cd')).toEqual({
+      diff: '/r/tmp/cross-review-codex-b-0123456-Ab12Cd/branch.diff',
+      report: '/r/tmp/cross-review-codex-b-0123456-Ab12Cd/report.md',
+      log: '/r/tmp/cross-review-codex-b-0123456-Ab12Cd/reviewer.log',
+      snapshot: '/r/tmp/cross-review-codex-b-0123456-Ab12Cd/snapshot',
     });
   });
-  test('the two reviewers at one SHA never share a report', () => {
-    expect(artifactPaths('/r/tmp', 'claude', 'b', '0123456789abcdef').report).toBe('/r/tmp/cross-review-claude-b-0123456.md');
+});
+
+describe('spawnOutcome', () => {
+  test('a clean exit is neither a timeout nor a spawn error', () => {
+    expect(spawnOutcome({ status: 0, signal: null })).toEqual({ timedOut: false });
+  });
+  test('ETIMEDOUT is the timeout and never a spawn error (Node also sets SIGKILL)', () => {
+    expect(spawnOutcome({ status: null, signal: 'SIGKILL', errorCode: 'ETIMEDOUT', errorMessage: 'spawnSync codex ETIMEDOUT' })).toEqual({ timedOut: true });
+  });
+  test('a missing CLI is named by its error code', () => {
+    expect(spawnOutcome({ status: null, signal: null, errorCode: 'ENOENT', errorMessage: 'spawnSync codex ENOENT' })).toEqual({ timedOut: false, spawnError: 'ENOENT' });
+  });
+  test('output over the buffer is named', () => {
+    expect(spawnOutcome({ status: null, signal: 'SIGTERM', errorCode: 'ENOBUFS', errorMessage: 'spawnSync claude ENOBUFS' })).toEqual({ timedOut: false, spawnError: 'ENOBUFS' });
+  });
+  test('an error without a code falls back to its message', () => {
+    expect(spawnOutcome({ status: null, signal: null, errorMessage: 'boom' })).toEqual({ timedOut: false, spawnError: 'boom' });
+  });
+  test('a signal kill with no exit status is named', () => {
+    expect(spawnOutcome({ status: null, signal: 'SIGKILL' })).toEqual({ timedOut: false, spawnError: 'killed by SIGKILL' });
+  });
+  test('a signal alongside an exit status is not a spawn error', () => {
+    expect(spawnOutcome({ status: 1, signal: 'SIGTERM' })).toEqual({ timedOut: false });
   });
 });
 
@@ -135,6 +163,9 @@ describe('renderPrompt', () => {
   });
   test('an unknown placeholder is an error, not silent text', () => {
     expect(() => renderPrompt('{{spec}}', { base: 'x', sha: 'y', branch: 'z', diffPath: 'w' })).toThrow('unfilled placeholder {{spec}}');
+  });
+  test('an inherited Object name is not a filled placeholder', () => {
+    expect(() => renderPrompt('{{constructor}}', { base: 'x', sha: 'y', branch: 'z', diffPath: 'w' })).toThrow('unfilled placeholder {{constructor}}');
   });
 });
 
