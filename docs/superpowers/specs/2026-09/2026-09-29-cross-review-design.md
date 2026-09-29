@@ -78,9 +78,10 @@ It must end with exactly one line `CROSS-REVIEW-RESULT: <n> finding(s)`.
 | `CROSS_REVIEW_ACTIVE=1` already in env (a reviewer calling a reviewer) | exit 3, no launch |
 | dirty tree / empty diff / unknown `--reviewer` | exit 2, usage message |
 | reviewer exceeds 15 min | kill, exit 5, `timeout` |
-| reviewer output contains `EAI_AGAIN` / `Can't reach the API server` | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
-| reviewer exits non-zero | exit 5, stderr tail |
-| output empty or missing the `CROSS-REVIEW-RESULT` line | exit 5, **never** read as "no findings" |
+| reviewer output contains `EAI_AGAIN` / `Can't reach the API server` and the reviewer exited non-zero (a successful report that quotes this text is not a network failure) | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
+| reviewer exits non-zero | exit 5, `reviewer exited with code N`; the log path is printed |
+| reviewer could not be spawned / killed by a signal / output over buffer | exit 5, `reviewer did not run to completion: <code>` |
+| output empty, or the `CROSS-REVIEW-RESULT` line is not the last non-empty line | exit 5, **never** read as "no findings" |
 | otherwise | exit 0, report written |
 
 The script sets `CROSS_REVIEW_ACTIVE=1` in the child's environment.
@@ -117,7 +118,7 @@ gate.
 | Recorded fact | What it claims | Evidence |
 |---|---|---|
 | Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured before launch + reviewer exit 0 |
-| "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` line; absence = error, not zero |
+| "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` as the **last non-empty line**; absence = error, not zero |
 | Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (P3: a write fails with `Read-only file system`). claude: no write tools in the set (P2) |
 | Codex can call it unattended | no manual approval needed | P1 with a control run (below) |
 | PR marker | a cross-review happened at `<sha>` with that tally | self-reported by the author, **verified by nobody**. It is a counting label for later analysis and gates nothing |
@@ -152,9 +153,10 @@ follow-up measurement, not part of this change.
 
 ## Scope
 
-- `scripts/cross-review.ts`: pure logic (argument parsing, command building, result
-  classification) plus a thin runner.
-- `scripts/cross-review.test.ts`: Vitest.
+- `scripts/cross-review/core.ts`: pure logic (argument parsing, command building, result
+  classification).
+- `scripts/cross-review/cli.ts`: thin runner.
+- `scripts/cross-review/core.test.ts`: Vitest.
 - `scripts/cross-review/prompt.md`.
 - `package.json`: the script entry.
 - `.codex/rules/default.rules`: the allow rule.
