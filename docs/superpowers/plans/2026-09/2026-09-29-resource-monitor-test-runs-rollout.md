@@ -50,10 +50,10 @@ manifest; tracked inode-followup-report.md contains only aggregate evidence.
 
 ## Task 3: Final verification and PR
 
-- [ ] Record installed hashes, real timer samples, root/disk/service metrics and actual
+- [x] Record installed hashes, real timer samples, root/disk/service metrics and actual
   no-root-leftovers after ordinary npm tests; list untouched active stale checkouts.
-- [ ] Fetch/rebase main immediately before PR; re-run full gate after any rebase/code fix.
-- [ ] Once-per-PR Claude cross-review with authorized tracked diff/code only; verify
+- [x] Fetch/rebase main immediately before PR; re-run full gate after any rebase/code fix.
+- [x] Once-per-PR Claude cross-review with authorized tracked diff/code only; verify
   findings technically, commit necessary fixes and refresh installed copies if relevant.
 - [ ] Push/create PR, wait for GitHub checks/review and resolve valid findings. Do not
   merge/deploy bot. Report installed versus PR-only work and decisions still required.

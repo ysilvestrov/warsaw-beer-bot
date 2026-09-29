@@ -1,6 +1,6 @@
 # Моніторинг ресурсів і тимчасові каталоги тестів
 
-Стан на 2026-09-29 14:06 UTC. Історичних видалень у цій задачі: **0**.
+Стан на 2026-09-29 14:26 UTC. Історичних видалень у цій задачі: **0**.
 Моніторинг і окрема команда запуску встановлені на сервері. Зміни звичайного
 `npm test` у root/extension оформлюються PR; код бота не деплоївся.
 
@@ -9,12 +9,12 @@
 - Монітор кожні 5 хвилин у crontab оператора, одна managed-секція.
   Наявні записи збережено; приватні before/previous backups лежать у
   `$HOME/.local/state/wbb-resource-monitor/`. Production units не змінені.
-- Встановлені копії: `$HOME/.local/lib/wbb-ops/598ec023f844b9f8/`.
+- Встановлені копії: `$HOME/.local/lib/wbb-ops/e2ac7389a59a5f8f/`.
   Ідентифікатор — перші 16 hex SHA256 двох Python-скриптів у визначеному порядку.
   Git checkout не змінює виконувані копії.
 - Warning inode: зайнято >=80% безперервно 15 хвилин; critical: >=90%
   або <100000 вільних inode. Disk warning: <=10 GiB протягом 15 хвилин;
-  critical: <=5 GiB. Диск 74,79 GiB, використано 41,76 GiB, доступно 29,94 GiB.
+  critical: <=5 GiB. На початку диск 74,79 GiB, використано 41,76 GiB, доступно 29,94 GiB.
   Поріг 10 GiB більший за попередній temp-інцидент 6,49 GiB; 5 GiB — резерв
   до заповнення, без припущення про швидкість накопичення.
 - До 864 samples (три доби при штатній частоті), JSON <=1 MiB; місцевий log
@@ -23,9 +23,11 @@
   Ні значення ключів, ні дані каналів у state/log не записуються.
 - Read-only getChat підтвердив доступність операційного каналу. Штучних
   повідомлень у Telegram не надсилали. На здорових реальних samples повідомлень немає.
-- Реальні samples: 13:59:50 вручну; **14:00:01 та 14:05:02 через cron**.
+- Реальні samples: 13:59:50 і 14:25:51 вручну; **14:00–14:25 кожні 5 хвилин через cron**.
   Обидва ресурси normal. Для прогнозу даних ще недостатньо. Мінімум: 13
   послідовних samples за >=1 годину, gap <=450s, додатне споживання без cleanup.
+  Часове вікно враховує startup jitter cron. Локальний `--notify none` не
+  підтверджує доставку й не приглушує наступний Telegram alert.
 - `$HOME/.local/bin/wbb-test` установлена для запуску зі старого checkout.
   Перевірка `wbb-test scripts/autodeploy/qualify-cli.test.ts --cache=false`
   на старому checkout: 19 passed; керований base після запуску порожній.
@@ -84,13 +86,13 @@ Tracked files були clean, але відкриті чужі sessions не п�
 Root — `/dev/sda1`, ext4, rw. Mount ro у sandbox не є станом сервера.
 Усього 4862256 inode, 80307429376 bytes диска.
 
-| Метрика | 13:22:15, до роботи | 14:06:28, після активації/перевірок |
+| Метрика | 13:22:15, до роботи | 14:25:56, після активації/перевірок |
 |---|---:|---:|
-| Використано inode | 3142710 | 3142823 |
-| Вільно inode | 1719546 | 1719433 |
+| Використано inode | 3142710 | 3142865 |
+| Вільно inode | 1719546 | 1719391 |
 | Зайнятість inode | 64,63% | 64,64% |
-| Використано bytes диска | 44840271872 | 44840890368 |
-| Доступно bytes диска | 32144543744 | 32143925248 |
+| Використано bytes диска | 44840271872 | 44847874048 |
+| Доступно bytes диска | 32144543744 | 32136941568 |
 
 Різниця — одночасна активність FS та нові worktree/evidence/monitor artifacts,
 не історичне очищення. Повного розміру /tmp не встановлено; неврахований
@@ -140,15 +142,22 @@ references у cwd/fd/maps/temp-env, жодних active tests чи audit errors.
 
 ## Перевірки й здоров’я production
 
-- 28 Python regressions: thresholds/boundaries/15min, gap/clock/FS reset,
+- 39 Python regressions: thresholds/boundaries/15min, gap/clock/FS reset,
   bounded history/forecast, delivery failure/retry, transition/recovery, busy
   inventory, installer preservation/idempotence, success/failure, signals,
   parallel runs, detached child, SIGKILL survivor, PID reuse, reboot,
   symlink/changed-root refusal, реальний Vitest cache через звичайний npm test.
+  Додатково: locked lease з неправильним/правильним starttime живого PID,
+  сигнали adopted detached child, interruption перед spawn, spawn failure 127,
+  Telegram ok:false/HTTP error без витоку token, точна cron command і відмова
+  при сторонньому monitor або concurrent crontab edit.
 - У cache probe один конкретний transformed module справді лежав у payload
   перед success/failure; після обох roots/fixtures/cache відсутні.
 - Root full gate: 4202 passed, 1 skipped, typecheck green.
   Extension: 836 passed, typecheck green. diff-check green.
+- Claude cross-review @b11e364: 7 findings, 7 fixed, 0 rejected. Дві помилки
+  відтворено RED (false acknowledgement і jitter forecast), виправлено GREEN;
+  решта зауважень посилили докази тестів. Після змін full gate повторно green.
 - Production health `{ok:true}`. Bot PID3521195/NRestarts0, cloudflared
   PID121172/0, litestream PID2019010/0, 48-hours-trip PID3348312/0 незмінні;
   code-server PID316945/NRestarts1 — попередній стан, без нового restart.
