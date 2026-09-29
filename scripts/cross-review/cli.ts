@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
@@ -42,7 +42,7 @@ function main(argv: string[]): number {
 
   const tmpDir = join(root, 'tmp');
   mkdirSync(tmpDir, { recursive: true });
-  const paths = artifactPaths(tmpDir, branch, sha);
+  const paths = artifactPaths(tmpDir, reviewer, branch, sha);
   writeFileSync(paths.diff, diff);
   const template = readFileSync(join(__dirname, 'prompt.md'), 'utf8');
   const prompt = renderPrompt(template, { base, sha: sha.slice(0, 7), branch, diffPath: paths.diff });
@@ -50,8 +50,8 @@ function main(argv: string[]): number {
 
   // The reviewer runs in a detached worktree of exactly `sha`, so the review describes that SHA by
   // construction — whatever happens in the author's checkout during the (up to 15 min) run (PR #738 review).
-  const snapshot = join(tmpDir, `cross-review-wt-${sha.slice(0, 7)}`);
-  removeSnapshot(snapshot); // a run killed mid-review can leave one behind
+  // A fresh directory per run: two concurrent runs at one SHA must not remove each other's snapshot.
+  const snapshot = mkdtempSync(join(tmpDir, 'cross-review-wt-'));
   git(['worktree', 'add', '--detach', snapshot, sha]);
 
   writeFileSync(paths.report, ''); // a stale report from an earlier run at this SHA must not survive a failed one

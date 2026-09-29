@@ -115,12 +115,15 @@ describe('classifyResult', () => {
 });
 
 describe('artifactPaths', () => {
-  test('slashes in the branch become dashes; sha is cut to 7', () => {
-    expect(artifactPaths('/r/tmp', 'feat/cross-review', '0123456789abcdef')).toEqual({
-      diff: '/r/tmp/cross-review-feat-cross-review-0123456.diff',
-      report: '/r/tmp/cross-review-feat-cross-review-0123456.md',
-      log: '/r/tmp/cross-review-feat-cross-review-0123456.log',
+  test('reviewer leads the name; slashes in the branch become dashes; sha is cut to 7', () => {
+    expect(artifactPaths('/r/tmp', 'codex', 'feat/cross-review', '0123456789abcdef')).toEqual({
+      diff: '/r/tmp/cross-review-codex-feat-cross-review-0123456.diff',
+      report: '/r/tmp/cross-review-codex-feat-cross-review-0123456.md',
+      log: '/r/tmp/cross-review-codex-feat-cross-review-0123456.log',
     });
+  });
+  test('the two reviewers at one SHA never share a report', () => {
+    expect(artifactPaths('/r/tmp', 'claude', 'b', '0123456789abcdef').report).toBe('/r/tmp/cross-review-claude-b-0123456.md');
   });
 });
 
