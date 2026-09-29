@@ -122,7 +122,7 @@ def atomic_state(fd, state):
 
 def read_state(fd):
     try:
-        handle = os.open('state.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+        handle = os.open('state.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
     except FileNotFoundError:
         return None
     with os.fdopen(handle) as stream:
@@ -222,7 +222,10 @@ def main():
     parser.add_argument('--notify', choices=('telegram', 'none'), default='none')
     args = parser.parse_args()
     _, fd = private_directory(args.state_dir)
-    handle = os.open('monitor.log', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+    handle = os.open('monitor.log', os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=fd)
+    log_stat = os.fstat(handle)
+    if not stat.S_ISREG(log_stat.st_mode) or log_stat.st_uid != os.getuid() or log_stat.st_nlink != 1:
+        raise ValueError('unsafe monitor log')
     os.close(handle)
     os.close(fd)
     log = logging.getLogger('resource-monitor')

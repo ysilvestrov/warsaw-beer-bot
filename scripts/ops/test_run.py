@@ -236,7 +236,7 @@ def inventory(base):
                     raise SafetyError('unrecognised run name')
                 root_fd = os.open(name, DIRECTORY_FLAGS, dir_fd=fd)
                 info = os.fstat(root_fd)
-                handle = os.open('run.json', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+                handle = os.open('run.json', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root_fd)
                 with os.fdopen(handle) as stream:
                     metadata_stat = os.fstat(stream.fileno())
                     if (not stat.S_ISREG(metadata_stat.st_mode) or metadata_stat.st_uid != os.getuid()
@@ -247,7 +247,7 @@ def inventory(base):
                     info.st_uid, stat.S_IMODE(info.st_mode)) != (
                         1, name[4:], os.getuid(), info.st_dev, info.st_ino, os.getuid(), 0o700):
                     raise SafetyError('run identity mismatch')
-                lease_fd = os.open('lease.lock', os.O_RDONLY | os.O_NOFOLLOW, dir_fd=root_fd)
+                lease_fd = os.open('lease.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=root_fd)
                 lease_stat = os.fstat(lease_fd)
                 if (not stat.S_ISREG(lease_stat.st_mode) or lease_stat.st_uid != os.getuid()
                         or lease_stat.st_nlink != 1):

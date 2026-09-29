@@ -100,6 +100,7 @@ describe('deploy rsync payload', () => {
       'deploy/autodeploy.sh',
       'deploy/deploy.sh',
       'deploy/install-autodeploy.sh',
+      'deploy/install-resource-monitor.sh',
       'deploy/installed-current.sh',
       'deploy/litestream.env.example',
       'deploy/litestream.service',
