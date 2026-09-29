@@ -25,6 +25,8 @@
     "scripts/cws-auth-bootstrap.test.ts",
     "scripts/publish-store-release.ts",
     "scripts/publish-store-release.test.ts",
-    "scripts/rearm-eligible-drinks.ts"
+    "scripts/rearm-eligible-drinks.ts",
+    // cross-review: the pre-PR reviewer between local agents (2026-09-29).
+    "scripts/cross-review/**/*"
   ]
 }
