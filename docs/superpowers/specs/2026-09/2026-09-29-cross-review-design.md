@@ -1,7 +1,8 @@
 # Cross-review between agents before the PR
 
 Status: design approved in brainstorming 2026-09-29 (approach B, one pass before the PR, PR
-marker on). Probes P1–P3 below must pass before the plan is written.
+marker on). Probes P1–P3 ran 2026-09-29 and all passed. The results are recorded below and changed
+the reviewer invocation.
 
 ## Why
 
@@ -42,6 +43,9 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
 - The script **refuses a dirty working tree**, because the marker names a SHA and an
   uncommitted change would be reviewed without being part of that SHA. It also refuses an
   empty diff against the base.
+- Before launch, the script writes the diff (`git diff <base>...HEAD`) to
+  `tmp/cross-review-<branch>-<shortsha>.diff`. Both reviewers read that file, so the
+  `claude` reviewer needs no shell at all (see P2).
 - Output: the report goes to `tmp/cross-review-<branch>-<shortsha>.md`, and stdout gets a
   summary line plus that path.
 
@@ -50,11 +54,11 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
 | `--reviewer` | Invocation | Read-only by |
 |---|---|---|
 | `codex` | `codex exec -s read-only --ephemeral -o <report> <prompt>` | Codex sandbox (`read-only`) |
-| `claude` | `claude -p <prompt>` with `--allowedTools` limited to Read/Grep/Glob and read-only `git` (`diff`, `log`, `show`) | the tool allowlist (probe P2) |
+| `claude` | `claude -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <tmp> -- <prompt> < /dev/null` | the tool **set** itself: there is no Edit/Write/Bash, and `--restricted` ignores the user/project/local settings files (P2) |
 
 Both get the same prompt, which is built from a template kept in the repo
 (`scripts/cross-review/prompt.md`) plus the base, the HEAD SHA, and the branch name. The
-reviewer runs `git diff` itself and may open any file in the repo: the branch's spec and plan,
+reviewer reads the prepared diff file and may open any file in the repo: the branch's spec and plan,
 `spec.md`, and neighbouring code.
 
 The prompt asks for:
@@ -73,7 +77,8 @@ It must end with exactly one line `CROSS-REVIEW-RESULT: <n> finding(s)`.
 |---|---|
 | `CROSS_REVIEW_ACTIVE=1` already in env (a reviewer calling a reviewer) | exit 3, no launch |
 | dirty tree / empty diff / unknown `--reviewer` | exit 2, usage message |
-| reviewer exceeds 15 min | kill, exit 5, `timeout (sandbox without network? see AGENTS.md)` |
+| reviewer exceeds 15 min | kill, exit 5, `timeout` |
+| reviewer output contains `EAI_AGAIN` / `Can't reach the API server` | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
 | reviewer exits non-zero | exit 5, stderr tail |
 | output empty or missing the `CROSS-REVIEW-RESULT` line | exit 5, **never** read as "no findings" |
 | otherwise | exit 0, report written |
@@ -82,8 +87,8 @@ The script sets `CROSS_REVIEW_ACTIVE=1` in the child's environment.
 
 For Codex, the repo's `.codex/rules/default.rules` gets
 `prefix_rule(pattern = ["npm", "run", "cross-review"], decision = "allow")`, so that the call
-escapes the sandbox without a manual approval, the same way `git push` and `gh pr` already do
-(probe P1).
+escapes the sandbox without a manual approval, the same way `git push` and `gh pr` already do.
+P1 proved this.
 
 ## Workflow rule (both agent files)
 
@@ -113,21 +118,31 @@ gate.
 |---|---|---|
 | Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured before launch + reviewer exit 0 |
 | "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` line; absence = error, not zero |
-| Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (enforced). claude: tool allowlist — **probe P2** |
-| Codex can call it unattended | no manual approval needed | **probe P1**; until it passes, AGENTS.md says an approval prompt is expected |
+| Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (P3: a write fails with `Read-only file system`). claude: no write tools in the set (P2) |
+| Codex can call it unattended | no manual approval needed | P1 with a control run (below) |
 | PR marker | a cross-review happened at `<sha>` with that tally | self-reported by the author, **verified by nobody**. It is a counting label for later analysis and gates nothing |
 
-## Probes before the plan
+## Probes (run 2026-09-29, all passed)
 
-- **P1:** from Codex, after the `prefix_rule` is added, `npm run cross-review -- --reviewer claude`
-  on a small branch reaches Claude (the report is written) with no approval prompt.
-- **P2:** `claude -p` with the planned `--allowedTools`, told to edit a file, cannot edit it
-  (the tree stays clean) and can still run `git diff`.
-- **P3:** `codex exec -s read-only` can run `git diff origin/main...HEAD` and read files in
-  the repo.
+- **P1: the Codex allow rule.** A stub `npm run cross-review` (`claude -p … 'reply PONG'`) was
+  run through `codex exec` (`approval: never`, sandbox `workspace-write`):
+  - **with** `prefix_rule(["npm","run","cross-review"], allow)` in the worktree's
+    `.codex/rules/default.rules`, it printed `PONG` in 3.7 s;
+  - **without** the rule (the control run), it exited 1 after 185 s with
+    `API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)`.
 
-If P1 fails, the design keeps the manual approval and documents it. P2 failing means `claude`
-needs a stronger read-only mechanism before the plan.
+  The rule is what grants network. Without the rule, the failure is an error message after about
+  3 minutes rather than a silent hang, and the script recognizes that text.
+- **P2: the `claude` reviewer is read-only.** The first attempt used `--allowedTools` limited to
+  Read/Grep/Glob and `git diff/log/show`. It refused the write, but the evidence is **weak**:
+  the reviewer chose not to try workarounds, and in `-p` mode the allow rules in
+  `.claude/settings.local.json` (`git commit *`, `git push *`, `node *`) still apply. The second
+  attempt used `--restricted --strict-mcp-config --tools Read,Grep,Glob`. The reviewer, told to
+  try every tool, listed exactly Read/Grep/Glob, still read a diff file under `--add-dir`, and
+  left the tree clean. That is the design's invocation.
+- **P3: the `codex` reviewer is read-only.** `codex exec -s read-only` read the diff file, ran
+  `git diff --stat origin/main...HEAD`, and its write attempt failed with
+  `README.md: Read-only file system`. `-o <report>` is written by the CLI outside the sandbox.
 
 ## Measuring the effect
 
