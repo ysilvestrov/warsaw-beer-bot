@@ -10,6 +10,8 @@ import tempfile
 import time
 import unittest
 
+from test_run import start_time
+
 SCRIPT = Path(__file__).with_name('test_run.py')
 
 
@@ -147,6 +149,48 @@ sys.exit({exit_code})
                 self.assertEqual(process.returncode, expected)
                 self.assertEqual(list(self.base.iterdir()), [])
 
+    def test_sigint_and_sigterm_reach_adopted_detached_children(self):
+        for signum, expected in [(signal.SIGINT, 130), (signal.SIGTERM, 143)]:
+            with self.subTest(signum=signum):
+                ready = self.root / f'detached-{signum}'
+                process = self.launch(self.held_child(ready, self.release))
+                wait_for(ready.exists)
+                child = json.loads(ready.read_text())
+                children = Path(f'/proc/{process.pid}/task/{process.pid}/children')
+                wait_for(lambda: children.read_text().split() == [str(child['pid'])])
+                self.assertEqual(Path(child['tmp'], 'alive').read_text(), 'x')
+                process.send_signal(signum)
+                _, stderr = process.communicate(timeout=10)
+                self.assertEqual(process.returncode, expected, stderr.decode())
+                self.assertEqual(process_finished(child['pid']), True)
+                self.assertEqual(list(self.base.iterdir()), [])
+
+    def test_interruption_during_publication_does_not_start_command(self):
+        sentinel = self.root / 'not-started'
+        code = f'''
+import os,sys,signal
+sys.path.insert(0,{str(SCRIPT.parent)!r})
+import test_run
+original = test_run.write_metadata
+def publish(fd, metadata):
+    original(fd, metadata)
+    os.kill(os.getpid(), signal.SIGTERM)
+test_run.write_metadata = publish
+raise SystemExit(test_run.run([sys.executable,'-c',
+    {f'from pathlib import Path;Path({str(sentinel)!r}).touch()'!r}], {str(self.base)!r}))
+'''
+        result = subprocess.run([sys.executable, '-B', '-c', code], capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 143, result.stderr.decode())
+        self.assertEqual(sentinel.exists(), False)
+        self.assertEqual(list(self.base.iterdir()), [])
+
+    def test_spawn_failure_returns_127_and_removes_own_root(self):
+        result = subprocess.run([sys.executable, str(SCRIPT), '--base', str(self.base),
+                                 '--', str(self.root/'missing-command')],
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 127, result.stderr.decode())
+        self.assertEqual(list(self.base.iterdir()), [])
+
     def test_sigkill_keeps_surviving_child_and_then_uncertain_root(self):
         ready = self.root / 'ready'
         process = self.launch(self.held_child(ready, self.release))
@@ -162,7 +206,7 @@ sys.exit({exit_code})
         self.assertEqual(self.inspect()[0]['status'], 'uncertain_current_boot')
         self.assertEqual(Path(observed['tmp']).exists(), True)
 
-    def test_pid_reuse_does_not_turn_an_unlocked_root_active(self):
+    def test_pid_reuse_does_not_turn_a_locked_root_active(self):
         ready = self.root / 'ready'
         process = self.launch(self.held_child(ready, self.release))
         wait_for(ready.exists)
@@ -174,10 +218,18 @@ sys.exit({exit_code})
         manifest = next(self.base.glob('run-*/run.json'))
         metadata = json.loads(manifest.read_text())
         metadata['supervisor_pid'] = os.getpid()
-        metadata['supervisor_start'] = 1
-        manifest.write_text(json.dumps(metadata))
-        self.assertEqual(self.inspect()[0]['status'], 'uncertain_current_boot')
-        self.assertEqual(manifest.exists(), True)
+        metadata['supervisor_start'] = start_time(os.getpid()) - 1
+        handle = os.open(manifest.parent/'lease.lock', os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            manifest.write_text(json.dumps(metadata))
+            self.assertEqual(self.inspect()[0]['status'], 'uncertain_current_boot')
+            self.assertEqual(manifest.exists(), True)
+            metadata['supervisor_start'] = start_time(os.getpid())
+            manifest.write_text(json.dumps(metadata))
+            self.assertEqual(self.inspect()[0]['status'], 'active')
+        finally:
+            os.close(handle)
 
     def test_previous_boot_is_reported_but_never_deleted(self):
         process = self.launch('pass')
