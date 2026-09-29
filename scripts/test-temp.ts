@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // that file finishes, including when setup or an assertion throws.
 const directories: string[] = [];
 
-afterAll(() => {
+function cleanup(): void {
   const failures: unknown[] = [];
   for (const directory of directories.splice(0)) {
     try {
@@ -17,6 +17,14 @@ afterAll(() => {
     }
   }
   if (failures.length) throw new AggregateError(failures, 'Test temporary directory cleanup failed');
+}
+
+// Collection failures skip afterAll. Keep an exit fallback until the file's
+// normal teardown runs; SIGKILL and abruptly terminated workers remain excluded.
+process.once('exit', cleanup);
+afterAll(() => {
+  process.off('exit', cleanup);
+  cleanup();
 });
 
 export function makeTempDirectory(prefix: string): string {

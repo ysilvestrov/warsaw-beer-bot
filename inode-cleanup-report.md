@@ -22,7 +22,7 @@
 **6,972,006,400 B** доступного диска
 (6.49 GiB).
 Дерева маніфесту мали 7,004,372,992 B виділених блоків і
-3,798,645,804 B logical size. Net counters відрізняються від ledger:
+3,798,645,804 B logical size. Net bytes відрізняються від ledger (inode збігаються точно):
 на сервері одночасно працює development середовище, а ledger сам займає файл.
 Початковий знімок діагностики: 4 818 934 used / 43 322 free inode,
 25 328 750 592 B доступно; створення worktree та проміжна активність вплинули
@@ -144,15 +144,20 @@ wildcard очищення. Mtime/lsof самі по собі не були до�
 
 scripts/test-temp.ts реєструє ресурс одразу після mkdtemp, до caller setup.
 Root afterAll прибирає всі зареєстровані paths після завершення файлу, включно
-з assertion/setup failure; shared fixtures живуть до кінця suite. Cleanup
+з assertion/setup failure; shared fixtures живуть до кінця suite. При collection
+failure Vitest пропускає hooks: резервний синхронний cleanup працює під час
+нормального виходу worker; після звичайного teardown exit listener знімається. Cleanup
 пробує всі paths і агрегує помилки. Одинадцять suite мігровані; наявні коректні
 finally/afterEach в інших тестах не змінено. Префікси з path separator та
 `.`/`..` відхиляються. У production код не деплоївся.
 
 Цільові replay: 184 тести в усіх 11 suite успішні, власних temp roots 0;
-шість child-Vitest сценаріїв: success, assertion failure, beforeAll failure,
-beforeEach failure, shared lifetime, invalid prefixes. Exact empty resource
-root перевіряється разом з exit status та специфічним failure marker.
+Вісім child-Vitest сценаріїв: success, assertion failure, beforeAll failure,
+beforeEach failure, collection failure, shared lifetime, invalid prefixes і
+cleanup failure. Кожна allocation перевіряє абсолютний parent та існування
+ресурсу. Exact remaining resource set перевіряється разом з exit status і
+специфічним failure marker. Mock removal failure підтверджує дві спроби
+очищення: невидалений перший root і успішно видалений другий.
 Framework cache відокремлено в scratch tree. Mutation check: вимкнення hook
 спричинило 5 failures через owned/shared leftovers; hook відновлено.
 Повний gate і pre-PR review фіксуються нижче після фактичного завершення.
@@ -188,10 +193,13 @@ code-server@ysi (PID 316945) і 48-hours-trip (PID 3348312) active/running.
 Перевірений /health повернув {ok:true}. Жоден сервіс не зупиняли/перезапускали.
 
 `npm test && npm run typecheck`: 218 test files успішні, 1 skipped;
-4197 tests успішні, 1 skipped; exit 0. Тривалість тестів 38,02 s.
+4199 tests успішні, 1 skipped; exit 0. Тривалість тестів 38,19 s.
 Обидві TypeScript перевірки успішні. `git diff --check` успішний.
 origin/main перевірено перед PR; на момент цього gate він збігався з базою
-1425182. Pre-PR Claude cross-review заблоковано automatic approval review через відсутність
-явного дозволу на передачу diff; payload не передано. AGENTS.md дозволяє PR
-із Cross-review: failed; GitHub CI/AI review залишаються обов'язковими.
+1425182. Claude cross-review коміту 22caab4 спочатку було заблоковано через
+відсутність явного дозволу на передачу коду. Після дозволу користувача рев'ю
+успішно виконано: 4 findings, усі виправлені. Доданий regression довів collection
+leak до exit fallback; посилені allocation assertions і cleanup-error перевірка;
+уточнені byte counters та статус рев'ю. Evidence/env/БД не передавалися.
+GitHub CI/AI review залишаються обов'язковими.
 Код та звіт підготовлені в fix/test-temp-cleanup; деплою в production немає.
