@@ -56,6 +56,14 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
 | `codex` | `codex exec -s read-only --ephemeral -o <report> <prompt>` | Codex sandbox (`read-only`) |
 | `claude` | `claude -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <tmp> -- <prompt> < /dev/null` | the tool **set** itself: there is no Edit/Write/Bash, and `--restricted` ignores the user/project/local settings files (P2) |
 
+**Snapshot (PR #738 review).** The reviewer does not run in the author's checkout. The runner
+creates a detached worktree of the captured SHA under `tmp/cross-review-wt-<sha7>` and makes it
+the reviewer's working directory, then removes it afterwards (a leftover from a killed run is
+removed before the next one). A review can take up to 15 min, and during that time another terminal may commit, check out, or edit
+and revert. A before/after HEAD comparison cannot see an edit that was made and reverted, and its
+two `git` samples race each other. A snapshot makes "the review describes exactly `<sha>`" true
+by construction instead.
+
 Both get the same prompt, which is built from a template kept in the repo
 (`scripts/cross-review/prompt.md`) plus the base, the HEAD SHA, and the branch name. The
 reviewer reads the prepared diff file and may open any file in the repo: the branch's spec and plan,
@@ -81,7 +89,6 @@ It must end with exactly one line `CROSS-REVIEW-RESULT: <n> finding(s)`.
 | reviewer output contains `EAI_AGAIN` / `Can't reach the API server` and the reviewer exited non-zero (a successful report that quotes this text is not a network failure) | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
 | reviewer exits non-zero | exit 5, `reviewer exited with code N`; the log path is printed |
 | reviewer could not be spawned / killed by a signal / output over buffer | exit 5, `reviewer did not run to completion: <code>` |
-| HEAD moved or tree dirtied while the reviewer ran (PR #738 review) | exit 5, `HEAD moved during the review …` / `working tree changed during the review …` — the report would not describe one SHA |
 | any other runtime error (a `git` call, a file write) | exit 5, `PR marker: Cross-review: failed (<first line of the error>)` — no review happened, which is a failure, not a usage error |
 | output empty, or the `CROSS-REVIEW-RESULT` line is not the last non-empty line | exit 5, **never** read as "no findings" |
 | otherwise | exit 0, report written |
@@ -119,7 +126,7 @@ gate.
 
 | Recorded fact | What it claims | Evidence |
 |---|---|---|
-| Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured before launch + the same HEAD and a clean tree after the reviewer exits + reviewer exit 0 |
+| Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured once, the diff taken as `<base>...<sha>`, and the reviewer run with its cwd in a detached worktree of `<sha>` (so changes in the author's checkout during the run are invisible to it) + reviewer exit 0 |
 | "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` as the **last non-empty line**; absence = error, not zero |
 | Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (P3: a write fails with `Read-only file system`). claude: no write tools in the set (P2) |
 | Codex can call it unattended | no manual approval needed | P1 with a control run (below) |

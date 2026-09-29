@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, postflight, classifyResult, artifactPaths, renderPrompt, buildReviewerCommand } from './core';
+import { parseArgs, isNestedRun, preflight, classifyResult, artifactPaths, renderPrompt, buildReviewerCommand } from './core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -40,28 +40,6 @@ describe('isNestedRun', () => {
   });
   test('any other value is not the guard', () => {
     expect(isNestedRun({ CROSS_REVIEW_ACTIVE: '0' })).toBe(false);
-  });
-});
-
-describe('postflight', () => {
-  const sha = '0123456789abcdef';
-  test('same HEAD and a clean tree: the report describes one SHA', () => {
-    expect(postflight({ startSha: sha, endSha: sha, dirty: false })).toBeNull();
-  });
-  test('HEAD moved during the review is refused, naming both SHAs', () => {
-    expect(postflight({ startSha: sha, endSha: 'fedcba9876543210', dirty: false })).toBe(
-      'HEAD moved during the review (0123456 → fedcba9) — the report does not describe one SHA',
-    );
-  });
-  test('tree dirtied during the review is refused', () => {
-    expect(postflight({ startSha: sha, endSha: sha, dirty: true })).toBe(
-      'working tree changed during the review — the report does not describe one SHA',
-    );
-  });
-  test('a moved HEAD is named before a dirty tree', () => {
-    expect(postflight({ startSha: sha, endSha: 'fedcba9876543210', dirty: true })).toBe(
-      'HEAD moved during the review (0123456 → fedcba9) — the report does not describe one SHA',
-    );
   });
 });
 
