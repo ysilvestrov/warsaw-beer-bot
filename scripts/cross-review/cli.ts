@@ -18,6 +18,17 @@ function removeSnapshot(dir: string): void {
   spawnSync('git', ['worktree', 'prune'], { encoding: 'utf8' });
 }
 
+// Everything read from git before a run exists. A failure here (e.g. `--base origin/mian`) means no
+// review was attempted: a usage error, never a `failed` PR marker (#739).
+function readRepo(base: string): { root: string; sha: string; branch: string; diff: string; dirty: boolean } {
+  const root = git(['rev-parse', '--show-toplevel']).trim();
+  const sha = git(['rev-parse', 'HEAD']).trim();
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  const diff = git(['diff', `${base}...${sha}`]);
+  const dirty = git(['status', '--porcelain']).trim() !== '';
+  return { root, sha, branch, diff, dirty };
+}
+
 function main(argv: string[]): number {
   if (isNestedRun(process.env)) {
     console.error('cross-review: refusing to run inside a cross-review (CROSS_REVIEW_ACTIVE=1)');
@@ -30,11 +41,15 @@ function main(argv: string[]): number {
   }
   const { reviewer, base, model } = parsed.opts;
 
-  const root = git(['rev-parse', '--show-toplevel']).trim();
-  const sha = git(['rev-parse', 'HEAD']).trim();
-  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-  const diff = git(['diff', `${base}...${sha}`]);
-  const refusal = preflight({ dirty: git(['status', '--porcelain']).trim() !== '', diffBytes: diff.length });
+  let repo: ReturnType<typeof readRepo>;
+  try {
+    repo = readRepo(base);
+  } catch (error) {
+    console.error(`cross-review: ${markerReason(error instanceof Error ? error.message : String(error))}`);
+    return EXIT.usage;
+  }
+  const { root, sha, branch, diff } = repo;
+  const refusal = preflight({ dirty: repo.dirty, diffBytes: diff.length });
   if (refusal) {
     console.error(`cross-review: ${refusal}`);
     return EXIT.usage;
