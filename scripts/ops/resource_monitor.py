@@ -156,8 +156,10 @@ def tick(state_dir, sample, notify, runs):
         except BlockingIOError:
             return {'skipped': 'already running'}
         state = evaluate(read_state(fd), sample)
-        retained = sorted([{'name': row['name'], 'status': row['status']}
-                           for row in runs if row['status'] != 'active'], key=lambda row: row['name'])
+        state['runs_inventory_available'] = runs is not None
+        retained = state['announced']['runs'] if runs is None else sorted(
+            [{'name': row['name'], 'status': row['status']} for row in runs if row['status'] != 'active'],
+            key=lambda row: row['name'])
         wanted = dict(state['levels'], runs=retained)
         atomic_state(fd, state)  # Evidence survives a failed external delivery.
         announced = state['announced']
@@ -241,10 +243,12 @@ def main():
     try:
         try:
             runs = inventory(args.runs_dir)
+        except BlockingIOError:
+            runs = None  # No false recovery from an incomplete concurrent snapshot.
         except (OSError, ValueError, SafetyError):
             runs = [{'name': '(inventory unavailable)', 'status': 'uncertain_metadata'}]
         result = tick(args.state_dir, collect(), notify, runs)
-        print(json.dumps({key: result[key] for key in ('levels', 'forecast', 'skipped') if key in result}))
+        print(json.dumps({key: result[key] for key in ('levels', 'forecast', 'runs_inventory_available', 'skipped') if key in result}))
         return 0
     except Exception as error:
         log.error('monitor failed (%s)', type(error).__name__)

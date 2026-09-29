@@ -135,6 +135,9 @@ def run(command, base):
 
     previous = {s: signal.signal(s, interrupted_by) for s in (signal.SIGINT, signal.SIGTERM)}
     try:
+        # Coordinate publication/removal with inventories, without a leftover
+        # registry file or a lock held for the duration of a test run.
+        fcntl.flock(base_fd, fcntl.LOCK_EX)
         os.mkdir(name, 0o700, dir_fd=base_fd)
         root_fd = os.open(name, DIRECTORY_FLAGS, dir_fd=base_fd)
         os.mkdir('tmp', 0o700, dir_fd=root_fd)
@@ -146,6 +149,7 @@ def run(command, base):
                     'device': info.st_dev, 'inode': info.st_ino, 'boot_id': boot_id(),
                     'supervisor_pid': os.getpid(), 'supervisor_start': start_time(os.getpid())}
         write_metadata(root_fd, identity)
+        fcntl.flock(base_fd, fcntl.LOCK_UN)
         payload = str(base / name / 'tmp')
         env = dict(os.environ, TMPDIR=payload, TMP=payload, TEMP=payload,
                    WBB_TEST_TMPDIR=payload, WBB_TEST_RUN_ID=identity['id'],
@@ -185,7 +189,9 @@ def run(command, base):
                 time.sleep(0.02)
         if main_status is None:
             raise SafetyError('initial child status is unknown; retained')
+        fcntl.flock(base_fd, fcntl.LOCK_EX)
         remove_owned(base_fd, name, root_fd)
+        fcntl.flock(base_fd, fcntl.LOCK_UN)
         return 128 + interrupted if interrupted else main_status
     finally:
         for signum, handler in previous.items():
@@ -228,6 +234,7 @@ def inventory(base):
     base, fd = private_directory(base)
     records = []
     try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
         for name in sorted(os.listdir(fd))[:256]:
             row = {'name': name, 'status': 'uncertain_metadata'}
             root_fd = lease_fd = None
@@ -307,6 +314,9 @@ def main():
 if __name__ == '__main__':
     try:
         sys.exit(main())
+    except BlockingIOError:
+        print(json.dumps({'status': 'registry_busy', 'retained': True}))
+        sys.exit(75)
     except (OSError, SafetyError) as error:
         print(f'test-run: retained on failure ({type(error).__name__})', file=sys.stderr)
         sys.exit(125)
