@@ -59,9 +59,24 @@ export function classifyResult(r: RunOutcome): Verdict {
   return { kind: 'ok', findings: Number(m[1]) };
 }
 
-export function artifactPaths(tmpDir: string, reviewer: Reviewer, branch: string, sha: string): { diff: string; report: string; log: string } {
-  const stem = `${tmpDir}/cross-review-${reviewer}-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}`;
-  return { diff: `${stem}.diff`, report: `${stem}.md`, log: `${stem}.log` };
+// Every run owns a fresh directory (mkdtemp appends a unique suffix to this prefix), so two concurrent
+// runs — same reviewer, branch and SHA included — never share a diff, report, log or snapshot.
+export function runDirPrefix(tmpDir: string, reviewer: Reviewer, branch: string, sha: string): string {
+  return `${tmpDir}/cross-review-${reviewer}-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}-`;
+}
+
+export function runArtifacts(runDir: string): { diff: string; report: string; log: string; snapshot: string } {
+  return { diff: `${runDir}/branch.diff`, report: `${runDir}/report.md`, log: `${runDir}/reviewer.log`, snapshot: `${runDir}/snapshot` };
+}
+
+// How spawnSync ended, reduced to what classifyResult needs. Node reports a timeout as error code
+// ETIMEDOUT (plus the kill signal), which is the timeout and never a spawn error.
+export function spawnOutcome(r: {
+  status: number | null; signal: string | null; errorCode?: string; errorMessage?: string;
+}): { timedOut: boolean; spawnError?: string } {
+  if (r.errorCode === 'ETIMEDOUT') return { timedOut: true };
+  const spawnError = r.errorCode ?? r.errorMessage ?? (r.signal && r.status === null ? `killed by ${r.signal}` : undefined);
+  return spawnError === undefined ? { timedOut: false } : { timedOut: false, spawnError };
 }
 
 export function renderPrompt(
@@ -70,7 +85,7 @@ export function renderPrompt(
 ): string {
   const table: Record<string, string> = vars;
   return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
-    if (!(key in table)) throw new Error(`unfilled placeholder {{${key}}}`);
+    if (!Object.hasOwn(table, key)) throw new Error(`unfilled placeholder {{${key}}}`);
     return table[key];
   });
 }
