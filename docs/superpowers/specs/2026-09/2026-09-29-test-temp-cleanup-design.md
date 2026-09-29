@@ -12,8 +12,13 @@ Use explicit resource registration at allocation and Vitest lifecycle cleanup.
 Keep all registered fixtures until root `afterAll`: some existing suites allocate
 shared fixtures during collection or beforeAll, so afterEach removal would break them.
 Normal per-file cleanup bounds retained resources to one suite without changing fixture lifetime.
-Collection failures skip hooks; a synchronous worker exit fallback releases those
-registered resources when the worker exits normally, and is removed after normal teardown.
+Collection failures skip hooks; a narrow subclass of Vitest TestRunner drains registered cleanup callbacks in
+onAfterRunFiles, which local Vitest 5 source calls even after failed collection.
+Callbacks are shared through a worker-local Symbol registry, independent of module isolation.
+No process exit listener is used: the cleanup-failure probe showed that worker
+termination does not reliably emit exit. Failed normal teardown retains the path
+for one lifecycle retry; permanent errors include the exact path, fail the run,
+and require explicit operational handling rather than chmod or prefix deletion.
 Registration must happen immediately after allocation, before writes/git/setup
 can fail. Do not remove directories by prefix or scan the machine in test hooks.
 A helper owns only paths it creates. Existing sound `finally` cleanup stays intact.
@@ -46,3 +51,11 @@ for future crash recovery; this change does not silently install a scheduler.
 
 Operational scans are partial where permissions/time limits intervene; neither
 entry count nor apparent size proves unexplained root usage belongs to /tmp.
+
+## Review follow-up evidence
+
+The collection regression failed before adding fallback cleanup. An exit fallback
+passed collection-only runs but failed a transient-removal probe after afterAll
+failure. Replace it with the documented runner lifecycle before shipping. Verify
+collection failure, transient/permanent removal errors and repeated collection
+failures in a reused worker. Preserve TestRunner default methods via inheritance.

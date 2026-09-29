@@ -2,6 +2,7 @@ import { afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { tempCleanups } from './test-temp-lifecycle';
 
 // Vitest isolates modules per file. Keep collection/beforeAll fixtures alive until
 // that file finishes, including when setup or an assertion throws.
@@ -13,19 +14,15 @@ function cleanup(): void {
     try {
       rmSync(directory, { recursive: true, force: true });
     } catch (error) {
-      failures.push(error);
+      directories.push(directory);
+      failures.push(new Error(`Cannot remove test temporary directory: ${directory}`, { cause: error }));
     }
   }
   if (failures.length) throw new AggregateError(failures, 'Test temporary directory cleanup failed');
+  tempCleanups().delete(cleanup);
 }
 
-// Collection failures skip afterAll. Keep an exit fallback until the file's
-// normal teardown runs; SIGKILL and abruptly terminated workers remain excluded.
-process.once('exit', cleanup);
-afterAll(() => {
-  process.off('exit', cleanup);
-  cleanup();
-});
+afterAll(cleanup);
 
 export function makeTempDirectory(prefix: string): string {
   if (!prefix || prefix === '.' || prefix === '..' || prefix.includes('/') || prefix.includes('\\')) {
@@ -33,5 +30,6 @@ export function makeTempDirectory(prefix: string): string {
   }
   const directory = mkdtempSync(join(tmpdir(), prefix));
   directories.push(directory);
+  tempCleanups().add(cleanup);
   return directory;
 }
