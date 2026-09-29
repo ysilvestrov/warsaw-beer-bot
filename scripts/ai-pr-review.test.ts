@@ -744,7 +744,7 @@ describe('runReview — incremental mode', () => {
     );
     expect(ai.calls).toEqual([]);
     expect(logs).toContain(
-      "::notice::AI review: 2 file(s) changed since the last review are not in this PR's own diff (merged in from the base) — left out of scope.",
+      "::notice::AI review: 2 file(s) changed since the last review are not in this PR's own diff (merged in from the base, or reverted to it) — left out of scope.",
     );
   });
 
