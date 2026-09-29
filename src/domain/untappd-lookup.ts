@@ -560,9 +560,14 @@ export async function lookupBeer(
   // refused. The moved-letter rescue reads only these, so the brewery gate and #636 still apply.
   let lastStrictPool: SearchResult[] = [];
   const refusedStrictPools: SearchResult[] = [];
+  // The rescue decides at most once per lookup: a match judge() proposed and a caller vetoed is not revived.
+  let rescueDecided = false;
   const movedLetterRescue = (pool: SearchResult[]): SearchResult | null => {
     if (abv == null) return null;
     const targets = targetNames.filter((target) => !target.exactOnly && !target.restored);
+    // An exact-identity candidate means the input is not a typo of a neighbour: abstain (the existing
+    // stages refused this pool for a reason the rescue must not overrule).
+    if (pool.some((result) => targets.some((target) => target.value === candIdent(result).value))) return null;
     const hits = new Map<number, SearchResult>();
     for (const result of pool) {
       if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
@@ -578,8 +583,11 @@ export async function lookupBeer(
     if (outcome?.kind === 'matched') return outcome;
     refusedStrictPools.push(...lastStrictPool);
     if (outcome?.kind !== 'not_found') return outcome;
-    const rescued = movedLetterRescue(lastStrictPool);
-    return rescued ? { kind: 'matched', result: rescued } : outcome;
+    // Uniqueness is over every strict pool this lookup refused so far, not just this one.
+    const rescued = movedLetterRescue(refusedStrictPools);
+    if (!rescued) return outcome;
+    rescueDecided = true;
+    return { kind: 'matched', result: rescued };
   };
 
   // One search attempt's candidate list run through every match stage. Returns a matched
@@ -1088,6 +1096,6 @@ export async function lookupBeer(
 
   // #659: every search attempt ended without a match (matchAgainst returned null). Same refinement
   // as in judge(), over all strict pools this lookup refused.
-  const rescued = movedLetterRescue(refusedStrictPools);
+  const rescued = rescueDecided ? null : movedLetterRescue(refusedStrictPools);
   return rescued ? { kind: 'matched', result: rescued } : notFound();
 }
