@@ -11,3 +11,11 @@ prefix_rule(
     decision = "allow",
     justification = "Allow all GitHub CLI commands without prompting"
 )
+
+# cross-review: Codex calls Claude as a read-only reviewer before the PR. The call
+# needs network, which the sandbox denies; probe P1 (2026-09-29) proved this rule grants it.
+prefix_rule(
+    pattern = ["npm", "run", "cross-review"],
+    decision = "allow",
+    justification = "Pre-PR cross-review by the other agent (docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md)"
+)
