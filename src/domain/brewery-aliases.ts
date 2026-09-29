@@ -136,6 +136,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['sonnenbrau', 'sonnen brau mursbach'],                 // 34734 Kellebier -> bid 183267, 4.7% = 4.7% (#483)
   ['st bernard', 'st bernardus'],                         // 34958 St. Bernardus Tripel 18° -> bid 481, 8.0% = 8.0% (#462)
   ['hosl', 'privatbrauerei hosl'],                        // 37962 Abt Andreas -> bid 198241, 5.4% vs 4.9% (#659)
+  ['terena', 'п ю першии'],                               // 36683 Citra х Nectaron NEIPA -> bid 6678788, 6.3% = 6.3% (#642)
   ['perennial', 'perennial artisan ales'],                // 38063 Colourant (2026) -> bid 5452613, 14.0% (#338)
   ['stiegl', 'stieglbrauerei zu salzburg'],               // 35115 12° Weisse Naturtrüb -> bid 80, 5.1% (#302)
   ['maryensztad', 'maryensztadt'],                        // 12269 Mi to żyto -> bid 6357167, 5.7% = 5.7% (#417)

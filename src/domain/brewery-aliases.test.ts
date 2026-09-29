@@ -1,5 +1,6 @@
 import { describe, test, expect } from 'vitest';
 import { aliasNeighbors, aliasKeys } from './brewery-aliases';
+import { normalizeBrewery } from './normalize';
 
 // Forms that are deliberately hubs (>1 curated partner). Everything else in every
 // batch must stay a 1:1 equivalence — that is what keeps the table non-transitive.
@@ -304,7 +305,7 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
   });
 });
 
-describe('Curated brewery alias batch for parent brands, suffixes, and typos (#417, #483, #462, #302, #338, #659)', () => {
+describe('Curated brewery alias batch for parent brands, suffixes, and typos (#417, #483, #462, #302, #338, #659, #642)', () => {
   const PAIRS: ReadonlyArray<readonly [string, string]> = [
     ['transcend', 'transcend beer crafters'],
     ['schladminger', 'schladming'],
@@ -315,6 +316,7 @@ describe('Curated brewery alias batch for parent brands, suffixes, and typos (#4
     ['sonnenbrau', 'sonnen brau mursbach'],
     ['st bernard', 'st bernardus'],
     ['hosl', 'privatbrauerei hosl'],
+    ['terena', 'п ю першии'],
     ['perennial', 'perennial artisan ales'],
     ['stiegl', 'stieglbrauerei zu salzburg'],
     ['maryensztad', 'maryensztadt'],
@@ -332,6 +334,12 @@ describe('Curated brewery alias batch for parent brands, suffixes, and typos (#4
       expect(aliasNeighbors(form)).toHaveLength(1);
     },
   );
+
+  test('normalizes raw brand names to the Teréna alias keys (#642)', () => {
+    expect(normalizeBrewery("П'Ю ПЕРШИЙ")).toBe('п ю першии');
+    expect(normalizeBrewery('Teréna')).toBe('terena');
+    expect(normalizeBrewery('Térena')).toBe('terena');
+  });
 });
 
 describe('Cluster #2 conglomerate line and series brand alias batch (#658)', () => {
