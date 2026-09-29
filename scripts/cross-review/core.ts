@@ -59,8 +59,8 @@ export function classifyResult(r: RunOutcome): Verdict {
   return { kind: 'ok', findings: Number(m[1]) };
 }
 
-export function artifactPaths(tmpDir: string, branch: string, sha: string): { diff: string; report: string; log: string } {
-  const stem = `${tmpDir}/cross-review-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}`;
+export function artifactPaths(tmpDir: string, reviewer: Reviewer, branch: string, sha: string): { diff: string; report: string; log: string } {
+  const stem = `${tmpDir}/cross-review-${reviewer}-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}`;
   return { diff: `${stem}.diff`, report: `${stem}.md`, log: `${stem}.log` };
 }
 

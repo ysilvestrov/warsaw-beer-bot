@@ -44,9 +44,9 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
   uncommitted change would be reviewed without being part of that SHA. It also refuses an
   empty diff against the base.
 - Before launch, the script writes the diff (`git diff <base>...HEAD`) to
-  `tmp/cross-review-<branch>-<shortsha>.diff`. Both reviewers read that file, so the
+  `tmp/cross-review-<reviewer>-<branch>-<shortsha>.diff`. Both reviewers read that file, so the
   `claude` reviewer needs no shell at all (see P2).
-- Output: the report goes to `tmp/cross-review-<branch>-<shortsha>.md`, and stdout gets a
+- Output: the report goes to `tmp/cross-review-<reviewer>-<branch>-<shortsha>.md`, and stdout gets a
   summary line plus that path.
 
 ## Reviewers
@@ -57,9 +57,11 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
 | `claude` | `claude -p --restricted --strict-mcp-config --tools Read,Grep,Glob --add-dir <tmp> -- <prompt> < /dev/null` | the tool **set** itself: there is no Edit/Write/Bash, and `--restricted` ignores the user/project/local settings files (P2) |
 
 **Snapshot (PR #738 review).** The reviewer does not run in the author's checkout. The runner
-creates a detached worktree of the captured SHA under `tmp/cross-review-wt-<sha7>` and makes it
-the reviewer's working directory, then removes it afterwards (a leftover from a killed run is
-removed before the next one). A review can take up to 15 min, and during that time another terminal may commit, check out, or edit
+creates a detached worktree of the captured SHA in a fresh `tmp/cross-review-wt-XXXXXX` directory,
+makes it the reviewer's working directory, and removes it afterwards. Every run gets its own
+directory, and the artifact names carry the reviewer, so two concurrent runs at one SHA cannot
+remove each other's snapshot or overwrite each other's report (cross-review of 38c76b7). A run that
+is killed can leave its directory behind in the ephemeral `tmp/`. A review can take up to 15 min, and during that time another terminal may commit, check out, or edit
 and revert. A before/after HEAD comparison cannot see an edit that was made and reverted, and its
 two `git` samples race each other. A snapshot makes "the review describes exactly `<sha>`" true
 by construction instead.
@@ -126,7 +128,7 @@ gate.
 
 | Recorded fact | What it claims | Evidence |
 |---|---|---|
-| Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured once, the diff taken as `<base>...<sha>`, and the reviewer run with its cwd in a detached worktree of `<sha>` (so changes in the author's checkout during the run are invisible to it) + reviewer exit 0 |
+| Report file `tmp/cross-review-<reviewer>-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured once, the diff taken as `<base>...<sha>`, and the reviewer run with its cwd in a detached worktree of `<sha>` (so changes in the author's checkout during the run are invisible to it) + reviewer exit 0 |
 | "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` as the **last non-empty line**; absence = error, not zero |
 | Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (P3: a write fails with `Read-only file system`). claude: no write tools in the set (P2) |
 | Codex can call it unattended | no manual approval needed | P1 with a control run (below) |
