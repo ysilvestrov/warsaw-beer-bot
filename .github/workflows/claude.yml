@@ -6,7 +6,7 @@ on:
   pull_request_review_comment:
     types: [created]
   issues:
-    types: [opened, assigned]
+    types: [opened]
   pull_request_review:
     types: [submitted]
 
@@ -32,7 +32,8 @@ jobs:
 
       - name: Run Claude Code
         id: claude
-        uses: anthropics/claude-code-action@v1
+        # Pinned: this action receives CLAUDE_CODE_OAUTH_TOKEN; dependabot does not track github-actions here.
+        uses: anthropics/claude-code-action@25e67a749845f3eb2c30bd814f65dca12c3bb8c3 # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 
