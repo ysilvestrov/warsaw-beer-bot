@@ -59,7 +59,12 @@ function main(argv: string[]): number {
   const report = existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : '';
 
   const timedOut = (r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT';
-  const verdict = classifyResult({ exitCode: r.status, timedOut, report, log });
+  const spawnError = timedOut
+    ? undefined
+    : (r.error as NodeJS.ErrnoException | undefined)?.code
+      ?? r.error?.message
+      ?? (r.signal && r.status === null ? `killed by ${r.signal}` : undefined);
+  const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);
     console.log(`PR marker: Cross-review: failed (${verdict.reason})`);
