@@ -2380,6 +2380,18 @@ describe('#664 numbered-series retry', () => {
     expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
   });
 
+  test.each([12, 0.5])('a mismatching collaborator ABV %s does not skip remaining series queries', async (abv) => {
+    const rejected: SearchResult = { bid: 1, beer_name: 'Beer #0061 HBC472', brewery_name: 'Alpha', abv, style: 'IPA', global_rating: 3.5 };
+    const accepted: SearchResult = { bid: 2, beer_name: 'Beer #0061 HBC472', brewery_name: 'Beta', abv: 6, style: 'IPA', global_rating: 3.5 };
+    const search = { search: vi.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([])
+      .mockResolvedValueOnce([rejected]).mockResolvedValueOnce([accepted]) };
+    expect(await lookupBeer({ brewery: 'Alpha / Beta', name: 'Beer #0061 HBC472', abv: 6, search }))
+      .toEqual({ kind: 'matched', result: accepted });
+    expect(search.search.mock.calls.map(([q]) => q)).toEqual([
+      'Alpha Beer #0061 HBC472', 'Beta Beer #0061 HBC472', 'Alpha Beer #0061', 'Beta Beer #0061',
+    ]);
+  });
+
   test('a discovered candidate still matches the full original name', async () => {
     const candidate: SearchResult = { bid: 1, beer_name: 'Beer #0061 HBC472', brewery_name: 'Other', abv: 6, style: 'IPA', global_rating: 3.5 };
     const search = { search: vi.fn().mockResolvedValueOnce([]).mockResolvedValue([candidate]) };

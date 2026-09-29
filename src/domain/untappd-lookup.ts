@@ -1001,7 +1001,7 @@ export async function lookupBeer(
       if (outcome?.kind === 'matched' && (
         isAlcoholClassMismatch(abv, identityName, outcome.result)
         || isDescriptorAbvMismatch(abv, outcome.result.abv)
-      )) return notFound();
+      )) continue;
       if (outcome) return outcome;
     }
   }
