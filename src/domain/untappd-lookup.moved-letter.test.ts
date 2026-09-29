@@ -86,4 +86,28 @@ describe('#659 moved-letter rescue', () => {
     });
     expect(out).toMatchObject({ kind: 'matched', result: { bid: 3 } });
   });
+
+  test('restored input identity (bare style word IPA) → not_found', async () => {
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'IPA', abv: 5,
+      search: fakeSearch([r(2, 'Browar Testowy', 'IAP', 5)]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('single-token collab side (exactOnly) never rescues', async () => {
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'Tounge Tingle / UTH', abv: 6,
+      search: fakeSearch([r(4, 'Browar Testowy', 'UHT', 6)]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('ABV difference 0.2 is inside tolerance → matched', async () => {
+    const out = await lookupBeer({
+      brewery: 'Artezan Brewery', name: 'UTH 15°', abv: 6.5,
+      search: fakeSearch([r(6843957, 'Browar Artezan', 'UHT', 6.7, 52)]),
+    });
+    expect(out).toMatchObject({ kind: 'matched', result: { bid: 6843957 } });
+  });
 });
