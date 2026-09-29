@@ -573,6 +573,7 @@ export async function lookupBeer(
       if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
       const cand = candIdent(result);
       if (cand.restored) continue;
+      if (isAlcoholClassMismatch(abv, identityName, result)) continue;
       if (targets.some((target) => isMovedLetterName(target.value, cand.value))) hits.set(result.bid, result);
     }
     return hits.size === 1 ? [...hits.values()][0] : null;

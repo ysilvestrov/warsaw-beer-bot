@@ -159,4 +159,12 @@ describe('#659 moved-letter rescue', () => {
     });
     expect(out.kind).toBe('not_found');
   });
+
+  test('the rescue never returns a candidate the alcohol-class guard rejects (Zero at 6%)', async () => {
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'Tounge #3 Zero', abv: 6,
+      search: { search: async (query: string) => (query === 'Testowy Tounge #3' ? [r(1, 'Browar Testowy', 'Tongue #3 Zero', 6)] : []) },
+    });
+    expect(out.kind).toBe('not_found');
+  });
 });
