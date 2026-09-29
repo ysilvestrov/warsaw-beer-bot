@@ -1,5 +1,7 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, classifyResult } from './core';
+import { parseArgs, isNestedRun, preflight, classifyResult, artifactPaths, renderPrompt, buildReviewerCommand } from './core';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 describe('parseArgs', () => {
   test('reviewer codex with the default base', () => {
@@ -87,5 +89,63 @@ describe('classifyResult', () => {
   });
   test('non-zero exit fails even with a result line', () => {
     expect(classifyResult(run({ exitCode: 2, report: 'CROSS-REVIEW-RESULT: 0 findings' }))).toEqual({ kind: 'failed', reason: 'reviewer exited with code 2' });
+  });
+});
+
+describe('artifactPaths', () => {
+  test('slashes in the branch become dashes; sha is cut to 7', () => {
+    expect(artifactPaths('/r/tmp', 'feat/cross-review', '0123456789abcdef')).toEqual({
+      diff: '/r/tmp/cross-review-feat-cross-review-0123456.diff',
+      report: '/r/tmp/cross-review-feat-cross-review-0123456.md',
+      log: '/r/tmp/cross-review-feat-cross-review-0123456.log',
+    });
+  });
+});
+
+describe('renderPrompt', () => {
+  test('fills every placeholder, repeated ones included', () => {
+    expect(renderPrompt('{{branch}}@{{sha}} vs {{base}}: {{diffPath}} ({{sha}})', {
+      base: 'origin/main', sha: 'abc1234', branch: 'b', diffPath: '/t/d.diff',
+    })).toBe('b@abc1234 vs origin/main: /t/d.diff (abc1234)');
+  });
+  test('an unknown placeholder is an error, not silent text', () => {
+    expect(() => renderPrompt('{{spec}}', { base: 'x', sha: 'y', branch: 'z', diffPath: 'w' })).toThrow('unfilled placeholder {{spec}}');
+  });
+});
+
+describe('buildReviewerCommand', () => {
+  const base = { prompt: 'P', reportPath: '/t/r.md', tmpDir: '/t' };
+  test('codex: read-only sandbox, report via -o', () => {
+    expect(buildReviewerCommand({ ...base, reviewer: 'codex' })).toEqual({
+      cmd: 'codex',
+      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', 'P'],
+      reportFromStdout: false,
+    });
+  });
+  test('codex: model passes through as -m', () => {
+    expect(buildReviewerCommand({ ...base, reviewer: 'codex', model: 'gpt-5.5' }).args).toEqual(
+      ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', '-m', 'gpt-5.5', 'P'],
+    );
+  });
+  test('claude: restricted, read-only tool set, tmp dir readable, prompt after --', () => {
+    expect(buildReviewerCommand({ ...base, reviewer: 'claude' })).toEqual({
+      cmd: 'claude',
+      args: ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--add-dir', '/t', '--', 'P'],
+      reportFromStdout: true,
+    });
+  });
+  test('claude: model passes through before --', () => {
+    expect(buildReviewerCommand({ ...base, reviewer: 'claude', model: 'claude-sonnet-5-5' }).args).toEqual(
+      ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--add-dir', '/t', '--model', 'claude-sonnet-5-5', '--', 'P'],
+    );
+  });
+});
+
+describe('prompt.md template', () => {
+  test('renders with the runner variables and demands the result line', () => {
+    const tpl = readFileSync(join(__dirname, 'prompt.md'), 'utf8');
+    const out = renderPrompt(tpl, { base: 'origin/main', sha: 'abc1234', branch: 'feat/x', diffPath: '/t/x.diff' });
+    expect(out.includes('/t/x.diff')).toBe(true);
+    expect(out.includes('CROSS-REVIEW-RESULT: <n> findings')).toBe(true);
   });
 });

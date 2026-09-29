@@ -54,3 +54,41 @@ export function classifyResult(r: RunOutcome): Verdict {
   if (matches.length === 0) return { kind: 'failed', reason: 'reviewer output has no CROSS-REVIEW-RESULT line' };
   return { kind: 'ok', findings: Number(matches[matches.length - 1][1]) };
 }
+
+export function artifactPaths(tmpDir: string, branch: string, sha: string): { diff: string; report: string; log: string } {
+  const stem = `${tmpDir}/cross-review-${branch.replace(/\//g, '-')}-${sha.slice(0, 7)}`;
+  return { diff: `${stem}.diff`, report: `${stem}.md`, log: `${stem}.log` };
+}
+
+export function renderPrompt(
+  template: string,
+  vars: { base: string; sha: string; branch: string; diffPath: string },
+): string {
+  const table: Record<string, string> = vars;
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => {
+    if (!(key in table)) throw new Error(`unfilled placeholder {{${key}}}`);
+    return table[key];
+  });
+}
+
+export interface ReviewerCommand { cmd: string; args: string[]; reportFromStdout: boolean }
+
+// Read-only is enforced by the tool, not requested of the model (spec, probes P2/P3):
+// codex by its sandbox; claude by --restricted (ignores settings allow rules) and a tool set with no writer.
+export function buildReviewerCommand(p: {
+  reviewer: Reviewer; model?: string; prompt: string; reportPath: string; tmpDir: string;
+}): ReviewerCommand {
+  if (p.reviewer === 'codex') {
+    return {
+      cmd: 'codex',
+      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', p.reportPath, ...(p.model ? ['-m', p.model] : []), p.prompt],
+      reportFromStdout: false,
+    };
+  }
+  return {
+    cmd: 'claude',
+    args: ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--add-dir', p.tmpDir,
+      ...(p.model ? ['--model', p.model] : []), '--', p.prompt],
+    reportFromStdout: true,
+  };
+}
