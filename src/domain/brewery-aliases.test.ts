@@ -281,6 +281,7 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
     ['harpagan', 'poznanskie rzemieslnicze'],
     ['baraba', 'remedicum'],
     ['murphys', 'heineken ireland'],
+    ['kojetin', 'sompivo'],
   ];
 
   test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
@@ -302,6 +303,11 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
   test('spokes of cydrownia are not neighbours of each other', () => {
     expect(aliasNeighbors('cydr dzik')).not.toContain('dzik');
     expect(aliasNeighbors('dzik')).not.toContain('cydr dzik');
+  });
+
+  test('normalizes raw brewery names for Kojetin and SomPivo (#679)', () => {
+    expect(normalizeBrewery('Kojetin Brewery')).toBe('kojetin');
+    expect(normalizeBrewery('SomPivo')).toBe('sompivo');
   });
 });
 

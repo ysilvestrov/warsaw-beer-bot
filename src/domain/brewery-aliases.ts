@@ -125,6 +125,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['harpagan', 'poznanskie rzemieslnicze'],                           // 37475 Lager 11° -> bid 6716261, 4.5% (#679)
   ['baraba', 'remedicum'],                                            // 37801 POMERANCOVA 11° -> bid 5910606, 4.3% (#679)
   ['murphys', 'heineken ireland'],                                    // 37909 Murphys -> bid 5932, 4.0% (#679)
+  ['kojetin', 'sompivo'],                                             // 38381 Som pohár čau 14° -> bid 6690910, 6.0% (#679)
   // Cluster batch: parent/portfolio brand, cider producer, and divergent brewery suffix resolution (#417, #483, #462, #302, #338, #659).
   // Each pair is proven against an orphan in enrich_failures and rescues it live.
   ['transcend', 'transcend beer crafters'],              // 37946 Citracalifragilisticexpialidocious -> bid 6086381, 7.0% (#417)
