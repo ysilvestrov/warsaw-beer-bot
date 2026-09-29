@@ -1,6 +1,6 @@
 # Моніторинг ресурсів і тимчасові каталоги тестів
 
-Стан на 2026-09-29 14:26 UTC. Історичних видалень у цій задачі: **0**.
+Стан на 2026-09-29 14:50 UTC. Історичних видалень у цій задачі: **0**.
 Моніторинг і окрема команда запуску встановлені на сервері. Зміни звичайного
 `npm test` у root/extension оформлені в [PR #745](https://github.com/ysilvestrov/warsaw-beer-bot/pull/745);
 код бота не деплоївся.
@@ -24,7 +24,7 @@
   Ні значення ключів, ні дані каналів у state/log не записуються.
 - Read-only getChat підтвердив доступність операційного каналу. Штучних
   повідомлень у Telegram не надсилали. На здорових реальних samples повідомлень немає.
-- Реальні samples: 13:59:50 і 14:25:51 вручну; **14:00–14:25 кожні 5 хвилин через cron**.
+- Реальні samples: 13:59:50 і 14:25:51 вручну; **14:00–14:45 кожні 5 хвилин через cron**.
   Обидва ресурси normal. Для прогнозу даних ще недостатньо. Мінімум: 13
   послідовних samples за >=1 годину, gap <=450s, додатне споживання без cleanup.
   Часове вікно враховує startup jitter cron. Локальний `--notify none` не
@@ -87,13 +87,13 @@ Tracked files були clean, але відкриті чужі sessions не п�
 Root — `/dev/sda1`, ext4, rw. Mount ro у sandbox не є станом сервера.
 Усього 4862256 inode, 80307429376 bytes диска.
 
-| Метрика | 13:22:15, до роботи | 14:25:56, після активації/перевірок |
+| Метрика | 13:22:15, до роботи | 14:49:36, після активації/перевірок |
 |---|---:|---:|
-| Використано inode | 3142710 | 3142865 |
-| Вільно inode | 1719546 | 1719391 |
+| Використано inode | 3142710 | 3143000 |
+| Вільно inode | 1719546 | 1719256 |
 | Зайнятість inode | 64,63% | 64,64% |
-| Використано bytes диска | 44840271872 | 44847874048 |
-| Доступно bytes диска | 32144543744 | 32136941568 |
+| Використано bytes диска | 44840271872 | 44850733056 |
+| Доступно bytes диска | 32144543744 | 32134082560 |
 
 Різниця — одночасна активність FS та нові worktree/evidence/monitor artifacts,
 не історичне очищення. Повного розміру /tmp не встановлено; неврахований
@@ -154,7 +154,7 @@ references у cwd/fd/maps/temp-env, жодних active tests чи audit errors.
   при сторонньому monitor або concurrent crontab edit.
 - У cache probe один конкретний transformed module справді лежав у payload
   перед success/failure; після обох roots/fixtures/cache відсутні.
-- Root full gate після GitHub review: 4203 passed, 1 skipped, typecheck green.
+- Root full gate після GitHub review: 4204 passed, 1 skipped, typecheck green.
   Extension: 836 passed, typecheck green. diff-check green.
 - Claude cross-review @b11e364: 7 findings, 7 fixed, 0 rejected. Дві помилки
   відтворено RED (false acknowledgement і jitter forecast), виправлено GREEN;
@@ -164,6 +164,12 @@ references у cwd/fd/maps/temp-env, жодних active tests чи audit errors.
   Вимогу Linux/Python 3.12+ додано до README: guard усередині Vitest не
   відновив би інші ОС, бо managed launcher виконується раніше. CI та обидві
   збірки першого head green; оновлений head має пройти ті самі GitHub checks.
+- Друге GitHub review: operational bridge отримав platform guard для direct
+  Vitest на інших ОС. Timeout regressions перевіряють фактичні ETIMEDOUT/
+  SIGKILL/status без вимоги output до deadline: окремо SIGTERM-ignoring child
+  і двосекундна initialization delay. Slow-start відтворив RED; три bridge
+  tests, усі 39 Python regressions і повторний full gate green. Managed
+  launcher лишається Linux/Python-only із безпечною відмовою на інших ОС.
 - Production health `{ok:true}`. Bot PID3521195/NRestarts0, cloudflared
   PID121172/0, litestream PID2019010/0, 48-hours-trip PID3348312/0 незмінні;
   code-server PID316945/NRestarts1 — попередній стан, без нового restart.
