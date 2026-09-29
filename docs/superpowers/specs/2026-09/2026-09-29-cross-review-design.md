@@ -90,12 +90,15 @@ It must end with exactly one line `CROSS-REVIEW-RESULT: <n> finding(s)`.
 | `CROSS_REVIEW_ACTIVE=1` already in env (a reviewer calling a reviewer) | exit 3, no launch |
 | dirty tree / empty diff / unknown `--reviewer` | exit 2, usage message |
 | reviewer exceeds 15 min | kill, exit 5, `timeout` |
-| reviewer output contains `EAI_AGAIN` / `Can't reach the API server` and the reviewer exited non-zero (a successful report that quotes this text is not a network failure) | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
-| reviewer exits non-zero | exit 5, `reviewer exited with code N`; the log path is printed |
+| reviewer exits non-zero and its own last error line (claude: stdout `API Error:`, codex: stderr `ERROR:`) is claude's and names `EAI_AGAIN` / `Can't reach the API server` | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md (<line>)` (#739) |
+| reviewer exits non-zero | exit 5, `<reviewer>: <its own error line>` when there is one (e.g. the codex usage limit), else `reviewer exited with code N`; the log path is printed (#739) |
 | reviewer could not be spawned / killed by a signal / output over buffer | exit 5, `reviewer did not run to completion: <code>` |
-| any other runtime error (a `git` call, a file write) | exit 5, `PR marker: Cross-review: failed (<first line of the error>)` — no review happened, which is a failure, not a usage error |
+| a `git` call while preparing fails (e.g. a bad `--base`) | exit 2, `cross-review: <message>`, no PR marker — no review was attempted (#739) |
+| any other runtime error after preparation (a file write, `worktree add`) | exit 5, `PR marker: Cross-review: failed (<reason>)` |
 | output empty, or the `CROSS-REVIEW-RESULT` line is not the last non-empty line | exit 5, **never** read as "no findings" |
 | otherwise | exit 0, report written |
+
+Every `failed (…)` reason is one line of at most 200 characters (#739).
 
 The script sets `CROSS_REVIEW_ACTIVE=1` in the child's environment.
 

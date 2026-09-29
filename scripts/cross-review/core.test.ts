@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, classifyResult, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand } from './core';
+import { parseArgs, isNestedRun, preflight, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand } from './core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -58,8 +58,8 @@ describe('preflight', () => {
   });
 });
 
-const run = (o: Partial<{ exitCode: number | null; timedOut: boolean; spawnError: string; report: string; log: string }>) => ({
-  exitCode: 0, timedOut: false, report: '', log: '', ...o,
+const run = (o: Partial<{ reviewer: 'codex' | 'claude'; exitCode: number | null; timedOut: boolean; spawnError: string; report: string; stdout: string; stderr: string }>) => ({
+  reviewer: 'claude' as const, exitCode: 0, timedOut: false, report: '', stdout: '', stderr: '', ...o,
 });
 
 describe('classifyResult', () => {
@@ -95,16 +95,6 @@ describe('classifyResult', () => {
   });
   test('timeout beats everything else', () => {
     expect(classifyResult(run({ timedOut: true, exitCode: null, report: 'CROSS-REVIEW-RESULT: 0 findings' }))).toEqual({ kind: 'failed', reason: 'timeout after 15 min' });
-  });
-  test('network failure in the log is named (measured P1 text)', () => {
-    expect(classifyResult(run({ exitCode: 1, log: "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)" }))).toEqual({
-      kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md',
-    });
-  });
-  test('EAI_AGAIN alone is recognised', () => {
-    expect(classifyResult(run({ exitCode: 1, report: 'getaddrinfo EAI_AGAIN api.anthropic.com' }))).toEqual({
-      kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md',
-    });
   });
   test('a successful review quoting EAI_AGAIN is not a network failure', () => {
     expect(classifyResult(run({ exitCode: 0, report: 'the code matches EAI_AGAIN in core.ts\nCROSS-REVIEW-RESULT: 2 findings' }))).toEqual({ kind: 'ok', findings: 2 });
@@ -203,5 +193,118 @@ describe('prompt.md template', () => {
     const out = renderPrompt(tpl, { base: 'origin/main', sha: 'abc1234', branch: 'feat/x', diffPath: '/t/x.diff' });
     expect(out.includes('/t/x.diff')).toBe(true);
     expect(out.includes('CROSS-REVIEW-RESULT: <n> findings')).toBe(true);
+  });
+});
+
+const CLAUDE_NO_NET = "API Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)";
+const CODEX_LIMIT = 'ERROR: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 11:20 AM.';
+const CODEX_NO_NET_STDERR = [
+  '2026-09-29T09:38:47.000090Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out',
+  'ERROR: Reconnecting... 5/5',
+  'ERROR: workspace routing discovery failed',
+  '',
+].join('\n');
+
+describe('reviewerErrorLine', () => {
+  test('claude reports its fatal error on stdout (measured)', () => {
+    expect(reviewerErrorLine('claude', `${CLAUDE_NO_NET}\n`, '')).toBe(CLAUDE_NO_NET);
+  });
+  test('codex reports its fatal error on stderr (measured: usage limit)', () => {
+    expect(reviewerErrorLine('codex', '', `OpenAI Codex v0.158.0\n${CODEX_LIMIT}\n${CODEX_LIMIT}\n`)).toBe(CODEX_LIMIT);
+  });
+  test('codex without network ends on its own ERROR line (measured)', () => {
+    expect(reviewerErrorLine('codex', '', CODEX_NO_NET_STDERR)).toBe('ERROR: workspace routing discovery failed');
+  });
+  test('an error line in the middle of the transcript is not the error line', () => {
+    expect(reviewerErrorLine('claude', `${CLAUDE_NO_NET}\nand then the review went on`, '')).toBeNull();
+  });
+  test('the right prefix on the wrong stream does not count', () => {
+    expect(reviewerErrorLine('codex', CODEX_LIMIT, '')).toBeNull();
+  });
+  test("claude's prefix is not codex's", () => {
+    expect(reviewerErrorLine('codex', '', CLAUDE_NO_NET)).toBeNull();
+  });
+  test('empty streams have no error line', () => {
+    expect(reviewerErrorLine('claude', '', '')).toBeNull();
+  });
+  test('a bare carriage return separates lines too (progress output)', () => {
+    expect(reviewerErrorLine('codex', '', 'Reconnecting... 5/5\rERROR: workspace routing discovery failed')).toBe('ERROR: workspace routing discovery failed');
+  });
+});
+
+describe('classifyResult — reviewer error lines', () => {
+  test('claude without network names the sandbox hint and the line', () => {
+    expect(classifyResult(run({ reviewer: 'claude', exitCode: 1, stdout: CLAUDE_NO_NET }))).toEqual({
+      kind: 'failed', reason: `no network — Codex sandbox without the allow rule? see AGENTS.md (${CLAUDE_NO_NET})`,
+    });
+  });
+  test('codex usage limit is named as such', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: `${CODEX_LIMIT}\n` }))).toEqual({
+      kind: 'failed',
+      reason: 'codex: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 11:20 AM.',
+    });
+  });
+  test('codex without network gets its own reason, not the claude sandbox hint', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: CODEX_NO_NET_STDERR }))).toEqual({
+      kind: 'failed', reason: 'codex: workspace routing discovery failed',
+    });
+  });
+  test('a codex error line mentioning EAI_AGAIN gets no claude sandbox hint', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: 'ERROR: getaddrinfo EAI_AGAIN chatgpt.com' }))).toEqual({
+      kind: 'failed', reason: 'codex: getaddrinfo EAI_AGAIN chatgpt.com',
+    });
+  });
+  test('a claude API error other than network is named without the hint', () => {
+    expect(classifyResult(run({ reviewer: 'claude', exitCode: 1, stdout: 'API Error: 529 Overloaded' }))).toEqual({
+      kind: 'failed', reason: 'claude: 529 Overloaded',
+    });
+  });
+  test('EAI_AGAIN quoted mid-transcript by a failing reviewer is not a diagnosis', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: `exec cat branch.diff\n+ const NO_NETWORK = /EAI_AGAIN/;\nsomething else went wrong` }))).toEqual({
+      kind: 'failed', reason: 'reviewer exited with code 1',
+    });
+  });
+  test('a bare prefix with nothing after it falls back to the exit code', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: 'ERROR:' }))).toEqual({
+      kind: 'failed', reason: 'reviewer exited with code 1',
+    });
+  });
+  test('an error line on a successful exit is ignored; the result line decides', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 0, stderr: CODEX_LIMIT, report: 'CROSS-REVIEW-RESULT: 1 finding' }))).toEqual({
+      kind: 'ok', findings: 1,
+    });
+  });
+});
+
+describe('markerReason', () => {
+  test('a short single line passes through', () => {
+    expect(markerReason('reviewer exited with code 1')).toBe('reviewer exited with code 1');
+  });
+  test('only the first non-empty line, trimmed', () => {
+    expect(markerReason('\n  git diff origin/mian...abc failed: fatal: bad revision  \nusage: git diff\n')).toBe('git diff origin/mian...abc failed: fatal: bad revision');
+  });
+  test('exactly 200 characters is not cut', () => {
+    expect(markerReason('a'.repeat(200))).toBe('a'.repeat(200));
+  });
+  test('201 characters is cut to 199 plus an ellipsis', () => {
+    expect(markerReason('a'.repeat(201))).toBe(`${'a'.repeat(199)}…`);
+  });
+  test('the cut never splits a character outside the BMP', () => {
+    expect(markerReason(`${'a'.repeat(198)}😀bc`)).toBe(`${'a'.repeat(198)}😀…`);
+  });
+  test('empty input still gives a reason', () => {
+    expect(markerReason('  \n\n')).toBe('unknown error');
+  });
+});
+
+describe('reportText', () => {
+  test('claude: the report is its stdout', () => {
+    expect(reportText('claude', 'review\nCROSS-REVIEW-RESULT: 0 findings', null)).toBe('review\nCROSS-REVIEW-RESULT: 0 findings');
+  });
+  test('codex: the report is the -o file, not stdout', () => {
+    expect(reportText('codex', 'noise', 'CROSS-REVIEW-RESULT: 2 findings')).toBe('CROSS-REVIEW-RESULT: 2 findings');
+  });
+  test('codex: a missing -o file is an empty report (then a failure, never zero)', () => {
+    expect(reportText('codex', 'noise', null)).toBe('');
   });
 });

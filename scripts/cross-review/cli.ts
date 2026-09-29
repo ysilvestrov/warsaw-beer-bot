@@ -2,7 +2,7 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
+  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult, reportText, markerReason,
   spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand,
 } from './core';
 
@@ -18,6 +18,17 @@ function removeSnapshot(dir: string): void {
   spawnSync('git', ['worktree', 'prune'], { encoding: 'utf8' });
 }
 
+// Everything read from git before a run exists. A failure here (e.g. `--base origin/mian`) means no
+// review was attempted: a usage error, never a `failed` PR marker (#739).
+function readRepo(base: string): { root: string; sha: string; branch: string; diff: string; dirty: boolean } {
+  const root = git(['rev-parse', '--show-toplevel']).trim();
+  const sha = git(['rev-parse', 'HEAD']).trim();
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
+  const diff = git(['diff', `${base}...${sha}`]);
+  const dirty = git(['status', '--porcelain']).trim() !== '';
+  return { root, sha, branch, diff, dirty };
+}
+
 function main(argv: string[]): number {
   if (isNestedRun(process.env)) {
     console.error('cross-review: refusing to run inside a cross-review (CROSS_REVIEW_ACTIVE=1)');
@@ -30,11 +41,15 @@ function main(argv: string[]): number {
   }
   const { reviewer, base, model } = parsed.opts;
 
-  const root = git(['rev-parse', '--show-toplevel']).trim();
-  const sha = git(['rev-parse', 'HEAD']).trim();
-  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-  const diff = git(['diff', `${base}...${sha}`]);
-  const refusal = preflight({ dirty: git(['status', '--porcelain']).trim() !== '', diffBytes: diff.length });
+  let repo: ReturnType<typeof readRepo>;
+  try {
+    repo = readRepo(base);
+  } catch (error) {
+    console.error(`cross-review: ${markerReason(error instanceof Error ? error.message : String(error))}`);
+    return EXIT.usage;
+  }
+  const { root, sha, branch, diff } = repo;
+  const refusal = preflight({ dirty: repo.dirty, diffBytes: diff.length });
   if (refusal) {
     console.error(`cross-review: ${refusal}`);
     return EXIT.usage;
@@ -67,10 +82,11 @@ function main(argv: string[]): number {
   } finally {
     removeSnapshot(paths.snapshot);
   }
-  const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}`;
-  writeFileSync(paths.log, log);
-  if (command.reportFromStdout) writeFileSync(paths.report, r.stdout ?? '');
-  const report = existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : '';
+  const stdout = r.stdout ?? '';
+  const stderr = r.stderr ?? '';
+  writeFileSync(paths.log, `${stdout}\n${stderr}${r.error ? `\n${r.error.message}` : ''}`);
+  if (command.reportFromStdout) writeFileSync(paths.report, stdout);
+  const report = reportText(reviewer, stdout, existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : null);
 
   const { timedOut, spawnError } = spawnOutcome({
     status: r.status,
@@ -78,10 +94,10 @@ function main(argv: string[]): number {
     errorCode: (r.error as NodeJS.ErrnoException | undefined)?.code,
     errorMessage: r.error?.message,
   });
-  const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
+  const verdict = classifyResult({ reviewer, exitCode: r.status, timedOut, spawnError, report, stdout, stderr });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);
-    console.log(`PR marker: Cross-review: failed (${verdict.reason})`);
+    console.log(`PR marker: Cross-review: failed (${markerReason(verdict.reason)})`);
     return EXIT.reviewerFailed;
   }
   console.log(`cross-review: ${reviewer} @ ${sha.slice(0, 7)} — ${verdict.findings} finding(s). Report: ${paths.report}`);
@@ -93,10 +109,10 @@ if (require.main === module) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    // git or filesystem failure: no review happened, so it is a failed review, not a usage error
+    // after preparation: a run was attempted and broke (file write, worktree add) — a failed review
     const reason = error instanceof Error ? error.message : String(error);
     console.error(`cross-review: FAILED — ${reason}`);
-    console.log(`PR marker: Cross-review: failed (${reason.split('\n')[0]})`);
+    console.log(`PR marker: Cross-review: failed (${markerReason(reason)})`);
     process.exitCode = EXIT.reviewerFailed;
   }
 }

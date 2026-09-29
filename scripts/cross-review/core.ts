@@ -7,7 +7,20 @@ export interface Options { reviewer: Reviewer; base: string; model?: string }
 export const EXIT = { ok: 0, usage: 2, nested: 3, reviewerFailed: 5 } as const;
 export const TIMEOUT_MS = 900_000;
 const RESULT_LINE = /^CROSS-REVIEW-RESULT: (\d+) findings?\s*$/;
-const NO_NETWORK = /EAI_AGAIN|Can't reach the API server/;
+// Each CLI reports its own fatal error on one stream, with its own prefix (measured, #739 spec):
+// claude → stdout `API Error: …`, codex → stderr `ERROR: …`. Only the LAST non-empty line counts,
+// so text quoted mid-transcript (a diff, a command output) can never be the diagnosis.
+const ERROR_LINE: Record<Reviewer, { stream: 'stdout' | 'stderr'; prefix: string }> = {
+  claude: { stream: 'stdout', prefix: 'API Error:' },
+  codex: { stream: 'stderr', prefix: 'ERROR:' },
+};
+const CLAUDE_NO_NETWORK = /EAI_AGAIN|Can't reach the API server/;
+const MARKER_REASON_MAX = 200;
+
+function lastNonEmptyLine(text: string): string {
+  const lines = text.split(/\r\n|\r|\n/).map((l) => l.trim()).filter((l) => l !== ''); // a bare \r ends a progress line
+  return lines.length === 0 ? '' : lines[lines.length - 1];
+}
 
 export function parseArgs(argv: string[]): { ok: true; opts: Options } | { ok: false; error: string } {
   const values: Record<string, string> = {};
@@ -41,22 +54,48 @@ export function preflight(s: { dirty: boolean; diffBytes: number }): string | nu
   return null;
 }
 
-export interface RunOutcome { exitCode: number | null; timedOut: boolean; spawnError?: string; report: string; log: string }
+export interface RunOutcome {
+  reviewer: Reviewer; exitCode: number | null; timedOut: boolean; spawnError?: string;
+  report: string; stdout: string; stderr: string;
+}
 export type Verdict = { kind: 'ok'; findings: number } | { kind: 'failed'; reason: string };
+
+export function reviewerErrorLine(reviewer: Reviewer, stdout: string, stderr: string): string | null {
+  const { stream, prefix } = ERROR_LINE[reviewer];
+  const last = lastNonEmptyLine(stream === 'stdout' ? stdout : stderr);
+  return last.startsWith(prefix) ? last : null;
+}
 
 export function classifyResult(r: RunOutcome): Verdict {
   if (r.timedOut) return { kind: 'failed', reason: 'timeout after 15 min' };
   if (r.spawnError) return { kind: 'failed', reason: `reviewer did not run to completion: ${r.spawnError}` };
   if (r.exitCode !== 0) {
-    if (NO_NETWORK.test(r.log) || NO_NETWORK.test(r.report)) {
-      return { kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md' };
+    const line = reviewerErrorLine(r.reviewer, r.stdout, r.stderr);
+    if (line === null) return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
+    if (r.reviewer === 'claude' && CLAUDE_NO_NETWORK.test(line)) {
+      return { kind: 'failed', reason: `no network — Codex sandbox without the allow rule? see AGENTS.md (${line})` };
     }
-    return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
+    const tail = line.slice(ERROR_LINE[r.reviewer].prefix.length).trim();
+    if (tail === '') return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
+    return { kind: 'failed', reason: `${r.reviewer}: ${tail}` };
   }
   const last = r.report.trimEnd().split('\n').pop() ?? '';
   const m = RESULT_LINE.exec(last);
   if (!m) return { kind: 'failed', reason: 'reviewer output does not end with a CROSS-REVIEW-RESULT line' };
   return { kind: 'ok', findings: Number(m[1]) };
+}
+
+// The text inside `PR marker: Cross-review: failed (…)`: one line, bounded (a codex usage-limit line carries URLs).
+export function markerReason(text: string): string {
+  const first = text.split('\n').map((l) => l.trim()).find((l) => l !== '') ?? '';
+  if (first === '') return 'unknown error';
+  const chars = Array.from(first); // code points: a cut must not leave half a surrogate pair
+  return chars.length <= MARKER_REASON_MAX ? first : `${chars.slice(0, MARKER_REASON_MAX - 1).join('')}…`;
+}
+
+// Where each reviewer's report comes from: claude prints it, codex writes it to its -o file.
+export function reportText(reviewer: Reviewer, stdout: string, reportFile: string | null): string {
+  return reviewer === 'claude' ? stdout : (reportFile ?? '');
 }
 
 // Every run owns a fresh directory (mkdtemp appends a unique suffix to this prefix), so two concurrent
