@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "postbuild": "python3 scripts/zip-dist.py",
-    "test": "vitest run",
+    "test": "python3 -B ../scripts/ops/test_run.py -- node node_modules/vitest/vitest.mjs run",
     "typecheck": "tsc --noEmit",
     "render-icons": "tsx scripts/render-icons.ts",
     "build:store": "CWS_BUILD=1 vite build",
