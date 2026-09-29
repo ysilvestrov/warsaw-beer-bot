@@ -73,11 +73,12 @@ describe('decideMode', () => {
   it('names the PR\'s own diff in every mode, so the runner can scope an incremental pass', () => {
     const specs = [
       decideMode({ state: null, headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps({ hasCommit: () => false }) }).prSpec,
       decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
       decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps({ isAncestor: () => false }) }).prSpec,
       decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
     ];
-    expect(specs).toEqual(['origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD']);
+    expect(specs).toEqual(['origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD']);
   });
 });
 
