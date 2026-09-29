@@ -2,7 +2,7 @@ import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
+  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult, reportText, markerReason,
   spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand,
 } from './core';
 
@@ -67,10 +67,11 @@ function main(argv: string[]): number {
   } finally {
     removeSnapshot(paths.snapshot);
   }
-  const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}`;
-  writeFileSync(paths.log, log);
-  if (command.reportFromStdout) writeFileSync(paths.report, r.stdout ?? '');
-  const report = existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : '';
+  const stdout = r.stdout ?? '';
+  const stderr = r.stderr ?? '';
+  writeFileSync(paths.log, `${stdout}\n${stderr}${r.error ? `\n${r.error.message}` : ''}`);
+  if (command.reportFromStdout) writeFileSync(paths.report, stdout);
+  const report = reportText(reviewer, stdout, existsSync(paths.report) ? readFileSync(paths.report, 'utf8') : null);
 
   const { timedOut, spawnError } = spawnOutcome({
     status: r.status,
@@ -78,10 +79,10 @@ function main(argv: string[]): number {
     errorCode: (r.error as NodeJS.ErrnoException | undefined)?.code,
     errorMessage: r.error?.message,
   });
-  const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
+  const verdict = classifyResult({ reviewer, exitCode: r.status, timedOut, spawnError, report, stdout, stderr });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);
-    console.log(`PR marker: Cross-review: failed (${verdict.reason})`);
+    console.log(`PR marker: Cross-review: failed (${markerReason(verdict.reason)})`);
     return EXIT.reviewerFailed;
   }
   console.log(`cross-review: ${reviewer} @ ${sha.slice(0, 7)} — ${verdict.findings} finding(s). Report: ${paths.report}`);
@@ -93,10 +94,10 @@ if (require.main === module) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    // git or filesystem failure: no review happened, so it is a failed review, not a usage error
+    // after preparation: a run was attempted and broke (file write, worktree add) — a failed review
     const reason = error instanceof Error ? error.message : String(error);
     console.error(`cross-review: FAILED — ${reason}`);
-    console.log(`PR marker: Cross-review: failed (${reason.split('\n')[0]})`);
+    console.log(`PR marker: Cross-review: failed (${markerReason(reason)})`);
     process.exitCode = EXIT.reviewerFailed;
   }
 }
