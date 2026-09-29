@@ -102,7 +102,7 @@ after that filter.)
 ## Verification
 
 - Unit tests (Vitest) for `incrementalScope`:
-  - the #741 file lists give an empty `inScope`, with the 3 `scripts/cross-review/*` files in
+  - the #741 file lists give an empty `inScope`, with all 6 files (#740's docs + `scripts/cross-review/*`) in
     `mergedIn`;
   - an identical list;
   - partial overlap;
@@ -124,6 +124,7 @@ after that filter.)
 - `scripts/ai-review/incremental.ts`: `incrementalScope`, and `prSpec` on `ModeDecision`.
 - `scripts/ai-pr-review.ts`: in incremental mode, intersect the scope before
   `filterReviewableFiles`, and log the merged-in count.
+- `spec.md`: the incremental-mode bullet of the AI-review section states the #742 scope and its known limit (added after the final review caught the omission).
 - The tests above.
 
 No change to the prompts, models, gate, verify or state format.
