@@ -110,4 +110,53 @@ describe('#659 moved-letter rescue', () => {
     });
     expect(out).toMatchObject({ kind: 'matched', result: { bid: 6843957 } });
   });
+
+  test('uniqueness spans every brewery part of the lookup (a later part cannot hide an earlier rival)', async () => {
+    const byQuery: Record<string, SearchResult[]> = {
+      'Monsters Tounge Tingle': [r(1, 'Browar Monsters', 'Tongue Tingle', 6, 90)],
+      'Monsters Taproom Tounge Tingle': [
+        r(2, 'Browar Monsters', 'Tonuge Tingle', 6, 90),
+        r(5, 'Browar Monsters', 'Tounge Tingle Red', 6, 70),
+        r(6, 'Browar Monsters', 'Tounge Tingle Blue', 6, 70),
+      ],
+    };
+    const out = await lookupBeer({
+      brewery: 'Monsters Brewery x Monsters Taproom', name: 'Tounge Tingle', abv: 6,
+      search: { search: async (query: string) => byQuery[query] ?? [] },
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('an exact-identity candidate beside a moved-letter neighbour → not_found', async () => {
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'Silk', abv: 5,
+      search: fakeSearch([
+        r(10, 'Browar Testowy', 'Silk', 5, 500),
+        r(11, 'Browar Testowy', 'Silk', 5, 450),
+        r(12, 'Browar Testowy', 'Slik', 5, 30),
+      ]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('#636: a different number is dropped before the pools, so no rescue', async () => {
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'UTH #2', abv: 6.5,
+      search: fakeSearch([r(7, 'Browar Testowy', 'UHT #3', 6.5)]),
+    });
+    expect(out.kind).toBe('not_found');
+  });
+
+  test('a rescue vetoed by the series loop (Zero vs 6%) is not revived at the end of the lookup', async () => {
+    const seriesPool = [
+      r(1, 'Browar Testowy', 'UHT Zero #3 Mango', 6, 100),
+      r(2, 'Browar Testowy', 'UTH Zero #3 Mango Red', 6, 80),
+      r(3, 'Browar Testowy', 'UTH Zero #3 Mango Blue', 6, 80),
+    ];
+    const out = await lookupBeer({
+      brewery: 'Browar Testowy', name: 'UTH Zero #3 Mango', abv: 6,
+      search: { search: async (query: string) => (query === 'Testowy UTH Zero #3' ? seriesPool : []) },
+    });
+    expect(out.kind).toBe('not_found');
+  });
 });

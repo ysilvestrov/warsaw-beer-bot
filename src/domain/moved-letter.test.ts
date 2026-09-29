@@ -20,9 +20,11 @@ describe('#659 isMovedLetter', () => {
     ['ab', 'ba', 'shorter than 3'],
     ['v14', 'v41', 'contains digits'],
     ['xxiv', 'xxvi', 'Roman numeral (Firestone/Moksa anniversaries)'],
-    ['mix', 'mxi', 'one side is a valid Roman numeral'],
-  ])('%s ↔ %s is rejected: %s', (a, b) => {
+    ['mix', 'mxi', 'both sides are valid Roman numerals'],
+    ['xii', 'ixi', 'only the first side is a valid Roman numeral'],
+  ])('%s ↔ %s is rejected in both directions: %s', (a, b) => {
     expect(isMovedLetter(a, b)).toBe(false);
+    expect(isMovedLetter(b, a)).toBe(false);
   });
 });
 
