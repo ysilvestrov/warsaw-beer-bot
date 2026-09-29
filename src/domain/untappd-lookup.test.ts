@@ -2327,6 +2327,55 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.result.bid).toBe(6547618);
     });
   });
+
+  describe('Issue #679 brand-as-brewery rescues', () => {
+    test('matches Kojetin Brewery / Som pohár čau 14° to SomPivo Som Pohár, Čau via curated alias', async () => {
+      const search = fakeSearch(() => [
+        {
+          bid: 6690910,
+          beer_name: 'Som Pohár, Čau',
+          brewery_name: 'SomPivo',
+          style: 'IPA - Other',
+          abv: 6.0,
+          global_rating: 3.75,
+          rating_count: 80,
+          alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+        },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Kojetin Brewery',
+        name: 'Som pohár čau 14°',
+        abv: 6.0,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6690910);
+    });
+
+    test('a Kojetín-label beer with no SomPivo counterpart still matches Měšťanský pivovar Kojetín', async () => {
+      const search = fakeSearch(() => [
+        {
+          bid: 123456,
+          beer_name: 'Kojetínský Ležák',
+          brewery_name: 'Měšťanský pivovar Kojetín',
+          style: 'Pilsner - Czech / Bohemian',
+          abv: 4.8,
+          global_rating: 3.4,
+          rating_count: 150,
+        },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Kojetin Brewery',
+        name: 'Kojetínský Ležák',
+        abv: 4.8,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(123456);
+    });
+  });
 });
 
 
