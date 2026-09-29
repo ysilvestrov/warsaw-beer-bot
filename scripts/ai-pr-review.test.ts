@@ -356,6 +356,25 @@ function githubFetch(existingBody: string | null): { fetchFn: typeof fetch; put:
 }
 
 describe('runReview — full mode', () => {
+  it('lists files once, from the PR diff, and never asks for a second list', async () => {
+    const listed: string[] = [];
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+    const gh = githubFetch(null);
+
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: gh.fetchFn,
+        listChangedFiles: (spec) => {
+          listed.push(spec);
+          return ['src/a.ts'];
+        },
+      }),
+    );
+    expect(listed).toEqual(['origin/main...HEAD']);
+  });
+
   it('reviews the whole PR when there is no previous review and publishes the finding', async () => {
     const ai = openaiFetch([
       JSON.stringify({ findings: [FINDING] }),
@@ -683,8 +702,9 @@ describe('runReview — incremental mode', () => {
     evidence: 'line 2 returns not_found',
   };
 
-  it('diffs from the stored head, not from the base branch', async () => {
-    const seen: string[] = [];
+  it('diffs from the stored head, and lists the PR\'s own files only to scope that diff', async () => {
+    const listed: string[] = [];
+    const diffed: string[] = [];
     const ai = openaiFetch([JSON.stringify({ findings: [] })]);
     const gh = githubFetch(previousState([]));
 
@@ -694,16 +714,67 @@ describe('runReview — incremental mode', () => {
         openaiFetch: ai.fetchFn,
         githubFetch: gh.fetchFn,
         listChangedFiles: (spec) => {
-          seen.push(spec);
+          listed.push(spec);
           return ['src/a.ts'];
         },
         getDiff: (spec) => {
-          seen.push(spec);
+          diffed.push(spec);
           return DIFF;
         },
       }),
     );
-    expect(seen.every((s) => s === `${'a'.repeat(40)}..HEAD`)).toBe(true);
+    expect(listed).toEqual([`${'a'.repeat(40)}..HEAD`, 'origin/main...HEAD']);
+    expect(diffed).toEqual([`${'a'.repeat(40)}..HEAD`]);
+  });
+
+  it('skips the find pass when everything since the stored head was merged in from the base (#742)', async () => {
+    const ai = openaiFetch([JSON.stringify({ findings: [FINDING] })]);
+    const gh = githubFetch(previousState([]));
+    const logs: string[] = [];
+
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: gh.fetchFn,
+        log: (m) => logs.push(m),
+        listChangedFiles: (spec) =>
+          spec === 'origin/main...HEAD' ? ['src/domain/brewery-aliases.ts'] : ['scripts/cross-review/core.ts', 'scripts/cross-review/cli.ts'],
+      }),
+    );
+    expect(ai.calls).toEqual([]);
+    expect(logs).toContain(
+      "::notice::AI review: 2 file(s) changed since the last review are not in this PR's own diff (merged in from the base) — left out of scope.",
+    );
+  });
+
+  it('reviews only the PR\'s own file out of a mixed push', async () => {
+    const diffedFiles: string[][] = [];
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+    const gh = githubFetch(previousState([]));
+
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: gh.fetchFn,
+        listChangedFiles: (spec) => (spec === 'origin/main...HEAD' ? ['src/a.ts'] : ['scripts/other.ts', 'src/a.ts']),
+        getDiff: (_spec, files) => {
+          diffedFiles.push(files);
+          return DIFF;
+        },
+      }),
+    );
+    expect(diffedFiles).toEqual([['src/a.ts']]);
+  });
+
+  it('logs no merged-in notice on an ordinary push', async () => {
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+    const gh = githubFetch(previousState([]));
+    const logs: string[] = [];
+
+    await runReview(CFG, deps({ openaiFetch: ai.fetchFn, githubFetch: gh.fetchFn, log: (m) => logs.push(m) }));
+    expect(logs.filter((l) => l.includes('merged in from the base'))).toEqual([]);
   });
 
   it('carries a still-anchored finding for free and does not re-publish it twice', async () => {

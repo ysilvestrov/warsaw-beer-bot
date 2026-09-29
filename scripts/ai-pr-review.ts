@@ -4,7 +4,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { buildReviewContext } from './ai-review/context';
 import { runFind } from './ai-review/find';
 import { applyGate, changedLineRanges, findingKey } from './ai-review/gate';
-import { decideMode, reconcileFindings, type ClosedFinding } from './ai-review/incremental';
+import { decideMode, incrementalScope, reconcileFindings, type ClosedFinding } from './ai-review/incremental';
 import { renderBody, type OpenFinding } from './ai-review/render';
 import { parseState, toStored, type StoredFinding } from './ai-review/state';
 import { EMPTY_USAGE, addUsage, costUsd, formatCostLine } from './ai-review/usage';
@@ -393,7 +393,20 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
     return;
   }
 
-  const reviewable = filterReviewableFiles(deps.listChangedFiles(decision.diffSpec));
+  const sinceDiffSpec = deps.listChangedFiles(decision.diffSpec);
+  let changedFiles = sinceDiffSpec;
+  if (decision.mode === 'incremental') {
+    // A merge from the base keeps the stored head an ancestor, so stored..HEAD also
+    // carries what the base gained; review only what this PR itself changes (#742).
+    const { inScope, mergedIn } = incrementalScope(sinceDiffSpec, deps.listChangedFiles(decision.prSpec));
+    if (mergedIn.length > 0) {
+      deps.log(
+        `::notice::AI review: ${mergedIn.length} file(s) changed since the last review are not in this PR's own diff (merged in from the base) — left out of scope.`,
+      );
+    }
+    changedFiles = inScope;
+  }
+  const reviewable = filterReviewableFiles(changedFiles);
 
   // A first review with nothing in scope has nothing to publish. An incremental
   // one still does — the previous run's findings are open until proven closed.
