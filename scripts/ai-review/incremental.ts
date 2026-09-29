@@ -7,6 +7,8 @@ export interface ModeDecision {
   mode: ReviewMode;
   /** What to pass to `git diff` / `git diff --name-only`. */
   diffSpec: string;
+  /** The PR's own diff (`origin/<base>...HEAD`), in every mode — what an incremental pass is scoped to. */
+  prSpec: string;
   /** One sentence for the ::notice line explaining why this mode. */
   reason: string;
 }
@@ -32,7 +34,7 @@ export function decideMode(p: {
   const full = `origin/${p.baseRef}...HEAD`;
 
   if (!p.state) {
-    return { mode: 'full', diffSpec: full, reason: 'no previous review state on this PR' };
+    return { mode: 'full', diffSpec: full, prSpec: full, reason: 'no previous review state on this PR' };
   }
   const stored = p.state.head;
 
@@ -40,6 +42,7 @@ export function decideMode(p: {
     return {
       mode: 'full',
       diffSpec: full,
+      prSpec: full,
       reason: `stored head ${stored} is not in this clone`,
     };
   }
@@ -48,13 +51,14 @@ export function decideMode(p: {
   // otherwise classify a plain workflow re-run as an incremental review of an
   // empty diff — a full-price no-op.
   if (stored === p.headSha) {
-    return { mode: 'republish', diffSpec: full, reason: 'HEAD unchanged since the last review' };
+    return { mode: 'republish', diffSpec: full, prSpec: full, reason: 'HEAD unchanged since the last review' };
   }
 
   if (!p.isAncestor(stored, p.headSha)) {
     return {
       mode: 'full',
       diffSpec: full,
+      prSpec: full,
       reason: `stored head ${stored} is not an ancestor of HEAD (rebase or force-push)`,
     };
   }
@@ -62,7 +66,26 @@ export function decideMode(p: {
   return {
     mode: 'incremental',
     diffSpec: `${stored}..HEAD`,
+    prSpec: full,
     reason: `incremental review of ${stored}..${p.headSha}`,
+  };
+}
+
+/**
+ * An incremental pass reviews what changed since the stored head AND belongs to
+ * this PR. A merge from the base (GitHub "Update branch") keeps the stored head
+ * an ancestor, so `stored..HEAD` also carries everything the base gained — code
+ * other PRs already paid to review (#742: PR #741, $0.21 for zero own lines).
+ * Author commits are unaffected: every file they touch is in the PR's own diff.
+ */
+export function incrementalScope(
+  sinceStored: string[],
+  prFiles: string[],
+): { inScope: string[]; mergedIn: string[] } {
+  const own = new Set(prFiles);
+  return {
+    inScope: sinceStored.filter((f) => own.has(f)),
+    mergedIn: sinceStored.filter((f) => !own.has(f)),
   };
 }
 

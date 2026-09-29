@@ -1,4 +1,4 @@
-import { decideMode } from './incremental';
+import { decideMode, incrementalScope } from './incremental';
 import type { ReviewState } from './state';
 
 const HEAD = 'b'.repeat(40);
@@ -68,6 +68,53 @@ describe('decideMode', () => {
     const d = decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps() });
     expect(d.mode).toBe('incremental');
     expect(d.diffSpec).toBe(`${OLD}..HEAD`);
+  });
+
+  it('names the PR\'s own diff in every mode, so the runner can scope an incremental pass', () => {
+    const specs = [
+      decideMode({ state: null, headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
+      decideMode({ state: state({ head: HEAD }), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps({ isAncestor: () => false }) }).prSpec,
+      decideMode({ state: state(), headSha: HEAD, baseRef: 'main', ...deps() }).prSpec,
+    ];
+    expect(specs).toEqual(['origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD', 'origin/main...HEAD']);
+  });
+});
+
+describe('incrementalScope', () => {
+  it('drops every file a merge from the base brought in (replay of PR #741, 62570a7..51aca4d)', () => {
+    const sinceStored = [
+      'docs/superpowers/plans/2026-09/2026-09-29-739-cross-review-diagnosis.md',
+      'docs/superpowers/specs/2026-09/2026-09-29-739-cross-review-diagnosis-design.md',
+      'docs/superpowers/specs/2026-09/2026-09-29-cross-review-design.md',
+      'scripts/cross-review/cli.ts',
+      'scripts/cross-review/core.test.ts',
+      'scripts/cross-review/core.ts',
+    ];
+    const prFiles = ['src/domain/brewery-aliases.test.ts', 'src/domain/brewery-aliases.ts'];
+    expect(incrementalScope(sinceStored, prFiles)).toEqual({ inScope: [], mergedIn: sinceStored });
+  });
+
+  it('keeps an ordinary push exactly as it was (author commits touch only PR files)', () => {
+    expect(incrementalScope(['src/b.ts', 'src/a.ts'], ['src/a.ts', 'src/b.ts', 'src/c.ts'])).toEqual({
+      inScope: ['src/b.ts', 'src/a.ts'],
+      mergedIn: [],
+    });
+  });
+
+  it('splits a mixed push, preserving the order of the since-stored list', () => {
+    expect(incrementalScope(['scripts/x.ts', 'src/a.ts', 'docs/y.md', 'src/b.ts'], ['src/b.ts', 'src/a.ts'])).toEqual({
+      inScope: ['src/a.ts', 'src/b.ts'],
+      mergedIn: ['scripts/x.ts', 'docs/y.md'],
+    });
+  });
+
+  it('a file reverted back to the base is out of the PR and out of scope', () => {
+    expect(incrementalScope(['src/a.ts'], [])).toEqual({ inScope: [], mergedIn: ['src/a.ts'] });
+  });
+
+  it('nothing changed since the stored head means nothing in scope', () => {
+    expect(incrementalScope([], ['src/a.ts'])).toEqual({ inScope: [], mergedIn: [] });
   });
 });
 
