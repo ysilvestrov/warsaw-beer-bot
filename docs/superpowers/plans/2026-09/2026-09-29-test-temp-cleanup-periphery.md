@@ -2,8 +2,8 @@
 
 **Spec:** ../../specs/2026-09/2026-09-29-test-temp-cleanup-design.md
 **Core review:** helper registers each successful allocation before caller setup;
-root afterAll covers collection, beforeAll and beforeEach failures and preserves
-shared lifetime. Cleanup attempts all owned paths and reports aggregate failures.
+root afterAll covers assertion, beforeAll and beforeEach failures and preserves
+shared lifetime. A worker exit fallback handles collection failures that skip hooks. Cleanup attempts all owned paths and reports aggregate failures.
 Child tests prove successful and failed lifecycle cleanup with exact exit status,
 specific failure markers and an empty resource directory. Framework transform-cache
 files have a distinct scratch directory; they are not evidence of helper leakage.

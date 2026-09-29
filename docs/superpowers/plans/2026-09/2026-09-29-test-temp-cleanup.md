@@ -13,6 +13,8 @@ no machine-wide prefix deletion from test code.
 - [x] Add `scripts/test-temp.ts` exporting `makeTempDirectory(prefix): string`.
   Register a path immediately after mkdtempSync(join(tmpdir(), prefix)); root afterAll
   removes only registered paths with rmSync and aggregates cleanup failures.
+  Worker exit fallback covers collection failure that skips hooks; normal teardown
+  removes the exit listener. SIGKILL remains outside this guarantee.
 - [x] Add child-Vitest regression in `scripts/test-temp.test.ts`: private TMPDIR,
   passing and failing fixture runs, exact status and `readdirSync(root) === []`.
   Include hook setup failure and shared fixture lifetime. Red before helper.
