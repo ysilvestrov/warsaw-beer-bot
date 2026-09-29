@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
-from resource_monitor import evaluate, tick
+from resource_monitor import evaluate, main, telegram, tick
 
 GIB = 1024**3
 
@@ -48,6 +50,12 @@ class ResourceMonitor(unittest.TestCase):
         self.assertEqual(evaluate(None, sample(bytes_available=5*GIB))['levels']['disk'], 'critical')
         self.assertEqual(evaluate(None, sample(bytes_available=5*GIB+1))['levels']['disk'], 'normal')
 
+    def test_disk_above_ten_gib_stays_normal_after_fifteen_minutes(self):
+        state = None
+        for at in (0, 300, 600, 900):
+            state = evaluate(state, sample(at, bytes_available=10*GIB+1))
+        self.assertEqual(state['levels']['disk'], 'normal')
+
     def test_missing_sample_device_change_and_clock_reversal_reset_continuity(self):
         for final in [sample(1200, inodes_free=1_000_000),
                       sample(900, device=2, inodes_free=1_000_000),
@@ -85,6 +93,13 @@ class ResourceMonitor(unittest.TestCase):
         state = evaluate(state, sample(4800, inodes_free=1_987_000))
         self.assertEqual(state['forecast']['inode_seconds'], None)
 
+    def test_forecast_uses_an_hour_despite_cron_jitter(self):
+        state = None
+        for index, at in enumerate((0, 302, 600, 900, 1200, 1500, 1800,
+                                    2100, 2400, 2700, 3000, 3300, 3600, 3901)):
+            state = evaluate(state, sample(at, inodes_free=2_000_000-index*1000))
+        self.assertEqual(state['forecast'], {'inode_seconds': 596253, 'disk_seconds': None})
+
     def test_invalid_counters_are_rejected(self):
         for changes in [{'inodes_free': -1}, {'inodes_total': 0},
                         {'inodes_free': 6_000_000}, {'bytes_available': -1},
@@ -120,6 +135,52 @@ class ResourceMonitor(unittest.TestCase):
             tick(Path(directory), sample(300, inodes_free=500_000), messages.append, [])
             tick(Path(directory), sample(600, inodes_free=500_000), messages.append, [])
             self.assertEqual(len(messages), 1)
+
+    def test_manual_none_mode_does_not_acknowledge_the_operational_channel(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch('sys.argv', ['resource_monitor.py', '--state-dir', directory,
+                                     '--runs-dir', str(Path(directory)/'missing'), '--notify', 'none']), \
+                    patch('resource_monitor.collect', return_value=sample(inodes_free=500_000)), \
+                    patch('resource_monitor.telegram') as send, patch('builtins.print'):
+                self.assertEqual(main(), 0)
+                send.assert_not_called()
+            recorded = json.loads(Path(directory, 'state.json').read_text())
+            self.assertEqual(recorded['levels']['inode'], 'critical')
+            self.assertEqual(recorded['announced']['inode'], 'normal')
+            messages = []
+            tick(Path(directory), sample(300, inodes_free=500_000), messages.append, [])
+            self.assertEqual(len(messages), 1)
+
+    def test_telegram_requires_json_acceptance(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"ok":false}'
+        credential = MagicMock(returncode=0, stdout='synthetic-secret')
+        with patch('resource_monitor.subprocess.run', return_value=credential), \
+                patch('resource_monitor.urlopen', return_value=response):
+            with self.assertRaisesRegex(RuntimeError, '^operational notification delivery failed$') as raised:
+                telegram('test')
+        self.assertEqual(raised.exception.__cause__, None)
+
+    def test_telegram_http_error_is_token_free(self):
+        credential = MagicMock(returncode=0, stdout='synthetic-secret')
+        error = HTTPError('https://example.invalid/botsynthetic-secret/sendMessage',
+                          500, 'synthetic-secret', {}, None)
+        with patch('resource_monitor.subprocess.run', return_value=credential), \
+                patch('resource_monitor.urlopen', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, '^operational notification delivery failed$') as raised:
+                telegram('test')
+        self.assertEqual(raised.exception.__cause__, None)
+
+    def test_telegram_accepts_only_confirmed_delivery(self):
+        response = MagicMock()
+        response.__enter__.return_value.read.return_value = b'{"ok":true}'
+        credential = MagicMock(returncode=0, stdout='synthetic-secret')
+        with patch('resource_monitor.subprocess.run', return_value=credential), \
+                patch('resource_monitor.urlopen', return_value=response) as transport:
+            self.assertEqual(telegram('test'), None)
+        transport.assert_called_once()
+        self.assertEqual(transport.call_args.kwargs, {'timeout': 10})
+        response.__enter__.return_value.read.assert_called_once_with(65536)
 
     def test_crash_inventory_announces_changes_without_deleting(self):
         with tempfile.TemporaryDirectory() as directory:

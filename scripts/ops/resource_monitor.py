@@ -61,10 +61,16 @@ def contiguous(history):
 
 
 def forecast(history, key):
-    window = contiguous(history)[-13:]
-    span = window[-1]['timestamp'] - window[0]['timestamp']
-    if len(window) < 13 or span < 3600:
+    window = contiguous(history)
+    # Pick the shortest tail with an hour of evidence and at least 13 samples.
+    # Actual cron ticks have startup/scan jitter, so 13 points may span <1 hour.
+    for start in range(len(window) - 13, -1, -1):
+        if window[-1]['timestamp'] - window[start]['timestamp'] >= 3600:
+            window = window[start:]
+            break
+    else:
         return None
+    span = window[-1]['timestamp'] - window[0]['timestamp']
     if any(later[key] > earlier[key] for earlier, later in zip(window, window[1:])):
         return None  # Cleanup invalidates a consumption-only extrapolation.
     consumption = window[0][key] - window[-1][key]
@@ -168,7 +174,7 @@ def tick(state_dir, sample, notify, runs):
         if retained != announced['runs']:
             names = ', '.join(row['name'] for row in retained[:10])
             changes.append(f'test leftovers retained: {len(retained)} ({names})')
-        if changes:
+        if changes and notify is not None:
             message = ('wbb root filesystem\n' + '\n'.join(changes) +
                        f"\nfree inodes: {sample['inodes_free']:,}; disk: {sample['bytes_available']/GIB:.2f} GiB")
             if state['forecast']['inode_seconds'] is not None:
@@ -235,11 +241,8 @@ def main():
     log.addHandler(RotatingFileHandler(args.state_dir / 'monitor.log', maxBytes=65536, backupCount=1))
 
     def notify(message):
-        if args.notify == 'telegram':
-            telegram(message)
-        else:
-            print(message)
-        log.info('transition delivered (%s)', args.notify)
+        telegram(message)
+        log.info('transition delivered (telegram)')
     try:
         try:
             runs = inventory(args.runs_dir)
@@ -247,7 +250,7 @@ def main():
             runs = None  # No false recovery from an incomplete concurrent snapshot.
         except (OSError, ValueError, SafetyError):
             runs = [{'name': '(inventory unavailable)', 'status': 'uncertain_metadata'}]
-        result = tick(args.state_dir, collect(), notify, runs)
+        result = tick(args.state_dir, collect(), notify if args.notify == 'telegram' else None, runs)
         print(json.dumps({key: result[key] for key in ('levels', 'forecast', 'runs_inventory_available', 'skipped') if key in result}))
         return 0
     except Exception as error:
