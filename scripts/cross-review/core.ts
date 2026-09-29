@@ -18,7 +18,7 @@ const CLAUDE_NO_NETWORK = /EAI_AGAIN|Can't reach the API server/;
 const MARKER_REASON_MAX = 200;
 
 function lastNonEmptyLine(text: string): string {
-  const lines = text.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  const lines = text.split(/\r\n|\r|\n/).map((l) => l.trim()).filter((l) => l !== ''); // a bare \r ends a progress line
   return lines.length === 0 ? '' : lines[lines.length - 1];
 }
 
@@ -75,7 +75,9 @@ export function classifyResult(r: RunOutcome): Verdict {
     if (r.reviewer === 'claude' && CLAUDE_NO_NETWORK.test(line)) {
       return { kind: 'failed', reason: `no network — Codex sandbox without the allow rule? see AGENTS.md (${line})` };
     }
-    return { kind: 'failed', reason: `${r.reviewer}: ${line.slice(ERROR_LINE[r.reviewer].prefix.length).trim()}` };
+    const tail = line.slice(ERROR_LINE[r.reviewer].prefix.length).trim();
+    if (tail === '') return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
+    return { kind: 'failed', reason: `${r.reviewer}: ${tail}` };
   }
   const last = r.report.trimEnd().split('\n').pop() ?? '';
   const m = RESULT_LINE.exec(last);
@@ -87,7 +89,8 @@ export function classifyResult(r: RunOutcome): Verdict {
 export function markerReason(text: string): string {
   const first = text.split('\n').map((l) => l.trim()).find((l) => l !== '') ?? '';
   if (first === '') return 'unknown error';
-  return first.length <= MARKER_REASON_MAX ? first : `${first.slice(0, MARKER_REASON_MAX - 1)}…`;
+  const chars = Array.from(first); // code points: a cut must not leave half a surrogate pair
+  return chars.length <= MARKER_REASON_MAX ? first : `${chars.slice(0, MARKER_REASON_MAX - 1).join('')}…`;
 }
 
 // Where each reviewer's report comes from: claude prints it, codex writes it to its -o file.

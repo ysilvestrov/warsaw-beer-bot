@@ -227,6 +227,9 @@ describe('reviewerErrorLine', () => {
   test('empty streams have no error line', () => {
     expect(reviewerErrorLine('claude', '', '')).toBeNull();
   });
+  test('a bare carriage return separates lines too (progress output)', () => {
+    expect(reviewerErrorLine('codex', '', 'Reconnecting... 5/5\rERROR: workspace routing discovery failed')).toBe('ERROR: workspace routing discovery failed');
+  });
 });
 
 describe('classifyResult — reviewer error lines', () => {
@@ -261,6 +264,11 @@ describe('classifyResult — reviewer error lines', () => {
       kind: 'failed', reason: 'reviewer exited with code 1',
     });
   });
+  test('a bare prefix with nothing after it falls back to the exit code', () => {
+    expect(classifyResult(run({ reviewer: 'codex', exitCode: 1, stderr: 'ERROR:' }))).toEqual({
+      kind: 'failed', reason: 'reviewer exited with code 1',
+    });
+  });
   test('an error line on a successful exit is ignored; the result line decides', () => {
     expect(classifyResult(run({ reviewer: 'codex', exitCode: 0, stderr: CODEX_LIMIT, report: 'CROSS-REVIEW-RESULT: 1 finding' }))).toEqual({
       kind: 'ok', findings: 1,
@@ -280,6 +288,9 @@ describe('markerReason', () => {
   });
   test('201 characters is cut to 199 plus an ellipsis', () => {
     expect(markerReason('a'.repeat(201))).toBe(`${'a'.repeat(199)}…`);
+  });
+  test('the cut never splits a character outside the BMP', () => {
+    expect(markerReason(`${'a'.repeat(198)}😀bc`)).toBe(`${'a'.repeat(198)}😀…`);
   });
   test('empty input still gives a reason', () => {
     expect(markerReason('  \n\n')).toBe('unknown error');
