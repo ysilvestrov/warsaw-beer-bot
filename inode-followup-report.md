@@ -2,7 +2,8 @@
 
 Стан на 2026-09-29 14:26 UTC. Історичних видалень у цій задачі: **0**.
 Моніторинг і окрема команда запуску встановлені на сервері. Зміни звичайного
-`npm test` у root/extension оформлюються PR; код бота не деплоївся.
+`npm test` у root/extension оформлені в [PR #745](https://github.com/ysilvestrov/warsaw-beer-bot/pull/745);
+код бота не деплоївся.
 
 ## Реалізовано й активовано
 
@@ -153,11 +154,16 @@ references у cwd/fd/maps/temp-env, жодних active tests чи audit errors.
   при сторонньому monitor або concurrent crontab edit.
 - У cache probe один конкретний transformed module справді лежав у payload
   перед success/failure; після обох roots/fixtures/cache відсутні.
-- Root full gate: 4202 passed, 1 skipped, typecheck green.
+- Root full gate після GitHub review: 4203 passed, 1 skipped, typecheck green.
   Extension: 836 passed, typecheck green. diff-check green.
 - Claude cross-review @b11e364: 7 findings, 7 fixed, 0 rejected. Дві помилки
   відтворено RED (false acknowledgement і jitter forecast), виправлено GREEN;
   решта зауважень посилили докази тестів. Після змін full gate повторно green.
+- Перше GitHub AI-review: два findings. Timeout Python bridge виправлено
+  через SIGKILL і цільовий RED/GREEN із процесом, що ігнорує SIGTERM.
+  Вимогу Linux/Python 3.12+ додано до README: guard усередині Vitest не
+  відновив би інші ОС, бо managed launcher виконується раніше. CI та обидві
+  збірки першого head green; оновлений head має пройти ті самі GitHub checks.
 - Production health `{ok:true}`. Bot PID3521195/NRestarts0, cloudflared
   PID121172/0, litestream PID2019010/0, 48-hours-trip PID3348312/0 незмінні;
   code-server PID316945/NRestarts1 — попередній стан, без нового restart.

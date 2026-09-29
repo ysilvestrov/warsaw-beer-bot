@@ -26,6 +26,7 @@ Stack: Node.js, TypeScript, Telegraf (Telegram), SQLite, Vitest.
 - API keys and config are read from a `.env` file.
 - Install deps: `npm install`
 - Run tests: `npm test` (extension tests: `cd extension && npm test`)
+- Test runs require Linux and Python 3.12+ for descendant supervision and temporary/cache cleanup; unsupported hosts have no cleanup fallback.
 - Run the bot locally: `npm run dev`
 
 See [`spec.md`](./spec.md) for the canonical behavior specification.
