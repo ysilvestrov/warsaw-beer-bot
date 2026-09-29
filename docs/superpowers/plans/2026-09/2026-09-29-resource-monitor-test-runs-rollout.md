@@ -57,3 +57,9 @@ manifest; tracked inode-followup-report.md contains only aggregate evidence.
   findings technically, commit necessary fixes and refresh installed copies if relevant.
 - [ ] Push/create PR, wait for GitHub checks/review and resolve valid findings. Do not
   merge/deploy bot. Report installed versus PR-only work and decisions still required.
+
+PR #745 is open. Its initial CI/builds passed; the first AI review raised platform
+requirements and a synchronous timeout. README now states the Linux/Python contract;
+the bridge has a hard timeout plus a real SIGTERM-ignoring child regression.
+The resulting full gate passed 4203 tests and both root typechecks. Latest-head
+GitHub checks and the review quiet window are the remaining shipping checkpoint.
