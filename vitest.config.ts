@@ -6,5 +6,6 @@ export default defineConfig({
     globals: true,
     include: ['src/**/*.test.ts', 'scripts/**/*.test.ts'],
     pool: 'forks',
+    runner: './scripts/test-temp-runner.ts',
   },
 });

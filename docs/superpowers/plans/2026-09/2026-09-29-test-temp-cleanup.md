@@ -13,8 +13,8 @@ no machine-wide prefix deletion from test code.
 - [x] Add `scripts/test-temp.ts` exporting `makeTempDirectory(prefix): string`.
   Register a path immediately after mkdtempSync(join(tmpdir(), prefix)); root afterAll
   removes only registered paths with rmSync and aggregates cleanup failures.
-  Worker exit fallback covers collection failure that skips hooks; normal teardown
-  removes the exit listener. SIGKILL remains outside this guarantee.
+  Runner onAfterRunFiles fallback covers collection failure and retries paths
+  retained after failed hooks. No exit listener; SIGKILL remains outside this guarantee.
 - [x] Add child-Vitest regression in `scripts/test-temp.test.ts`: private TMPDIR,
   passing and failing fixture runs, exact status and `readdirSync(root) === []`.
   Include hook setup failure and shared fixture lifetime. Red before helper.
@@ -36,3 +36,13 @@ cwd/fd/maps references; new runs allocate different mkdtemp names. Delete in sma
 batches only after activity can be separated; pause on changed candidates or health.
 Record before/after, retained uncertainty, SIGKILL policy and alert threshold in
 inode-cleanup-report.md. Never deploy the code during this task.
+
+## Review follow-up
+
+- [x] Add a worker-local callback registry and TestRunner subclass configured in
+  vitest.config.ts. AfterAll cleans ordinary fixtures; runner drains remaining
+  callbacks even after collection failure, reports every permanent failed path,
+  and detaches callbacks after its final attempt. Preserve built-in runner cleanup.
+- [x] Child configurations use the same runner; prove failed collection, transient
+  cleanup recovery, permanent error diagnostics and reused-worker collection runs.
+- [ ] Full gate, commit/push, reply to AI feedback, await new CI/review.
