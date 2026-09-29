@@ -41,6 +41,16 @@ export function preflight(s: { dirty: boolean; diffBytes: number }): string | nu
   return null;
 }
 
+// The report is pinned to the SHA captured before launch; a review of up to 15 min can outlive that
+// SHA (another terminal commits or checks out), and then the reviewer read files the diff does not describe.
+export function postflight(s: { startSha: string; endSha: string; dirty: boolean }): string | null {
+  if (s.startSha !== s.endSha) {
+    return `HEAD moved during the review (${s.startSha.slice(0, 7)} → ${s.endSha.slice(0, 7)}) — the report does not describe one SHA`;
+  }
+  if (s.dirty) return 'working tree changed during the review — the report does not describe one SHA';
+  return null;
+}
+
 export interface RunOutcome { exitCode: number | null; timedOut: boolean; spawnError?: string; report: string; log: string }
 export type Verdict = { kind: 'ok'; findings: number } | { kind: 'failed'; reason: string };
 

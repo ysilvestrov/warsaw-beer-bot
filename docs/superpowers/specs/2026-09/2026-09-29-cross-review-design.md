@@ -81,6 +81,8 @@ It must end with exactly one line `CROSS-REVIEW-RESULT: <n> finding(s)`.
 | reviewer output contains `EAI_AGAIN` / `Can't reach the API server` and the reviewer exited non-zero (a successful report that quotes this text is not a network failure) | exit 5, `no network — Codex sandbox without the allow rule? see AGENTS.md` |
 | reviewer exits non-zero | exit 5, `reviewer exited with code N`; the log path is printed |
 | reviewer could not be spawned / killed by a signal / output over buffer | exit 5, `reviewer did not run to completion: <code>` |
+| HEAD moved or tree dirtied while the reviewer ran (PR #738 review) | exit 5, `HEAD moved during the review …` / `working tree changed during the review …` — the report would not describe one SHA |
+| any other runtime error (a `git` call, a file write) | exit 5, `PR marker: Cross-review: failed (<first line of the error>)` — no review happened, which is a failure, not a usage error |
 | output empty, or the `CROSS-REVIEW-RESULT` line is not the last non-empty line | exit 5, **never** read as "no findings" |
 | otherwise | exit 0, report written |
 
@@ -117,7 +119,7 @@ gate.
 
 | Recorded fact | What it claims | Evidence |
 |---|---|---|
-| Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured before launch + reviewer exit 0 |
+| Report file `tmp/cross-review-<branch>-<sha>.md` | a review of exactly `<base>...<sha>` happened | tree clean at launch + HEAD SHA captured before launch + the same HEAD and a clean tree after the reviewer exits + reviewer exit 0 |
 | "0 findings" | the reviewer looked and found nothing | explicit `CROSS-REVIEW-RESULT: 0` as the **last non-empty line**; absence = error, not zero |
 | Reviewer did not modify the tree | review is read-only | codex: sandbox `read-only` (P3: a write fails with `Read-only file system`). claude: no write tools in the set (P2) |
 | Codex can call it unattended | no manual approval needed | P1 with a control run (below) |
