@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
+  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, postflight, classifyResult,
   artifactPaths, renderPrompt, buildReviewerCommand,
 } from './core';
 
@@ -64,7 +64,14 @@ function main(argv: string[]): number {
     : (r.error as NodeJS.ErrnoException | undefined)?.code
       ?? r.error?.message
       ?? (r.signal && r.status === null ? `killed by ${r.signal}` : undefined);
-  const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
+  const moved = postflight({
+    startSha: sha,
+    endSha: git(['rev-parse', 'HEAD']).trim(),
+    dirty: git(['status', '--porcelain']).trim() !== '',
+  });
+  const verdict = moved
+    ? { kind: 'failed' as const, reason: moved }
+    : classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);
     console.log(`PR marker: Cross-review: failed (${verdict.reason})`);
@@ -79,7 +86,10 @@ if (require.main === module) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {
-    console.error(`cross-review: ${error instanceof Error ? error.message : String(error)}`);
-    process.exitCode = EXIT.usage;
+    // git or filesystem failure: no review happened, so it is a failed review, not a usage error
+    const reason = error instanceof Error ? error.message : String(error);
+    console.error(`cross-review: FAILED — ${reason}`);
+    console.log(`PR marker: Cross-review: failed (${reason.split('\n')[0]})`);
+    process.exitCode = EXIT.reviewerFailed;
   }
 }
