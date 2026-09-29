@@ -47,12 +47,11 @@ a dedicated cgroup would be stronger after supervisor SIGKILL but this operator 
 no passwordless cgroup delegation or user systemd. Do not add privileged infrastructure.
 
 Metadata records protocol version, uid, root device/inode, boot_id, supervisor
-PID/starttime and random run identity; a held flock provides a live lease. A bounded
-directory flock coordinates root publication/removal with inventories. A busy
+PID/starttime and random run identity; a held flock provides a live lease.
+A directory flock coordinates root publication/removal with inventories. A busy
 inventory preserves its prior known leftovers while filesystem sampling continues;
 it never announces recovery from a partial snapshot.
-The
-read-only inventory checks these identities and matching process environment markers
+A bounded read-only inventory checks these identities and matching process environment markers
 without printing environment contents. When the supervisor is SIGKILLed, same-boot
 leftovers remain uncertain even with zero observed references: a child can scrub its
 environment. A changed boot_id proves old processes ended, but still do not automatically

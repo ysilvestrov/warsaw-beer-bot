@@ -23,13 +23,13 @@ Files: deploy/install-resource-monitor.sh, scripts/ops/test_install_monitor.py.
 Interfaces: shell installer run from repository; WBB_OPS_HOME/WBB_CRONTAB are
 test seams, real defaults are the current user's home and crontab executable.
 
-- [ ] Write real-script test with isolated home and file-backed crontab executable;
+- [x] Write real-script test with isolated home and file-backed crontab executable;
   existing comment/job survive, two installs produce one managed block, foreign
   wrapper/malformed markers refuse without writing the crontab.
-- [ ] Run test RED before installer exists. Implement versioned code copies, managed
+- [x] Run test RED before installer exists. Implement versioned code copies, managed
   wbb-test, exact crontab backup, compare crontab before replacement, 5-minute schedule,
   timeout/low priority and explicit default /tmp/wbb-test-runs-UID.
-- [ ] Run focused and full gates; commit, then activate as operator with permitted
+- [x] Run focused and full gates; commit, then activate as operator with permitted
   host escalation. Validate read-only Telegram channel accessibility without sending
   synthetic operational alerts; initial healthy sample and >=one genuine cron tick.
 
@@ -38,14 +38,14 @@ test seams, real defaults are the current user's home and crontab executable.
 Files: ignored tmp/resource-evidence/historical-survey.py, summaries and compressed
 manifest; tracked inode-followup-report.md contains only aggregate evidence.
 
-- [ ] One nice/ionice sequential metadata scan: cache, known wbb fixtures, other
+- [x] One nice/ionice sequential metadata scan: cache, known wbb fixtures, other
   directories; separate per-phase deadlines, no symlink/filesystem traversal.
-- [ ] Validate Vitest filename/environment/layout against local source; parse only
+- [x] Validate Vitest filename/environment/layout against local source; parse only
   structural header/id fields of bounded sample files, never output cached code.
-- [ ] Count entries/files/dirs, global unique inode, blocks/logical bytes and links
+- [x] Count entries/files/dirs, global unique inode, blocks/logical bytes and links
   seen versus nlink. Keep partial results labelled partial; complete source-confirmed
   roots alone enter a proposal. Protected/unknown entries stay excluded.
-- [ ] Snapshot bounded process-reference audit and production health; record limitations
+- [x] Snapshot bounded process-reference audit and production health; record limitations
   and prerequisite no-tests window before any later historical deletion approval.
 
 ## Task 3: Final verification and PR

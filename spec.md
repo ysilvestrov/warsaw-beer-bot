@@ -2351,6 +2351,13 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 
 ### 5.3 Тестування (CLAUDE.md)
 - **Кожен новий модуль логіки покривається базовими Vitest-тестами перед злиттям.**
+- **Тимчасові ресурси запуску.** Звичайні `npm test` у root та extension
+  запускають Linux/Python 3.12+ supervisor до Vitest. Кожен запуск має приватний
+  temp-root 0700; TMPDIR/TMP/TEMP, кеш трансформацій і Node/Vite-кеші дочірніх
+  процесів залишаються всередині нього. Після завершення всіх descendants root
+  прибирається зі збереженням exit code; hooks #744 залишаються per-file cleanup.
+  Після SIGKILL supervisor або reboot інвентаризація лише повідомляє про залишки:
+  вік чи відсутній PID не дозволяють їх видаляти. Паралельні запуски незалежні.
 - `domain/*` — повне unit-покриття (чисті функції).
 - `sources/*` — **контрактні тести на фікстурах** (`tests/fixtures/**`,
   HTML/CSV-снепшоти), що падають при зміні верстки джерела.
@@ -2493,6 +2500,16 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   (`enable --now` на запущеному unit'і не перезапускає).
 - Бекап: **Litestream** → Cloudflare R2 (стрім WAL), креденшели лише з env/конфіга.
 - Cron — у процесі через `node-cron` (зміна частоти = окремий PR).
+- **Операційний монітор root FS.** Окремий `scripts/ops/resource_monitor.py`
+  перевіряє statvfs(`/`) через operator cron кожні 5 хвилин, без перезапуску бота.
+  Inode warning: >=80% протягом 15 хвилин; critical: >=90% або <100000 вільних.
+  Disk warning: <=10 GiB протягом 15 хвилин; critical: <=5 GiB негайно.
+  Історія обмежена 864 samples; прогноз потребує >=13 безперервних вимірювань
+  за >=1 годину без cleanup-зростання free counters. Наявний Telegram admin-канал
+  отримує лише переходи стану/відновлення, з acknowledgement після ok:true.
+  `deploy/install-resource-monitor.sh` ставить копії в operator `.local/lib`,
+  зберігає чужі cron jobs і надає `wbb-test` для старих checkout. Виявлені
+  аварійні каталоги автоматично не видаляються; busy inventory не означає recovery.
 - **HTTP API** (Hono): слухає `127.0.0.1:API_PORT` (default 3000) — нових
   вхідних портів не відкриваємо. Доступний зовні через **наявний
   Cloudflare-тунель**; для публічного hostname додати роут
