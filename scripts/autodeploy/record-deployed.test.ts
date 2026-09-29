@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const RECORD = resolve(__dirname, '../../deploy/record-deployed.sh');
@@ -30,7 +30,7 @@ const statePath = (stateHome: string): string =>
 describe('record-deployed.sh', () => {
   let home: string;
   beforeEach(() => {
-    home = mkdtempSync(join(tmpdir(), 'wbb-state-'));
+    home = makeTempDirectory('wbb-state-');
   });
 
   it('creates the state file and its directory when neither exists', () => {

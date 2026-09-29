@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const READ_ENV = resolve(__dirname, '../../deploy/read-env.sh');
@@ -26,7 +26,7 @@ describe('read-env.sh', () => {
   let envFile: string;
 
   beforeAll(() => {
-    const dir = mkdtempSync(join(tmpdir(), 'wbb-env-'));
+    const dir = makeTempDirectory('wbb-env-');
     envFile = join(dir, '.env');
     // Line 4 reproduces the real file's shape: unquoted parentheses, which are
     // a bash syntax error. Everything the notifier needs sits BELOW it.
