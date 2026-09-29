@@ -1,6 +1,6 @@
+import { makeTempDirectory } from '../test-temp';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { EMPTY_USAGE } from './usage';
@@ -62,7 +62,7 @@ describe('gitBody', () => {
   let sha: string;
 
   beforeAll(() => {
-    dir = mkdtempSync(join(tmpdir(), 'wbb-verify-gitbody-'));
+    dir = makeTempDirectory('wbb-verify-gitbody-');
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
     execFileSync('git', ['config', 'user.email', 't@example.com'], { cwd: dir });
     execFileSync('git', ['config', 'user.name', 'T'], { cwd: dir });

@@ -1,6 +1,6 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeEach } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   auditReport,
@@ -23,7 +23,7 @@ import { qualify, type AuditReport, type Severity } from './qualify';
  */
 
 function dirWith(files: Record<string, unknown>): string {
-  const dir = mkdtempSync(join(tmpdir(), 'wbb-qualify-'));
+  const dir = makeTempDirectory('wbb-qualify-');
   for (const [name, body] of Object.entries(files)) {
     writeFileSync(join(dir, name), typeof body === 'string' ? body : JSON.stringify(body));
   }

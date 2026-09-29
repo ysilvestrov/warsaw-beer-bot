@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 const SHIPS = resolve(__dirname, '../../deploy/ships.sh');
@@ -20,7 +20,7 @@ const REAL_FILTER = [
 ].join('\n');
 
 function filterFile(body: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'wbb-ships-filter-'));
+  const dir = makeTempDirectory('wbb-ships-filter-');
   const p = join(dir, 'rsync-filter');
   writeFileSync(p, body);
   return p;
@@ -279,8 +279,8 @@ describe('ships.sh agrees with real rsync, path for path', () => {
   }
 
   it('classifies exactly the files real rsync transfers under the same filter', () => {
-    const source = mkdtempSync(join(tmpdir(), 'wbb-ships-src-'));
-    const destination = mkdtempSync(join(tmpdir(), 'wbb-ships-dst-'));
+    const source = makeTempDirectory('wbb-ships-src-');
+    const destination = makeTempDirectory('wbb-ships-dst-');
 
     for (const p of FIXTURE_PATHS) {
       const full = join(source, p);

@@ -15,6 +15,7 @@
     // #435 — qualify.ts, manifest-scope.ts and qualify-cli.ts decide whether
     // production gets patched with nobody watching, so they are the last
     // place an untypechecked file belongs.
+    "scripts/test-temp*.ts",
     "scripts/autodeploy/**/*",
     "scripts/ai-review/**/*",
     "scripts/ai-pr-review.ts",

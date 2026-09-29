@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const CHECK = resolve(__dirname, '../../deploy/installed-current.sh');
@@ -34,8 +34,8 @@ describe('installed-current.sh', () => {
   let installed: string;
 
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'wbb-cur-repo-'));
-    installed = mkdtempSync(join(tmpdir(), 'wbb-cur-bin-'));
+    repo = makeTempDirectory('wbb-cur-repo-');
+    installed = makeTempDirectory('wbb-cur-bin-');
 
     git(repo, 'init', '-q', '-b', 'main');
     git(repo, 'config', 'user.email', 't@example.com');

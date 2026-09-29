@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /**
@@ -94,10 +94,10 @@ let target: string;
 const TAG = 'autodeploy-20260816T120000Z';
 
 beforeAll(() => {
-  remoteDir = mkdtempSync(join(tmpdir(), 'wbb-ad-remote-'));
+  remoteDir = makeTempDirectory('wbb-ad-remote-');
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', remoteDir]);
 
-  const seed = mkdtempSync(join(tmpdir(), 'wbb-ad-seed-'));
+  const seed = makeTempDirectory('wbb-ad-seed-');
   git(seed, 'init', '-q', '-b', 'main');
   git(seed, 'config', 'user.email', 't@example.com');
   git(seed, 'config', 'user.name', 'T');
@@ -128,7 +128,7 @@ interface Harness {
 
 /** Fresh XDG dirs + a real clone of remoteDir, per test. */
 function setup(): Harness {
-  const home = mkdtempSync(join(tmpdir(), 'wbb-ad-home-'));
+  const home = makeTempDirectory('wbb-ad-home-');
   const dataDir = join(home, 'data');
   const stateDir = join(home, 'state');
   const repoParent = join(dataDir, 'wbb-autodeploy');
@@ -136,7 +136,7 @@ function setup(): Harness {
   mkdirSync(repoParent, { recursive: true });
   mkdirSync(stateDir, { recursive: true });
   execFileSync('git', ['clone', '-q', remoteDir, repo]);
-  const bin = mkdtempSync(join(tmpdir(), 'wbb-ad-bin-'));
+  const bin = makeTempDirectory('wbb-ad-bin-');
   return { home, dataDir, stateDir, repo, bin };
 }
 
@@ -465,9 +465,9 @@ function driftRemote(
   tagAt?: 'old' | 'new',
   differsIn: 'src' | 'lockfile' | 'extension' | 'narrow-filter' = 'src',
 ): { dir: string; oldSha: string; newSha: string; tag: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-remote-'));
+  const dir = makeTempDirectory('wbb-drift-remote-');
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
-  const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-seed-'));
+  const seed = makeTempDirectory('wbb-drift-seed-');
   git(seed, 'init', '-q', '-b', 'main');
   git(seed, 'config', 'user.email', 't@example.com');
   git(seed, 'config', 'user.name', 'T');
@@ -500,9 +500,9 @@ function driftRemote(
 
 /** A remote whose commits carry NO rsync-filter: the fail-closed case. */
 function driftRemoteWithoutFilter(): { dir: string; oldSha: string; newSha: string } {
-  const dir = mkdtempSync(join(tmpdir(), 'wbb-drift-nofilter-'));
+  const dir = makeTempDirectory('wbb-drift-nofilter-');
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', dir]);
-  const seed = mkdtempSync(join(tmpdir(), 'wbb-drift-nofilter-seed-'));
+  const seed = makeTempDirectory('wbb-drift-nofilter-seed-');
   git(seed, 'init', '-q', '-b', 'main');
   git(seed, 'config', 'user.email', 't@example.com');
   git(seed, 'config', 'user.name', 'T');
@@ -516,7 +516,7 @@ function driftRemoteWithoutFilter(): { dir: string; oldSha: string; newSha: stri
 
 /** A harness cloned from a drift remote, plus arbitrary state fields. */
 function driftHarness(remote: string, state: Record<string, string>): Harness {
-  const home = mkdtempSync(join(tmpdir(), 'wbb-ad-home-'));
+  const home = makeTempDirectory('wbb-ad-home-');
   const dataDir = join(home, 'data');
   const stateDir = join(home, 'state');
   const repoParent = join(dataDir, 'wbb-autodeploy');
@@ -529,7 +529,7 @@ function driftHarness(remote: string, state: Record<string, string>): Harness {
     join(dir, 'state.env'),
     Object.entries(state).map(([k, v]) => `${k}=${v}`).join('\n') + '\n',
   );
-  return { home, dataDir, stateDir, repo: join(repoParent, 'repo'), bin: mkdtempSync(join(tmpdir(), 'wbb-ad-bin-')) };
+  return { home, dataDir, stateDir, repo: join(repoParent, 'repo'), bin: makeTempDirectory('wbb-ad-bin-') };
 }
 
 describe('#490 drift episode', () => {

@@ -1,7 +1,7 @@
+import { makeTempDirectory } from './test-temp';
 import { describe, test, expect } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const SCRIPT = join(__dirname, 'set-env.sh');
@@ -10,7 +10,7 @@ function run(file: string, key: string, value: string) {
   execFileSync('bash', [SCRIPT, key, value, file], { stdio: 'pipe' });
 }
 function freshFile(contents: string): string {
-  const dir = mkdtempSync(join(tmpdir(), 'setenv-'));
+  const dir = makeTempDirectory('setenv-');
   const f = join(dir, '.env');
   writeFileSync(f, contents);
   return f;

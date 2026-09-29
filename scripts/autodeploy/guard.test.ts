@@ -1,7 +1,7 @@
+import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect, beforeAll } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, mkdirSync, chmodSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, mkdirSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const GUARD = resolve(__dirname, '../../deploy/autodeploy-guard.sh');
@@ -66,7 +66,7 @@ describe('autodeploy-guard.sh', () => {
   let addedFilterHead: string;
 
   beforeAll(() => {
-    repo = mkdtempSync(join(tmpdir(), 'wbb-guard-'));
+    repo = makeTempDirectory('wbb-guard-');
     git(repo, 'init', '-q', '-b', 'main');
     git(repo, 'config', 'user.email', 't@example.com');
     git(repo, 'config', 'user.name', 'T');
@@ -103,7 +103,7 @@ describe('autodeploy-guard.sh', () => {
 
     tsconfigChange = commit(repo, { 'tsconfig.json': '{"compilerOptions":{}}' }, 'tsconfig change');
 
-    noFilterRepo = mkdtempSync(join(tmpdir(), 'wbb-guard-nofilter-'));
+    noFilterRepo = makeTempDirectory('wbb-guard-nofilter-');
     git(noFilterRepo, 'init', '-q', '-b', 'main');
     git(noFilterRepo, 'config', 'user.email', 't@example.com');
     git(noFilterRepo, 'config', 'user.name', 'T');
@@ -113,7 +113,7 @@ describe('autodeploy-guard.sh', () => {
     // C1 (final review): a target that NARROWS the filter to the degenerate
     // `- *`. Read against the target alone, every path in this diff —
     // including the filter itself — classifies SKIP.
-    narrowRepo = mkdtempSync(join(tmpdir(), 'wbb-guard-narrow-'));
+    narrowRepo = makeTempDirectory('wbb-guard-narrow-');
     git(narrowRepo, 'init', '-q', '-b', 'main');
     git(narrowRepo, 'config', 'user.email', 't@example.com');
     git(narrowRepo, 'config', 'user.name', 'T');
@@ -129,7 +129,7 @@ describe('autodeploy-guard.sh', () => {
 
     // The deployed side has no filter at all while the target does: the
     // "what is on the server today" half of the union cannot be computed.
-    addedFilterRepo = mkdtempSync(join(tmpdir(), 'wbb-guard-addedfilter-'));
+    addedFilterRepo = makeTempDirectory('wbb-guard-addedfilter-');
     git(addedFilterRepo, 'init', '-q', '-b', 'main');
     git(addedFilterRepo, 'config', 'user.email', 't@example.com');
     git(addedFilterRepo, 'config', 'user.name', 'T');
@@ -235,7 +235,7 @@ describe('autodeploy-guard.sh', () => {
     // Defends the `*)` arm in the classification loop against a WBB_SHIPS
     // binary whose output format does not match SHIP/SKIP — e.g. an
     // incompatible version installed out of step with the guard.
-    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-stub-'));
+    const stubDir = makeTempDirectory('wbb-guard-stub-');
     const stub = join(stubDir, 'bogus-ships.sh');
     writeFileSync(stub, '#!/usr/bin/env bash\ncat >/dev/null\necho "MAYBE package.json"\n');
     chmodSync(stub, 0o755);
@@ -282,7 +282,7 @@ describe('autodeploy-guard.sh', () => {
     // Silence is not the statement "nothing ships". A classifier that drains
     // stdin and exits 0 produced zero violations and a clean ACCEPT — the
     // final review waved 15 shipping src/** paths through this way.
-    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-silent-'));
+    const stubDir = makeTempDirectory('wbb-guard-silent-');
     const silent = join(stubDir, 'silent-ships.sh');
     writeFileSync(silent, '#!/usr/bin/env bash\ncat >/dev/null\nexit 0\n');
     chmodSync(silent, 0o755);
@@ -297,7 +297,7 @@ describe('autodeploy-guard.sh', () => {
     // the diff at all. A count-only check passes it, and every real shipping
     // path is waved through to ACCEPT. Correspondence — answer i must be about
     // input path i — is what refuses it.
-    const stubDir = mkdtempSync(join(tmpdir(), 'wbb-guard-wrongpaths-'));
+    const stubDir = makeTempDirectory('wbb-guard-wrongpaths-');
     const liar = join(stubDir, 'lying-ships.sh');
     writeFileSync(
       liar,

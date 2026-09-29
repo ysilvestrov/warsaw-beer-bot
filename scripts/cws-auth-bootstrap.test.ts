@@ -1,5 +1,5 @@
+import { makeTempDirectory } from './test-temp';
 import {
-  mkdtempSync,
   readFileSync,
   statSync,
   writeFileSync,
@@ -8,7 +8,6 @@ import {
   symlinkSync,
   lstatSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildAuthUrl,
@@ -135,7 +134,7 @@ describe('resolvePort', () => {
 
 describe('writeSecretFile', () => {
   it('creates a new file readable only by the owner', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const dir = makeTempDirectory('cws-auth-bootstrap-test-');
     const path = join(dir, 'cws-env.txt');
 
     writeSecretFile(path, 'CWS_REFRESH_TOKEN=abc\n');
@@ -148,7 +147,7 @@ describe('writeSecretFile', () => {
   });
 
   it('tightens permissions on a pre-existing file left world-readable by a prior run', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const dir = makeTempDirectory('cws-auth-bootstrap-test-');
     const path = join(dir, 'cws-env.txt');
     writeFileSync(path, 'stale\n');
     chmodSync(path, 0o644);
@@ -171,7 +170,7 @@ describe('writeSecretFile', () => {
   });
 
   it('lands at exactly 0600 even under a umask that would strip the owner bits', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const dir = makeTempDirectory('cws-auth-bootstrap-test-');
     const path = join(dir, 'cws-env.txt');
     const previous = process.umask(0o777);
     try {
@@ -187,7 +186,7 @@ describe('writeSecretFile', () => {
   });
 
   it('never writes the token through a symlink planted at the path', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cws-auth-bootstrap-test-'));
+    const dir = makeTempDirectory('cws-auth-bootstrap-test-');
     const path = join(dir, 'cws-env.txt');
     const victim = join(dir, 'victim.txt');
     writeFileSync(victim, 'untouched\n');

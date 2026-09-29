@@ -1,3 +1,4 @@
+import { makeTempDirectory } from './test-temp';
 import {
   BODY_EXCLUDE_PATTERNS,
   contextReader,
@@ -199,14 +200,13 @@ describe('upsertReview', () => {
   });
 });
 
-import { mkdtempSync, symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { symlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readReviewableFile } from './ai-pr-review';
 
 describe('readReviewableFile', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ai-review-symlink-'));
+  const dir = makeTempDirectory('ai-review-symlink-');
 
   it('reads a regular file', () => {
     const p = join(dir, 'real.ts');
