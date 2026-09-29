@@ -61,5 +61,7 @@ manifest; tracked inode-followup-report.md contains only aggregate evidence.
 PR #745 is open. Its initial CI/builds passed; the first AI review raised platform
 requirements and a synchronous timeout. README now states the Linux/Python contract;
 the bridge has a hard timeout plus a real SIGTERM-ignoring child regression.
-The resulting full gate passed 4203 tests and both root typechecks. Latest-head
+The second review added a platform guard to the Linux bridge and removed its
+startup-output deadline assumption, with a real delayed-initialization case.
+The resulting full gate passed 4204 tests and both root typechecks. Latest-head
 GitHub checks and the review quiet window are the remaining shipping checkpoint.
