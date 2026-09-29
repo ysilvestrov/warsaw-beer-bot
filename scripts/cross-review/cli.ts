@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, postflight, classifyResult,
+  EXIT, TIMEOUT_MS, parseArgs, isNestedRun, preflight, classifyResult,
   artifactPaths, renderPrompt, buildReviewerCommand,
 } from './core';
 
@@ -10,6 +10,12 @@ function git(args: string[]): string {
   const r = spawnSync('git', args, { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr.trim()}`);
   return r.stdout;
+}
+
+// Best-effort cleanup of a snapshot worktree; a failure here must not mask the review's own result.
+function removeSnapshot(dir: string): void {
+  spawnSync('git', ['worktree', 'remove', '--force', dir], { encoding: 'utf8' });
+  spawnSync('git', ['worktree', 'prune'], { encoding: 'utf8' });
 }
 
 function main(argv: string[]): number {
@@ -27,7 +33,7 @@ function main(argv: string[]): number {
   const root = git(['rev-parse', '--show-toplevel']).trim();
   const sha = git(['rev-parse', 'HEAD']).trim();
   const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']).trim();
-  const diff = git(['diff', `${base}...HEAD`]);
+  const diff = git(['diff', `${base}...${sha}`]);
   const refusal = preflight({ dirty: git(['status', '--porcelain']).trim() !== '', diffBytes: diff.length });
   if (refusal) {
     console.error(`cross-review: ${refusal}`);
@@ -42,17 +48,29 @@ function main(argv: string[]): number {
   const prompt = renderPrompt(template, { base, sha: sha.slice(0, 7), branch, diffPath: paths.diff });
   const command = buildReviewerCommand({ reviewer, model, prompt, reportPath: paths.report, tmpDir });
 
+  // The reviewer runs in a detached worktree of exactly `sha`, so the review describes that SHA by
+  // construction — whatever happens in the author's checkout during the (up to 15 min) run (PR #738 review).
+  const snapshot = join(tmpDir, `cross-review-wt-${sha.slice(0, 7)}`);
+  removeSnapshot(snapshot); // a run killed mid-review can leave one behind
+  git(['worktree', 'add', '--detach', snapshot, sha]);
+
   writeFileSync(paths.report, ''); // a stale report from an earlier run at this SHA must not survive a failed one
   console.error(`cross-review: ${reviewer} reviewing ${branch} @ ${sha.slice(0, 7)} vs ${base} (up to 15 min)…`);
-  const r = spawnSync(command.cmd, command.args, {
-    cwd: root,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-    timeout: TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, CROSS_REVIEW_ACTIVE: '1' },
-  });
+  const r = (() => {
+    try {
+      return spawnSync(command.cmd, command.args, {
+        cwd: snapshot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        maxBuffer: 64 * 1024 * 1024,
+        env: { ...process.env, CROSS_REVIEW_ACTIVE: '1' },
+      });
+    } finally {
+      removeSnapshot(snapshot);
+    }
+  })();
   const log = `${r.stdout ?? ''}\n${r.stderr ?? ''}${r.error ? `\n${r.error.message}` : ''}`;
   writeFileSync(paths.log, log);
   if (command.reportFromStdout) writeFileSync(paths.report, r.stdout ?? '');
@@ -64,14 +82,7 @@ function main(argv: string[]): number {
     : (r.error as NodeJS.ErrnoException | undefined)?.code
       ?? r.error?.message
       ?? (r.signal && r.status === null ? `killed by ${r.signal}` : undefined);
-  const moved = postflight({
-    startSha: sha,
-    endSha: git(['rev-parse', 'HEAD']).trim(),
-    dirty: git(['status', '--porcelain']).trim() !== '',
-  });
-  const verdict = moved
-    ? { kind: 'failed' as const, reason: moved }
-    : classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
+  const verdict = classifyResult({ exitCode: r.status, timedOut, spawnError, report, log });
   if (verdict.kind === 'failed') {
     console.error(`cross-review: FAILED — ${verdict.reason}. Log: ${paths.log}`);
     console.log(`PR marker: Cross-review: failed (${verdict.reason})`);
