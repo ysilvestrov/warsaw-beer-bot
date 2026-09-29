@@ -22,6 +22,10 @@ describe('parseArgs', () => {
   test('a flag without its value is rejected', () => {
     expect(parseArgs(['--reviewer', 'codex', '--base'])).toEqual({ ok: false, error: '--base needs a value' });
   });
+  test('a value that looks like a flag is rejected, for any flag', () => {
+    expect(parseArgs(['--reviewer', '--base', 'x'])).toEqual({ ok: false, error: '--reviewer needs a value' });
+    expect(parseArgs(['--reviewer', 'codex', '--model'])).toEqual({ ok: false, error: '--model needs a value' });
+  });
   test('an unknown flag is rejected', () => {
     expect(parseArgs(['--reviewer', 'codex', '--fast'])).toEqual({ ok: false, error: 'unknown argument "--fast"' });
   });
@@ -54,7 +58,7 @@ describe('preflight', () => {
   });
 });
 
-const run = (o: Partial<{ exitCode: number | null; timedOut: boolean; report: string; log: string }>) => ({
+const run = (o: Partial<{ exitCode: number | null; timedOut: boolean; spawnError: string; report: string; log: string }>) => ({
   exitCode: 0, timedOut: false, report: '', log: '', ...o,
 });
 
@@ -68,11 +72,26 @@ describe('classifyResult', () => {
   test('the last result line wins when the prompt is quoted back', () => {
     expect(classifyResult(run({ report: 'CROSS-REVIEW-RESULT: 0 findings\n...\nCROSS-REVIEW-RESULT: 3 findings' }))).toEqual({ kind: 'ok', findings: 3 });
   });
+  test('a result line quoted in a code fence is not the verdict when the report ends otherwise', () => {
+    expect(classifyResult(run({ report: 'Example:\n```\nCROSS-REVIEW-RESULT: 0 findings\n```\nI could not read the diff.' }))).toEqual({ kind: 'failed', reason: 'reviewer output does not end with a CROSS-REVIEW-RESULT line' });
+  });
+  test('an indented result line is not the result line', () => {
+    expect(classifyResult(run({ report: '  CROSS-REVIEW-RESULT: 0 findings' }))).toEqual({ kind: 'failed', reason: 'reviewer output does not end with a CROSS-REVIEW-RESULT line' });
+  });
+  test('trailing blank lines after the result line are ignored', () => {
+    expect(classifyResult(run({ report: 'findings\nCROSS-REVIEW-RESULT: 2 findings\n\n' }))).toEqual({ kind: 'ok', findings: 2 });
+  });
+  test('a spawn failure is named, never reported as a missing result line', () => {
+    expect(classifyResult(run({ exitCode: null, spawnError: 'ENOENT' }))).toEqual({ kind: 'failed', reason: 'reviewer did not run to completion: ENOENT' });
+  });
+  test('timeout wins over the spawn error it caused', () => {
+    expect(classifyResult(run({ exitCode: null, timedOut: true, spawnError: 'ETIMEDOUT' }))).toEqual({ kind: 'failed', reason: 'timeout after 15 min' });
+  });
   test('empty output is a failure, never zero findings', () => {
-    expect(classifyResult(run({ report: '' }))).toEqual({ kind: 'failed', reason: 'reviewer output has no CROSS-REVIEW-RESULT line' });
+    expect(classifyResult(run({ report: '' }))).toEqual({ kind: 'failed', reason: 'reviewer output does not end with a CROSS-REVIEW-RESULT line' });
   });
   test('output without the result line is a failure', () => {
-    expect(classifyResult(run({ report: 'Looks good to me!' }))).toEqual({ kind: 'failed', reason: 'reviewer output has no CROSS-REVIEW-RESULT line' });
+    expect(classifyResult(run({ report: 'Looks good to me!' }))).toEqual({ kind: 'failed', reason: 'reviewer output does not end with a CROSS-REVIEW-RESULT line' });
   });
   test('timeout beats everything else', () => {
     expect(classifyResult(run({ timedOut: true, exitCode: null, report: 'CROSS-REVIEW-RESULT: 0 findings' }))).toEqual({ kind: 'failed', reason: 'timeout after 15 min' });
