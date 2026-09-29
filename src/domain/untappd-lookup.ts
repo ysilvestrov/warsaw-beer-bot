@@ -24,6 +24,7 @@ import { HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
+import { isMovedLetterName } from './moved-letter';
 import { digitIdentity, readNameDigits, type NameDigits } from './digit-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
@@ -555,12 +556,39 @@ export async function lookupBeer(
     candidates: seenCandidates,
   });
 
+  // #659: the digit-filtered STRICT pool of the latest matchAgainst call, and every such pool this lookup
+  // refused. The moved-letter rescue reads only these, so the brewery gate and #636 still apply.
+  let lastStrictPool: SearchResult[] = [];
+  const refusedStrictPools: SearchResult[] = [];
+  const movedLetterRescue = (pool: SearchResult[]): SearchResult | null => {
+    if (abv == null) return null;
+    const targets = targetNames.filter((target) => !target.exactOnly && !target.restored);
+    const hits = new Map<number, SearchResult>();
+    for (const result of pool) {
+      if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
+      const cand = candIdent(result);
+      if (cand.restored) continue;
+      if (targets.some((target) => isMovedLetterName(target.value, cand.value))) hits.set(result.bid, result);
+    }
+    return hits.size === 1 ? [...hits.values()][0] : null;
+  };
+  // Refinement of a refusal only: a matched outcome passes through untouched.
+  const judge = (results: SearchResult[]): LookupOutcome | null => {
+    const outcome = matchAgainst(results);
+    if (outcome?.kind === 'matched') return outcome;
+    refusedStrictPools.push(...lastStrictPool);
+    if (outcome?.kind !== 'not_found') return outcome;
+    const rescued = movedLetterRescue(lastStrictPool);
+    return rescued ? { kind: 'matched', result: rescued } : outcome;
+  };
+
   // One search attempt's candidate list run through every match stage. Returns a matched
   // outcome, a terminal not_found for an unresolved scored tie, or null when this list
   // yields nothing. Extracted from the search loop so the query ladder (#382) can iterate
   // rungs without duplicating 130 lines of staging — and so "no match" is a return value
   // rather than a `continue` whose meaning depends on how many loops happen to enclose it.
   function matchAgainst(unfiltered: SearchResult[]): LookupOutcome | null {
+    lastStrictPool = [];
     // #636: every stage below reads a normalized name with no digits, so a candidate of another number or
     // vintage (`Dr.Hazy #7` → `Dr. Hazy #4`, proved live) would pass them all. One filter here, before any pool:
     // `different` never; `number-fallback` (a number only Untappd writes) only when no better tier of its series —
@@ -660,6 +688,7 @@ export async function lookupBeer(
       return { r, strict, relaxed, native, brand, brandName };
     });
     const strictPool = tagged.filter((t) => t.strict).map((t) => t.r);
+    lastStrictPool = strictPool;
     const relaxedPool = tagged.filter((t) => t.relaxed).map((t) => t.r);
     const nativePool = tagged.filter((t) => t.native).map((t) => t.r);
     const brandPool = tagged.filter((t) => t.brand).map((t) => t.r);
@@ -972,7 +1001,7 @@ export async function lookupBeer(
       // rejection could only re-offer rows the same stages just rejected (#382 §3.3).
       if (results.length === 0) continue;
 
-      const outcome = matchAgainst(results);
+      const outcome = judge(results);
       if (outcome) return outcome;
       break;
     }
@@ -997,7 +1026,7 @@ export async function lookupBeer(
         return { kind: 'transient', error };
       }
       seenCandidates.push(...results);
-      const outcome = matchAgainst(results);
+      const outcome = judge(results);
       if (outcome?.kind === 'matched' && (
         isAlcoholClassMismatch(abv, identityName, outcome.result)
         || isDescriptorAbvMismatch(abv, outcome.result.abv)
@@ -1057,5 +1086,8 @@ export async function lookupBeer(
     }
   }
 
-  return notFound();
+  // #659: every search attempt ended without a match (matchAgainst returned null). Same refinement
+  // as in judge(), over all strict pools this lookup refused.
+  const rescued = movedLetterRescue(refusedStrictPools);
+  return rescued ? { kind: 'matched', result: rescued } : notFound();
 }
