@@ -87,6 +87,9 @@ describe('classifyResult', () => {
       kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md',
     });
   });
+  test('a successful review quoting EAI_AGAIN is not a network failure', () => {
+    expect(classifyResult(run({ exitCode: 0, report: 'the code matches EAI_AGAIN in core.ts\nCROSS-REVIEW-RESULT: 2 findings' }))).toEqual({ kind: 'ok', findings: 2 });
+  });
   test('non-zero exit fails even with a result line', () => {
     expect(classifyResult(run({ exitCode: 2, report: 'CROSS-REVIEW-RESULT: 0 findings' }))).toEqual({ kind: 'failed', reason: 'reviewer exited with code 2' });
   });

@@ -46,10 +46,12 @@ export type Verdict = { kind: 'ok'; findings: number } | { kind: 'failed'; reaso
 
 export function classifyResult(r: RunOutcome): Verdict {
   if (r.timedOut) return { kind: 'failed', reason: 'timeout after 15 min' };
-  if (NO_NETWORK.test(r.log) || NO_NETWORK.test(r.report)) {
-    return { kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md' };
+  if (r.exitCode !== 0) {
+    if (NO_NETWORK.test(r.log) || NO_NETWORK.test(r.report)) {
+      return { kind: 'failed', reason: 'no network — Codex sandbox without the allow rule? see AGENTS.md' };
+    }
+    return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
   }
-  if (r.exitCode !== 0) return { kind: 'failed', reason: `reviewer exited with code ${r.exitCode}` };
   const matches = [...r.report.matchAll(RESULT_LINE)];
   if (matches.length === 0) return { kind: 'failed', reason: 'reviewer output has no CROSS-REVIEW-RESULT line' };
   return { kind: 'ok', findings: Number(matches[matches.length - 1][1]) };
