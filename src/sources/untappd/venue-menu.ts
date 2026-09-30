@@ -20,12 +20,13 @@ export interface VenueMenu {
 }
 
 const BID_RE = /^\/b\/[^/]+\/(\d+)/;
-const UNTAPPD_HOSTS = new Set(['untappd.com', 'www.untappd.com']);
+const UNTAPPD_ORIGINS = new Set(['https://untappd.com', 'https://www.untappd.com']);
 const VENUE_PATH_RE = /^\/v\/[^/]+\/(\d+)(?:\/|$)/;
 
-// The venue id of an Untappd venue URL, or null. Parsed with URL so the scheme and host compare
-// case-insensitively (as they are defined) while the path stays case-sensitive; a venue-looking
-// fragment on another host or in a query string is not a venue page.
+// The venue id of an Untappd venue URL, or null. Parsed with URL so the whole origin (scheme, host,
+// port) is compared as normalised — case-insensitive host, default port only — while the path stays
+// case-sensitive; a venue-looking fragment on another origin, behind credentials or in a query
+// string is not a venue page.
 function untappdVenueId(href: string): number | null {
   let url: URL;
   try {
@@ -33,7 +34,7 @@ function untappdVenueId(href: string): number | null {
   } catch {
     return null;
   }
-  if (url.protocol !== 'https:' || !UNTAPPD_HOSTS.has(url.hostname)) return null;
+  if (!UNTAPPD_ORIGINS.has(url.origin) || url.username !== '' || url.password !== '') return null;
   const m = url.pathname.match(VENUE_PATH_RE);
   return m ? parseInt(m[1], 10) : null;
 }
