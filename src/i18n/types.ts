@@ -223,6 +223,8 @@ export interface Messages {
   'fest.alert_new': string;
   'fest.alert_pouring': string;
   'fest.alert_line': string;
+  'fest.printer_private': string;
+  'fest.printer_link': string;
   'fest.history_header': string;
   'fest.history_line': string;
   'fest.history_unknown': string;
