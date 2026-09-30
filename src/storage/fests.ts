@@ -64,28 +64,36 @@ export function pollingSessionAt(db: DB, festId: number, now: Date): FestSession
 }
 
 /**
- * The earliest fest whose last polling window has not closed yet — the one being polled now or
- * the next one. The menu is read during the run-up, before any window opens.
+ * Fests whose last polling window has not closed yet — being polled now or still ahead — earliest
+ * first. The menu is read during the run-up, before any window opens.
  */
-export function currentOrNextFest(db: DB, now: Date): Fest | null {
-  const row = db
+export function currentOrNextFests(db: DB, now: Date): Fest[] {
+  const rows = db
     .prepare(
       `SELECT f.* FROM fests f JOIN fest_sessions s ON s.fest_id = f.id
         GROUP BY f.id
        HAVING MAX(s.end_at) >= ?
-        ORDER BY MIN(s.start_at), f.id
-        LIMIT 1`,
+        ORDER BY MIN(s.start_at), f.id`,
     )
-    .get(new Date(now.getTime() - POLL_MARGIN_MS).toISOString()) as FestRow | undefined;
-  return row ? toFest(row) : null;
+    .all(new Date(now.getTime() - POLL_MARGIN_MS).toISOString()) as FestRow[];
+  return rows.map(toFest);
 }
 
-/** The fest (and its session) that is being polled at `now`, if any. */
-export function activeFest(db: DB, now: Date): { fest: Fest; session: FestSession } | null {
+/** The earliest of `currentOrNextFests`, if any. */
+export function currentOrNextFest(db: DB, now: Date): Fest | null {
+  return currentOrNextFests(db, now)[0] ?? null;
+}
+
+/** Every fest being polled at `now`, with its session. Windows of different fests may overlap. */
+export function activeFests(db: DB, now: Date): { fest: Fest; session: FestSession }[] {
   const rows = db.prepare('SELECT * FROM fests ORDER BY id').all() as FestRow[];
-  for (const row of rows) {
+  return rows.flatMap((row) => {
     const session = pollingSessionAt(db, row.id, now);
-    if (session) return { fest: toFest(row), session };
-  }
-  return null;
+    return session ? [{ fest: toFest(row), session }] : [];
+  });
+}
+
+/** The first fest being polled at `now`, if any — for callers with nothing to choose by. */
+export function activeFest(db: DB, now: Date): { fest: Fest; session: FestSession } | null {
+  return activeFests(db, now)[0] ?? null;
 }

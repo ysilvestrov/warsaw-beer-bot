@@ -13,13 +13,15 @@ export interface FestMenuRow {
   last_seen_at: string;
 }
 
-// A menu item that disappears is kept: the menu only grows during the run-up, and a vanished
-// row is more likely a render hiccup than a withdrawn beer. last_seen_at tells them apart.
+// One row per (beer, section): the same beer can be poured at two exhibitors (a collab), and each
+// stand is a place to find it. A menu item that disappears is kept: the menu only grows during the
+// run-up, and a vanished row is more likely a render hiccup than a withdrawn beer. last_seen_at
+// tells them apart.
 export function upsertMenuItem(db: DB, festId: number, beerId: number, section: string, seenAt: string): void {
   db.prepare(
     `INSERT INTO fest_menu (fest_id, beer_id, section, first_seen_at, last_seen_at)
      VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(fest_id, beer_id) DO UPDATE SET section = excluded.section, last_seen_at = excluded.last_seen_at`,
+     ON CONFLICT(fest_id, beer_id, section) DO UPDATE SET last_seen_at = excluded.last_seen_at`,
   ).run(festId, beerId, section, seenAt, seenAt);
 }
 
@@ -37,6 +39,6 @@ export function menuFor(db: DB, festId: number): FestMenuRow[] {
 
 export function menuStats(db: DB, festId: number): { count: number; lastSeenAt: string | null } {
   return db
-    .prepare('SELECT COUNT(*) AS count, MAX(last_seen_at) AS lastSeenAt FROM fest_menu WHERE fest_id = ?')
+    .prepare('SELECT COUNT(DISTINCT beer_id) AS count, MAX(last_seen_at) AS lastSeenAt FROM fest_menu WHERE fest_id = ?')
     .get(festId) as { count: number; lastSeenAt: string | null };
 }

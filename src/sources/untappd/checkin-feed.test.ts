@@ -7,10 +7,10 @@ const html = readFileSync(join(__dirname, '__fixtures__/checkin-feed-page.html')
 describe('venue feeds (festival probe fixtures)', () => {
   it('prefers data-gregtime over the browser-collapsed date text and reads the author', () => {
     const dom = parseCheckinFeedPage(readFileSync(join(__dirname, '__fixtures__/venue-activity-dom.html'), 'utf8'));
-    expect(dom.checkins.map((c) => [c.checkin_id, c.bid, c.author, c.checkin_at])).toEqual([
-      ['1600770333', 5703496, 'bockje', 'Fri, 11 Sep 2026 20:45:58 +0000'],
-      ['1573215662', 5995292, 'bockje', 'Tue, 26 May 2026 00:11:50 +0000'],
-      ['1562430582', 4000001, 'Piwny_John', '12 Apr 26'],
+    expect(dom.checkins.map((c) => [c.checkin_id, c.bid, c.author, c.checkin_at, c.venue_id])).toEqual([
+      ['1600770333', 5703496, 'bockje', 'Fri, 11 Sep 2026 20:45:58 +0000', 11142155],
+      ['1573215662', 5995292, 'bockje', 'Tue, 26 May 2026 00:11:50 +0000', 11142155],
+      ['1562430582', 4000001, 'Piwny_John', '12 Apr 26', 11142155],
     ]);
   });
 
@@ -30,6 +30,18 @@ describe('venue feeds (festival probe fixtures)', () => {
     expect(parseCheckinFeedPage(item('<a href="/user/some.one">S</a> is drinking')).checkins[0].author).toBe('some.one');
     expect(parseCheckinFeedPage(item('Someone is drinking')).checkins[0].author).toBeNull();
   });
+
+  it('keeps the raw name for a malformed percent escape instead of failing the page', () => {
+    const html = `<div class="item" data-checkin-id="1"><p class="text"><a class="user" href="/user/bad%zzname">B</a>
+      is drinking <a href="/b/x/2">X</a> by <a href="/Brew">Brew</a></p><a class="time">Tue, 31 Mar 2026 12:12:08 +0000</a></div>`;
+    expect(parseCheckinFeedPage(html).checkins.map((c) => c.author)).toEqual(['bad%zzname']);
+  });
+
+  it('has no venue id for a row without a venue link', () => {
+    const html = `<div class="item" data-checkin-id="1"><p class="text"><a class="user" href="/user/u">U</a>
+      is drinking <a href="/b/x/2">X</a> by <a href="/Brew">Brew</a></p><a class="time">Tue, 31 Mar 2026 12:12:08 +0000</a></div>`;
+    expect(parseCheckinFeedPage(html).checkins[0].venue_id).toBeNull();
+  });
 });
 
 describe('feedCheckinTime', () => {
@@ -39,6 +51,15 @@ describe('feedCheckinTime', () => {
 
   it('rejects a date without a time', () => {
     expect(feedCheckinTime('11 Sep 26')).toBeNull();
+  });
+
+  it('accepts ISO 8601 with seconds and an offset', () => {
+    expect(feedCheckinTime('2026-10-15T17:30:05+02:00')).toBe('2026-10-15T15:30:05.000Z');
+  });
+
+  it('rejects an ISO date and a minute-precision time instead of inventing the rest', () => {
+    expect([feedCheckinTime('2026-10-15'), feedCheckinTime('2026-10-15T17:30Z'), feedCheckinTime('Tue, 31 Mar 2026 12:13 +0000')])
+      .toEqual([null, null, null]);
   });
 
   it('rejects empty and unparseable input', () => {
@@ -62,6 +83,7 @@ describe('parseCheckinFeedPage', () => {
       user_rating: 4.5,
       checkin_at: 'Mon, 15 Jun 2026 19:25:26 +0000',
       venue: 'Os. Górczewska 200',
+      venue_id: 9448532,
       author: 'ysilvestrov',
     });
   });

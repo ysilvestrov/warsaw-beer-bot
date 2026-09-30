@@ -25,10 +25,8 @@ const iso = (ms: number): string => new Date(ms).toISOString();
 export function pageSpan(p: PageSpanInput): Span | null {
   if (p.checkinTimes.length === 0) return null;
   const oldest = Math.min(...p.checkinTimes.map((t) => Date.parse(t)));
-  // The eye's clock may run ahead of ours; it must not stretch coverage into the future.
-  const upper = p.cursorAt !== null
-    ? Date.parse(p.cursorAt)
-    : Math.min(Date.parse(p.fetchedAt), Date.parse(p.now));
+  // Neither the eye's clock nor a stored cursor time may stretch coverage into the future.
+  const upper = Math.min(p.cursorAt !== null ? Date.parse(p.cursorAt) : Date.parse(p.fetchedAt), Date.parse(p.now));
   if (!Number.isFinite(oldest) || !Number.isFinite(upper) || upper < oldest) return null;
   return { from_at: iso(oldest), to_at: iso(upper) };
 }

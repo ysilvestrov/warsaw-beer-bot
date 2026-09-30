@@ -7,6 +7,7 @@ import { normalizeBrewery, normalizeName } from '../domain/normalize';
 import { insertVenueCheckins, venueCheckinAt, type Eye } from '../storage/venue_checkins';
 import { addCoverage, coverageSince } from '../storage/fest_coverage';
 import { upsertMenuItem } from '../storage/fest_menu';
+import { getJobState, setJobState } from '../storage/job_state';
 import { pageSpan, touches } from '../domain/fest/coverage';
 
 export class BlockedPageError extends Error {
@@ -31,8 +32,10 @@ export interface FeedPageResult {
   inserted: number;
   /** Check-ins on the page with a usable time. */
   seen: number;
-  /** Check-ins on the page without a second-precision time (not stored). */
+  /** Check-ins of this venue without a second-precision time (not stored). */
   dropped: number;
+  /** Check-ins whose venue link is not this venue (not stored). */
+  mismatched: number;
   /** Whether the page's proven span overlaps or touches existing coverage of this venue. */
   stitched: boolean;
   /** Cursor for the next (older) page; null on an empty page. */
@@ -44,18 +47,22 @@ export function ingestFeedPage(db: DB, p: FeedPageInput): FeedPageResult {
   if (isBlockPage(p.html)) throw new BlockedPageError();
   const page = parseCheckinFeedPage(p.html);
 
-  const rows = page.checkins.flatMap((c) => {
+  // A row whose venue link names another venue (or none) does not belong to this feed: a relay
+  // that pairs one venue's page with another's id must not create check-ins or coverage there.
+  const here = page.checkins.filter((c) => c.venue_id === p.venueId);
+  const mismatched = page.checkins.length - here.length;
+  const rows = here.flatMap((c) => {
     const at = feedCheckinTime(c.checkin_at);
     return at === null
       ? []
       : [{ checkin_id: Number(c.checkin_id), venue_id: p.venueId, bid: c.bid, untappd_user: c.author, checkin_at: at }];
   });
-  const dropped = page.checkins.length - rows.length;
+  const dropped = here.length - rows.length;
 
-  // A row we could not place in time is a check-in we saw but cannot vouch for, so the page
-  // proves no span at all. A cursor we never stored leaves the upper bound unproven too.
+  // A row we could not place in time or in this venue is a check-in we saw but cannot vouch for,
+  // so the page proves no span at all. A cursor we never stored leaves the upper bound unproven too.
   const cursorAt = p.cursor === null ? null : venueCheckinAt(db, Number(p.cursor), p.venueId);
-  const span = dropped > 0 || (p.cursor !== null && cursorAt === null)
+  const span = dropped > 0 || mismatched > 0 || (p.cursor !== null && cursorAt === null)
     ? null
     : pageSpan({ checkinTimes: rows.map((r) => r.checkin_at), cursorAt, fetchedAt: p.fetchedAt, now: p.now });
 
@@ -63,21 +70,32 @@ export function ingestFeedPage(db: DB, p: FeedPageInput): FeedPageResult {
     const stitched = span !== null && touches(coverageSince(db, p.venueId, span.from_at), span);
     const inserted = insertVenueCheckins(db, rows, p.eye, p.now);
     if (span !== null) addCoverage(db, p.venueId, span, p.eye, p.now);
-    return { inserted, seen: rows.length, dropped, stitched, nextCursor: page.nextMaxId };
+    return { inserted, seen: rows.length, dropped, mismatched, stitched, nextCursor: page.nextMaxId };
   })();
 }
 
 export interface MenuPageResult {
   items: number;
   updatedAt: string | null;
+  /** The page is older than the menu already applied; nothing was written. */
+  stale: boolean;
 }
+
+const menuUpdatedKey = (festId: number): string => `fest_menu_updated_at:${festId}`;
 
 // Menu items come from Untappd's own venue page, so the bid is Untappd's record ('checkin'
 // provenance, which a later shop-published bid may not override).
 export function ingestMenuPage(db: DB, p: { festId: number; html: string; now: string }): MenuPageResult {
   if (isBlockPage(p.html)) throw new BlockedPageError();
   const menu = parseVenueMenu(p.html);
-  db.transaction(() => {
+  return db.transaction((): MenuPageResult => {
+    // Two eyes can relay the menu out of order; a page whose "updated" stamp is older than the
+    // one already applied must not roll the menu back. A page without a stamp cannot be ordered
+    // and is applied (upserts only add rows and refresh last_seen_at).
+    const applied = getJobState(db, menuUpdatedKey(p.festId));
+    if (menu.updatedAt !== null && applied !== null && menu.updatedAt < applied) {
+      return { items: menu.items.length, updatedAt: menu.updatedAt, stale: true };
+    }
     for (const item of menu.items) {
       const beerId = upsertBeerByBid(db, {
         untappd_id: item.bid,
@@ -92,6 +110,7 @@ export function ingestMenuPage(db: DB, p: { festId: number; html: string; now: s
       });
       upsertMenuItem(db, p.festId, beerId, item.section, p.now);
     }
+    if (menu.updatedAt !== null) setJobState(db, menuUpdatedKey(p.festId), menu.updatedAt);
+    return { items: menu.items.length, updatedAt: menu.updatedAt, stale: false };
   })();
-  return { items: menu.items.length, updatedAt: menu.updatedAt };
 }

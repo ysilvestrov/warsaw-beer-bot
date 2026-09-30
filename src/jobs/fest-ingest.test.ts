@@ -26,7 +26,7 @@ describe('ingestFeedPage', () => {
   it('stores a head page and proves [oldest, fetchedAt]', () => {
     const db = fresh();
     const r = ingestFeedPage(db, { venueId: VENUE, html: RAW, cursor: null, fetchedAt: '2026-03-31T12:19:00.000Z', eye: 'laptop', now: NOW });
-    expect(r).toEqual({ inserted: 3, seen: 3, dropped: 0, stitched: false, nextCursor: '1559318775' });
+    expect(r).toEqual({ inserted: 3, seen: 3, dropped: 0, mismatched: 0, stitched: false, nextCursor: '1559318775' });
     expect(coverage(db)).toEqual([
       { venue_id: VENUE, from_at: '2026-03-31T12:12:08.000Z', to_at: '2026-03-31T12:19:00.000Z', eye: 'laptop' },
     ]);
@@ -41,7 +41,7 @@ describe('ingestFeedPage', () => {
     const db = fresh();
     const input = { venueId: VENUE, html: RAW, cursor: null, fetchedAt: '2026-03-31T12:19:00.000Z', eye: 'laptop' as const, now: NOW };
     ingestFeedPage(db, input);
-    expect(ingestFeedPage(db, input)).toEqual({ inserted: 0, seen: 3, dropped: 0, stitched: true, nextCursor: '1559318775' });
+    expect(ingestFeedPage(db, input)).toEqual({ inserted: 0, seen: 3, dropped: 0, mismatched: 0, stitched: true, nextCursor: '1559318775' });
     expect(coverage(db)).toHaveLength(1);
   });
 
@@ -76,10 +76,25 @@ describe('ingestFeedPage', () => {
     expect(coverage(db)).toContainEqual({ venue_id: VENUE, from_at: '2026-03-31T12:12:08.000Z', to_at: '2026-03-31T12:16:16.000Z', eye: 'server' });
   });
 
+  it('rows of another venue are not stored and the page proves nothing', () => {
+    const db = fresh();
+    const r = ingestFeedPage(db, { venueId: 2167060, html: RAW, cursor: null, fetchedAt: NOW, eye: 'laptop', now: NOW });
+    expect([r.inserted, r.seen, r.mismatched]).toEqual([0, 0, 3]);
+    expect([db.prepare('SELECT COUNT(*) AS n FROM venue_checkins').get(), coverage(db)]).toEqual([{ n: 0 }, []]);
+  });
+
+  it('a later eye fills in an author the first eye lacked, keeping the first eye', () => {
+    const db = fresh();
+    insertVenueCheckins(db, [{ checkin_id: 1559318905, venue_id: VENUE, bid: 6604039, untappd_user: null, checkin_at: '2026-03-31T12:14:19.000Z' }], 'server', NOW);
+    ingestFeedPage(db, { venueId: VENUE, html: RAW, cursor: null, fetchedAt: NOW, eye: 'laptop', now: NOW });
+    expect(db.prepare('SELECT untappd_user, first_eye FROM venue_checkins WHERE checkin_id = 1559318905').get())
+      .toEqual({ untappd_user: 'Bierfluenzer', first_eye: 'server' });
+  });
+
   it('an empty page writes nothing and has no cursor', () => {
     const db = fresh();
     expect(ingestFeedPage(db, { venueId: VENUE, html: '<html></html>', cursor: null, fetchedAt: NOW, eye: 'laptop', now: NOW }))
-      .toEqual({ inserted: 0, seen: 0, dropped: 0, stitched: false, nextCursor: null });
+      .toEqual({ inserted: 0, seen: 0, dropped: 0, mismatched: 0, stitched: false, nextCursor: null });
     expect(coverage(db)).toEqual([]);
   });
 
@@ -95,7 +110,7 @@ describe('ingestMenuPage', () => {
   it('links every menu item by bid with Untappd provenance and records its section', () => {
     const db = fresh();
     const fest = getFestBySlug(db, 'wfp22')!;
-    expect(ingestMenuPage(db, { festId: fest.id, html: MENU, now: NOW })).toEqual({ items: 4, updatedAt: '2026-09-29T12:15:39.465Z' });
+    expect(ingestMenuPage(db, { festId: fest.id, html: MENU, now: NOW })).toEqual({ items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false });
     expect(menuFor(db, fest.id).map((m) => [m.section, m.untappd_id, m.style, m.abv, m.rating_global])).toEqual([
       ['Browar Test', 7000001, 'Sour - Fruited', 5, null],
       ['PINTA', 6852012, 'IPA - New England / Hazy', 6.5, 4.1],
@@ -103,6 +118,25 @@ describe('ingestMenuPage', () => {
       ['PINTA', 6726011, 'IPA - American', 6.1, 4.07],
     ]);
     expect(db.prepare('SELECT DISTINCT untappd_id_source FROM beers').all()).toEqual([{ untappd_id_source: 'checkin' }]);
+  });
+
+  it('does not let an older menu page roll back a newer one', () => {
+    const db = fresh();
+    const fest = getFestBySlug(db, 'wfp22')!;
+    ingestMenuPage(db, { festId: fest.id, html: MENU, now: NOW });
+    const older = MENU.replace('2026-09-29T12:15:39.465575Z', '2026-09-28T09:00:00Z').replace('Browar Test', 'Browar Moved');
+    expect(ingestMenuPage(db, { festId: fest.id, html: older, now: '2026-10-01T00:00:00.000Z' }))
+      .toEqual({ items: 4, updatedAt: '2026-09-28T09:00:00.000Z', stale: true });
+    expect(menuFor(db, fest.id).map((m) => [m.section, m.last_seen_at]).filter(([sec]) => sec !== 'PINTA'))
+      .toEqual([['Browar Test', NOW]]);
+  });
+
+  it('keeps a beer listed by two exhibitors under both sections', () => {
+    const db = fresh();
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const twice = MENU.replace('/b/browar-test-new-beer/7000001', '/b/verdant-brewing-co-beskidy/6852012');
+    ingestMenuPage(db, { festId: fest.id, html: twice, now: NOW });
+    expect(menuFor(db, fest.id).filter((m) => m.untappd_id === 6852012).map((m) => m.section)).toEqual(['Browar Test', 'PINTA']);
   });
 
   it('refuses a Cloudflare page', () => {
