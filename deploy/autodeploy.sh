@@ -1,74 +1,89 @@
 #!/usr/bin/env bash
-# #435 — unattended deploy of a qualified dependency fix.
+# Merge-deploy — the host deploys the head of origin/main by itself.
+# Spec: docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md
 #
-# Runs as the operator user (ysi) so it reuses the existing NOPASSWD sudoers
-# scope; it requires no new privilege. It NEVER touches the operator's working
-# tree at /home/ysi/warsaw-beer-bot — deploy.sh rsyncs `./`, so running from
-# there would ship whatever happens to be uncommitted.
+# The rule: production runs what was merged into main (by a human, or by the
+# Dependabot qualifier's auto-merge), after CI passed on THAT commit, unless a
+# hold says a human must be present. A merge is the permission; everything
+# else is re-derived here before production is touched.
+#
+# Runs as the operator user (ysi) from wbb-autodeploy.timer and reuses the
+# existing NOPASSWD sudoers scope. It NEVER touches the operator's working
+# tree: deploy.sh rsyncs `./`, so it runs from a private clone.
+#
+# Exit: 0 idle/waiting/settled, 1 refused, 2 rolled back, 3 rollback failed,
+#       4 state write failed.
 set -euo pipefail
+# notify() cuts messages by CHARACTERS. Under systemd's default C locale bash
+# counts bytes and can cut a UTF-8 character in half, which Telegram rejects.
+export LC_ALL=C.UTF-8
 
 REPO_URL=https://github.com/ysilvestrov/warsaw-beer-bot.git
+GH_REPO=ysilvestrov/warsaw-beer-bot
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/wbb-autodeploy"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
 REPO="$DATA_DIR/repo"
 STATE="$STATE_DIR/state.env"
 LOCK="$STATE_DIR/lock"
-LAST_DRIFT_NOTICE=""
-LAST_STALE_NOTICE=""
-DRIFT_SINCE=""
-HEALTH_TIMEOUT_S=60
 NOTIFY_LIMIT=3500
-# #490: drift is the normal state of the minutes between a merge and the deploy
-# that follows it. What makes it worth a message is DURATION, not existence —
-# so the episode has to have a beginning, and the beginning has to be storable.
-DRIFT_GRACE_S=900
-# The clock is a seam like every other external contact in this file: 15 minutes
-# cannot be tested against the wall clock, and an untestable grace period is how
-# the drift branch ended up with no tests at all.
-NOW_S="${WBB_NOW_S:-$(date +%s)}"
+QUIET_S=600
+CI_STUCK_S=3600
+STARTUP_S=60
 
-# The guard comes from the INSTALLED copy, never from the checkout we just
-# fetched into: a guard that ships with the commit it is judging is not a guard.
-GUARD_BIN="${WBB_GUARD:-/usr/local/bin/wbb-autodeploy-guard}"
-# #527 — same install-path pattern as the guard and read-env.
 SHIPS_BIN="${WBB_SHIPS:-/usr/local/bin/wbb-ships}"
+READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
+INSTALLED_CHECK_BIN="${WBB_INSTALLED_CHECK:-/usr/local/bin/wbb-installed-current}"
 # Merge-deploy — the snapshot helper, installed like the guard and the predicate.
 SNAPSHOT_BIN="${WBB_SNAPSHOT_BIN:-/usr/local/bin/wbb-db-snapshot}"
 TRIAL_BIN="${WBB_TRIAL_BIN:-/usr/local/bin/wbb-trial-migrate}"
 
-# I2 — this script's only points of contact with the outside world: deploy,
-# health check, notify, port lookup, and the security audit. Each is a single
-# swappable command that defaults to today's real behaviour, so a test can
-# substitute a stub for every one of them and never touch sudo, systemd,
-# /opt or the network.
-_deploy_default() { ./deploy/deploy.sh; }
-DEPLOY_CMD="${WBB_DEPLOY_CMD:-_deploy_default}"
+# --- seams --------------------------------------------------------------------
+# I2 (#435), kept: every contact with the outside world is ONE swappable
+# command that defaults to the real thing, so a test substitutes all of them
+# and never touches sudo, systemd, /opt, GitHub or the network.
+_clock_default() { date +%s; }
+CLOCK_CMD="${WBB_CLOCK_CMD:-_clock_default}"
+_sleep_default() { sleep "$1"; }
+SLEEP_CMD="${WBB_SLEEP_CMD:-_sleep_default}"
 
+# ONE probe, no loop: wait_healthy and the watch window own the timing.
 _health_default() {
-  local port="$1" deadline body
-  deadline=$(( $(date +%s) + HEALTH_TIMEOUT_S ))
-  while [ "$(date +%s)" -lt "$deadline" ]; do
-    body=$(curl -fsS --max-time 3 "http://127.0.0.1:${port}/health" 2>/dev/null || true)
-    case "$body" in *'"ok":true'*) return 0 ;; esac
-    sleep 2
-  done
+  local body
+  body=$(curl -fsS --max-time 3 "http://127.0.0.1:${1}/health" 2>/dev/null) || return 1
+  case "$body" in *'"ok":true'*) return 0 ;; esac
   return 1
 }
 HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
+_restarts_default() { systemctl show -p NRestarts --value warsaw-beer-bot; }
+RESTARTS_CMD="${WBB_RESTARTS_CMD:-_restarts_default}"
 
-# Reads ONE key out of the operator env file. The parsing lives in
-# deploy/read-env.sh so the SAME code that runs in production can be exercised
-# by a test without sudo — see the header there for why `. file` is wrong.
-# Installed alongside the deployer, like the guard: this script is a COPY in
-# /usr/local/bin, so it cannot reach its sibling through its own path.
-READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
-# Same install-path pattern as the guard.
-INSTALLED_CHECK_BIN="${WBB_INSTALLED_CHECK:-/usr/local/bin/wbb-installed-current}"
+_deploy_default() { ./deploy/deploy.sh; }
+DEPLOY_CMD="${WBB_DEPLOY_CMD:-_deploy_default}"
+_build_default() { npm ci --no-audit --no-fund && npm run build; }
+BUILD_CMD="${WBB_BUILD_CMD:-_build_default}"
+# npm audit's exit 1 = advisories at/above the level; any other non-zero = it
+# could not run (I3). Callers keep the two apart.
+_audit_default() { npm audit --omit=dev --audit-level=high; }
+AUDIT_CMD="${WBB_AUDIT_CMD:-_audit_default}"
+
+# GitHub, read as the operator's `gh` (P3: works under the unit's environment).
+# One line per check run: name<TAB>status<TAB>conclusion.
+_checks_default() {
+  gh api "repos/${GH_REPO}/commits/$1/check-runs" --paginate \
+    --jq '.check_runs[] | [.name, .status, (.conclusion // "")] | @tsv'
+}
+CHECKS_CMD="${WBB_CHECKS_CMD:-_checks_default}"
+# One line per PR that contains the commit: number<TAB>label,label,...
+_pr_labels_default() {
+  gh api "repos/${GH_REPO}/commits/$1/pulls" \
+    --jq '.[] | "\(.number)\t\(.labels | map(.name) | join(","))"'
+}
+PR_LABELS_CMD="${WBB_PR_LABELS_CMD:-_pr_labels_default}"
+
 _read_env_default() {
   sudo -u warsaw-beer-bot bash -lc '"$0" /etc/warsaw-beer-bot/.env "$1"' "$READ_ENV_BIN" "$1"
 }
 READ_ENV_CMD="${WBB_READ_ENV_CMD:-_read_env_default}"
-
 _notify_default() {
   # Deliberately NOT via the bot: if the deploy took the bot down, the bot
   # cannot report that it is down.
@@ -84,7 +99,6 @@ _notify_default() {
     --data-urlencode "text=$1" >/dev/null
 }
 NOTIFY_CMD="${WBB_NOTIFY_CMD:-_notify_default}"
-
 _api_port_default() {
   local p
   p=$("$READ_ENV_CMD" API_PORT)
@@ -92,36 +106,38 @@ _api_port_default() {
 }
 API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
 
-# npm audit talks to the registry — it belongs in this swappable set too, or
-# a test exercising the deploy path would make a real network call.
-_audit_default() { ( cd "$REPO" && npm audit --omit=dev --audit-level=high ); }
-AUDIT_CMD="${WBB_AUDIT_CMD:-_audit_default}"
+now() { "$CLOCK_CMD"; }
 
-# Unprivileged emergency stop (#435 §7 amendment): arming the timer costs a
-# password (sudoers pins systemctl to the warsaw-beer-bot and litestream
-# units, not to wbb-autodeploy), so stopping it must not — or the brake is
-# unavailable exactly when the operator is asleep. Any unprivileged process
-# can create this file; see deploy/README.md. Checked before `mkdir -p` and
-# well before `flock` does any real work, so a paused deployer does almost
-# nothing — a journal line, no Telegram message (notify() isn't even defined
-# yet at this point in the script).
+# --- brake, lock --------------------------------------------------------------
+# Unprivileged emergency stop (#435 §7): arming the timer costs a password, so
+# stopping it must not. Checked before anything else; a paused tick writes
+# nothing and says nothing.
 if [ -f "$STATE_DIR/PAUSED" ]; then
   echo "wbb-autodeploy: paused ($STATE_DIR/PAUSED exists); exiting quietly"
   exit 0
 fi
-
 mkdir -p "$DATA_DIR" "$STATE_DIR"
-
-# Prevents overlapping autodeploy runs. It does NOT exclude a manual
-# ./deploy/deploy.sh, which takes no lock — but a manual deploy means the
-# operator is present, which is the case this whole mechanism defers to.
+# Excludes overlapping ticks — a tick can now last the whole 10-min window.
+# It does NOT exclude a manual deploy.sh; a manual deploy means a human is
+# present, which is the case this mechanism defers to.
 exec 9>"$LOCK"
-flock -n 9 || { echo "another autodeploy holds the lock; exiting"; exit 0; }
+flock -n 9 || { echo "another tick holds the lock; exiting"; exit 0; }
 
-# I6: a guard refusal embeds the full violation list, and Telegram's
-# sendMessage caps at 4096 chars — the realistic long refusal was silently
-# becoming an HTTP 400 with nobody reading the journal. Truncate first, and
-# never let a notify failure itself abort the run unnoticed.
+# --- state ----------------------------------------------------------------------
+DEPLOYED_SHA=""
+PREVIOUS_SHA=""
+LAST_FAILED_SHA=""
+MAIN_SEEN_SHA=""
+MAIN_SEEN_S=""
+LAST_CI_NOTICE_SHA=""
+LAST_HOLD_NOTICE=""
+LAST_STALE_NOTICE=""
+LAST_ASSESS_NOTICE=""
+# shellcheck disable=SC1090
+if [ -f "$STATE" ]; then . "$STATE"; fi
+
+# I6: Telegram caps sendMessage at 4096 chars, and a notify failure must never
+# abort the run unnoticed.
 notify() {
   local msg="$1"
   if [ "${#msg}" -gt "$NOTIFY_LIMIT" ]; then
@@ -130,105 +146,50 @@ notify() {
   "$NOTIFY_CMD" "$msg" || echo "WARNING: notify failed: $msg"
 }
 
-api_port() { "$API_PORT_CMD"; }
-
-healthy() { "$HEALTH_CMD" "$1"; }
-
-deploy_commit() {
-  # C2: this used to run deploy.sh unconditionally even when the checkout
-  # failed. Both call sites are `if deploy_commit ... && healthy; then` —
-  # inside an `if` condition, `set -e` is suppressed for the ENTIRE
-  # condition, including this function's body, so a failing
-  # `git checkout --detach` fell straight through into deploy.sh. On the
-  # rollback path that meant re-deploying the broken target while telling
-  # the operator the rollback had succeeded. Check explicitly instead of
-  # relying on inherited errexit.
-  git -C "$REPO" checkout -q --detach "$1" || return 1
-  # I5: the guard bounds the DIFF; rsync ships the TREE, and those are
-  # different statements. `checkout --detach` leaves untracked files in
-  # place, and deploy.sh rsyncs `./` with --delete — so anything left over
-  # from a previous checkout would ship regardless of what the guard saw.
-  git -C "$REPO" clean -xdff || return 1
-  ( cd "$REPO" && "$DEPLOY_CMD" )
-}
-
-# C3: writes the state file, preserving DEPLOYED_SHA/PREVIOUS_SHA and setting
-# (or clearing, if $3 is empty) LAST_FAILED_SHA.
-#
-# #497: the three daily/episode markers are NOT parameters. They used to be
-# positions 4-6, carried by default (`${4:-$LAST_DRIFT_NOTICE}`), and that form
-# let a LATER call in the same tick silently decide what an EARLIER one had
-# persisted: report_stale_once passed its marker as argument 5 without assigning
-# the variable, and report_drift_once's four-argument write moments later fell
-# back to the still-empty variable and dropped the line. Reading the shell
-# variables directly does not merely fix that — it makes it unwriteable. A
-# caller that wants to change one of these ASSIGNS it, then calls.
+# #497, kept: every key is carried from a shell variable, so a caller changes
+# one by ASSIGNING it, never by passing it. Keys not listed here — the old
+# DRIFT_SINCE / LAST_DRIFT_NOTICE — are dropped by the first write.
+STATE_KEYS=(LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE)
 write_state() {
-  local deployed="$1" previous="$2" last_failed="${3:-}"
-  {
-    printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$deployed" "$previous"
-    # `if`, not `[ -n ... ] &&` — the latter, as the group's last statement,
-    # would leak ITS OWN exit status (1 when last_failed is empty) out of
-    # the whole `{ ... }` group and into the `||` below, tripping the
-    # "failed to write state" path even though the write succeeded.
-    if [ -n "$last_failed" ]; then
-      printf 'LAST_FAILED_SHA=%s\n' "$last_failed"
-    fi
-    # Carried on every write so a deploy does not reset the once-a-day drift
-    # reminder and turn a standing condition back into a siren.
-    if [ -n "$LAST_DRIFT_NOTICE" ]; then
-      printf 'LAST_DRIFT_NOTICE=%s\n' "$LAST_DRIFT_NOTICE"
-    fi
-    if [ -n "$LAST_STALE_NOTICE" ]; then
-      printf 'LAST_STALE_NOTICE=%s\n' "$LAST_STALE_NOTICE"
-    fi
-    if [ -n "$DRIFT_SINCE" ]; then
-      printf 'DRIFT_SINCE=%s\n' "$DRIFT_SINCE"
-    fi
-  } > "$STATE" || {
-    # I6: the state write used to abort silently under set -e. A failure
-    # here means the file on disk may now disagree with what is actually
-    # running — that is worth waking a human for.
-    notify "🔥 autodeploy: failed to write $STATE — its record of what is deployed may now disagree with production."
+  local k
+  if ! {
+    printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=%s\n' "$DEPLOYED_SHA" "$PREVIOUS_SHA"
+    for k in "${STATE_KEYS[@]}"; do
+      if [ -n "${!k}" ]; then printf '%s=%s\n' "$k" "${!k}"; fi
+    done
+  } > "$STATE.tmp" 2>/dev/null || ! mv "$STATE.tmp" "$STATE" 2>/dev/null; then
+    notify "🔥 merge-deploy: failed to write $STATE — its record of what is deployed may now disagree with production."
     exit 4
-  }
+  fi
 }
 
-# Drift: production behind main blocks autodeploy, and does so INVISIBLY.
-# The guard diffs from the deployed commit, so every merge that is not
-# deployed adds paths to that diff; once it leaves the allowlist every future
-# security tag is refused, and a refusal looks exactly like the guard working
-# correctly. MEASURED 2026-08-18: three merges, twelve files, autodeploy dead
-# with no error anywhere.
-#
-# deploy.sh now records the baseline itself, so this should not happen — but
-# "should not happen" is what the last two incidents had in common, and a
-# deploy that bypassed deploy.sh entirely would still produce it.
-#
-# Called ONLY on the idle path. If a tag is pending, the guard either deploys
-# it or refuses it with the offending paths listed, and a second message about
-# the same condition is noise. Reported at most ONCE A DAY: drift is a standing
-# condition, not an event, and a siren every five minutes is the failure mode
-# this script already had to fix once.
-# Is the deployer running the code that was merged? /usr/local/bin holds
-# COPIES on purpose — the running deployer must not change under a
-# `git checkout` — and the same property means a merged fix is not a live fix
-# until someone installs it. MEASURED 2026-08-18: a guard fix was merged while
-# the timer kept running the old copy, and only memory caught it.
-#
-# Idle: report once a day. Tag pending: REFUSE. Deploying production with
-# safety logic we know is out of date is the exact risk this whole mechanism
-# exists to manage — the stale copy that day was missing `--prune-tags` and
-# the downgrade check.
-#
-# The honest limit, same as the PAUSED brake: this check lives in the very
-# file it checks, so it cannot catch a copy so old it predates the check.
+# A standing condition is reported at most once per UTC day, per marker.
+once_a_day() {
+  local var="$1" msg="$2" today
+  today=$(date -u +%Y-%m-%d)
+  [ "${!var}" != "$today" ] || return 0
+  notify "$msg"
+  printf -v "$var" '%s' "$today"
+  write_state
+}
+
+# A gate the COMMIT failed. Recorded, so the same head is never retried; the
+# next merge is.
+refuse() {
+  notify "⛔ merge-deploy refused ${1:0:7}: $2"
+  LAST_FAILED_SHA="$1"
+  write_state
+  exit 1
+}
+
+# --- installed copies -------------------------------------------------------------
+# /usr/local/bin holds COPIES on purpose; a merged fix is not live until
+# installed. The honest limit: this check lives in the file it checks.
 installed_is_stale() {
   [ -n "$INSTALLED_CHECK_BIN" ] || return 1
   [ -x "$INSTALLED_CHECK_BIN" ] || return 1
   ! STALE_REPORT=$("$INSTALLED_CHECK_BIN" "$REPO" origin/main \
       "deploy/autodeploy.sh=$0" \
-      "deploy/autodeploy-guard.sh=$GUARD_BIN" \
       "deploy/read-env.sh=$READ_ENV_BIN" \
       "deploy/ships.sh=$SHIPS_BIN" \
       "deploy/db-snapshot.sh=$SNAPSHOT_BIN" \
@@ -237,18 +198,10 @@ installed_is_stale() {
 }
 
 report_stale_once() {
-  local today
-  today=$(date -u +%Y-%m-%d)
   installed_is_stale || return 0
-  [ "$LAST_STALE_NOTICE" != "$today" ] || return 0
-  notify "⚠️ the installed deployer is out of date — a merged fix is not live until it is installed.
+  once_a_day LAST_STALE_NOTICE "⚠️ merge-deploy: the installed deployer is out of date — a merged fix is not live until it is installed.
 ${STALE_REPORT}
 Run: sudo bash deploy/install-autodeploy.sh"
-  # #497: assign, then let write_state carry it. Passing "$today" positionally
-  # left LAST_STALE_NOTICE empty, and report_drift_once's write in the same
-  # tick then persisted that emptiness over the marker just written.
-  LAST_STALE_NOTICE="$today"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
 }
 
 # #527 — the paths of diff(DEPLOYED_SHA, $1) that actually reach production,
@@ -344,260 +297,245 @@ shipping_paths() {
   done
 }
 
-report_drift_once() {
-  local main_sha today behind shipping outside_count
-  main_sha=$(git -C "$REPO" rev-parse origin/main 2>/dev/null || echo '')
-  today=$(date -u +%Y-%m-%d)
+# --- holds ------------------------------------------------------------------------
+# Paths whose change needs a human on the host: root-installed files, units
+# other than the bot's own (deploy.sh installs that one), and every installed
+# copy of this deployer. Changing this list is itself a hold (it lives here).
+path_is_held() {
+  case "$1" in
+    deploy/warsaw-beer-bot.service) return 1 ;;
+    deploy/sudoers.d/*|deploy/*.service|deploy/*.timer|deploy/litestream.*|deploy/install-*.sh) return 0 ;;
+    deploy/autodeploy.sh|deploy/autodeploy-guard.sh|deploy/ships.sh|deploy/read-env.sh) return 0 ;;
+    deploy/installed-current.sh|deploy/db-snapshot.sh|deploy/trial-migrate.cjs) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
-  [ -n "$DEPLOYED_SHA" ] || return 0
-  [ -n "$main_sha" ] || return 0
+add_unique() {
+  local -n _arr="$1"
+  local v="$2" e
+  for e in "${_arr[@]}"; do
+    if [ "$e" = "$v" ]; then return 0; fi
+  done
+  _arr+=("$v")
+}
 
-  # #527 — classify BEFORE deciding anything. A failure here is its own state.
-  if ! shipping=$(shipping_paths "$main_sha"); then
-    if [ "$LAST_DRIFT_NOTICE" != "$today" ]; then
-      notify "⚠️ autodeploy cannot tell whether production is behind main: classifying diff(${DEPLOYED_SHA}, ${main_sha}) against deploy/rsync-filter failed. Since #527 the check reads the filter from BOTH commits and classifies against each, so the fault may be on either side — a missing or unparseable filter at either ref, or an answer that did not match the paths asked about. Treat autodeploy as blocked until this is understood."
-      LAST_DRIFT_NOTICE="$today"
-      write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
-    fi
-    return 0
+# Fills HOLDS (reasons) and RANGE_PRS (#n of every PR in DEPLOYED_SHA..$1).
+# A failure to look is a hold, never a pass (fail closed).
+scan_range() {
+  local x="$1" paths commits c out pr labels f
+  HOLDS=()
+  RANGE_PRS=()
+  if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --name-only "$DEPLOYED_SHA" "$x"); then
+    HOLDS+=("could not list the changed paths")
   fi
-
-  # No drift: nothing that reaches production differs. Commit equality is one
-  # case of this rather than a separate condition — an extension-only merge is
-  # the other, and it is why this function used to siren forever about a
-  # difference nobody could deploy away.
-  if [ -z "$shipping" ]; then
-    [ -n "$DRIFT_SINCE" ] || return 0
-    # Only close out loud if we spoke. An all-clear for an alarm that never
-    # sounded is noise, and it would arrive on exactly the path this change
-    # exists to keep quiet: merge, deploy, done, nobody disturbed.
-    if [ -n "$LAST_DRIFT_NOTICE" ]; then
-      notify "✅ production has caught up with main — unattended deploys work again."
-    fi
-    DRIFT_SINCE=""
-    LAST_DRIFT_NOTICE=""
-    write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
-    return 0
-  fi
-
-  # Drift, and no episode open yet: start the clock, say nothing. This is the
-  # merge that just happened; the person who made it is probably deploying.
-  if [ -z "$DRIFT_SINCE" ]; then
-    DRIFT_SINCE="$NOW_S"
-    write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
-    return 0
-  fi
-
-  # Inside the grace window: still nothing.
-  [ $((NOW_S - DRIFT_SINCE)) -ge "$DRIFT_GRACE_S" ] || return 0
-
-  [ "$LAST_DRIFT_NOTICE" != "$today" ] || return 0
-
-  behind=$(git -C "$REPO" rev-list --count "${DEPLOYED_SHA}..${main_sha}" 2>/dev/null || echo '?')
-
-  # Counted in THIS shell, not in a pipeline whose last element is a `{ ... }`
-  # group. That shape is #499's body: a failure inside it is invisible and
-  # yields 0, which reads as "nothing to worry about".
-  outside_count=0
   while IFS= read -r f; do
-    if [ -z "$f" ]; then continue; fi
-    case "$f" in
-      package.json|package-lock.json) ;;
-      *) outside_count=$((outside_count + 1)) ;;
+    if [ -n "$f" ] && path_is_held "$f"; then HOLDS+=("path $f needs a human step"); fi
+  done <<< "$paths"
+  if ! commits=$(git -C "$REPO" rev-list "${DEPLOYED_SHA}..${x}"); then
+    HOLDS+=("could not list the commits")
+    return 0
+  fi
+  while IFS= read -r c; do
+    if [ -z "$c" ]; then continue; fi
+    if ! out=$("$PR_LABELS_CMD" "$c" 2>/dev/null); then
+      add_unique HOLDS "could not read PR labels for ${c:0:7}"
+      continue
+    fi
+    while IFS=$'\t' read -r pr labels; do
+      if [ -z "$pr" ]; then continue; fi
+      add_unique RANGE_PRS "#$pr"
+      case ",$labels," in
+        *,deploy:hold,*) add_unique HOLDS "PR #$pr carries deploy:hold — https://github.com/${GH_REPO}/pull/$pr" ;;
+      esac
+    done <<< "$out"
+  done <<< "$commits"
+}
+
+# --- CI ---------------------------------------------------------------------------
+# PASS | WAIT | FAIL <name=conclusion ...>. Non-zero = could not read.
+# The required `ci` must be present AND successful; its absence is WAIT.
+ci_verdict() {
+  local out name status conclusion ci_ok=0 pending=0 failed=()
+  out=$("$CHECKS_CMD" "$1") || return 1
+  while IFS=$'\t' read -r name status conclusion; do
+    if [ -z "$name" ]; then continue; fi
+    if [ "$status" != completed ]; then pending=1; continue; fi
+    case "$conclusion" in
+      success|skipped|neutral) ;;
+      *) failed+=("${name}=${conclusion}") ;;
     esac
-  done <<< "$shipping"
-
-  if [ "$outside_count" != "0" ]; then
-    notify "⚠️ autodeploy is BLOCKED: production is ${behind} commit(s) behind main, and ${outside_count} path(s) that ship to the server differ. Every security tag will be refused until production is deployed. Run ./deploy/deploy.sh."
-  else
-    notify "ℹ️ production is ${behind} commit(s) behind main, but the only paths that ship are the manifest and lockfile — autodeploy still works."
-  fi
-  LAST_DRIFT_NOTICE="$today"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$LAST_FAILED_SHA"
+    if [ "$name" = ci ] && [ "$conclusion" = success ]; then ci_ok=1; fi
+  done <<< "$out"
+  if [ "${#failed[@]}" -gt 0 ]; then echo "FAIL ${failed[*]}"; return 0; fi
+  if [ "$pending" = 1 ] || [ "$ci_ok" = 0 ]; then echo WAIT; return 0; fi
+  echo PASS
 }
 
-# --- fetch -------------------------------------------------------------------
+# --- deploy primitives ----------------------------------------------------------------
+# C2 (#435), kept: check explicitly — inside an `if`, set -e is off.
+# I5, kept: `clean -xdff` because rsync ships the TREE, not the diff.
+checkout_clean() {
+  git -C "$REPO" checkout -q --detach "$1" || return 1
+  git -C "$REPO" clean -xdffq || return 1
+}
+
+wait_healthy() {
+  local port="$1" limit="$2" start
+  start=$(now)
+  while :; do
+    if "$HEALTH_CMD" "$port"; then return 0; fi
+    if [ $(( $(now) - start )) -ge "$limit" ]; then return 1; fi
+    "$SLEEP_CMD" 2
+  done
+}
+
+settle() {
+  local prs="${RANGE_PRS[*]}"
+  PREVIOUS_SHA="$2"
+  DEPLOYED_SHA="$1"
+  write_state
+  notify "✅ merge-deploy ${1:0:7} is live and settled${prs:+ — $prs}."
+  exit 0
+}
+
+# Code-only until Task 5.
+roll_back() {
+  LAST_FAILED_SHA="$1"
+  write_state
+  notify "⚠️ merge-deploy ${1:0:7} failed: $2 — rolling back to ${DEPLOYED_SHA:0:7}."
+  if checkout_clean "$DEPLOYED_SHA" && ( cd "$REPO" && "$DEPLOY_CMD" ) && wait_healthy "$PORT" "$STARTUP_S"; then
+    notify "↩️ rollback to ${DEPLOYED_SHA:0:7} succeeded. ${1:0:7} needs a human."
+    exit 2
+  fi
+  notify "🔥 ROLLBACK FAILED. Production is DOWN at ${DEPLOYED_SHA:0:7}. Manual intervention required."
+  exit 3
+}
+
+deploy_pipeline() {
+  local x="$1" old="$DEPLOYED_SHA" out status
+  if ! checkout_clean "$x"; then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not check out ${x:0:7}."
+    exit 1
+  fi
+  if ! out=$(cd "$REPO" && "$BUILD_CMD" 2>&1); then
+    refuse "$x" "the build failed.
+$(tail -n 20 <<< "$out")"
+  fi
+  out=$(cd "$REPO" && "$AUDIT_CMD" 2>&1) && status=0 || status=$?
+  if [ "$status" -eq 1 ]; then
+    refuse "$x" "npm audit --omit=dev reports a high or critical advisory.
+$out"
+  elif [ "$status" -ne 0 ]; then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: npm audit could not run (exit ${status}) for ${x:0:7} — NOT a finding, just no verification. Retrying next tick.
+$out"
+    exit 1
+  fi
+  echo "deploying $x"
+  if ( cd "$REPO" && "$DEPLOY_CMD" ) && wait_healthy "$PORT" "$STARTUP_S"; then
+    settle "$x" "$old"
+  fi
+  roll_back "$x" "not healthy within ${STARTUP_S}s"
+}
+
+# --- the tick ---------------------------------------------------------------------
 if [ ! -d "$REPO/.git" ]; then
-  git clone -q "$REPO_URL" "$REPO" || { notify "⛔ autodeploy: git clone of $REPO_URL failed."; exit 1; }
+  git clone -q "$REPO_URL" "$REPO" || {
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git clone of $REPO_URL failed."
+    exit 1
+  }
 fi
-# --prune-tags, not just --prune: `--prune` deletes stale BRANCHES only, so a
-# tag removed upstream survives in this clone forever and keeps being selected.
-# MEASURED 2026-08-18, on the first unattended run: a throwaway test tag deleted
-# from origin was still here, pointed at a commit OLDER than the deployed one,
-# and the guard had to catch it as a downgrade. The guard did its job; this is
-# the reason it was asked to.
-git -C "$REPO" fetch -q --tags --prune --prune-tags origin || { notify "⛔ autodeploy: git fetch failed."; exit 1; }
-
-# shellcheck disable=SC1090
-if [ -f "$STATE" ]; then . "$STATE"; fi
-DEPLOYED_SHA="${DEPLOYED_SHA:-}"
-PREVIOUS_SHA="${PREVIOUS_SHA:-}"
-LAST_FAILED_SHA="${LAST_FAILED_SHA:-}"
-LAST_DRIFT_NOTICE="${LAST_DRIFT_NOTICE:-}"
-LAST_STALE_NOTICE="${LAST_STALE_NOTICE:-}"
-DRIFT_SINCE="${DRIFT_SINCE:-}"
-
-# Minor: lightweight tags sort by the TAGGED COMMIT's committer date under
-# -creatordate, not by when the tag was made — a tag on a backdated commit
-# could then outrank a newer one, and the guard would accept a downgrade.
-# Tag names are ISO-8601 timestamps, so lexical order is chronological.
-tag=$(git -C "$REPO" for-each-ref --sort=-refname --format='%(refname:short)' \
-        --count=1 'refs/tags/autodeploy-*')
-
-# #491: what makes the deployer idle is having no WORK, not having no TAG.
-# The old gate was `[ -n "$tag" ] || { ...report...; exit 0; }` — literally
-# "no autodeploy-* tag has ever been pushed". Tags are permanent, so the first
-# qualified merge turned the drift AND stale-deployer reports off forever, and
-# they worked at all only because none had ever been pushed. The three
-# diagnostic lines below are kept verbatim: they say different things and are
-# read in the journal.
-pending=""
-target=""
-if [ -z "$tag" ]; then
-  echo "no autodeploy tag yet"
-else
-  target=$(git -C "$REPO" rev-parse "${tag}^{commit}")
-  # C3: a tag that already failed once is not retried automatically — design
-  # §7 calls for one attempt, then a human, and without this the state file
-  # was written only on success, so the next tick saw the same tag and the
-  # same DEPLOYED_SHA and did it all again — ~288 forced restarts a day.
-  # Quiet on purpose ABOUT THE TAG: the operator was already paged when this
-  # was first recorded (guard refusal / audit refusal / deploy failure /
-  # rollback failure all notify before writing LAST_FAILED_SHA); a repeat
-  # every 5 minutes forever is the outage this fixes. Drift is a different
-  # statement about a different object, on a once-a-day cadence, and a stuck
-  # tag WITH production behind main is autodeploy dead twice over.
-  # Clear LAST_FAILED_SHA in the state file (or delete the file) to retry.
-  if [ -n "$LAST_FAILED_SHA" ] && [ "$target" = "$LAST_FAILED_SHA" ]; then
-    echo "tag $tag ($target) is recorded as LAST_FAILED_SHA in $STATE; skipping quietly"
-  elif [ "$target" = "$DEPLOYED_SHA" ]; then
-    echo "already deployed $target"
-  else
-    # target is what everything below the gate uses (guard, audit, deploy);
-    # pending only decides *whether* we get there — keep them the same value.
-    pending="$target"
-  fi
+if ! git -C "$REPO" fetch -q --prune origin; then
+  once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git fetch failed."
+  exit 1
 fi
 
-# Idle: nothing to deploy, so the two standing conditions get their once-a-day
-# say. A PENDING tag deliberately reaches neither — it is about to be deployed
-# or refused with its offending paths listed, and a second message about the
-# same condition is noise.
-[ -n "$pending" ] || { report_stale_once; report_drift_once; exit 0; }
+X=$(git -C "$REPO" rev-parse origin/main)
+NOW=$(now)
 
-# On a first run we have nothing to diff against, so compare with what is
-# actually installed rather than deploying an unbounded diff blind.
 if [ -z "$DEPLOYED_SHA" ]; then
-  echo "no recorded deployment; refusing to autodeploy an unbounded diff"
-  notify "⛔ autodeploy: no recorded baseline yet. Deploy once by hand, then this becomes automatic."
-  exit 1
-fi
-
-# --- verify ------------------------------------------------------------------
-# Before anything else: are we the deployer that was merged? Refusing here is
-# deliberate. On the idle path staleness is a once-a-day reminder, because
-# nothing is at risk; with a tag pending, the safety logic about to run is
-# KNOWN to be out of date, and deploying production on logic we know is stale
-# is the risk this whole mechanism exists to manage. The stale copy on
-# 2026-08-18 was missing `--prune-tags` and the downgrade check — exactly the
-# two things that would have mattered.
-if installed_is_stale; then
-  echo "$STALE_REPORT"
-  notify "⛔ autodeploy REFUSED for ${tag}: the installed deployer is out of date.
-${STALE_REPORT}
-Run: sudo bash deploy/install-autodeploy.sh — then this tag will be retried."
-  # NOT recorded as LAST_FAILED_SHA: the tag is fine, we are not. Recording it
-  # would make the tag un-retryable after the install that fixes the cause.
-  exit 1
-fi
-
-if ! guard_out=$("$GUARD_BIN" "$REPO" "$DEPLOYED_SHA" "$target" origin/main); then
-  echo "$guard_out"
-  notify "⛔ autodeploy REFUSED for ${tag}:
-${guard_out}"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-fi
-echo "$guard_out"
-
-# I6: this checkout (for the audit) used to abort under set -e with no
-# notification.
-if ! git -C "$REPO" checkout -q --detach "$target"; then
-  notify "⛔ autodeploy: could not check out ${target} to audit it."
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-fi
-git -C "$REPO" clean -xdff || {
-  notify "⛔ autodeploy: git clean failed while preparing ${target} for audit."
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-}
-
-# I3: npm audit's exit 1 means "found advisories at/above --audit-level" —
-# any OTHER nonzero exit means the audit itself could not run (network,
-# registry, missing lockfile, ...). Those are not the same conclusion, and
-# the operator message must say which one happened.
-audit_out=$("$AUDIT_CMD" 2>&1) && audit_status=0 || audit_status=$?
-if [ "$audit_status" -eq 1 ]; then
-  notify "⛔ autodeploy REFUSED for ${tag}: npm audit --omit=dev still reports a high or critical advisory after the fix.
-${audit_out}"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-elif [ "$audit_status" -ne 0 ]; then
-  notify "⛔ autodeploy REFUSED for ${tag}: npm audit --omit=dev could not run (exit ${audit_status}) — this is NOT a security finding, just an inability to verify one.
-${audit_out}"
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-fi
-
-# --- deploy ------------------------------------------------------------------
-# I4: resolved once, up front. Previously `healthy` called `api_port` itself,
-# and because errexit is suppressed inside the `if` condition that calls it,
-# a transient sudo/.env failure made `healthy` return non-zero WITHOUT ever
-# polling /health — tearing down a perfectly good deploy. Fail closed here,
-# before anything is touched, instead.
-if ! PORT=$(api_port); then
-  notify "⛔ autodeploy: could not resolve API_PORT from /etc/warsaw-beer-bot/.env — refusing to deploy ${tag}."
-  write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-  exit 1
-fi
-
-echo "deploying $target ($tag)"
-if deploy_commit "$target" && healthy "$PORT"; then
-  # #490: production just moved. Whatever episode the idle path was tracking
-  # measured a gap that no longer exists. Since #491, the very next tick
-  # reaches report_drift_once instead of exiting at "already deployed" — and
-  # if main has not moved further in the meantime, DEPLOYED_SHA now equals
-  # main, so that tick takes the "no drift" branch, which speaks only if
-  # DRIFT_SINCE is still set (and announces "caught up" only if a prior
-  # message was ever sent). A stale DRIFT_SINCE left behind here would
-  # already be past the grace window, so it would siren "caught up" within
-  # five minutes of a successful deploy — not eventually, immediately. A
-  # stale LAST_DRIFT_NOTICE would then go on suppressing the daily reminder
-  # for an episode that no longer exists. Clear both, not just the start
-  # time.
-  DRIFT_SINCE=""
-  LAST_DRIFT_NOTICE=""
-  write_state "$target" "$DEPLOYED_SHA" ""
-  bumped=$(git -C "$REPO" diff --stat "$DEPLOYED_SHA" "$target" -- package.json | tail -1)
-  notify "✅ autodeploy ${tag} — production patched and healthy.
-${bumped}"
+  once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: no recorded baseline. Deploy once by hand (bash deploy/deploy.sh), then this becomes automatic."
   exit 0
 fi
-
-# C3: record the failure BEFORE attempting rollback, so even if rollback
-# itself misbehaves the timer will not retry this tag again.
-write_state "$DEPLOYED_SHA" "$PREVIOUS_SHA" "$target"
-
-# --- roll back ---------------------------------------------------------------
-# Deliberately not clever: one attempt, then stop and wake a human. An
-# automation that keeps turning production over unattended after two failures
-# is worse than one that stops and says so.
-notify "⚠️ autodeploy ${tag} failed to come up healthy — rolling back to ${DEPLOYED_SHA}."
-if deploy_commit "$DEPLOYED_SHA" && healthy "$PORT"; then
-  notify "↩️ rollback to ${DEPLOYED_SHA} succeeded. ${tag} needs a human."
-  exit 2
+if [ "$X" = "$DEPLOYED_SHA" ]; then
+  report_stale_once
+  echo "up to date at $X"
+  exit 0
+fi
+# The downgrade check that used to live in the guard.
+if ! git -C "$REPO" rev-parse -q --verify "${DEPLOYED_SHA}^{commit}" >/dev/null \
+   || ! git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; then
+  once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: production (${DEPLOYED_SHA:0:7}) is not an ancestor of main (${X:0:7}) — refusing what could be a downgrade. Deploy main by hand to reseed."
+  exit 0
+fi
+# #527, kept: "could not tell" is its own state, never "nothing ships".
+if ! shipping=$(shipping_paths "$X"); then
+  once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy cannot tell whether production is behind main: classifying diff(${DEPLOYED_SHA:0:7}, ${X:0:7}) against deploy/rsync-filter failed. Treat deploys as blocked until this is understood."
+  exit 0
+fi
+if [ -z "$shipping" ]; then
+  report_stale_once
+  echo "nothing that ships differs between $DEPLOYED_SHA and $X"
+  exit 0
+fi
+if [ "$X" = "$LAST_FAILED_SHA" ]; then
+  report_stale_once
+  echo "main $X is recorded as LAST_FAILED_SHA; waiting for the next merge"
+  exit 0
+fi
+# D1: ten minutes of quiet, measured from the first tick that saw this head.
+if [ "$MAIN_SEEN_SHA" != "$X" ]; then
+  MAIN_SEEN_SHA="$X"
+  MAIN_SEEN_S="$NOW"
+  write_state
+  echo "new main head $X; waiting ${QUIET_S}s of quiet"
+  exit 0
+fi
+if [ $(( NOW - MAIN_SEEN_S )) -lt "$QUIET_S" ]; then
+  echo "main moved $(( NOW - MAIN_SEEN_S ))s ago; waiting"
+  exit 0
+fi
+if installed_is_stale; then
+  echo "$STALE_REPORT"
+  once_a_day LAST_STALE_NOTICE "⚠️ merge-deploy is waiting: the installed deployer is out of date — a merged fix is not live until it is installed.
+${STALE_REPORT}
+Run: sudo bash deploy/install-autodeploy.sh"
+  exit 0
+fi
+scan_range "$X"
+if [ "${#HOLDS[@]}" -gt 0 ]; then
+  printf '%s\n' "${HOLDS[@]}"
+  once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: production is behind main and HELD:
+$(printf '• %s\n' "${HOLDS[@]}")
+Do the steps, then run bash deploy/deploy.sh on the host — that releases the hold."
+  exit 0
+fi
+if ! verdict=$(ci_verdict "$X"); then
+  once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy cannot read CI status for ${X:0:7} (gh api failed). Waiting."
+  exit 0
+fi
+case "$verdict" in
+  PASS) ;;
+  WAIT)
+    if [ $(( NOW - MAIN_SEEN_S )) -ge "$CI_STUCK_S" ]; then
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: CI has not concluded on ${X:0:7} after $(( (NOW - MAIN_SEEN_S) / 60 )) min (the required 'ci' check is pending or absent)."
+    fi
+    echo "CI not concluded on $X"
+    exit 0
+    ;;
+  FAIL*)
+    if [ "$LAST_CI_NOTICE_SHA" != "$X" ]; then
+      notify "⛔ merge-deploy: CI failed on ${X:0:7} — not deploying. ${verdict#FAIL }
+Re-running the failed job releases it; nothing else to do here."
+      LAST_CI_NOTICE_SHA="$X"
+      write_state
+    fi
+    exit 0
+    ;;
+esac
+if ! PORT=$("$API_PORT_CMD"); then
+  once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not resolve API_PORT — not deploying ${X:0:7}."
+  exit 1
 fi
 
-notify "🔥 ROLLBACK FAILED. Production is DOWN at ${DEPLOYED_SHA}. Manual intervention required."
-exit 3
+deploy_pipeline "$X"

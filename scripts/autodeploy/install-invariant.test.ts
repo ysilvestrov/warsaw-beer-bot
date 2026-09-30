@@ -19,11 +19,10 @@ describe('every checked installed copy is actually installed', () => {
     ...new Set([...block.matchAll(/"(deploy\/[A-Za-z0-9._/-]+)=/g)].map((m) => m[1])),
   ];
 
-  it('names the four original scripts and ships.sh', () => {
+  it('names every installed script the tick depends on', () => {
     // Pinned explicitly. Without this the loop below is vacuously green the
     // moment a pair is deleted from the list.
     expect(declared).toContain('deploy/autodeploy.sh');
-    expect(declared).toContain('deploy/autodeploy-guard.sh');
     expect(declared).toContain('deploy/read-env.sh');
     expect(declared).toContain('deploy/installed-current.sh');
     expect(declared).toContain('deploy/ships.sh');
