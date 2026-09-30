@@ -1,0 +1,88 @@
+{
+  "checkins": {
+    "count": 3,
+    "items": [
+      {
+        "checkin_id": 1605095696,
+        "created_at": "Wed, 30 Sep 2026 17:04:06 +0000",
+        "rating_score": 3.75,
+        "checkin_comment": "",
+        "user": {
+          "uid": 1000,
+          "user_name": "friend_1",
+          "first_name": "Friend",
+          "last_name": "1",
+          "relationship": "friends"
+        },
+        "beer": {
+          "bid": 6813263,
+          "beer_name": "Absztyfikant",
+          "beer_style": "IPA - Session",
+          "beer_abv": 5.8
+        },
+        "brewery": {
+          "brewery_id": 282381,
+          "brewery_name": "Ziemia Obiecana"
+        },
+        "venue": {
+          "venue_id": 10600165,
+          "venue_name": "Szklanki"
+        }
+      },
+      {
+        "checkin_id": 1605095315,
+        "created_at": "Wed, 30 Sep 2026 17:02:21 +0000",
+        "rating_score": 0,
+        "checkin_comment": "",
+        "user": {
+          "uid": 1001,
+          "user_name": "friend_2",
+          "first_name": "Friend",
+          "last_name": "2",
+          "relationship": "friends"
+        },
+        "beer": {
+          "bid": 6753545,
+          "beer_name": "INDIGO BLOOM",
+          "beer_style": "Sour - Fruited",
+          "beer_abv": 4.5
+        },
+        "brewery": {
+          "brewery_id": 116251,
+          "brewery_name": "Paradox"
+        },
+        "venue": {
+          "venue_id": 12613920,
+          "venue_name": "Phantom"
+        }
+      },
+      {
+        "checkin_id": 1605095205,
+        "created_at": "Wed, 30 Sep 2026 17:01:45 +0000",
+        "rating_score": 0,
+        "checkin_comment": "",
+        "user": {
+          "uid": 1002,
+          "user_name": "friend_3",
+          "first_name": "Friend",
+          "last_name": "3",
+          "relationship": "friends"
+        },
+        "beer": {
+          "bid": 6837562,
+          "beer_name": "The Night Before, The Morning After",
+          "beer_style": "IPA - American",
+          "beer_abv": 6.5
+        },
+        "brewery": {
+          "brewery_id": 135208,
+          "brewery_name": "Zagovor Brewery"
+        },
+        "venue": []
+      }
+    ]
+  },
+  "pagination": {
+    "max_id": 1605095205
+  }
+}
