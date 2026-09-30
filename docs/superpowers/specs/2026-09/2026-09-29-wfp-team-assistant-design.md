@@ -225,10 +225,21 @@ zod-схему з мінімальним набором полів (`checkin_id`
 - Тік кожні 5 хв у вікні опитування; гортати `maxId`, доки не буде стику з курсором
   `job_state.fest_friend_feed_min_id`. Без стику після 4 сторінок — дірка, курсор не
   рухається, алерт адміну.
-- **Передумова:** механізм автентифікації бота в MCP-сервері (питання до автора, ДК §3.4).
-  Без нього модуль вимкнено (`FEST_MCP_URL` відсутній). Пасивне закриття тоді бере стрічки
-  учасників HTML-скрейпом `/user/<u>` раз на 10 хв (наявний парсер, куковий клієнт), тим самим
-  breaker'ом §4.4.
+- **Автентифікація — стандартна MCP OAuth 2.1** (розділ Authorization специфікації MCP), клієнт з
+  `@modelcontextprotocol/sdk` 1.30.0: `StreamableHTTPClientTransport({ authProvider })`. SDK сам робить
+  discovery (`/.well-known/oauth-protected-resource` → метадані сервера авторизації), dynamic client
+  registration і оновлення access token за refresh token.
+  - `OAuthClientProvider` бота — файл `FEST_MCP_OAUTH_FILE` (`/var/lib/warsaw-beer-bot/fest-mcp-oauth.json`,
+    `600`) з реєстрацією клієнта й токенами; `saveTokens` переписує його атомарно.
+  - Разовий інтерактивний вхід — `scripts/fest-mcp-login.ts` на ноуті: loopback-редирект
+    `http://localhost:8765/callback`, логін власника тим самим акаунтом, до якого прив'язано Untappd,
+    `transport.finishAuth(code)`. Файл переноситься на сервер вручну.
+  - На сервері `redirectToAuthorization` **не** відкриває браузер: кидає помилку. Refresh, що не пройшов →
+    `UnauthorizedError` → breaker `job_state.fest_mcp_open_until` + алерт адміну «перезапусти
+    fest-mcp-login». Пасивне закриття тим часом бере HTML-фолбек нижче.
+  - **Не доведено** (проба за брифом `brief-codex-mcp-auth`): що сервер віддає стандартні метадані й
+    дозволяє DCR; що вхід процесу бачить той самий прив'язаний Untappd; скільки живе refresh token.
+    До доведення модуль вимкнено (`FEST_MCP_URL` відсутній).
 
 ### 4.6 Меню — `jobs/fest-menu.ts`
 
@@ -355,7 +366,8 @@ targets(menu, teamTried: Map<telegramId, Set<beerId>>, beers, overrides, criteri
 показує лічильник і кнопку **«Друкувати все»** (Web Bluetooth вимагає жесту). Растр
 етикетки будує клієнт із даних сервера; бібліотека протоколу — NiimBlue. Після кожної
 наліпки — `POST /fest/print-jobs/:id/printed` або `/failed` з текстом помилки.
-**Передумова:** `niim.blue` друкує з D11 власника (S3, ще не доведено).
+**S3 доведено (2026-09-30):** D11 власника друкує з Chrome на Android (первинна невдача — розряджена
+батарея). Рівень 1 — основний шлях.
 
 **Рівень 2 — картинка.** `GET /fest/print-jobs/:id.png`, той самий растр, генерується на
 сервері. Кнопка «PNG» у `/fest queue` надсилає картинку в DM для друку з застосунку Niimbot.
