@@ -594,20 +594,6 @@ describe('merge-deploy: state and notifications', () => {
   });
 });
 
-describe('merge-deploy: a deploy that does not come up (code-only rollback until Task 5)', () => {
-  it('redeploys the previous commit, records LAST_FAILED_SHA and exits 2', () => {
-    const w = world();
-    const x = push(w, { 'src/a.ts': '2' }, 'feat');
-    const health = stub(w.bin, 'health-x-bad', `tail -n1 "${w.eventsLog}" | grep -q "deploy ${x}" && exit 1; exit 0`);
-    ready(w, { WBB_HEALTH_CMD: health });
-    const r = tick(w, { WBB_HEALTH_CMD: health });
-    expect(r.code).toBe(2);
-    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`, `deploy ${w.base}`]);
-    expect(readState(w).LAST_FAILED_SHA).toBe(x);
-    expect(readState(w).DEPLOYED_SHA).toBe(w.base);
-  });
-});
-
 describe('merge-deploy: snapshot, trial migration, window', () => {
   /** health fails from `from` seconds after the latest deploy onwards. */
   function healthFailingFrom(w: World, from: number): string {
@@ -648,7 +634,7 @@ describe('merge-deploy: snapshot, trial migration, window', () => {
     const r = tick(w, { WBB_HEALTH_CMD: health });
     expect(r.code).toBe(2);
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`, `deploy ${w.base}`]);
-    expect(notes(w)[0]).toMatch(/health check failed at \+590s/);
+    expect(notes(w)[0]).toMatch(/failed inside the rollback window: health check failed at \+590s/);
   });
 
   it('settles when the failure only starts at 600 s — after the window', () => {
@@ -686,5 +672,79 @@ describe('merge-deploy: snapshot, trial migration, window', () => {
   it('lets the service unit outlive the window', () => {
     const unit = readFileSync(resolve(__dirname, '../../deploy/wbb-autodeploy.service'), 'utf8');
     expect(unit).toMatch(/^TimeoutStartSec=30min$/m);
+  });
+});
+
+describe('merge-deploy: rollback restores code AND database', () => {
+  function healthFailingFrom(w: World, from: number): string {
+    return stub(w.bin, `health-from-${from}`,
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( now - d )) -lt ${from} ]`);
+  }
+  const stamp = (e: string) => e.replace(/\d{8}T\d{6}Z/, 'STAMP');
+
+  it('stops, keeps post, restores pre, and redeploys the old code — in that order', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    ready(w, { WBB_HEALTH_CMD: health });
+    const r = tick(w, { WBB_HEALTH_CMD: health });
+
+    expect(r.code).toBe(2);
+    const ev = events(w).map(stamp);
+    expect(ev.slice(ev.indexOf(`deploy ${x}`))).toEqual([
+      `deploy ${x}`,
+      'service stop warsaw-beer-bot',
+      'service stop litestream',
+      `mark STAMP-${short(x)}-pre.db`,
+      `post STAMP-${short(x)}-rollback-post`,
+      `restore STAMP-${short(x)}-rollback-pre.db`,
+      'service start litestream',
+      `deploy ${w.base}`,
+    ]);
+    expect(readState(w).LAST_FAILED_SHA).toBe(x);
+    expect(readState(w).DEPLOYED_SHA).toBe(w.base);
+    const last = notes(w)[notes(w).length - 1];
+    expect(last).toMatch(new RegExp(`^🔥 merge-deploy ROLLED BACK ${short(x)} → ${short(w.base)}, code AND database\\.`));
+    expect(last).toMatch(/Writes between \d\d:\d\d:\d\d and \d\d:\d\d:\d\d UTC exist only in: \S+-rollback-post\n/);
+    expect(last).toMatch(/Pre-deploy snapshot now live: \S+-rollback-pre\.db\n/);
+  });
+
+  it('restores the database too when the new code never comes up', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = stub(w.bin, 'health-x-bad', `tail -n1 "${w.eventsLog}" | grep -q "deploy ${x}" && exit 1; exit 0`);
+    ready(w, { WBB_HEALTH_CMD: health });
+    const r = tick(w, { WBB_HEALTH_CMD: health });
+    expect(r.code).toBe(2);
+    expect(events(w).map(stamp)).toContain(`restore STAMP-${short(x)}-rollback-pre.db`);
+    expect(notes(w)[0]).toMatch(/not healthy within 60s/);
+  });
+
+  it('stops at a failed restore, says ROLLBACK FAILED with both paths, and deploys nothing more', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    const restore = stub(w.bin, 'restore-red', `echo "restore $(basename "$1")" >> "${w.eventsLog}"; exit 1`);
+    ready(w, { WBB_HEALTH_CMD: health, WBB_RESTORE_CMD: restore });
+    const r = tick(w, { WBB_HEALTH_CMD: health, WBB_RESTORE_CMD: restore });
+
+    expect(r.code).toBe(3);
+    expect(events(w).map(stamp).slice(-1)).toEqual([`restore STAMP-${short(x)}-rollback-pre.db`]);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+    const last = notes(w)[notes(w).length - 1];
+    expect(last).toMatch(/^🔥 ROLLBACK FAILED at: restore pre\. /);
+    expect(last).toMatch(/pre=\S+-rollback-pre\.db post=\S+-rollback-post/);
+  });
+
+  it('records LAST_FAILED_SHA before the first rollback step can fail', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    const service = stub(w.bin, 'service-red', 'exit 1');
+    ready(w, { WBB_HEALTH_CMD: health, WBB_SERVICE_CMD: service });
+    const r = tick(w, { WBB_HEALTH_CMD: health, WBB_SERVICE_CMD: service });
+    expect(r.code).toBe(3);
+    expect(readState(w).LAST_FAILED_SHA).toBe(x);
+    expect(notes(w)[notes(w).length - 1]).toMatch(/^🔥 ROLLBACK FAILED at: stop warsaw-beer-bot\./);
   });
 });
