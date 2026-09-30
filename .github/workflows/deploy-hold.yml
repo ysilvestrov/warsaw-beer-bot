@@ -34,4 +34,6 @@ jobs:
         # HEAD is the PR's merge ref: its first parent is the base it merged
         # onto, so this is exactly the PR's own contribution — base.sha on an
         # edited/labeled event may be older and would count others' changes.
-        run: git diff --name-only HEAD^1 HEAD | npx tsx scripts/autodeploy/deploy-hold-check.ts
+        # --no-renames: a rename would otherwise report only its destination,
+        # hiding a held source path.
+        run: git diff --no-renames --name-only HEAD^1 HEAD | npx tsx scripts/autodeploy/deploy-hold-check.ts

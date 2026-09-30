@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { isHoldPath, checkHold } from './deploy-hold-check';
 
@@ -115,3 +116,12 @@ describe('deploy-hold-check CLI', () => {
     expect(r.out).toContain('no changed paths on stdin');
   });
 });
+
+describe('deploy-hold workflow', () => {
+  // A rename would otherwise report only its destination, hiding a held source.
+  it('feeds the check a diff with rename detection off', () => {
+    const wf = readFileSync(resolve(__dirname, '../../.github/workflows/deploy-hold.yml'), 'utf8');
+    expect(wf).toContain('run: git diff --no-renames --name-only HEAD^1 HEAD | npx tsx scripts/autodeploy/deploy-hold-check.ts');
+  });
+});
+
