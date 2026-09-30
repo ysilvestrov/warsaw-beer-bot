@@ -21,7 +21,8 @@ export interface VenueMenu {
 
 const BID_RE = /^\/b\/[^/]+\/(\d+)/;
 // Anchored to Untappd's own host and path: a venue-looking fragment elsewhere in a URL is not a venue page.
-const CANONICAL_VENUE_RE = /^https:\/\/(?:www\.)?untappd\.com\/v\/[^/?#]+\/(\d+)(?:[/?#]|$)/;
+// Case-insensitive, because URL schemes and host names are.
+const CANONICAL_VENUE_RE = /^https:\/\/(?:www\.)?untappd\.com\/v\/[^/?#]+\/(\d+)(?:[/?#]|$)/i;
 const ABV_RE = /(\d+(?:\.\d+)?)\s*%\s*ABV/i;
 
 const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();

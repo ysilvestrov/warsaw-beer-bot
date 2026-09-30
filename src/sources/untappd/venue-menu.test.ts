@@ -25,10 +25,11 @@ describe('parseVenueMenu', () => {
     expect([
       withCanonical('https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155'),
       withCanonical('https://untappd.com/v/x/11142155/activity'),
+      withCanonical('HTTPS://WWW.UNTAPPD.COM/v/x/11142155'),
       withCanonical('https://example.test/?next=/v/fake/11142155'),
       withCanonical('https://untappd.com.evil.test/v/fake/11142155'),
       withCanonical('https://untappd.com/b/some-beer/11142155'),
-    ]).toEqual([11142155, 11142155, null, null, null]);
+    ]).toEqual([11142155, 11142155, 11142155, null, null, null]);
   });
 
   it('reads the menu update time as ISO', () => {
