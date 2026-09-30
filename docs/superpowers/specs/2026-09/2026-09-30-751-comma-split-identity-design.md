@@ -25,11 +25,14 @@ comma, restoring the combined alternative label. Admit the candidate only if:
 1. The normalized shop beer name equals the normalized registered beer name and
    contains at least two tokens. This permits shop-only grade noise (`14°`) but
    rejects partial titles.
-2. The base-normalized restored label ends with the complete base-normalized
-   registered beer title. Its remaining prefix, normalized as a brewery, equals
+2. Try consecutive `alias_alt` windows with as many elements as the registered
+   title has comma-delimited parts; other aliases in the array are ignored. The
+   base-normalized joined window must end with the complete base-normalized
+   registered title. Its remaining prefix, normalized as a brewery, must equal
    the normalized shop brewery. Never treat that prefix as a global alias.
 3. Exactly one distinct `bid` has this evidence. ABV never resolves competing
-   bids; known contradictory ABV vetoes the sole candidate.
+   bids. Every qualifying row for that bid must avoid a known ABV or alcohol
+   class contradiction; a conflicting duplicate row vetoes this fallback.
 
 The fallback runs after ordinary brewery and complete-identity matches, before
 candidate-native brewery aliases. It does not change query construction, the
