@@ -1,4 +1,5 @@
-import { chmodSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 import type { OAuthClientProvider } from '@modelcontextprotocol/sdk/client/auth.js';
 import type { OAuthClientInformationMixed, OAuthClientMetadata, OAuthTokens } from '@modelcontextprotocol/sdk/shared/auth.js';
 
@@ -32,6 +33,7 @@ export function readOAuthFile(path: string): Stored {
 
 function writeAtomic(path: string, data: Stored): void {
   const tmp = `${path}.tmp`;
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   chmodSync(tmp, 0o600); // mode applies only on create; an old tmp could have kept looser bits
   renameSync(tmp, path);

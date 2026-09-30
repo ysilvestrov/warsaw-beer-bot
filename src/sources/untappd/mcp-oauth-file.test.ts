@@ -26,6 +26,12 @@ describe('FileOAuthProvider', () => {
     });
   });
 
+  it('creates a missing parent directory for the file', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'mcp-oauth-')), 'nested', 'dir', 'oauth.json');
+    new FileOAuthProvider(path).saveTokens(TOKENS);
+    expect(new FileOAuthProvider(path).tokens()).toEqual(TOKENS);
+  });
+
   it('on the server a login is never started: redirect throws McpLoginRequired', async () => {
     await expect(new FileOAuthProvider(file()).redirectToAuthorization(new URL('https://x/authorize'))).rejects.toBeInstanceOf(McpLoginRequired);
   });

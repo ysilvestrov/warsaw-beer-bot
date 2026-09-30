@@ -94,12 +94,16 @@ async function main(): Promise<void> {
   console.log(`Власник токена в Untappd: ${owner}`);
 
   const usage = await call('get_untappd_api_usage', {});
-  console.log(`get_untappd_api_usage: ${usage.isError ? `помилка — ${textOf(usage)}` : 'ок'}`);
   const feed = parseMcpCheckins(await call('get_my_friend_feed', { limit: 1 }));
+  await client.close();
+  console.log(`get_untappd_api_usage: ${usage.isError ? `помилка — ${textOf(usage)}` : 'ок'}`);
   console.log('error' in feed
     ? `get_my_friend_feed: не розібрано — ${feed.error}`
     : `get_my_friend_feed: розібрано записів ${feed.items.length} з ${feed.count}, поля на місці`);
-  await client.close();
+  // A file that fails either check would not serve the festival job: do not tell anyone to deploy it.
+  if (usage.isError || 'error' in feed) {
+    throw new Error(`Перевірка не пройшла — файл ${out} на сервер НЕ переносити. Виправ причину й запусти скрипт ще раз.`);
+  }
   console.log(`\nФайл: ${out}. Перенеси його на сервер (власник warsaw-beer-bot, права 600). Не архівуй і не пересилай.`);
 }
 
