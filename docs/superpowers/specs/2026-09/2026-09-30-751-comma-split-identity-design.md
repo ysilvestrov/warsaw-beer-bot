@@ -25,9 +25,9 @@ comma, restoring the combined alternative label. Admit the candidate only if:
 1. The normalized shop beer name equals the normalized registered beer name and
    contains at least two tokens. This permits shop-only grade noise (`14°`) but
    rejects partial titles.
-2. The restored alternative label, after leading brewery descriptors and name
-   noise are removed, equals the normalized shop brewery plus the complete
-   normalized shop beer name. Never treat its brewery prefix as a global alias.
+2. The base-normalized restored label ends with the complete base-normalized
+   registered beer title. Its remaining prefix, normalized as a brewery, equals
+   the normalized shop brewery. Never treat that prefix as a global alias.
 3. Exactly one distinct `bid` has this evidence. ABV never resolves competing
    bids; known contradictory ABV vetoes the sole candidate.
 
@@ -37,6 +37,8 @@ ordinary identity rule, or catalog normalization. Remove the
 `['kojetin', 'sompivo']` curated pair and its pair-specific test. This also
 closes the brewery-wide equivalence in `/match`, which reads the same pair list;
 the new fallback is intentionally limited to enrich `lookupBeer`.
+An ambiguous or ABV-vetoed split identity falls through to later evidence
+stages and other brewery search parts; it does not veto an independent match.
 
 ## Evidence and claims
 

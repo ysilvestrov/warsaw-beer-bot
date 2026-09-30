@@ -2382,6 +2382,53 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.kind).toBe('not_found');
     });
 
+    test('a vetoed split identity does not block a valid native brewery alias', async () => {
+      const search = fakeSearch(() => [
+        { bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+          style: 'IPA - Other', abv: 8.0, global_rating: 3.75,
+          alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'] },
+        { bid: 6690911, beer_name: 'Som Pohár, Čau', brewery_name: 'Other Brewery',
+          style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+          brewery_alias: ['Kojetin Brewery'] },
+      ]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6690911);
+    });
+
+    test('does not accept another brewery from a split alternative label', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Pivovar Other Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects a split identity whose full beer name normalizes to one token', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Čau, IPA', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín', 'Čau IPA'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Čau', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('normalizes a brewery descriptor inside the split identity prefix', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Kojetin Brewery Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6690910);
+    });
+
     test('does not join independent aliases for a comma-free title', async () => {
       const search = fakeSearch(() => [{
         bid: 6690910, beer_name: 'Som Pohár Čau', brewery_name: 'SomPivo',
