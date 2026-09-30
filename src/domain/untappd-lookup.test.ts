@@ -2490,4 +2490,128 @@ describe('#664 numbered-series retry', () => {
     expect(await lookupBeer({ brewery: 'Other', name: 'Beer #0061 HBC472', search })).toEqual({ kind: 'transient', error });
     expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
   });
+
+  describe('colon-prefix rescue (#746)', () => {
+    it('rescues 37961 (Sarabanda Brewery / Pils 11,5° -> Classic: Pils)', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'matched', result: candidate });
+    });
+
+    it('rescues 37966 (Ziemia Obiecana/Maplewood Brewery / CASIMIR 13,0° -> 10th Anniversary Collab: Casimir)', async () => {
+      const candidate: SearchResult = {
+        bid: 6914830,
+        beer_name: '10th Anniversary Collab: Casimir',
+        brewery_name: 'Ziemia Obiecana',
+        abv: 5.5,
+        style: 'IPA',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Ziemia Obiecana/Maplewood Brewery', name: 'CASIMIR 13,0°', abv: 5.5, search });
+      expect(out).toEqual({ kind: 'matched', result: candidate });
+    });
+
+    it('rescues 37967 (Ziemia Obiecana/Brew Your Mind Brewery / JOZSEF 17,0° -> 10th Anniversary Collab: Jozsef) while rejecting Josef trap', async () => {
+      const jozsef: SearchResult = {
+        bid: 6914829,
+        beer_name: '10th Anniversary Collab: Jozsef',
+        brewery_name: 'Ziemia Obiecana',
+        abv: 6.5,
+        style: 'IPA',
+        global_rating: 3.5,
+      };
+      const josef: SearchResult = {
+        bid: 6921732,
+        beer_name: '10th Anniversary Collab: Josef',
+        brewery_name: 'Ziemia Obiecana',
+        abv: 7.0,
+        style: 'IPA',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [jozsef, josef]);
+      const out = await lookupBeer({ brewery: 'Ziemia Obiecana/Brew Your Mind Brewery', name: 'JOZSEF 17,0°', abv: 6.5, search });
+      expect(out).toEqual({ kind: 'matched', result: jozsef });
+    });
+
+    it('strictly rejects the Josef candidate alone against JOZSEF (exact tail guard)', async () => {
+      const josef: SearchResult = {
+        bid: 6921732,
+        beer_name: '10th Anniversary Collab: Josef',
+        brewery_name: 'Ziemia Obiecana',
+        abv: 7.0,
+        style: 'IPA',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [josef]);
+      const out = await lookupBeer({ brewery: 'Ziemia Obiecana/Brew Your Mind Brewery', name: 'JOZSEF 17,0°', abv: 6.5, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('abstains (not_found) when multiple candidates from the same brewery match the colon tail with corroborating ABV', async () => {
+      const cand1: SearchResult = {
+        bid: 101,
+        beer_name: 'Series 1: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const cand2: SearchResult = {
+        bid: 102,
+        beer_name: 'Series 2: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [cand1, cand2]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('rejects candidate when ABV diverges beyond tolerance', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 5.5,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('prefers a plain exact candidate over a colon-prefixed variant in the same pool', async () => {
+      const plain: SearchResult = {
+        bid: 201,
+        beer_name: 'Black Celebration #3',
+        brewery_name: 'Browar Sarabanda',
+        abv: 8.2,
+        style: 'Stout',
+        global_rating: 3.5,
+      };
+      const prefixed: SearchResult = {
+        bid: 202,
+        beer_name: 'Barrel Born: Black Celebration #3',
+        brewery_name: 'Browar Sarabanda',
+        abv: 8.0,
+        style: 'Stout',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [prefixed, plain]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Black Celebration #3', abv: 8.2, search });
+      expect(out).toEqual({ kind: 'matched', result: plain });
+    });
+  });
 });

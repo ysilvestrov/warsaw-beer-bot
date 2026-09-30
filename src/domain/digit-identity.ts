@@ -51,7 +51,7 @@ const YEAR_APOSTROPHE_AFTER = /(?<![\p{L}\p{N}])(\d{2})['’](?=[\s):,\]\-]|$)/g
 // or comma before it is fine unless a digit precedes that (`vol.01` reads, `10.5` stays one token). A
 // decimal is taken whole or not at all: without `(?![.,]\p{N})` the engine backtracks inside a volume glued
 // to its unit (`0,5l`) and reads the `0`.
-const NUMBER = /(?<![\p{L}\p{N}])(?<!\p{N}[.,])(v?)(\d+(?:[.,]\d+)?)(?![.,]\p{N})(?:st|nd|rd|th)?(?![\p{L}\p{N}])/giu;
+const NUMBER = /(?<![\p{L}\p{N}])(?<!\p{N}[.,])(v?)(\d+(?:[.,]\d+)?)(?![.,]\p{N})((?:st|nd|rd|th)?)(?![\p{L}\p{N}])/giu;
 const MARKER_BEFORE = /(?:#|\b(?:no|nr|vol|batch|edition|part)\.?)\s*$/i;
 const HASH_MARKER_BEFORE = /(?:#|\b(?:no|nr)\.?)\s*$/i;
 const YEAR = /^(?:19|20)\d{2}$/;
@@ -82,8 +82,9 @@ function readOrdinaryNameDigits(name: string): NameDigits {
   const years = new Set<string>();
   for (const m of s.matchAll(NUMBER)) {
     const value = canon(m[2]);
+    const isOrdinal = Boolean(m[3]);
     const marked =
-      MARKER_BEFORE.test(s.slice(0, m.index)) || /^0\d/.test(m[2]) || m[1] !== '';
+      MARKER_BEFORE.test(s.slice(0, m.index)) || /^0\d/.test(m[2]) || m[1] !== '' || isOrdinal;
     // A '#', 'no.' or 'nr.' right before a year-shaped value makes it a number (`Beer #2024`), not a vintage.
     if (YEAR.test(value) && !HASH_MARKER_BEFORE.test(s.slice(0, m.index))) years.add(value);
     else if (VERSION.test(value)) versions.push(value);

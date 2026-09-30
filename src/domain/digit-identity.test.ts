@@ -129,6 +129,9 @@ describe('digitIdentity(input, candidate)', () => {
     // candidate number without letters is not a fallback for lettered name (#663)
     ['LAGER 10.5°', '21', 'different', 'different'],
     ['Pils 12°', '15', 'different', 'different'],
+    // PR #746: ordinal suffixes (st, nd, rd, th) mark edition numbers, not soft Czech Plato grades
+    ['CASIMIR 13,0°', '10th Anniversary Collab: Casimir', 'number-fallback', 'different'],
+    ['JOZSEF 17,0°', '10th Anniversary Collab: Jozsef', 'number-fallback', 'different'],
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
     expect(identity(input, candidate)).toBe(forward);
     expect(identity(candidate, input)).toBe(reverse);
