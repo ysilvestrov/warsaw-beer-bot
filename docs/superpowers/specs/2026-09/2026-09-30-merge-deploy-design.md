@@ -1,7 +1,8 @@
 # Merge is the deploy — the host deploys `main` by itself
 
 Date: 2026-09-30
-Status: design approved in brainstorming 2026-09-30; probes P1–P4 must run **before** the plan
+Status: design approved in brainstorming 2026-09-30; probes P1–P4 ran 2026-09-30. P1 **refuted** the
+snapshot mechanism and changed step 4; P2–P4 passed (results under "Probes")
 Supersedes: the tag path of `2026-08/2026-08-16-435-dependency-security-autofix-design.md`
 (`autodeploy-*` tags, the lockfile-only guard) and the drift episode of
 `2026-08/2026-08-23-autodeploy-drift-signal-design.md` / `2026-08-24-491-497-…`
@@ -57,8 +58,8 @@ Every place where the system **records something as fact** and later reads it as
 | "CI passed on X" | read, never stored | GitHub check-runs **on SHA X**: every run completed, none `failure`/`cancelled`/`timed_out`, and the required `ci` present with `success` | strong. The absence of `ci` means **wait**, never pass |
 | "X is held" | derived per tick, never stored | (a) paths from `diff(DEPLOYED_SHA, X)` matched by the hold list (computed locally), (b) any PR returned by `commits/<sha>/pulls` for a commit in `DEPLOYED_SHA..X` carries `deploy:hold` | (a) strong; (b) as strong as GitHub's API. If the API is unreachable, treat as **held** (fail closed) |
 | "the migration works on production data" | pre-deploy gate | new `migrate()` on a **copy** of `pre`, run twice (idempotence), then `PRAGMA foreign_key_check` and `PRAGMA integrity_check` empty | strong for crashes and constraint breaks; **silent wrong rewrites are NOT covered**. That still needs a human preflight, and such a PR must carry `[deploy:hold]` |
-| "`pre` is a consistent copy of production at T" | snapshot file + sha256 | SQLite backup API from a `mode=ro` connection while the bot runs in WAL | **weak until P1** |
-| "restoring `pre` gives the old state, and Litestream does not replay stale WAL over it" | rollback | — | **weak until P2** |
+| "`pre` is a consistent copy of production at T" | snapshot file + sha256 | `VACUUM INTO` from a `mode=ro` connection: one read transaction, so one point in time (P1) | strong — measured under a concurrent writer and on the production file |
+| "restoring `pre` gives the old state, and Litestream does not replay stale WAL over it" | rollback | P2: litestream 0.5.11 (the production version) on a throwaway DB with a file replica | strong for the mechanism; measured once, small DB, file replica rather than R2 |
 | "the deploy is settled" | end of window, ✅ message | 10 min of `/health` ok **and** `NRestarts` of the unit unchanged since restart | medium: catches crash loops and hangs, not wrong answers. That is D6's accepted limit |
 | `LAST_FAILED_SHA=X` | `state.env` | written only after a failed gate or a rollback, before anything else | strong |
 
@@ -87,10 +88,11 @@ names stay, so no re-arming is needed.
    `npm audit --omit=dev --audit-level=high` (moved here from the tag path; exit 1 = refuse, any other
    non-zero = refuse with "could not verify", as I3 today). A failure leaves production untouched →
    ⛔ + `LAST_FAILED_SHA=X`.
-4. **Snapshot `pre`**: backup API → `/var/lib/warsaw-beer-bot/deploy-snapshots/<utc>-<sha7>-pre.db`
+4. **Snapshot `pre`**: `VACUUM INTO` from a `mode=ro` connection (**not** the backup API, P1) → `/var/lib/warsaw-beer-bot/deploy-snapshots/<utc>-<sha7>-pre.db`
    plus a `.sha256`. The directory lies outside rsync's reach (`/var/lib`, not `/opt`) and is owned by
-   `warsaw-beer-bot`. Write it as the bot user via the existing `bash -lc` rule; P3 confirms that no
-   sudoers change is needed.
+   `warsaw-beer-bot`. Write it as the bot user via the existing `bash -lc` rule (P3: no sudoers
+   change). The snapshot is written in `journal_mode=delete`; that is harmless, because litestream
+   and the bot's `openDb` both switch it to WAL (P2).
 5. **Trial migration** on a copy of `pre`: `node -e` against the clone's
    `dist/storage/schema.js#migrate`, twice, then both pragmas. Record `schema_version` before/after in
    the journal. Failure → ⛔ + `LAST_FAILED_SHA=X`, and delete the copy (keep `pre` until pruning).
@@ -103,12 +105,15 @@ names stay, so no re-arming is needed.
    2. stop `warsaw-beer-bot`, then `litestream`;
    3. snapshot `post`: copy `bot.db`, `bot.db-wal`, `bot.db-shm` as they are (the bot is stopped, so
       a file copy is consistent) → `<utc>-<sha7>-post/`;
-   4. replace `bot.db` with `pre` after verifying its sha256; delete `-wal`/`-shm`; chown to the bot
-      user;
+   4. as the bot user: verify `pre`'s sha256, copy it to a temp file next to `bot.db`, `mv -f` over
+      `bot.db`, delete `-wal`/`-shm` (P3: atomic, no chown needed). Do **not** run `litestream reset`:
+      P2 shows litestream detects the replaced file by itself;
    5. `deploy_commit <old DEPLOYED_SHA>`, start `litestream`, start the bot, check health (single
       60 s check, no second window);
    6. 🔥 message: the failing SHA and PRs, both snapshot paths, and the interval of writes that exist
       only in `post` (`pre` time → stop time). A human reconciles; nothing does it automatically.
+      A third copy of the `post` state stays in R2's history: P2 restored it with
+      `litestream restore -txid <before the replace>`.
    A failure inside the rollback → 🔥 ROLLBACK FAILED, as today, plus both snapshot paths.
 9. **Prune** after a *settled* deploy: keep the newest 3 `pre` snapshots of settled deploys. A
    `pre`/`post` pair from a rollback is **never** deleted by the machine.
@@ -175,22 +180,48 @@ merge a human runs `sudo bash deploy/install-autodeploy.sh` and `bash deploy/dep
 merge after that is the live test, **pre-registered**: before it, write down the expected journal
 lines and messages, as #527's live test did.
 
-## Probes before the plan
+## Probes (run 2026-09-30, before the plan)
 
-- **P1** — backup API from a `mode=ro` connection on the live WAL DB: run it twice, 30 s apart. The
-  copies pass `integrity_check`, and a row written between them appears only in the second.
-- **P2** — Litestream vs a replaced DB file, on a **throwaway DB path with its own litestream config
-  and a local file replica**, never on production: replace the file while litestream is stopped and
-  delete `-wal`/`-shm`, then start it. Does it start a new generation, and does a restore from the
-  replica give the replaced content rather than the old one?
-- **P3** — the timer's user can create `deploy-snapshots/` and write/replace `bot.db` as
-  `warsaw-beer-bot` through the existing `bash -lc` rule, and `gh api` works from inside the systemd
-  unit's environment (`HOME=/home/ysi`, not a login shell).
-- **P4** — duration and peak RSS of `npm ci && npm run build` in the deployer's clone on this host,
-  measured under `systemd-run --scope` so it is visible next to code-server's memory limits.
+**P1 — snapshot consistency. The backup API is REFUTED; `VACUUM INTO` is confirmed.**
+- A throwaway WAL DB with a writer inserting balanced row pairs (`+i`, `-i`) in transactions for 20 s,
+  and `.backup` from a `mode=ro` connection started 2 s into the run. `.backup` **took 18 462 ms**:
+  it finished only when the writer stopped, and all 12 copies held the writer's *final* state. The
+  backup API restarts on every foreign write, so against a bot that writes steadily it can wait
+  indefinitely. That rules it out for a step inside a deploy tick.
+- `VACUUM INTO` from `mode=ro` under the same writer: 5 copies at 246–1354 ms, **during** the writes,
+  with counts growing 47 752 → 349 046, every copy `sum(v) = 0` and `integrity_check = ok`. Each is
+  one consistent point in time.
+- On the production file (`mode=ro`, into scratch): 789 ms, 19.9 MB, `integrity_check = ok`, sorted
+  dumps identical to the live DB (the unsorted dump differs only in DDL order), and `rowid,*` equal in
+  all 41 rowid tables. `VACUUM` may renumber the implicit rowids of tables without an `INTEGER PRIMARY
+  KEY`; none of our code reads `rowid` (only `beers.id`), so a renumbering could not be observed
+  anyway.
+- The production DB received no writes during the 15-min probe window, so "a row written between two
+  snapshots appears only in the second" was proven on the throwaway DB, not on production.
 
-A probe that fails changes this design before a plan is written. It does not become a task in the
-plan.
+**P2 — litestream vs a replaced DB file: PASS.** litestream 0.5.11 (the production version), file
+replica, scratch paths only. The sequence: 100 `base` rows, replicate, `VACUUM INTO pre`, 50 `post`
+rows replicated (txid 2), stop, replace the file with `pre`, delete `-wal`/`-shm`, start, insert 1
+`after` row, stop. `litestream restore` (latest) → `base 100 + after 1`, **no `post` rows**; `restore
+-txid 0000000000000002` → `base 100 + post 50`. So litestream picks up the replaced file without
+`reset`, and the pre-rollback history remains restorable. Not covered: an R2 replica, or a DB of
+production size.
+
+**P3 — privileges: PASS.** As `warsaw-beer-bot` via the existing `bash -lc` rule: create a directory
+in `/var/lib/warsaw-beer-bot`, `VACUUM INTO` there, `mv -f` a copy over a DB file with `-wal`/`-shm`
+present, delete them, verify sha256 — exit 0, no password (probe directory removed). `sudo -n -l`
+lists `stop/start litestream` and `warsaw-beer-bot` as NOPASSWD. `gh api …/check-runs` under
+`env -i HOME=/home/ysi PATH=/usr/local/bin:/usr/bin:/bin` (the unit's environment) → `["success"]`.
+Snapshots come out `0644`, the same exposure as `bot.db` itself (world-readable today). Tightening
+both is a separate question and is not changed here.
+
+**P4 — build cost: PASS.** In a clone at `2f6a25c`: `npm ci` 5 s / peak 421 MB RSS (process tree,
+sampled at 0.5 s; warm `~/.npm` cache, which the deployer's user keeps), `npm run build` (`tsc`) 2 s /
+616 MB, `npm audit` 2 s / 104 MB. 5.6 GB available. `systemd-run --user` is unavailable for `ysi` (no
+user manager), so this was measured by sampling rather than by a cgroup.
+**Bonus, trial migration:** the new build's `migrate()` on a copy of the real `bot.db.pre-v22` file:
+v21 → v42 in 450 ms, the second call 0 ms, `foreign_key_check` empty, `integrity_check = ok`. On the
+current snapshot (already v42) it is a no-op. The step-5 mechanism works as written.
 
 ## Testing (for the plan)
 
