@@ -54,7 +54,7 @@ export function ingestFeedPage(db: DB, p: FeedPageInput): FeedPageResult {
 
   // A row we could not place in time is a check-in we saw but cannot vouch for, so the page
   // proves no span at all. A cursor we never stored leaves the upper bound unproven too.
-  const cursorAt = p.cursor === null ? null : venueCheckinAt(db, Number(p.cursor));
+  const cursorAt = p.cursor === null ? null : venueCheckinAt(db, Number(p.cursor), p.venueId);
   const span = dropped > 0 || (p.cursor !== null && cursorAt === null)
     ? null
     : pageSpan({ checkinTimes: rows.map((r) => r.checkin_at), cursorAt, fetchedAt: p.fetchedAt, now: p.now });

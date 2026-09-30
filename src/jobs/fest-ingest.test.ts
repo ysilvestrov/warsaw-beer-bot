@@ -59,6 +59,13 @@ describe('ingestFeedPage', () => {
     expect(coverage(db)).toEqual([]);
   });
 
+  it('a cursor stored for another venue proves nothing here', () => {
+    const db = fresh();
+    insertVenueCheckins(db, [{ checkin_id: 1559319022, venue_id: 2167060, bid: 1, untappd_user: null, checkin_at: '2026-03-31T12:16:16.000Z' }], 'server', NOW);
+    ingestFeedPage(db, { venueId: VENUE, html: RAW, cursor: '1559319022', fetchedAt: NOW, eye: 'server', now: NOW });
+    expect(coverage(db)).toEqual([]);
+  });
+
   it('a cursor page with a stored cursor proves [oldest, cursor time] and stitches to its head page', () => {
     const db = fresh();
     insertVenueCheckins(db, [{ checkin_id: 1559319022, venue_id: VENUE, bid: 1, untappd_user: null, checkin_at: '2026-03-31T12:16:16.000Z' }], 'server', NOW);
