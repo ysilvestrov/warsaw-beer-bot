@@ -16,11 +16,15 @@ describe('parseVenueMenu', () => {
     ]);
   });
 
+  it('reads the page venue from its canonical link', () => {
+    expect(menu.venueId).toBe(11142155);
+  });
+
   it('reads the menu update time as ISO', () => {
     expect(menu.updatedAt).toBe('2026-09-29T12:15:39.465Z');
   });
 
   it('returns an empty menu with no timestamp for a page without a menu', () => {
-    expect(parseVenueMenu('<html><body><p>closed</p></body></html>')).toEqual({ updatedAt: null, items: [] });
+    expect(parseVenueMenu('<html><body><p>closed</p></body></html>')).toEqual({ venueId: null, updatedAt: null, items: [] });
   });
 });

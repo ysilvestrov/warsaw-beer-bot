@@ -12,12 +12,15 @@ export interface VenueMenuItem {
 }
 
 export interface VenueMenu {
+  /** Untappd venue id of the page, from its canonical link; null when the page does not name one. */
+  venueId: number | null;
   /** When Untappd says the menu was last updated (ISO), or null when the header is absent. */
   updatedAt: string | null;
   items: VenueMenuItem[];
 }
 
 const BID_RE = /^\/b\/[^/]+\/(\d+)/;
+const CANONICAL_VENUE_RE = /\/v\/[^/]+\/(\d+)(?:[/?#]|$)/;
 const ABV_RE = /(\d+(?:\.\d+)?)\s*%\s*ABV/i;
 
 const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
@@ -29,6 +32,8 @@ const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
 // cheerio does not parse as DOM, so its placeholder links never match.
 export function parseVenueMenu(html: string): VenueMenu {
   const $ = cheerio.load(html);
+  const venueMatch = ($('link[rel="canonical"]').first().attr('href') ?? '').match(CANONICAL_VENUE_RE);
+  const venueId = venueMatch ? parseInt(venueMatch[1], 10) : null;
   const updatedRaw = $('.menu-header .updated-time').first().attr('data-time') ?? '';
   const updatedMs = Date.parse(updatedRaw);
   const updatedAt = Number.isFinite(updatedMs) ? new Date(updatedMs).toISOString() : null;
@@ -61,5 +66,5 @@ export function parseVenueMenu(html: string): VenueMenu {
       });
     });
   });
-  return { updatedAt, items };
+  return { venueId, updatedAt, items };
 }

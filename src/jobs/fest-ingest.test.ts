@@ -91,6 +91,13 @@ describe('ingestFeedPage', () => {
       .toEqual({ untappd_user: 'Bierfluenzer', first_eye: 'server' });
   });
 
+  it('does not fill an author into a stored row that disagrees on the Untappd facts', () => {
+    const db = fresh();
+    insertVenueCheckins(db, [{ checkin_id: 1559318905, venue_id: VENUE, bid: 999, untappd_user: null, checkin_at: '2026-03-31T12:14:19.000Z' }], 'server', NOW);
+    ingestFeedPage(db, { venueId: VENUE, html: RAW, cursor: null, fetchedAt: NOW, eye: 'laptop', now: NOW });
+    expect(db.prepare('SELECT untappd_user FROM venue_checkins WHERE checkin_id = 1559318905').get()).toEqual({ untappd_user: null });
+  });
+
   it('an empty page writes nothing and has no cursor', () => {
     const db = fresh();
     expect(ingestFeedPage(db, { venueId: VENUE, html: '<html></html>', cursor: null, fetchedAt: NOW, eye: 'laptop', now: NOW }))

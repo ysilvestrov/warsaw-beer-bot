@@ -1,6 +1,6 @@
 import type { DB } from '../storage/db';
 import { parseCheckinFeedPage, feedCheckinTime } from '../sources/untappd/checkin-feed';
-import { parseVenueMenu } from '../sources/untappd/venue-menu';
+import { parseVenueMenu, type VenueMenu } from '../sources/untappd/venue-menu';
 import { isBlockPage } from '../sources/untappd/block';
 import { upsertBeerByBid } from '../storage/beers';
 import { normalizeBrewery, normalizeName } from '../domain/normalize';
@@ -87,12 +87,16 @@ const menuUpdatedKey = (festId: number): string => `fest_menu_updated_at:${festI
 // provenance, which a later shop-published bid may not override).
 export function ingestMenuPage(db: DB, p: { festId: number; html: string; now: string }): MenuPageResult {
   if (isBlockPage(p.html)) throw new BlockedPageError();
-  const menu = parseVenueMenu(p.html);
+  return applyMenu(db, p.festId, parseVenueMenu(p.html), p.now);
+}
+
+/** Writes an already-parsed menu; the route parses first to learn which fest the page belongs to. */
+export function applyMenu(db: DB, festId: number, menu: VenueMenu, now: string): MenuPageResult {
   return db.transaction((): MenuPageResult => {
     // Two eyes can relay the menu out of order; a page whose "updated" stamp is older than the
     // one already applied must not roll the menu back. A page without a stamp cannot be ordered
     // and is applied (upserts only add rows and refresh last_seen_at).
-    const applied = getJobState(db, menuUpdatedKey(p.festId));
+    const applied = getJobState(db, menuUpdatedKey(festId));
     if (menu.updatedAt !== null && applied !== null && menu.updatedAt < applied) {
       return { items: menu.items.length, updatedAt: menu.updatedAt, stale: true };
     }
@@ -108,9 +112,9 @@ export function ingestMenuPage(db: DB, p: { festId: number; html: string; now: s
         normalized_brewery: normalizeBrewery(item.brewery),
         untappd_id_source: 'checkin',
       });
-      upsertMenuItem(db, p.festId, beerId, item.section, p.now);
+      upsertMenuItem(db, festId, beerId, item.section, now);
     }
-    if (menu.updatedAt !== null) setJobState(db, menuUpdatedKey(p.festId), menu.updatedAt);
+    if (menu.updatedAt !== null) setJobState(db, menuUpdatedKey(festId), menu.updatedAt);
     return { items: menu.items.length, updatedAt: menu.updatedAt, stale: false };
   })();
 }

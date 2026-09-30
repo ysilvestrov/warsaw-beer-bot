@@ -27,13 +27,15 @@ export function insertVenueCheckins(db: DB, rows: VenueCheckinInput[], eye: Eye,
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   const fillAuthor = db.prepare(
-    'UPDATE venue_checkins SET untappd_user = ? WHERE checkin_id = ? AND untappd_user IS NULL',
+    // Only a row that agrees on every Untappd fact is the same check-in; anything else is left alone.
+    `UPDATE venue_checkins SET untappd_user = ?
+      WHERE checkin_id = ? AND venue_id = ? AND bid = ? AND checkin_at = ? AND untappd_user IS NULL`,
   );
   let inserted = 0;
   for (const r of rows) {
     const n = insert.run(r.checkin_id, r.venue_id, r.bid, r.untappd_user, r.checkin_at, eye, observedAt).changes;
     inserted += n;
-    if (n === 0 && r.untappd_user !== null) fillAuthor.run(r.untappd_user, r.checkin_id);
+    if (n === 0 && r.untappd_user !== null) fillAuthor.run(r.untappd_user, r.checkin_id, r.venue_id, r.bid, r.checkin_at);
   }
   return inserted;
 }

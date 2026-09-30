@@ -2127,7 +2127,7 @@ submit сторінки до backend або паузу між сторінкам
 - `POST /fest/feed` `{ venueId, html, cursor?, fetchedAt }` — лише у вікні опитування (сесія ± 30 хв,
   інакше `404 no_active_fest`), `venueId` — одна з `fest_venues` (інакше `400 unknown_venue`). Єдиний шлях
   запису для всіх очей — `ingestFeedPage`: чекіни в `venue_checkins` (дедуп за Untappd `checkin_id`, перше
-  око зберігає `first_eye`; порожній `untappd_user` пізніше око дописує) і доведений проміжок у
+  око зберігає `first_eye`; порожній `untappd_user` пізніше око дописує, лише якщо локація, bid і час збігаються) і доведений проміжок у
   `fest_coverage`. Відповідь `{ inserted, seen, dropped, mismatched, stitched, nextCursor }`. Рядок,
   чиє посилання `/v/<slug>/<id>` веде на іншу локацію (або якого немає), не зберігається
   (`mismatched`); сторінка, де всі рядки такі, дає `400 venue_mismatch`. Якщо вікна кількох фестів
@@ -2141,8 +2141,9 @@ submit сторінки до backend або паузу між сторінкам
   секунди — лише RFC 2822 (формат Untappd) або ISO 8601 із секундами й зсувом; дата без часу чи час
   до хвилини відкидаються, щоб `Date.parse` не домислював відсутнє. `stitched` — проміжок сторінки
   перетинає або торкається наявного покриття; `false` просить око дочитати наступну сторінку.
-- `POST /fest/menu` `{ html }` — від початку підготовки до кінця останнього вікна (`currentOrNextFest`,
-  інакше `404 no_fest`). `parseVenueMenu` → `upsertBeerByBid` з провенансом `checkin` (bid узято зі
+- `POST /fest/menu` `{ html }` — від початку підготовки до кінця останнього вікна (`currentOrNextFests`,
+  інакше `404 no_fest`). Фест визначає сама сторінка: її `link[rel=canonical]` має вказувати на
+  `menu_venue_id` фесту, у команді якого автор запиту, інакше `400 unknown_menu_venue`. `parseVenueMenu` → `upsertBeerByBid` з провенансом `checkin` (bid узято зі
   сторінки самого Untappd) → `fest_menu`, рядок на пару (пиво, секція): те саме пиво в двох експонентів
   лишається в обох (`first_seen_at` незмінний, `last_seen_at` оновлюється; зникла позиція не
   видаляється). Сторінка з міткою «updated» старшою за вже застосовану (`job_state
