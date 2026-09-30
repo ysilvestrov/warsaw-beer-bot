@@ -8,7 +8,7 @@ import { getJobState } from '../storage/job_state';
 import { menuStats } from '../storage/fest_menu';
 import { CookieExpiredError, HttpError, type Http } from '../sources/http';
 import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
-import { runFestMenu, runFestPoll, refreshFestMenu, FEST_POLL_LAST_KEY } from './fest-poll';
+import { runFestMenu, runFestPoll, refreshFestMenu, FEST_MENU_LAST_KEY, FEST_POLL_LAST_KEY } from './fest-poll';
 
 const FIX = join(__dirname, '../sources/untappd/__fixtures__');
 const MENU = readFileSync(join(FIX, 'venue-menu.html'), 'utf8');
@@ -71,10 +71,12 @@ describe('runFestPoll', () => {
     expect([trips, getJobState(db, 'fest_poll_open_until')]).toEqual([[], null]);
   });
 
-  it('an expired cookie alerts the admin and does not count as a block', async () => {
-    const { db, deps, alerts } = setup([new CookieExpiredError()]);
+  it('an expired cookie alerts the admin once per 6 hours and does not count as a block', async () => {
+    const { db, deps, alerts } = setup([new CookieExpiredError(), new CookieExpiredError(), new CookieExpiredError()]);
     expect(await runFestPoll(deps, IN_SESSION)).toBeNull();
-    expect([alerts.length, getJobState(db, 'fest_poll_open_until')]).toEqual([1, null]);
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 6 * 60 * 60 * 1000));
+    expect([alerts.length, getJobState(db, 'fest_poll_open_until')]).toEqual([2, null]);
   });
 });
 
@@ -91,6 +93,21 @@ describe('fest menu job', () => {
     const { db, deps } = setup([MENU.replace('/11142155"', '/999"')]);
     expect(await refreshFestMenu(deps, getFestBySlug(db, 'wfp22')!, new Date('2026-10-09T12:00:00.000Z'))).toBe('wrong_page');
     expect(menuStats(db, getFestBySlug(db, 'wfp22')!.id).count).toBe(0);
+  });
+
+  it('a failed read does not count: the job retries after 10 minutes, not after 6 hours', async () => {
+    const { db, deps, urls } = setup([new HttpError(403, 'u'), MENU]);
+    await runFestMenu(deps, new Date('2026-10-09T12:00:00.000Z'));
+    expect(getJobState(db, FEST_MENU_LAST_KEY)).toBeNull();
+    await runFestMenu(deps, new Date('2026-10-09T12:09:00.000Z'));
+    await runFestMenu(deps, new Date('2026-10-09T12:10:00.000Z'));
+    expect([urls.length, getJobState(db, FEST_MENU_LAST_KEY)]).toEqual([2, '2026-10-09T12:10:00.000Z']);
+  });
+
+  it('a wrong page does not count as a read either', async () => {
+    const { db, deps } = setup([MENU.replace('/11142155"', '/999"')]);
+    await runFestMenu(deps, new Date('2026-10-09T12:00:00.000Z'));
+    expect(getJobState(db, FEST_MENU_LAST_KEY)).toBeNull();
   });
 
   it('runs on its schedule only: once in the run-up, not again an hour later', async () => {

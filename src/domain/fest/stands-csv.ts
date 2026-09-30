@@ -21,11 +21,15 @@ const blank = (s: string | undefined): string | null => {
 
 export function parseStandsCsv(text: string): StandsCsv {
   const out: StandsCsv = { rows: [], errors: [] };
-  const lines = text.replace(/^﻿/, '').split(/\r?\n/);
+  const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/);
+  let seenContent = false;
   lines.forEach((raw, i) => {
     const line = i + 1;
     if (raw.trim() === '') return;
-    if (i === 0 && HEADER_RE.test(raw)) return;
+    // The header may only be the first line with content: exports often start with blank lines.
+    const first = !seenContent;
+    seenContent = true;
+    if (first && HEADER_RE.test(raw)) return;
     // Quoting is not supported: a quoted ';' would silently shift the columns, so refuse the line.
     if (raw.includes('"')) {
       out.errors.push({ line, reason: 'quotes' });

@@ -243,4 +243,5 @@ export const uk: Messages = {
   'fest.menu_blocked': 'Untappd зараз не віддає сторінку серверу — спробуйте пізніше або з ноута.',
   'fest.menu_wrong_page': 'Сторінка не схожа на меню фестивалю — нічого не змінено.',
   'fest.menu_unavailable': 'Серверне читання Untappd вимкнене (немає куки) — меню оновлює лише ноут.',
+  'fest.lines_more': '…не вмістилося рядків: {count}',
 };

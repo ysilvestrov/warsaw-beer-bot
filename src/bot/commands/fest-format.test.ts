@@ -1,8 +1,8 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { formatRanking, formatSection, formatTargets, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
-import { initialsOf } from './fest';
+import { fitMessage, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
+import { initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
 const NOW = new Date('2026-10-15T18:00:00.000Z'); // 20:00 in Warsaw
@@ -140,5 +140,51 @@ describe('searchMenu', () => {
 
   it('finds nothing for an empty or unmatched query', () => {
     expect([searchMenu(view(), '   '), searchMenu(view(), 'zzz')]).toEqual([[], []]);
+  });
+});
+
+describe('Telegram message limit', () => {
+  it('fitMessage keeps a short message whole', () => {
+    expect(fitMessage(t, ['h'], ['a', 'b'], ['z'])).toBe('h\na\nb\nz');
+  });
+
+  it('drops items from the end, says how many, and keeps head and tail', () => {
+    const items = Array.from({ length: 100 }, (_, i) => `${i}`.padEnd(100, 'x'));
+    const out = fitMessage(t, ['HEAD'], items, ['TAIL']);
+    const lines = out.split('\n');
+    const shown = lines.filter((l) => /^\d+x/.test(l)).length;
+    expect([out.length <= MESSAGE_LIMIT, lines[0], lines[lines.length - 1], lines[lines.length - 2]])
+      .toEqual([true, 'HEAD', 'TAIL', `…не вмістилося рядків: ${100 - shown}`]);
+  });
+
+  it('a ranking of 200 long sections stays under the limit', () => {
+    const ranking = Array.from({ length: 200 }, (_, i) => ({ section: `Browar ${'Długa Nazwa '.repeat(4)}${i}`, onTap: 0, unknown: 1, total: 1, targets: [] }));
+    expect(formatRanking(t, view({ ranking })).length <= MESSAGE_LIMIT).toBe(true);
+  });
+
+  it('a section with 300 Targets stays under the limit', () => {
+    const targets = Array.from({ length: 300 }, (_, i) => ({ beerId: 1, section: 'PINTA', reasons: ['rating' as const], rating: 4, style: null, i }));
+    const v = view({ ranking: [{ section: 'PINTA', onTap: 0, unknown: 0, total: 300, targets }] });
+    expect(formatSection(t, v, sectionKey('PINTA'), NOW)!.length <= MESSAGE_LIMIT).toBe(true);
+  });
+
+  it('lists how many unrated beers are beyond the shown 40', () => {
+    const unrated = Array.from({ length: 41 }, (_, i) => ({ beer_id: 5000 + i, section: 'S', rating_global: null, style: 'Lager' }));
+    const lines = formatTargets(t, view({ members: [], targets: [], unrated })).split('\n');
+    expect(lines[lines.length - 1]).toBe('…і ще 1');
+  });
+});
+
+describe('pickCallback', () => {
+  it('carries the subcommand and query, cut to 64 bytes on whole code points', () => {
+    const long = pickCallback(123, 'add', 'Łańcut '.repeat(20));
+    expect([
+      pickCallback(7, '', ''),
+      pickCallback(7, 'targets', ''),
+      pickCallback(7, 'add', 'motueka'),
+      Buffer.byteLength(long) <= 64,
+      long.startsWith('fest:t:123:add:Łańcut'),
+      long.includes('\uFFFD'),
+    ]).toEqual(['fest:t:7::', 'fest:t:7:targets:', 'fest:t:7:add:motueka', true, true, false]);
   });
 });

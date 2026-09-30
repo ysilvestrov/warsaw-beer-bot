@@ -11,6 +11,25 @@ export function sectionKey(section: string): string {
   return createHash('sha1').update(section).digest('hex').slice(0, 10);
 }
 
+// Telegram rejects a message over 4096 characters outright, so a long festival (many sections,
+// long names) must lose lines, not the whole reply. The margin covers the "not shown" line.
+export const MESSAGE_LIMIT = 4000;
+
+/** head + as many items as fit + tail, with a "N lines not shown" line when items were dropped. */
+export function fitMessage(t: Translator, head: string[], items: string[], tail: string[] = [], limit = MESSAGE_LIMIT): string {
+  const all = [...head, ...items, ...tail].join('\n');
+  if (all.length <= limit) return all;
+  const reserve = t('fest.lines_more', { count: items.length }).length + 1;
+  let size = [...head, ...tail].join('\n').length + reserve;
+  const kept: string[] = [];
+  for (const item of items) {
+    if (size + item.length + 1 > limit) break;
+    kept.push(item);
+    size += item.length + 1;
+  }
+  return [...head, ...kept, t('fest.lines_more', { count: items.length - kept.length }), ...tail].join('\n');
+}
+
 const hhmm = (iso: string): string =>
   new Intl.DateTimeFormat('uk-UA', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', hour12: false })
     .format(new Date(iso));
@@ -36,19 +55,13 @@ function menuLine(t: Translator, view: FestView): string {
 
 /** "Where to go" (spec §7): one line per section with Targets, best first. */
 export function formatRanking(t: Translator, view: FestView): string {
-  const lines = [menuLine(t, view)];
-  if (view.menuUpdatedAt === null) return lines.join('\n');
-  if (view.ranking.length === 0) {
-    lines.push('', t('fest.no_targets'));
-    return lines.join('\n');
-  }
-  lines.push('');
-  for (const r of view.ranking) {
+  if (view.menuUpdatedAt === null) return menuLine(t, view);
+  if (view.ranking.length === 0) return [menuLine(t, view), '', t('fest.no_targets')].join('\n');
+  const items = view.ranking.map((r) => {
     const stand = standLabel(t, view.stands.get(r.section));
-    lines.push(`🍺 ${r.onTap} · ❔ ${r.unknown} · <b>${escapeHtml(r.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`);
-  }
-  lines.push('', t('fest.legend'));
-  return lines.join('\n');
+    return `🍺 ${r.onTap} · ❔ ${r.unknown} · <b>${escapeHtml(r.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`;
+  });
+  return fitMessage(t, [menuLine(t, view), ''], items, ['', t('fest.legend')]);
 }
 
 /** One section's Targets with their tap status; null when the section is not in the ranking. */
@@ -56,14 +69,14 @@ export function formatSection(t: Translator, view: FestView, key: string, now: D
   const rank = view.ranking.find((r) => sectionKey(r.section) === key);
   if (!rank) return null;
   const stand = standLabel(t, view.stands.get(rank.section));
-  const lines = [`<b>${escapeHtml(rank.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`, ''];
-  for (const target of rank.targets) {
+  const head = [`<b>${escapeHtml(rank.section)}</b>${stand ? ` · ${escapeHtml(stand)}` : ''}`, ''];
+  const items = rank.targets.map((target) => {
     const beer = view.beerNames.get(target.beerId);
     const name = beer ? beer.name : `#${target.beerId}`;
     const rating = target.rating !== null ? ` · ⭐ ${target.rating.toFixed(2)}` : '';
-    lines.push(`${escapeHtml(name)}${rating}`, `   ${statusLabel(t, view.statusByBeer.get(target.beerId), now)}`);
-  }
-  return lines.join('\n');
+    return `${escapeHtml(name)}${rating}\n   ${statusLabel(t, view.statusByBeer.get(target.beerId), now)}`;
+  });
+  return fitMessage(t, head, items);
 }
 
 export const TARGETS_SHOWN = 40;
@@ -80,28 +93,30 @@ function reasonsLabel(t: Translator, target: FestView['targets'][number]): strin
  * complete each member's history is — "nobody has had it" is only as true as the worst history.
  */
 export function formatTargets(t: Translator, view: FestView): string {
-  const lines = [t('fest.history_header')];
+  const head = [t('fest.history_header')];
   for (const m of view.members) {
-    lines.push(t('fest.history_line', {
+    head.push(t('fest.history_line', {
       initials: escapeHtml(m.initials),
       inBot: m.inBot,
       total: m.profileTotal === null ? t('fest.history_unknown') : m.profileTotal,
     }));
   }
-  lines.push('', t('fest.targets_header', { count: view.targets.length }));
+  head.push('', t('fest.targets_header', { count: view.targets.length }));
+  const items: string[] = [];
   for (const target of view.targets.slice(0, TARGETS_SHOWN)) {
     const beer = view.beerNames.get(target.beerId);
-    lines.push(`• ${escapeHtml(beer?.name ?? `#${target.beerId}`)} — ${escapeHtml(beer?.brewery ?? target.section)} · ${reasonsLabel(t, target)}`);
+    items.push(`• ${escapeHtml(beer?.name ?? `#${target.beerId}`)} — ${escapeHtml(beer?.brewery ?? target.section)} · ${reasonsLabel(t, target)}`);
   }
-  if (view.targets.length > TARGETS_SHOWN) lines.push(t('fest.targets_more', { count: view.targets.length - TARGETS_SHOWN }));
+  if (view.targets.length > TARGETS_SHOWN) items.push(t('fest.targets_more', { count: view.targets.length - TARGETS_SHOWN }));
   if (view.unrated.length > 0) {
-    lines.push('', t('fest.unrated_header', { count: view.unrated.length }));
+    items.push('', t('fest.unrated_header', { count: view.unrated.length }));
     for (const u of view.unrated.slice(0, TARGETS_SHOWN)) {
       const beer = view.beerNames.get(u.beer_id);
-      lines.push(`• ${escapeHtml(beer?.name ?? `#${u.beer_id}`)} — ${escapeHtml(u.style ?? '?')}`);
+      items.push(`• ${escapeHtml(beer?.name ?? `#${u.beer_id}`)} — ${escapeHtml(u.style ?? '?')}`);
     }
+    if (view.unrated.length > TARGETS_SHOWN) items.push(t('fest.targets_more', { count: view.unrated.length - TARGETS_SHOWN }));
   }
-  return lines.join('\n');
+  return fitMessage(t, head, items);
 }
 
 /** Menu beers whose name or brewery contains `query` (case-insensitive), at most `limit`. */

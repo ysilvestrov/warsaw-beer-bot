@@ -243,4 +243,5 @@ export const en: Messages = {
   'fest.menu_blocked': 'Untappd is not serving the page to the server right now — try later or from the laptop.',
   'fest.menu_wrong_page': 'That page does not look like the festival menu — nothing changed.',
   'fest.menu_unavailable': 'Server-side Untappd reading is off (no cookie) — only the laptop updates the menu.',
+  'fest.lines_more': '…{count} more lines did not fit',
 };

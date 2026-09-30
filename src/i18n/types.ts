@@ -210,6 +210,7 @@ export interface Messages {
   'fest.status_not_seen': string;
   'fest.status_unknown': string;
   'fest.section_gone': string;
+  'fest.lines_more': string;
   'fest.history_header': string;
   'fest.history_line': string;
   'fest.history_unknown': string;

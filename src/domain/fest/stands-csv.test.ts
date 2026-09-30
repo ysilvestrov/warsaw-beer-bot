@@ -24,7 +24,11 @@ describe('parseStandsCsv', () => {
     ]);
   });
 
-  it('a header is only recognised on the first line', () => {
+  it('recognises the header on the first non-blank line', () => {
+    expect(parseStandsCsv('\n\nsekcja;piętro;stoisko\nPINTA;2;B14').rows).toEqual([{ section: 'PINTA', floor: '2', stand: 'B14' }]);
+  });
+
+  it('a header is only recognised on the first line with content', () => {
     expect(parseStandsCsv('PINTA;2;B14\nsection;floor;stand').rows.map((r) => r.section)).toEqual(['PINTA', 'section']);
   });
 

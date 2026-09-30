@@ -13,6 +13,11 @@ import { BlockedPageError, applyMenu, ingestFeedPage, type FeedPageResult, type 
 const UNTAPPD = 'https://untappd.com';
 export const FEST_POLL_LAST_KEY = 'fest_poll_last_at';
 export const FEST_MENU_LAST_KEY = 'fest_menu_last_at';
+export const FEST_MENU_ATTEMPT_KEY = 'fest_menu_attempt_at';
+const COOKIE_ALERT_KEY = 'fest_cookie_alert_at';
+// A failed menu read is retried, but not on every minute's tick.
+export const MENU_RETRY_MS = 10 * 60 * 1000;
+const COOKIE_ALERT_EVERY_MS = 6 * 60 * 60 * 1000;
 
 export interface FestServerDeps {
   db: DB;
@@ -37,7 +42,12 @@ async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise
   } catch (e) {
     if (e instanceof CookieExpiredError) {
       deps.log.warn('fest: untappd cookie expired');
-      await deps.notifyAdmin?.('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').catch(() => {});
+      // Once per 6 h, not on every 10-minute poll.
+      const last = getJobState(deps.db, COOKIE_ALERT_KEY);
+      if (last === null || now.getTime() - Date.parse(last) >= COOKIE_ALERT_EVERY_MS) {
+        setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
+        await deps.notifyAdmin?.('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').catch(() => {});
+      }
       return null;
     }
     if (isBlock(e)) {
@@ -85,13 +95,17 @@ export async function refreshFestMenu(deps: FestServerDeps, fest: Fest, now: Dat
   const menuVenue = festVenues(deps.db, fest.id).find((v) => v.venue_id === fest.menu_venue_id);
   // The menu lives on the venue's main page; the feed path of the festival venue ends in /activity.
   const path = (menuVenue?.feed_path ?? `/v/x/${fest.menu_venue_id}`).replace(/\/activity$/, '');
-  setJobState(deps.db, FEST_MENU_LAST_KEY, now.toISOString());
+  // The schedule counts only a read that landed: a blocked, expired or wrong page leaves
+  // FEST_MENU_LAST_KEY where it was, so the job retries (after MENU_RETRY_MS) instead of waiting hours.
+  setJobState(deps.db, FEST_MENU_ATTEMPT_KEY, now.toISOString());
   const html = await guardedGet(deps, UNTAPPD + path, now);
   if (html === null) return 'blocked';
   const menu = parseVenueMenu(html);
   if (menu.venueId !== fest.menu_venue_id) return 'wrong_page';
   deps.breaker.onResult(false, now);
-  return applyMenu(deps.db, fest.id, menu, now.toISOString());
+  const result = applyMenu(deps.db, fest.id, menu, now.toISOString());
+  setJobState(deps.db, FEST_MENU_LAST_KEY, now.toISOString());
+  return result;
 }
 
 /** The menu job: the next fest's menu on the run-up / in-window schedule. */
@@ -99,5 +113,7 @@ export async function runFestMenu(deps: FestServerDeps, now: Date): Promise<Menu
   const fest = currentOrNextFests(deps.db, now)[0];
   if (!fest) return null;
   if (!dueMenuRefresh(now, pollingWindows(deps, fest), getJobState(deps.db, FEST_MENU_LAST_KEY))) return null;
+  const attempt = getJobState(deps.db, FEST_MENU_ATTEMPT_KEY);
+  if (attempt !== null && now.getTime() - Date.parse(attempt) < MENU_RETRY_MS) return null;
   return refreshFestMenu(deps, fest, now);
 }
