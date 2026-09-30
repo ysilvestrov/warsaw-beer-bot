@@ -148,7 +148,8 @@ export function queueOrder(view: QueueView): QueueItemView[] {
 
 /** /fest queue (spec §7): every glass, who got it, and who has checked it in (✅) or not yet (⏳). */
 export function formatQueue(t: Translator, view: QueueView): string {
-  if (view.items.length === 0) return t('fest.queue_empty');
+  // The hint names a placeholder in angle brackets; the reply is HTML, so it must be escaped.
+  if (view.items.length === 0) return escapeHtml(t('fest.queue_empty'));
   const items = queueOrder(view).map((item) => t('fest.queue_line', {
     glass: item.glassNo,
     name: escapeHtml(item.name),

@@ -222,7 +222,8 @@ describe('formatQueue', () => {
   });
 
   it('an empty queue says how to add a glass', () => {
-    expect(formatQueue(t, { items: [] })).toBe('Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take <назва>.');
+    // Sent as HTML, so the <назва> placeholder must reach Telegram escaped.
+    expect(formatQueue(t, { items: [] })).toBe('Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take &lt;назва&gt;.');
   });
 
   it('links only open glasses that have an Untappd bid', () => {
