@@ -34,6 +34,7 @@ GUARD_BIN="${WBB_GUARD:-/usr/local/bin/wbb-autodeploy-guard}"
 SHIPS_BIN="${WBB_SHIPS:-/usr/local/bin/wbb-ships}"
 # Merge-deploy — the snapshot helper, installed like the guard and the predicate.
 SNAPSHOT_BIN="${WBB_SNAPSHOT_BIN:-/usr/local/bin/wbb-db-snapshot}"
+TRIAL_BIN="${WBB_TRIAL_BIN:-/usr/local/bin/wbb-trial-migrate}"
 
 # I2 — this script's only points of contact with the outside world: deploy,
 # health check, notify, port lookup, and the security audit. Each is a single
@@ -231,6 +232,7 @@ installed_is_stale() {
       "deploy/read-env.sh=$READ_ENV_BIN" \
       "deploy/ships.sh=$SHIPS_BIN" \
       "deploy/db-snapshot.sh=$SNAPSHOT_BIN" \
+      "deploy/trial-migrate.cjs=$TRIAL_BIN" \
       "deploy/installed-current.sh=$INSTALLED_CHECK_BIN" 2>&1)
 }
 
