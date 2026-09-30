@@ -2491,31 +2491,7 @@ describe('#664 numbered-series retry', () => {
     expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
   });
 
-  describe('coverageScore (#746 single-token guard)', () => {
-    it('rejects a single-token needle when matched against multi-token haystack with a typo', () => {
-      // 'jozsef' vs '10th anniversary collab josef': 1 token vs 4 tokens, typo jozsef/josef (< 1.0)
-      expect(coverageScore(['jozsef'], ['10th', 'anniversary', 'collab', 'josef'])).toBeNull();
-    });
-
-    it('accepts a single-token needle when matched against multi-token haystack exactly', () => {
-      // 'jozsef' vs 'jozsef lager': 1 token vs 2 tokens, exact match (1.0)
-      expect(coverageScore(['jozsef'], ['jozsef', 'lager'])).toBe(1.0);
-    });
-
-    it('allows typo matching when needle has multiple tokens', () => {
-      // 'jozsef collab' vs 'josef collab'
-      const score = coverageScore(['jozsef', 'collab'], ['josef', 'collab']);
-      expect(score).not.toBeNull();
-      expect(score!).toBeGreaterThan(0.75);
-    });
-
-    it('allows typo matching when haystack has only a single token', () => {
-      // 'jozsef' vs 'josef'
-      const score = coverageScore(['jozsef'], ['josef']);
-      expect(score).not.toBeNull();
-      expect(score!).toBeGreaterThan(0.75);
-    });
-
+  describe('nearNameScore single-token target guard (#746)', () => {
     it('refuses single-token target with a typo against multi-token candidate in lookupBeer', async () => {
       const candidate: SearchResult = {
         bid: 9991,
@@ -2528,6 +2504,12 @@ describe('#664 numbered-series retry', () => {
       const search = fakeSearch(() => [candidate]);
       const out = await lookupBeer({ brewery: 'Browar Test', name: 'JOZSEF', abv: 5.0, search });
       expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Test JOZSEF')], candidates: [candidate] });
+    });
+
+    it('keeps coverageScore direction-agnostic while computing token coverage', () => {
+      expect(coverageScore(['jozsef'], ['10th', 'anniversary', 'collab', 'josef'])).toBeGreaterThan(0.75);
+      expect(coverageScore(['jozsef'], ['jozsef', 'lager'])).toBe(1.0);
+      expect(coverageScore(['jozsef', 'collab'], ['josef', 'collab'])).toBeGreaterThan(0.75);
     });
   });
 
@@ -2772,6 +2754,20 @@ describe('#664 numbered-series retry', () => {
       };
       const search = fakeSearch(() => [candidate]);
       const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Black Celebration', search });
+      expect(out).toEqual({ kind: 'matched', result: candidate });
+    });
+
+    it('without input ABV, accepts multi-token tail even when collab side has single token (#746 Finding 2)', async () => {
+      const candidate: SearchResult = {
+        bid: 202,
+        beer_name: 'Barrel Born: Black Celebration',
+        brewery_name: 'Browar Sarabanda',
+        abv: 8.0,
+        style: 'Stout',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Black Celebration / Guest', search });
       expect(out).toEqual({ kind: 'matched', result: candidate });
     });
 

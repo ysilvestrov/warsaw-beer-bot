@@ -25,7 +25,7 @@ import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
 import { isMovedLetterName } from './moved-letter';
-import { isColonPrefixTailMatch } from './colon-prefix';
+import { isColonPrefixTailMatch, extractColonTails } from './colon-prefix';
 import { digitIdentity, readNameDigits, type NameDigits } from './digit-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
@@ -352,11 +352,6 @@ export function coverageScore(needles: string[], haystack: string[]): number | n
     return null;
   }
   const total = needles.reduce((sum, token) => sum + bestTokenScore(token, haystack), 0);
-  // #746: A single-token target must match its candidate counterpart exactly if the candidate has extra tokens;
-  // a fuzzy typo combined with extra tokens (e.g. `jozsef` -> `10th Anniversary Collab: Josef`) is never a near-match.
-  if (needles.length === 1 && haystack.length > 1 && total < 1.0) {
-    return null;
-  }
   return total / needles.length;
 }
 
@@ -384,7 +379,12 @@ function nearNameScore(targetValue: string, candidate: SearchResult, singletonSt
     const candidateTokens = nameTokens(variant);
     if (candidateTokens.length === 0) continue;
 
-    const targetCovered = coverageScore(targetTokens, candidateTokens);
+    let targetCovered = coverageScore(targetTokens, candidateTokens);
+    // #746: A single-token target must match its candidate counterpart exactly if the candidate has extra tokens;
+    // a fuzzy typo combined with extra tokens (e.g. `jozsef` -> `10th Anniversary Collab: Josef`) is never a near-match.
+    if (targetTokens.length === 1 && candidateTokens.length > 1 && targetCovered != null && targetCovered < 1.0) {
+      targetCovered = null;
+    }
     if (targetCovered != null) {
       const extraPenalty = Math.max(0, candidateTokens.length - targetTokens.length) * 0.03;
       const score = targetCovered - extraPenalty;
@@ -591,16 +591,20 @@ export async function lookupBeer(
     const hits = new Map<number, SearchResult>();
     for (const result of pool) {
       if (isAlcoholClassMismatch(abv, identityName, result)) continue;
+      if (!isColonPrefixTailMatch(name, result.beer_name)) continue;
       if (abv != null) {
         if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
       } else {
         // Without input ABV evidence, a single-token tail cannot discriminate.
-        const isSingleTokenTail = cleanTargets.some((t) => t.split(' ').filter(Boolean).length <= 1);
-        if (isSingleTokenTail) continue;
+        // Check whether the tail that actually matched the input has > 1 token.
+        const tails = extractColonTails(result.beer_name);
+        const hasMultiTokenMatch = tails.some((tail) => {
+          const normTail = baseNormalize(stripSearchNoise(tail));
+          return cleanTargets.some((t) => t === normTail && t.split(' ').filter(Boolean).length > 1);
+        });
+        if (!hasMultiTokenMatch) continue;
       }
-      if (isColonPrefixTailMatch(name, result.beer_name)) {
-        hits.set(result.bid, result);
-      }
+      hits.set(result.bid, result);
     }
     return hits.size === 1 ? [...hits.values()][0] : null;
   };

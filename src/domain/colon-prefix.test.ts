@@ -61,4 +61,16 @@ describe('isColonPrefixTailMatch', () => {
     expect(isColonPrefixTailMatch('11,5°', 'Classic: 12°')).toBe(false);
     expect(isColonPrefixTailMatch('Pils', 'Classic: °')).toBe(false);
   });
+
+  it('rejects candidates with empty prefix before colon', () => {
+    expect(extractColonTails(': Pils')).toEqual([]);
+    expect(extractColonTails('   : Pils')).toEqual([]);
+    expect(isColonPrefixTailMatch('Pils', ': Pils')).toBe(false);
+  });
+
+  it('rejects timestamps and codes that appear after series prefix', () => {
+    expect(extractColonTails('Series: 6:15')).toEqual([]);
+    expect(extractColonTails('Series: 7:45 Escalation')).toEqual([]);
+    expect(isColonPrefixTailMatch('6:15', 'Series: 6:15')).toBe(false);
+  });
 });

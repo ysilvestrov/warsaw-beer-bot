@@ -42,6 +42,10 @@ describe('readNameDigits', () => {
   test("an apostrophe year after the number is a year, the slash pair stays numbers", () => {
     expect(readNameDigits("Hoppy Grodzisz 23' 2/20")).toMatchObject({ numbers: ['2', '20'], years: ['2023'] });
   });
+
+  test('a year-shaped ordinal is an edition number, not a vintage year', () => {
+    expect(readNameDigits('Beer 2024th Edition')).toMatchObject({ numbers: ['2024'], years: [] });
+  });
 });
 
 describe('digitIdentity(input, candidate)', () => {
@@ -85,6 +89,7 @@ describe('digitIdentity(input, candidate)', () => {
     ['Juicy Trap #12', 'Juicy Trap 12', 'same', 'same'],
     // ordinals are numbers
     ['Echo 16th Anniversary', 'Echo Anniversary', 'different', 'number-fallback'],
+    ['Beer 2024', 'Beer 2024th Edition', 'number-fallback', 'different'],
     // markers and leading zeros
     ['Uwarzone z Wami #3', 'Uwarzone Z Wami vol.3: Polish Black IPA', 'same', 'same'],
     ['Barrel Aged Serie No.38', 'Barrel Aged Serie No.35', 'different', 'different'],

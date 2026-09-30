@@ -86,7 +86,8 @@ function readOrdinaryNameDigits(name: string): NameDigits {
     const marked =
       MARKER_BEFORE.test(s.slice(0, m.index)) || /^0\d/.test(m[2]) || m[1] !== '' || isOrdinal;
     // A '#', 'no.' or 'nr.' right before a year-shaped value makes it a number (`Beer #2024`), not a vintage.
-    if (YEAR.test(value) && !HASH_MARKER_BEFORE.test(s.slice(0, m.index))) years.add(value);
+    // Ordinal suffixes ('2024th') denote an edition number, not a vintage year.
+    if (YEAR.test(value) && !HASH_MARKER_BEFORE.test(s.slice(0, m.index)) && !isOrdinal) years.add(value);
     else if (VERSION.test(value)) versions.push(value);
     else if (!marked && /^\d+$/.test(value) && +value >= SOFT_MIN && +value <= SOFT_MAX) soft.push(value);
     else numbers.push(value);
