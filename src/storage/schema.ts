@@ -166,6 +166,19 @@ export const V41_ACCOUNT_HISTORY_SQL = `
 // "drunk" are deliberately NOT stored: each is recomputed from menu + history + check-ins, so a
 // stored flag cannot go stale. The WFP22 seed is config the code reads, not a fact about the world.
 // Sessions are UTC: Warsaw is UTC+2 until 2026-10-25.
+// WFP print station (spec 2026-09-29-wfp-team-assistant-design.md §8): a capability token per
+// station, stored only as its SHA-256, bound to one team, expiring after the fest. Idempotent like
+// v42, because migration tests rewind schema_version over a live database.
+export const V43_FEST_PRINT_SQL = `
+  CREATE TABLE IF NOT EXISTS fest_print_stations (
+    token_hash TEXT PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+    created_by INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+  );
+`;
+
 export const V42_FEST_SQL = `
   CREATE TABLE IF NOT EXISTS fests (
     id INTEGER PRIMARY KEY,
@@ -944,6 +957,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   },
   { version: 41, sql: V41_ACCOUNT_HISTORY_SQL },
   { version: 42, sql: V42_FEST_SQL },
+  { version: 43, sql: V43_FEST_PRINT_SQL },
 ];
 
 export function migrate(db: DB): void {
