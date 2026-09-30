@@ -67,17 +67,19 @@ function store(db: DB, festId: number, venueIds: Set<number>, items: McpCheckin[
     checkin_id: c.checkinId, venue_id: c.venueId!, bid: c.bid, untappd_user: c.userName, checkin_at: c.checkinAt,
   })), 'friend_feed', at);
   for (const c of items) {
-    const telegramId = members.get(c.userName.toLowerCase());
-    if (telegramId === undefined) continue;
+    const telegramIds = members.get(c.userName.toLowerCase());
+    if (telegramIds === undefined) continue;
     const beerId = upsertBeerByBid(db, {
       untappd_id: c.bid, name: c.beerName, brewery: c.breweryName, style: c.style, abv: c.abv, rating_global: null,
       normalized_name: normalizeName(c.beerName), normalized_brewery: normalizeBrewery(c.breweryName),
       untappd_id_source: 'checkin',
     });
-    mergeCheckin(db, {
-      checkin_id: String(c.checkinId), telegram_id: telegramId, account_key: getHistoryOwner(db, telegramId).accountKey,
-      beer_id: beerId, user_rating: c.rating, checkin_at: c.checkinAt, venue: null,
-    });
+    for (const telegramId of telegramIds) {
+      mergeCheckin(db, {
+        checkin_id: String(c.checkinId), telegram_id: telegramId, account_key: getHistoryOwner(db, telegramId).accountKey,
+        beer_id: beerId, user_rating: c.rating, checkin_at: c.checkinAt, venue: null,
+      });
+    }
   }
 }
 

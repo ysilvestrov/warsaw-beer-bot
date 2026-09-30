@@ -67,6 +67,16 @@ describe('runFestFriendFeed', () => {
     ]).toEqual([[{ checkin_id: 502 }], [{ checkin_id: '503' }]]);
   });
 
+  it('two members linked to the same Untappd account both get the check-in in their history', async () => {
+    const { db, deps } = setup({ get_my_friend_feed: [page([record(504, 'member1', null)])], get_user_checkins: [page([])] });
+    ensureProfile(db, 2);
+    setUntappdUsername(db, 2, 'MEMBER1');
+    addMember(db, 1, 2, 'M2', '2026-10-01T00:00:00.000Z');
+    await runFestFriendFeed(deps, IN_SESSION);
+    expect(db.prepare('SELECT telegram_id, account_key FROM checkins ORDER BY telegram_id').all())
+      .toEqual([{ telegram_id: 1, account_key: 'member1' }, { telegram_id: 2, account_key: 'member1' }]);
+  });
+
   it('reads the owner by name, stores both cursors, and asks for newer than them on the next tick', async () => {
     const { db, deps, calls } = setup({
       get_my_friend_feed: [page([record(510, 'x', null)]), page([])],
