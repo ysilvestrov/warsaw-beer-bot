@@ -27,30 +27,43 @@ export async function runFestAlerts(deps: FestAlertDeps, now: Date): Promise<num
     // Check-ins from the polling window count: a stand may pour before the doors open.
     const since = new Date(Date.parse(session.start_at) - POLL_MARGIN_MS).toISOString();
     for (const team of teamsOfFest(deps.db, fest.id)) {
-      const teamMembers = members(deps.db, team.id);
-      if (teamMembers.length === 0) continue;
-      const view = buildFestView(deps.db, { festId: fest.id, teamId: team.id, now });
-      const onTap: OnTapTarget[] = view.targets.flatMap((target) => {
-        const bid = view.bidByBeer.get(target.beerId);
-        if (bid === undefined || view.statusByBeer.get(target.beerId)?.kind !== 'on_tap') return [];
-        const first = firstCheckinSince(deps.db, venueIds, bid, since);
-        return first ? [{ beerId: target.beerId, firstAt: first.checkin_at, firstCheckinId: first.checkin_id }] : [];
-      });
-      const plan = planAlerts({ onTap, sent: sentFor(deps.db, team.id, session.session_no), now });
-      const t = createTranslator(getUserLanguage(deps.db, teamMembers[0].telegram_id) ?? 'uk');
-      const html = formatAlert(t, view, plan);
-      if (html === null) continue;
       try {
-        await deps.send(team.chat_id, html);
+        if (await alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)) sent++;
       } catch (e) {
-        deps.log.warn({ err: e, teamId: team.id }, 'fest alert not delivered; retrying next tick');
-        continue;
+        // One team's failure must not silence the others.
+        deps.log.error({ err: e, teamId: team.id }, 'fest alert failed for a team');
       }
-      recordSent(deps.db, [...plan.fresh, ...plan.pouring].map((a) => ({
-        teamId: team.id, sessionNo: session.session_no, beerId: a.beerId, checkinId: a.firstCheckinId,
-      })), now.toISOString());
-      sent++;
     }
   }
   return sent;
+}
+
+async function alertTeam(
+  deps: FestAlertDeps,
+  p: { festId: number; sessionNo: number; teamId: number; chatId: number; venueIds: number[]; since: string },
+  now: Date,
+): Promise<boolean> {
+  const teamMembers = members(deps.db, p.teamId);
+  if (teamMembers.length === 0) return false;
+  const view = buildFestView(deps.db, { festId: p.festId, teamId: p.teamId, now });
+  const onTap: OnTapTarget[] = view.targets.flatMap((target) => {
+    const bid = view.bidByBeer.get(target.beerId);
+    if (bid === undefined || view.statusByBeer.get(target.beerId)?.kind !== 'on_tap') return [];
+    const first = firstCheckinSince(deps.db, p.venueIds, bid, p.since);
+    return first ? [{ beerId: target.beerId, firstAt: first.checkin_at, firstCheckinId: first.checkin_id }] : [];
+  });
+  const plan = planAlerts({ onTap, sent: sentFor(deps.db, p.teamId, p.sessionNo), now });
+  const t = createTranslator(getUserLanguage(deps.db, teamMembers[0].telegram_id) ?? 'uk');
+  const html = formatAlert(t, view, plan);
+  if (html === null) return false;
+  try {
+    await deps.send(p.chatId, html);
+  } catch (e) {
+    deps.log.warn({ err: e, teamId: p.teamId }, 'fest alert not delivered; retrying next tick');
+    return false;
+  }
+  recordSent(deps.db, [...plan.fresh, ...plan.pouring].map((a) => ({
+    teamId: p.teamId, sessionNo: p.sessionNo, beerId: a.beerId, checkinId: a.firstCheckinId,
+  })), now.toISOString());
+  return true;
 }

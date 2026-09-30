@@ -84,6 +84,19 @@ describe('runFestAlerts', () => {
     expect(sent).toEqual([]);
   });
 
+  it("one team's failure does not stop the alert of another team", async () => {
+    const { db, sent, deps } = setup();
+    const festId = getFestBySlug(db, 'wfp22')!.id;
+    const second = createTeam(db, festId, -200, '2026-10-02T00:00:00.000Z').id;
+    addMember(db, second, 1, 'YS', '2026-10-02T00:00:00.000Z');
+    tap(db, 501, 6000011, '2026-10-15T17:50:00.000Z');
+    // Teams go in id order: the first (-100) is refused, the second (-200) accepted.
+    const outcomes = [() => Promise.reject(new Error('bot was kicked')), () => Promise.resolve()];
+    const picky = { ...deps, send: async (chatId: number, html: string) => { await outcomes.shift()!(); sent.push([chatId, html]); } };
+    await runFestAlerts(picky, NOW);
+    expect(sent.map(([chatId]) => chatId)).toEqual([-200]);
+  });
+
   it('outside every polling window it does nothing', async () => {
     const { db, sent, deps } = setup();
     tap(db, 501, 6000011, '2026-10-15T17:50:00.000Z');
