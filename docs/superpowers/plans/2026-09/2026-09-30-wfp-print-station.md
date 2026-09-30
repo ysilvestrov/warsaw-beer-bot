@@ -16,7 +16,7 @@
 2. **NiimBlue** (`@mmote/niimbluelib` 0.47.0, MIT; тарбол npm, 2026-09-30): UMD-збірка
    `niimbluelib.min.js` (120 КБ, простір імен `niimbluelib`); `client.getPrintTaskType()` /
    `getModelMetadata()` після `connect()`; D11 — 203 dpi, `printDirection "left"`, голівка 96 точок;
-   `ImageEncoder.encodeCanvas(canvas, 'white', dir)`; друк — `newPrintTask(...)` → `printInit` →
+   `ImageEncoder.encodeCanvas(canvas, PageColorType.SingleColor, dir)`; друк — `newPrintTask(...)` → `printInit` →
    `printPage(img, 1)` → `waitForPageFinished` → `waitForFinished` → `printEnd`.
 3. **CDN з контейнера недоступний** (jsDelivr — 403 від проксі), тож збіг файлу на CDN з тарболом
    не перевірити; і на фесті мобільний інтернет. Бібліотека вендориться в `src/api/fest-print/`

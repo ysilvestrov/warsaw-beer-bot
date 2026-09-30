@@ -1,2 +1,229 @@
 <!doctype html>
-<html lang="uk"><head><meta charset="utf-8"><title>Станція друку</title></head><body></body></html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Станція друку</title>
+<style>
+  :root { --bg: #fff; --fg: #111; --muted: #666; --line: #ddd; --ok: #1a7f37; --bad: #c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #111; --fg: #eee; --muted: #999; --line: #333; } }
+  body { margin: 0; padding: 16px; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  button { font: inherit; padding: 10px 14px; margin: 4px 4px 4px 0; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: inherit; }
+  button.primary { background: #0b57d0; color: #fff; border-color: #0b57d0; }
+  button:disabled { opacity: .5; }
+  #status { color: var(--muted); margin: 8px 0; }
+  .row { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--line); padding: 8px 0; flex-wrap: wrap; }
+  .row .text { flex: 1 1 200px; }
+  .failed { color: var(--bad); }
+  label { margin-right: 12px; }
+  input[type=number] { width: 4em; font: inherit; }
+  canvas { border: 1px solid var(--line); max-width: 100%; }
+</style>
+</head>
+<body>
+<h1>Станція друку</h1>
+<div>
+  <button id="connect" class="primary">Підключити принтер</button>
+  <button id="printAll" class="primary" disabled>Друкувати все (0)</button>
+</div>
+<div>
+  <label>Ширина, мм <input id="w" type="number" min="10" max="100" step="1"></label>
+  <label>Висота, мм <input id="h" type="number" min="8" max="50" step="1"></label>
+</div>
+<div id="status">Завантаження…</div>
+<canvas id="preview"></canvas>
+<div id="jobs"></div>
+
+<script src="/fest-print/niimbluelib.min.js"></script>
+<script>
+(() => {
+  'use strict';
+  // Print station for the WFP festival mode (spec 2026-09-29-wfp-team-assistant-design.md §8).
+  const DOTS_PER_MM = 8; // 203 dpi
+  const POLL_MS = 5000;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* private mode: keep in memory */ } },
+  };
+
+  // The token arrives once in the fragment (never sent to the server with the page request) and is
+  // kept on this phone; the fragment is then removed from the address bar.
+  const fromHash = new URLSearchParams(location.hash.slice(1)).get('t');
+  if (fromHash) { store.set('fest-print-token', fromHash); history.replaceState(null, '', location.pathname); }
+  const token = fromHash || store.get('fest-print-token');
+
+  const $ = (id) => document.getElementById(id);
+  const statusEl = $('status');
+  const say = (text) => { statusEl.textContent = text; };
+  const size = { w: Number(store.get('fest-print-w')) || 40, h: Number(store.get('fest-print-h')) || 12 };
+  $('w').value = size.w; $('h').value = size.h;
+  for (const k of ['w', 'h']) {
+    $(k).addEventListener('change', () => {
+      size[k] = Number($(k).value) || size[k];
+      store.set(`fest-print-${k}`, String(size[k]));
+      render();
+    });
+  }
+
+  let jobs = [];
+  let client = null;
+  let printing = false;
+
+  async function api(path, init = {}) {
+    const res = await fetch(path, { ...init, headers: { ...(init.headers || {}), Authorization: `Bearer ${token}` } });
+    if (res.status === 401) throw new Error('Посилання недійсне або прострочене — візьми нове: /fest printer у боті');
+    if (!res.ok) throw new Error(`Сервер відповів ${res.status}`);
+    return res.json();
+  }
+
+  // One label, drawn as a person reads it: the glass number large on the left; the beer on up to
+  // two lines, the second cut with "…"; the initials below. The encoder rotates it for the head.
+  function fitLine(ctx, text, width) {
+    if (ctx.measureText(text).width <= width) return text;
+    let t = text;
+    while (t.length > 1 && ctx.measureText(`${t}…`).width > width) t = t.slice(0, -1);
+    return `${t.trimEnd()}…`;
+  }
+
+  function wrapTwo(ctx, text, width) {
+    const words = text.split(/\s+/);
+    let first = '';
+    while (words.length && ctx.measureText(first ? `${first} ${words[0]}` : words[0]).width <= width) {
+      first = first ? `${first} ${words.shift()}` : words.shift();
+    }
+    if (!first) return [fitLine(ctx, text, width)]; // one word longer than the line
+    return words.length ? [first, fitLine(ctx, words.join(' '), width)] : [first];
+  }
+
+  function draw(canvas, job) {
+    const W = Math.round(size.w * DOTS_PER_MM), H = Math.round(size.h * DOTS_PER_MM);
+    canvas.width = W; canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = '#000'; ctx.textBaseline = 'middle';
+    const pad = Math.round(H * 0.06);
+    ctx.font = `bold ${Math.round(H * 0.62)}px sans-serif`;
+    const numText = `№${job.glassNo}`;
+    const numW = Math.min(ctx.measureText(numText).width, W * 0.35);
+    ctx.fillText(numText, pad, H / 2, numW);
+    const left = pad * 2 + numW, avail = W - left - pad;
+    const nameSize = Math.round(H * 0.27);
+    ctx.font = `bold ${nameSize}px sans-serif`;
+    const lines = wrapTwo(ctx, job.beerName, avail);
+    lines.forEach((line, i) => ctx.fillText(line, left, pad + nameSize * (0.55 + i * 1.05)));
+    ctx.font = `${Math.round(H * 0.24)}px sans-serif`;
+    ctx.fillText(job.initials, left, H - pad - H * 0.12, avail);
+  }
+
+  async function printOne(job) {
+    const canvas = document.createElement('canvas');
+    draw(canvas, job);
+    const meta = client.getModelMetadata();
+    const taskName = client.getPrintTaskType();
+    if (!meta || !taskName) throw new Error('Невідома модель принтера');
+    const image = niimbluelib.ImageEncoder.encodeCanvas(canvas, niimbluelib.PageColorType.SingleColor, meta.printDirection);
+    const task = client.protocol.newPrintTask(taskName, { totalPages: 1 });
+    try {
+      await task.printInit();
+      await task.printPage(image, 1);
+      await task.waitForPageFinished();
+      await task.waitForFinished();
+    } finally {
+      await client.protocol.printEnd().catch(() => {});
+    }
+  }
+
+  async function printAll() {
+    if (!client || printing) return;
+    printing = true; render();
+    try {
+      for (const job of jobs.filter((j) => j.status === 'queued')) {
+        say(`Друкую №${job.glassNo}…`);
+        try {
+          await printOne(job);
+          await api(`/fest-print/jobs/${job.id}/printed`, { method: 'POST' });
+        } catch (e) {
+          await api(`/fest-print/jobs/${job.id}/failed`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ error: String(e && e.message || e) }),
+          }).catch(() => {});
+        }
+      }
+    } finally {
+      printing = false;
+      await poll();
+    }
+  }
+
+  function savePng(job) {
+    const canvas = document.createElement('canvas');
+    draw(canvas, job);
+    canvas.toBlob((blob) => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `glass-${job.glassNo}.png`;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    }, 'image/png');
+  }
+
+  function render() {
+    const queued = jobs.filter((j) => j.status === 'queued').length;
+    const btn = $('printAll');
+    btn.textContent = `Друкувати все (${queued})`;
+    btn.disabled = !client || printing || queued === 0;
+    const list = $('jobs');
+    list.replaceChildren(...jobs.map((job) => {
+      const row = document.createElement('div');
+      row.className = 'row';
+      const text = document.createElement('div');
+      text.className = `text${job.status === 'failed' ? ' failed' : ''}`;
+      text.textContent = `№${job.glassNo} ${job.beerName} · ${job.initials}` + (job.status === 'failed' ? ` — не вдалося: ${job.error || ''}` : '');
+      const png = document.createElement('button');
+      png.textContent = 'PNG';
+      png.onclick = () => savePng(job);
+      row.append(text, png);
+      if (job.status === 'failed') {
+        const again = document.createElement('button');
+        again.textContent = 'Ще раз';
+        again.onclick = async () => { await api(`/fest-print/jobs/${job.id}/requeue`, { method: 'POST' }).catch((e) => say(e.message)); await poll(); };
+        row.append(again);
+      }
+      return row;
+    }));
+    if (jobs[0]) draw($('preview'), jobs[0]);
+  }
+
+  async function poll() {
+    if (!token) { say('Немає токена станції — відкрий посилання з /fest printer у боті.'); return; }
+    try {
+      jobs = (await api('/fest-print/jobs')).jobs;
+      if (!printing) say(client ? `Принтер підключено. У черзі: ${jobs.length}` : `У черзі: ${jobs.length}. Підключи принтер.`);
+    } catch (e) {
+      say(e.message);
+    }
+    render();
+  }
+
+  $('connect').onclick = async () => {
+    if (!navigator.bluetooth) { say('Цей браузер не має Web Bluetooth — відкрий сторінку в Chrome на Android або друкуй PNG через застосунок Niimbot.'); return; }
+    try {
+      say('Підключаюся…');
+      const c = new niimbluelib.NiimbotBluetoothClient();
+      await c.connect();
+      client = c;
+      c.on('disconnect', () => { client = null; say('Принтер відключився — підключи знову.'); render(); });
+      await poll();
+    } catch (e) {
+      say(`Не підключився: ${e && e.message || e}`);
+    }
+  };
+  $('printAll').onclick = printAll;
+
+  poll();
+  setInterval(() => { if (!printing) poll(); }, POLL_MS);
+})();
+</script>
+</body>
+</html>
