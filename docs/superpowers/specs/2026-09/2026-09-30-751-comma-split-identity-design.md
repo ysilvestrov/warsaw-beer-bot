@@ -26,8 +26,9 @@ comma, restoring the combined alternative label. Admit the candidate only if:
    contains at least two tokens. This permits shop-only grade noise (`14°`) but
    rejects partial titles.
 2. Try consecutive `alias_alt` windows with at least as many elements as the registered
-   title has comma-delimited parts; more parts may belong to a comma-bearing credited
-   brewery, while other aliases in the array are ignored. The
+   title has comma-delimited parts and at most that many plus the shop brewery's
+   comma count. Extra parts require evidence of a comma-bearing credited brewery;
+   other aliases in the array are ignored. The
    base-normalized joined window must end with the complete base-normalized
    registered title. Its remaining prefix, normalized as a brewery, must equal
    the normalized shop brewery. Never treat that prefix as a global alias.

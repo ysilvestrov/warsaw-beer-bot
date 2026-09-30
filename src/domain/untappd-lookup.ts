@@ -716,6 +716,7 @@ export async function lookupBeer(
     // Reconstruct only this candidate's identity; the collaborator is not a brewery-wide alias.
     const splitName = normalizeName(name);
     const splitBrewery = normalizeBrewery(brewery);
+    const creditedBreweryCommas = brewery.split(',').length - 1;
     const splitIdentityHits = results.filter((result) => {
       const aliases = result.alias_alt ?? [];
       const fragmentCount = result.beer_name.split(',').length;
@@ -726,7 +727,8 @@ export async function lookupBeer(
       ) return false;
       const titleSuffix = ` ${baseNormalize(result.beer_name)}`;
       for (let start = 0; start + fragmentCount <= aliases.length; start++) {
-        for (let end = start + fragmentCount; end <= aliases.length; end++) {
+        const lastEnd = Math.min(aliases.length, start + fragmentCount + creditedBreweryCommas);
+        for (let end = start + fragmentCount; end <= lastEnd; end++) {
           const fullAlias = baseNormalize(aliases.slice(start, end).join(','));
           if (!fullAlias.endsWith(titleSuffix)) continue;
           const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
