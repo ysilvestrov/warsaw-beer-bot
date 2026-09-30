@@ -2594,9 +2594,17 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 ### 5.9 Інфраструктура / деплой
 - Runtime: **Node ≥ 20** під systemd (`warsaw-beer-bot.service`).
 - SQLite у `/var/lib/warsaw-beer-bot/bot.db` (WAL).
-- Деплой: rsync allowlist build/runtime-файлів із working tree → `/opt` →
-  `npm ci` → `npm run build` →
-  `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**
+- Деплой — **merge-deploy** (`deploy/autodeploy.sh`, таймер кожні 5 хв, спека
+  `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`): хост сам деплоїть голову
+  `main`, коли вона 10 хв не рухалась, CI зелений саме на цьому SHA і в діапазоні немає hold.
+  Мердж — це дозвіл: право писати в `main` означає прод. Перед деплоєм: збірка й `npm audit` у
+  клоні, знімок БД `VACUUM INTO` і пробна міграція на копії. Протягом 10 хв після рестарту збій
+  (3 невдалі `/health` поспіль, старт довше 120 с, зміна `NRestarts`) відкочує **код і БД** до
+  знімка, зберігаючи `post` для людини. Hold: шлях, що потребує root (sudoers, юніти, litestream,
+  `install-*.sh`, `rsync-filter`, встановлені копії деплоєра), або PR з міткою `deploy:hold` і
+  маркером `[deploy:hold]` на початку заголовка. Hold знімає ручний `bash deploy/deploy.sh`.
+  Сам `deploy.sh`: rsync allowlist build/runtime-файлів → `/opt` → `npm ci` → `npm run build` →
+  `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**.
   (`enable --now` на запущеному unit'і не перезапускає).
 - Бекап: **Litestream** → Cloudflare R2 (стрім WAL), креденшели лише з env/конфіга.
 - Cron — у процесі через `node-cron` (зміна частоти = окремий PR).
