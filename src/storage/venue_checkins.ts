@@ -31,8 +31,9 @@ export function insertVenueCheckins(db: DB, rows: VenueCheckinInput[], eye: Eye,
   return inserted;
 }
 
-export function venueCheckinAt(db: DB, checkinId: number): string | null {
-  const row = db.prepare('SELECT checkin_at FROM venue_checkins WHERE checkin_id = ?').get(checkinId) as
+/** Time of a stored check-in at this venue; null if unknown here — a cursor from another venue proves nothing. */
+export function venueCheckinAt(db: DB, checkinId: number, venueId: number): string | null {
+  const row = db.prepare('SELECT checkin_at FROM venue_checkins WHERE checkin_id = ? AND venue_id = ?').get(checkinId, venueId) as
     | { checkin_at: string }
     | undefined;
   return row ? row.checkin_at : null;

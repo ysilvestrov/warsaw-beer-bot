@@ -154,8 +154,9 @@ describe('venue_checkins', () => {
     expect(insertVenueCheckins(db, [row], 'laptop', '2026-09-29T21:00:00.000Z')).toBe(1);
     expect(insertVenueCheckins(db, [row], 'friend_feed', '2026-09-29T21:05:00.000Z')).toBe(0);
     expect(db.prepare('SELECT first_eye FROM venue_checkins').get()).toEqual({ first_eye: 'laptop' });
-    expect(venueCheckinAt(db, 1605001196)).toBe('2026-09-29T20:59:23.000Z');
-    expect(venueCheckinAt(db, 1)).toBeNull();
+    expect(venueCheckinAt(db, 1605001196, 11142155)).toBe('2026-09-29T20:59:23.000Z');
+    expect(venueCheckinAt(db, 1605001196, 2167060)).toBeNull();
+    expect(venueCheckinAt(db, 1, 11142155)).toBeNull();
   });
 
   it('returns only check-ins strictly after the bound, only at the given venues', () => {
