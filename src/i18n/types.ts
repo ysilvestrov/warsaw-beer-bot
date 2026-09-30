@@ -210,6 +210,32 @@ export interface Messages {
   'fest.status_not_seen': string;
   'fest.status_unknown': string;
   'fest.section_gone': string;
+  'fest.history_header': string;
+  'fest.history_line': string;
+  'fest.history_unknown': string;
+  'fest.targets_header': string;
+  'fest.targets_more': string;
+  'fest.unrated_header': string;
+  'fest.reason_rating': string;
+  'fest.reason_style': string;
+  'fest.reason_manual': string;
+  'fest.remove_button': string;
+  'fest.add_usage': string;
+  'fest.add_none': string;
+  'fest.add_pick': string;
+  'fest.added': string;
+  'fest.removed': string;
+  'fest.stands_usage': string;
+  'fest.stands_saved': string;
+  'fest.stands_errors': string;
+  'fest.stands_unknown': string;
+  'fest.stands_missing': string;
+  'fest.stands_complete': string;
+  'fest.menu_refreshed': string;
+  'fest.menu_stale': string;
+  'fest.menu_blocked': string;
+  'fest.menu_wrong_page': string;
+  'fest.menu_unavailable': string;
 }
 
 export type Translator = (

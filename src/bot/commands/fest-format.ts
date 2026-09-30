@@ -65,3 +65,53 @@ export function formatSection(t: Translator, view: FestView, key: string, now: D
   }
   return lines.join('\n');
 }
+
+export const TARGETS_SHOWN = 40;
+
+function reasonsLabel(t: Translator, target: FestView['targets'][number]): string {
+  return target.reasons.map((r) =>
+    r === 'rating' ? t('fest.reason_rating', { rating: (target.rating ?? 0).toFixed(2) })
+      : r === 'style' ? t('fest.reason_style')
+      : t('fest.reason_manual')).join(' · ');
+}
+
+/**
+ * /fest targets (spec §7): Targets with reasons, the untried-but-unrated list apart, and how
+ * complete each member's history is — "nobody has had it" is only as true as the worst history.
+ */
+export function formatTargets(t: Translator, view: FestView): string {
+  const lines = [t('fest.history_header')];
+  for (const m of view.members) {
+    lines.push(t('fest.history_line', {
+      initials: escapeHtml(m.initials),
+      inBot: m.inBot,
+      total: m.profileTotal === null ? t('fest.history_unknown') : m.profileTotal,
+    }));
+  }
+  lines.push('', t('fest.targets_header', { count: view.targets.length }));
+  for (const target of view.targets.slice(0, TARGETS_SHOWN)) {
+    const beer = view.beerNames.get(target.beerId);
+    lines.push(`• ${escapeHtml(beer?.name ?? `#${target.beerId}`)} — ${escapeHtml(beer?.brewery ?? target.section)} · ${reasonsLabel(t, target)}`);
+  }
+  if (view.targets.length > TARGETS_SHOWN) lines.push(t('fest.targets_more', { count: view.targets.length - TARGETS_SHOWN }));
+  if (view.unrated.length > 0) {
+    lines.push('', t('fest.unrated_header', { count: view.unrated.length }));
+    for (const u of view.unrated.slice(0, TARGETS_SHOWN)) {
+      const beer = view.beerNames.get(u.beer_id);
+      lines.push(`• ${escapeHtml(beer?.name ?? `#${u.beer_id}`)} — ${escapeHtml(u.style ?? '?')}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/** Menu beers whose name or brewery contains `query` (case-insensitive), at most `limit`. */
+export function searchMenu(view: FestView, query: string, limit = 8): { beerId: number; label: string }[] {
+  const q = query.trim().toLowerCase();
+  if (q === '') return [];
+  const out: { beerId: number; label: string }[] = [];
+  for (const [beerId, b] of view.beerNames) {
+    if (`${b.name} ${b.brewery}`.toLowerCase().includes(q)) out.push({ beerId, label: `${b.name} — ${b.brewery}` });
+    if (out.length === limit) break;
+  }
+  return out;
+}

@@ -1,7 +1,7 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { formatRanking, formatSection, sectionKey, standLabel, statusLabel } from './fest-format';
+import { formatRanking, formatSection, formatTargets, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
 import { initialsOf } from './fest';
 
 const t = createTranslator('uk');
@@ -95,5 +95,50 @@ describe('initialsOf', () => {
   it('takes first letters of first and last name, upper-cased', () => {
     expect([initialsOf({ first_name: 'yuriy', last_name: 'Silvestrov' }), initialsOf({ first_name: 'Олег' }), initialsOf({ username: 'nesh05' }), initialsOf({})])
       .toEqual(['YS', 'О', 'NE', '?']);
+  });
+});
+
+describe('formatTargets', () => {
+  it('shows history completeness (unknown profile as ?), Targets with reasons, and the unrated list apart', () => {
+    const v = view({
+      members: [
+        { telegramId: 1, initials: 'YS', untappdUsername: 'ysilvestrov', inBot: 12709, profileTotal: 12709 },
+        { telegramId: 2, initials: 'OB', untappdUsername: 'Nesh05', inBot: 3201, profileTotal: null },
+      ],
+      targets: [
+        { beerId: 1, section: 'PINTA', reasons: ['rating', 'manual'], rating: 4.1, style: null },
+        { beerId: 3, section: 'Verdant <&>', reasons: ['style'], rating: null, style: 'Stout - Imperial / Double' },
+      ],
+      unrated: [{ beer_id: 2, section: 'PINTA', rating_global: null, style: 'Lager - Pale' }],
+    });
+    expect(formatTargets(t, v)).toBe([
+      '<b>Повнота історії</b> (чекінів у боті / у профілі Untappd):',
+      'YS: 12709 / 12709',
+      'OB: 3201 / ? (синк розширенням не робився)',
+      '',
+      '<b>Target-и: 2</b>',
+      '• Motueka — PINTA · ⭐ 4.10 · ✋ вручну',
+      '• Beskidy — Verdant · 🧪 стиль',
+      '',
+      '<b>Непите без рейтингу: 1</b> (не Target, але й не відкинуте)',
+      '• Nelson — Lager - Pale',
+    ].join('\n'));
+  });
+
+  it('caps the list and says how many more there are', () => {
+    const many = Array.from({ length: 42 }, (_, i) => ({ beerId: 1000 + i, section: 'S', reasons: ['rating' as const], rating: 4, style: null }));
+    const lines = formatTargets(t, view({ members: [], targets: many })).split('\n');
+    expect([lines.filter((l) => l.startsWith('• ')).length, lines[lines.length - 1]]).toEqual([40, '…і ще 2']);
+  });
+});
+
+describe('searchMenu', () => {
+  it('matches name or brewery case-insensitively, up to the limit', () => {
+    expect([searchMenu(view(), 'pinta').map((f) => f.beerId), searchMenu(view(), 'BESK').map((f) => f.label), searchMenu(view(), 'pinta', 1).length])
+      .toEqual([[1, 2], ['Beskidy — Verdant'], 1]);
+  });
+
+  it('finds nothing for an empty or unmatched query', () => {
+    expect([searchMenu(view(), '   '), searchMenu(view(), 'zzz')]).toEqual([[], []]);
   });
 });
