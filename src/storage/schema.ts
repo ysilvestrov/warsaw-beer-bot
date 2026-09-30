@@ -195,7 +195,7 @@ export const V42_FEST_SQL = `
     section TEXT NOT NULL,
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
-    PRIMARY KEY (fest_id, beer_id)
+    PRIMARY KEY (fest_id, beer_id, section)
   );
   CREATE TABLE IF NOT EXISTS fest_stands (
     fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,

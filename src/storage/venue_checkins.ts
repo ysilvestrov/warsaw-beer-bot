@@ -17,16 +17,23 @@ export interface VenueCheckin {
   checkin_at: string;
 }
 
-// checkin_id is Untappd's own id, so the same check-in seen by two eyes is one row; the first
-// eye to see it keeps the credit.
+// checkin_id is Untappd's own id, so the same check-in seen by two eyes is one row; the first eye
+// keeps the credit. Venue, bid and time are Untappd's facts for that id and cannot differ between
+// honest eyes; the author can be missing in one source and present in another, so a later eye
+// fills it in.
 export function insertVenueCheckins(db: DB, rows: VenueCheckinInput[], eye: Eye, observedAt: string): number {
-  const stmt = db.prepare(
+  const insert = db.prepare(
     `INSERT OR IGNORE INTO venue_checkins (checkin_id, venue_id, bid, untappd_user, checkin_at, first_eye, observed_at)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
+  const fillAuthor = db.prepare(
+    'UPDATE venue_checkins SET untappd_user = ? WHERE checkin_id = ? AND untappd_user IS NULL',
+  );
   let inserted = 0;
   for (const r of rows) {
-    inserted += stmt.run(r.checkin_id, r.venue_id, r.bid, r.untappd_user, r.checkin_at, eye, observedAt).changes;
+    const n = insert.run(r.checkin_id, r.venue_id, r.bid, r.untappd_user, r.checkin_at, eye, observedAt).changes;
+    inserted += n;
+    if (n === 0 && r.untappd_user !== null) fillAuthor.run(r.untappd_user, r.checkin_id);
   }
   return inserted;
 }

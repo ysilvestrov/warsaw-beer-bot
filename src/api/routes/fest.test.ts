@@ -48,7 +48,7 @@ describe('POST /fest/feed', () => {
     const { app } = setup(IN_SESSION);
     const res = await post(app, '/fest/feed', 'member-token', feed);
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ inserted: 3, seen: 3, dropped: 0, stitched: false, nextCursor: '1559318775' });
+    expect(await res.json()).toEqual({ inserted: 3, seen: 3, dropped: 0, mismatched: 0, stitched: false, nextCursor: '1559318775' });
   });
 
   it('refuses a user who is not in any team of the fest', async () => {
@@ -67,6 +67,26 @@ describe('POST /fest/feed', () => {
     const { app } = setup(IN_SESSION);
     const res = await post(app, '/fest/feed', 'member-token', { ...feed, venueId: 12345 });
     expect([res.status, await res.json()]).toEqual([400, { error: 'unknown_venue' }]);
+  });
+
+  it('answers 400 when every row of the page belongs to another fest venue', async () => {
+    const { db, app } = setup(IN_SESSION);
+    const res = await post(app, '/fest/feed', 'member-token', { ...feed, venueId: 2167060 });
+    expect([res.status, await res.json()]).toEqual([400, { error: 'venue_mismatch' }]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM venue_checkins').get()).toEqual({ n: 0 });
+  });
+
+  it('routes to the overlapping fest the member belongs to and that owns the venue', async () => {
+    const { db, app } = setup(IN_SESSION);
+    // A second fest over the same hours with its own venue; the member joins only its team.
+    db.prepare(`INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('other', 'Other', 1, 4, '[]')`).run();
+    const other = getFestBySlug(db, 'other')!;
+    db.prepare(`INSERT INTO fest_sessions VALUES (?, 1, '2026-10-15T14:00:00.000Z', '2026-10-15T22:00:00.000Z')`).run(other.id);
+    db.prepare(`INSERT INTO fest_venues VALUES (?, 11142155, 'Same venue', '/v/x/11142155')`).run(other.id);
+    db.prepare('DELETE FROM fest_team_members').run();
+    addMember(db, createTeam(db, other.id, -200, '2026-09-30T00:00:00.000Z').id, MEMBER, 'MM', '2026-09-30T00:00:00.000Z');
+    const res = await post(app, '/fest/feed', 'member-token', feed);
+    expect(res.status).toBe(200);
   });
 
   it('answers 502 for a Cloudflare page and writes nothing', async () => {
@@ -93,7 +113,7 @@ describe('POST /fest/menu', () => {
   it('ingests the menu during the run-up, before any polling window', async () => {
     const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
     const res = await post(app, '/fest/menu', 'member-token', { html: MENU });
-    expect([res.status, await res.json()]).toEqual([200, { items: 4, updatedAt: '2026-09-29T12:15:39.465Z' }]);
+    expect([res.status, await res.json()]).toEqual([200, { items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false }]);
   });
 
   it('refuses a non-member', async () => {

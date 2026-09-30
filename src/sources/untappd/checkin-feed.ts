@@ -9,6 +9,8 @@ export interface FeedCheckin {
   user_rating: number | null;
   checkin_at: string;
   venue: string | null;
+  /** Untappd venue id from the row's /v/<slug>/<id> link; null when the row names no venue. */
+  venue_id: number | null;
   /** Untappd username of whoever checked in; null when the row carries no /user/ link. */
   author: string | null;
 }
@@ -44,25 +46,33 @@ function breweryNameFrom($: cheerio.CheerioAPI, row: cheerio.Cheerio<Element>): 
 }
 
 const USER_RE = /^\/user\/([^/?#]+)/;
+const VENUE_ID_RE = /^\/v\/[^/]+\/(\d+)/;
 
 // The author is the p.text anchor marked a.user; fall back to the first /user/ link there.
 function authorFrom($: cheerio.CheerioAPI, row: cheerio.Cheerio<Element>): string | null {
   const anchor = row.find('p.text a.user[href^="/user/"]').first();
   const href = (anchor.length ? anchor : row.find('p.text a[href^="/user/"]').first()).attr('href') ?? '';
   const m = href.match(USER_RE);
-  return m ? decodeURIComponent(m[1]) : null;
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    // A malformed escape ("%zz") must not abort the whole page; the raw segment is still the name.
+    return m[1];
+  }
 }
 
-const DATE_ONLY_RE = /^\d{1,2} [A-Za-z]{3} \d{2}$/;
+// Only formats that carry a time to the second are accepted: Untappd's RFC 2822 ("Tue, 31 Mar 2026
+// 12:13:15 +0000", HTML text / data-gregtime / API created_at) and ISO 8601 with seconds and an
+// offset. Anything else — the browser-collapsed "11 Sep 26", an ISO date, a minute-precision time —
+// would be completed by Date.parse with invented components, so it is rejected (spec §10, "time").
+const RFC2822_SECONDS_RE = /^[A-Z][a-z]{2}, \d{1,2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} [+-]\d{4}$/;
+const ISO_SECONDS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/;
 
-/**
- * A check-in time with second precision as ISO UTC, or null when `raw` does not carry one.
- * The browser-collapsed "11 Sep 26" is a date without a time and is rejected on purpose: the
- * festival "checked in within 60 min" rule cannot use it (spec §10, "time").
- */
+/** A check-in time with second precision as ISO UTC, or null when `raw` does not carry one. */
 export function feedCheckinTime(raw: string): string | null {
   const s = raw.trim();
-  if (!s || DATE_ONLY_RE.test(s)) return null;
+  if (!RFC2822_SECONDS_RE.test(s) && !ISO_SECONDS_RE.test(s)) return null;
   const t = Date.parse(s);
   return Number.isFinite(t) ? new Date(t).toISOString() : null;
 }
@@ -126,10 +136,13 @@ export function parseCheckinFeedPage(html: string): CheckinFeedPage {
     if (!checkin_at) return;
 
     // venue — scoped to p.text (NOT .checkin-comment)
-    const venueText = row.find('p.text a[href^="/v/"]').first().text().trim();
+    const venueLink = row.find('p.text a[href^="/v/"]').first();
+    const venueText = venueLink.text().trim();
     const venue = venueText.length > 0 ? venueText : null;
+    const venueIdMatch = (venueLink.attr('href') ?? '').match(VENUE_ID_RE);
+    const venue_id = venueIdMatch ? parseInt(venueIdMatch[1], 10) : null;
 
-    checkins.push({ checkin_id, bid, beer_name, brewery_name, user_rating, checkin_at, venue, author: authorFrom($, row) });
+    checkins.push({ checkin_id, bid, beer_name, brewery_name, user_rating, checkin_at, venue, venue_id, author: authorFrom($, row) });
   });
 
   const profileTotal = parseProfileTotal($);

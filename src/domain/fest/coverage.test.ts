@@ -28,6 +28,13 @@ describe('pageSpan', () => {
     })).toEqual({ from_at: '2026-10-15T15:20:00.000Z', to_at: NOW });
   });
 
+  it('clips a cursor time in the future to the server now', () => {
+    expect(pageSpan({
+      checkinTimes: ['2026-10-15T15:20:00.000Z'],
+      cursorAt: '2026-10-15T18:00:00.000Z', fetchedAt: NOW, now: NOW,
+    })).toEqual({ from_at: '2026-10-15T15:20:00.000Z', to_at: NOW });
+  });
+
   it('proves nothing when the upper bound is older than the page (inconsistent input)', () => {
     expect(pageSpan({
       checkinTimes: ['2026-10-15T15:20:00.000Z'],
