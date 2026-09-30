@@ -715,15 +715,20 @@ export async function lookupBeer(
     // Algolia sometimes splits a complete alternative label at commas in the beer title.
     // Reconstruct only this candidate's identity; the collaborator is not a brewery-wide alias.
     const splitName = normalizeName(name);
-    const splitIdentity = `${normalizeBrewery(brewery)} ${splitName}`;
-    const splitIdentityHits = results.filter((result) =>
-      brewery.trim() !== '' &&
-      splitName.split(' ').length >= 2 &&
-      result.beer_name.includes(',') &&
-      result.alias_alt != null && result.alias_alt.length > 1 &&
-      normalizeName(result.beer_name) === splitName &&
-      normalizeName(normalizeIdentityAlias(result.alias_alt.join(','))) === splitIdentity,
-    );
+    const splitBrewery = normalizeBrewery(brewery);
+    const splitIdentityHits = results.filter((result) => {
+      if (
+        !splitBrewery || splitName.split(' ').length < 2 ||
+        !result.beer_name.includes(',') ||
+        result.alias_alt == null || result.alias_alt.length < 2 ||
+        normalizeName(result.beer_name) !== splitName
+      ) return false;
+      const fullAlias = baseNormalize(result.alias_alt.join(','));
+      const titleSuffix = ` ${baseNormalize(result.beer_name)}`;
+      if (!fullAlias.endsWith(titleSuffix)) return false;
+      const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
+      return normalizeBrewery(creditedBrewery) === splitBrewery;
+    });
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
@@ -916,10 +921,9 @@ export async function lookupBeer(
       return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
     }
 
-    if (splitIdentityHits.length > 0) {
-      if (new Set(splitIdentityHits.map((result) => result.bid)).size !== 1) return notFound();
+    if (new Set(splitIdentityHits.map((result) => result.bid)).size === 1) {
       const splitHit = pickUniqueByAbv(splitIdentityHits, abv, true);
-      return splitHit ? { kind: 'matched', result: splitHit } : notFound();
+      if (splitHit) return { kind: 'matched', result: splitHit };
     }
 
     // Candidate-native brewery aliases are structured identity evidence, but unlike
