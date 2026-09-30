@@ -1,8 +1,50 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { parseCheckinFeedPage } from './checkin-feed';
+import { feedCheckinTime, parseCheckinFeedPage } from './checkin-feed';
 
 const html = readFileSync(join(__dirname, '__fixtures__/checkin-feed-page.html'), 'utf8');
+
+describe('venue feeds (festival probe fixtures)', () => {
+  it('prefers data-gregtime over the browser-collapsed date text and reads the author', () => {
+    const dom = parseCheckinFeedPage(readFileSync(join(__dirname, '__fixtures__/venue-activity-dom.html'), 'utf8'));
+    expect(dom.checkins.map((c) => [c.checkin_id, c.bid, c.author, c.checkin_at])).toEqual([
+      ['1600770333', 5703496, 'bockje', 'Fri, 11 Sep 2026 20:45:58 +0000'],
+      ['1573215662', 5995292, 'bockje', 'Tue, 26 May 2026 00:11:50 +0000'],
+      ['1562430582', 4000001, 'Piwny_John', '12 Apr 26'],
+    ]);
+  });
+
+  it('reads the RFC time from the text of a raw more_feed fragment', () => {
+    const raw = parseCheckinFeedPage(readFileSync(join(__dirname, '__fixtures__/venue-more-feed-raw.html'), 'utf8'));
+    expect(raw.checkins.map((c) => [c.checkin_id, c.author, c.checkin_at])).toEqual([
+      ['1559318905', 'Bierfluenzer', 'Tue, 31 Mar 2026 12:14:19 +0000'],
+      ['1559318837', 'Bierfluenzer', 'Tue, 31 Mar 2026 12:13:15 +0000'],
+      ['1559318775', 'Bierfluenzer', 'Tue, 31 Mar 2026 12:12:08 +0000'],
+    ]);
+    expect(raw.nextMaxId).toBe('1559318775');
+  });
+
+  it('falls back to the first /user/ link when no a.user is marked, and to null without one', () => {
+    const item = (text: string) => `<div class="item" data-checkin-id="1"><p class="text">${text}
+      <a href="/b/x/2">X</a> by <a href="/Brew">Brew</a></p><a class="time">Tue, 31 Mar 2026 12:12:08 +0000</a></div>`;
+    expect(parseCheckinFeedPage(item('<a href="/user/some.one">S</a> is drinking')).checkins[0].author).toBe('some.one');
+    expect(parseCheckinFeedPage(item('Someone is drinking')).checkins[0].author).toBeNull();
+  });
+});
+
+describe('feedCheckinTime', () => {
+  it('turns an RFC time into ISO UTC', () => {
+    expect(feedCheckinTime('Tue, 31 Mar 2026 12:13:15 +0000')).toBe('2026-03-31T12:13:15.000Z');
+  });
+
+  it('rejects a date without a time', () => {
+    expect(feedCheckinTime('11 Sep 26')).toBeNull();
+  });
+
+  it('rejects empty and unparseable input', () => {
+    expect([feedCheckinTime(''), feedCheckinTime('   '), feedCheckinTime('yesterday')]).toEqual([null, null, null]);
+  });
+});
 
 describe('parseCheckinFeedPage', () => {
   const out = parseCheckinFeedPage(html);
@@ -20,6 +62,7 @@ describe('parseCheckinFeedPage', () => {
       user_rating: 4.5,
       checkin_at: 'Mon, 15 Jun 2026 19:25:26 +0000',
       venue: 'Os. Górczewska 200',
+      author: 'ysilvestrov',
     });
   });
 
