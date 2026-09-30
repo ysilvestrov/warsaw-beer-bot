@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Plain http is fine only on this machine (URL.hostname keeps the brackets of an IPv6 host).
+const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+
 const Schema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(10),
   DATABASE_PATH: z.string().min(1),
@@ -50,7 +53,7 @@ const Schema = z.object({
   // HTTPS only (localhost aside): the station sends its team-bound token to this origin, and Web
   // Bluetooth needs a secure context anyway.
   FEST_PRINT_BASE_URL: z.string().url()
-    .refine((u) => { const url = URL.canParse(u) ? new URL(u) : null; return !url || url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname); },
+    .refine((u) => { const url = URL.canParse(u) ? new URL(u) : null; return !url || url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK_HOSTS.includes(url.hostname)); },
       'FEST_PRINT_BASE_URL must be https (or http on localhost)')
     .default('https://beer-api.ysilvestrov-ai.uk'),
 });
