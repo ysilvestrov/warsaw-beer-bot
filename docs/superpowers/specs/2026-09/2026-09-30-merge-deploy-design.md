@@ -42,7 +42,7 @@ no host credentials in GitHub.
 | D2 | The tag path is **deleted** (tags, `autodeploy-tag.yml`, the lockfile allowlist in the guard, drift episodes) | Keeping both: two deployers with different threat models sharing one `DEPLOYED_SHA` |
 | D3 | Dependabot qualification **stays**, but its only effect is auto-merge; the merge then deploys by the common path | — it already decides who may merge unattended; that is still a real decision |
 | D4 | Before every deploy: DB snapshot `pre` + trial migration of a **copy** of `pre` with the new build | Deploy blind and trust `/health` |
-| D5 | **Rollback window = 10 min** after restart. A failure inside it rolls back **code AND database** to `pre`, keeping a `post` snapshot for a human to reconcile | Code-only rollback: the old binary against a newer schema is exactly what #611's preflight forbids |
+| D5 | **Rollback window = 10 min** after restart. A failure inside it — the bot not healthy within **120 s** of the restart, **3 consecutive** failed `/health` polls, or a change in `NRestarts` — rolls back **code AND database** to `pre`, keeping a `post` snapshot for a human to reconcile (R6) | Code-only rollback: the old binary against a newer schema is exactly what #611's preflight forbids |
 | D6 | After the window a deploy is **settled**. Any later failure is an ordinary incident, not a rollback | Unbounded window: a crash at hour 3 is not evidence against the deploy, and the data loss grows with the window |
 | D7 | Holds come from **two independent sources**: path autodetection (the host computes it) and a `[deploy:hold]` title marker with a matching `deploy:hold` label | Label only: whoever merges does not see it. Paths only: `.env` keys and preflight steps have no path |
 | D8 | A hold is released **by a deploy**, not by editing labels: once `DEPLOYED_SHA` descends from the held commit, the hold is behind us | Unlabel to release: a second bookkeeping step that someone forgets, and the host would have to trust GitHub for it |
@@ -57,10 +57,10 @@ Every place where the system **records something as fact** and later reads it as
 | `DEPLOYED_SHA=X`: `/opt` holds the tree of X | `state.env`, written by `deploy.sh` | `deploy.sh` rsyncs a clean checkout of X; the deployer's clone is `git clean -xdff` before it (existing I5) | strong — unchanged from #435 |
 | "CI passed on X" | read, never stored | GitHub check-runs **on SHA X**: every run completed, none `failure`/`cancelled`/`timed_out`, and the required `ci` present with `success` | strong. The absence of `ci` means **wait**, never pass |
 | "X is held" | derived per tick, never stored | (a) paths from `diff(DEPLOYED_SHA, X)` matched by the hold list (computed locally), (b) any PR returned by `commits/<sha>/pulls` for a commit in `DEPLOYED_SHA..X` carries `deploy:hold` | (a) strong; (b) as strong as GitHub's API. If the API is unreachable, treat as **held** (fail closed) |
-| "the migration works on production data" | pre-deploy gate | new `migrate()` on a **copy** of `pre`, run twice (idempotence), then `PRAGMA foreign_key_check` and `PRAGMA integrity_check` empty | strong for crashes and constraint breaks; **silent wrong rewrites are NOT covered**. That still needs a human preflight, and such a PR must carry `[deploy:hold]` |
+| "the migration works on production data" | pre-deploy gate | new `migrate()` on a **copy** of `pre`, opened through the **clone's own `openDb`** (so `foreign_keys = ON`, as production, R1), run twice (idempotence), then `PRAGMA foreign_key_check` and `PRAGMA integrity_check` empty. The startup rewrites that run beside `migrate()` in `src/index.ts` (backfills, alias dedupe, ontap cleanup) are **not** trialled | strong for crashes and constraint breaks; **silent wrong rewrites are NOT covered**. That still needs a human preflight, and such a PR must carry `[deploy:hold]` |
 | "`pre` is a consistent copy of production at T" | snapshot file + sha256 | `VACUUM INTO` from a `mode=ro` connection: one read transaction, so one point in time (P1) | strong — measured under a concurrent writer and on the production file |
 | "restoring `pre` gives the old state, and Litestream does not replay stale WAL over it" | rollback | P2: litestream 0.5.11 (the production version) on a throwaway DB with a file replica | strong for the mechanism; measured once, small DB, file replica rather than R2 |
-| "the deploy is settled" | end of window, ✅ message | 10 min of `/health` ok **and** `NRestarts` of the unit unchanged since restart | medium: catches crash loops and hangs, not wrong answers. That is D6's accepted limit |
+| "the deploy is settled" | end of window, ✅ message | 10 min without 3 consecutive failed `/health` polls, **and** `NRestarts` read at least once and unchanged from its first successful read (R3). A window the tick did not watch to its end is **never** settled: it ends as ⚠️ unverified (R2) | medium: catches crash loops and hangs, not wrong answers. That is D6's accepted limit |
 | `LAST_FAILED_SHA=X` | `state.env` | written only after a failed gate or a rollback, before anything else | strong |
 
 ## The tick
@@ -93,13 +93,25 @@ names stay, so no re-arming is needed.
    `warsaw-beer-bot`. Write it as the bot user via the existing `bash -lc` rule (P3: no sudoers
    change). The snapshot is written in `journal_mode=delete`; that is harmless, because litestream
    and the bot's `openDb` both switch it to WAL (P2).
-5. **Trial migration** on a copy of `pre`: `node -e` against the clone's
-   `dist/storage/schema.js#migrate`, twice, then both pragmas. Record `schema_version` before/after in
-   the journal. Failure → ⛔ + `LAST_FAILED_SHA=X`, and delete the copy (keep `pre` until pruning).
-6. **Deploy**: `deploy.sh` from the clone, as today (`deploy_commit`). Record `DEPLOY_STARTED_S`.
-7. **Watch window** (10 min): poll `/health` every 10 s and `systemctl show -p NRestarts
-   warsaw-beer-bot`. Any failure → step 8. Clean window → `DEPLOYED_SHA=X`,
-   `PREVIOUS_SHA=<old>`, ✅ message listing the merged PR numbers in the range.
+5. **Trial migration** on a copy of `pre`: `wbb-trial-migrate` opens it with the clone's
+   `dist/storage/db.js#openDb` and runs `dist/storage/schema.js#migrate` twice, then both pragmas.
+   Record `schema_version` before/after in the journal. Failure → ⛔ + `LAST_FAILED_SHA=X`; delete the
+   copy **and** discard `pre` (R9: it recorded no deploy, and prune must not count it).
+6. **Deploy**: first record the window in state (`WINDOW_SHA=X`, `WINDOW_OLD=<old>`,
+   `WINDOW_PRE=<pre>`, `WINDOW_START=<now>`, R2), then `deploy.sh` from the clone with
+   `WBB_TICK_HOLDS_LOCK=1` (R4). `deploy.sh` itself records `DEPLOYED_SHA=X`.
+7. **Watch window** (10 min): wait up to 120 s for the first healthy `/health`, then poll `/health`
+   and `systemctl show -p NRestarts warsaw-beer-bot` every 10 s. Rollback (step 8) on 3 consecutive
+   failed polls or on a changed `NRestarts`. An unreadable `NRestarts` poll is neither a change nor a
+   pass; if no poll ever read it, the window ends ⚠️ unverified (R3). Clean window → `DEPLOYED_SHA=X`,
+   `PREVIOUS_SHA=<old>`, window cleared, ✅ message listing the merged PR numbers in the range.
+7a. **Interrupted window** (R2). A tick that finds `WINDOW_SHA` in state knows a previous tick died
+   inside the window (reboot, OOM, `TimeoutStartSec`, `systemctl stop`). If `DEPLOYED_SHA =
+   WINDOW_SHA` and the window has time left, it watches the **rest** of it and then settles or rolls
+   back to `WINDOW_OLD`. If the window is over, it marks `pre` as `-unverified-pre.db` (kept like a
+   rollback pair) and sends ⚠️ "X is live but its window was not watched to the end". If `DEPLOYED_SHA
+   ≠ WINDOW_SHA`, `deploy.sh` never finished: ⚠️ "deploy of X was interrupted before it completed".
+   In both cases the window is cleared and the ordinary tick continues.
 8. **Rollback** (only inside the window):
    1. record `LAST_FAILED_SHA=X` first (as C3 today);
    2. stop `warsaw-beer-bot`, then `litestream`;
@@ -108,21 +120,23 @@ names stay, so no re-arming is needed.
    4. as the bot user: verify `pre`'s sha256, copy it to a temp file next to `bot.db`, `mv -f` over
       `bot.db`, delete `-wal`/`-shm` (P3: atomic, no chown needed). Do **not** run `litestream reset`:
       P2 shows litestream detects the replaced file by itself;
-   5. `deploy_commit <old DEPLOYED_SHA>`, start `litestream`, start the bot, check health (single
-      60 s check, no second window);
+   5. start `litestream`, `deploy_commit <old>` (whose `deploy.sh` restarts the bot and re-records
+      `DEPLOYED_SHA=<old>`), check health (a single 120 s check, no second window);
    6. 🔥 message: the failing SHA and PRs, both snapshot paths, and the interval of writes that exist
       only in `post` (`pre` time → stop time). A human reconciles; nothing does it automatically.
       A third copy of the `post` state stays in R2's history: P2 restored it with
       `litestream restore -txid <before the replace>`.
    A failure inside the rollback → 🔥 ROLLBACK FAILED, as today, plus both snapshot paths.
 9. **Prune** after a *settled* deploy: keep the newest 3 `pre` snapshots of settled deploys. A
-   `pre`/`post` pair from a rollback is **never** deleted by the machine.
+   `pre`/`post` pair from a rollback, and an `-unverified-pre.db`, are **never** deleted by the
+   machine.
 
 ## Holds
 
 **Autodetected paths** (a list in the deployer, tested; changing it is itself a hold path):
 `deploy/sudoers.d/**`, `deploy/*.service` and `deploy/*.timer` except `deploy/warsaw-beer-bot.service`
-(which `deploy.sh` installs), `deploy/litestream.*`, `deploy/install-*.sh`. Changes to
+(which `deploy.sh` installs), `deploy/litestream.*`, `deploy/install-*.sh`, and
+**`deploy/rsync-filter`** (R5). Changes to
 `deploy/autodeploy*.sh`, `ships.sh`, `read-env.sh` and `installed-current.sh` are already caught by
 the staleness check, but they are listed as well, so that the PR-side check (below) warns the
 **merger** instead of only the host.
@@ -134,6 +148,10 @@ the staleness check, but they are listed as well, so that the PR-side check (bel
 Since the job is not required, the host does not rely on it. It exists so that whoever presses merge
 sees the hold in the title. `CLAUDE.md`/`AGENTS.md` gain the rule: a PR that needs a root step, an
 `.env` key or a preflight carries `[deploy:hold]`, and its body lists the steps.
+
+**Manual deploys and the tick exclude each other** (R4): `deploy.sh` takes the tick's lock
+(`~/.local/state/wbb-autodeploy/lock`, waiting up to 30 s) unless it was started by the tick itself
+(`WBB_TICK_HOLDS_LOCK=1`). While a tick watches a window, a manual deploy refuses and says until when.
 
 **Release**: the human does the steps on the host, then runs `bash deploy/deploy.sh` from the main
 checkout (it records `DEPLOYED_SHA`). The next tick finds no hold in the range and continues.
@@ -149,6 +167,7 @@ checkout (it records `DEPLOYED_SHA`). The next tick finds no hold in the range a
 | rollback done | 🔥 with snapshots and the loss interval | per event |
 | rollback failed | 🔥 ROLLBACK FAILED | per event |
 | stale deployer | ⚠️ as today | once a day |
+| window not watched to its end (R2) or `NRestarts` never readable (R3) | ⚠️ X is live but unverified; `pre` kept as `-unverified-pre.db` | per event |
 
 The drift episode (`DRIFT_SINCE`, 15-min grace, "✅ caught up") is deleted. Drift is now either work
 in progress, or one of the rows above, which say why it is not.
@@ -179,6 +198,40 @@ The PR implementing this is itself `[deploy:hold]`: it changes `deploy/*.sh` and
 merge a human runs `sudo bash deploy/install-autodeploy.sh` and `bash deploy/deploy.sh`. The first
 merge after that is the live test, **pre-registered**: before it, write down the expected journal
 lines and messages, as #527's live test did.
+
+## Amendments after the core review (2026-09-30)
+
+An end-to-end review of the implemented core (Tasks 1–5) found defects no test caught. Each one
+changed the design above as follows. The original wording is replaced inline; the reasons live here.
+
+- **R1 — the trial ran with foreign keys OFF, production runs them ON.** `openDb` sets
+  `foreign_keys = ON` before `migrate()`; the trial used a bare connection. A table rebuild with child
+  rows pointing at it passed the trial and would crash-loop production (reproduced by the reviewer).
+  The trial now opens the copy with the clone's own `openDb`.
+- **R2 — a tick killed inside the window settled silently.** `deploy.sh` records `DEPLOYED_SHA=X`
+  before the window, so the next tick saw "up to date": no ✅, no rollback, `pre` unmarked (prune
+  would delete it). The window is now state (`WINDOW_*`), and the next tick finishes or reports it
+  (step 7a).
+- **R3 — an unreadable `NRestarts` either disabled the restart check for the whole window (empty
+  baseline) or rolled back on one failed read.** Now the baseline is the first successful read, an
+  unreadable poll is skipped, and a window with no read at all is not settled.
+- **R4 — a manual `deploy.sh` during the window was not deferred to** (the comment said it was; the
+  lock never covered `deploy.sh`). The tick could restore the DB and redeploy `old` over a human's
+  release. `deploy.sh` now takes the same lock.
+- **R5 — `deploy/rsync-filter` was not a hold path.** Under #435 a narrowing filter was "ships →
+  BLOCKED, tell a human"; under merge-deploy the same union logic meant "ships → deploy". With
+  `--delete --delete-excluded`, a narrowing empties `/opt` or silently drops `scripts/`. The filter is
+  the operand of a root command pinned in sudoers, so it is held like sudoers.
+- **R6 — one failed `/health` probe (3 s timeout) rolled back the database.** A 3-s event-loop stall
+  would rewind production. Now 3 consecutive failures (~30 s). The startup limit rose from 60 s to
+  120 s, because the API listens only after `registerCommandMenu`, a Telegram call.
+- **R7 — "could not resolve API_PORT" was unreachable.** A failed read fell back to 3000. A failed
+  read now refuses the deploy; an empty value is still the application default 3000.
+- **R9 — a trial refusal left an unmarked `pre`** that prune counted as a settled deploy. It is now
+  discarded.
+- **Not changed (R8):** after a failed rollback, state says `DEPLOYED_SHA=<old>` while `/opt` may
+  hold X. The 🔥 message goes to a human in either case, and any "more correct" value would be a
+  guess.
 
 ## Probes (run 2026-09-30, before the plan)
 
