@@ -57,7 +57,7 @@ Every place where the system **records something as fact** and later reads it as
 | `DEPLOYED_SHA=X`: `/opt` holds the tree of X | `state.env`, written by `deploy.sh` | `deploy.sh` rsyncs a clean checkout of X; the deployer's clone is `git clean -xdff` before it (existing I5) | strong — unchanged from #435 |
 | "CI passed on X" | read, never stored | GitHub check-runs **on SHA X**: every run completed, none `failure`/`cancelled`/`timed_out`, and the required `ci` present with `success` | strong. The absence of `ci` means **wait**, never pass |
 | "X is held" | derived per tick, never stored | (a) paths from `diff(DEPLOYED_SHA, X)` matched by the hold list (computed locally), (b) any PR returned by `commits/<sha>/pulls` for a commit in `DEPLOYED_SHA..X` carries `deploy:hold` | (a) strong; (b) as strong as GitHub's API. If the API is unreachable, treat as **held** (fail closed) |
-| "the migration works on production data" | pre-deploy gate | new `migrate()` on a **copy** of `pre`, opened through the **clone's own `openDb`** (so `foreign_keys = ON`, as production, R1), run twice (idempotence), then `PRAGMA foreign_key_check` and `PRAGMA integrity_check` empty. The startup rewrites that run beside `migrate()` in `src/index.ts` (backfills, alias dedupe, ontap cleanup) are **not** trialled | strong for crashes and constraint breaks; **silent wrong rewrites are NOT covered**. That still needs a human preflight, and such a PR must carry `[deploy:hold]` |
+| "the migration works on production data" | pre-deploy gate | new `migrate()` on a **copy** of `pre`, opened through the **clone's own `openDb`**, exactly as production opens `bot.db` (R1), run twice (idempotence), then `PRAGMA foreign_key_check` and `PRAGMA integrity_check` empty. The startup rewrites that run beside `migrate()` in `src/index.ts` (backfills, alias dedupe, ontap cleanup) are **not** trialled | strong for crashes and constraint breaks; **silent wrong rewrites are NOT covered**. That still needs a human preflight, and such a PR must carry `[deploy:hold]` |
 | "`pre` is a consistent copy of production at T" | snapshot file + sha256 | `VACUUM INTO` from a `mode=ro` connection: one read transaction, so one point in time (P1) | strong — measured under a concurrent writer and on the production file |
 | "restoring `pre` gives the old state, and Litestream does not replay stale WAL over it" | rollback | P2: litestream 0.5.11 (the production version) on a throwaway DB with a file replica | strong for the mechanism; measured once, small DB, file replica rather than R2 |
 | "the deploy is settled" | end of window, ✅ message | 10 min without 3 consecutive failed `/health` polls, **and** `NRestarts` read at least once and unchanged from its first successful read (R3). A window the tick did not watch to its end is **never** settled: it ends as ⚠️ unverified (R2) | medium: catches crash loops and hangs, not wrong answers. That is D6's accepted limit |
@@ -204,10 +204,14 @@ lines and messages, as #527's live test did.
 An end-to-end review of the implemented core (Tasks 1–5) found defects no test caught. Each one
 changed the design above as follows. The original wording is replaced inline; the reasons live here.
 
-- **R1 — the trial ran with foreign keys OFF, production runs them ON.** `openDb` sets
-  `foreign_keys = ON` before `migrate()`; the trial used a bare connection. A table rebuild with child
-  rows pointing at it passed the trial and would crash-loop production (reproduced by the reviewer).
-  The trial now opens the copy with the clone's own `openDb`.
+- **R1 — the trial opened the copy differently from production.** The reviewer's claim was that it
+  ran with foreign keys OFF, so a table rebuild with referencing rows would pass the trial and
+  crash-loop production. **That claim is REFUTED:** better-sqlite3 is compiled with
+  `SQLITE_DEFAULT_FOREIGN_KEYS=1` (`deps/defines.gypi`), so a bare connection already enforces them;
+  the test "a table rebuild with referencing rows fails" was green before the change. The reviewer's
+  probe must have turned them off explicitly. The change stays for fidelity rather than for that
+  defect: the trial now opens the copy with the clone's own `openDb`, so any pragma production sets
+  there (WAL, `busy_timeout`, foreign keys, and whatever is added later) applies to the trial too.
 - **R2 — a tick killed inside the window settled silently.** `deploy.sh` records `DEPLOYED_SHA=X`
   before the window, so the next tick saw "up to date": no ✅, no rollback, `pre` unmarked (prune
   would delete it). The window is now state (`WINDOW_*`), and the next tick finishes or reports it

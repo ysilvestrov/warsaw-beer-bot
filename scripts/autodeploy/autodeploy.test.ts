@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
  */
 const SCRIPT = resolve(__dirname, '../../deploy/autodeploy.sh');
 const SHIPS = resolve(__dirname, '../../deploy/ships.sh');
+const RECORD_DEPLOYED = resolve(__dirname, '../../deploy/record-deployed.sh');
 const QUIET_S = 600;
 
 const REAL_FILTER = [
@@ -150,7 +151,15 @@ function stubs(w: World): Record<string, string> {
     WBB_API_PORT_CMD: stub(b, 'port', 'echo 3000'),
     WBB_BUILD_CMD: stub(b, 'build', `echo "build $(git rev-parse HEAD)" >> "${ev}"`),
     WBB_AUDIT_CMD: stub(b, 'audit', `echo audit >> "${ev}"`),
-    WBB_DEPLOY_CMD: stub(b, 'deploy', `echo "deploy $(git rev-parse HEAD)" >> "${ev}"; cat "${clk}" > "${b}/deployed_at"`),
+    // Like the real deploy.sh: records DEPLOYED_SHA itself (so a stale
+    // in-memory value in the tick is visible), and complains loudly if the
+    // tick did not tell it that the lock is already held (R4).
+    WBB_DEPLOY_CMD: stub(b, 'deploy', [
+      `[ "\${WBB_TICK_HOLDS_LOCK:-}" = 1 ] || echo "deploy WITHOUT the lock flag" >> "${ev}"`,
+      `echo "deploy $(git rev-parse HEAD)" >> "${ev}"`,
+      `cat "${clk}" > "${b}/deployed_at"`,
+      `"${RECORD_DEPLOYED}" "$(git rev-parse HEAD)" >/dev/null`,
+    ].join('\n')),
     WBB_HEALTH_CMD: stub(b, 'health', 'exit 0'),
     WBB_RESTARTS_CMD: stub(b, 'restarts', 'echo 0'),
     WBB_CHECKS_CMD: stub(b, 'checks', `echo "checks $1" >> "${ev}"; printf 'ci\\tcompleted\\tsuccess\\n'`),
@@ -162,6 +171,8 @@ function stubs(w: World): Record<string, string> {
     WBB_MARK_CMD: stub(b, 'mark', `echo "mark $(basename "$1")" >> "${ev}"; echo "\${1%-pre.db}-rollback-pre.db"`),
     WBB_POST_CMD: stub(b, 'post', `echo "post $(basename "$1")" >> "${ev}"`),
     WBB_RESTORE_CMD: stub(b, 'restore', `echo "restore $(basename "$1")" >> "${ev}"`),
+    WBB_MARK_UNVERIFIED_CMD: stub(b, 'mark-unverified', `echo "mark-unverified $(basename "$1")" >> "${ev}"; echo "\${1%-pre.db}-unverified-pre.db"`),
+    WBB_DISCARD_CMD: stub(b, 'discard', `echo "discard $(basename "$1")" >> "${ev}"`),
     WBB_SNAPSHOT_DIR: join(w.home, 'snapshots'),
     WBB_INSTALLED_CHECK: stub(b, 'installed', 'echo "CURRENT: stub"; exit 0'),
     WBB_SHIPS: SHIPS,
@@ -298,12 +309,13 @@ describe('merge-deploy: shipping classification', () => {
     expect(notes(w)[0]).toMatch(/^⚠️ merge-deploy cannot tell whether production is behind main:/);
   });
 
-  it('still deploys a change that removes paths from the shipping filter', () => {
+  it('holds a change that narrows the shipping filter (R5) instead of deploying it', () => {
     const w = world();
-    const x = push(w, { 'deploy/rsync-filter': '- *\n' }, 'narrow filter');
+    push(w, { 'deploy/rsync-filter': '- *\n' }, 'narrow filter');
     ready(w);
     tick(w);
-    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)[0]).toContain('• path deploy/rsync-filter needs a human step');
   });
 });
 
@@ -411,6 +423,7 @@ describe('merge-deploy: holds', () => {
     ['deploy/trial-migrate.cjs', true],
     ['deploy/warsaw-beer-bot.service', false],
     ['deploy/deploy.sh', false],
+    ['deploy/rsync-filter', true],
     ['src/x.ts', false],
   ])('a change to %s holds the deploy: %s', (path, held) => {
     const w = world();
@@ -626,21 +639,21 @@ describe('merge-deploy: snapshot, trial migration, window', () => {
     expect(notes(w)[0]).toMatch(/^⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying [0-9a-f]{7}\.\ndisk full/);
   });
 
-  it('rolls back on a failure first seen at the last poll inside the window (590 s)', () => {
+  it('rolls back when the third failed poll in a row is the last one inside the window (570–590 s)', () => {
     const w = world();
     const x = push(w, { 'src/a.ts': '2' }, 'feat');
-    const health = healthFailingFrom(w, 590);
+    const health = healthFailingFrom(w, 570);
     ready(w, { WBB_HEALTH_CMD: health });
     const r = tick(w, { WBB_HEALTH_CMD: health });
     expect(r.code).toBe(2);
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`, `deploy ${w.base}`]);
-    expect(notes(w)[0]).toMatch(/failed inside the rollback window: health check failed at \+590s/);
+    expect(notes(w)[0]).toMatch(/failed inside the rollback window: health check failed 3 times in a row \(last at \+590s\)/);
   });
 
-  it('settles when the failure only starts at 600 s — after the window', () => {
+  it('settles when only two failed polls fit inside the window (580–590 s)', () => {
     const w = world();
     const x = push(w, { 'src/a.ts': '2' }, 'feat');
-    const health = healthFailingFrom(w, 600);
+    const health = healthFailingFrom(w, 580);
     ready(w, { WBB_HEALTH_CMD: health });
     const r = tick(w, { WBB_HEALTH_CMD: health });
     expect(r.code).toBe(0);
@@ -717,7 +730,7 @@ describe('merge-deploy: rollback restores code AND database', () => {
     const r = tick(w, { WBB_HEALTH_CMD: health });
     expect(r.code).toBe(2);
     expect(events(w).map(stamp)).toContain(`restore STAMP-${short(x)}-rollback-pre.db`);
-    expect(notes(w)[0]).toMatch(/not healthy within 60s/);
+    expect(notes(w)[0]).toMatch(/not healthy within 120s/);
   });
 
   it('stops at a failed restore, says ROLLBACK FAILED with both paths, and deploys nothing more', () => {
@@ -746,5 +759,170 @@ describe('merge-deploy: rollback restores code AND database', () => {
     expect(r.code).toBe(3);
     expect(readState(w).LAST_FAILED_SHA).toBe(x);
     expect(notes(w)[notes(w).length - 1]).toMatch(/^🔥 ROLLBACK FAILED at: stop warsaw-beer-bot\./);
+  });
+});
+
+describe('merge-deploy: review fixes R2–R9', () => {
+  function healthFailingFrom(w: World, from: number): string {
+    return stub(w.bin, `health-from-${from}`,
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( now - d )) -lt ${from} ]`);
+  }
+  const stamp = (e: string) => e.replace(/\d{8}T\d{6}Z/, 'STAMP');
+  /** A stub that answers the Nth call (1-based) from `answers`, `exit 1` for 'X'. */
+  function sequence(w: World, name: string, answers: string[], rest: string): string {
+    const n = join(w.bin, `${name}.n`);
+    const cases = answers.map((a, i) => `${i + 1}) ${a === 'X' ? 'exit 1' : `echo ${a}`} ;;`).join(' ');
+    return stub(w.bin, name,
+      `c=$(( $(cat "${n}" 2>/dev/null || echo 0) + 1 )); echo "$c" > "${n}"; case "$c" in ${cases} *) echo ${rest} ;; esac`);
+  }
+
+  it('R6: a single failed poll inside the window does not roll back', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const blip = stub(w.bin, 'health-blip',
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( now - d )) -ne 10 ]`);
+    ready(w, { WBB_HEALTH_CMD: blip });
+    const r = tick(w, { WBB_HEALTH_CMD: blip });
+    expect(r.code).toBe(0);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+  });
+
+  it('R4: the tick tells deploy.sh that it already holds the lock, on deploy and on rollback', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    ready(w, { WBB_HEALTH_CMD: health });
+    tick(w, { WBB_HEALTH_CMD: health });
+    expect(events(w).filter((e) => e.startsWith('deploy ')).length).toBe(2);
+    expect(events(w)).not.toContain('deploy WITHOUT the lock flag');
+  });
+
+  it('R3: a baseline read only after a failed first read still catches a restart', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const restarts = sequence(w, 'restarts-late', ['X', '1', '1'], '2');
+    ready(w, { WBB_RESTARTS_CMD: restarts });
+    const r = tick(w, { WBB_RESTARTS_CMD: restarts });
+    expect(r.code).toBe(2);
+    expect(notes(w)[0]).toMatch(/service restarted \(NRestarts 1 -> 2\) at \+30s/);
+  });
+
+  it('R3: one unreadable poll in the middle is neither a restart nor a failure', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const restarts = sequence(w, 'restarts-gap', ['0', '0', '0', '0', '0', 'X'], '0');
+    ready(w, { WBB_RESTARTS_CMD: restarts });
+    const r = tick(w, { WBB_RESTARTS_CMD: restarts });
+    expect(r.code).toBe(0);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+  });
+
+  it('R3: a window in which NRestarts was never readable ends unverified, keeping pre', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const restarts = stub(w.bin, 'restarts-dead', 'exit 1');
+    ready(w, { WBB_RESTARTS_CMD: restarts });
+    const r = tick(w, { WBB_RESTARTS_CMD: restarts });
+    expect(r.code).toBe(0);
+    expect(events(w).map(stamp).slice(-1)).toEqual([`mark-unverified STAMP-${short(x)}-pre.db`]);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+    expect(readState(w).PREVIOUS_SHA).toBe(w.base);
+    expect(notes(w)[0]).toMatch(new RegExp(`^⚠️ merge-deploy ${short(x)} is live but UNVERIFIED: NRestarts could not be read once during the window\\. Nothing was rolled back\\.`));
+  });
+
+  it('R2: a tick killed inside the window leaves the window in state, and the next tick finishes it', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    // Kills the tick itself (its parent) once, at +100 s.
+    const killer = stub(w.bin, 'health-killer', [
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at")`,
+      `if [ $(( now - d )) -ge 100 ] && [ ! -f "${w.bin}/killed" ]; then touch "${w.bin}/killed"; kill -9 $PPID; fi`,
+      'exit 0',
+    ].join('\n'));
+    ready(w, { WBB_HEALTH_CMD: killer });
+    const dead = tick(w, { WBB_HEALTH_CMD: killer });
+    expect(dead.code).toBe(null);
+    expect(readState(w).WINDOW_SHA).toBe(x);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+    expect(notes(w)).toEqual([]);
+
+    const r = tick(w, { WBB_HEALTH_CMD: killer });
+    expect(r.code).toBe(0);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+    expect(readState(w).PREVIOUS_SHA).toBe(w.base);
+    expect(readState(w).WINDOW_SHA).toBe(undefined);
+    expect(notes(w)).toEqual([`✅ merge-deploy ${short(x)} is live and settled.`]);
+  });
+
+  it('R2: a window found after it would have ended is reported unverified, not settled', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    seedState(w, {
+      DEPLOYED_SHA: x, PREVIOUS_SHA: '', MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000',
+      WINDOW_SHA: x, WINDOW_OLD: w.base, WINDOW_PRE: '/s/20260930T120000Z-abcdef0-pre.db',
+      WINDOW_PRE_T: '12:00:00', WINDOW_START: '99000',
+    });
+    const r = tick(w);
+    expect(r.code).toBe(0);
+    expect(events(w)).toEqual(['mark-unverified 20260930T120000Z-abcdef0-pre.db']);
+    expect(readState(w)).toEqual({ DEPLOYED_SHA: x, PREVIOUS_SHA: w.base, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000' });
+    expect(notes(w)[0]).toMatch(/is live but UNVERIFIED: the tick that deployed it died inside its window\./);
+  });
+
+  it('R2: a deploy interrupted before deploy.sh finished is reported, cleared, and redeployed', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    seedState(w, {
+      DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', MAIN_SEEN_SHA: x, MAIN_SEEN_S: '99000',
+      WINDOW_SHA: x, WINDOW_OLD: w.base, WINDOW_PRE: '/s/20260930T120000Z-abcdef0-pre.db', WINDOW_PRE_T: '12:00:00',
+    });
+    const r = tick(w);
+    expect(r.code).toBe(0);
+    expect(notes(w)[0]).toMatch(/^⚠️ merge-deploy: the deploy of [0-9a-f]{7} was interrupted before deploy\.sh completed\./);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+    expect(readState(w).WINDOW_SHA).toBe(undefined);
+  });
+
+  it('R7: a failed API_PORT read refuses the deploy instead of guessing 3000', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const readEnv = stub(w.bin, 'read-env-broken', 'exit 1');
+    const over = { WBB_API_PORT_CMD: '', WBB_READ_ENV_CMD: readEnv };
+    ready(w, over);
+    const r = tick(w, over);
+    expect(r.code).toBe(1);
+    expect(events(w).some((e) => e.startsWith('deploy '))).toBe(false);
+    expect(notes(w)[0]).toMatch(/could not resolve API_PORT/);
+  });
+
+  it('R9: a trial refusal discards its pre snapshot', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const trial = stub(w.bin, 'trial-red', 'echo "TRIAL FAILED: boom"; exit 1');
+    ready(w, { WBB_TRIAL_CMD: trial });
+    tick(w, { WBB_TRIAL_CMD: trial });
+    expect(events(w).map(stamp).slice(-1)).toEqual([`discard STAMP-${short(x)}-pre.db`]);
+  });
+
+  it('a failed health check after the rollback is a ROLLBACK FAILED, not a success', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const down = stub(w.bin, 'health-down', 'exit 1');
+    ready(w, { WBB_HEALTH_CMD: down });
+    const r = tick(w, { WBB_HEALTH_CMD: down });
+    expect(r.code).toBe(3);
+    expect(notes(w)[notes(w).length - 1]).toMatch(/^🔥 ROLLBACK FAILED at: health after the rollback\./);
+  });
+
+  it('after a completed rollback, state says the old commit again', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    ready(w, { WBB_HEALTH_CMD: health });
+    tick(w, { WBB_HEALTH_CMD: health });
+    // The stub deploy recorded x first (as deploy.sh does), so this is a real reset.
+    expect(readState(w)).toEqual({
+      DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', LAST_FAILED_SHA: x, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000',
+    });
   });
 });

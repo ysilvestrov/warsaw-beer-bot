@@ -228,3 +228,67 @@ describe('db-snapshot.sh usage', () => {
     expect(snap('frobnicate').code).toBe(64);
   });
 });
+
+describe('db-snapshot.sh mark-unverified (R2/R3)', () => {
+  it('renames an unwatched deploy\'s snapshot so prune keeps it', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const pre = join(dir, '20260930T120000Z-abc1234-pre.db');
+    writeFileSync(pre, 'db');
+    writeFileSync(`${pre}.sha256`, 'h\n');
+    writeFileSync(join(dir, '20260930T130000Z-bbbbbbb-pre.db'), 'newer');
+    writeFileSync(join(dir, '20260930T130000Z-bbbbbbb-pre.db.sha256'), 'h\n');
+
+    const r = snap('mark-unverified', pre);
+    const pruned = snap('prune', dir, '1');
+
+    expect(r.code).toBe(0);
+    expect(r.out.trim()).toBe(join(dir, '20260930T120000Z-abc1234-unverified-pre.db'));
+    expect(pruned.code).toBe(0);
+    expect(readdirSync(dir).sort()).toEqual([
+      '20260930T120000Z-abc1234-unverified-pre.db',
+      '20260930T120000Z-abc1234-unverified-pre.db.sha256',
+      '20260930T130000Z-bbbbbbb-pre.db',
+      '20260930T130000Z-bbbbbbb-pre.db.sha256',
+    ]);
+  });
+
+  it('refuses to re-mark a rollback snapshot', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const marked = join(dir, '20260930T120000Z-abc1234-rollback-pre.db');
+    writeFileSync(marked, 'db');
+    writeFileSync(`${marked}.sha256`, 'h\n');
+
+    const r = snap('mark-unverified', marked);
+
+    expect(r.code).toBe(1);
+    expect(readdirSync(dir).sort()).toEqual([
+      '20260930T120000Z-abc1234-rollback-pre.db',
+      '20260930T120000Z-abc1234-rollback-pre.db.sha256',
+    ]);
+  });
+});
+
+describe('db-snapshot.sh discard (R9)', () => {
+  it('removes an unmarked pre snapshot and its checksum', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const pre = join(dir, '20260930T120000Z-abc1234-pre.db');
+    writeFileSync(pre, 'db');
+    writeFileSync(`${pre}.sha256`, 'h\n');
+
+    const r = snap('discard', pre);
+
+    expect(r.code).toBe(0);
+    expect(readdirSync(dir)).toEqual([]);
+  });
+
+  it('never discards a marked snapshot', () => {
+    const dir = makeTempDirectory('wbb-snap-');
+    const marked = join(dir, '20260930T120000Z-abc1234-rollback-pre.db');
+    writeFileSync(marked, 'db');
+
+    const r = snap('discard', marked);
+
+    expect(r.code).toBe(1);
+    expect(readdirSync(dir)).toEqual(['20260930T120000Z-abc1234-rollback-pre.db']);
+  });
+});

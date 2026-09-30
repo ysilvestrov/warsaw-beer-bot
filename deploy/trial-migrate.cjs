@@ -21,11 +21,13 @@ function main(argv) {
   const [clone, dbPath] = argv;
   let db;
   try {
-    // Both from the CLONE: the build under judgement, and the driver it ships
-    // with. Inside the try, so a missing build is a TRIAL FAILED, not a crash.
-    const Database = require(path.join(clone, 'node_modules', 'better-sqlite3'));
+    // Everything from the CLONE: the build under judgement opens the copy
+    // exactly as production opens bot.db (its own openDb: WAL, busy_timeout,
+    // foreign_keys), then migrates it. Inside the try, so a missing build is a
+    // TRIAL FAILED, not a crash.
+    const { openDb } = require(path.join(clone, 'dist', 'storage', 'db.js'));
     const { migrate } = require(path.join(clone, 'dist', 'storage', 'schema.js'));
-    db = new Database(dbPath);
+    db = openDb(dbPath);
     const version = () => db.prepare('SELECT MAX(version) AS v FROM schema_version').get().v;
     const before = version();
     migrate(db);

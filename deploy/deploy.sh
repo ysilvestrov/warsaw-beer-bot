@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Merge-deploy R4: a manual deploy and the merge-deploy tick exclude each other
+# through the tick's own lock. While a tick watches its 10-minute rollback
+# window, a manual deploy here would be undone by that tick's rollback (code
+# AND database). The tick passes WBB_TICK_HOLDS_LOCK=1 to the deploy.sh it
+# runs itself, because it already holds the lock.
+if [ -z "${WBB_TICK_HOLDS_LOCK:-}" ]; then
+  LOCK_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
+  mkdir -p "$LOCK_DIR"
+  exec 8>"$LOCK_DIR/lock"
+  if ! flock -w "${WBB_LOCK_WAIT_S:-30}" 8; then
+    echo "ERROR: a merge-deploy tick holds $LOCK_DIR/lock — it is probably watching a rollback window (up to ~12 min after its deploy). Retry when it ends. 'touch $LOCK_DIR/PAUSED' stops the NEXT tick, not the running one." >&2
+    exit 1
+  fi
+fi
+
 APP=/opt/warsaw-beer-bot
 DATA=/var/lib/warsaw-beer-bot
 ENVDIR=/etc/warsaw-beer-bot

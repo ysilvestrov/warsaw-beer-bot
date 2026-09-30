@@ -1,5 +1,5 @@
 [Unit]
-Description=#435 check for a qualified dependency fix to deploy
+Description=merge-deploy: check origin/main every 5 minutes
 
 [Timer]
 OnBootSec=5min

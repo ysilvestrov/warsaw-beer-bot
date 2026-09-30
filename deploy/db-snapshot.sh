@@ -10,13 +10,15 @@
 #   db-snapshot.sh snapshot <db> <out.db>      VACUUM INTO + <out.db>.sha256
 #   db-snapshot.sh post <db> <out-dir>         file copy of db, -wal, -shm (bot STOPPED)
 #   db-snapshot.sh mark-rollback <x-pre.db>    rename to x-rollback-pre.db, print it
+#   db-snapshot.sh mark-unverified <x-pre.db>  rename to x-unverified-pre.db, print it
+#   db-snapshot.sh discard <x-pre.db>          delete an UNMARKED pre snapshot
 #   db-snapshot.sh restore <snap.db> <db>      verify sha256, atomic replace, drop -wal/-shm
 #   db-snapshot.sh prune <dir> <keep>          keep the newest <keep> settled *-pre.db
 #
 # Exit: 0 ok, 1 refused or failed (reason on stderr), 64 usage.
 set -euo pipefail
 
-usage() { echo "usage: db-snapshot.sh snapshot|post|mark-rollback|restore|prune ..." >&2; exit 64; }
+usage() { echo "usage: db-snapshot.sh snapshot|post|mark-rollback|mark-unverified|discard|restore|prune ..." >&2; exit 64; }
 die() { echo "db-snapshot: $*" >&2; exit 1; }
 
 # P1: VACUUM INTO, never the backup API. The backup API restarts on every
@@ -56,21 +58,35 @@ cmd_post() {
   echo "$dir"
 }
 
-# Marked BEFORE the restore, so a rollback that dies half-way never leaves an
-# unmarked pre snapshot for prune to delete.
-cmd_mark() {
-  local pre="$1" marked
-  case "$pre" in
-    *-rollback-pre.db) die "already marked: $pre" ;;
-    *-pre.db) ;;
-    *) die "not a pre snapshot: $pre" ;;
+# An unmarked *-pre.db is what prune may delete. A marked one is evidence a
+# human has to look at: `rollback` (marked BEFORE the restore, so a rollback
+# that dies half-way never leaves it unmarked) or `unverified` (R2/R3: the
+# deploy is live, but nobody watched its window to the end).
+is_unmarked_pre() {
+  case "$1" in
+    *-rollback-pre.db|*-unverified-pre.db) return 1 ;;
+    *-pre.db) return 0 ;;
+    *) return 1 ;;
   esac
+}
+
+cmd_mark() {
+  local pre="$1" tag="$2" marked
+  is_unmarked_pre "$pre" || die "not an unmarked pre snapshot: $pre"
   [ -f "$pre" ] || die "no snapshot at $pre"
   [ -f "$pre.sha256" ] || die "no checksum for $pre"
-  marked="${pre%-pre.db}-rollback-pre.db"
+  marked="${pre%-pre.db}-${tag}-pre.db"
   mv "$pre" "$marked"
   mv "$pre.sha256" "$marked.sha256"
   echo "$marked"
+}
+
+# R9: a snapshot taken for a deploy that never happened (trial refusal) is
+# not a settled deploy; prune must not count it among the newest N.
+cmd_discard() {
+  is_unmarked_pre "$1" || die "refusing to discard anything but an unmarked pre snapshot: $1"
+  rm -f "$1" "$1.sha256"
+  echo "discarded $1"
 }
 
 # P2: litestream picks a replaced file up by itself (no `litestream reset`),
@@ -98,7 +114,7 @@ cmd_prune() {
   case "$keep" in ''|*[!0-9]*) die "keep must be a non-negative integer: $keep" ;; esac
   [ "$keep" -ge 1 ] || die "keep must be at least 1"
   [ -d "$dir" ] || return 0
-  listing=$(find "$dir" -maxdepth 1 -type f -name '*-pre.db' ! -name '*-rollback-pre.db' | LC_ALL=C sort) \
+  listing=$(find "$dir" -maxdepth 1 -type f -name '*-pre.db' ! -name '*-rollback-pre.db' ! -name '*-unverified-pre.db' | LC_ALL=C sort) \
     || die "cannot list $dir"
   while IFS= read -r f; do
     if [ -n "$f" ]; then all+=("$f"); fi
@@ -118,7 +134,9 @@ shift
 case "$sub" in
   snapshot)      [ $# -eq 2 ] || usage; cmd_snapshot "$@" ;;
   post)          [ $# -eq 2 ] || usage; cmd_post "$@" ;;
-  mark-rollback) [ $# -eq 1 ] || usage; cmd_mark "$@" ;;
+  mark-rollback)   [ $# -eq 1 ] || usage; cmd_mark "$1" rollback ;;
+  mark-unverified) [ $# -eq 1 ] || usage; cmd_mark "$1" unverified ;;
+  discard)         [ $# -eq 1 ] || usage; cmd_discard "$1" ;;
   restore)       [ $# -eq 2 ] || usage; cmd_restore "$@" ;;
   prune)         [ $# -eq 2 ] || usage; cmd_prune "$@" ;;
   *)             usage ;;
