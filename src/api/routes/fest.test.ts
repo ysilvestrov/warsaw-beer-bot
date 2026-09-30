@@ -122,6 +122,31 @@ describe('POST /fest/menu', () => {
     expect(res.status).toBe(403);
   });
 
+  it('files the menu under the fest whose menu venue is the page, among the caller\'s fests', async () => {
+    const { db, app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    // An earlier-starting fest the member also belongs to, with a different menu venue.
+    db.prepare(`INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('early', 'Early', 555, 4, '[]')`).run();
+    const early = getFestBySlug(db, 'early')!;
+    db.prepare(`INSERT INTO fest_sessions VALUES (?, 1, '2026-10-01T10:00:00.000Z', '2026-10-01T20:00:00.000Z')`).run(early.id);
+    addMember(db, createTeam(db, early.id, -300, '2026-09-30T00:00:00.000Z').id, MEMBER, 'MM', '2026-09-30T00:00:00.000Z');
+    const res = await post(app, '/fest/menu', 'member-token', { html: MENU });
+    expect(res.status).toBe(200);
+    const counts = db.prepare('SELECT fest_id, COUNT(*) AS n FROM fest_menu GROUP BY fest_id').all();
+    expect(counts).toEqual([{ fest_id: getFestBySlug(db, 'wfp22')!.id, n: 4 }]);
+  });
+
+  it('refuses a menu page that names no fest venue of the caller', async () => {
+    const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    const res = await post(app, '/fest/menu', 'member-token', { html: MENU.replace('/11142155"', '/999"') });
+    expect([res.status, await res.json()]).toEqual([400, { error: 'unknown_menu_venue' }]);
+  });
+
+  it('answers 502 for a Cloudflare menu page', async () => {
+    const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    const res = await post(app, '/fest/menu', 'member-token', { html: '<title>Just a moment...</title>' });
+    expect([res.status, await res.json()]).toEqual([502, { error: 'blocked' }]);
+  });
+
   it('has no fest to write to once the last window has closed', async () => {
     const { app } = setup(new Date('2026-10-17T22:31:00.000Z'));
     const res = await post(app, '/fest/menu', 'member-token', { html: MENU });

@@ -5,7 +5,9 @@ import type { ApiDeps, ApiEnv } from '../types';
 import { CHECKINS_HTML_LIMIT_CHARS, CURSOR_LIMIT_CHARS, payloadSizeValidationHook } from '../middleware/payload-limit';
 import { activeFests, currentOrNextFests, festVenues } from '../../storage/fests';
 import { isFestMember } from '../../storage/fest_teams';
-import { BlockedPageError, ingestFeedPage, ingestMenuPage } from '../../jobs/fest-ingest';
+import { BlockedPageError, applyMenu, ingestFeedPage } from '../../jobs/fest-ingest';
+import { isBlockPage } from '../../sources/untappd/block';
+import { parseVenueMenu } from '../../sources/untappd/venue-menu';
 
 const FeedBody = z.object({
   venueId: z.number().int().positive(),
@@ -53,18 +55,19 @@ export function festRoute(app: Hono<ApiEnv>, deps: ApiDeps, clock: () => Date = 
     }
   });
 
-  // The menu is read during the run-up too, so it targets the fest being polled now or the next one.
+  // The menu is read during the run-up too, so it targets a fest being polled now or still ahead —
+  // the one whose menu venue is the page's own (canonical link) and whose team the caller is in.
   app.post('/fest/menu', zValidator('json', MenuBody, payloadSizeValidationHook(deps) as never), (c) => {
     const now = clock();
+    const html = c.req.valid('json').html;
+    if (isBlockPage(html)) return c.json({ error: 'blocked' }, 502);
     const fests = currentOrNextFests(deps.db, now);
     if (fests.length === 0) return c.json({ error: 'no_fest' }, 404);
-    const fest = fests.find((f) => isFestMember(deps.db, f.id, c.get('telegramId')!));
-    if (!fest) return c.json({ error: 'not_team_member' }, 403);
-    try {
-      return c.json(ingestMenuPage(deps.db, { festId: fest.id, html: c.req.valid('json').html, now: now.toISOString() }));
-    } catch (e) {
-      if (e instanceof BlockedPageError) return c.json({ error: 'blocked' }, 502);
-      throw e;
-    }
+    const mine = fests.filter((f) => isFestMember(deps.db, f.id, c.get('telegramId')!));
+    if (mine.length === 0) return c.json({ error: 'not_team_member' }, 403);
+    const menu = parseVenueMenu(html);
+    const fest = mine.find((f) => f.menu_venue_id === menu.venueId);
+    if (!fest) return c.json({ error: 'unknown_menu_venue' }, 400);
+    return c.json(applyMenu(deps.db, fest.id, menu, now.toISOString()));
   });
 }
