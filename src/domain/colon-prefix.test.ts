@@ -62,15 +62,22 @@ describe('isColonPrefixTailMatch', () => {
     expect(isColonPrefixTailMatch('Pils', 'Classic: °')).toBe(false);
   });
 
-  it('rejects candidates with empty prefix before colon', () => {
+  it('rejects candidates with empty prefix before colon or intermediate empty prefix', () => {
     expect(extractColonTails(': Pils')).toEqual([]);
     expect(extractColonTails('   : Pils')).toEqual([]);
+    expect(extractColonTails('Series: : Pils')).toEqual([]);
+    expect(extractColonTails('Series: Pils: ')).toEqual([]);
     expect(isColonPrefixTailMatch('Pils', ': Pils')).toBe(false);
+    expect(isColonPrefixTailMatch('Pils', 'Series: : Pils')).toBe(false);
   });
 
-  it('rejects timestamps and codes that appear after series prefix', () => {
+  it('rejects timestamps and codes that appear after series prefix or nested behind subseries', () => {
     expect(extractColonTails('Series: 6:15')).toEqual([]);
     expect(extractColonTails('Series: 7:45 Escalation')).toEqual([]);
+    expect(extractColonTails('Series: AB:20')).toEqual([]);
+    expect(extractColonTails('Series: Subseries: 7:45')).toEqual([]);
     expect(isColonPrefixTailMatch('6:15', 'Series: 6:15')).toBe(false);
+    expect(isColonPrefixTailMatch('AB:20', 'Series: AB:20')).toBe(false);
+    expect(isColonPrefixTailMatch('Subseries: 7:45', 'Series: Subseries: 7:45')).toBe(false);
   });
 });
