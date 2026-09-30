@@ -237,8 +237,20 @@ zod-схему з мінімальним набором полів (`checkin_id`
   - На сервері `redirectToAuthorization` **не** відкриває браузер: кидає помилку. Refresh, що не пройшов →
     `UnauthorizedError` → breaker `job_state.fest_mcp_open_until` + алерт адміну «перезапусти
     fest-mcp-login». Пасивне закриття тим часом бере HTML-фолбек нижче.
-  - **Не доведено** (проба за брифом `brief-codex-mcp-auth`): що сервер віддає стандартні метадані й
-    дозволяє DCR; що вхід процесу бачить той самий прив'язаний Untappd; скільки живе refresh token.
+  - **Проба 2026-09-30 (ноут, SDK 1.30.0). Доведено:**
+    - сервер віддає стандартні метадані: `oauth-protected-resource` (зокрема `/mcp`),
+      `oauth-authorization-server`; `401` на `/mcp` з
+      `WWW-Authenticate: Bearer resource_metadata=…`;
+    - DCR (`/oauth/register`), PKCE S256, `authorization_code` + `refresh_token`;
+    - вхід власника через Google дав ту саму MCP-ідентичність: `get_my_friend_feed` повернув
+      чекін друга (`relationship: friends`);
+    - access token живе 3600 с, `refresh_token` видається.
+  - **Scope — лише `untappd:read`.** SDK 1.30.0 за замовчуванням просить усі `scopes_supported`
+    (`untappd:read untappd:write`) і ставить їх вище за `clientMetadata.scope`. Провайдер бота
+    звужує scope в authorization URL до `untappd:read`: бот не має права чекінити чи тостити від
+    імені власника.
+  - **Ще не доведено:** оновлення токена за refresh token після закінчення години (третій
+    запуск проби) і термін життя refresh token.
     До доведення модуль вимкнено (`FEST_MCP_URL` відсутній).
 
 ### 4.6 Меню — `jobs/fest-menu.ts`
