@@ -211,6 +211,15 @@ export interface Messages {
   'fest.status_unknown': string;
   'fest.section_gone': string;
   'fest.lines_more': string;
+  'fest.take_usage': string;
+  'fest.take_none': string;
+  'fest.take_pick': string;
+  'fest.take_button': string;
+  'fest.taken': string;
+  'fest.queue_header': string;
+  'fest.queue_empty': string;
+  'fest.queue_line': string;
+  'fest.queue_link': string;
   'fest.history_header': string;
   'fest.history_line': string;
   'fest.history_unknown': string;

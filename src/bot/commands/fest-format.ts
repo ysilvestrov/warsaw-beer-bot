@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Translator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
+import type { QueueItemView, QueueView } from '../../jobs/fest-queue-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
 import type { FestStand } from '../../storage/fest_stands';
 import { escapeHtml } from './html';
@@ -135,4 +136,34 @@ export function searchMenu(view: FestView, query: string, limit = 8): { beerId: 
     if (out.length === limit) break;
   }
   return out;
+}
+
+const isOpen = (item: QueueItemView): boolean => item.closedBy.some((c) => c.checkinId === null);
+
+/** Queue items not yet checked in by everyone first, each group by glass number. */
+export function queueOrder(view: QueueView): QueueItemView[] {
+  return [...view.items].sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || a.glassNo - b.glassNo);
+}
+
+/** /fest queue (spec §7): every glass, who got it, and who has checked it in (✅) or not yet (⏳). */
+export function formatQueue(t: Translator, view: QueueView): string {
+  if (view.items.length === 0) return t('fest.queue_empty');
+  const items = queueOrder(view).map((item) => t('fest.queue_line', {
+    glass: item.glassNo,
+    name: escapeHtml(item.name),
+    section: item.section ? ` (${escapeHtml(item.section)})` : '',
+    taker: escapeHtml(item.takenBy),
+    marks: item.closedBy.map((c) => `${c.checkinId === null ? '⏳' : '✅'} ${escapeHtml(c.initials)}`).join(' '),
+  }));
+  return fitMessage(t, [t('fest.queue_header'), ''], items);
+}
+
+export const QUEUE_LINKS = 20;
+
+/** Untappd links for the open glasses that have a bid: the page to check in from. */
+export function queueLinks(view: QueueView): { glassNo: number; name: string; bid: number }[] {
+  return queueOrder(view)
+    .filter((item) => isOpen(item) && item.bid !== null)
+    .slice(0, QUEUE_LINKS)
+    .map((item) => ({ glassNo: item.glassNo, name: item.name, bid: item.bid! }));
 }

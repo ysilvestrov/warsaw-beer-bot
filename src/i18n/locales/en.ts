@@ -244,4 +244,13 @@ export const en: Messages = {
   'fest.menu_wrong_page': 'That page does not look like the festival menu — nothing changed.',
   'fest.menu_unavailable': 'Server-side Untappd reading is off (no cookie) — only the laptop updates the menu.',
   'fest.lines_more': '…{count} more lines did not fit',
+  'fest.take_usage': 'Send part of a beer or brewery name: /fest take motueka',
+  'fest.take_none': 'Nothing on the menu matches “{query}”.',
+  'fest.take_pick': 'Which beer did you get?',
+  'fest.take_button': '🍺 Got it: {name}',
+  'fest.taken': '🍺 Glass #{glass} — {name} · {initials}',
+  'fest.queue_header': '<b>Glass queue</b> (✅ checked in · ⏳ not yet)',
+  'fest.queue_empty': 'The queue is empty. Tap “🍺 Got it” in a section or send /fest take <name>.',
+  'fest.queue_line': '#{glass} <b>{name}</b>{section} · got by {taker}\n   {marks}',
+  'fest.queue_link': '#{glass} {name} ↗',
 };

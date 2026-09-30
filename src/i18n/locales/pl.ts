@@ -244,4 +244,13 @@ export const pl: Messages = {
   'fest.menu_wrong_page': 'Strona nie wygląda na menu festiwalu — nic nie zmieniono.',
   'fest.menu_unavailable': 'Odczyt Untappd z serwera jest wyłączony (brak ciasteczka) — menu aktualizuje tylko laptop.',
   'fest.lines_more': '…nie zmieściło się wierszy: {count}',
+  'fest.take_usage': 'Napisz część nazwy piwa lub browaru: /fest take motueka',
+  'fest.take_none': 'W menu nic nie znaleziono dla „{query}”.',
+  'fest.take_pick': 'Które piwo wzięliście?',
+  'fest.take_button': '🍺 Wziąłem: {name}',
+  'fest.taken': '🍺 Kufel nr {glass} — {name} · {initials}',
+  'fest.queue_header': '<b>Kolejka kufli</b> (✅ zameldowane · ⏳ jeszcze nie)',
+  'fest.queue_empty': 'Kolejka jest pusta. Naciśnij „🍺 Wziąłem” w sekcji albo wyślij /fest take <nazwa>.',
+  'fest.queue_line': 'nr {glass} <b>{name}</b>{section} · wziął {taker}\n   {marks}',
+  'fest.queue_link': 'nr {glass} {name} ↗',
 };
