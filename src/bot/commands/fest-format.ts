@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { Translator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { QueueItemView, QueueView } from '../../jobs/fest-queue-view';
+import type { AlertPlan, OnTapTarget } from '../../domain/fest/alerts';
 import type { TapStatus } from '../../domain/fest/tap-status';
 import type { FestStand } from '../../storage/fest_stands';
 import { escapeHtml } from './html';
@@ -166,4 +167,27 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
     .filter((item) => isOpen(item) && item.bid !== null)
     .slice(0, QUEUE_LINKS)
     .map((item) => ({ glassNo: item.glassNo, name: item.name, bid: item.bid! }));
+}
+
+/**
+ * The group alert (spec §6.5): fresh first check-ins as "🆕", older ones as "already pouring",
+ * in one message. Null when there is nothing to say.
+ */
+export function formatAlert(t: Translator, view: FestView, plan: AlertPlan): string | null {
+  const line = (item: OnTapTarget) => {
+    const beer = view.beerNames.get(item.beerId);
+    const section = view.targets.find((target) => target.beerId === item.beerId)?.section ?? '';
+    const stand = standLabel(t, view.stands.get(section));
+    return t('fest.alert_line', {
+      name: escapeHtml(beer?.name ?? `#${item.beerId}`),
+      brewery: escapeHtml(beer?.brewery ?? ''),
+      place: escapeHtml(stand ? `${section} · ${stand}` : section),
+      time: hhmm(item.firstAt),
+    });
+  };
+  const blocks: string[][] = [];
+  if (plan.fresh.length) blocks.push([t('fest.alert_new'), ...plan.fresh.map(line)]);
+  if (plan.pouring.length) blocks.push([t('fest.alert_pouring'), ...plan.pouring.map(line)]);
+  if (blocks.length === 0) return null;
+  return fitMessage(t, [], blocks.map((b) => b.join('\n')).join('\n\n').split('\n'));
 }

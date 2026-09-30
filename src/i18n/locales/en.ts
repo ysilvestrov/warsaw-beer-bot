@@ -253,4 +253,7 @@ export const en: Messages = {
   'fest.queue_empty': 'The queue is empty. Tap “🍺 Got it” in a section or send /fest take <name>.',
   'fest.queue_line': '#{glass} <b>{name}</b>{section} · got by {taker}\n   {marks}',
   'fest.queue_link': '#{glass} {name} ↗',
+  'fest.alert_new': '🆕 Just tapped:',
+  'fest.alert_pouring': '🍺 Already pouring:',
+  'fest.alert_line': '• <b>{name}</b> — {brewery} · {place} · first check-in {time}',
 };

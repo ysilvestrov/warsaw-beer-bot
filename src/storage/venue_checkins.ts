@@ -60,3 +60,16 @@ export function checkinsSince(db: DB, venueIds: number[], sinceIso: string): Ven
     )
     .all(...venueIds, sinceIso) as VenueCheckin[];
 }
+
+/** The earliest check-in of `bid` at any of `venueIds` at or after `sinceIso`; null if none. */
+export function firstCheckinSince(db: DB, venueIds: number[], bid: number, sinceIso: string): { checkin_id: number; checkin_at: string } | null {
+  if (venueIds.length === 0) return null;
+  const marks = venueIds.map(() => '?').join(',');
+  return (db
+    .prepare(
+      `SELECT checkin_id, checkin_at FROM venue_checkins
+        WHERE venue_id IN (${marks}) AND bid = ? AND checkin_at >= ?
+        ORDER BY checkin_at, checkin_id LIMIT 1`,
+    )
+    .get(...venueIds, bid, sinceIso) as { checkin_id: number; checkin_at: string } | undefined) ?? null;
+}

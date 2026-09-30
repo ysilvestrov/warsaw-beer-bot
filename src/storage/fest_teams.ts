@@ -83,3 +83,7 @@ export function teamsOfUser(db: DB, festId: number, telegramId: number): FestTea
 export function isTeamMember(db: DB, teamId: number, telegramId: number): boolean {
   return db.prepare('SELECT 1 FROM fest_team_members WHERE team_id = ? AND telegram_id = ?').get(teamId, telegramId) !== undefined;
 }
+
+export function teamsOfFest(db: DB, festId: number): FestTeam[] {
+  return db.prepare('SELECT id, fest_id, chat_id FROM fest_teams WHERE fest_id = ? ORDER BY id').all(festId) as FestTeam[];
+}

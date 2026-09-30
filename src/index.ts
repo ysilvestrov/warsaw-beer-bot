@@ -33,6 +33,7 @@ import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
+import { runFestAlerts } from './jobs/fest-alerts';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
@@ -425,6 +426,20 @@ async function main(): Promise<void> {
         .finally(() => { festInFlight = false; });
     }));
   }
+
+  // Festival group alerts (spec §6.5). Registered without the cookie'd client on purpose: the laptop
+  // eye may be the only source of venue check-ins. No-op outside a fest's polling windows.
+  let festAlertsInFlight = false;
+  cronJobs.push(cron.schedule('* * * * *', () => {
+    if (festAlertsInFlight) return;
+    festAlertsInFlight = true;
+    runFestAlerts({
+      db, log,
+      send: (chatId, html) => bot.telegram.sendMessage(chatId, html, { parse_mode: 'HTML' }).then(() => {}),
+    }, new Date())
+      .catch((e) => log.error({ err: e }, 'fest alerts cron'))
+      .finally(() => { festAlertsInFlight = false; });
+  }));
 
   await registerCommandMenu(bot, log);
 
