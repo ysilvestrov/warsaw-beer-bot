@@ -53,7 +53,7 @@ async function moreFeed(page: Page, venueId: number, cursor: string): Promise<st
   return r.status === 200 && r.text.trim() !== '' ? r.text : null;
 }
 
-/** Returns false when the server says the page was a Cloudflare block. */
+/** false: the server says the page was a Cloudflare block. Throws on any other failure (retried). */
 async function readFeed(page: Page, task: FeedTask): Promise<boolean> {
   await page.goto(UNTAPPD + task.feedPath, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
   let reply = await api<FeedReply>('POST', '/fest/feed', {
@@ -61,6 +61,7 @@ async function readFeed(page: Page, task: FeedTask): Promise<boolean> {
   });
   log('feed', { venueId: task.venueId, page: 1, status: reply.status, reply: reply.data });
   if (reply.status === 502) return false;
+  if (reply.status !== 200) throw new Error(`POST /fest/feed answered ${reply.status}`);
   // Page further only while the new page does not stitch onto what the server already had.
   for (let n = 2; n <= task.maxPages && reply.status === 200; n++) {
     const r = reply.data as FeedReply;
@@ -80,7 +81,9 @@ async function readMenu(page: Page, cfg: EyeConfig): Promise<boolean> {
   await page.goto(UNTAPPD + cfg.menuPath, { waitUntil: 'domcontentloaded', timeout: NAV_TIMEOUT_MS });
   const reply = await api('POST', '/fest/menu', { html: await page.content() });
   log('menu', { status: reply.status, reply: reply.data });
-  return reply.status !== 502;
+  if (reply.status === 502) return false;
+  if (reply.status !== 200) throw new Error(`POST /fest/menu answered ${reply.status}`);
+  return true;
 }
 
 async function main(): Promise<void> {
@@ -96,8 +99,14 @@ async function main(): Promise<void> {
   }
 
   let cfg: EyeConfig | null = null;
-  const state = { configAt: null as number | null, menuAt: null as number | null, feedAt: new Map<number, number>() };
+  // Success times drive the cadence; attempt times only rate-limit retries (schedule.ts).
+  const state = { configAt: null as number | null, menuAt: null as number | null, feedAt: new Map<number, number>(), attemptAt: new Map<string, number>() };
   let pauseUntil = 0;
+  const blocked = (what: string) => {
+    pauseUntil = Date.now() + BLOCK_PAUSE_MS;
+    beep();
+    log(`blocked on ${what}: pausing 10 min — pass the Cloudflare check in the window if one is shown`);
+  };
 
   for (;;) {
     const now = Date.now();
@@ -105,26 +114,30 @@ async function main(): Promise<void> {
       const tasks = eyeTasks(now, cfg, state);
       try {
         if (tasks.config) {
+          state.attemptAt.set('config', now);
           const r = await api<EyeConfig>('GET', '/fest/config');
-          if (r.status === 200) cfg = r.data as EyeConfig;
-          state.configAt = now;
           log('config', { status: r.status });
-        }
-        for (const task of tasks.feeds) {
-          state.feedAt.set(task.venueId, now);
-          if (!(await readFeed(page, task))) {
-            pauseUntil = Date.now() + BLOCK_PAUSE_MS;
-            beep();
-            log('blocked: pausing 10 min — pass the Cloudflare check in the window if one is shown');
-            break;
+          if (r.status === 200) {
+            cfg = r.data as EyeConfig;
+            state.configAt = now;
           }
         }
-        if (tasks.menu && cfg && now >= pauseUntil) {
-          state.menuAt = now;
-          await readMenu(page, cfg);
+        for (const task of tasks.feeds) {
+          state.attemptAt.set(`feed:${task.venueId}`, now);
+          const ok = await readFeed(page, task);
+          if (!ok) {
+            blocked(`venue ${task.venueId}`);
+            break;
+          }
+          state.feedAt.set(task.venueId, now);
+        }
+        if (tasks.menu && cfg && Date.now() >= pauseUntil) {
+          state.attemptAt.set('menu', now);
+          if (await readMenu(page, cfg)) state.menuAt = now;
+          else blocked('menu');
         }
       } catch (e) {
-        // A timeout or a dropped Wi-Fi costs one tick, not the process (measured 2026-09-29).
+        // A timeout or a dropped Wi-Fi costs one attempt, retried after a minute (measured 2026-09-29).
         log('tick failed', { error: String(e) });
       }
     }

@@ -11,10 +11,12 @@ const CFG: EyeConfig = {
   ],
 };
 const t = (iso: string) => Date.parse(iso);
-const state = (feedAt: [number, string][] = [], menuAt: string | null = null, configAt: string | null = '2026-10-15T14:00:00.000Z'): EyeState => ({
+const state = (feedAt: [number, string][] = [], menuAt: string | null = null, configAt: string | null = '2026-10-15T14:00:00.000Z',
+  attemptAt: [string, string][] = []): EyeState => ({
   configAt: configAt === null ? null : t(configAt),
   menuAt: menuAt === null ? null : t(menuAt),
   feedAt: new Map(feedAt.map(([v, at]) => [v, t(at)])),
+  attemptAt: new Map(attemptAt.map(([k, at]) => [k, t(at)])),
 });
 
 describe('eyeTasks', () => {
@@ -45,5 +47,15 @@ describe('eyeTasks', () => {
       eyeTasks(t('2026-10-15T16:59:00.000Z'), CFG, state(read, '2026-10-15T15:00:00.000Z')).menu,
       eyeTasks(t('2026-10-15T17:00:00.000Z'), CFG, state(read, '2026-10-15T15:00:00.000Z')).menu,
     ]).toEqual([false, true]);
+  });
+
+  it('a failed read is retried after a minute, not after its full interval', () => {
+    // Feeds last read an hour ago, the menu before the window, the config two hours ago; every task
+    // then failed at 15:00.
+    const failed = state([[2167060, '2026-10-15T14:00:00.000Z'], [11142155, '2026-10-15T14:00:00.000Z']], '2026-10-15T12:00:00.000Z',
+      '2026-10-15T13:00:00.000Z', [['config', '2026-10-15T15:00:00.000Z'], ['menu', '2026-10-15T15:00:00.000Z'],
+        ['feed:2167060', '2026-10-15T15:00:00.000Z'], ['feed:11142155', '2026-10-15T15:00:00.000Z']]);
+    const at = (iso: string) => { const r = eyeTasks(t(iso), CFG, failed); return [r.config, r.menu, r.feeds.length]; };
+    expect([at('2026-10-15T15:00:59.000Z'), at('2026-10-15T15:01:00.000Z')]).toEqual([[false, false, 0], [true, true, 2]]);
   });
 });
