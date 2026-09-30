@@ -354,7 +354,7 @@ path_is_held() {
     # R5: the operand of the root rsync pinned in sudoers. A narrowing empties
     # /opt (--delete-excluded) or silently drops scripts/.
     deploy/rsync-filter) return 0 ;;
-    deploy/autodeploy.sh|deploy/autodeploy-guard.sh|deploy/ships.sh|deploy/read-env.sh) return 0 ;;
+    deploy/autodeploy.sh|deploy/ships.sh|deploy/read-env.sh) return 0 ;;
     deploy/installed-current.sh|deploy/db-snapshot.sh|deploy/trial-migrate.cjs) return 0 ;;
     *) return 1 ;;
   esac
