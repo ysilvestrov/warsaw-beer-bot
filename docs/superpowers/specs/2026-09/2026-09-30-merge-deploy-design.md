@@ -5,7 +5,7 @@ Status: design approved in brainstorming 2026-09-30; probes P1–P4 must run **b
 Supersedes: the tag path of `2026-08/2026-08-16-435-dependency-security-autofix-design.md`
 (`autodeploy-*` tags, the lockfile-only guard) and the drift episode of
 `2026-08/2026-08-23-autodeploy-drift-signal-design.md` / `2026-08-24-491-497-…`
-Spawned: external canary — separate spec (issue filed with this design)
+Spawned: #758 — external canary, separate spec
 
 ## Why
 
