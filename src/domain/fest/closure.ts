@@ -18,19 +18,25 @@ export interface ClosureCheckin {
   checkinAt: string;
 }
 
-/** queue id → member telegram id → the earliest closing check-in id, or null. */
+/**
+ * queue id → member telegram id → the closing check-in id, or null. One check-in proves one glass:
+ * for each member, glasses are matched in queue order to the earliest check-in not yet used, so
+ * two glasses of the same beer need two check-ins to both show ✅.
+ */
 export function closeQueue(items: ClosureItem[], memberIds: number[], checkins: ClosureCheckin[]): Map<number, Map<number, string | null>> {
-  const out = new Map<number, Map<number, string | null>>();
-  for (const item of items) {
-    const from = Date.parse(item.addedAt) - CLOSE_SLACK_MS;
-    const byMember = new Map<number, string | null>();
-    for (const m of memberIds) {
-      const hits = checkins
-        .filter((c) => c.telegramId === m && c.beerId === item.beerId && Date.parse(c.checkinAt) >= from)
-        .sort((a, b) => Date.parse(a.checkinAt) - Date.parse(b.checkinAt));
-      byMember.set(m, hits.length > 0 ? hits[0].checkinId : null);
+  const out = new Map<number, Map<number, string | null>>(items.map((item) => [item.id, new Map<number, string | null>()]));
+  const ordered = [...items].sort((a, b) => Date.parse(a.addedAt) - Date.parse(b.addedAt) || a.id - b.id);
+  for (const m of memberIds) {
+    const own = checkins
+      .filter((c) => c.telegramId === m)
+      .sort((a, b) => Date.parse(a.checkinAt) - Date.parse(b.checkinAt));
+    const used = new Set<ClosureCheckin>();
+    for (const item of ordered) {
+      const from = Date.parse(item.addedAt) - CLOSE_SLACK_MS;
+      const hit = own.find((c) => !used.has(c) && c.beerId === item.beerId && Date.parse(c.checkinAt) >= from);
+      if (hit) used.add(hit);
+      out.get(item.id)!.set(m, hit ? hit.checkinId : null);
     }
-    out.set(item.id, byMember);
   }
   return out;
 }

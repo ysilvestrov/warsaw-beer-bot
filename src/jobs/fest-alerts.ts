@@ -26,14 +26,14 @@ export async function runFestAlerts(deps: FestAlertDeps, now: Date): Promise<num
     const venueIds = festVenues(deps.db, fest.id).map((v) => v.venue_id);
     // Check-ins from the polling window count: a stand may pour before the doors open.
     const since = new Date(Date.parse(session.start_at) - POLL_MARGIN_MS).toISOString();
-    for (const team of teamsOfFest(deps.db, fest.id)) {
-      try {
-        if (await alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)) sent++;
-      } catch (e) {
-        // One team's failure must not silence the others.
-        deps.log.error({ err: e, teamId: team.id }, 'fest alert failed for a team');
-      }
-    }
+    // Teams run side by side: one team's failure, or a send that hangs, must not hold up the others.
+    const results = await Promise.allSettled(teamsOfFest(deps.db, fest.id).map((team) =>
+      alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)
+        .catch((e) => {
+          deps.log.error({ err: e, teamId: team.id }, 'fest alert failed for a team');
+          return false;
+        })));
+    sent += results.filter((r) => r.status === 'fulfilled' && r.value).length;
   }
   return sent;
 }

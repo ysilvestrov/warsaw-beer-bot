@@ -64,6 +64,18 @@ describe('«Взяв» (fest:q)', () => {
     expect([queueFor(db, teamId), replies, answers]).toEqual([[], [], ['This is for team members — press “I’m in the team”.']]);
   });
 
+  it('a button pressed after the fest is over queues nothing', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-20T12:00:00.000Z'));
+    try {
+      const { db, bot, teamId, answers } = setup();
+      await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
+      expect([queueFor(db, teamId), answers]).toEqual([[], [createTranslator('en')('fest.no_fest')]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('a beer that is not on the menu queues nothing', async () => {
     const { db, bot, teamId } = setup();
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:999`) as unknown as Update);
