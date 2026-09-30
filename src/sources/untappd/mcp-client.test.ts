@@ -31,4 +31,18 @@ describe('createFestMcp', () => {
     await expect(mcp.call('get_untappd_api_usage', {})).rejects.toThrow('mcp connect timed out after 100 ms');
     for (const res of held) res.destroy();
   });
+
+  it('two calls made at once share one connection attempt: the server sees one connect, both calls fail alike', async () => {
+    const held: import('node:http').ServerResponse[] = [];
+    server = createServer((_req, res) => { held.push(res); });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as AddressInfo;
+    const mcp = createFestMcp({
+      url: `http://127.0.0.1:${port}/mcp`, oauthFile: join(mkdtempSync(join(tmpdir(), 'mcp-')), 'o.json'),
+      log: pino({ level: 'silent' }), timeoutMs: 100,
+    });
+    const results = await Promise.allSettled([mcp.call('a', {}), mcp.call('b', {})]);
+    expect([results.map((r) => r.status), held.length]).toEqual([['rejected', 'rejected'], 1]);
+    for (const res of held) res.destroy();
+  });
 });
