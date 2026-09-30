@@ -27,6 +27,7 @@ describe('every checked installed copy is actually installed', () => {
     expect(declared).toContain('deploy/read-env.sh');
     expect(declared).toContain('deploy/installed-current.sh');
     expect(declared).toContain('deploy/ships.sh');
+    expect(declared).toContain('deploy/db-snapshot.sh');
   });
 
   // A bare substring search would treat a commented-out line — e.g.

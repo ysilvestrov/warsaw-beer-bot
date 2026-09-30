@@ -98,6 +98,7 @@ describe('deploy rsync payload', () => {
       'deploy/README.md',
       'deploy/autodeploy-guard.sh',
       'deploy/autodeploy.sh',
+      'deploy/db-snapshot.sh',
       'deploy/deploy.sh',
       'deploy/install-autodeploy.sh',
       'deploy/install-resource-monitor.sh',
