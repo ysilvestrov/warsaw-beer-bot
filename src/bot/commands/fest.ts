@@ -51,6 +51,11 @@ async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
 }
 
 const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu', 'printer'] as const;
+/** The station page on the configured origin; any path, query or fragment of the base is dropped. */
+export function festPrintUrl(base: string): string {
+  return new URL('/fest-print', base).href;
+}
+
 /** A station keeps working for a day after the last session: labels for the last glasses. */
 const STATION_GRACE_MS = 24 * 60 * 60 * 1000;
 /** «Взяв» buttons under a section's details. */

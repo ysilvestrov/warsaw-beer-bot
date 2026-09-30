@@ -32,6 +32,10 @@ describe('loadEnv', () => {
       .toEqual(['https://beer-api.ysilvestrov-ai.uk', 'http://localhost:3000']);
   });
 
+  it('FEST_PRINT_BASE_URL over plain http is refused off localhost: the station token would travel in clear', () => {
+    expect(() => loadEnv({ ...baseEnv, FEST_PRINT_BASE_URL: 'http://beer-api.example' })).toThrow(/FEST_PRINT_BASE_URL must be https/);
+  });
+
   it('FEST_MCP_URL must be a URL', () => {
     expect(() => loadEnv({ ...baseEnv, FEST_MCP_URL: 'not a url' })).toThrow(/FEST_MCP_URL/);
   });

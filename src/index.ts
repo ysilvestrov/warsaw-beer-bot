@@ -36,6 +36,7 @@ import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { runFestAlerts } from './jobs/fest-alerts';
 import { runFestFriendFeed, runFestMcpKeepalive } from './jobs/fest-friend-feed';
 import { createFestMcp } from './sources/untappd/mcp-client';
+import { festPrintUrl } from './bot/commands/fest';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
@@ -254,7 +255,7 @@ async function main(): Promise<void> {
     helpCommand,
     createFestCommand({
       downloadFile,
-      printStationUrl: `${env.FEST_PRINT_BASE_URL.replace(/\/$/, '')}/fest-print`,
+      printStationUrl: festPrintUrl(env.FEST_PRINT_BASE_URL),
       refreshMenu: festDeps ? (fest, now) => refreshFestMenu(festDeps, fest, now) : undefined,
     }),
     createRefreshCommand(
