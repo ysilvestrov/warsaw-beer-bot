@@ -172,20 +172,28 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /**
- * `text` cut to at most `max` user-visible characters, the last being "…" when anything was cut.
- * Counts grapheme clusters, so a flag or a skin-toned emoji is never split, and segments only a
- * bounded prefix, so an absurdly long scraped field costs no more than a normal one.
+ * `text` cut to at most `max` UTF-16 code units — the unit Telegram's message limit counts — with
+ * "…" as the last one when anything was cut. The cut falls only between grapheme clusters, so a
+ * flag or a skin-toned emoji is never split; a single cluster longer than `max` leaves just "…".
+ * Segments are iterated lazily and the loop stops at the cut, so a huge field costs no more than
+ * a normal one.
  */
 export function capText(text: string, max: number): string {
-  if (text.length <= max) return text; // code units ≥ graphemes: nothing to cut
-  const window = max * 16; // far beyond the longest grapheme cluster in practice
-  const cut = text.length > window;
-  const parts = Array.from(graphemes.segment(cut ? text.slice(0, window) : text), (g) => g.segment);
-  if (cut) parts.pop(); // the window may end inside a cluster
-  return parts.length > max || cut ? `${parts.slice(0, max - 1).join('')}…` : text;
+  if (text.length <= max) return text;
+  if (max < 1) return '';
+  let kept = '';
+  for (const { segment } of graphemes.segment(text)) {
+    if (kept.length + segment.length > max - 1) break;
+    kept += segment;
+  }
+  return `${kept}…`;
 }
 
-/** Characters kept of each free-text field of an alert line (name, brewery, place). */
+/**
+ * UTF-16 code units kept of each free-text field of an alert line (name, brewery, place). Even with
+ * every character escaped (`&amp;` is 5 units) three fields and the template stay far below the
+ * message limit, so any one line fits an empty message.
+ */
 export const ALERT_FIELD_MAX = 120;
 
 /**

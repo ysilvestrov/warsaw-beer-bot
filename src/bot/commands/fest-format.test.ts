@@ -253,13 +253,31 @@ describe('formatAlert', () => {
   });
 });
 
+describe('formatAlert worst case', () => {
+  it('a line whose every field is huge and fully escaped still fits an empty message', () => {
+    const view = {
+      beerNames: new Map([[1, { name: '&'.repeat(5000), brewery: '<'.repeat(5000) }]]),
+      targets: [{ beerId: 1, section: '>'.repeat(5000), reasons: ['rating'], rating: 4.2, style: null }],
+      stands: new Map(),
+    } as unknown as Parameters<typeof formatAlert>[1];
+    const r = formatAlert(t, view, { fresh: [{ beerId: 1, firstAt: '2026-10-15T17:55:00.000Z', firstCheckinId: 9 }], pouring: [] });
+    // Fields 119×'&amp;'+'…' = 596, 119×'&lt;'+'…' = 477, 119×'&gt;'+'…' = 477; template 36; header line 23.
+    expect([r!.beerIds, r!.html.length]).toEqual([[1], 1609]);
+  });
+});
+
 describe('capText', () => {
-  it('leaves text within the limit alone, even when its code units exceed it', () => {
-    expect(capText('🇵🇱🇵🇱🇵🇱', 3)).toBe('🇵🇱🇵🇱🇵🇱');
+  it('leaves text of at most max code units alone', () => {
+    expect(capText('🇵🇱🇵🇱', 8)).toBe('🇵🇱🇵🇱');
   });
 
-  it('cuts by user-visible characters and never splits a flag', () => {
-    expect(capText(`abc🇵🇱def`, 5)).toBe('abc🇵🇱…');
+  it('cuts to max code units between grapheme clusters, never inside a flag', () => {
+    // 'abc' (3) + flag (4) would be 7 > 6 − 1, so the flag goes whole and "…" takes its place.
+    expect(capText('abc🇵🇱def', 6)).toBe('abc…');
+  });
+
+  it('a single cluster longer than max leaves only the ellipsis; max 0 leaves nothing', () => {
+    expect([capText(`a${'\u0301'.repeat(2000)}`, 120), capText('x', 0)]).toEqual(['…', '']);
   });
 
   it('cuts a huge field to the limit', () => {
