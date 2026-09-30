@@ -36,6 +36,11 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ ...baseEnv, FEST_PRINT_BASE_URL: 'http://beer-api.example' })).toThrow(/FEST_PRINT_BASE_URL must be https/);
   });
 
+  it('the localhost exception is plain http on a loopback host only, IPv6 included', () => {
+    expect(loadEnv({ ...baseEnv, FEST_PRINT_BASE_URL: 'http://[::1]:3000' }).FEST_PRINT_BASE_URL).toBe('http://[::1]:3000');
+    expect(() => loadEnv({ ...baseEnv, FEST_PRINT_BASE_URL: 'ftp://localhost:3000' })).toThrow(/FEST_PRINT_BASE_URL must be https/);
+  });
+
   it('FEST_MCP_URL must be a URL', () => {
     expect(() => loadEnv({ ...baseEnv, FEST_MCP_URL: 'not a url' })).toThrow(/FEST_MCP_URL/);
   });
