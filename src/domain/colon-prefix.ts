@@ -7,17 +7,17 @@ import { baseNormalize, stripSearchNoise, NAME_COLLAB_SEP } from './normalize';
  * Colons in digital timestamps (6:15, 7:45) and alphanumeric code identifiers (AB:20)
  * are excluded. Only colons followed by whitespace (`:\s+`) separate prefix and tail.
  */
-const DIGIT_OR_CODE_PREFIX = /^\d+:\d+/;
+const CODE_OR_TIMESTAMP = /[\p{L}\p{N}]+:[\p{L}\p{N}]+/u;
 
 export function extractColonTails(beerName: string): string[] {
-  if (DIGIT_OR_CODE_PREFIX.test(beerName)) return [];
+  if (CODE_OR_TIMESTAMP.test(beerName)) return [];
   const parts = beerName.split(/:\s+/);
-  if (parts.length < 2 || parts[0].trim().length === 0) return [];
+  if (parts.length < 2 || parts.some((p) => p.trim().length === 0)) return [];
   // For names with multiple colons (e.g. `Series: Subseries: Name`), emit each progressive tail.
   const tails: string[] = [];
   for (let i = 1; i < parts.length; i += 1) {
     const tail = parts.slice(i).join(': ').trim();
-    if (tail.length > 0 && !DIGIT_OR_CODE_PREFIX.test(tail)) tails.push(tail);
+    if (tail.length > 0 && !CODE_OR_TIMESTAMP.test(tail)) tails.push(tail);
   }
   return tails;
 }
