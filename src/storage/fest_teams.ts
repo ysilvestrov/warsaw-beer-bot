@@ -87,3 +87,15 @@ export function isTeamMember(db: DB, teamId: number, telegramId: number): boolea
 export function teamsOfFest(db: DB, festId: number): FestTeam[] {
   return db.prepare('SELECT id, fest_id, chat_id FROM fest_teams WHERE fest_id = ? ORDER BY id').all(festId) as FestTeam[];
 }
+
+/** Every member of any team of the fest with a linked Untappd, keyed by lower-case username. */
+export function festMembersByUsername(db: DB, festId: number): Map<string, number> {
+  const rows = db.prepare(
+    `SELECT DISTINCT lower(p.untappd_username) AS username, m.telegram_id AS telegramId
+       FROM fest_team_members m
+       JOIN fest_teams t ON t.id = m.team_id
+       JOIN user_profiles p ON p.telegram_id = m.telegram_id
+      WHERE t.fest_id = ? AND p.untappd_username IS NOT NULL`,
+  ).all(festId) as { username: string; telegramId: number }[];
+  return new Map(rows.map((r) => [r.username, r.telegramId]));
+}
