@@ -283,4 +283,9 @@ describe('capText', () => {
   it('cuts a huge field to the limit', () => {
     expect(capText('y'.repeat(1_000_000), 4)).toBe('yyy…');
   });
+
+  it('keeps a flag whole when it ends exactly at the cut', () => {
+    // 'ab' (2) + flag (4) = 6 = 7 − 1 fits; the next flag does not.
+    expect(capText('ab🇵🇱🇺🇦cd', 7)).toBe('ab🇵🇱…');
+  });
 });
