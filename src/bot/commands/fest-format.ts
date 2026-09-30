@@ -169,6 +169,9 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
     .map((item) => ({ glassNo: item.glassNo, name: item.name, bid: item.bid! }));
 }
 
+/** Characters kept of each free-text field of an alert line (name, brewery, place). */
+export const ALERT_FIELD_MAX = 120;
+
 /**
  * The group alert (spec §6.5): fresh first check-ins as "🆕", older ones as "already pouring",
  * in one message. Lines are added only while the message fits Telegram's limit, and the beers
@@ -176,14 +179,17 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
  * next tick. Null when there is nothing to say.
  */
 export function formatAlert(t: Translator, view: FestView, plan: AlertPlan, limit = MESSAGE_LIMIT): { html: string; beerIds: number[] } | null {
+  // Every field is capped, so any one line fits an empty message: a line that could never fit
+  // would stop its block for good, since the loop below keeps order and stops at the first misfit.
+  const cap = (text: string) => ([...text].length > ALERT_FIELD_MAX ? `${[...text].slice(0, ALERT_FIELD_MAX - 1).join('')}…` : text);
   const line = (item: OnTapTarget) => {
     const beer = view.beerNames.get(item.beerId);
     const section = view.targets.find((target) => target.beerId === item.beerId)?.section ?? '';
     const stand = standLabel(t, view.stands.get(section));
     return t('fest.alert_line', {
-      name: escapeHtml(beer?.name ?? `#${item.beerId}`),
-      brewery: escapeHtml(beer?.brewery ?? ''),
-      place: escapeHtml(stand ? `${section} · ${stand}` : section),
+      name: escapeHtml(cap(beer?.name ?? `#${item.beerId}`)),
+      brewery: escapeHtml(cap(beer?.brewery ?? '')),
+      place: escapeHtml(cap(stand ? `${section} · ${stand}` : section)),
       time: hhmm(item.firstAt),
     });
   };
