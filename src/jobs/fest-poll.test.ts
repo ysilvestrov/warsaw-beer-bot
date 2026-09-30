@@ -1,0 +1,102 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import pino from 'pino';
+import { openDb, type DB } from '../storage/db';
+import { migrate } from '../storage/schema';
+import { getFestBySlug } from '../storage/fests';
+import { getJobState } from '../storage/job_state';
+import { menuStats } from '../storage/fest_menu';
+import { CookieExpiredError, HttpError, type Http } from '../sources/http';
+import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
+import { runFestMenu, runFestPoll, refreshFestMenu, FEST_POLL_LAST_KEY } from './fest-poll';
+
+const FIX = join(__dirname, '../sources/untappd/__fixtures__');
+const MENU = readFileSync(join(FIX, 'venue-menu.html'), 'utf8');
+// The raw more_feed fragment doubles as a head page: its rows link to the festival venue.
+const FEED = readFileSync(join(FIX, 'venue-more-feed-raw.html'), 'utf8');
+const IN_SESSION = new Date('2026-10-15T15:00:00.000Z');
+
+function setup(responses: (string | Error)[]) {
+  const db: DB = openDb(':memory:');
+  migrate(db);
+  const urls: string[] = [];
+  const http: Http = {
+    async get(url: string) {
+      urls.push(url);
+      const r = responses.shift();
+      if (r === undefined) throw new Error('unexpected request');
+      if (r instanceof Error) throw r;
+      return r;
+    },
+  };
+  const trips: string[] = [];
+  const breaker = createPersistentCircuitBreaker({
+    db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
+    onTrip: () => trips.push('trip'), onRecover: () => trips.push('recover'),
+  });
+  const alerts: string[] = [];
+  const deps = { db, log: pino({ level: 'silent' }), http, breaker, notifyAdmin: async (m: string) => { alerts.push(m); } };
+  return { db, deps, urls, trips, alerts };
+}
+
+describe('runFestPoll', () => {
+  it('reads page 1 of the festival /activity feed and ingests it as the server eye', async () => {
+    const { db, deps, urls } = setup([FEED]);
+    const r = await runFestPoll(deps, IN_SESSION);
+    expect(urls).toEqual(['https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity']);
+    expect(r?.inserted).toBe(3);
+    expect(db.prepare('SELECT DISTINCT first_eye FROM venue_checkins').all()).toEqual([{ first_eye: 'server' }]);
+    expect(getJobState(db, FEST_POLL_LAST_KEY)).toBe(IN_SESSION.toISOString());
+  });
+
+  it('does nothing outside a polling window and before its 10-minute tick', async () => {
+    const { deps, urls } = setup([FEED]);
+    await runFestPoll(deps, new Date('2026-10-16T02:00:00.000Z'));
+    await runFestPoll(deps, IN_SESSION);
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 9 * 60 * 1000));
+    expect(urls).toHaveLength(1);
+  });
+
+  it('two blocks in a row open the festival breaker for exactly 30 minutes', async () => {
+    const { db, deps, trips } = setup([new HttpError(403, 'u'), new HttpError(403, 'u')]);
+    await runFestPoll(deps, IN_SESSION);
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
+    expect(trips).toEqual(['trip']);
+    expect(getJobState(db, 'fest_poll_open_until')).toBe(new Date(IN_SESSION.getTime() + 40 * 60 * 1000).toISOString());
+  });
+
+  it('a success between blocks keeps the breaker closed', async () => {
+    const { db, deps, trips } = setup([new HttpError(403, 'u'), FEED, new HttpError(403, 'u')]);
+    for (const m of [0, 10, 20]) await runFestPoll(deps, new Date(IN_SESSION.getTime() + m * 60 * 1000));
+    expect([trips, getJobState(db, 'fest_poll_open_until')]).toEqual([[], null]);
+  });
+
+  it('an expired cookie alerts the admin and does not count as a block', async () => {
+    const { db, deps, alerts } = setup([new CookieExpiredError()]);
+    expect(await runFestPoll(deps, IN_SESSION)).toBeNull();
+    expect([alerts.length, getJobState(db, 'fest_poll_open_until')]).toEqual([1, null]);
+  });
+});
+
+describe('fest menu job', () => {
+  it('reads the venue main page (not /activity) and applies the menu', async () => {
+    const { db, deps, urls } = setup([MENU]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    expect(await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'))).toEqual({ items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false });
+    expect(urls).toEqual(['https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155']);
+    expect(menuStats(db, fest.id).count).toBe(4);
+  });
+
+  it('refuses a page that is not the fest menu venue', async () => {
+    const { db, deps } = setup([MENU.replace('/11142155"', '/999"')]);
+    expect(await refreshFestMenu(deps, getFestBySlug(db, 'wfp22')!, new Date('2026-10-09T12:00:00.000Z'))).toBe('wrong_page');
+    expect(menuStats(db, getFestBySlug(db, 'wfp22')!.id).count).toBe(0);
+  });
+
+  it('runs on its schedule only: once in the run-up, not again an hour later', async () => {
+    const { deps, urls } = setup([MENU, MENU]);
+    await runFestMenu(deps, new Date('2026-10-09T12:00:00.000Z'));
+    await runFestMenu(deps, new Date('2026-10-09T13:00:00.000Z'));
+    expect(urls).toHaveLength(1);
+  });
+});

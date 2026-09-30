@@ -31,6 +31,7 @@ import { registerCommandMenu } from './bot/register-command-menu';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
+import { runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
@@ -390,6 +391,32 @@ async function main(): Promise<void> {
         db, log, http: untappdHttp, notifyAdmin,
         breaker: profileHttpBreaker,
       }).catch((e) => log.error({ err: e }, 'untappd cron'));
+    }));
+  }
+
+  // WFP festival mode (spec 2026-09-29-wfp-team-assistant-design.md §4.4, §4.6): the server eye
+  // (page 1 of the festival feed every 10 min in a polling window) and the menu reader. They share
+  // the cookie'd client with refreshAllUntappd but have their own breaker key, a lower threshold and
+  // a short cooldown, so a festival block never silences the nightly job and vice versa. The cron
+  // ticks every minute; each job decides whether its own tick is due and is a no-op outside a fest.
+  if (untappdHttp) {
+    const festDeps = {
+      db, log, http: untappdHttp, notifyAdmin,
+      breaker: createPersistentCircuitBreaker({
+        db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
+        onTrip: () => adminAlert('Фест: Untappd блокує серверне око — пауза 30 хв'),
+        onRecover: () => adminAlert('Фест: серверне око знову бачить Untappd'),
+      }),
+    };
+    let festInFlight = false;
+    cronJobs.push(cron.schedule('* * * * *', () => {
+      if (festInFlight) return;
+      festInFlight = true;
+      const now = new Date();
+      runFestPoll(festDeps, now)
+        .then(() => runFestMenu(festDeps, now))
+        .catch((e) => log.error({ err: e }, 'fest cron'))
+        .finally(() => { festInFlight = false; });
     }));
   }
 
