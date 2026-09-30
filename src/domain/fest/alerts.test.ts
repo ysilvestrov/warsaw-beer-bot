@@ -1,4 +1,4 @@
-import { ALERT_FRESH_MS, planAlerts } from './alerts';
+import { ALERT_FRESH_MS, CLOCK_SKEW_MS, planAlerts } from './alerts';
 
 const NOW = new Date('2026-10-15T18:00:00.000Z');
 const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
@@ -31,5 +31,21 @@ describe('planAlerts', () => {
       now: NOW,
     });
     expect(plan.fresh.map((a) => a.beerId)).toEqual([4, 3]);
+  });
+});
+
+describe('planAlerts on implausible times', () => {
+  it('keeps a first check-in up to 5 minutes ahead as fresh; drops one further ahead or unparseable', () => {
+    const ahead = (ms: number) => new Date(NOW.getTime() + ms).toISOString();
+    const plan = planAlerts({
+      onTap: [
+        { beerId: 1, firstAt: ahead(CLOCK_SKEW_MS), firstCheckinId: 11 },
+        { beerId: 2, firstAt: ahead(CLOCK_SKEW_MS + 1000), firstCheckinId: 12 },
+        { beerId: 3, firstAt: 'not a time', firstCheckinId: 13 },
+      ],
+      sent: new Set(),
+      now: NOW,
+    });
+    expect(plan).toEqual({ fresh: [{ beerId: 1, firstAt: ahead(CLOCK_SKEW_MS), firstCheckinId: 11 }], pouring: [] });
   });
 });
