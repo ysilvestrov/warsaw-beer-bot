@@ -159,3 +159,38 @@ describe('POST /fest/menu', () => {
     expect([res.status, await res.json()]).toEqual([404, { error: 'no_fest' }]);
   });
 });
+
+describe('GET /fest/config', () => {
+  const get = (app: Hono<ApiEnv>, token: string) => app.request('/fest/config', { headers: { Authorization: `Bearer ${token}` } });
+
+  it('gives a member the fest sessions, venues and menu page', async () => {
+    const { app } = setup(new Date('2026-10-01T10:00:00.000Z'));
+    const res = await get(app, 'member-token');
+    expect([res.status, await res.json()]).toEqual([200, {
+      slug: 'wfp22',
+      pollMarginMs: 1800000,
+      sessions: [
+        { start_at: '2026-10-15T14:00:00.000Z', end_at: '2026-10-15T22:00:00.000Z' },
+        { start_at: '2026-10-16T12:00:00.000Z', end_at: '2026-10-16T22:00:00.000Z' },
+        { start_at: '2026-10-17T10:00:00.000Z', end_at: '2026-10-17T22:00:00.000Z' },
+      ],
+      menuVenueId: 11142155,
+      menuPath: '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155',
+      venues: [
+        { venueId: 2167060, feedPath: '/v/stadion-legii-warszawa-im-marszalka-jozefa-pilsudskiego/2167060' },
+        { venueId: 2815864, feedPath: '/v/centrum-konferencyjne-legia/2815864' },
+        { venueId: 11142155, feedPath: '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity' },
+      ],
+    }]);
+  });
+
+  it('has nothing for a non-member', async () => {
+    const { app } = setup(new Date('2026-10-01T10:00:00.000Z'));
+    expect((await get(app, 'outsider-token')).status).toBe(404);
+  });
+
+  it('has nothing once the fest is over', async () => {
+    const { app } = setup(new Date('2026-10-18T00:00:00.000Z'));
+    expect((await get(app, 'member-token')).status).toBe(404);
+  });
+});

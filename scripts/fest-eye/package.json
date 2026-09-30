@@ -1,0 +1,13 @@
+{
+  "name": "warsaw-beer-bot-fest-eye",
+  "private": true,
+  "description": "Laptop eye for the WFP festival mode: real Chrome relays Untappd venue feeds to the bot",
+  "scripts": {
+    "start": "tsx main.ts",
+    "login": "tsx main.ts --login"
+  },
+  "dependencies": {
+    "playwright-core": "^1.63.0",
+    "tsx": "^4.23.15"
+  }
+}
