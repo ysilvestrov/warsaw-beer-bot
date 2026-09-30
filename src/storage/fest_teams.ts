@@ -65,3 +65,21 @@ export function overridesFor(db: DB, teamId: number): Map<number, OverrideAction
     .all(teamId) as { beer_id: number; action: OverrideAction }[];
   return new Map(rows.map((r) => [r.beer_id, r.action]));
 }
+
+export function teamById(db: DB, teamId: number): FestTeam | null {
+  return (db.prepare('SELECT id, fest_id, chat_id FROM fest_teams WHERE id = ?').get(teamId) as FestTeam | undefined) ?? null;
+}
+
+/** Teams of `festId` that `telegramId` belongs to, oldest first. */
+export function teamsOfUser(db: DB, festId: number, telegramId: number): FestTeam[] {
+  return db
+    .prepare(
+      `SELECT t.id, t.fest_id, t.chat_id FROM fest_teams t JOIN fest_team_members m ON m.team_id = t.id
+        WHERE t.fest_id = ? AND m.telegram_id = ? ORDER BY t.id`,
+    )
+    .all(festId, telegramId) as FestTeam[];
+}
+
+export function isTeamMember(db: DB, teamId: number, telegramId: number): boolean {
+  return db.prepare('SELECT 1 FROM fest_team_members WHERE team_id = ? AND telegram_id = ?').get(teamId, telegramId) !== undefined;
+}

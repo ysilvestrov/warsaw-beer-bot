@@ -189,6 +189,27 @@ export interface Messages {
   'reportban.usage': string;
   'reportban.banned': string;
   'reportban.unbanned': string;
+
+  // WFP festival mode
+  'fest.no_fest': string;
+  'fest.team_created': string;
+  'fest.join_button': string;
+  'fest.joined': string;
+  'fest.already_member': string;
+  'fest.need_link': string;
+  'fest.no_team': string;
+  'fest.pick_team': string;
+  'fest.not_member': string;
+  'fest.menu_empty': string;
+  'fest.menu_line': string;
+  'fest.no_targets': string;
+  'fest.legend': string;
+  'fest.stand': string;
+  'fest.stand_floor_only': string;
+  'fest.status_on_tap': string;
+  'fest.status_not_seen': string;
+  'fest.status_unknown': string;
+  'fest.section_gone': string;
 }
 
 export type Translator = (

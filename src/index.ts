@@ -22,6 +22,7 @@ import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
 import { cityCommand } from './bot/commands/city';
+import { festCommand } from './bot/commands/fest';
 import { extensionCommand } from './bot/commands/extension';
 import { announceCommand } from './bot/commands/announce';
 import { helpCommand } from './bot/commands/help';
@@ -239,6 +240,7 @@ async function main(): Promise<void> {
     announceCommand,
     statusCommand,
     helpCommand,
+    festCommand,
     createRefreshCommand(
       async (notify, opts) => {
         await refreshOntap({
