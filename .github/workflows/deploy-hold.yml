@@ -25,8 +25,13 @@ jobs:
       - name: Install
         run: npm ci --no-audit --no-fund
       - name: Title marker, label and hold paths agree
+        # `shell: bash` = -eo pipefail: a failed diff must fail the step, not
+        # feed an empty list into an "OK".
+        shell: bash
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: git diff --name-only "$BASE_SHA"...HEAD | npx tsx scripts/autodeploy/deploy-hold-check.ts
+        # HEAD is the PR's merge ref: its first parent is the base it merged
+        # onto, so this is exactly the PR's own contribution — base.sha on an
+        # edited/labeled event may be older and would count others' changes.
+        run: git diff --name-only HEAD^1 HEAD | npx tsx scripts/autodeploy/deploy-hold-check.ts

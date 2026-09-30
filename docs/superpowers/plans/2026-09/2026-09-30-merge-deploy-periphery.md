@@ -383,7 +383,7 @@ fi
 
 ## Rollout (after the user merges — this PR is itself `[deploy:hold]`)
 
-1. **Before merge:** create the labels on GitHub. Run `gh label create deploy:hold --color B60205 --description "Deploy needs a human on the host; see the PR body"`, then `gh label edit autodeploy --name automerge` and `gh label edit autodeploy-pending --name automerge-pending`. Renaming keeps the labels on existing PRs. Title the PR `[deploy:hold] feat(deploy): merge-deploy …`, add the label, and put these steps in the body.
+1. **Before merge:** create the labels on GitHub. Run `gh label create deploy:hold --color B60205 --description "Deploy needs a human on the host; see the PR body"`, then `gh label create automerge` and `gh label create automerge-pending`. Do NOT rename: a rename in either order breaks one side's `gh pr edit --add-label` (review round 3, finding 4). **After merge:** `gh label delete autodeploy --yes` and `gh label delete autodeploy-pending --yes`. Title the PR `[deploy:hold] feat(deploy): merge-deploy …`, add the label, and put these steps in the body.
 2. After merge, on the host, as the user in a code-server terminal: `sudo bash deploy/install-autodeploy.sh` (put it in `./tmp/rollout.sh` per CLAUDE.md), `sudo systemctl daemon-reload`, `sudo rm /usr/local/bin/wbb-autodeploy-guard`.
 3. Claude: `wbb-installed-current` → CURRENT, then `bash deploy/deploy.sh` from the main checkout. That releases the hold, and `DEPLOYED_SHA` becomes the merge.
 4. Remove the stale key from state: `sed -i '/^LAST_FAILED_SHA=72448d9/d' ~/.local/state/wbb-autodeploy/state.env` (the #498 residue). Delete the last tag: `git push origin :refs/tags/autodeploy-20260825T073442Z`. Ask the user first; deleting a remote tag is not reversible from here.

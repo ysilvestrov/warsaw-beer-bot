@@ -108,4 +108,10 @@ describe('deploy-hold-check CLI', () => {
     const r = spawnSync('npx', ['tsx', CLI], { input: '', encoding: 'utf8', env: { ...process.env, PR_TITLE: 'x', PR_LABELS: 'nope' } });
     expect(r.status).toBe(2);
   });
+
+  it('exits 2 on an empty path list: a PR always changes something, so empty means the diff failed', () => {
+    const r = cli('fix: x', [], '');
+    expect(r.code).toBe(2);
+    expect(r.out).toContain('no changed paths on stdin');
+  });
 });
