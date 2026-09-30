@@ -34,6 +34,8 @@ import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { runFestAlerts } from './jobs/fest-alerts';
+import { runFestFriendFeed, runFestMcpKeepalive } from './jobs/fest-friend-feed';
+import { createFestMcp } from './sources/untappd/mcp-client';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
@@ -440,6 +442,31 @@ async function main(): Promise<void> {
       .catch((e) => log.error({ err: e }, 'fest alerts cron'))
       .finally(() => { festAlertsInFlight = false; });
   }));
+
+  // Festival MCP eye (spec §4.5): team check-ins through the owner's Untappd token, every 5 min in
+  // a polling window, plus a daily keepalive that keeps the refresh token in use outside the fest.
+  // Independent of the cookie'd client; off without FEST_MCP_URL.
+  if (env.FEST_MCP_URL) {
+    const mcpDeps = {
+      db, log, notifyAdmin,
+      mcp: createFestMcp({ url: env.FEST_MCP_URL, oauthFile: env.FEST_MCP_OAUTH_FILE, log }),
+      breaker: createPersistentCircuitBreaker({
+        db, key: 'fest_mcp_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
+        onTrip: () => adminAlert('Фест: Untappd MCP не відповідає — пауза 30 хв'),
+        onRecover: () => adminAlert('Фест: Untappd MCP знову відповідає'),
+      }),
+    };
+    let mcpInFlight = false;
+    cronJobs.push(cron.schedule('* * * * *', () => {
+      if (mcpInFlight) return;
+      mcpInFlight = true;
+      const now = new Date();
+      runFestFriendFeed(mcpDeps, now)
+        .then(() => runFestMcpKeepalive(mcpDeps, now))
+        .catch((e) => log.error({ err: e }, 'fest mcp cron'))
+        .finally(() => { mcpInFlight = false; });
+    }));
+  }
 
   await registerCommandMenu(bot, log);
 

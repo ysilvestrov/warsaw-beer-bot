@@ -32,6 +32,8 @@
     "scripts/cross-review/**/*",
     // WFP laptop eye: the pure schedule only; main.ts needs playwright-core from its own folder.
     "scripts/fest-eye/schedule.ts",
-    "scripts/fest-eye/schedule.test.ts"
+    "scripts/fest-eye/schedule.test.ts",
+    // WFP: one-time MCP login on the laptop (the owner's Untappd token for the bot).
+    "scripts/fest-mcp-login.ts"
   ]
 }

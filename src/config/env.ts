@@ -40,6 +40,12 @@ const Schema = z.object({
   // Untappd searches the triage job may spend per run on evidence probes and on
   // verifying proposed causes; 0 disables both (job behaves as before).
   TRIAGE_PROBE_LIMIT: z.coerce.number().int().min(0).default(120),
+
+  // WFP festival: the third-party Untappd MCP the bot reads team check-ins through (spec
+  // 2026-09-29-wfp-team-assistant-design.md §4.5). Unset ⇒ the MCP eye is off; closure then relies
+  // on the venue feeds alone. The OAuth file comes from scripts/fest-mcp-login.ts.
+  FEST_MCP_URL: z.string().url().optional(),
+  FEST_MCP_OAUTH_FILE: z.string().min(1).default('/var/lib/warsaw-beer-bot/fest-mcp-oauth.json'),
 });
 
 export type Env = z.infer<typeof Schema>;
