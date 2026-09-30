@@ -46,6 +46,8 @@ const Schema = z.object({
   // on the venue feeds alone. The OAuth file comes from scripts/fest-mcp-login.ts.
   FEST_MCP_URL: z.string().url().optional(),
   FEST_MCP_OAUTH_FILE: z.string().min(1).default('/var/lib/warsaw-beer-bot/fest-mcp-oauth.json'),
+  // Where phones reach the bot's API (the Cloudflare tunnel): the print station link points here.
+  FEST_PRINT_BASE_URL: z.string().url().default('https://beer-api.ysilvestrov-ai.uk'),
 });
 
 export type Env = z.infer<typeof Schema>;

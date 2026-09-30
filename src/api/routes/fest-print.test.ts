@@ -65,11 +65,20 @@ describe('print station API', () => {
       .toEqual([200, [['failed', 'paper out']], 200, { jobs: [] }]);
   });
 
-  it('a job of another team, or a failed report without an error text, is refused', async () => {
+  it('a job of another team, or a failed report without an error text (missing, empty, blank), is refused', async () => {
     const { app, station, glassId } = setup();
     const other = await app.request(`/fest-print/jobs/${glassId + 1}/printed`, { method: 'POST', headers: bearer(station) });
-    const bad = await app.request(`/fest-print/jobs/${glassId}/failed`, { method: 'POST', headers: bearer(station) });
-    expect([other.status, bad.status]).toEqual([404, 400]);
+    const failed = (body?: unknown) => app.request(`/fest-print/jobs/${glassId}/failed`, {
+      method: 'POST', headers: { ...bearer(station), 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const statuses = [other.status, ...(await Promise.all([failed(), failed({ error: '' }), failed({ error: '   ' })])).map((r) => r.status)];
+    expect(statuses).toEqual([404, 400, 400, 400]);
+  });
+
+  it('the job list is never cached', async () => {
+    const { app, station } = setup();
+    const res = await app.request('/fest-print/jobs', { headers: bearer(station) });
+    expect(res.headers.get('cache-control')).toBe('no-store');
   });
 
   it('serves the page as HTML and the vendored NiimBlue bundle as JavaScript, byte for byte', async () => {

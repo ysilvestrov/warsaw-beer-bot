@@ -30,6 +30,8 @@ export interface FestCommandDeps {
   /** Server-side menu read (the cookie'd Untappd client); absent when the server has no cookie. */
   refreshMenu?: (fest: Fest, now: Date) => Promise<MenuPageResult | 'blocked' | 'wrong_page'>;
   downloadFile: (fileId: string) => Promise<Buffer>;
+  /** The print station page as phones reach it (FEST_PRINT_BASE_URL + /fest-print). */
+  printStationUrl: string;
 }
 
 const isGroup = (type: string | undefined): boolean => type === 'group' || type === 'supergroup';
@@ -49,8 +51,6 @@ async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
 }
 
 const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu', 'printer'] as const;
-/** Where the bot's API is reachable from a phone (the Cloudflare tunnel); the station page lives there. */
-export const FEST_PRINT_URL = 'https://beer-api.ysilvestrov-ai.uk/fest-print';
 /** A station keeps working for a day after the last session: labels for the last glasses. */
 const STATION_GRACE_MS = 24 * 60 * 60 * 1000;
 /** «Взяв» buttons under a section's details. */
@@ -137,16 +137,16 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
 
     if (sub === 'printer') {
       // The link carries the station's key, so it is only ever sent in a private chat.
-      if (isGroup(ctx.chat?.type)) {
+      if (ctx.chat?.type !== 'private' || !ctx.from) {
         await ctx.reply(ctx.t('fest.printer_private'));
         return;
       }
       const lastEnd = festSessions(db, fest.id).reduce((max, s) => (s.end_at > max ? s.end_at : max), now.toISOString());
       const token = createStation(db, {
-        teamId: team.id, createdBy: ctx.from!.id, now: now.toISOString(),
+        teamId: team.id, createdBy: ctx.from.id, now: now.toISOString(),
         expiresAt: new Date(Date.parse(lastEnd) + STATION_GRACE_MS).toISOString(),
       });
-      await ctx.reply(ctx.t('fest.printer_link', { url: `${FEST_PRINT_URL}#t=${token}` }));
+      await ctx.reply(ctx.t('fest.printer_link', { url: `${deps.printStationUrl}#t=${token}` }));
       return;
     }
 

@@ -254,6 +254,7 @@ async function main(): Promise<void> {
     helpCommand,
     createFestCommand({
       downloadFile,
+      printStationUrl: `${env.FEST_PRINT_BASE_URL.replace(/\/$/, '')}/fest-print`,
       refreshMenu: festDeps ? (fest, now) => refreshFestMenu(festDeps, fest, now) : undefined,
     }),
     createRefreshCommand(

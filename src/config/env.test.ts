@@ -27,6 +27,11 @@ describe('loadEnv', () => {
     expect([env.FEST_MCP_URL, env.FEST_MCP_OAUTH_FILE]).toEqual([undefined, '/var/lib/warsaw-beer-bot/fest-mcp-oauth.json']);
   });
 
+  it('the print station link points at the production tunnel unless FEST_PRINT_BASE_URL says otherwise', () => {
+    expect([loadEnv(baseEnv).FEST_PRINT_BASE_URL, loadEnv({ ...baseEnv, FEST_PRINT_BASE_URL: 'http://localhost:3000' }).FEST_PRINT_BASE_URL])
+      .toEqual(['https://beer-api.ysilvestrov-ai.uk', 'http://localhost:3000']);
+  });
+
   it('FEST_MCP_URL must be a URL', () => {
     expect(() => loadEnv({ ...baseEnv, FEST_MCP_URL: 'not a url' })).toThrow(/FEST_MCP_URL/);
   });

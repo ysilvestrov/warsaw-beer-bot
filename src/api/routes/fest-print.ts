@@ -18,7 +18,8 @@ const assets = () => (cache ??= {
   lib: readFileSync(join(ASSETS, NIIMBLUE_FILE), 'utf8'),
 });
 
-const FailedBody = z.object({ error: z.string().max(1000) });
+// A failure must say what failed: an empty report would leave a retryable job with no diagnosis.
+const FailedBody = z.object({ error: z.string().trim().min(1).max(1000) });
 
 export function festPrintRoute(app: Hono<ApiEnv>, deps: ApiDeps, clock: () => Date = () => new Date()): void {
   const team = (c: Context<ApiEnv>): number | null => {
@@ -40,6 +41,8 @@ export function festPrintRoute(app: Hono<ApiEnv>, deps: ApiDeps, clock: () => Da
   app.get('/fest-print/jobs', (c) => {
     const teamId = team(c);
     if (teamId === null) return c.json({ error: 'unauthorized' }, 401);
+    // Polled every 5 s: a cached answer would drop new glasses or print old ones twice.
+    c.header('Cache-Control', 'no-store');
     return c.json({ jobs: pendingJobs(deps.db, teamId) });
   });
 
