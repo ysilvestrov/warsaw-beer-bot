@@ -2328,8 +2328,8 @@ describe('#665 Czech grade lookup context', () => {
     });
   });
 
-  describe('Issue #679 brand-as-brewery rescues', () => {
-    test('matches Kojetin Brewery / Som pohár čau 14° to SomPivo Som Pohár, Čau via curated alias', async () => {
+  describe('Issue #751 comma-split collaboration identity', () => {
+    test('matches Kojetin Brewery / Som pohár čau 14° to the complete split SomPivo identity', async () => {
       const search = fakeSearch(() => [
         {
           bid: 6690910,
@@ -2351,6 +2351,68 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.kind).toBe('matched');
       assert(out.kind === 'matched');
       expect(out.result.bid).toBe(6690910);
+    });
+
+    test('does not equate Kojetin with an unrelated SomPivo beer of the same name and ABV', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75, alias_alt: [],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects a split identity when the registered title differs', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Ahoj', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects a split identity with contradictory ABV', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 8.0, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('does not join independent aliases for a comma-free title', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('does not choose between two beers with the same split identity and ABV', async () => {
+      const search = fakeSearch(() => [6690910, 6690911].map((bid) => ({
+        bid, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      })));
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('does not use ABV to choose between two split identities', async () => {
+      const search = fakeSearch(() => [
+        { bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+          style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+          alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'] },
+        { bid: 6690911, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+          style: 'IPA - Other', abv: 7.0, global_rating: 3.75,
+          alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'] },
+      ]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
     });
 
     test('a Kojetín-label beer with no SomPivo counterpart still matches Měšťanský pivovar Kojetín', async () => {

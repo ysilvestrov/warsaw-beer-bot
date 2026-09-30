@@ -712,6 +712,19 @@ export async function lookupBeer(
       );
     });
 
+    // Algolia sometimes splits a complete alternative label at commas in the beer title.
+    // Reconstruct only this candidate's identity; the collaborator is not a brewery-wide alias.
+    const splitName = normalizeName(name);
+    const splitIdentity = `${normalizeBrewery(brewery)} ${splitName}`;
+    const splitIdentityHits = results.filter((result) =>
+      brewery.trim() !== '' &&
+      splitName.split(' ').length >= 2 &&
+      result.beer_name.includes(',') &&
+      result.alias_alt != null && result.alias_alt.length > 1 &&
+      normalizeName(result.beer_name) === splitName &&
+      normalizeName(normalizeIdentityAlias(result.alias_alt.join(','))) === splitIdentity,
+    );
+
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
     // overlap — full name path incl. fuzzy) or `relaxed` (#149 empty-input bypass /
     // #120 contained non-leading brewery token — EXACT name only, never approximate
@@ -790,7 +803,8 @@ export async function lookupBeer(
       relaxedPool.length === 0 &&
       nativePool.length === 0 &&
       brandPool.length === 0 &&
-      identityHits.length === 0
+      identityHits.length === 0 &&
+      splitIdentityHits.length === 0
     ) return typoRescue();
 
     // Stage 2a: exact name-key intersection (order-insensitive, collab/bilingual
@@ -900,6 +914,12 @@ export async function lookupBeer(
       const inputRestored = targetNames.some((t) => t.restored);
       const identityHit = pickUniqueByAbv(identityHits, abv, inputRestored);
       return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
+    }
+
+    if (splitIdentityHits.length > 0) {
+      if (new Set(splitIdentityHits.map((result) => result.bid)).size !== 1) return notFound();
+      const splitHit = pickUniqueByAbv(splitIdentityHits, abv, true);
+      return splitHit ? { kind: 'matched', result: splitHit } : notFound();
     }
 
     // Candidate-native brewery aliases are structured identity evidence, but unlike
