@@ -112,6 +112,7 @@ describe('deploy rsync payload', () => {
       'deploy/rsync-filter',
       'deploy/ships.sh',
       'deploy/sudoers.d/warsaw-beer-bot',
+      'deploy/trial-migrate.cjs',
       'deploy/warsaw-beer-bot.service',
       'deploy/wbb-autodeploy.service',
       'deploy/wbb-autodeploy.timer',
