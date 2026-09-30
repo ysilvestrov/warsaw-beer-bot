@@ -162,6 +162,136 @@ export const V41_ACCOUNT_HISTORY_SQL = `
   UPDATE user_profiles SET legacy_sync_revision = untappd_link_revision WHERE untappd_username IS NOT NULL;
 `;
 
+// WFP festival mode (spec 2026-09-29-wfp-team-assistant-design.md §3). Target, "on tap" and
+// "drunk" are deliberately NOT stored: each is recomputed from menu + history + check-ins, so a
+// stored flag cannot go stale. The WFP22 seed is config the code reads, not a fact about the world.
+// Sessions are UTC: Warsaw is UTC+2 until 2026-10-25.
+export const V42_FEST_SQL = `
+  CREATE TABLE IF NOT EXISTS fests (
+    id INTEGER PRIMARY KEY,
+    slug TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    menu_venue_id INTEGER NOT NULL,
+    target_min_rating REAL NOT NULL,
+    target_style_patterns TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS fest_sessions (
+    fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,
+    session_no INTEGER NOT NULL,
+    start_at TEXT NOT NULL,
+    end_at TEXT NOT NULL,
+    PRIMARY KEY (fest_id, session_no)
+  );
+  CREATE TABLE IF NOT EXISTS fest_venues (
+    fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,
+    venue_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    feed_path TEXT NOT NULL,
+    PRIMARY KEY (fest_id, venue_id)
+  );
+  CREATE TABLE IF NOT EXISTS fest_menu (
+    fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,
+    beer_id INTEGER NOT NULL REFERENCES beers(id),
+    section TEXT NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    PRIMARY KEY (fest_id, beer_id)
+  );
+  CREATE TABLE IF NOT EXISTS fest_stands (
+    fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,
+    section TEXT NOT NULL,
+    floor TEXT,
+    stand TEXT,
+    updated_by INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (fest_id, section)
+  );
+  CREATE TABLE IF NOT EXISTS fest_teams (
+    id INTEGER PRIMARY KEY,
+    fest_id INTEGER NOT NULL REFERENCES fests(id) ON DELETE CASCADE,
+    chat_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (fest_id, chat_id)
+  );
+  CREATE TABLE IF NOT EXISTS fest_team_members (
+    team_id INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+    telegram_id INTEGER NOT NULL REFERENCES user_profiles(telegram_id) ON DELETE CASCADE,
+    initials TEXT NOT NULL,
+    joined_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, telegram_id)
+  );
+  CREATE TABLE IF NOT EXISTS fest_target_overrides (
+    team_id INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+    beer_id INTEGER NOT NULL REFERENCES beers(id),
+    action TEXT NOT NULL CHECK (action IN ('add', 'remove')),
+    by_telegram_id INTEGER NOT NULL,
+    at TEXT NOT NULL,
+    PRIMARY KEY (team_id, beer_id)
+  );
+  CREATE TABLE IF NOT EXISTS venue_checkins (
+    checkin_id INTEGER PRIMARY KEY,
+    venue_id INTEGER NOT NULL,
+    bid INTEGER NOT NULL,
+    untappd_user TEXT,
+    checkin_at TEXT NOT NULL,
+    first_eye TEXT NOT NULL CHECK (first_eye IN ('laptop', 'server', 'friend_feed')),
+    observed_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_venue_checkins_venue_at ON venue_checkins (venue_id, checkin_at);
+  CREATE INDEX IF NOT EXISTS idx_venue_checkins_bid_at ON venue_checkins (bid, checkin_at);
+  CREATE TABLE IF NOT EXISTS fest_coverage (
+    venue_id INTEGER NOT NULL,
+    from_at TEXT NOT NULL,
+    to_at TEXT NOT NULL,
+    eye TEXT NOT NULL CHECK (eye IN ('laptop', 'server', 'friend_feed')),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (venue_id, from_at, to_at, eye)
+  );
+  CREATE TABLE IF NOT EXISTS fest_alerts_sent (
+    team_id INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+    session_no INTEGER NOT NULL,
+    beer_id INTEGER NOT NULL,
+    checkin_id INTEGER NOT NULL,
+    sent_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, session_no, beer_id)
+  );
+  CREATE TABLE IF NOT EXISTS fest_queue (
+    id INTEGER PRIMARY KEY,
+    team_id INTEGER NOT NULL REFERENCES fest_teams(id) ON DELETE CASCADE,
+    glass_no INTEGER NOT NULL,
+    beer_id INTEGER NOT NULL REFERENCES beers(id),
+    added_by INTEGER NOT NULL,
+    added_at TEXT NOT NULL,
+    UNIQUE (team_id, glass_no)
+  );
+  CREATE TABLE IF NOT EXISTS fest_print_jobs (
+    queue_id INTEGER PRIMARY KEY REFERENCES fest_queue(id) ON DELETE CASCADE,
+    status TEXT NOT NULL CHECK (status IN ('queued', 'printed', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    error TEXT
+  );
+
+  INSERT OR IGNORE INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns)
+    VALUES ('wfp22', 'Warszawski Festiwal Piwa 22', 11142155, 3.8,
+            '["Imperial","Wild Ale","Sour","Lambic","Eisbock","Barleywine","Wheatwine"]');
+  INSERT OR IGNORE INTO fest_sessions (fest_id, session_no, start_at, end_at)
+    SELECT id, 1, '2026-10-15T14:00:00.000Z', '2026-10-15T22:00:00.000Z' FROM fests WHERE slug = 'wfp22'
+    UNION ALL
+    SELECT id, 2, '2026-10-16T12:00:00.000Z', '2026-10-16T22:00:00.000Z' FROM fests WHERE slug = 'wfp22'
+    UNION ALL
+    SELECT id, 3, '2026-10-17T10:00:00.000Z', '2026-10-17T22:00:00.000Z' FROM fests WHERE slug = 'wfp22';
+  INSERT OR IGNORE INTO fest_venues (fest_id, venue_id, label, feed_path)
+    SELECT id, 11142155, 'Warszawski Festiwal Piwa',
+           '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity' FROM fests WHERE slug = 'wfp22'
+    UNION ALL
+    SELECT id, 2815864, 'Centrum Konferencyjne Legia',
+           '/v/centrum-konferencyjne-legia/2815864' FROM fests WHERE slug = 'wfp22'
+    UNION ALL
+    SELECT id, 2167060, 'Stadion Legii',
+           '/v/stadion-legii-warszawa-im-marszalka-jozefa-pilsudskiego/2167060' FROM fests WHERE slug = 'wfp22';
+`;
+
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
@@ -813,6 +943,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
     `,
   },
   { version: 41, sql: V41_ACCOUNT_HISTORY_SQL },
+  { version: 42, sql: V42_FEST_SQL },
 ];
 
 export function migrate(db: DB): void {

@@ -42,6 +42,6 @@ export function restoreV40History(db: DB): void {
     INSERT INTO checkin_sync_state SELECT * FROM saved_sync;
     DROP TABLE saved_checkins; DROP TABLE saved_had; DROP TABLE saved_coverage; DROP TABLE saved_sync;
     ALTER TABLE user_profiles DROP COLUMN legacy_sync_revision;
-    DELETE FROM schema_version WHERE version = 41;
+    DELETE FROM schema_version WHERE version >= 41;
   `);
 }
