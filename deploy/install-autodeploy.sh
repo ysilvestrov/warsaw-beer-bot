@@ -35,6 +35,7 @@ echo
 # "deploy/ships.sh (not installed)" and the guard REFUSEs — but the window is
 # free to remove.
 install -m 0755 deploy/ships.sh               /usr/local/bin/wbb-ships
+install -m 0755 deploy/db-snapshot.sh         /usr/local/bin/wbb-db-snapshot
 install -m 0755 deploy/read-env.sh            /usr/local/bin/wbb-read-env
 install -m 0755 deploy/installed-current.sh   /usr/local/bin/wbb-installed-current
 install -m 0755 deploy/autodeploy-guard.sh    /usr/local/bin/wbb-autodeploy-guard
@@ -46,7 +47,7 @@ systemctl daemon-reload
 echo
 echo "== installed =="
 ls -l /usr/local/bin/wbb-autodeploy /usr/local/bin/wbb-autodeploy-guard \
-      /usr/local/bin/wbb-read-env /usr/local/bin/wbb-ships \
+      /usr/local/bin/wbb-read-env /usr/local/bin/wbb-ships /usr/local/bin/wbb-db-snapshot \
       /usr/local/bin/wbb-installed-current
 ls -l /etc/systemd/system/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.timer
 
