@@ -46,7 +46,7 @@ function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: 
     ctx.answerCbQuery = (async (text?: string) => { answers.push(text); return true; }) as never;
     return next();
   });
-  bot.use(createFestCommand({ downloadFile: async () => Buffer.from('') }));
+  bot.use(createFestCommand({ downloadFile: async () => Buffer.from(''), printStationUrl: 'https://beer-api.example/fest-print' }));
   return { db, bot, teamId, replies, answers };
 }
 
@@ -96,7 +96,7 @@ describe('/fest printer', () => {
     const { db, bot, teamId, replies } = setup();
     await bot.handleUpdate(command(1, 7, { id: 7, type: 'private' }, '/fest printer') as unknown as Update);
     const token = /#t=([A-Za-z0-9_-]+)/.exec(replies[0])![1];
-    expect([replies.length, replies[0].includes('https://beer-api.ysilvestrov-ai.uk/fest-print#t='), stationTeam(db, token, '2026-10-17T21:00:00.000Z')])
+    expect([replies.length, replies[0].includes('https://beer-api.example/fest-print#t='), stationTeam(db, token, '2026-10-17T21:00:00.000Z')])
       .toEqual([1, true, teamId]);
   });
 
