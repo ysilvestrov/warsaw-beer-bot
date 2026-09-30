@@ -2365,6 +2365,18 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.result.bid).toBe(6690910);
     });
 
+    test('reconstructs a split identity when the credited brewery also contains a comma', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Foo, Bar', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['Smith', ' Jones Brewing Foo', ' Bar'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Smith, Jones Brewing', name: 'Foo Bar', abv: 6.0, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6690910);
+    });
+
     test('does not equate Kojetin with an unrelated SomPivo beer of the same name and ABV', async () => {
       const search = fakeSearch(() => [{
         bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',

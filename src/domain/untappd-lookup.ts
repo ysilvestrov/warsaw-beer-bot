@@ -725,14 +725,15 @@ export async function lookupBeer(
         normalizeName(result.beer_name) !== splitName
       ) return false;
       const titleSuffix = ` ${baseNormalize(result.beer_name)}`;
-      return aliases.some((_, start) => {
-        const fragments = aliases.slice(start, start + fragmentCount);
-        if (fragments.length !== fragmentCount) return false;
-        const fullAlias = baseNormalize(fragments.join(','));
-        if (!fullAlias.endsWith(titleSuffix)) return false;
-        const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
-        return normalizeBrewery(creditedBrewery) === splitBrewery;
-      });
+      for (let start = 0; start + fragmentCount <= aliases.length; start++) {
+        for (let end = start + fragmentCount; end <= aliases.length; end++) {
+          const fullAlias = baseNormalize(aliases.slice(start, end).join(','));
+          if (!fullAlias.endsWith(titleSuffix)) continue;
+          const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
+          if (normalizeBrewery(creditedBrewery) === splitBrewery) return true;
+        }
+      }
+      return false;
     });
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
