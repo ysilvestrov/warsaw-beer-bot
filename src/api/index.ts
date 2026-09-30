@@ -23,6 +23,7 @@ import { createCatalogCache } from '../domain/catalog-cache';
 import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
+import { festRoute } from './routes/fest';
 
 export function postPayloadBodyLimit(
   deps: ApiDeps,
@@ -75,6 +76,11 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   );
   app.use('/checkins/*', authMiddleware(deps.db));
   checkinsRoute(app, deps);
+
+  // Festival eyes relay a venue feed page or the menu page — the same size class as /checkins/sync.
+  app.use('/fest/*', postPayloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES));
+  app.use('/fest/*', authMiddleware(deps.db));
+  festRoute(app, deps);
 
   app.use('/admin/*', adminMiddleware(deps.env));
   adminRoute(app, deps);
