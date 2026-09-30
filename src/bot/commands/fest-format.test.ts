@@ -149,6 +149,10 @@ describe('Telegram message limit', () => {
     expect(fitMessage(t, head, ['a'], [], 25)).toBe('hhhhhhhh0\nhhhhhhhh1\n…');
   });
 
+  it('fitMessage never cuts inside a line, even a first line longer than the limit', () => {
+    expect(fitMessage(t, [`<b>${'x'.repeat(30)}</b>`, 'h2'], ['a'], [], 25)).toBe('…');
+  });
+
   it('fitMessage keeps a short message whole', () => {
     expect(fitMessage(t, ['h'], ['a', 'b'], ['z'])).toBe('h\na\nb\nz');
   });

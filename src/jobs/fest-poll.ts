@@ -4,7 +4,7 @@ import type { Http } from '../sources/http';
 import { CookieExpiredError, HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
 import { activeFest, currentOrNextFests, festSessions, festVenues, POLL_MARGIN_MS, type Fest } from '../storage/fests';
-import { getJobState, setJobState } from '../storage/job_state';
+import { deleteJobState, getJobState, setJobState } from '../storage/job_state';
 import { parseVenueMenu } from '../sources/untappd/venue-menu';
 import { dueMenuRefresh, dueServerPoll, type Window } from '../domain/fest/schedule';
 import type { CircuitBreaker } from '../domain/untappd-circuit';
@@ -44,12 +44,15 @@ async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise
       deps.log.warn('fest: untappd cookie expired');
       // Once per 6 h, not on every 10-minute poll.
       const last = getJobState(deps.db, COOKIE_ALERT_KEY);
-      if (last === null || now.getTime() - Date.parse(last) >= COOKIE_ALERT_EVERY_MS) {
-        // The throttle counts only an alert that was delivered: a failed send is retried next poll.
-        const sent = deps.notifyAdmin
-          ? await deps.notifyAdmin('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').then(() => true, () => false)
-          : false;
-        if (sent) setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
+      if (deps.notifyAdmin && (last === null || now.getTime() - Date.parse(last) >= COOKIE_ALERT_EVERY_MS)) {
+        // Claim the slot synchronously (a concurrent /fest menu sees it and stays quiet), and give it
+        // back if the send fails: the throttle counts only an alert that was delivered.
+        setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
+        const sent = await deps.notifyAdmin('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').then(() => true, () => false);
+        if (!sent) {
+          if (last === null) deleteJobState(deps.db, COOKIE_ALERT_KEY);
+          else setJobState(deps.db, COOKIE_ALERT_KEY, last);
+        }
       }
       return null;
     }

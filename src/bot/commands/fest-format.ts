@@ -28,12 +28,12 @@ export function fitMessage(t: Translator, head: string[], items: string[], tail:
     size += item.length + 1;
   }
   const out = [...head, ...kept, t('fest.lines_more', { count: items.length - kept.length }), ...tail].join('\n');
-  // Head and tail alone can outgrow the limit (a big team's history lines): then cut the text at a
-  // line boundary, since a clipped reply is still an answer and a rejected one is none.
+  // Head and tail alone can outgrow the limit (a big team's history lines): then keep whole lines
+  // only, since a clipped reply is still an answer and a rejected one is none. Never cut inside a
+  // line: it may hold an HTML tag or entity that Telegram would then refuse to parse.
   if (out.length <= limit) return out;
-  const cut = out.slice(0, limit - 2);
-  const nl = cut.lastIndexOf('\n');
-  return (nl > 0 ? cut.slice(0, nl) : cut) + '\n…';
+  const nl = out.slice(0, limit - 1).lastIndexOf('\n');
+  return nl > 0 ? out.slice(0, nl) + '\n…' : '…';
 }
 
 const hhmm = (iso: string): string =>
