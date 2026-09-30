@@ -12,12 +12,12 @@ const DIGIT_OR_CODE_PREFIX = /^\d+:\d+/;
 export function extractColonTails(beerName: string): string[] {
   if (DIGIT_OR_CODE_PREFIX.test(beerName)) return [];
   const parts = beerName.split(/:\s+/);
-  if (parts.length < 2) return [];
+  if (parts.length < 2 || parts[0].trim().length === 0) return [];
   // For names with multiple colons (e.g. `Series: Subseries: Name`), emit each progressive tail.
   const tails: string[] = [];
   for (let i = 1; i < parts.length; i += 1) {
     const tail = parts.slice(i).join(': ').trim();
-    if (tail.length > 0) tails.push(tail);
+    if (tail.length > 0 && !DIGIT_OR_CODE_PREFIX.test(tail)) tails.push(tail);
   }
   return tails;
 }
