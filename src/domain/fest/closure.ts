@@ -30,11 +30,13 @@ export function closeQueue(items: ClosureItem[], memberIds: number[], checkins: 
     const own = checkins
       .filter((c) => c.telegramId === m)
       .sort((a, b) => Date.parse(a.checkinAt) - Date.parse(b.checkinAt));
-    const used = new Set<ClosureCheckin>();
+    // By id, not by object: the same Untappd check-in can arrive from the member's history and
+    // from an authored venue row, and it still proves only one glass.
+    const used = new Set<string>();
     for (const item of ordered) {
       const from = Date.parse(item.addedAt) - CLOSE_SLACK_MS;
-      const hit = own.find((c) => !used.has(c) && c.beerId === item.beerId && Date.parse(c.checkinAt) >= from);
-      if (hit) used.add(hit);
+      const hit = own.find((c) => !used.has(c.checkinId) && c.beerId === item.beerId && Date.parse(c.checkinAt) >= from);
+      if (hit) used.add(hit.checkinId);
       out.get(item.id)!.set(m, hit ? hit.checkinId : null);
     }
   }

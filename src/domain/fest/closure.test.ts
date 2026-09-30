@@ -51,3 +51,15 @@ describe('closeQueue with two glasses of one beer', () => {
     expect([r.get(7)!.get(1), r.get(8)!.get(1)]).toEqual(['a', 'b']);
   });
 });
+
+describe('closeQueue with the same check-in from two sources', () => {
+  it('one check-in id closes one glass even when it arrives twice', () => {
+    const second = { id: 8, beerId: 11, addedAt: '2026-10-15T18:02:00.000Z' };
+    const twice = [
+      { telegramId: 1, beerId: 11, checkinId: '501', checkinAt: at(60_000) },
+      { telegramId: 1, beerId: 11, checkinId: '501', checkinAt: at(60_000) },
+    ];
+    const r = closeQueue([ITEM, second], [1], twice);
+    expect([r.get(7)!.get(1), r.get(8)!.get(1)]).toEqual(['501', null]);
+  });
+});
