@@ -253,4 +253,7 @@ export const uk: Messages = {
   'fest.queue_empty': 'Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take <назва>.',
   'fest.queue_line': '№{glass} <b>{name}</b>{section} · взяв {taker}\n   {marks}',
   'fest.queue_link': '№{glass} {name} ↗',
+  'fest.alert_new': '🆕 З\'явилося на крані:',
+  'fest.alert_pouring': '🍺 Уже наливають:',
+  'fest.alert_line': '• <b>{name}</b> — {brewery} · {place} · перший чекін {time}',
 };

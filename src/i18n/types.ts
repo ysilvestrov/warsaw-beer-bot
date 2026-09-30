@@ -220,6 +220,9 @@ export interface Messages {
   'fest.queue_empty': string;
   'fest.queue_line': string;
   'fest.queue_link': string;
+  'fest.alert_new': string;
+  'fest.alert_pouring': string;
+  'fest.alert_line': string;
   'fest.history_header': string;
   'fest.history_line': string;
   'fest.history_unknown': string;
