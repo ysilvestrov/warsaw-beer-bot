@@ -1,6 +1,6 @@
 import { Composer, Markup } from 'telegraf';
 import type { BotContext } from '../index';
-import { currentOrNextFest, getFest, type Fest } from '../../storage/fests';
+import { currentOrNextFest, currentOrNextFests, getFest, type Fest } from '../../storage/fests';
 import {
   addMember, createTeam, isTeamMember, members, setOverride, teamById, teamByChat, teamsOfUser, type FestTeam,
 } from '../../storage/fest_teams';
@@ -270,6 +270,11 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
     const beerId = Number(ctx.match[2]);
     if (!team || !isTeamMember(db, team.id, ctx.from.id)) {
       await ctx.answerCbQuery(ctx.t('fest.not_member'));
+      return;
+    }
+    // A button outlives its fest: once the fest's last window has closed, it queues nothing.
+    if (!currentOrNextFests(db, new Date()).some((f) => f.id === team.fest_id)) {
+      await ctx.answerCbQuery(ctx.t('fest.no_fest'));
       return;
     }
     const beer = menuFor(db, team.fest_id).find((m) => m.beer_id === beerId);

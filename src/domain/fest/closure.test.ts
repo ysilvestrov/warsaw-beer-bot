@@ -34,3 +34,20 @@ describe('closeQueue', () => {
     expect(closeQueue([], [1], []).size).toBe(0);
   });
 });
+
+describe('closeQueue with two glasses of one beer', () => {
+  const second = { id: 8, beerId: 11, addedAt: '2026-10-15T18:02:00.000Z' };
+
+  it('one check-in closes only the first glass', () => {
+    const r = closeQueue([ITEM, second], [1], [{ telegramId: 1, beerId: 11, checkinId: 'a', checkinAt: at(60_000) }]);
+    expect([r.get(7)!.get(1), r.get(8)!.get(1)]).toEqual(['a', null]);
+  });
+
+  it('two check-ins close both, in queue order', () => {
+    const r = closeQueue([second, ITEM], [1], [
+      { telegramId: 1, beerId: 11, checkinId: 'b', checkinAt: at(9 * 60_000) },
+      { telegramId: 1, beerId: 11, checkinId: 'a', checkinAt: at(60_000) },
+    ]);
+    expect([r.get(7)!.get(1), r.get(8)!.get(1)]).toEqual(['a', 'b']);
+  });
+});

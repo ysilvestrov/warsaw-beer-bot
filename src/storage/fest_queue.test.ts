@@ -58,6 +58,15 @@ describe('takeBeer on a repeated tap', () => {
   });
 });
 
+describe('takeBeer against a glass dated ahead of the clock', () => {
+  it('a glass stamped later than this tap is not a repeat of it', () => {
+    const { db, teamA } = setup();
+    const ahead = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: '2026-10-15T18:01:00.000Z' });
+    const now = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: AT });
+    expect([ahead.glassNo, now.glassNo, now.repeated]).toEqual([1, 2, false]);
+  });
+});
+
 describe('memberBeerCheckins', () => {
   const member = [{ telegramId: 1, untappdUsername: 'JohnDoe' }];
 

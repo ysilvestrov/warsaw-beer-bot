@@ -31,9 +31,9 @@ export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: n
     const since = new Date(Date.parse(p.at) - REPEAT_TAP_MS).toISOString();
     const recent = db.prepare(
       `SELECT id, glass_no FROM fest_queue
-        WHERE team_id = ? AND beer_id = ? AND added_by = ? AND added_at >= ?
+        WHERE team_id = ? AND beer_id = ? AND added_by = ? AND added_at >= ? AND added_at <= ?
         ORDER BY glass_no DESC LIMIT 1`,
-    ).get(p.teamId, p.beerId, p.addedBy, since) as { id: number; glass_no: number } | undefined;
+    ).get(p.teamId, p.beerId, p.addedBy, since, p.at) as { id: number; glass_no: number } | undefined;
     if (recent) return { id: recent.id, glassNo: recent.glass_no, repeated: true };
     const { next } = db.prepare('SELECT COALESCE(MAX(glass_no), 0) + 1 AS next FROM fest_queue WHERE team_id = ?')
       .get(p.teamId) as { next: number };

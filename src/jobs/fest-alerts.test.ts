@@ -120,6 +120,20 @@ describe('runFestAlerts', () => {
     expect([sent.map(([, html]) => html.length <= 4000), first, total]).toEqual([[true, true], FIRST_FIT, 40]);
   });
 
+  it("a send that hangs for one team does not hold up another team's alert", async () => {
+    const { db, sent, deps } = setup();
+    const festId = getFestBySlug(db, 'wfp22')!.id;
+    const second = createTeam(db, festId, -200, '2026-10-02T00:00:00.000Z').id;
+    addMember(db, second, 1, 'YS', '2026-10-02T00:00:00.000Z');
+    tap(db, 501, 6000011, '2026-10-15T17:50:00.000Z');
+    // Teams go in id order: the first (-100) never answers, the second (-200) does.
+    const outcomes = [() => new Promise<void>(() => {}), () => Promise.resolve()];
+    const stuck = { ...deps, send: async (chatId: number, html: string) => { await outcomes.shift()!(); sent.push([chatId, html]); } };
+    void runFestAlerts(stuck, NOW);
+    await new Promise((r) => setImmediate(r));
+    expect(sent.map(([chatId]) => chatId)).toEqual([-200]);
+  });
+
   it('outside every polling window it does nothing', async () => {
     const { db, sent, deps } = setup();
     tap(db, 501, 6000011, '2026-10-15T17:50:00.000Z');
