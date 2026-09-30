@@ -42,9 +42,10 @@ export async function runFestAlerts(deps: FestAlertDeps, now: Date): Promise<num
     const venueIds = festVenues(deps.db, fest.id).map((v) => v.venue_id);
     // Check-ins from the polling window count: a stand may pour before the doors open.
     const since = new Date(Date.parse(session.start_at) - POLL_MARGIN_MS).toISOString();
-    // Teams in turn, each send bounded by ALERT_SEND_TIMEOUT_MS: a hung send cannot stall the tick
-    // or the teams after it, and sends never burst past Telegram's rate limit. A failure of one
-    // team is logged and the loop moves on.
+    // Teams in turn, each send bounded by ALERT_SEND_TIMEOUT_MS, so a hung send delays the teams
+    // after it by at most that much; a failure of one team is logged and the loop moves on. Ticks
+    // never overlap (the cron's in-flight guard). Sized for a festival's handful of teams — one
+    // message per team per tick, far below Telegram's bot-wide rate — so there is no pacing.
     for (const team of teamsOfFest(deps.db, fest.id)) {
       try {
         if (await alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)) sent++;
