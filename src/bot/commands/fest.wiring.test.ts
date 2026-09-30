@@ -8,6 +8,7 @@ import { getFestBySlug } from '../../storage/fests';
 import { addMember, createTeam } from '../../storage/fest_teams';
 import { upsertMenuItem } from '../../storage/fest_menu';
 import { queueFor } from '../../storage/fest_queue';
+import { stationTeam } from '../../storage/fest_print';
 import type { BotContext } from '../index';
 import { createFestCommand } from './fest';
 
@@ -80,5 +81,38 @@ describe('«Взяв» (fest:q)', () => {
     const { db, bot, teamId } = setup();
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:999`) as unknown as Update);
     expect(queueFor(db, teamId)).toEqual([]);
+  });
+});
+
+function command(updateId: number, from: number, chat: { id: number; type: 'private' | 'supergroup' }, text: string) {
+  return { update_id: updateId, message: { message_id: updateId, date: 1, text,
+    entities: [{ type: 'bot_command', offset: 0, length: 5 }],
+    chat: chat.type === 'private' ? { id: chat.id, type: 'private' as const, first_name: 'T' } : { id: chat.id, type: 'supergroup' as const, title: 'Team' },
+    from: { id: from, is_bot: false, first_name: 'Test' } } };
+}
+
+describe('/fest printer', () => {
+  it("in a private chat a member gets a station link whose token opens the team's print queue", async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(command(1, 7, { id: 7, type: 'private' }, '/fest printer') as unknown as Update);
+    const token = /#t=([A-Za-z0-9_-]+)/.exec(replies[0])![1];
+    expect([replies.length, replies[0].includes('https://beer-api.ysilvestrov-ai.uk/fest-print#t='), stationTeam(db, token, '2026-10-17T21:00:00.000Z')])
+      .toEqual([1, true, teamId]);
+  });
+
+  it('in the group chat it sends no link, only where to ask', async () => {
+    const { db, bot, replies } = setup();
+    await bot.handleUpdate(command(1, 7, { id: -100, type: 'supergroup' }, '/fest printer') as unknown as Update);
+    expect([replies, db.prepare('SELECT COUNT(*) AS n FROM fest_print_stations').get()])
+      .toEqual([['The print station link is sent only in a private chat: message me /fest printer.'], { n: 0 }]);
+  });
+
+  it('the station stops working a day after the last session', async () => {
+    const { db, bot, teamId, replies } = setup();
+    await bot.handleUpdate(command(1, 7, { id: 7, type: 'private' }, '/fest printer') as unknown as Update);
+    const token = /#t=([A-Za-z0-9_-]+)/.exec(replies[0])![1];
+    // The last WFP22 session ends 2026-10-17 22:00Z.
+    expect([stationTeam(db, token, '2026-10-18T21:59:59.000Z'), stationTeam(db, token, '2026-10-18T22:00:00.000Z')])
+      .toEqual([teamId, null]);
   });
 });

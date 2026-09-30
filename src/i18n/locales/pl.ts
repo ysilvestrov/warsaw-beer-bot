@@ -256,4 +256,6 @@ export const pl: Messages = {
   'fest.alert_new': '🆕 Właśnie na kranie:',
   'fest.alert_pouring': '🍺 Już nalewają:',
   'fest.alert_line': '• <b>{name}</b> — {brewery} · {place} · pierwszy check-in {time}',
+  'fest.printer_private': 'Link do stacji druku wysyłam tylko w prywatnym czacie: napisz mi /fest printer.',
+  'fest.printer_link': '🖨 Stacja druku drużyny — otwórz w Chrome na telefonie z Androidem, z którym sparujesz drukarkę:\n{url}\n\nLink to klucz do kolejki druku drużyny: nie przesyłaj go dalej. Działa do końca festiwalu.',
 };

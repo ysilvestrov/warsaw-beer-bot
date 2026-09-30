@@ -1,6 +1,7 @@
 import { Composer, Markup } from 'telegraf';
 import type { BotContext } from '../index';
-import { currentOrNextFest, currentOrNextFests, getFest, type Fest } from '../../storage/fests';
+import { currentOrNextFest, currentOrNextFests, festSessions, getFest, type Fest } from '../../storage/fests';
+import { createStation } from '../../storage/fest_print';
 import {
   addMember, createTeam, isTeamMember, members, setOverride, teamById, teamByChat, teamsOfUser, type FestTeam,
 } from '../../storage/fest_teams';
@@ -47,7 +48,11 @@ async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
   await ctx.replyWithHTML(formatRanking(ctx.t, view), Markup.inlineKeyboard(buttons));
 }
 
-const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu'] as const;
+const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu', 'printer'] as const;
+/** Where the bot's API is reachable from a phone (the Cloudflare tunnel); the station page lives there. */
+export const FEST_PRINT_URL = 'https://beer-api.ysilvestrov-ai.uk/fest-print';
+/** A station keeps working for a day after the last session: labels for the last glasses. */
+const STATION_GRACE_MS = 24 * 60 * 60 * 1000;
 /** «Взяв» buttons under a section's details. */
 export const TAKE_BUTTONS = 20;
 type Sub = typeof SUBS[number] | '';
@@ -127,6 +132,21 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
         ctx.t('fest.queue_link', { glass: l.glassNo, name: l.name.slice(0, 50) }), buildBeerPageUrl(l.bid),
       )]);
       await ctx.replyWithHTML(formatQueue(ctx.t, view), Markup.inlineKeyboard(links));
+      return;
+    }
+
+    if (sub === 'printer') {
+      // The link carries the station's key, so it is only ever sent in a private chat.
+      if (isGroup(ctx.chat?.type)) {
+        await ctx.reply(ctx.t('fest.printer_private'));
+        return;
+      }
+      const lastEnd = festSessions(db, fest.id).reduce((max, s) => (s.end_at > max ? s.end_at : max), now.toISOString());
+      const token = createStation(db, {
+        teamId: team.id, createdBy: ctx.from!.id, now: now.toISOString(),
+        expiresAt: new Date(Date.parse(lastEnd) + STATION_GRACE_MS).toISOString(),
+      });
+      await ctx.reply(ctx.t('fest.printer_link', { url: `${FEST_PRINT_URL}#t=${token}` }));
       return;
     }
 

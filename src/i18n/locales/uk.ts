@@ -256,4 +256,6 @@ export const uk: Messages = {
   'fest.alert_new': '🆕 З\'явилося на крані:',
   'fest.alert_pouring': '🍺 Уже наливають:',
   'fest.alert_line': '• <b>{name}</b> — {brewery} · {place} · перший чекін {time}',
+  'fest.printer_private': 'Посилання на станцію друку — лише в приватному чаті: напиши мені /fest printer.',
+  'fest.printer_link': '🖨 Станція друку для команди — відкрий у Chrome на Android-телефоні, до якого підключатимеш принтер:\n{url}\n\nПосилання — ключ до черги друку команди: не пересилай його. Діє до кінця фестивалю.',
 };

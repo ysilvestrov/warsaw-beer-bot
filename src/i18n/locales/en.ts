@@ -256,4 +256,6 @@ export const en: Messages = {
   'fest.alert_new': '🆕 Just tapped:',
   'fest.alert_pouring': '🍺 Already pouring:',
   'fest.alert_line': '• <b>{name}</b> — {brewery} · {place} · first check-in {time}',
+  'fest.printer_private': 'The print station link is sent only in a private chat: message me /fest printer.',
+  'fest.printer_link': '🖨 Your team\'s print station — open it in Chrome on the Android phone the printer will pair with:\n{url}\n\nThe link is the key to your team\'s print queue: do not forward it. It works until the end of the festival.',
 };
