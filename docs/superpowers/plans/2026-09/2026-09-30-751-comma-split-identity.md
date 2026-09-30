@@ -33,7 +33,7 @@
 **Files:** `src/domain/untappd-lookup.ts`, `src/domain/brewery-aliases.ts`
 
 - [ ] Delete `['kojetin', 'sompivo']` from `ALIAS_PAIRS`.
-- [ ] In `matchAgainst`, build a split-identity pool only when the candidate title includes `,`, the input title has at least two normalized tokens and equals the candidate title, and `alias_alt` has enough elements. Join each consecutive window whose element count equals the candidate title's comma-part count, base-normalize it, require the complete base-normalized candidate title as its suffix, then compare the remaining prefix with the input via `normalizeBrewery`.
+- [ ] In `matchAgainst`, build a split-identity pool only when the candidate title includes `,`, the input title has at least two normalized tokens and equals the candidate title, and `alias_alt` has enough elements. Join each consecutive window whose element count is at least the candidate title's comma-part count (extra commas can belong to the credited brewery), base-normalize it, require the complete base-normalized candidate title as its suffix, then compare the remaining prefix with the input via `normalizeBrewery`.
 - [ ] Include this pool in the early no-evidence check. Resolve it after the original `identityHits` stage only when there is exactly one distinct `bid`; reject if any qualifying row has a known ABV or alcohol-class contradiction. ABV cannot select between bids in this fallback. On veto, continue to independent evidence stages and other brewery search parts.
 - [ ] Re-run the focused suites and then `npm test && npm run typecheck`.
 - [ ] Replay issue #751 read-only against live Algolia and verify bid 6690910; ensure a same-name SomPivo negative case still yields `not_found`.
