@@ -810,6 +810,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 38 | `bug_report_drafts`, `bug_reports`, `bug_report_media`, `bug_report_bans` — діалог, черга, приватні вкладення і бан скарг на помилки; без бекфілу |
 | 40 | `untappd_had.user_rating` (#612) — nullable особиста оцінка профілю (0–5), резервна до оцінки чекіну; без бекфілу. `user_profiles.untappd_link_revision` починається з 0 й збільшується при зміні акаунта, щоб відкинути стару відповідь скрейпу навіть після зміни туди й назад |
 | 41 | `account_key` у чотирьох таблицях історії, складені ключі та `legacy_sync_revision`; старі дані збережено за поточним акаунтом, лічильник AUTOINCREMENT чекінів збережено |
+| 42 | Фестивальний режим WFP: `fests`, `fest_sessions`, `fest_venues`, `fest_menu`, `fest_stands`, `fest_teams`, `fest_team_members`, `fest_target_overrides`, `venue_checkins`, `fest_coverage`, `fest_alerts_sent`, `fest_queue`, `fest_print_jobs`; сид WFP22 (три сесії в UTC, три локації, поріг 3.80, шаблони стилів). Ідемпотентна (`IF NOT EXISTS` / `OR IGNORE`), як v38. Target, «на крані» і «випито» не зберігаються — обчислюються |
 
 ---
 
@@ -2040,7 +2041,7 @@ Auth like `/match` (per-user Bearer-токен → `telegram_id`). Другий 
 `POST /checkins/sync` приймає `{ html, maxId?, linkRevision? }` (обрізана клієнтом сторінка стрічки + курсор,
 що її породив). Сервер: детектить блок-сторінку (спільний `block.ts`) → `502 { error: "blocked" }`
 (курсор не чіпає); валідує курсор — не `/^\d+$/` (нечисловий, з пробілами, `0x…`, `5e2`) →
-`400 { error: "bad_cursor" }`; парсить `parseCheckinFeedPage(html)`; на кожен чекін `upsertBeerByBid`
+`400 { error: "bad_cursor" }`; парсить `parseCheckinFeedPage(html)` (час чекіну — спершу атрибут `a.time[data-gregtime]`, потім текст `a.time`: у DOM браузера текст згорнуто до дати, атрибут несе RFC-час; у сирому HTML атрибута нема, і текст той самий; парсер також повертає `author` — username з `p.text a.user`, цей маршрут його не використовує); на кожен чекін `upsertBeerByBid`
 за **bid** (канонічний `untappd_id`; не знайдено — резолвить **єдину** сироту з тією самою нормалізованою
 парою й цифрами назви `same`/`year-fallback` щодо назви bid (#636), інакше новий рядок; факти не стираються, назва не змінюється,
 провенанс лише посилюється, #617) → локальний
@@ -2116,6 +2117,37 @@ submit сторінки до backend або паузу між сторінкам
 Якщо callback на `checkin-sync:start` не приходить, popup після 1.5 s повторює start один раз,
 а після другого timeout усе одно переходить до polling статусу, тому не зависає на «Starting…».
 Деталі — §6 і `docs/extension-install-uk.md`.
+
+#### `POST /fest/feed` / `POST /fest/menu` — прийом від фестивальних «очей» (v42)
+
+Дизайн: `docs/superpowers/specs/2026-09/2026-09-29-wfp-team-assistant-design.md`. Auth — Bearer-токен, як у
+`/checkins/*`, ліміт тіла той самий (`CHECKINS_SYNC_BODY_LIMIT_BYTES`). Писати може лише учасник команди
+фесту (`fest_team_members`), інакше `403 not_team_member`; блок-сторінка → `502 blocked`, нічого не пишеться.
+
+- `POST /fest/feed` `{ venueId, html, cursor?, fetchedAt }` — лише у вікні опитування (сесія ± 30 хв,
+  інакше `404 no_active_fest`), `venueId` — одна з `fest_venues` (інакше `400 unknown_venue`). Єдиний шлях
+  запису для всіх очей — `ingestFeedPage`: чекіни в `venue_checkins` (дедуп за Untappd `checkin_id`, перше
+  око зберігає `first_eye`) і доведений проміжок у `fest_coverage`. Відповідь
+  `{ inserted, seen, dropped, stitched, nextCursor }`.
+- **Покриття доводить сама сторінка** (неперервний зріз стрічки від нових до старих): головна —
+  `[найстаріший на сторінці, min(fetchedAt, now)]`, курсорна — `[найстаріший, час чекіну-курсора]`, де
+  курсор мусить бути збереженим чекіном **тієї самої локації**. Нічого не доводять: порожня сторінка
+  (так виглядає незалогінений `more_feed`), курсор, якого немає в БД для цієї локації, і сторінка, на
+  якій бодай один рядок не має часу до секунди (`dropped > 0`). `stitched` — проміжок сторінки
+  перетинає або торкається наявного покриття; `false` просить око дочитати наступну сторінку.
+- `POST /fest/menu` `{ html }` — від початку підготовки до кінця останнього вікна (`currentOrNextFest`,
+  інакше `404 no_fest`). `parseVenueMenu` → `upsertBeerByBid` з провенансом `checkin` (bid узято зі
+  сторінки самого Untappd) → `fest_menu` (`first_seen_at` незмінний, `last_seen_at` оновлюється; зникла
+  позиція не видаляється). Відповідь `{ items, updatedAt }`.
+
+Чисті функції ядра (без I/O, `src/domain/fest/`): `computeTargets` (непите **кожним** учасником ∧
+(`rating_global ≥ target_min_rating` ∨ підрядок `target_style_patterns` у сирому стилі Untappd,
+регістронезалежно); ручні `add`/`remove`; непите без рейтингу й без збігу стилю — окремим списком
+`unrated`; порожня команда → нічого), `tapStatus` (тристанний: `on_tap` — чекін у `(now − 60 хв, now]` на
+будь-якій локації фесту; `not_seen` — лише коли покриття **кожної** локації безперервне за цю годину;
+інакше `unknown`), `rankSections` (секції меню за `on_tap` ↓, `unknown` ↓, усього ↓, назвою).
+`canonicalStyleFamily` для Target свідомо не вживається: її родини надто грубі й живлять `/filters`
+для всіх користувачів.
 
 #### `POST /admin/enrich-failures/review` — тріажна розмітка провалу
 
