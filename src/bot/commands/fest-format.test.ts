@@ -1,7 +1,7 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { fitMessage, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
+import { fitMessage, formatAlert, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
 import { initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
@@ -235,5 +235,20 @@ describe('pickCallback for take', () => {
   it('keeps the take subcommand and cuts a long query to whole letters within 64 bytes', () => {
     // 'fest:t:123456:take:' is 19 bytes; 22 two-byte letters make 63, a 23rd would make 65.
     expect(pickCallback(123456, 'take', 'ж'.repeat(60))).toBe(`fest:t:123456:take:${'ж'.repeat(22)}`);
+  });
+});
+
+describe('formatAlert', () => {
+  it('caps a name longer than the whole message, so the beer is still announced', () => {
+    const view = {
+      beerNames: new Map([[1, { name: 'x'.repeat(5000), brewery: 'Brew' }]]),
+      targets: [{ beerId: 1, section: 'PINTA', reasons: ['rating'], rating: 4.2, style: null }],
+      stands: new Map(),
+    } as unknown as Parameters<typeof formatAlert>[1];
+    const r = formatAlert(t, view, { fresh: [{ beerId: 1, firstAt: '2026-10-15T17:55:00.000Z', firstCheckinId: 9 }], pouring: [] });
+    expect(r).toEqual({
+      html: `🆕 З'явилося на крані:\n• <b>${'x'.repeat(119)}…</b> — Brew · PINTA · перший чекін 19:55`,
+      beerIds: [1],
+    });
   });
 });
