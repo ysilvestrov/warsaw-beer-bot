@@ -22,7 +22,7 @@ import { routeCommand } from './bot/commands/route';
 import { filtersCommand } from './bot/commands/filters';
 import { langCommand } from './bot/commands/lang';
 import { cityCommand } from './bot/commands/city';
-import { festCommand } from './bot/commands/fest';
+import { createFestCommand } from './bot/commands/fest';
 import { extensionCommand } from './bot/commands/extension';
 import { announceCommand } from './bot/commands/announce';
 import { helpCommand } from './bot/commands/help';
@@ -32,7 +32,7 @@ import { registerCommandMenu } from './bot/register-command-menu';
 import { createRefreshCommand } from './bot/commands/refresh';
 import { refreshOntap } from './jobs/refresh-ontap';
 import { refreshAllUntappd } from './jobs/refresh-untappd';
-import { runFestMenu, runFestPoll } from './jobs/fest-poll';
+import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
 import { backfillNormalizedBrewery } from './jobs/backfill-normalized-brewery';
 import { backfillCheckinAt } from './jobs/backfill-checkin-at';
@@ -221,6 +221,15 @@ async function main(): Promise<void> {
     onRecover: () => adminAlert('✅ Untappd профіль-скрейп: доступ відновлено.'),
   });
 
+  const festDeps = untappdHttp ? {
+    db, log, http: untappdHttp, notifyAdmin,
+    breaker: createPersistentCircuitBreaker({
+      db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
+      onTrip: () => adminAlert('Фест: Untappd блокує серверне око — пауза 30 хв'),
+      onRecover: () => adminAlert('Фест: серверне око знову бачить Untappd'),
+    }),
+  } : null;
+
   bot.use(
     cityGate,
     createReportCommand({ available: bugReportsAvailable, mediaDir: env.BUG_REPORT_MEDIA_DIR ?? null,
@@ -240,7 +249,10 @@ async function main(): Promise<void> {
     announceCommand,
     statusCommand,
     helpCommand,
-    festCommand,
+    createFestCommand({
+      downloadFile,
+      refreshMenu: festDeps ? (fest, now) => refreshFestMenu(festDeps, fest, now) : undefined,
+    }),
     createRefreshCommand(
       async (notify, opts) => {
         await refreshOntap({
@@ -401,15 +413,7 @@ async function main(): Promise<void> {
   // the cookie'd client with refreshAllUntappd but have their own breaker key, a lower threshold and
   // a short cooldown, so a festival block never silences the nightly job and vice versa. The cron
   // ticks every minute; each job decides whether its own tick is due and is a no-op outside a fest.
-  if (untappdHttp) {
-    const festDeps = {
-      db, log, http: untappdHttp, notifyAdmin,
-      breaker: createPersistentCircuitBreaker({
-        db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
-        onTrip: () => adminAlert('Фест: Untappd блокує серверне око — пауза 30 хв'),
-        onRecover: () => adminAlert('Фест: серверне око знову бачить Untappd'),
-      }),
-    };
+  if (festDeps) {
     let festInFlight = false;
     cronJobs.push(cron.schedule('* * * * *', () => {
       if (festInFlight) return;
