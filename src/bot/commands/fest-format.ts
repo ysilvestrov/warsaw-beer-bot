@@ -170,19 +170,25 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+/** Code units segmented past the cut, so a cluster straddling it is seen whole (or dropped). */
+const CAP_LOOKAHEAD = 64;
 
 /**
  * `text` cut to at most `max` UTF-16 code units — the unit Telegram's message limit counts — with
  * "…" as the last one when anything was cut. The cut falls only between grapheme clusters, so a
  * flag or a skin-toned emoji is never split; a single cluster longer than `max` leaves just "…".
- * Segments are iterated lazily and the loop stops at the cut, so a huge field costs no more than
- * a normal one.
+ * Only a bounded prefix is segmented, so a huge field costs no more than a normal one.
  */
 export function capText(text: string, max: number): string {
   if (text.length <= max) return text;
   if (max < 1) return '';
+  // Segment only a prefix a little past the cut: cost stays O(max) even for one cluster of a
+  // million combining marks. The prefix's last segment may be a cluster the slice cut short, so it
+  // is dropped; every segment before it ends inside the prefix and is whole.
+  const segments = Array.from(graphemes.segment(text.slice(0, max + CAP_LOOKAHEAD)), (g) => g.segment);
+  segments.pop();
   let kept = '';
-  for (const { segment } of graphemes.segment(text)) {
+  for (const segment of segments) {
     if (kept.length + segment.length > max - 1) break;
     kept += segment;
   }
