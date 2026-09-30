@@ -1,7 +1,7 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { fitMessage, formatAlert, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
+import { capText, fitMessage, formatAlert, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
 import { initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
@@ -250,5 +250,19 @@ describe('formatAlert', () => {
       html: `🆕 З'явилося на крані:\n• <b>${'x'.repeat(119)}…</b> — Brew · PINTA · перший чекін 19:55`,
       beerIds: [1],
     });
+  });
+});
+
+describe('capText', () => {
+  it('leaves text within the limit alone, even when its code units exceed it', () => {
+    expect(capText('🇵🇱🇵🇱🇵🇱', 3)).toBe('🇵🇱🇵🇱🇵🇱');
+  });
+
+  it('cuts by user-visible characters and never splits a flag', () => {
+    expect(capText(`abc🇵🇱def`, 5)).toBe('abc🇵🇱…');
+  });
+
+  it('cuts a huge field to the limit', () => {
+    expect(capText('y'.repeat(1_000_000), 4)).toBe('yyy…');
   });
 });

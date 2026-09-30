@@ -169,6 +169,22 @@ export function queueLinks(view: QueueView): { glassNo: number; name: string; bi
     .map((item) => ({ glassNo: item.glassNo, name: item.name, bid: item.bid! }));
 }
 
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * `text` cut to at most `max` user-visible characters, the last being "…" when anything was cut.
+ * Counts grapheme clusters, so a flag or a skin-toned emoji is never split, and segments only a
+ * bounded prefix, so an absurdly long scraped field costs no more than a normal one.
+ */
+export function capText(text: string, max: number): string {
+  if (text.length <= max) return text; // code units ≥ graphemes: nothing to cut
+  const window = max * 16; // far beyond the longest grapheme cluster in practice
+  const cut = text.length > window;
+  const parts = Array.from(graphemes.segment(cut ? text.slice(0, window) : text), (g) => g.segment);
+  if (cut) parts.pop(); // the window may end inside a cluster
+  return parts.length > max || cut ? `${parts.slice(0, max - 1).join('')}…` : text;
+}
+
 /** Characters kept of each free-text field of an alert line (name, brewery, place). */
 export const ALERT_FIELD_MAX = 120;
 
@@ -181,7 +197,7 @@ export const ALERT_FIELD_MAX = 120;
 export function formatAlert(t: Translator, view: FestView, plan: AlertPlan, limit = MESSAGE_LIMIT): { html: string; beerIds: number[] } | null {
   // Every field is capped, so any one line fits an empty message: a line that could never fit
   // would stop its block for good, since the loop below keeps order and stops at the first misfit.
-  const cap = (text: string) => ([...text].length > ALERT_FIELD_MAX ? `${[...text].slice(0, ALERT_FIELD_MAX - 1).join('')}…` : text);
+  const cap = (text: string) => capText(text, ALERT_FIELD_MAX);
   const line = (item: OnTapTarget) => {
     const beer = view.beerNames.get(item.beerId);
     const section = view.targets.find((target) => target.beerId === item.beerId)?.section ?? '';
