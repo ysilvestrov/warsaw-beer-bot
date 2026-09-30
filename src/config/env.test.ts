@@ -22,6 +22,15 @@ describe('loadEnv', () => {
     expect(() => loadEnv({ DATABASE_PATH: '/tmp/x.db' } as any)).toThrow(/TELEGRAM_BOT_TOKEN/);
   });
 
+  it('the festival MCP eye is off without FEST_MCP_URL, and its OAuth file has a production default', () => {
+    const env = loadEnv(baseEnv);
+    expect([env.FEST_MCP_URL, env.FEST_MCP_OAUTH_FILE]).toEqual([undefined, '/var/lib/warsaw-beer-bot/fest-mcp-oauth.json']);
+  });
+
+  it('FEST_MCP_URL must be a URL', () => {
+    expect(() => loadEnv({ ...baseEnv, FEST_MCP_URL: 'not a url' })).toThrow(/FEST_MCP_URL/);
+  });
+
   it('UNTAPPD_LOOKUP_ENABLED defaults to true when unset', () => {
     const env = loadEnv(baseEnv);
     expect(env.UNTAPPD_LOOKUP_ENABLED).toBe(true);
