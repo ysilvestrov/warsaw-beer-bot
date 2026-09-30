@@ -50,12 +50,12 @@ function setup(): { db: DB; bot: Telegraf<BotContext>; teamId: number; replies: 
 }
 
 describe('«Взяв» (fest:q)', () => {
-  it('a member gets the next glass number, announced in the chat', async () => {
+  it('a member gets a glass number, announced in the chat; a double tap gives the same glass', async () => {
     const { db, bot, teamId, replies } = setup();
     await bot.handleUpdate(callback(1, 7, `fest:q:${teamId}:11`) as unknown as Update);
     await bot.handleUpdate(callback(2, 7, `fest:q:${teamId}:11`) as unknown as Update);
-    expect(queueFor(db, teamId).map((r) => [r.glass_no, r.beer_id, r.added_by])).toEqual([[1, 11, 7], [2, 11, 7]]);
-    expect(replies).toEqual(['🍺 Glass #1 — Bravo · YS', '🍺 Glass #2 — Bravo · YS']);
+    expect(queueFor(db, teamId).map((r) => [r.glass_no, r.beer_id, r.added_by])).toEqual([[1, 11, 7]]);
+    expect(replies).toEqual(['🍺 Glass #1 — Bravo · YS', '🍺 Glass #1 — Bravo · YS']);
   });
 
   it('someone outside the team queues nothing and is told so', async () => {

@@ -42,6 +42,22 @@ describe('takeBeer', () => {
   });
 });
 
+describe('takeBeer on a repeated tap', () => {
+  it('the same member and beer within 30 s is the same glass; at 31 s, or by someone else, a new one', () => {
+    const { db, teamA } = setup();
+    ensureProfile(db, 2);
+    const at = (s: number) => new Date(Date.parse(AT) + s * 1000).toISOString();
+    const r = [
+      takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: at(0) }),
+      takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: at(30) }),
+      takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 2, at: at(30) }),
+      takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: at(61) }),
+    ];
+    expect(r.map((x) => [x.glassNo, x.repeated])).toEqual([[1, false], [1, true], [2, false], [3, false]]);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM fest_print_jobs').get()).toEqual({ n: 3 });
+  });
+});
+
 describe('memberBeerCheckins', () => {
   const member = [{ telegramId: 1, untappdUsername: 'JohnDoe' }];
 
