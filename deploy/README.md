@@ -109,6 +109,10 @@ sudo install -m 0440 -o root -g root \
 ./deploy/deploy.sh
 ```
 
+`deploy.sh` must run as the operator, never via `sudo` (it calls sudo itself,
+per step). It waits up to 30 s for the merge-deploy lock and refuses while a
+tick watches a rollback window.
+
 Subsequent deploys:
 
 ```bash
@@ -135,122 +139,100 @@ sudo -n -u warsaw-beer-bot bash -lc \
   'cd /opt/warsaw-beer-bot && npm run rearm-matcher-bug-orphans -- --apply'
 ```
 
-## Unattended security autodeploy (#435)
+## Merge-deploy (unattended deploy of `main`)
 
-A timer checks for an `autodeploy-*` tag and deploys it only if the change
-touches nothing that **reaches production** except the root `package.json` and
-`package-lock.json`. What reaches production is decided by `deploy/rsync-filter`
-and read by `deploy/ships.sh`; a merge that changes only `extension/**`,
-`docs/**` or `spec.md` ships nothing, so it neither blocks a security tag nor
-counts as drift. See
-`docs/superpowers/specs/2026-08/2026-08-16-435-dependency-security-autofix-design.md`
-and `docs/superpowers/specs/2026-08/2026-08-28-527-guard-ships-predicate-design.md`.
+Design: `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`.
+A timer (`wbb-autodeploy.timer`, every 5 min, runs as the operator) deploys
+the head of `origin/main` by itself. **A merge is the permission**: write
+access to `main` means production. The host re-derives everything else, from
+its own clone in `~/.local/share/wbb-autodeploy/repo` (never your checkout).
 
-One-time install (as root):
+### When a merge is deployed
 
-```bash
-sudo bash deploy/install-autodeploy.sh
-```
+All of these, checked in this order each tick:
 
-It installs the scripts to fixed paths rather than running them from the
-operator's working tree — that tree is rsynced wholesale by `deploy.sh` and may
-hold uncommitted work at any moment. They are **copies, not symlinks**, so the
-running deployer cannot change under a `git checkout`.
+1. production (`DEPLOYED_SHA`) is an ancestor of `main` (no downgrade), and
+   something in the diff actually ships (`deploy/rsync-filter`, both sides);
+2. `main` has not moved for **10 minutes** (serial merges → one restart);
+3. the installed deployer is current (`wbb-installed-current`);
+4. **no hold** in `DEPLOYED_SHA..main` (below);
+5. CI concluded on **that exact commit**, the required `ci` check is present
+   and green, nothing failed or was cancelled.
 
-**Re-run it after every merge that touches `deploy/*.sh`.** The same property
-that protects the running deployer means a merged fix is not a live fix until
-it is installed. You no longer have to remember this on your own: the deployer
-compares its installed copies against `origin/main` and says so once a day
-while idle — and **refuses to deploy at all** while it is stale, because
-deploying production on safety logic known to be out of date is the risk the
-whole mechanism exists to manage.
+Then, still before production is touched: `npm ci && npm run build` and
+`npm audit --omit=dev --audit-level=high` in the clone; a DB snapshot
+(`VACUUM INTO`, one point in time); the new build's `migrate()` run twice on a
+copy of it. Only then `deploy/deploy.sh`.
 
-Re-run the three script `install` lines whenever any of them changes — they are copies,
-not symlinks, deliberately: the running deployer must not change under a
-`git checkout`.
+### Holds
 
-### The deployed baseline
+A deploy that needs a human on the host is **held**, never attempted:
 
-`deploy.sh` records the commit it deployed into
-`~/.local/state/wbb-autodeploy/state.env`. This is not bookkeeping — the guard
-computes its diff **from that commit**, so a stale baseline does not merely
-mislead, it BLOCKS autodeploy: every undeployed merge adds paths to the diff
-until it leaves the allowlist, and then every security tag is refused. A
-refusal looks exactly like the guard working correctly, which is what makes it
-dangerous.
+- the range changes a path that needs root or an install step: `deploy/sudoers.d/**`,
+  `deploy/*.service` / `*.timer` (except `warsaw-beer-bot.service`),
+  `deploy/litestream.*`, `deploy/install-*.sh`, `deploy/rsync-filter`, or an
+  installed copy of the deployer;
+- or a PR in the range carries the `deploy:hold` label. Its title then starts
+  with `[deploy:hold]` (the `deploy-hold` CI check keeps the two in step) and
+  its body lists the steps.
 
-If the working tree is dirty when you deploy, the baseline is **cleared**
-instead of recorded: `rsync` ships a tree, not a commit, so `HEAD` would be a
-lie. Autodeploy then refuses until you reseed it:
+**Release:** do the steps, then run `bash deploy/deploy.sh` from the main
+checkout. It records `DEPLOYED_SHA`, the held commit is behind production, and
+the next tick carries on by itself.
 
-```bash
-./deploy/record-deployed.sh "$(git rev-parse HEAD)"
-```
+### The rollback window
 
-`autodeploy.sh` also watches for drift on its idle path — production falling
-behind `main` in ways that would block it. **Idle means it has no work**: no
-`autodeploy-*` tag exists, or the newest one is already deployed, or the newest
-one is recorded as `LAST_FAILED_SHA`. It does NOT mean "no tag has ever been
-pushed", which is what the condition said until #491 — and since tags are never
-pruned, that turned both this report and the stale-deployer reminder off
-permanently the first time one was pushed. A tag that is genuine work still
-reaches neither report: it is deployed, or refused with its offending paths
-listed. Drift is treated as an **episode**, not a per-tick condition: nothing is
-reported for the first 15 minutes (`DRIFT_GRACE_S`), because a merge followed by
-a deploy is ordinary work and needs no message at either end. Past that, one
-message goes out, repeated at most once a day while the episode stays open, and
-one closing message when production catches up — the closing message only if the
-episode was announced. `DRIFT_SINCE` in the state file holds the episode's
-start; both it and `LAST_DRIFT_NOTICE` clear when it ends. `LAST_STALE_NOTICE`
-does the same job for the stale-deployer reminder.
+For **10 minutes** after the restart the tick watches production:
+`/health` every 10 s and the unit's `NRestarts`. The bot must be healthy within
+120 s; **3 consecutive** failed polls or a changed `NRestarts` roll back **code
+AND database**: the bot and litestream are stopped, the live DB is copied to a
+`post` directory, the pre-deploy snapshot is restored, the old commit is
+deployed. Nothing merges the two: **a human reconciles** the writes that exist
+only in `post` (the 🔥 message names the interval). R2 history also keeps the
+post state (`litestream restore -txid …`).
 
-The timer stays **disabled** until the mechanism has been exercised by hand:
+After the window a deploy is settled; a later failure is an ordinary incident.
 
-```bash
-# dry run — the guard refuses anything that is not a lockfile-only change
-/usr/local/bin/wbb-autodeploy
+Snapshots live in `/var/lib/warsaw-beer-bot/deploy-snapshots/`, owned by the
+bot user: `<UTC>-<sha7>-pre.db` + `.sha256`. The newest 3 of settled deploys
+are kept. `*-rollback-pre.db` + `*-rollback-post/` (a rollback) and
+`*-unverified-pre.db` (a window nobody watched to its end) are **never**
+deleted by the machine.
 
-# arm it
-systemctl enable --now wbb-autodeploy.timer
-systemctl list-timers wbb-autodeploy.timer
-```
+### Messages (Telegram, sent by the deployer, not the bot)
 
-The first run refuses with "no recorded baseline". Seed it with the commit
-currently deployed:
+| Message | Meaning | You do |
+|---|---|---|
+| ✅ `<sha>` is live and settled — #PRs | deployed, window clean | nothing |
+| ⏸ … HELD | a hold is in the range | the steps, then `bash deploy/deploy.sh` |
+| ⛔ CI failed on `<sha>` | once per SHA | re-run the failed job; that releases it |
+| ⛔ refused `<sha>`: build / audit / trial migration | recorded as `LAST_FAILED_SHA`, not retried | fix and merge again (the next merge is tried) |
+| ⚠️ … UNVERIFIED | live, but its window was not watched to the end | check the bot; the `-unverified-pre.db` is kept |
+| 🔥 ROLLED BACK | code and DB went back to `pre` | reconcile `post` |
+| 🔥 ROLLBACK FAILED / INTERRUPTED | production state unknown | intervene now |
+| ⚠️ deploy lock held for N min | a stuck `deploy.sh` blocks every tick | `fuser -v ~/.local/state/wbb-autodeploy/lock` |
+| ⚠️ installed deployer is out of date | a merged fix is not live | `sudo bash deploy/install-autodeploy.sh` |
 
-```bash
-mkdir -p ~/.local/state/wbb-autodeploy
-printf 'DEPLOYED_SHA=%s\nPREVIOUS_SHA=\n' "$(git -C /home/ysi/warsaw-beer-bot rev-parse origin/main)" \
-  > ~/.local/state/wbb-autodeploy/state.env
-```
+### State
 
-### A failed tag is remembered, not retried
+`~/.local/state/wbb-autodeploy/state.env`: `DEPLOYED_SHA` / `PREVIOUS_SHA`
+(written by `deploy.sh` too), `LAST_FAILED_SHA` (delete the line to retry that
+exact commit), `MAIN_SEEN_*` (the quiet clock), `WINDOW_*` and
+`ROLLBACK_STARTED` (a window or rollback in progress — a tick that finds them
+finishes or reports it), and once-a-day markers `LAST_*_NOTICE`.
 
-If a tag fails — the guard refuses it, `npm audit` still reports an advisory,
-the deploy comes up unhealthy, or the rollback itself fails — the run writes
-`LAST_FAILED_SHA=<that commit>` into `~/.local/state/wbb-autodeploy/state.env`
-alongside the existing `DEPLOYED_SHA`/`PREVIOUS_SHA` lines. On every later
-tick, a tag whose commit matches `LAST_FAILED_SHA` is skipped immediately —
-exit 0, one journal line, and **no message about the tag**. The tag is idle,
-so the two standing idle reports (drift, stale deployer) can still speak on
-their once-a-day cadence; a stuck tag *with* production behind `main` is
-autodeploy dead twice over. This is deliberate: the operator was already
-paged when the failure was first recorded, and design §7 calls for one
-attempt, then a human, not a message every 5 minutes forever.
+`deploy.sh` and a tick exclude each other through the same lock: a manual
+deploy waits up to 30 s and refuses while a tick watches a window.
 
-To retry a tag by hand (after fixing whatever made it fail, or if the
-failure was a known-transient blip), clear the memory:
+### Install / upgrade
 
 ```bash
-# delete the whole line …
-sed -i '/^LAST_FAILED_SHA=/d' ~/.local/state/wbb-autodeploy/state.env
-# … or just delete the file (loses DEPLOYED_SHA/PREVIOUS_SHA too — see
-# "seed it" above to restore the baseline afterward)
-rm ~/.local/state/wbb-autodeploy/state.env
+sudo bash deploy/install-autodeploy.sh   # copies into /usr/local/bin + units
+sudo systemctl daemon-reload
 ```
 
-The next timer tick then treats it as a fresh tag and goes through the
-guard/audit/deploy sequence again.
+Re-run after any merge that changes an installed copy; those merges are holds
+anyway, and the deployer waits (and says so daily) while its copy is stale.
 
 ### Emergency stop — no password required
 
@@ -277,6 +259,8 @@ To resume:
 ```bash
 rm ~/.local/state/wbb-autodeploy/PAUSED
 ```
+
+PAUSED stops the **next** tick, not one that is already watching a window.
 
 **Stated plainly:** this brake lives *inside* the script it brakes, so it
 cannot help against a deployer that is broken before it reaches that check

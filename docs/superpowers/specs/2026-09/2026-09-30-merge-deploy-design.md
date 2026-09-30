@@ -162,12 +162,15 @@ checkout (it records `DEPLOYED_SHA`). The next tick finds no hold in the range a
 |---|---|---|
 | settled | ✅ `<sha7>` live — PRs #a #b | per deploy |
 | gate refused (CI red, build, audit, migration trial) | ⛔ with the gate and its output (truncated as I6) | once per SHA |
-| held | ⏸ production is behind `main`: held by #n — `<steps from PR body>` | once a day |
+| held | ⏸ production is behind main and HELD: <reasons, each PR linked> — do the steps, then `bash deploy/deploy.sh` | once a day |
 | cannot assess | ⚠️ as today's #527 text | once a day |
 | rollback done | 🔥 with snapshots and the loss interval | per event |
 | rollback failed | 🔥 ROLLBACK FAILED | per event |
 | stale deployer | ⚠️ as today | once a day |
 | window not watched to its end (R2) or `NRestarts` never readable (R3) | ⚠️ X is live but unverified; `pre` kept as `-unverified-pre.db` | per event |
+
+The PR body is not quoted in the ⏸ message: it is free-form and long; the link is exact (decided
+2026-09-30).
 
 The drift episode (`DRIFT_SINCE`, 15-min grace, "✅ caught up") is deleted. Drift is now either work
 in progress, or one of the rows above, which say why it is not.
