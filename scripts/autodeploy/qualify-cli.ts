@@ -130,7 +130,7 @@ export async function publishedAt(
  * fixes normally take: bumping the PARENT makes the vulnerable CHILD vanish
  * from the head lockfile entirely, so there was no version of it to date —
  * "unknown" forced the hold, the hourly re-evaluation recomputed "now"
- * every run, and the pull request parked in `autodeploy-pending`
+ * every run, and the pull request parked in `automerge-pending`
  * permanently.
  *
  * So this scans every package name appearing in EITHER lockfile (not just

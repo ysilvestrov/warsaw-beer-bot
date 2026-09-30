@@ -19,8 +19,8 @@ in case the user already exists without one.
 
 ### Node 24
 
-Before starting a major-version change, hold the #435 autodeploy brake for the whole procedure — see
-"Emergency stop" below — so no unattended security tag can land mid-flight while the host is between
+Before starting a major-version change, hold the merge-deploy brake for the whole procedure — see
+"Emergency stop" below — so no merge can deploy mid-flight while the host is between
 runtimes:
 
 ```bash
@@ -173,7 +173,7 @@ A deploy that needs a human on the host is **held**, never attempted:
   `deploy/litestream.*`, `deploy/install-*.sh`, `deploy/rsync-filter`, or an
   installed copy of the deployer;
 - or a PR in the range carries the `deploy:hold` label. Its title then starts
-  with `[deploy:hold]` (the `deploy-hold` CI check keeps the two in step) and
+  with `[deploy:hold]` (the `deploy-hold` CI check flags a mismatch) and
   its body lists the steps.
 
 **Release:** do the steps, then run `bash deploy/deploy.sh` from the main
@@ -215,8 +215,8 @@ deleted by the machine.
 
 ### State
 
-`~/.local/state/wbb-autodeploy/state.env`: `DEPLOYED_SHA` / `PREVIOUS_SHA`
-(written by `deploy.sh` too), `LAST_FAILED_SHA` (delete the line to retry that
+`~/.local/state/wbb-autodeploy/state.env`: `DEPLOYED_SHA` (written by
+`deploy.sh` too) / `PREVIOUS_SHA`, `LAST_FAILED_SHA` (delete the line to retry that
 exact commit), `MAIN_SEEN_*` (the quiet clock), `WINDOW_*` and
 `ROLLBACK_STARTED` (a window or rollback in progress — a tick that finds them
 finishes or reports it), and once-a-day markers `LAST_*_NOTICE`.

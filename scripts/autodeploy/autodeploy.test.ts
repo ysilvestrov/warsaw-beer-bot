@@ -1007,5 +1007,19 @@ describe('merge-deploy: a stalled lock', () => {
     tick(w);
     expect(existsSync(busy)).toBe(false);
   });
+
+  it('treats a busy-since record older than two stall periods as stale, not as a 70-min hold', async () => {
+    const w = world();
+    // Left behind by an earlier busy period that no tick ever closed (e.g. PAUSED in between).
+    writeFileSync(join(w.stateDir, 'wbb-autodeploy', 'lock-busy-since'), String(100000 - 4200));
+    const holder = await holdLock(join(w.stateDir, 'wbb-autodeploy', 'lock'));
+    try {
+      tick(w);
+      expect(notes(w)).toEqual([]);
+      expect(readFileSync(join(w.stateDir, 'wbb-autodeploy', 'lock-busy-since'), 'utf8').trim()).toBe('100000');
+    } finally {
+      holder.kill();
+    }
+  });
 });
 

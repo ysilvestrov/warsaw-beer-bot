@@ -60,6 +60,12 @@ function main(): number {
     return 2;
   }
   const paths = readFileSync(0, 'utf8').split('\n').filter((p) => p !== '');
+  // A PR always changes at least one path; an empty list means the diff that
+  // feeds this failed upstream, and "OK" would be the #499 shape again.
+  if (paths.length === 0) {
+    console.error('no changed paths on stdin — the diff feeding this check failed or is empty');
+    return 2;
+  }
   const r = checkHold({ title: process.env.PR_TITLE ?? '', labels, paths });
   for (const p of r.problems) console.log(`✗ ${p}`);
   if (r.ok) console.log(r.held.length > 0 ? `OK: held for ${r.held.join(', ')}` : 'OK');

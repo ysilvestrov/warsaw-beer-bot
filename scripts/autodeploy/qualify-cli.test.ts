@@ -135,7 +135,7 @@ describe('selectPublishedAt — the hold rests on what this PR INTRODUCES, not o
   // normally take — bumping the PARENT makes the vulnerable CHILD vanish
   // from the head lockfile, there is no version of it to date, "unknown"
   // forced the hold, and the hourly re-evaluation recomputed "now" every
-  // run: the pull request parked in `autodeploy-pending` permanently. The
+  // run: the pull request parked in `automerge-pending` permanently. The
   // function no longer takes an audit report at all — it scans every
   // package name in either lockfile and dates whatever version(s) this PR
   // actually introduces (head \ base).
@@ -220,7 +220,7 @@ describe('selectPublishedAt — the hold rests on what this PR INTRODUCES, not o
     // the fix bumps a PARENT package instead, so undici vanishes from the
     // head lockfile entirely. Under the OLD scoping this was "unknown" and
     // forced a hold that could never expire — the pull request parked in
-    // autodeploy-pending permanently, since the hourly re-run always saw
+    // automerge-pending permanently, since the hourly re-run always saw
     // "now". The parent's introduced version was published long ago, so the
     // correct outcome is autodeploy, not a permanent hold.
     const base = report({ undici: 'high' });

@@ -173,7 +173,11 @@ if ! flock -n 9; then
   # These two files live outside state.env on purpose: state is written only
   # under the lock, and this path runs because we do not have it.
   busy="$STATE_DIR/lock-busy-since"
-  [ -s "$busy" ] || now > "$busy"
+  # A record older than two stall periods belongs to an earlier busy period
+  # that no tick closed (e.g. PAUSED in between): start counting afresh.
+  if [ ! -s "$busy" ] || [ $(( $(now) - $(cat "$busy") )) -ge $(( 2 * LOCK_STALL_S )) ]; then
+    now > "$busy"
+  fi
   held_s=$(( $(now) - $(cat "$busy") ))
   if [ "$held_s" -ge "$LOCK_STALL_S" ] && [ "$(cat "$STATE_DIR/lock-notice" 2>/dev/null)" != "$(date -u +%Y-%m-%d)" ]; then
     notify "⚠️ merge-deploy: the deploy lock has been held for $(( held_s / 60 )) min — no tick can run. A stuck manual deploy.sh? Check: fuser -v $LOCK"
