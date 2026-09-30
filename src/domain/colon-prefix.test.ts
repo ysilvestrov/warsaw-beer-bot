@@ -49,4 +49,16 @@ describe('isColonPrefixTailMatch', () => {
     expect(isColonPrefixTailMatch('Pils', 'Pils')).toBe(false);
     expect(isColonPrefixTailMatch('15', '6:15')).toBe(false);
   });
+
+  it('matches middle tail in multi-colon candidate', () => {
+    expect(isColonPrefixTailMatch('Gelato: Sangria', 'Carles: Gelato: Sangria')).toBe(true);
+    expect(isColonPrefixTailMatch('Sangria', 'Carles: Gelato: Sangria')).toBe(true);
+  });
+
+  it('returns false when input or tail normalizes to empty string', () => {
+    expect(isColonPrefixTailMatch('', 'Classic: Pils')).toBe(false);
+    expect(isColonPrefixTailMatch('   ', 'Classic: Pils')).toBe(false);
+    expect(isColonPrefixTailMatch('11,5°', 'Classic: 12°')).toBe(false);
+    expect(isColonPrefixTailMatch('Pils', 'Classic: °')).toBe(false);
+  });
 });
