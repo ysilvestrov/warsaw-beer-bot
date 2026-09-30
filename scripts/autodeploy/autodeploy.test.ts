@@ -206,7 +206,16 @@ describe('merge-deploy: what gets deployed, and when', () => {
     const second = tick(w);
 
     expect(second.code).toBe(0);
-    expect(events(w)).toEqual([`checks ${x}`, `build ${x}`, 'audit', `deploy ${x}`]);
+    const stamp = (e: string) => e.replace(/\d{8}T\d{6}Z/, 'STAMP');
+    expect(events(w).map(stamp)).toEqual([
+      `checks ${x}`,
+      `build ${x}`,
+      'audit',
+      `snapshot STAMP-${short(x)}-pre.db`,
+      'trial pre',
+      `deploy ${x}`,
+      'prune',
+    ]);
     expect(readState(w).DEPLOYED_SHA).toBe(x);
     expect(readState(w).PREVIOUS_SHA).toBe(w.base);
     expect(notes(w)).toEqual([`✅ merge-deploy ${short(x)} is live and settled — #7.`]);
@@ -596,5 +605,86 @@ describe('merge-deploy: a deploy that does not come up (code-only rollback until
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`, `deploy ${w.base}`]);
     expect(readState(w).LAST_FAILED_SHA).toBe(x);
     expect(readState(w).DEPLOYED_SHA).toBe(w.base);
+  });
+});
+
+describe('merge-deploy: snapshot, trial migration, window', () => {
+  /** health fails from `from` seconds after the latest deploy onwards. */
+  function healthFailingFrom(w: World, from: number): string {
+    return stub(w.bin, `health-from-${from}`,
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( now - d )) -lt ${from} ]`);
+  }
+
+  it('refuses a commit whose trial migration fails, never deploys it, and removes the copy', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const trial = stub(w.bin, 'trial-red', 'echo "TRIAL FAILED: boom"; exit 1');
+    ready(w, { WBB_TRIAL_CMD: trial });
+    const r = tick(w, { WBB_TRIAL_CMD: trial });
+    expect(r.code).toBe(1);
+    expect(events(w).some((e) => e.startsWith('deploy '))).toBe(false);
+    expect(readState(w).LAST_FAILED_SHA).toBe(x);
+    expect(notes(w)[0]).toBe(`⛔ merge-deploy refused ${short(x)}: the trial migration on a copy of production failed.\nTRIAL FAILED: boom`);
+    expect(existsSync(join(w.dataDir, 'wbb-autodeploy', 'trial.db'))).toBe(false);
+  });
+
+  it('does not deploy when the snapshot fails, and does not blame the commit', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const snapshot = stub(w.bin, 'snapshot-red', 'echo "disk full" >&2; exit 1');
+    ready(w, { WBB_SNAPSHOT_CMD: snapshot });
+    const r = tick(w, { WBB_SNAPSHOT_CMD: snapshot });
+    expect(r.code).toBe(1);
+    expect(events(w).some((e) => e.startsWith('deploy '))).toBe(false);
+    expect(readState(w).LAST_FAILED_SHA).toBe(undefined);
+    expect(notes(w)[0]).toMatch(/^⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying [0-9a-f]{7}\.\ndisk full/);
+  });
+
+  it('rolls back on a failure first seen at the last poll inside the window (590 s)', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 590);
+    ready(w, { WBB_HEALTH_CMD: health });
+    const r = tick(w, { WBB_HEALTH_CMD: health });
+    expect(r.code).toBe(2);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`, `deploy ${w.base}`]);
+    expect(notes(w)[0]).toMatch(/health check failed at \+590s/);
+  });
+
+  it('settles when the failure only starts at 600 s — after the window', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 600);
+    ready(w, { WBB_HEALTH_CMD: health });
+    const r = tick(w, { WBB_HEALTH_CMD: health });
+    expect(r.code).toBe(0);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+  });
+
+  it('rolls back when the service restarts inside the window, even if health looks fine', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const restarts = stub(w.bin, 'restarts-bump',
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( now - d )) -lt 300 ] && echo 0 || echo 1`);
+    ready(w, { WBB_RESTARTS_CMD: restarts });
+    const r = tick(w, { WBB_RESTARTS_CMD: restarts });
+    expect(r.code).toBe(2);
+    expect(notes(w)[0]).toMatch(/service restarted \(NRestarts 0 -> 1\) at \+300s/);
+  });
+
+  it('keeps a settled deploy settled when pruning fails', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const prune = stub(w.bin, 'prune-red', 'exit 1');
+    ready(w, { WBB_PRUNE_CMD: prune });
+    const r = tick(w, { WBB_PRUNE_CMD: prune });
+    expect(r.code).toBe(0);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+  });
+
+  it('lets the service unit outlive the window', () => {
+    const unit = readFileSync(resolve(__dirname, '../../deploy/wbb-autodeploy.service'), 'utf8');
+    expect(unit).toMatch(/^TimeoutStartSec=30min$/m);
   });
 });
