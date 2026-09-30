@@ -54,15 +54,17 @@ async function alertTeam(
   });
   const plan = planAlerts({ onTap, sent: sentFor(deps.db, p.teamId, p.sessionNo), now });
   const t = createTranslator(getUserLanguage(deps.db, teamMembers[0].telegram_id) ?? 'uk');
-  const html = formatAlert(t, view, plan);
-  if (html === null) return false;
+  const message = formatAlert(t, view, plan);
+  if (message === null) return false;
   try {
-    await deps.send(p.chatId, html);
+    await deps.send(p.chatId, message.html);
   } catch (e) {
     deps.log.warn({ err: e, teamId: p.teamId }, 'fest alert not delivered; retrying next tick');
     return false;
   }
-  recordSent(deps.db, [...plan.fresh, ...plan.pouring].map((a) => ({
+  // Only the beers that made it into the message: the rest are announced on the next tick.
+  const included = new Set(message.beerIds);
+  recordSent(deps.db, [...plan.fresh, ...plan.pouring].filter((a) => included.has(a.beerId)).map((a) => ({
     teamId: p.teamId, sessionNo: p.sessionNo, beerId: a.beerId, checkinId: a.firstCheckinId,
   })), now.toISOString());
   return true;

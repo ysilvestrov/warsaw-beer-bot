@@ -31,6 +31,9 @@ function setup(): { db: DB; teamId: number; sent: [number, string][]; deps: Para
   return { db, teamId, sent, deps };
 }
 
+// 35 alert lines of the long names below (~113 characters each) fit under 4000; a 36th would not.
+const FIRST_FIT = 35;
+
 const tap = (db: DB, checkinId: number, bid: number, at: string) =>
   insertVenueCheckins(db, [{ checkin_id: checkinId, venue_id: 2167060, bid, untappd_user: null, checkin_at: at }], 'laptop', at);
 
@@ -95,6 +98,26 @@ describe('runFestAlerts', () => {
     const picky = { ...deps, send: async (chatId: number, html: string) => { await outcomes.shift()!(); sent.push([chatId, html]); } };
     await runFestAlerts(picky, NOW);
     expect(sent.map(([chatId]) => chatId)).toEqual([-200]);
+  });
+
+  it('beers that did not fit into one message are announced on the next tick, not dropped', async () => {
+    const { db, sent, deps } = setup();
+    const festId = getFestBySlug(db, 'wfp22')!.id;
+    const insert = db.prepare(`INSERT INTO beers (id, untappd_id, name, brewery, normalized_name, normalized_brewery, style, rating_global)
+                               VALUES (?, ?, ?, 'Brew', ?, 'brew', 'IPA - American', 4.5)`);
+    for (let i = 0; i < 40; i++) {
+      const id = 100 + i;
+      insert.run(id, 7000000 + i, `Very Long Festival Special Edition Double Dry Hopped Beer Number ${i}`, `n${i}`);
+      upsertMenuItem(db, festId, id, 'PINTA', '2026-10-15T10:00:00.000Z');
+      tap(db, 1000 + i, 7000000 + i, '2026-10-15T17:55:00.000Z');
+    }
+    await runFestAlerts(deps, NOW);
+    const first = (db.prepare('SELECT COUNT(*) AS n FROM fest_alerts_sent').get() as { n: number }).n;
+    await runFestAlerts(deps, new Date(NOW.getTime() + 60_000));
+    const total = (db.prepare('SELECT COUNT(*) AS n FROM fest_alerts_sent').get() as { n: number }).n;
+    // Both messages stay within Telegram's limit; the first holds FIRST_FIT of the 40 lines (each
+    // line of these names is ~100 characters), and every beer is announced once across the two ticks.
+    expect([sent.map(([, html]) => html.length <= 4000), first, total]).toEqual([[true, true], FIRST_FIT, 40]);
   });
 
   it('outside every polling window it does nothing', async () => {
