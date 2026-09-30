@@ -347,7 +347,7 @@ function tokenCovered(token: string, others: string[]): boolean {
   return bestTokenScore(token, others) >= NEAR_TOKEN_SIM;
 }
 
-function coverageScore(needles: string[], haystack: string[]): number | null {
+export function coverageScore(needles: string[], haystack: string[]): number | null {
   if (needles.length === 0 || !needles.every((token) => tokenCovered(token, haystack))) {
     return null;
   }
@@ -574,9 +574,18 @@ export async function lookupBeer(
     const cleanTargets = (NAME_COLLAB_SEP.test(name) ? name.split(NAME_COLLAB_SEP) : [name])
       .map((s) => baseNormalize(stripSearchNoise(s)))
       .filter(Boolean);
-    // If the pool contains a candidate whose clean name directly equals the target,
+    const targetValues = new Set([
+      ...cleanTargets,
+      ...targetNames.map((t) => t.value),
+    ]);
+    // If the pool contains a candidate whose clean name or identity directly equals the target,
     // the existing stages refused this pool for a reason the rescue must not overrule.
-    if (pool.some((result) => cleanTargets.includes(baseNormalize(stripSearchNoise(result.beer_name))))) {
+    if (pool.some((result) => {
+      const candNorm = baseNormalize(stripSearchNoise(result.beer_name));
+      const candId = candIdent(result).value;
+      const stripped = stripBreweryFromName(candNorm, normalizeBrewery(result.brewery_name));
+      return targetValues.has(candNorm) || targetValues.has(candId) || targetValues.has(stripped);
+    })) {
       return null;
     }
     const hits = new Map<number, SearchResult>();
@@ -585,12 +594,9 @@ export async function lookupBeer(
       if (abv != null) {
         if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
       } else {
-        // Without input ABV evidence, a single-token generic style tail cannot discriminate.
-        const isGenericTail = cleanTargets.some((t) => {
-          const toks = t.split(' ').filter(Boolean);
-          return toks.length <= 1 || (toks.length === 1 && GENERIC_TYPO_RESCUE_NAMES.has(toks[0]));
-        });
-        if (isGenericTail) continue;
+        // Without input ABV evidence, a single-token tail cannot discriminate.
+        const isSingleTokenTail = cleanTargets.some((t) => t.split(' ').filter(Boolean).length <= 1);
+        if (isSingleTokenTail) continue;
       }
       if (isColonPrefixTailMatch(name, result.beer_name)) {
         hits.set(result.bid, result);

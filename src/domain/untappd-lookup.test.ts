@@ -1,7 +1,7 @@
 import assert from 'node:assert';
 import { vi } from 'vitest';
 import { buildSearchUrl } from '../sources/untappd/search';
-import { lookupBeer } from './untappd-lookup';
+import { lookupBeer, coverageScore } from './untappd-lookup';
 import { HttpError } from '../sources/http';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 
@@ -2491,6 +2491,46 @@ describe('#664 numbered-series retry', () => {
     expect(search.search.mock.calls.map(([q]) => q)).toEqual(['Other Beer #0061 HBC472', 'Other Beer #0061']);
   });
 
+  describe('coverageScore (#746 single-token guard)', () => {
+    it('rejects a single-token needle when matched against multi-token haystack with a typo', () => {
+      // 'jozsef' vs '10th anniversary collab josef': 1 token vs 4 tokens, typo jozsef/josef (< 1.0)
+      expect(coverageScore(['jozsef'], ['10th', 'anniversary', 'collab', 'josef'])).toBeNull();
+    });
+
+    it('accepts a single-token needle when matched against multi-token haystack exactly', () => {
+      // 'jozsef' vs 'jozsef lager': 1 token vs 2 tokens, exact match (1.0)
+      expect(coverageScore(['jozsef'], ['jozsef', 'lager'])).toBe(1.0);
+    });
+
+    it('allows typo matching when needle has multiple tokens', () => {
+      // 'jozsef collab' vs 'josef collab'
+      const score = coverageScore(['jozsef', 'collab'], ['josef', 'collab']);
+      expect(score).not.toBeNull();
+      expect(score!).toBeGreaterThan(0.75);
+    });
+
+    it('allows typo matching when haystack has only a single token', () => {
+      // 'jozsef' vs 'josef'
+      const score = coverageScore(['jozsef'], ['josef']);
+      expect(score).not.toBeNull();
+      expect(score!).toBeGreaterThan(0.75);
+    });
+
+    it('refuses single-token target with a typo against multi-token candidate in lookupBeer', async () => {
+      const candidate: SearchResult = {
+        bid: 9991,
+        beer_name: '10th Anniversary Collab: Josef',
+        brewery_name: 'Browar Test',
+        abv: 5.0,
+        style: 'IPA',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Browar Test', name: 'JOZSEF', abv: 5.0, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Test JOZSEF')], candidates: [candidate] });
+    });
+  });
+
   describe('colon-prefix rescue (#746)', () => {
     it('rescues 37961 (Sarabanda Brewery / Pils 11,5° -> Classic: Pils)', async () => {
       const candidate: SearchResult = {
@@ -2533,7 +2573,7 @@ describe('#664 numbered-series retry', () => {
         bid: 6921732,
         beer_name: '10th Anniversary Collab: Josef',
         brewery_name: 'Ziemia Obiecana',
-        abv: 7.0,
+        abv: 6.5, // Finding 3: abv identical to input so exact tail guard is tested in isolation
         style: 'IPA',
         global_rating: 3.5,
       };
@@ -2547,19 +2587,26 @@ describe('#664 numbered-series retry', () => {
         bid: 6921732,
         beer_name: '10th Anniversary Collab: Josef',
         brewery_name: 'Ziemia Obiecana',
-        abv: 7.0,
+        abv: 6.5, // Finding 3: abv identical to input so exact tail guard is tested in isolation
         style: 'IPA',
         global_rating: 3.5,
       };
       const search = fakeSearch(() => [josef]);
       const out = await lookupBeer({ brewery: 'Ziemia Obiecana/Brew Your Mind Brewery', name: 'JOZSEF 17,0°', abv: 6.5, search });
-      expect(out.kind).toBe('not_found');
+      expect(out).toEqual({
+        kind: 'not_found',
+        searchUrls: [
+          buildSearchUrl('Ziemia Obiecana JOZSEF'),
+          buildSearchUrl('Brew Your Mind JOZSEF'),
+        ],
+        candidates: [josef, josef],
+      });
     });
 
     it('abstains (not_found) when multiple candidates from the same brewery match the colon tail with corroborating ABV', async () => {
       const cand1: SearchResult = {
         bid: 101,
-        beer_name: 'Series 1: Pils',
+        beer_name: 'Series Alpha: Pils',
         brewery_name: 'Browar Sarabanda',
         abv: 4.8,
         style: 'Pilsner',
@@ -2567,7 +2614,7 @@ describe('#664 numbered-series retry', () => {
       };
       const cand2: SearchResult = {
         bid: 102,
-        beer_name: 'Series 2: Pils',
+        beer_name: 'Series Beta: Pils',
         brewery_name: 'Browar Sarabanda',
         abv: 4.8,
         style: 'Pilsner',
@@ -2575,7 +2622,7 @@ describe('#664 numbered-series retry', () => {
       };
       const search = fakeSearch(() => [cand1, cand2]);
       const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
-      expect(out.kind).toBe('not_found');
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [cand1, cand2] });
     });
 
     it('rejects candidate when ABV diverges beyond tolerance', async () => {
@@ -2589,7 +2636,7 @@ describe('#664 numbered-series retry', () => {
       };
       const search = fakeSearch(() => [candidate]);
       const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
-      expect(out.kind).toBe('not_found');
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
     });
 
     it('prefers a plain exact candidate over a colon-prefixed variant in the same pool', async () => {
@@ -2612,6 +2659,181 @@ describe('#664 numbered-series retry', () => {
       const search = fakeSearch(() => [prefixed, plain]);
       const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Black Celebration #3', abv: 8.2, search });
       expect(out).toEqual({ kind: 'matched', result: plain });
+    });
+
+    it('abstains from colon-prefix rescue when a plain candidate is present in the pool but was refused', async () => {
+      const plainRefused: SearchResult = {
+        bid: 201,
+        beer_name: 'Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 6.0, // Diverges from target 4.8% by 1.2%, so rejected by stage 2/3
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const prefixed: SearchResult = {
+        bid: 202,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8, // Matches target 4.8%
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [plainRefused, prefixed]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [plainRefused, prefixed] });
+    });
+
+    it('abstains from colon-prefix rescue when a plain candidate includes brewery name in its title', async () => {
+      const plainWithBrewery: SearchResult = {
+        bid: 203,
+        beer_name: 'Sarabanda Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 6.0,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const prefixed: SearchResult = {
+        bid: 204,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [plainWithBrewery, prefixed]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [plainWithBrewery, prefixed] });
+    });
+
+    it('accepts candidate on ABV tolerance boundary (gap = 0.3)', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 5.1, // 5.1 - 4.8 = 0.3 (within ABV_TOLERANCE)
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'matched', result: candidate });
+    });
+
+    it('rejects candidate just beyond ABV tolerance boundary (gap = 0.31)', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 5.11, // 5.11 - 4.8 = 0.31 (> ABV_TOLERANCE)
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
+    });
+
+    it('rejects candidate when input has ABV but candidate has null/undefined ABV', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: null,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
+    });
+
+    it('without input ABV, rejects single-token tail', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
+    });
+
+    it('without input ABV, accepts multi-token tail', async () => {
+      const candidate: SearchResult = {
+        bid: 202,
+        beer_name: 'Barrel Born: Black Celebration',
+        brewery_name: 'Browar Sarabanda',
+        abv: 8.0,
+        style: 'Stout',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Black Celebration', search });
+      expect(out).toEqual({ kind: 'matched', result: candidate });
+    });
+
+    it('rejects candidate on alcohol class mismatch (alcoholic candidate for non-alcoholic input)', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils Bezalkoholowe', abv: 0.0, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils Bezalkoholowe')], candidates: [candidate] });
+    });
+
+    it('rejects candidate on alcohol class mismatch (non-alcoholic candidate for alcoholic input)', async () => {
+      const candidate: SearchResult = {
+        bid: 6902834,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Sarabanda',
+        abv: 0.5,
+        style: 'Low Alcohol / Non-Alcoholic Beer',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
+    });
+
+    it('rejects candidate from a non-matching brewery', async () => {
+      const candidate: SearchResult = {
+        bid: 6902833,
+        beer_name: 'Classic: Pils',
+        brewery_name: 'Browar Inny',
+        abv: 4.8,
+        style: 'Pilsner',
+        global_rating: 3.5,
+      };
+      const search = fakeSearch(() => [candidate]);
+      const out = await lookupBeer({ brewery: 'Sarabanda Brewery', name: 'Pils 11,5°', abv: 4.8, search });
+      expect(out).toEqual({ kind: 'not_found', searchUrls: [buildSearchUrl('Sarabanda Pils')], candidates: [candidate] });
+    });
+
+    it('a colon-prefix rescue vetoed by the series loop is not revived at the end of the lookup', async () => {
+      const seriesPool: SearchResult[] = [
+        { bid: 1, brewery_name: 'Browar Testowy', beer_name: 'Series: Zero #3 Mango', abv: 6, style: 'IPA', global_rating: 3.5 },
+        { bid: 2, brewery_name: 'Browar Testowy', beer_name: 'Zero #3 Mango Red', abv: 6, style: 'IPA', global_rating: 3.5 },
+        { bid: 3, brewery_name: 'Browar Testowy', beer_name: 'Zero #3 Mango Blue', abv: 6, style: 'IPA', global_rating: 3.5 },
+      ];
+      const out = await lookupBeer({
+        brewery: 'Browar Testowy',
+        name: 'Zero #3 Mango',
+        abv: 6,
+        search: { search: async (query: string) => (query === 'Testowy Zero #3' ? seriesPool : []) },
+      });
+      expect(out).toEqual({
+        kind: 'not_found',
+        searchUrls: [buildSearchUrl('Testowy Zero #3 Mango'), buildSearchUrl('Testowy Zero #3')],
+        candidates: seriesPool,
+      });
     });
   });
 });

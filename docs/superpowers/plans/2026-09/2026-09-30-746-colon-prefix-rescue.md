@@ -42,62 +42,11 @@
   export function isColonPrefixTailMatch(inputName: string, candidateBeerName: string): boolean;
   ```
 
-- [ ] **Step 1: Write failing unit tests for colon-prefix extraction and tail matching**
-
-Create `src/domain/colon-prefix.test.ts` covering:
-- Standard single colon: `Classic: Pils` -> tail `Pils`
-- Long collab prefix: `10th Anniversary Collab: Casimir` -> tail `Casimir`
-- Collab prefix with accented name: `10th Anniversary Collab: Jozsef` -> tail `Jozsef`
-- Negative trap test: `isColonPrefixTailMatch('JOZSEF 17,0°', '10th Anniversary Collab: Josef') === false`
-- Negative timing/code test: `isColonPrefixTailMatch('15', '6:15') === false`
-- Negative non-colon test: `isColonPrefixTailMatch('Pils', 'Pilsner') === false`
-- Multiple colons: `Carles: Gelato: Sangria` -> tails `Gelato: Sangria`, `Sangria`
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run src/domain/colon-prefix.test.ts`
-Expected: FAIL (module `colon-prefix` does not exist).
-
-- [ ] **Step 3: Implement `src/domain/colon-prefix.ts`**
-
-Implement:
-```typescript
-import { baseNormalize, stripSearchNoise, NAME_COLLAB_SEP } from './normalize';
-
-const DIGIT_OR_CODE_PREFIX = /^\d+:\d+/;
-
-export function extractColonTails(beerName: string): string[] {
-  if (DIGIT_OR_CODE_PREFIX.test(beerName)) return [];
-  const parts = beerName.split(/:\s+/);
-  if (parts.length < 2) return [];
-  const tails: string[] = [];
-  for (let i = 1; i < parts.length; i += 1) {
-    const tail = parts.slice(i).join(': ').trim();
-    if (tail.length > 0) tails.push(tail);
-  }
-  return tails;
-}
-
-export function isColonPrefixTailMatch(inputName: string, candidateBeerName: string): boolean {
-  const tails = extractColonTails(candidateBeerName);
-  if (tails.length === 0) return false;
-  const inputSides = (NAME_COLLAB_SEP.test(inputName) ? inputName.split(NAME_COLLAB_SEP) : [inputName])
-    .map((s) => baseNormalize(stripSearchNoise(s)))
-    .filter(Boolean);
-  if (inputSides.length === 0) return false;
-  const normalizedTails = tails
-    .map((t) => baseNormalize(stripSearchNoise(t)))
-    .filter(Boolean);
-  return normalizedTails.some((t) => inputSides.includes(t));
-}
-```
-
-- [ ] **Step 4: Run test to verify it passes**
-
-Run: `npx vitest run src/domain/colon-prefix.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 1: Write failing unit tests for colon-prefix extraction and tail matching**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Implement `src/domain/colon-prefix.ts`**
+- [x] **Step 4: Run test to verify it passes**
+- [x] **Step 5: Commit Task 1**
 
 Commit: `feat(domain): implement pure colon-prefix tail matching predicate (#746)`
 
@@ -113,49 +62,12 @@ Commit: `feat(domain): implement pure colon-prefix tail matching predicate (#746
 - Consumes: `isColonPrefixTailMatch` from `src/domain/colon-prefix`
 - Produces: `lookupBeer` with `colonPrefixRescue` stage integrated into refusal resolution
 
-- [ ] **Step 1: Write integration tests in `src/domain/untappd-lookup.test.ts`**
-
-Add tests for:
-- `lookupBeer` rescues 37961 (`Sarabanda Brewery` / `Pils 11,5°` @ 4.8% -> `Classic: Pils`, bid 6902833)
-- `lookupBeer` rescues 37966 (`Ziemia Obiecana/Maplewood Brewery` / `CASIMIR 13,0°` @ 5.5% -> `10th Anniversary Collab: Casimir`, bid 6914830)
-- `lookupBeer` rescues 37967 (`Ziemia Obiecana/Brew Your Mind Brewery` / `JOZSEF 17,0°` @ 6.5% -> `10th Anniversary Collab: Jozsef`, bid 6914829)
-- Negative boundary: candidate `10th Anniversary Collab: Josef` (bid 6921732 @ 7.0%) alone returns `not_found` for `JOZSEF 17,0°` @ 6.5%
-- Negative collision: two candidates with same tail and matching ABV return `not_found`
-- Negative ABV gap: candidate ABV 5.5% vs input 4.8% returns `not_found`
-- Direct plain candidate precedence: if pool has both `Black Celebration #3` (bid 1) and `Barrel Born: Black Celebration #3` (bid 2), plain candidate is chosen
-
-- [ ] **Step 2: Run test to verify it fails**
-
-Run: `npx vitest run src/domain/untappd-lookup.test.ts -t "colon-prefix"`
-Expected: FAIL (records return `not_found`).
-
-- [ ] **Step 3: Integrate `colonPrefixRescue` into `src/domain/untappd-lookup.ts`**
-
-In `src/domain/untappd-lookup.ts`:
-1. Import `isColonPrefixTailMatch` from `./colon-prefix`.
-2. Define `colonPrefixRescue(pool: SearchResult[]): SearchResult | null`:
-   - Checks `isAlcoholClassMismatch`.
-   - Checks if plain exact candidate already exists in pool (`pool.some(r => targetValues.has(baseNormalize(stripSearchNoise(r.beer_name))))`), if so returns `null`.
-   - Checks ABV tolerance if input ABV is present; if input ABV is absent or candidate ABV is absent, rejects single-token style names.
-   - Collects distinct matching `bid`s.
-   - If `hits.size === 1`, returns the unique candidate.
-3. Wire `colonPrefixRescue` before `movedLetterRescue`:
-   ```typescript
-   const rescued = colonPrefixRescue(refusedStrictPools) ?? movedLetterRescue(refusedStrictPools);
-   ```
-   both in `judge` and at the terminal return of `lookupBeer`.
-
-- [ ] **Step 4: Run tests to verify they pass**
-
-Run: `npx vitest run src/domain/untappd-lookup.test.ts`
-Expected: PASS.
-
-- [ ] **Step 5: Run full test gate**
-
-Run: `npm test && npm run typecheck`
-Expected: ALL PASS.
-
-- [ ] **Step 6: Commit Task 2**
+- [x] **Step 1: Write integration tests in `src/domain/untappd-lookup.test.ts`**
+- [x] **Step 2: Run test to verify it fails**
+- [x] **Step 3: Integrate `colonPrefixRescue` into `src/domain/untappd-lookup.ts`**
+- [x] **Step 4: Run tests to verify they pass**
+- [x] **Step 5: Run full test gate**
+- [x] **Step 6: Commit Task 2**
 
 Commit: `feat(domain): integrate colon-prefix rescue in lookupBeer (#746)`
 
@@ -166,15 +78,34 @@ Commit: `feat(domain): integrate colon-prefix rescue in lookupBeer (#746)`
 **Files:**
 - Modify: `spec.md`
 
-- [ ] **Step 1: Document `colonPrefixRescue` in `spec.md`**
-
-Add description in `spec.md` under `lookupBeer` staging detailing the colon-prefix series rescue.
-
-- [ ] **Step 2: Run full verification gate**
-
-Run: `npm test && npm run typecheck`
-Expected: All tests pass, typecheck clean.
-
-- [ ] **Step 3: Commit Task 3**
+- [x] **Step 1: Document `colonPrefixRescue` in `spec.md`**
+- [x] **Step 2: Run full verification gate**
+- [x] **Step 3: Commit Task 3**
 
 Commit: `docs(spec): document colon-prefix series rescue in spec.md (#746)`
+
+---
+
+### Task 4: Address Claude Cross-Review Findings
+
+**Files:**
+- Modify: `src/domain/untappd-lookup.ts`
+- Modify: `src/domain/untappd-lookup.test.ts`
+- Modify: `src/domain/digit-identity.ts`
+- Modify: `src/domain/digit-identity.test.ts`
+- Modify: `src/domain/colon-prefix.test.ts`
+- Modify: `spec.md`
+- Modify: `docs/superpowers/specs/2026-09/2026-09-30-746-colon-prefix-rescue-design.md`
+
+- [x] **Step 1: Resolve all 9 Claude cross-review findings**
+  - Finding 1: Document `coverageScore` single-token guard in spec and design doc; add unit and integration tests.
+  - Finding 2: Document `digitIdentity` ordinals in spec, design doc, and plan; add tests for `1st`, `2nd`, `3rd`, `11th` and `digitsCompatibleAsPeers`.
+  - Finding 3: Isolate Josef exact-tail guard test by giving `josef` identical ABV (6.5).
+  - Finding 4 & 5: Check `candNorm`, `candId`, `stripped` against `targetValues` in condition 6; add test where plain candidate was refused due to ABV divergence and test candidate with brewery name in title.
+  - Finding 6 & 7: Add ABV boundaries (0.3 vs 0.31), missing ABV tests, alcohol-class guard tests, non-strict brewery test, `rescueDecided` test, and edge cases in `colon-prefix.test.ts`; strengthen negative assertions to exact objects.
+  - Finding 8: Make spec and code ABV conditions consistent; simplify dead code in `untappd-lookup.ts`.
+  - Finding 9: Isolate uniqueness in ambiguity test by using `Series Alpha` vs `Series Beta`.
+- [x] **Step 2: Run full verification gate (`npm test && npm run typecheck`)**
+- [ ] **Step 3: Commit Task 4**
+
+Commit: `fix(domain): address cross-review findings for colon-prefix rescue (#746)`

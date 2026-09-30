@@ -132,6 +132,10 @@ describe('digitIdentity(input, candidate)', () => {
     // PR #746: ordinal suffixes (st, nd, rd, th) mark edition numbers, not soft Czech Plato grades
     ['CASIMIR 13,0°', '10th Anniversary Collab: Casimir', 'number-fallback', 'different'],
     ['JOZSEF 17,0°', '10th Anniversary Collab: Jozsef', 'number-fallback', 'different'],
+    ['Beer 12°', '1st Edition Beer', 'number-fallback', 'different'],
+    ['Beer 12°', '2nd Edition Beer', 'number-fallback', 'different'],
+    ['Beer 12°', '3rd Edition Beer', 'number-fallback', 'different'],
+    ['Beer 12°', '11th Edition Beer', 'number-fallback', 'different'],
   ])('%s  →  %s  :  %s / reverse %s', (input, candidate, forward, reverse) => {
     expect(identity(input, candidate)).toBe(forward);
     expect(identity(candidate, input)).toBe(reverse);
@@ -141,6 +145,7 @@ describe('digitIdentity(input, candidate)', () => {
 describe('digitsCompatibleAsPeers — ensureOrphan (the #617 numericTokensCompatible table, carried over)', () => {
   test.each<[string, string, boolean]>([
     // measured wrong pairs — must stay apart
+    ['10th Anniversary IPA', '11th Anniversary IPA', false],
     ['Juicy Trap #19 18°', 'Juicy Trap #20', false],
     ['Trappistes Rochefort 8', 'Trappistes Rochefort 10', false],
     ['Grodziskie Piwobraniowe 2024', 'Piwobranie 2026: Suska sechlońska i cascara', false],
