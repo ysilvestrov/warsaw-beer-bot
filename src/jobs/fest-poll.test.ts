@@ -4,7 +4,7 @@ import pino from 'pino';
 import { openDb, type DB } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { getFestBySlug } from '../storage/fests';
-import { getJobState } from '../storage/job_state';
+import { getJobState, setJobState } from '../storage/job_state';
 import { menuStats } from '../storage/fest_menu';
 import { CookieExpiredError, HttpError, type Http } from '../sources/http';
 import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
@@ -98,6 +98,13 @@ describe('cookie alert throttle', () => {
     const fest = getFestBySlug(deps.db, 'wfp22')!;
     await Promise.all([refreshFestMenu(slow, fest, IN_SESSION), refreshFestMenu(slow, fest, IN_SESSION)]);
     expect(sent.length).toBe(1);
+  });
+  it('a failed alert never rolls back a newer claim that another read made meanwhile', async () => {
+    const { db, deps } = setup([new CookieExpiredError()]);
+    const later = new Date(IN_SESSION.getTime() + 7 * 60 * 60 * 1000).toISOString();
+    const flaky = { ...deps, notifyAdmin: async () => { setJobState(db, 'fest_cookie_alert_at', later); throw new Error('tg down'); } };
+    await refreshFestMenu(flaky, getFestBySlug(db, 'wfp22')!, IN_SESSION);
+    expect(getJobState(db, 'fest_cookie_alert_at')).toBe(later);
   });
 });
 

@@ -12,6 +12,7 @@
 // Options: --profile <dir> (default ./profile), FEST_API (default https://beer-api.ysilvestrov-ai.uk).
 import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { eyeTasks, type EyeConfig, type FeedTask } from './schedule';
+import { isBlockPage, isBlockStatus } from '../../src/sources/untappd/block';
 
 const API = (process.env.FEST_API ?? 'https://beer-api.ysilvestrov-ai.uk').replace(/\/$/, '');
 const TOKEN = process.env.FEST_TOKEN ?? '';
@@ -51,8 +52,9 @@ async function moreFeed(page: Page, venueId: number, cursor: string): Promise<st
     const res = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
     return { status: res.status, text: await res.text() };
   }, url);
-  // Cloudflare answers a challenge with 403 or 503, a rate limit with 429.
-  if (r.status === 403 || r.status === 429 || r.status === 503) return 'blocked';
+  // The server's own block rule: 403/429, or a Cloudflare challenge page whatever its status (it
+  // comes as 503 too). A plain 503 without the challenge is an outage, retried in a minute.
+  if (isBlockStatus(r.status) || isBlockPage(r.text)) return 'blocked';
   if (r.status !== 200) throw new Error(`more_feed answered ${r.status}`);
   return r.text.trim();
 }
