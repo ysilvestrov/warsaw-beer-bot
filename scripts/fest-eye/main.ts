@@ -51,7 +51,8 @@ async function moreFeed(page: Page, venueId: number, cursor: string): Promise<st
     const res = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
     return { status: res.status, text: await res.text() };
   }, url);
-  if (r.status === 403 || r.status === 429) return 'blocked';
+  // Cloudflare answers a challenge with 403 or 503, a rate limit with 429.
+  if (r.status === 403 || r.status === 429 || r.status === 503) return 'blocked';
   if (r.status !== 200) throw new Error(`more_feed answered ${r.status}`);
   return r.text.trim();
 }

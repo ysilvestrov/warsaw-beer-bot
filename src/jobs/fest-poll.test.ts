@@ -90,6 +90,15 @@ describe('cookie alert throttle', () => {
     await runFestPoll(withFlaky, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
     expect([sent.length, getJobState(db, 'fest_cookie_alert_at')]).toEqual([1, new Date(IN_SESSION.getTime() + 10 * 60 * 1000).toISOString()]);
   });
+
+  it('two expired-cookie reads in flight at once send one alert', async () => {
+    const { deps } = setup([new CookieExpiredError(), new CookieExpiredError()]);
+    const sent: string[] = [];
+    const slow = { ...deps, notifyAdmin: async (m: string) => { await new Promise((r) => setTimeout(r, 5)); sent.push(m); } };
+    const fest = getFestBySlug(deps.db, 'wfp22')!;
+    await Promise.all([refreshFestMenu(slow, fest, IN_SESSION), refreshFestMenu(slow, fest, IN_SESSION)]);
+    expect(sent.length).toBe(1);
+  });
 });
 
 describe('fest menu job', () => {
