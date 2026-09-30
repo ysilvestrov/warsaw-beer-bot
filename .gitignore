@@ -28,3 +28,6 @@ site/changelog/
 # Impeccable design-review snapshots are committed (.impeccable/critique/);
 # the detector's local cache is machine state and is not.
 .impeccable/hook.cache.json
+
+# WFP laptop eye: the Chrome profile holds a logged-in Untappd session
+scripts/fest-eye/profile/

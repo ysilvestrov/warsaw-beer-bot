@@ -3,7 +3,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import type { ApiDeps, ApiEnv } from '../types';
 import { CHECKINS_HTML_LIMIT_CHARS, CURSOR_LIMIT_CHARS, payloadSizeValidationHook } from '../middleware/payload-limit';
-import { activeFests, currentOrNextFests, festVenues } from '../../storage/fests';
+import { activeFests, currentOrNextFests, festSessions, festVenues, POLL_MARGIN_MS } from '../../storage/fests';
 import { isFestMember } from '../../storage/fest_teams';
 import { BlockedPageError, applyMenu, ingestFeedPage } from '../../jobs/fest-ingest';
 import { isBlockPage } from '../../sources/untappd/block';
@@ -70,5 +70,22 @@ export function festRoute(app: Hono<ApiEnv>, deps: ApiDeps, clock: () => Date = 
     const fest = menu.venueId === null ? undefined : mine.find((f) => f.menu_venue_id === menu.venueId);
     if (!fest) return c.json({ error: 'unknown_menu_venue' }, 400);
     return c.json(applyMenu(deps.db, fest.id, menu, now.toISOString()));
+  });
+
+  // What the laptop eye polls (plan 2, task 3): the caller's current or next fest, its sessions and
+  // venues, so the script never hard-codes what the database already knows.
+  app.get('/fest/config', (c) => {
+    const fest = currentOrNextFests(deps.db, clock()).find((f) => isFestMember(deps.db, f.id, c.get('telegramId')!));
+    if (!fest) return c.json({ error: 'no_fest' }, 404);
+    const venues = festVenues(deps.db, fest.id);
+    const menuVenue = venues.find((v) => v.venue_id === fest.menu_venue_id);
+    return c.json({
+      slug: fest.slug,
+      pollMarginMs: POLL_MARGIN_MS,
+      sessions: festSessions(deps.db, fest.id).map((s) => ({ start_at: s.start_at, end_at: s.end_at })),
+      menuVenueId: fest.menu_venue_id,
+      menuPath: (menuVenue?.feed_path ?? `/v/x/${fest.menu_venue_id}`).replace(/\/activity$/, ''),
+      venues: venues.map((v) => ({ venueId: v.venue_id, feedPath: v.feed_path })),
+    });
   });
 }
