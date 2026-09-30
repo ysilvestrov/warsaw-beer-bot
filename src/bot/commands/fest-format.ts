@@ -27,7 +27,13 @@ export function fitMessage(t: Translator, head: string[], items: string[], tail:
     kept.push(item);
     size += item.length + 1;
   }
-  return [...head, ...kept, t('fest.lines_more', { count: items.length - kept.length }), ...tail].join('\n');
+  const out = [...head, ...kept, t('fest.lines_more', { count: items.length - kept.length }), ...tail].join('\n');
+  // Head and tail alone can outgrow the limit (a big team's history lines): then cut the text at a
+  // line boundary, since a clipped reply is still an answer and a rejected one is none.
+  if (out.length <= limit) return out;
+  const cut = out.slice(0, limit - 2);
+  const nl = cut.lastIndexOf('\n');
+  return (nl > 0 ? cut.slice(0, nl) : cut) + '\n…';
 }
 
 const hhmm = (iso: string): string =>

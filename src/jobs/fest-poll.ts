@@ -45,8 +45,11 @@ async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise
       // Once per 6 h, not on every 10-minute poll.
       const last = getJobState(deps.db, COOKIE_ALERT_KEY);
       if (last === null || now.getTime() - Date.parse(last) >= COOKIE_ALERT_EVERY_MS) {
-        setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
-        await deps.notifyAdmin?.('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').catch(() => {});
+        // The throttle counts only an alert that was delivered: a failed send is retried next poll.
+        const sent = deps.notifyAdmin
+          ? await deps.notifyAdmin('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').then(() => true, () => false)
+          : false;
+        if (sent) setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
       }
       return null;
     }

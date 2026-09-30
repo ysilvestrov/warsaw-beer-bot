@@ -144,6 +144,11 @@ describe('searchMenu', () => {
 });
 
 describe('Telegram message limit', () => {
+  it('fitMessage cuts at a line boundary when head and tail alone exceed the limit', () => {
+    const head = Array.from({ length: 10 }, (_, i) => `${i}`.padStart(9, 'h'));
+    expect(fitMessage(t, head, ['a'], [], 25)).toBe('hhhhhhhh0\nhhhhhhhh1\n…');
+  });
+
   it('fitMessage keeps a short message whole', () => {
     expect(fitMessage(t, ['h'], ['a', 'b'], ['z'])).toBe('h\na\nb\nz');
   });

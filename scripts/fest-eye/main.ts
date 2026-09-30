@@ -44,13 +44,16 @@ async function api<T>(method: 'GET' | 'POST', path: string, body?: unknown): Pro
 }
 
 // The "Show More" XHR, run inside the page so it carries the browser's own Untappd session.
-async function moreFeed(page: Page, venueId: number, cursor: string): Promise<string | null> {
+// '' is the end of the feed; 'blocked' a Cloudflare answer; any other failure throws (retried).
+async function moreFeed(page: Page, venueId: number, cursor: string): Promise<string | 'blocked'> {
   const url = `${UNTAPPD}/venue/more_feed/${venueId}/${cursor}?filter=&v2=true`;
   const r = await page.evaluate(async (u) => {
     const res = await fetch(u, { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' });
     return { status: res.status, text: await res.text() };
   }, url);
-  return r.status === 200 && r.text.trim() !== '' ? r.text : null;
+  if (r.status === 403 || r.status === 429) return 'blocked';
+  if (r.status !== 200) throw new Error(`more_feed answered ${r.status}`);
+  return r.text.trim();
 }
 
 /** false: the server says the page was a Cloudflare block. Throws on any other failure (retried). */
@@ -63,16 +66,19 @@ async function readFeed(page: Page, task: FeedTask): Promise<boolean> {
   if (reply.status === 502) return false;
   if (reply.status !== 200) throw new Error(`POST /fest/feed answered ${reply.status}`);
   // Page further only while the new page does not stitch onto what the server already had.
-  for (let n = 2; n <= task.maxPages && reply.status === 200; n++) {
+  // A read counts only when every page it fetched landed: a failed page throws or reports a block.
+  for (let n = 2; n <= task.maxPages; n++) {
     const r = reply.data as FeedReply;
     if (r.stitched || r.nextCursor === null) break;
     const fragment = await moreFeed(page, task.venueId, r.nextCursor);
-    if (fragment === null) break;
+    if (fragment === 'blocked') return false;
+    if (fragment === '') break;
     reply = await api<FeedReply>('POST', '/fest/feed', {
       venueId: task.venueId, html: fragment, cursor: r.nextCursor, fetchedAt: new Date().toISOString(),
     });
     log('feed', { venueId: task.venueId, page: n, status: reply.status, reply: reply.data });
     if (reply.status === 502) return false;
+    if (reply.status !== 200) throw new Error(`POST /fest/feed answered ${reply.status}`);
   }
   return true;
 }

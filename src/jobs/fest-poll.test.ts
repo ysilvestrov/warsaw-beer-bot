@@ -80,6 +80,18 @@ describe('runFestPoll', () => {
   });
 });
 
+describe('cookie alert throttle', () => {
+  it('a failed alert does not start the 6-hour silence: the next poll alerts again', async () => {
+    const { db, deps } = setup([new CookieExpiredError(), new CookieExpiredError()]);
+    const sent: string[] = [];
+    const outcomes = [() => Promise.reject(new Error('tg down')), () => Promise.resolve()];
+    const withFlaky = { ...deps, notifyAdmin: async (m: string) => { await outcomes.shift()!(); sent.push(m); } };
+    await runFestPoll(withFlaky, IN_SESSION);
+    await runFestPoll(withFlaky, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
+    expect([sent.length, getJobState(db, 'fest_cookie_alert_at')]).toEqual([1, new Date(IN_SESSION.getTime() + 10 * 60 * 1000).toISOString()]);
+  });
+});
+
 describe('fest menu job', () => {
   it('reads the venue main page (not /activity) and applies the menu', async () => {
     const { db, deps, urls } = setup([MENU]);
