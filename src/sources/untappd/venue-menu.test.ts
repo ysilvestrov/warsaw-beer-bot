@@ -20,6 +20,17 @@ describe('parseVenueMenu', () => {
     expect(menu.venueId).toBe(11142155);
   });
 
+  it('accepts only an Untappd venue canonical, not a venue-looking path elsewhere', () => {
+    const withCanonical = (href: string) => parseVenueMenu(`<link rel="canonical" href="${href}">`).venueId;
+    expect([
+      withCanonical('https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155'),
+      withCanonical('https://untappd.com/v/x/11142155/activity'),
+      withCanonical('https://example.test/?next=/v/fake/11142155'),
+      withCanonical('https://untappd.com.evil.test/v/fake/11142155'),
+      withCanonical('https://untappd.com/b/some-beer/11142155'),
+    ]).toEqual([11142155, 11142155, null, null, null]);
+  });
+
   it('reads the menu update time as ISO', () => {
     expect(menu.updatedAt).toBe('2026-09-29T12:15:39.465Z');
   });

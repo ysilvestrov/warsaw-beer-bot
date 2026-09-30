@@ -66,7 +66,8 @@ export function festRoute(app: Hono<ApiEnv>, deps: ApiDeps, clock: () => Date = 
     const mine = fests.filter((f) => isFestMember(deps.db, f.id, c.get('telegramId')!));
     if (mine.length === 0) return c.json({ error: 'not_team_member' }, 403);
     const menu = parseVenueMenu(html);
-    const fest = mine.find((f) => f.menu_venue_id === menu.venueId);
+    // A page that names no venue matches no fest, whatever a fest row holds.
+    const fest = menu.venueId === null ? undefined : mine.find((f) => f.menu_venue_id === menu.venueId);
     if (!fest) return c.json({ error: 'unknown_menu_venue' }, 400);
     return c.json(applyMenu(deps.db, fest.id, menu, now.toISOString()));
   });

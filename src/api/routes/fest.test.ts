@@ -141,6 +141,12 @@ describe('POST /fest/menu', () => {
     expect([res.status, await res.json()]).toEqual([400, { error: 'unknown_menu_venue' }]);
   });
 
+  it('refuses a menu page with no canonical venue', async () => {
+    const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
+    const res = await post(app, '/fest/menu', 'member-token', { html: MENU.replace(/<link id="canonical"[^>]*>/, '') });
+    expect([res.status, await res.json()]).toEqual([400, { error: 'unknown_menu_venue' }]);
+  });
+
   it('answers 502 for a Cloudflare menu page', async () => {
     const { app } = setup(new Date('2026-09-30T10:00:00.000Z'));
     const res = await post(app, '/fest/menu', 'member-token', { html: '<title>Just a moment...</title>' });
