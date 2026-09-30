@@ -40,30 +40,42 @@ export function isMcpAuthError(e: unknown): boolean {
 export function createFestMcp(p: { url: string; oauthFile: string; log: pino.Logger; timeoutMs?: number }): FestMcp {
   const timeoutMs = p.timeoutMs ?? MCP_CALL_TIMEOUT_MS;
   const provider = new FileOAuthProvider(p.oauthFile);
-  let client: Client | null = null;
+  // One connection shared by every call: a call that arrives while it is being made waits for the
+  // same promise instead of using a half-connected client. A failed connect clears it and is closed.
+  let connected: Promise<Client> | null = null;
 
-  const drop = async () => {
-    const c = client;
-    client = null;
-    await c?.close().catch(() => {});
+  const connect = (): Promise<Client> => {
+    if (!connected) {
+      const c = new Client({ name: 'warsaw-beer-bot-fest', version: '1.0.0' });
+      connected = withTimeout(c.connect(new StreamableHTTPClientTransport(new URL(p.url), { authProvider: provider })), timeoutMs)
+        .then(() => c, async (e) => {
+          await c.close().catch(() => {});
+          throw e;
+        });
+    }
+    return connected;
+  };
+
+  const drop = async (which?: Promise<Client>) => {
+    const current = connected;
+    if (!current || (which && which !== current)) return; // a newer connection is not ours to close
+    connected = null;
+    await current.then((c) => c.close(), () => {}).catch(() => {});
   };
 
   return {
     async call(tool, args) {
+      const attempt = connect();
       try {
-        if (!client) {
-          // Tracked before connecting, so a failed or timed-out connect is closed by drop() below.
-          client = new Client({ name: 'warsaw-beer-bot-fest', version: '1.0.0' });
-          await withTimeout(client.connect(new StreamableHTTPClientTransport(new URL(p.url), { authProvider: provider })), timeoutMs);
-        }
+        const client = await attempt;
         return (await client.callTool({ name: tool, arguments: args }, undefined, { timeout: timeoutMs })) as ToolCallResult;
       } catch (e) {
         p.log.warn({ tool, auth: isMcpAuthError(e), err: e instanceof Error ? e.message : String(e) }, 'fest mcp call failed');
-        await drop();
+        await drop(attempt);
         throw e;
       }
     },
     owner: () => provider.owner(),
-    close: drop,
+    close: () => drop(),
   };
 }
