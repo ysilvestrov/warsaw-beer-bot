@@ -32,6 +32,28 @@ export interface FestServerDeps {
 const isBlock = (e: unknown): boolean =>
   e instanceof BlockedPageError || (e instanceof HttpError && isBlockStatus(e.status));
 
+// The cookie alert goes out once per 6 h, and the 6 h count only from an alert that was delivered.
+// The slot is claimed in one IMMEDIATE transaction (check and write under the database write lock),
+// so two reads in flight, even from two processes, send one alert; a failed send gives the slot
+// back, but only while it still holds this claim, never over a newer one.
+/** The previous value (null: none) when this call won the slot; false when an alert is not due. */
+function claimAlertSlot(db: DB, now: Date): string | null | false {
+  return db.transaction((): string | null | false => {
+    const last = getJobState(db, COOKIE_ALERT_KEY);
+    if (last !== null && now.getTime() - Date.parse(last) < COOKIE_ALERT_EVERY_MS) return false;
+    setJobState(db, COOKIE_ALERT_KEY, now.toISOString());
+    return last;
+  }).immediate();
+}
+
+function releaseAlertSlot(db: DB, claim: string, prev: string | null): void {
+  db.transaction(() => {
+    if (getJobState(db, COOKIE_ALERT_KEY) !== claim) return;
+    if (prev === null) deleteJobState(db, COOKIE_ALERT_KEY);
+    else setJobState(db, COOKIE_ALERT_KEY, prev);
+  }).immediate();
+}
+
 // One guarded fetch: breaker gate, block → breaker, expired cookie → admin alert (not a block:
 // it is a session problem, and rotating or cooling down would not fix it).
 async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise<string | null> {
@@ -43,15 +65,12 @@ async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise
     if (e instanceof CookieExpiredError) {
       deps.log.warn('fest: untappd cookie expired');
       // Once per 6 h, not on every 10-minute poll.
-      const last = getJobState(deps.db, COOKIE_ALERT_KEY);
-      if (deps.notifyAdmin && (last === null || now.getTime() - Date.parse(last) >= COOKIE_ALERT_EVERY_MS)) {
-        // Claim the slot synchronously (a concurrent /fest menu sees it and stays quiet), and give it
-        // back if the send fails: the throttle counts only an alert that was delivered.
-        setJobState(deps.db, COOKIE_ALERT_KEY, now.toISOString());
-        const sent = await deps.notifyAdmin('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').then(() => true, () => false);
-        if (!sent) {
-          if (last === null) deleteJobState(deps.db, COOKIE_ALERT_KEY);
-          else setJobState(deps.db, COOKIE_ALERT_KEY, last);
+      if (deps.notifyAdmin) {
+        const claim = now.toISOString();
+        const prev = claimAlertSlot(deps.db, now);
+        if (prev !== false) {
+          const sent = await deps.notifyAdmin('Фест: Untappd-кука протухла — серверне око сліпе, онови куку').then(() => true, () => false);
+          if (!sent) releaseAlertSlot(deps.db, claim, prev);
         }
       }
       return null;

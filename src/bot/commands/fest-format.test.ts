@@ -153,6 +153,10 @@ describe('Telegram message limit', () => {
     expect(fitMessage(t, [`<b>${'x'.repeat(30)}</b>`, 'h2'], ['a'], [], 25)).toBe('…');
   });
 
+  it('fitMessage drops the markup of a clipped reply, so a tag spanning the cut cannot stay open', () => {
+    expect(fitMessage(t, ['<b>title', 'continued</b> &amp; more', 'x'.repeat(30)], ['a'], [], 40)).toBe('title\ncontinued &amp; more\n…');
+  });
+
   it('fitMessage keeps a short message whole', () => {
     expect(fitMessage(t, ['h'], ['a', 'b'], ['z'])).toBe('h\na\nb\nz');
   });
