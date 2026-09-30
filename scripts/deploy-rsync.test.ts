@@ -89,6 +89,8 @@ describe('deploy rsync payload', () => {
         ...process.env,
         PATH: `${fakeBin}:${process.env.PATH ?? ''}`,
         WBB_TEST_DESTINATION: destination,
+        // deploy.sh takes the merge-deploy lock (R4); never the real one.
+        XDG_STATE_HOME: temporaryDirectory('wbb-deploy-state-'),
       },
     });
 

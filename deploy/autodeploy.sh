@@ -28,7 +28,12 @@ LOCK="$STATE_DIR/lock"
 NOTIFY_LIMIT=3500
 QUIET_S=600
 CI_STUCK_S=3600
-STARTUP_S=60
+# R6: the API listens only after a Telegram call (registerCommandMenu), so a
+# slow Telegram must not fail the startup check.
+STARTUP_S=120
+# R6: one failed probe (3 s timeout) is a stall, not a failed deploy; a
+# rollback rewinds the database, so it needs a run of failures.
+HEALTH_FAILS_MAX=3
 WINDOW_S=600
 POLL_S=10
 KEEP_SNAPSHOTS=3
@@ -99,14 +104,15 @@ _notify_default() {
     echo "WARNING: notifier has no token or chat id; cannot report: $1" >&2
     return 1
   fi
-  curl -fsS -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
+  curl -fsS --max-time 10 -X POST "https://api.telegram.org/bot${tok}/sendMessage" \
     --data-urlencode "chat_id=${chat}" \
     --data-urlencode "text=$1" >/dev/null
 }
 NOTIFY_CMD="${WBB_NOTIFY_CMD:-_notify_default}"
 _api_port_default() {
   local p
-  p=$("$READ_ENV_CMD" API_PORT)
+  # R7: a failed READ refuses the deploy; an empty VALUE is the app default.
+  p=$("$READ_ENV_CMD" API_PORT) || return 1
   echo "${p:-3000}"
 }
 API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
@@ -128,6 +134,10 @@ _post_default() { _as_bot "$SNAPSHOT_BIN" post "$DB_PATH" "$1"; }
 POST_CMD="${WBB_POST_CMD:-_post_default}"
 _restore_default() { _as_bot "$SNAPSHOT_BIN" restore "$1" "$DB_PATH"; }
 RESTORE_CMD="${WBB_RESTORE_CMD:-_restore_default}"
+_mark_unverified_default() { _as_bot "$SNAPSHOT_BIN" mark-unverified "$1"; }
+MARK_UNVERIFIED_CMD="${WBB_MARK_UNVERIFIED_CMD:-_mark_unverified_default}"
+_discard_default() { _as_bot "$SNAPSHOT_BIN" discard "$1"; }
+DISCARD_CMD="${WBB_DISCARD_CMD:-_discard_default}"
 
 now() { "$CLOCK_CMD"; }
 
@@ -156,6 +166,14 @@ LAST_CI_NOTICE_SHA=""
 LAST_HOLD_NOTICE=""
 LAST_STALE_NOTICE=""
 LAST_ASSESS_NOTICE=""
+# R2: a deploy whose window is being watched. Written before deploy.sh runs
+# (WINDOW_START once it has returned) and cleared when the window ends in any
+# way, so a tick that finds it knows its predecessor died mid-window.
+WINDOW_SHA=""
+WINDOW_OLD=""
+WINDOW_PRE=""
+WINDOW_PRE_T=""
+WINDOW_START=""
 # shellcheck disable=SC1090
 if [ -f "$STATE" ]; then . "$STATE"; fi
 
@@ -172,7 +190,8 @@ notify() {
 # #497, kept: every key is carried from a shell variable, so a caller changes
 # one by ASSIGNING it, never by passing it. Keys not listed here — the old
 # DRIFT_SINCE / LAST_DRIFT_NOTICE — are dropped by the first write.
-STATE_KEYS=(LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE)
+STATE_KEYS=(LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE
+  WINDOW_SHA WINDOW_OLD WINDOW_PRE WINDOW_PRE_T WINDOW_START)
 write_state() {
   local k
   if ! {
@@ -231,9 +250,9 @@ Run: sudo bash deploy/install-autodeploy.sh"
 # one per line on stdout.
 #
 # Non-zero exit means WE COULD NOT TELL. That is not the same statement as
-# "nothing ships", and the caller must not collapse them: the quiet branch in
-# report_drift_once is quieter than #499's reassuring message, so a failure
-# folded into it would be an outage nobody hears about.
+# "nothing ships", and the caller must not collapse them: the tick's quiet
+# "nothing ships" branch is quieter than #499's reassuring message, so a
+# failure folded into it would be an outage nobody hears about.
 #
 # The filter is read from BOTH sides — DEPLOYED_SHA and $1 — and the SHIP set
 # is their UNION, for the reason spelled out in autodeploy-guard.sh: deploy.sh
@@ -328,6 +347,9 @@ path_is_held() {
   case "$1" in
     deploy/warsaw-beer-bot.service) return 1 ;;
     deploy/sudoers.d/*|deploy/*.service|deploy/*.timer|deploy/litestream.*|deploy/install-*.sh) return 0 ;;
+    # R5: the operand of the root rsync pinned in sudoers. A narrowing empties
+    # /opt (--delete-excluded) or silently drops scripts/.
+    deploy/rsync-filter) return 0 ;;
     deploy/autodeploy.sh|deploy/autodeploy-guard.sh|deploy/ships.sh|deploy/read-env.sh) return 0 ;;
     deploy/installed-current.sh|deploy/db-snapshot.sh|deploy/trial-migrate.cjs) return 0 ;;
     *) return 1 ;;
@@ -415,33 +437,74 @@ wait_healthy() {
 
 # D5/D6: ten minutes after the deploy, anything that goes wrong is the
 # deploy's fault and is rolled back; after that, it is an ordinary incident.
-# Polls /health and NRestarts (a crash loop can look healthy between polls).
+# $2 is the window's start, so a resumed window (R2) watches only what is left.
+# Returns 0 clean, 1 failed (WATCH_REASON), 2 unverifiable (WATCH_REASON).
 watch_window() {
-  local port="$1" start r0 r t
-  start=$(now)
-  r0=$("$RESTARTS_CMD" 2>/dev/null) || r0=""
+  local port="$1" start="$2" r0="" r t fails=0
   while :; do
     t=$(( $(now) - start ))
-    if [ "$t" -ge "$WINDOW_S" ]; then return 0; fi
-    if ! "$HEALTH_CMD" "$port"; then
-      WATCH_REASON="health check failed at +${t}s"
-      return 1
+    if [ "$t" -ge "$WINDOW_S" ]; then
+      # R3: "NRestarts unchanged" needs at least one reading to mean anything.
+      if [ -z "$r0" ]; then
+        WATCH_REASON="NRestarts could not be read once during the window"
+        return 2
+      fi
+      return 0
     fi
-    r=$("$RESTARTS_CMD" 2>/dev/null) || r=""
-    if [ -n "$r0" ] && [ "$r" != "$r0" ]; then
-      WATCH_REASON="service restarted (NRestarts ${r0} -> ${r}) at +${t}s"
-      return 1
+    # R6: a run of failures, not one slow probe.
+    if "$HEALTH_CMD" "$port"; then
+      fails=0
+    else
+      fails=$((fails + 1))
+      if [ "$fails" -ge "$HEALTH_FAILS_MAX" ]; then
+        WATCH_REASON="health check failed ${fails} times in a row (last at +${t}s)"
+        return 1
+      fi
+    fi
+    # R3: an unreadable poll is neither a change nor a pass. The baseline is
+    # the first successful read.
+    if r=$("$RESTARTS_CMD" 2>/dev/null) && [ -n "$r" ]; then
+      if [ -z "$r0" ]; then
+        r0="$r"
+      elif [ "$r" != "$r0" ]; then
+        WATCH_REASON="service restarted (NRestarts ${r0} -> ${r}) at +${t}s"
+        return 1
+      fi
     fi
     "$SLEEP_CMD" "$POLL_S"
   done
 }
 
+clear_window() {
+  WINDOW_SHA=""
+  WINDOW_OLD=""
+  WINDOW_PRE=""
+  WINDOW_PRE_T=""
+  WINDOW_START=""
+}
+
 settle() {
   local prs="${RANGE_PRS[*]}"
+  "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
   PREVIOUS_SHA="$2"
   DEPLOYED_SHA="$1"
+  clear_window
   write_state
   notify "✅ merge-deploy ${1:0:7} is live and settled${prs:+ — $prs}."
+  exit 0
+}
+
+# R2/R3: the deploy is live and nothing proved it bad, but nothing proved it
+# good either. Nothing is rolled back; pre is kept (prune skips it).
+unverified() {
+  local x="$1" pre="$2" reason="$3" old="$4" marked
+  marked=$("$MARK_UNVERIFIED_CMD" "$pre" 2>&1) || marked="NOT marked (${marked}) — prune may delete ${pre}"
+  PREVIOUS_SHA="$old"
+  DEPLOYED_SHA="$x"
+  clear_window
+  write_state
+  notify "⚠️ merge-deploy ${x:0:7} is live but UNVERIFIED: ${reason}. Nothing was rolled back.
+Pre-deploy snapshot kept: ${marked}"
   exit 0
 }
 
@@ -453,10 +516,13 @@ rollback_failed() {
 # D5 — inside the window, code AND database go back to pre. Nothing is lost:
 # post keeps what the new code wrote (and R2 history keeps it a third time,
 # P2), and a human reconciles. One attempt, then a human (#435 §7).
+# $5 is the commit to go back to. It is a parameter, not DEPLOYED_SHA:
+# deploy.sh re-records DEPLOYED_SHA itself, so by now it may already say X.
 roll_back() {
-  local x="$1" reason="$2" pre="$3" pre_t="$4" old="$DEPLOYED_SHA" marked post stop_t
+  local x="$1" reason="$2" pre="$3" pre_t="$4" old="$5" marked post stop_t
   # C3, kept: recorded FIRST, so whatever happens below, this head is not retried.
   LAST_FAILED_SHA="$x"
+  clear_window
   write_state
   notify "⚠️ merge-deploy ${x:0:7} failed inside the rollback window: ${reason} — restoring code and database to ${old:0:7}."
   "$SERVICE_CMD" stop warsaw-beer-bot || rollback_failed "stop warsaw-beer-bot" "$pre" ""
@@ -471,8 +537,10 @@ roll_back() {
   "$SERVICE_CMD" start litestream || rollback_failed "start litestream" "$marked" "$post"
   checkout_clean "$old" || rollback_failed "check out ${old:0:7}" "$marked" "$post"
   # deploy.sh restarts the bot itself (and re-records DEPLOYED_SHA=old).
-  ( cd "$REPO" && "$DEPLOY_CMD" ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
+  ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
   wait_healthy "$PORT" "$STARTUP_S" || rollback_failed "health after the rollback" "$marked" "$post"
+  DEPLOYED_SHA="$old"
+  write_state
   notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${old:0:7}, code AND database.
 Writes between ${pre_t} and ${stop_t} UTC exist only in: ${post}
 Pre-deploy snapshot now live: ${marked}
@@ -521,26 +589,73 @@ $out"
   out=$("$TRIAL_CMD" "$trial" 2>&1) && status=0 || status=$?
   rm -f "$trial" "$trial-wal" "$trial-shm"
   if [ "$status" -ne 0 ]; then
+    # R9: no deploy happened, so this snapshot must not count as a settled one.
+    "$DISCARD_CMD" "$pre" || echo "WARNING: could not discard $pre"
     refuse "$x" "the trial migration on a copy of production failed.
 $out"
   fi
   echo "$out"
 
+  # R2: the window is state BEFORE anything changes production.
+  WINDOW_SHA="$x"
+  WINDOW_OLD="$old"
+  WINDOW_PRE="$pre"
+  WINDOW_PRE_T="$pre_t"
+  WINDOW_START=""
+  write_state
   echo "deploying $x"
-  if ! ( cd "$REPO" && "$DEPLOY_CMD" ); then
-    roll_back "$x" "deploy.sh failed" "$pre" "$pre_t"
+  # R4: deploy.sh takes the tick's lock unless told the caller holds it.
+  if ! ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" ); then
+    roll_back "$x" "deploy.sh failed" "$pre" "$pre_t" "$old"
   fi
+  # deploy.sh recorded X; say so here too, or the next write would undo it.
+  DEPLOYED_SHA="$x"
+  WINDOW_START=$(now)
+  write_state
   if ! wait_healthy "$PORT" "$STARTUP_S"; then
-    roll_back "$x" "not healthy within ${STARTUP_S}s" "$pre" "$pre_t"
+    roll_back "$x" "not healthy within ${STARTUP_S}s" "$pre" "$pre_t" "$old"
   fi
-  if ! watch_window "$PORT"; then
-    roll_back "$x" "$WATCH_REASON" "$pre" "$pre_t"
+  finish_window "$x" "$old" "$pre" "$pre_t" "$WINDOW_START"
+}
+
+# The end of every watched window, first or resumed. Never returns.
+finish_window() {
+  local x="$1" old="$2" pre="$3" pre_t="$4" start="$5" rc=0
+  watch_window "$PORT" "$start" || rc=$?
+  case "$rc" in
+    0) settle "$x" "$old" ;;
+    2) unverified "$x" "$pre" "$WATCH_REASON" "$old" ;;
+    *) roll_back "$x" "$WATCH_REASON" "$pre" "$pre_t" "$old" ;;
+  esac
+}
+
+# R2: a previous tick died inside a window (reboot, OOM, TimeoutStartSec,
+# systemctl stop). Finish what it started before doing anything else.
+resume_window() {
+  [ -n "$WINDOW_SHA" ] || return 0
+  local x="$WINDOW_SHA" old="$WINDOW_OLD" pre="$WINDOW_PRE" pre_t="$WINDOW_PRE_T" start="$WINDOW_START"
+  if [ "$DEPLOYED_SHA" != "$x" ]; then
+    clear_window
+    write_state
+    notify "⚠️ merge-deploy: the deploy of ${x:0:7} was interrupted before deploy.sh completed. Production is recorded at ${DEPLOYED_SHA:0:7}, and /opt may be half-written. The tick continues and will deploy main afresh."
+    return 0
   fi
-  "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
-  settle "$x" "$old"
+  RANGE_PRS=()
+  if [ -z "$start" ]; then
+    unverified "$x" "$pre" "the tick that deployed it died before its window began" "$old"
+  fi
+  if [ $(( $(now) - start )) -ge "$WINDOW_S" ]; then
+    unverified "$x" "$pre" "the tick that deployed it died inside its window" "$old"
+  fi
+  if ! PORT=$("$API_PORT_CMD"); then
+    unverified "$x" "$pre" "the tick that deployed it died inside its window, and API_PORT cannot be read to watch the rest" "$old"
+  fi
+  echo "resuming the window of $x at +$(( $(now) - start ))s"
+  finish_window "$x" "$old" "$pre" "$pre_t" "$start"
 }
 
 # --- the tick ---------------------------------------------------------------------
+resume_window
 if [ ! -d "$REPO/.git" ]; then
   git clone -q "$REPO_URL" "$REPO" || {
     once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: git clone of $REPO_URL failed."
