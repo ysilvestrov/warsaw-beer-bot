@@ -278,7 +278,8 @@ Run: sudo bash deploy/install-autodeploy.sh"
 # failure folded into it would be an outage nobody hears about.
 #
 # The filter is read from BOTH sides — DEPLOYED_SHA and $1 — and the SHIP set
-# is their UNION, for the reason spelled out in autodeploy-guard.sh: deploy.sh
+# is their UNION, for the reason spelled out in #527's spec
+# (docs/superpowers/specs/2026-08/2026-08-28-527-guard-ships-predicate-design.md): deploy.sh
 # rsyncs with `--delete --delete-excluded`, so a path that stops shipping is
 # DELETED from /opt. Reading only the target's filter lets a narrowing commit
 # cloak itself and everything it drops. Here the consequence is silence rather

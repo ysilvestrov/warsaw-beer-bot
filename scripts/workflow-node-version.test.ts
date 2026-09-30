@@ -200,7 +200,7 @@ test('every workflow pins the Node major that package.json declares', () => {
 
   const nodeWorkflows = files.filter((f) => setupNodeSteps(fileLines(f)).length > 0);
   // Anti-vacuity: a workflow with no `actions/setup-node` step legitimately pins no
-  // Node (e.g. autodeploy-tag.yml) and is skipped — but that exemption is derived
+  // Node (e.g. claude.yml) and is skipped — but that exemption is derived
   // from the file's own content, not a hand-maintained list that would rot.
   expect(nodeWorkflows.length).toBeGreaterThanOrEqual(5);
 

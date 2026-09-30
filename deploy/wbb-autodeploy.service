@@ -11,8 +11,9 @@ ExecStart=/usr/local/bin/wbb-autodeploy
 # Merge-deploy: a deploying tick lasts the 10-min rollback window plus the
 # build; a oneshot's start timeout must not cut the window short.
 TimeoutStartSec=30min
-# 1 = guard refused, 2 = rolled back — both are reported to Telegram by the
-# script itself and are not systemd failures worth restarting.
+# 1 = refused, 2 = rolled back — both are reported to Telegram by the script
+# itself and are not systemd failures worth restarting. 3 = rollback failed
+# and 4 = state write failed ARE failures.
 SuccessExitStatus=0 1 2
 StandardOutput=journal
 StandardError=journal
