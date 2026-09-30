@@ -29,6 +29,11 @@ NOTIFY_LIMIT=3500
 QUIET_S=600
 CI_STUCK_S=3600
 STARTUP_S=60
+WINDOW_S=600
+POLL_S=10
+KEEP_SNAPSHOTS=3
+SNAPSHOT_DIR="${WBB_SNAPSHOT_DIR:-/var/lib/warsaw-beer-bot/deploy-snapshots}"
+DB_PATH="${WBB_DB_PATH:-/var/lib/warsaw-beer-bot/bot.db}"
 
 SHIPS_BIN="${WBB_SHIPS:-/usr/local/bin/wbb-ships}"
 READ_ENV_BIN="${WBB_READ_ENV:-/usr/local/bin/wbb-read-env}"
@@ -105,6 +110,16 @@ _api_port_default() {
   echo "${p:-3000}"
 }
 API_PORT_CMD="${WBB_API_PORT_CMD:-_api_port_default}"
+
+# DB helpers run as the bot user through the existing `bash -lc` rule (P3), so
+# snapshots are owned by warsaw-beer-bot and live next to bot.db.
+_as_bot() { sudo -u warsaw-beer-bot bash -lc '"$0" "$@"' "$@"; }
+_snapshot_default() { _as_bot "$SNAPSHOT_BIN" snapshot "$DB_PATH" "$1"; }
+SNAPSHOT_CMD="${WBB_SNAPSHOT_CMD:-_snapshot_default}"
+_prune_default() { _as_bot "$SNAPSHOT_BIN" prune "$SNAPSHOT_DIR" "$KEEP_SNAPSHOTS"; }
+PRUNE_CMD="${WBB_PRUNE_CMD:-_prune_default}"
+_trial_default() { node "$TRIAL_BIN" "$REPO" "$1"; }
+TRIAL_CMD="${WBB_TRIAL_CMD:-_trial_default}"
 
 now() { "$CLOCK_CMD"; }
 
@@ -390,6 +405,29 @@ wait_healthy() {
   done
 }
 
+# D5/D6: ten minutes after the deploy, anything that goes wrong is the
+# deploy's fault and is rolled back; after that, it is an ordinary incident.
+# Polls /health and NRestarts (a crash loop can look healthy between polls).
+watch_window() {
+  local port="$1" start r0 r t
+  start=$(now)
+  r0=$("$RESTARTS_CMD" 2>/dev/null) || r0=""
+  while :; do
+    t=$(( $(now) - start ))
+    if [ "$t" -ge "$WINDOW_S" ]; then return 0; fi
+    if ! "$HEALTH_CMD" "$port"; then
+      WATCH_REASON="health check failed at +${t}s"
+      return 1
+    fi
+    r=$("$RESTARTS_CMD" 2>/dev/null) || r=""
+    if [ -n "$r0" ] && [ "$r" != "$r0" ]; then
+      WATCH_REASON="service restarted (NRestarts ${r0} -> ${r}) at +${t}s"
+      return 1
+    fi
+    "$SLEEP_CMD" "$POLL_S"
+  done
+}
+
 settle() {
   local prs="${RANGE_PRS[*]}"
   PREVIOUS_SHA="$2"
@@ -413,7 +451,7 @@ roll_back() {
 }
 
 deploy_pipeline() {
-  local x="$1" old="$DEPLOYED_SHA" out status
+  local x="$1" old="$DEPLOYED_SHA" out status pre pre_t trial
   if ! checkout_clean "$x"; then
     once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not check out ${x:0:7}."
     exit 1
@@ -431,11 +469,44 @@ $out"
 $out"
     exit 1
   fi
-  echo "deploying $x"
-  if ( cd "$REPO" && "$DEPLOY_CMD" ) && wait_healthy "$PORT" "$STARTUP_S"; then
-    settle "$x" "$old"
+
+  # D4 + P1: VACUUM INTO, one point in time. A failed snapshot is the host's
+  # problem, not the commit's: no LAST_FAILED_SHA, retried next tick.
+  pre="${SNAPSHOT_DIR}/$(date -u +%Y%m%dT%H%M%SZ)-${x:0:7}-pre.db"
+  pre_t=$(date -u +%H:%M:%S)
+  if ! out=$("$SNAPSHOT_CMD" "$pre" 2>&1); then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: the pre-deploy DB snapshot failed — not deploying ${x:0:7}.
+$out"
+    exit 1
   fi
-  roll_back "$x" "not healthy within ${STARTUP_S}s"
+
+  # The trial runs on a COPY of pre, in the operator's own data dir.
+  trial="$DATA_DIR/trial.db"
+  rm -f "$trial" "$trial-wal" "$trial-shm"
+  if ! cp "$pre" "$trial"; then
+    once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: could not copy the snapshot for the trial migration — not deploying ${x:0:7}."
+    exit 1
+  fi
+  out=$("$TRIAL_CMD" "$trial" 2>&1) && status=0 || status=$?
+  rm -f "$trial" "$trial-wal" "$trial-shm"
+  if [ "$status" -ne 0 ]; then
+    refuse "$x" "the trial migration on a copy of production failed.
+$out"
+  fi
+  echo "$out"
+
+  echo "deploying $x"
+  if ! ( cd "$REPO" && "$DEPLOY_CMD" ); then
+    roll_back "$x" "deploy.sh failed" "$pre" "$pre_t"
+  fi
+  if ! wait_healthy "$PORT" "$STARTUP_S"; then
+    roll_back "$x" "not healthy within ${STARTUP_S}s" "$pre" "$pre_t"
+  fi
+  if ! watch_window "$PORT"; then
+    roll_back "$x" "$WATCH_REASON" "$pre" "$pre_t"
+  fi
+  "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
+  settle "$x" "$old"
 }
 
 # --- the tick ---------------------------------------------------------------------
