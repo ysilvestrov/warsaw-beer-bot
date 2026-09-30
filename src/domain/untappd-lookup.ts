@@ -717,17 +717,22 @@ export async function lookupBeer(
     const splitName = normalizeName(name);
     const splitBrewery = normalizeBrewery(brewery);
     const splitIdentityHits = results.filter((result) => {
+      const aliases = result.alias_alt ?? [];
+      const fragmentCount = result.beer_name.split(',').length;
       if (
         !splitBrewery || splitName.split(' ').length < 2 ||
-        !result.beer_name.includes(',') ||
-        result.alias_alt == null || result.alias_alt.length < 2 ||
+        fragmentCount < 2 || aliases.length < fragmentCount ||
         normalizeName(result.beer_name) !== splitName
       ) return false;
-      const fullAlias = baseNormalize(result.alias_alt.join(','));
       const titleSuffix = ` ${baseNormalize(result.beer_name)}`;
-      if (!fullAlias.endsWith(titleSuffix)) return false;
-      const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
-      return normalizeBrewery(creditedBrewery) === splitBrewery;
+      return aliases.some((_, start) => {
+        const fragments = aliases.slice(start, start + fragmentCount);
+        if (fragments.length !== fragmentCount) return false;
+        const fullAlias = baseNormalize(fragments.join(','));
+        if (!fullAlias.endsWith(titleSuffix)) return false;
+        const creditedBrewery = fullAlias.slice(0, -titleSuffix.length);
+        return normalizeBrewery(creditedBrewery) === splitBrewery;
+      });
     });
 
     // Stage 1: brewery-match strength. Each result is `strict` (leading-prefix
@@ -921,7 +926,12 @@ export async function lookupBeer(
       return identityHit ? { kind: 'matched', result: identityHit } : typoRescue();
     }
 
-    if (new Set(splitIdentityHits.map((result) => result.bid)).size === 1) {
+    if (
+      new Set(splitIdentityHits.map((result) => result.bid)).size === 1 &&
+      splitIdentityHits.every((result) =>
+        !isDescriptorAbvMismatch(abv, result.abv) &&
+        !isAlcoholClassMismatch(abv, identityName, result))
+    ) {
       const splitHit = pickUniqueByAbv(splitIdentityHits, abv, true);
       if (splitHit) return { kind: 'matched', result: splitHit };
     }

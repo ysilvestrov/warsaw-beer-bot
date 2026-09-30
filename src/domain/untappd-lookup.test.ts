@@ -2353,6 +2353,18 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.result.bid).toBe(6690910);
     });
 
+    test('finds a split identity after an unrelated alternative alias', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: 6.0, global_rating: 3.75,
+        alias_alt: ['English title', 'Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6690910);
+    });
+
     test('does not equate Kojetin with an unrelated SomPivo beer of the same name and ABV', async () => {
       const search = fakeSearch(() => [{
         bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
@@ -2378,6 +2390,26 @@ describe('#665 Czech grade lookup context', () => {
         style: 'IPA - Other', abv: 8.0, global_rating: 3.75,
         alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
       }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects a split identity whose style contradicts the alcoholic input', async () => {
+      const search = fakeSearch(() => [{
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'Non-Alcoholic Beer', abv: null, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      }]);
+      const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('rejects conflicting ABV rows for the same split-identity bid', async () => {
+      const search = fakeSearch(() => [8.0, 6.0].map((candidateAbv) => ({
+        bid: 6690910, beer_name: 'Som Pohár, Čau', brewery_name: 'SomPivo',
+        style: 'IPA - Other', abv: candidateAbv, global_rating: 3.75,
+        alias_alt: ['Měšťanský pivovar Kojetín Som Pohár', 'Čau'],
+      })));
       const out = await lookupBeer({ brewery: 'Kojetin Brewery', name: 'Som pohár čau 14°', abv: 6.0, search });
       expect(out.kind).toBe('not_found');
     });
