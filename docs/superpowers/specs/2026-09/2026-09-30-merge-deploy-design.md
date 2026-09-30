@@ -233,9 +233,21 @@ changed the design above as follows. The original wording is replaced inline; th
   read now refuses the deploy; an empty value is still the application default 3000.
 - **R9 — a trial refusal left an unmarked `pre`** that prune counted as a settled deploy. It is now
   discarded.
-- **Not changed (R8):** after a failed rollback, state says `DEPLOYED_SHA=<old>` while `/opt` may
-  hold X. The 🔥 message goes to a human in either case, and any "more correct" value would be a
+- **R2, second review round — a tick that died DURING the rollback was silent.** The rollback cleared
+  the window first, so the next tick read "up to date" with the bot possibly stopped. The window keys
+  now stay, with `ROLLBACK_STARTED=1`, until the rollback ends (🔥 ROLLED BACK or 🔥 ROLLBACK FAILED);
+  a tick that finds the marker sends 🔥 ROLLBACK INTERRUPTED once. In the "deploy.sh never finished"
+  branch, `pre` is marked unverified instead of being left for prune: `deploy.sh` may have been
+  killed after restarting X and before recording it, and then that `pre` is the only true "before".
+- **R8, corrected:** after a failed rollback, state says `DEPLOYED_SHA=X` if the failure came after
+  `deploy.sh` finished (the tick records X there), and `<old>` if it came earlier. Neither is
+  verified; the 🔥 message goes to a human in either case, and later ticks stay quiet because
+  `LAST_FAILED_SHA=X` or `DEPLOYED_SHA=X`. Not changed further: any "more correct" value would be a
   guess.
+- **Deferred to the periphery:** a stalled manual `deploy.sh` holds the tick's lock and blocks
+  merge-deploy silently (a notice when the lock has been busy for ~20 min); `sudo bash deploy.sh`
+  resolves a different lock path (`HOME=/root`); `read-env.sh` exits 0 when `.env` is unreadable, so
+  R7 only covers a failed sudo/read, not an unreadable file.
 
 ## Probes (run 2026-09-30, before the plan)
 

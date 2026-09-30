@@ -879,6 +879,8 @@ describe('merge-deploy: review fixes R2–R9', () => {
     const r = tick(w);
     expect(r.code).toBe(0);
     expect(notes(w)[0]).toMatch(/^⚠️ merge-deploy: the deploy of [0-9a-f]{7} was interrupted before deploy\.sh completed\./);
+    expect(notes(w)[0]).toContain('/s/20260930T120000Z-abcdef0-unverified-pre.db');
+    expect(events(w)[0]).toBe('mark-unverified 20260930T120000Z-abcdef0-pre.db');
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
     expect(readState(w).WINDOW_SHA).toBe(undefined);
   });
@@ -924,5 +926,42 @@ describe('merge-deploy: review fixes R2–R9', () => {
     expect(readState(w)).toEqual({
       DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', LAST_FAILED_SHA: x, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000',
     });
+  });
+
+  it('R6: failures that are not consecutive never roll back', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    // Every other poll fails: 0 ok, 10 fail, 20 ok, 30 fail, ...
+    const flaky = stub(w.bin, 'health-flaky',
+      `now=$(cat "${w.clock}"); d=$(cat "${w.bin}/deployed_at"); [ $(( (now - d) / 10 % 2 )) -eq 0 ]`);
+    ready(w, { WBB_HEALTH_CMD: flaky });
+    const r = tick(w, { WBB_HEALTH_CMD: flaky });
+    expect(r.code).toBe(0);
+    expect(readState(w).DEPLOYED_SHA).toBe(x);
+  });
+
+  it('a tick that dies in the middle of a rollback is reported by the next one, once', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = healthFailingFrom(w, 300);
+    // Dies (kills the tick) when asked to stop litestream — mid-rollback.
+    const service = stub(w.bin, 'service-dies', [
+      `echo "service $1 $2" >> "${w.eventsLog}"`,
+      `if [ "$1 $2" = "stop litestream" ]; then kill -9 $PPID; fi`,
+    ].join('\n'));
+    ready(w, { WBB_HEALTH_CMD: health, WBB_SERVICE_CMD: service });
+    const dead = tick(w, { WBB_HEALTH_CMD: health, WBB_SERVICE_CMD: service });
+    expect(dead.code).toBe(null);
+    expect(readState(w).ROLLBACK_STARTED).toBe('1');
+
+    const r = tick(w);
+    tick(w);
+    expect(r.code).toBe(3);
+    const fire = notes(w).filter((n) => n.startsWith('🔥'));
+    expect(fire.length).toBe(1);
+    expect(fire[0]).toMatch(new RegExp(`^🔥 ROLLBACK INTERRUPTED: the tick died while rolling ${short(x)} back to ${short(w.base)}\\.`));
+    expect(readState(w).ROLLBACK_STARTED).toBe(undefined);
+    expect(readState(w).WINDOW_SHA).toBe(undefined);
+    expect(readState(w).LAST_FAILED_SHA).toBe(x);
   });
 });
