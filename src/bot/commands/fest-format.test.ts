@@ -1,7 +1,7 @@
 import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
-import { fitMessage, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
+import { fitMessage, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
 import { initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
@@ -199,5 +199,41 @@ describe('pickCallback', () => {
       long.startsWith('fest:t:123:add:Łańcut'),
       long.includes('\uFFFD'),
     ]).toEqual(['fest:t:7::', 'fest:t:7:targets:', 'fest:t:7:add:motueka', true, true, false]);
+  });
+});
+
+describe('formatQueue', () => {
+  const item = (glassNo: number, marks: (string | null)[], bid: number | null = 6000000 + glassNo, section: string | null = 'PINTA') => ({
+    id: glassNo, glassNo, beerId: glassNo, name: `Beer <${glassNo}>`, brewery: 'Brew', bid, section, takenBy: 'OB',
+    addedAt: '2026-10-15T18:00:00.000Z',
+    closedBy: marks.map((checkinId, i) => ({ initials: ['YS', 'OB'][i], checkinId })),
+  });
+
+  it('lists glasses still open for someone first, with a ✅ or ⏳ per member', () => {
+    const view = { items: [item(1, ['a', 'b']), item(2, ['c', null], 6000002, null)] };
+    expect(formatQueue(t, view)).toBe([
+      '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+      '',
+      '№2 <b>Beer &lt;2&gt;</b> · взяв OB',
+      '   ✅ YS ⏳ OB',
+      '№1 <b>Beer &lt;1&gt;</b> (PINTA) · взяв OB',
+      '   ✅ YS ✅ OB',
+    ].join('\n'));
+  });
+
+  it('an empty queue says how to add a glass', () => {
+    expect(formatQueue(t, { items: [] })).toBe('Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take <назва>.');
+  });
+
+  it('links only open glasses that have an Untappd bid', () => {
+    const view = { items: [item(1, ['a', 'b']), item(2, [null, null]), item(3, [null, 'x'], null)] };
+    expect(queueLinks(view)).toEqual([{ glassNo: 2, name: 'Beer <2>', bid: 6000002 }]);
+  });
+});
+
+describe('pickCallback for take', () => {
+  it('keeps the take subcommand and cuts a long query to whole letters within 64 bytes', () => {
+    // 'fest:t:123456:take:' is 19 bytes; 22 two-byte letters make 63, a 23rd would make 65.
+    expect(pickCallback(123456, 'take', 'ж'.repeat(60))).toBe(`fest:t:123456:take:${'ж'.repeat(22)}`);
   });
 });

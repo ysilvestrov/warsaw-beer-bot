@@ -8,9 +8,12 @@ import { ensureProfile, getProfile } from '../../storage/user_profiles';
 import { upsertStand } from '../../storage/fest_stands';
 import { menuFor } from '../../storage/fest_menu';
 import { buildFestView } from '../../jobs/fest-view';
+import { buildQueueView } from '../../jobs/fest-queue-view';
+import { takeBeer } from '../../storage/fest_queue';
+import { buildBeerPageUrl } from '../../sources/untappd/beer-page';
 import type { MenuPageResult } from '../../jobs/fest-ingest';
 import { parseStandsCsv } from '../../domain/fest/stands-csv';
-import { formatRanking, formatSection, formatTargets, searchMenu, sectionKey, TARGETS_SHOWN } from './fest-format';
+import { formatQueue, formatRanking, formatSection, formatTargets, queueLinks, searchMenu, sectionKey, TARGETS_SHOWN } from './fest-format';
 
 // Festival mode in the bot (spec §7). The handlers only glue: the view is built by buildFestView
 // and rendered by fest-format.ts.
@@ -44,7 +47,9 @@ async function showRanking(ctx: BotContext, team: FestTeam): Promise<void> {
   await ctx.replyWithHTML(formatRanking(ctx.t, view), Markup.inlineKeyboard(buttons));
 }
 
-const SUBS = ['targets', 'add', 'stands', 'menu'] as const;
+const SUBS = ['targets', 'add', 'take', 'queue', 'stands', 'menu'] as const;
+/** «Взяв» buttons under a section's details. */
+export const TAKE_BUTTONS = 20;
 type Sub = typeof SUBS[number] | '';
 
 /**
@@ -99,19 +104,29 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
       return;
     }
 
-    if (sub === 'add') {
+    if (sub === 'add' || sub === 'take') {
+      const take = sub === 'take';
       if (query.trim() === '') {
-        await ctx.reply(ctx.t('fest.add_usage'));
+        await ctx.reply(ctx.t(take ? 'fest.take_usage' : 'fest.add_usage'));
         return;
       }
       const found = searchMenu(buildFestView(db, { festId: fest.id, teamId: team.id, now }), query);
       if (found.length === 0) {
-        await ctx.reply(ctx.t('fest.add_none', { query }));
+        await ctx.reply(ctx.t(take ? 'fest.take_none' : 'fest.add_none', { query }));
         return;
       }
-      await ctx.reply(ctx.t('fest.add_pick'), Markup.inlineKeyboard(
-        found.map((f) => [Markup.button.callback(`➕ ${f.label.slice(0, 55)}`, `fest:a:${team.id}:${f.beerId}`)]),
+      await ctx.reply(ctx.t(take ? 'fest.take_pick' : 'fest.add_pick'), Markup.inlineKeyboard(
+        found.map((f) => [Markup.button.callback(`${take ? '🍺' : '➕'} ${f.label.slice(0, 55)}`, `fest:${take ? 'q' : 'a'}:${team.id}:${f.beerId}`)]),
       ));
+      return;
+    }
+
+    if (sub === 'queue') {
+      const view = buildQueueView(db, { festId: fest.id, teamId: team.id });
+      const links = queueLinks(view).map((l) => [Markup.button.url(
+        ctx.t('fest.queue_link', { glass: l.glassNo, name: l.name.slice(0, 50) }), buildBeerPageUrl(l.bid),
+      )]);
+      await ctx.replyWithHTML(formatQueue(ctx.t, view), Markup.inlineKeyboard(links));
       return;
     }
 
@@ -237,9 +252,32 @@ export function createFestCommand(deps: FestCommandDeps): Composer<BotContext> {
       return;
     }
     const now = new Date();
-    const text = formatSection(ctx.t, buildFestView(db, { festId: team.fest_id, teamId: team.id, now }), ctx.match[2], now);
+    const view = buildFestView(db, { festId: team.fest_id, teamId: team.id, now });
+    const text = formatSection(ctx.t, view, ctx.match[2], now);
+    const rank = view.ranking.find((r) => sectionKey(r.section) === ctx.match[2]);
+    const take = (rank?.targets ?? []).slice(0, TAKE_BUTTONS).map((target) => [Markup.button.callback(
+      ctx.t('fest.take_button', { name: (view.beerNames.get(target.beerId)?.name ?? `#${target.beerId}`).slice(0, 50) }),
+      `fest:q:${team.id}:${target.beerId}`,
+    )]);
     await ctx.answerCbQuery();
-    await ctx.replyWithHTML(text ?? ctx.t('fest.section_gone'));
+    await ctx.replyWithHTML(text ?? ctx.t('fest.section_gone'), Markup.inlineKeyboard(take));
+  });
+
+  // «Взяв» (spec §7): the next glass number of the team and a queued print job, in one transaction.
+  festCommand.action(/^fest:q:(\d+):(\d+)$/, async (ctx) => {
+    const db = ctx.deps.db;
+    const team = teamById(db, Number(ctx.match[1]));
+    const beerId = Number(ctx.match[2]);
+    if (!team || !isTeamMember(db, team.id, ctx.from.id)) {
+      await ctx.answerCbQuery(ctx.t('fest.not_member'));
+      return;
+    }
+    const beer = menuFor(db, team.fest_id).find((m) => m.beer_id === beerId);
+    if (!beer) return ctx.answerCbQuery();
+    const { glassNo } = takeBeer(db, { teamId: team.id, beerId, addedBy: ctx.from.id, at: new Date().toISOString() });
+    const initials = members(db, team.id).find((m) => m.telegram_id === ctx.from.id)?.initials ?? '?';
+    await ctx.answerCbQuery();
+    await ctx.reply(ctx.t('fest.taken', { glass: glassNo, name: beer.name, initials }));
   });
 
   // ➕ / ➖ a Target by hand (spec §5 overrides). Only a member of that team may change its list.

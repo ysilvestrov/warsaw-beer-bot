@@ -244,4 +244,13 @@ export const uk: Messages = {
   'fest.menu_wrong_page': 'Сторінка не схожа на меню фестивалю — нічого не змінено.',
   'fest.menu_unavailable': 'Серверне читання Untappd вимкнене (немає куки) — меню оновлює лише ноут.',
   'fest.lines_more': '…не вмістилося рядків: {count}',
+  'fest.take_usage': 'Напишіть частину назви пива або броварні: /fest take motueka',
+  'fest.take_none': 'У меню нічого не знайдено за «{query}».',
+  'fest.take_pick': 'Яке пиво взяли?',
+  'fest.take_button': '🍺 Взяв: {name}',
+  'fest.taken': '🍺 Келих №{glass} — {name} · {initials}',
+  'fest.queue_header': '<b>Черга келихів</b> (✅ зачекінив · ⏳ ще ні)',
+  'fest.queue_empty': 'Черга порожня. Натисніть «🍺 Взяв» у деталях секції або /fest take <назва>.',
+  'fest.queue_line': '№{glass} <b>{name}</b>{section} · взяв {taker}\n   {marks}',
+  'fest.queue_link': '№{glass} {name} ↗',
 };
