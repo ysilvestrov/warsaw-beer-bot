@@ -15,6 +15,22 @@ export interface FestAlertDeps {
   log: pino.Logger;
   /** Sends HTML to a team's group chat; rejects when Telegram does not take it. */
   send: (chatId: number, html: string) => Promise<void>;
+  /** Tests shorten it; production uses ALERT_SEND_TIMEOUT_MS. */
+  sendTimeoutMs?: number;
+}
+
+/**
+ * A send that has not settled by then counts as failed and is retried on the next tick. If it
+ * was delivered after all, the group sees the alert twice — rarer and cheaper than a stalled job.
+ */
+export const ALERT_SEND_TIMEOUT_MS = 20 * 1000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 // Group alerts (spec §6.5), one tick per minute. A beer is announced once per team and session;
@@ -26,14 +42,16 @@ export async function runFestAlerts(deps: FestAlertDeps, now: Date): Promise<num
     const venueIds = festVenues(deps.db, fest.id).map((v) => v.venue_id);
     // Check-ins from the polling window count: a stand may pour before the doors open.
     const since = new Date(Date.parse(session.start_at) - POLL_MARGIN_MS).toISOString();
-    // Teams run side by side: one team's failure, or a send that hangs, must not hold up the others.
-    const results = await Promise.allSettled(teamsOfFest(deps.db, fest.id).map((team) =>
-      alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)
-        .catch((e) => {
-          deps.log.error({ err: e, teamId: team.id }, 'fest alert failed for a team');
-          return false;
-        })));
-    sent += results.filter((r) => r.status === 'fulfilled' && r.value).length;
+    // Teams in turn, each send bounded by ALERT_SEND_TIMEOUT_MS: a hung send cannot stall the tick
+    // or the teams after it, and sends never burst past Telegram's rate limit. A failure of one
+    // team is logged and the loop moves on.
+    for (const team of teamsOfFest(deps.db, fest.id)) {
+      try {
+        if (await alertTeam(deps, { festId: fest.id, sessionNo: session.session_no, teamId: team.id, chatId: team.chat_id, venueIds, since }, now)) sent++;
+      } catch (e) {
+        deps.log.error({ err: e, teamId: team.id }, 'fest alert failed for a team');
+      }
+    }
   }
   return sent;
 }
@@ -57,7 +75,7 @@ async function alertTeam(
   const message = formatAlert(t, view, plan);
   if (message === null) return false;
   try {
-    await deps.send(p.chatId, message.html);
+    await withTimeout(deps.send(p.chatId, message.html), deps.sendTimeoutMs ?? ALERT_SEND_TIMEOUT_MS);
   } catch (e) {
     deps.log.warn({ err: e, teamId: p.teamId }, 'fest alert not delivered; retrying next tick');
     return false;

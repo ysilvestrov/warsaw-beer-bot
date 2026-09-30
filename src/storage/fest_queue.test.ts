@@ -67,6 +67,16 @@ describe('takeBeer against a glass dated ahead of the clock', () => {
   });
 });
 
+describe('takeBeer with a time in another zone notation', () => {
+  it('compares instants: a glass 10 s ahead of 20:00+02:00 is not a repeat, and times are stored as ISO Z', () => {
+    const { db, teamA } = setup();
+    takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: '2026-10-15T18:00:10.000Z' });
+    const r = takeBeer(db, { teamId: teamA, beerId: 11, addedBy: 1, at: '2026-10-15T20:00:00+02:00' });
+    expect([r.glassNo, r.repeated, queueFor(db, teamA).map((q) => q.added_at)])
+      .toEqual([2, false, ['2026-10-15T18:00:10.000Z', '2026-10-15T18:00:00.000Z']]);
+  });
+});
+
 describe('memberBeerCheckins', () => {
   const member = [{ telegramId: 1, untappdUsername: 'JohnDoe' }];
 

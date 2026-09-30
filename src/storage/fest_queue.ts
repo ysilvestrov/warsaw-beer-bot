@@ -27,20 +27,22 @@ export const REPEAT_TAP_MS = 30 * 1000;
 // member taking the same beer again within REPEAT_TAP_MS gets that glass back: on a phone in a
 // crowd a double tap is far likelier than two identical glasses half a minute apart.
 export function takeBeer(db: DB, p: { teamId: number; beerId: number; addedBy: number; at: string }): { id: number; glassNo: number; repeated: boolean } {
+  // Stored and compared as canonical ISO 'Z' text, so the window is a comparison of instants.
+  const at = new Date(p.at).toISOString();
   return db.transaction(() => {
-    const since = new Date(Date.parse(p.at) - REPEAT_TAP_MS).toISOString();
+    const since = new Date(Date.parse(at) - REPEAT_TAP_MS).toISOString();
     const recent = db.prepare(
       `SELECT id, glass_no FROM fest_queue
         WHERE team_id = ? AND beer_id = ? AND added_by = ? AND added_at >= ? AND added_at <= ?
         ORDER BY glass_no DESC LIMIT 1`,
-    ).get(p.teamId, p.beerId, p.addedBy, since, p.at) as { id: number; glass_no: number } | undefined;
+    ).get(p.teamId, p.beerId, p.addedBy, since, at) as { id: number; glass_no: number } | undefined;
     if (recent) return { id: recent.id, glassNo: recent.glass_no, repeated: true };
     const { next } = db.prepare('SELECT COALESCE(MAX(glass_no), 0) + 1 AS next FROM fest_queue WHERE team_id = ?')
       .get(p.teamId) as { next: number };
     const id = Number(db.prepare(
       'INSERT INTO fest_queue (team_id, glass_no, beer_id, added_by, added_at) VALUES (?, ?, ?, ?, ?)',
-    ).run(p.teamId, next, p.beerId, p.addedBy, p.at).lastInsertRowid);
-    db.prepare("INSERT INTO fest_print_jobs (queue_id, status, attempts, updated_at) VALUES (?, 'queued', 0, ?)").run(id, p.at);
+    ).run(p.teamId, next, p.beerId, p.addedBy, at).lastInsertRowid);
+    db.prepare("INSERT INTO fest_print_jobs (queue_id, status, attempts, updated_at) VALUES (?, 'queued', 0, ?)").run(id, at);
     return { id, glassNo: next, repeated: false };
   }).immediate();
 }
