@@ -3,7 +3,7 @@ name: Qualify Dependabot PR
 on:
   pull_request:
   schedule:
-    # Re-evaluates open `autodeploy-pending` PRs so a `high` promotes itself
+    # Re-evaluates open `automerge-pending` PRs so a `high` promotes itself
     # when its fixing version ages past the hold. Runs from main with a full
     # token and is unreachable from any pull request.
     - cron: '17 * * * *'
@@ -118,8 +118,11 @@ jobs:
             reason=$(printf '%s\n' "$out" | sed -n 's/^reason=//p')
 
             case "$verdict" in
-              autodeploy) label=autodeploy ;;
-              hold)       label=autodeploy-pending ;;
+              # The verdict keeps its old name inside qualify.ts; its only
+              # effect now is auto-merge, and the merge deploys by the common
+              # merge-deploy path (spec 2026-09-30).
+              autodeploy) label=automerge ;;
+              hold)       label=automerge-pending ;;
               manual)     label=deps-manual ;;
               # An unrecognised verdict is a bug in our own tooling, not a
               # judgement about the PR. Fail closed and say so.
@@ -127,18 +130,17 @@ jobs:
             esac
 
             gh pr edit "$pr" \
-              --remove-label autodeploy \
-              --remove-label autodeploy-pending \
+              --remove-label automerge \
+              --remove-label automerge-pending \
               --remove-label deps-manual >/dev/null 2>&1 || true
             gh pr edit "$pr" --add-label "$label" || return 1
 
             # Auto-merge waits for the required `ci` check; it does not bypass it.
             if [ "$verdict" = "autodeploy" ]; then
               # `|| return 1`: this function runs without `set -e`, so a silent
-              # failure here would leave the PR wearing the `autodeploy` label
-              # with nothing armed — and the tag workflow fires on the LABEL at
-              # merge time, so the mismatch would not surface until someone
-              # wondered why a qualified critical fix never landed.
+              # failure here would leave the PR wearing the `automerge` label
+              # with nothing armed, and the mismatch would not surface until
+              # someone wondered why a qualified critical fix never landed.
               gh pr merge "$pr" --auto --squash || return 1
               echo "  auto-merge armed"
               echo "  auto-merge armed" >> "$GITHUB_STEP_SUMMARY"

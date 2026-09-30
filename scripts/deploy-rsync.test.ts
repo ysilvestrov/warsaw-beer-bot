@@ -98,7 +98,6 @@ describe('deploy rsync payload', () => {
     expect(result.status).toBe(0);
     expect(filesBelow(destination).sort()).toEqual([
       'deploy/README.md',
-      'deploy/autodeploy-guard.sh',
       'deploy/autodeploy.sh',
       'deploy/db-snapshot.sh',
       'deploy/deploy.sh',

@@ -27,19 +27,17 @@ echo
 
 # Copies, not symlinks, deliberately: the running deployer must not change
 # under a `git checkout` in the operator's working tree.
-# M2 (#527): DEPENDENCIES FIRST. wbb-ships is what wbb-autodeploy and
-# wbb-autodeploy-guard now call to decide what reaches production, so it is
-# installed BEFORE them: installing a consumer first leaves a sub-second window
-# in which a timer tick finds a new deployer and an old (or absent) predicate.
-# It fails closed either way — installed-current.sh reports
-# "deploy/ships.sh (not installed)" and the guard REFUSEs — but the window is
-# free to remove.
+# M2 (#527): DEPENDENCIES FIRST. wbb-ships, wbb-db-snapshot and
+# wbb-trial-migrate are what wbb-autodeploy calls, so they are installed BEFORE
+# it: installing a consumer first leaves a sub-second window in which a timer
+# tick finds a new deployer and an old (or absent) helper. It fails closed
+# either way — installed-current.sh reports the helper as stale or not
+# installed and the tick waits — but the window is free to remove.
 install -m 0755 deploy/ships.sh               /usr/local/bin/wbb-ships
 install -m 0755 deploy/db-snapshot.sh         /usr/local/bin/wbb-db-snapshot
 install -m 0755 deploy/trial-migrate.cjs      /usr/local/bin/wbb-trial-migrate
 install -m 0755 deploy/read-env.sh            /usr/local/bin/wbb-read-env
 install -m 0755 deploy/installed-current.sh   /usr/local/bin/wbb-installed-current
-install -m 0755 deploy/autodeploy-guard.sh    /usr/local/bin/wbb-autodeploy-guard
 install -m 0755 deploy/autodeploy.sh          /usr/local/bin/wbb-autodeploy
 install -m 0644 deploy/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.service
 install -m 0644 deploy/wbb-autodeploy.timer   /etc/systemd/system/wbb-autodeploy.timer
@@ -47,7 +45,7 @@ systemctl daemon-reload
 
 echo
 echo "== installed =="
-ls -l /usr/local/bin/wbb-autodeploy /usr/local/bin/wbb-autodeploy-guard \
+ls -l /usr/local/bin/wbb-autodeploy \
       /usr/local/bin/wbb-read-env /usr/local/bin/wbb-ships /usr/local/bin/wbb-db-snapshot /usr/local/bin/wbb-trial-migrate \
       /usr/local/bin/wbb-installed-current
 ls -l /etc/systemd/system/wbb-autodeploy.service /etc/systemd/system/wbb-autodeploy.timer
