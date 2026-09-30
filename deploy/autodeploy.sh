@@ -34,6 +34,9 @@ STARTUP_S=120
 # R6: one failed probe (3 s timeout) is a stall, not a failed deploy; a
 # rollback rewinds the database, so it needs a run of failures.
 HEALTH_FAILS_MAX=3
+# A lock held longer than the longest legitimate tick (TimeoutStartSec=30min
+# kills a tick at 1800 s) has a holder that will not let go.
+LOCK_STALL_S=2100
 WINDOW_S=600
 POLL_S=10
 KEEP_SNAPSHOTS=3
@@ -141,6 +144,16 @@ DISCARD_CMD="${WBB_DISCARD_CMD:-_discard_default}"
 
 now() { "$CLOCK_CMD"; }
 
+# I6: Telegram caps sendMessage at 4096 chars, and a notify failure must never
+# abort the run unnoticed.
+notify() {
+  local msg="$1"
+  if [ "${#msg}" -gt "$NOTIFY_LIMIT" ]; then
+    msg="${msg:0:$NOTIFY_LIMIT}"$'\n… truncated'
+  fi
+  "$NOTIFY_CMD" "$msg" || echo "WARNING: notify failed: $msg"
+}
+
 # --- brake, lock --------------------------------------------------------------
 # Unprivileged emergency stop (#435 §7): arming the timer costs a password, so
 # stopping it must not. Checked before anything else; a paused tick writes
@@ -154,7 +167,22 @@ mkdir -p "$DATA_DIR" "$STATE_DIR"
 # It does NOT exclude a manual deploy.sh; a manual deploy means a human is
 # present, which is the case this mechanism defers to.
 exec 9>"$LOCK"
-flock -n 9 || { echo "another tick holds the lock; exiting"; exit 0; }
+if ! flock -n 9; then
+  # A holder that never lets go (a suspended manual deploy.sh, a hung npm ci)
+  # blocks every tick, and "another tick holds the lock" alone says nothing.
+  # These two files live outside state.env on purpose: state is written only
+  # under the lock, and this path runs because we do not have it.
+  busy="$STATE_DIR/lock-busy-since"
+  [ -s "$busy" ] || now > "$busy"
+  held_s=$(( $(now) - $(cat "$busy") ))
+  if [ "$held_s" -ge "$LOCK_STALL_S" ] && [ "$(cat "$STATE_DIR/lock-notice" 2>/dev/null)" != "$(date -u +%Y-%m-%d)" ]; then
+    notify "⚠️ merge-deploy: the deploy lock has been held for $(( held_s / 60 )) min — no tick can run. A stuck manual deploy.sh? Check: fuser -v $LOCK"
+    date -u +%Y-%m-%d > "$STATE_DIR/lock-notice"
+  fi
+  echo "another process holds the lock (${held_s}s); exiting"
+  exit 0
+fi
+rm -f "$STATE_DIR/lock-busy-since"
 
 # --- state ----------------------------------------------------------------------
 DEPLOYED_SHA=""
@@ -181,15 +209,6 @@ ROLLBACK_STARTED=""
 # shellcheck disable=SC1090
 if [ -f "$STATE" ]; then . "$STATE"; fi
 
-# I6: Telegram caps sendMessage at 4096 chars, and a notify failure must never
-# abort the run unnoticed.
-notify() {
-  local msg="$1"
-  if [ "${#msg}" -gt "$NOTIFY_LIMIT" ]; then
-    msg="${msg:0:$NOTIFY_LIMIT}"$'\n… truncated'
-  fi
-  "$NOTIFY_CMD" "$msg" || echo "WARNING: notify failed: $msg"
-}
 
 # #497, kept: every key is carried from a shell variable, so a caller changes
 # one by ASSIGNING it, never by passing it. Keys not listed here — the old

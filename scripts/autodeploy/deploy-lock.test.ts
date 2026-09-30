@@ -43,7 +43,7 @@ function deploy(r: Rig, env: Record<string, string> = {}): { code: number | null
 
 /** Holds the lock in another process until released; resolves once it is held. */
 async function holdLock(lock: string): Promise<ChildProcess> {
-  const holder = spawn('flock', [lock, 'sleep', '30'], { stdio: 'ignore' });
+  const holder = spawn('flock', ['-o', lock, 'sleep', '30'], { stdio: 'ignore' });
   for (let i = 0; i < 100; i += 1) {
     if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
     await new Promise((res) => setTimeout(res, 20));
@@ -83,5 +83,14 @@ describe('deploy.sh and the merge-deploy lock', () => {
     const res = deploy(r);
     expect(res.code).toBe(0);
     expect(readFileSync(r.sudoLog, 'utf8')).toMatch(/restart warsaw-beer-bot/);
+  });
+
+  it('refuses to run as root, and touches nothing', () => {
+    const r = rig();
+    executable(join(r.bin, 'id'), 'echo 0');
+    const res = deploy(r);
+    expect(res.code).toBe(1);
+    expect(res.err).toMatch(/^ERROR: run deploy\.sh as the operator/);
+    expect(existsSync(r.sudoLog)).toBe(false);
   });
 });

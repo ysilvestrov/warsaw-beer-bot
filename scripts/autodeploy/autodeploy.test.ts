@@ -1,6 +1,6 @@
 import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -965,3 +965,47 @@ describe('merge-deploy: review fixes R2–R9', () => {
     expect(readState(w).LAST_FAILED_SHA).toBe(x);
   });
 });
+
+describe('merge-deploy: a stalled lock', () => {
+  /** Holds the tick's lock in another process; resolves once it is held. */
+  async function holdLock(lock: string): Promise<ChildProcess> {
+    const holder = spawn('flock', ['-o', lock, 'sleep', '60'], { stdio: 'ignore' });
+    for (let i = 0; i < 100; i += 1) {
+      if (spawnSync('flock', ['-n', lock, 'true']).status === 1) return holder;
+      await new Promise((res) => setTimeout(res, 20));
+    }
+    holder.kill();
+    throw new Error('the lock holder never acquired the lock');
+  }
+
+  it('says nothing for 35 min, then reports a held lock once a day', async () => {
+    const w = world();
+    const holder = await holdLock(join(w.stateDir, 'wbb-autodeploy', 'lock'));
+    try {
+      expect(tick(w).code).toBe(0);
+      advance(w, 2099);
+      tick(w);
+      expect(notes(w)).toEqual([]);
+      advance(w, 1);
+      tick(w);
+      tick(w);
+      expect(notes(w).length).toBe(1);
+      expect(notes(w)[0]).toMatch(/^⚠️ merge-deploy: the deploy lock has been held for 35 min/);
+    } finally {
+      holder.kill();
+    }
+  });
+
+  it('forgets the busy period once a tick gets the lock', async () => {
+    const w = world();
+    const holder = await holdLock(join(w.stateDir, 'wbb-autodeploy', 'lock'));
+    tick(w);
+    const busy = join(w.stateDir, 'wbb-autodeploy', 'lock-busy-since');
+    expect(readFileSync(busy, 'utf8').trim()).toBe('100000');
+    holder.kill();
+    await new Promise((res) => holder.once('exit', res));
+    tick(w);
+    expect(existsSync(busy)).toBe(false);
+  });
+});
+
