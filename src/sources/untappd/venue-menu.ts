@@ -20,9 +20,23 @@ export interface VenueMenu {
 }
 
 const BID_RE = /^\/b\/[^/]+\/(\d+)/;
-// Anchored to Untappd's own host and path: a venue-looking fragment elsewhere in a URL is not a venue page.
-// Case-insensitive, because URL schemes and host names are.
-const CANONICAL_VENUE_RE = /^https:\/\/(?:www\.)?untappd\.com\/v\/[^/?#]+\/(\d+)(?:[/?#]|$)/i;
+const UNTAPPD_HOSTS = new Set(['untappd.com', 'www.untappd.com']);
+const VENUE_PATH_RE = /^\/v\/[^/]+\/(\d+)(?:\/|$)/;
+
+// The venue id of an Untappd venue URL, or null. Parsed with URL so the scheme and host compare
+// case-insensitively (as they are defined) while the path stays case-sensitive; a venue-looking
+// fragment on another host or in a query string is not a venue page.
+function untappdVenueId(href: string): number | null {
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== 'https:' || !UNTAPPD_HOSTS.has(url.hostname)) return null;
+  const m = url.pathname.match(VENUE_PATH_RE);
+  return m ? parseInt(m[1], 10) : null;
+}
 const ABV_RE = /(\d+(?:\.\d+)?)\s*%\s*ABV/i;
 
 const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
@@ -34,8 +48,7 @@ const clean = (s: string): string => s.replace(/\s+/g, ' ').trim();
 // cheerio does not parse as DOM, so its placeholder links never match.
 export function parseVenueMenu(html: string): VenueMenu {
   const $ = cheerio.load(html);
-  const venueMatch = ($('link[rel="canonical"]').first().attr('href') ?? '').match(CANONICAL_VENUE_RE);
-  const venueId = venueMatch ? parseInt(venueMatch[1], 10) : null;
+  const venueId = untappdVenueId($('link[rel="canonical"]').first().attr('href') ?? '');
   const updatedRaw = $('.menu-header .updated-time').first().attr('data-time') ?? '';
   const updatedMs = Date.parse(updatedRaw);
   const updatedAt = Number.isFinite(updatedMs) ? new Date(updatedMs).toISOString() : null;
