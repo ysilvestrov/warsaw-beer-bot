@@ -120,6 +120,14 @@ _prune_default() { _as_bot "$SNAPSHOT_BIN" prune "$SNAPSHOT_DIR" "$KEEP_SNAPSHOT
 PRUNE_CMD="${WBB_PRUNE_CMD:-_prune_default}"
 _trial_default() { node "$TRIAL_BIN" "$REPO" "$1"; }
 TRIAL_CMD="${WBB_TRIAL_CMD:-_trial_default}"
+_service_default() { sudo systemctl "$1" "$2"; }
+SERVICE_CMD="${WBB_SERVICE_CMD:-_service_default}"
+_mark_default() { _as_bot "$SNAPSHOT_BIN" mark-rollback "$1"; }
+MARK_CMD="${WBB_MARK_CMD:-_mark_default}"
+_post_default() { _as_bot "$SNAPSHOT_BIN" post "$DB_PATH" "$1"; }
+POST_CMD="${WBB_POST_CMD:-_post_default}"
+_restore_default() { _as_bot "$SNAPSHOT_BIN" restore "$1" "$DB_PATH"; }
+RESTORE_CMD="${WBB_RESTORE_CMD:-_restore_default}"
 
 now() { "$CLOCK_CMD"; }
 
@@ -437,17 +445,40 @@ settle() {
   exit 0
 }
 
-# Code-only until Task 5.
-roll_back() {
-  LAST_FAILED_SHA="$1"
-  write_state
-  notify "⚠️ merge-deploy ${1:0:7} failed: $2 — rolling back to ${DEPLOYED_SHA:0:7}."
-  if checkout_clean "$DEPLOYED_SHA" && ( cd "$REPO" && "$DEPLOY_CMD" ) && wait_healthy "$PORT" "$STARTUP_S"; then
-    notify "↩️ rollback to ${DEPLOYED_SHA:0:7} succeeded. ${1:0:7} needs a human."
-    exit 2
-  fi
-  notify "🔥 ROLLBACK FAILED. Production is DOWN at ${DEPLOYED_SHA:0:7}. Manual intervention required."
+rollback_failed() {
+  notify "🔥 ROLLBACK FAILED at: $1. Production state is UNKNOWN — the bot may be down. Snapshots: pre=${2:-?} post=${3:-?}. Manual intervention required."
   exit 3
+}
+
+# D5 — inside the window, code AND database go back to pre. Nothing is lost:
+# post keeps what the new code wrote (and R2 history keeps it a third time,
+# P2), and a human reconciles. One attempt, then a human (#435 §7).
+roll_back() {
+  local x="$1" reason="$2" pre="$3" pre_t="$4" old="$DEPLOYED_SHA" marked post stop_t
+  # C3, kept: recorded FIRST, so whatever happens below, this head is not retried.
+  LAST_FAILED_SHA="$x"
+  write_state
+  notify "⚠️ merge-deploy ${x:0:7} failed inside the rollback window: ${reason} — restoring code and database to ${old:0:7}."
+  "$SERVICE_CMD" stop warsaw-beer-bot || rollback_failed "stop warsaw-beer-bot" "$pre" ""
+  # P2: litestream must not be replicating while the file is replaced.
+  "$SERVICE_CMD" stop litestream || rollback_failed "stop litestream" "$pre" ""
+  stop_t=$(date -u +%H:%M:%S)
+  # Marked before anything reads it, so prune can never take it.
+  marked=$("$MARK_CMD" "$pre") || rollback_failed "mark the pre snapshot" "$pre" ""
+  post="${marked%-rollback-pre.db}-rollback-post"
+  "$POST_CMD" "$post" || rollback_failed "snapshot post" "$marked" "$post"
+  "$RESTORE_CMD" "$marked" || rollback_failed "restore pre" "$marked" "$post"
+  "$SERVICE_CMD" start litestream || rollback_failed "start litestream" "$marked" "$post"
+  checkout_clean "$old" || rollback_failed "check out ${old:0:7}" "$marked" "$post"
+  # deploy.sh restarts the bot itself (and re-records DEPLOYED_SHA=old).
+  ( cd "$REPO" && "$DEPLOY_CMD" ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
+  wait_healthy "$PORT" "$STARTUP_S" || rollback_failed "health after the rollback" "$marked" "$post"
+  notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${old:0:7}, code AND database.
+Writes between ${pre_t} and ${stop_t} UTC exist only in: ${post}
+Pre-deploy snapshot now live: ${marked}
+R2 history also still holds the post state (litestream restore -txid).
+A human must reconcile; nothing will do it automatically."
+  exit 2
 }
 
 deploy_pipeline() {
