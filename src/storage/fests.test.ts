@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from './db';
 import { migrate } from './schema';
-import { activeFest, festSessions, festVenues, getFestBySlug, pollingSessionAt } from './fests';
+import { activeFest, currentOrNextFest, festSessions, festVenues, getFestBySlug, pollingSessionAt } from './fests';
 import { menuFor, menuStats, upsertMenuItem } from './fest_menu';
 import { checkinsSince, insertVenueCheckins, venueCheckinAt } from './venue_checkins';
 import { addCoverage, coverageSince } from './fest_coverage';
@@ -101,6 +101,26 @@ describe('activeFest — polling window is each session ± 30 min', () => {
   it('picks the Saturday session', () => {
     const fest = getFestBySlug(db, 'wfp22')!;
     expect(pollingSessionAt(db, fest.id, new Date('2026-10-17T12:00:00.000Z'))?.session_no).toBe(3);
+  });
+});
+
+describe('currentOrNextFest', () => {
+  let db: DB;
+  beforeEach(() => {
+    db = openDb(':memory:');
+    migrate(db);
+  });
+
+  it('is WFP22 during the run-up', () => {
+    expect(currentOrNextFest(db, new Date('2026-09-30T10:00:00.000Z'))?.slug).toBe('wfp22');
+  });
+
+  it('is WFP22 until 30 min after its last session', () => {
+    expect(currentOrNextFest(db, new Date('2026-10-17T22:30:00.000Z'))?.slug).toBe('wfp22');
+  });
+
+  it('is null once the last window has closed', () => {
+    expect(currentOrNextFest(db, new Date('2026-10-17T22:31:00.000Z'))).toBeNull();
   });
 });
 

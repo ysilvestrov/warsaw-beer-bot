@@ -63,6 +63,23 @@ export function pollingSessionAt(db: DB, festId: number, now: Date): FestSession
   ) ?? null;
 }
 
+/**
+ * The earliest fest whose last polling window has not closed yet — the one being polled now or
+ * the next one. The menu is read during the run-up, before any window opens.
+ */
+export function currentOrNextFest(db: DB, now: Date): Fest | null {
+  const row = db
+    .prepare(
+      `SELECT f.* FROM fests f JOIN fest_sessions s ON s.fest_id = f.id
+        GROUP BY f.id
+       HAVING MAX(s.end_at) >= ?
+        ORDER BY MIN(s.start_at), f.id
+        LIMIT 1`,
+    )
+    .get(new Date(now.getTime() - POLL_MARGIN_MS).toISOString()) as FestRow | undefined;
+  return row ? toFest(row) : null;
+}
+
 /** The fest (and its session) that is being polled at `now`, if any. */
 export function activeFest(db: DB, now: Date): { fest: Fest; session: FestSession } | null {
   const rows = db.prepare('SELECT * FROM fests ORDER BY id').all() as FestRow[];
