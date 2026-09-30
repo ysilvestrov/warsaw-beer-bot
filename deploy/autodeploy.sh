@@ -174,6 +174,10 @@ WINDOW_OLD=""
 WINDOW_PRE=""
 WINDOW_PRE_T=""
 WINDOW_START=""
+# Set for the whole rollback, with the WINDOW_* keys kept, so a tick that dies
+# half-way through it is reported by the next one instead of reading as
+# "up to date" with the bot possibly stopped.
+ROLLBACK_STARTED=""
 # shellcheck disable=SC1090
 if [ -f "$STATE" ]; then . "$STATE"; fi
 
@@ -191,7 +195,7 @@ notify() {
 # one by ASSIGNING it, never by passing it. Keys not listed here — the old
 # DRIFT_SINCE / LAST_DRIFT_NOTICE — are dropped by the first write.
 STATE_KEYS=(LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE
-  WINDOW_SHA WINDOW_OLD WINDOW_PRE WINDOW_PRE_T WINDOW_START)
+  WINDOW_SHA WINDOW_OLD WINDOW_PRE WINDOW_PRE_T WINDOW_START ROLLBACK_STARTED)
 write_state() {
   local k
   if ! {
@@ -481,6 +485,7 @@ clear_window() {
   WINDOW_PRE=""
   WINDOW_PRE_T=""
   WINDOW_START=""
+  ROLLBACK_STARTED=""
 }
 
 settle() {
@@ -509,6 +514,8 @@ Pre-deploy snapshot kept: ${marked}"
 }
 
 rollback_failed() {
+  clear_window
+  write_state
   notify "🔥 ROLLBACK FAILED at: $1. Production state is UNKNOWN — the bot may be down. Snapshots: pre=${2:-?} post=${3:-?}. Manual intervention required."
   exit 3
 }
@@ -522,7 +529,11 @@ roll_back() {
   local x="$1" reason="$2" pre="$3" pre_t="$4" old="$5" marked post stop_t
   # C3, kept: recorded FIRST, so whatever happens below, this head is not retried.
   LAST_FAILED_SHA="$x"
-  clear_window
+  WINDOW_SHA="$x"
+  WINDOW_OLD="$old"
+  WINDOW_PRE="$pre"
+  WINDOW_PRE_T="$pre_t"
+  ROLLBACK_STARTED=1
   write_state
   notify "⚠️ merge-deploy ${x:0:7} failed inside the rollback window: ${reason} — restoring code and database to ${old:0:7}."
   "$SERVICE_CMD" stop warsaw-beer-bot || rollback_failed "stop warsaw-beer-bot" "$pre" ""
@@ -540,6 +551,7 @@ roll_back() {
   ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
   wait_healthy "$PORT" "$STARTUP_S" || rollback_failed "health after the rollback" "$marked" "$post"
   DEPLOYED_SHA="$old"
+  clear_window
   write_state
   notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${old:0:7}, code AND database.
 Writes between ${pre_t} and ${stop_t} UTC exist only in: ${post}
@@ -633,11 +645,23 @@ finish_window() {
 # systemctl stop). Finish what it started before doing anything else.
 resume_window() {
   [ -n "$WINDOW_SHA" ] || return 0
-  local x="$WINDOW_SHA" old="$WINDOW_OLD" pre="$WINDOW_PRE" pre_t="$WINDOW_PRE_T" start="$WINDOW_START"
-  if [ "$DEPLOYED_SHA" != "$x" ]; then
+  local x="$WINDOW_SHA" old="$WINDOW_OLD" pre="$WINDOW_PRE" pre_t="$WINDOW_PRE_T" start="$WINDOW_START" marked
+  if [ -n "$ROLLBACK_STARTED" ]; then
+    # LAST_FAILED_SHA was recorded before the rollback began, so X is not
+    # retried; this message is the only thing that is still owed.
     clear_window
     write_state
-    notify "⚠️ merge-deploy: the deploy of ${x:0:7} was interrupted before deploy.sh completed. Production is recorded at ${DEPLOYED_SHA:0:7}, and /opt may be half-written. The tick continues and will deploy main afresh."
+    notify "🔥 ROLLBACK INTERRUPTED: the tick died while rolling ${x:0:7} back to ${old:0:7}. The bot and litestream may be STOPPED, and bot.db may be half-restored. Pre-deploy snapshot: ${pre} (or its -rollback-pre.db name if it was marked). Manual intervention required."
+    exit 3
+  fi
+  if [ "$DEPLOYED_SHA" != "$x" ]; then
+    # deploy.sh may have been killed after restarting X but before recording
+    # it, so X may already have migrated bot.db: this pre is the only true
+    # "before". Keep it (marked, so prune leaves it) and name it.
+    marked=$("$MARK_UNVERIFIED_CMD" "$pre" 2>&1) || marked="NOT marked (${marked}): ${pre}"
+    clear_window
+    write_state
+    notify "⚠️ merge-deploy: the deploy of ${x:0:7} was interrupted before deploy.sh completed. Production is recorded at ${DEPLOYED_SHA:0:7}, and /opt may be half-written. The tick continues and will deploy main afresh. If X had already started, the true pre-deploy snapshot is ${marked}"
     return 0
   fi
   RANGE_PRS=()
