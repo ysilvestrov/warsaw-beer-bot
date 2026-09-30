@@ -303,11 +303,14 @@ shipping_paths() {
     rm -f "$target_filter" "$deployed_filter"
     return 1
   fi
+  # `--no-renames` (PR #760 review): with rename detection on, --name-only
+  # reports only a rename's DESTINATION, so moving src/x.ts to docs/ read as
+  # "nothing ships" although rsync --delete removes src/x.ts from /opt.
   # `-c core.quotePath=false`: without it git C-quotes a non-ASCII path (e.g.
   # `"src/\303\251.ts"`), which ships.sh refuses on sight (the quoted form is
   # not the path it names) — an ordinary merge would needlessly report
   # "cannot assess".
-  if ! diff_out=$(git -C "$REPO" -c core.quotePath=false diff --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null); then
+  if ! diff_out=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$main_sha" 2>/dev/null); then
     rm -f "$target_filter" "$deployed_filter"
     return 1
   fi
@@ -399,7 +402,7 @@ scan_range() {
   local x="$1" paths commits c out pr labels f
   HOLDS=()
   RANGE_PRS=()
-  if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --name-only "$DEPLOYED_SHA" "$x"); then
+  if ! paths=$(git -C "$REPO" -c core.quotePath=false diff --no-renames --name-only "$DEPLOYED_SHA" "$x"); then
     HOLDS+=("could not list the changed paths")
   fi
   while IFS= read -r f; do

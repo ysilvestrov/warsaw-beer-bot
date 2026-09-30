@@ -1023,3 +1023,32 @@ describe('merge-deploy: a stalled lock', () => {
   });
 });
 
+describe('merge-deploy: renames are seen from both ends', () => {
+  function renameIn(w: World, from: string, to: string): string {
+    mkdirSync(join(w.seed, to, '..'), { recursive: true });
+    git(w.seed, 'mv', from, to);
+    git(w.seed, 'commit', '-q', '-m', `rename ${from}`);
+    git(w.seed, 'push', '-q', 'origin', 'main');
+    return git(w.seed, 'rev-parse', 'HEAD');
+  }
+
+  it('holds a PR that moves a hold path away (the source side counts)', () => {
+    const w = world();
+    push(w, { 'deploy/sudoers.d/warsaw-beer-bot': 'a\nb\nc\nd\n' }, 'add');
+    seedState(w, { DEPLOYED_SHA: git(w.seed, 'rev-parse', 'HEAD'), PREVIOUS_SHA: '' });
+    renameIn(w, 'deploy/sudoers.d/warsaw-beer-bot', 'docs/sudoers-example');
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    expect(notes(w)[0]).toContain('• path deploy/sudoers.d/warsaw-beer-bot needs a human step');
+  });
+
+  it('deploys a PR that moves a shipped file out of the shipped tree (its deletion ships)', () => {
+    const w = world();
+    const x = renameIn(w, 'src/a.ts', 'docs/a.ts');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+  });
+});
+
