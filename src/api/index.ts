@@ -24,6 +24,7 @@ import { enrichRoute } from './routes/enrich';
 import { checkinsRoute } from './routes/checkins';
 import { adminRoute } from './routes/admin';
 import { festRoute } from './routes/fest';
+import { festPrintRoute } from './routes/fest-print';
 
 export function postPayloadBodyLimit(
   deps: ApiDeps,
@@ -81,6 +82,8 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
   app.use('/fest/*', postPayloadBodyLimit(deps, CHECKINS_SYNC_BODY_LIMIT_BYTES));
   app.use('/fest/*', authMiddleware(deps.db));
   festRoute(app, deps);
+  // The print station has its own team-bound token (spec §8), so it lives outside /fest/*.
+  festPrintRoute(app, deps);
 
   app.use('/admin/*', adminMiddleware(deps.env));
   adminRoute(app, deps);

@@ -1,0 +1,2 @@
+# Third-party minified bundles: kept out of text diffs (and so out of the AI reviewer's context).
+src/api/fest-print/vendor/*.js -diff linguist-vendored
