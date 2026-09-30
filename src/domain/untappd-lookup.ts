@@ -25,6 +25,7 @@ import { isBlockStatus } from '../sources/untappd/block';
 import { dominantCandidate } from './rating-dominance';
 import { nameIdentity, candidateIdentity, identityAllowsApprox, type NameIdentity } from './name-identity';
 import { isMovedLetterName } from './moved-letter';
+import { isColonPrefixTailMatch } from './colon-prefix';
 import { digitIdentity, readNameDigits, type NameDigits } from './digit-identity';
 
 const NAME_FUZZY_THRESHOLD = 0.85;
@@ -351,6 +352,11 @@ function coverageScore(needles: string[], haystack: string[]): number | null {
     return null;
   }
   const total = needles.reduce((sum, token) => sum + bestTokenScore(token, haystack), 0);
+  // #746: A single-token target must match its candidate counterpart exactly if the candidate has extra tokens;
+  // a fuzzy typo combined with extra tokens (e.g. `jozsef` -> `10th Anniversary Collab: Josef`) is never a near-match.
+  if (needles.length === 1 && haystack.length > 1 && total < 1.0) {
+    return null;
+  }
   return total / needles.length;
 }
 
@@ -562,6 +568,36 @@ export async function lookupBeer(
   const refusedStrictPools: SearchResult[] = [];
   // The rescue decides at most once per lookup: a match judge() proposed and a caller vetoed is not revived.
   let rescueDecided = false;
+  // #746: Untappd names with serial/line prefix through a colon (<prefix>: <tail>) when
+  // the menu/tap gives only the tail. Refusal refinement on strict pools only.
+  const colonPrefixRescue = (pool: SearchResult[]): SearchResult | null => {
+    const cleanTargets = (NAME_COLLAB_SEP.test(name) ? name.split(NAME_COLLAB_SEP) : [name])
+      .map((s) => baseNormalize(stripSearchNoise(s)))
+      .filter(Boolean);
+    // If the pool contains a candidate whose clean name directly equals the target,
+    // the existing stages refused this pool for a reason the rescue must not overrule.
+    if (pool.some((result) => cleanTargets.includes(baseNormalize(stripSearchNoise(result.beer_name))))) {
+      return null;
+    }
+    const hits = new Map<number, SearchResult>();
+    for (const result of pool) {
+      if (isAlcoholClassMismatch(abv, identityName, result)) continue;
+      if (abv != null) {
+        if (result.abv == null || Math.abs(result.abv - abv) > ABV_TOLERANCE) continue;
+      } else {
+        // Without input ABV evidence, a single-token generic style tail cannot discriminate.
+        const isGenericTail = cleanTargets.some((t) => {
+          const toks = t.split(' ').filter(Boolean);
+          return toks.length <= 1 || (toks.length === 1 && GENERIC_TYPO_RESCUE_NAMES.has(toks[0]));
+        });
+        if (isGenericTail) continue;
+      }
+      if (isColonPrefixTailMatch(name, result.beer_name)) {
+        hits.set(result.bid, result);
+      }
+    }
+    return hits.size === 1 ? [...hits.values()][0] : null;
+  };
   const movedLetterRescue = (pool: SearchResult[]): SearchResult | null => {
     if (abv == null) return null;
     const targets = targetNames.filter((target) => !target.exactOnly && !target.restored);
@@ -585,7 +621,7 @@ export async function lookupBeer(
     refusedStrictPools.push(...lastStrictPool);
     if (outcome?.kind !== 'not_found') return outcome;
     // Uniqueness is over every strict pool this lookup refused so far, not just this one.
-    const rescued = movedLetterRescue(refusedStrictPools);
+    const rescued = colonPrefixRescue(refusedStrictPools) ?? movedLetterRescue(refusedStrictPools);
     if (!rescued) return outcome;
     rescueDecided = true;
     return { kind: 'matched', result: rescued };
@@ -1095,8 +1131,8 @@ export async function lookupBeer(
     }
   }
 
-  // #659: every search attempt ended without a match (matchAgainst returned null). Same refinement
+  // #746 / #659: every search attempt ended without a match (matchAgainst returned null). Same refinement
   // as in judge(), over all strict pools this lookup refused.
-  const rescued = rescueDecided ? null : movedLetterRescue(refusedStrictPools);
+  const rescued = rescueDecided ? null : (colonPrefixRescue(refusedStrictPools) ?? movedLetterRescue(refusedStrictPools));
   return rescued ? { kind: 'matched', result: rescued } : notFound();
 }
