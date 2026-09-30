@@ -29,7 +29,10 @@ describe('parseVenueMenu', () => {
       withCanonical('https://example.test/?next=/v/fake/11142155'),
       withCanonical('https://untappd.com.evil.test/v/fake/11142155'),
       withCanonical('https://untappd.com/b/some-beer/11142155'),
-    ]).toEqual([11142155, 11142155, 11142155, null, null, null]);
+      withCanonical('https://untappd.com/V/x/11142155'),
+      withCanonical('http://untappd.com/v/x/11142155'),
+      withCanonical('not a url'),
+    ]).toEqual([11142155, 11142155, 11142155, null, null, null, null, null, null]);
   });
 
   it('reads the menu update time as ISO', () => {
