@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Run as the operator. As root, HOME=/root: another lock (R4 would not hold)
+# and another state file (record-deployed would write a baseline nobody reads).
+if [ "$(id -u)" -eq 0 ]; then
+  echo "ERROR: run deploy.sh as the operator (bash deploy/deploy.sh), not as root or via sudo — it calls sudo itself, per step." >&2
+  exit 1
+fi
+
 # Merge-deploy R4: a manual deploy and the merge-deploy tick exclude each other
 # through the tick's own lock. While a tick watches its 10-minute rollback
 # window, a manual deploy here would be undone by that tick's rollback (code
