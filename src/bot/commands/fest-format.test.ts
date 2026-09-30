@@ -2,7 +2,7 @@ import { createTranslator } from '../../i18n';
 import type { FestView } from '../../jobs/fest-view';
 import type { TapStatus } from '../../domain/fest/tap-status';
 import { capText, fitMessage, formatAlert, formatQueue, queueLinks, formatRanking, formatSection, formatTargets, MESSAGE_LIMIT, searchMenu, sectionKey, standLabel, statusLabel } from './fest-format';
-import { initialsOf, pickCallback } from './fest';
+import { festPrintUrl, initialsOf, pickCallback } from './fest';
 
 const t = createTranslator('uk');
 const NOW = new Date('2026-10-15T18:00:00.000Z'); // 20:00 in Warsaw
@@ -288,5 +288,12 @@ describe('capText', () => {
   it('keeps a flag whole when it ends exactly at the cut', () => {
     // 'ab' (2) + flag (4) = 6 = 7 − 1 fits; the next flag does not.
     expect(capText('ab🇵🇱🇺🇦cd', 7)).toBe('ab🇵🇱…');
+  });
+});
+
+describe('festPrintUrl', () => {
+  it('puts the station on the base origin whatever path, query or fragment the base carries', () => {
+    expect(['https://a.example', 'https://a.example/', 'https://a.example/?source=bot', 'https://a.example/x#y'].map(festPrintUrl))
+      .toEqual(Array(4).fill('https://a.example/fest-print'));
   });
 });

@@ -47,7 +47,12 @@ const Schema = z.object({
   FEST_MCP_URL: z.string().url().optional(),
   FEST_MCP_OAUTH_FILE: z.string().min(1).default('/var/lib/warsaw-beer-bot/fest-mcp-oauth.json'),
   // Where phones reach the bot's API (the Cloudflare tunnel): the print station link points here.
-  FEST_PRINT_BASE_URL: z.string().url().default('https://beer-api.ysilvestrov-ai.uk'),
+  // HTTPS only (localhost aside): the station sends its team-bound token to this origin, and Web
+  // Bluetooth needs a secure context anyway.
+  FEST_PRINT_BASE_URL: z.string().url()
+    .refine((u) => { const url = URL.canParse(u) ? new URL(u) : null; return !url || url.protocol === 'https:' || ['localhost', '127.0.0.1'].includes(url.hostname); },
+      'FEST_PRINT_BASE_URL must be https (or http on localhost)')
+    .default('https://beer-api.ysilvestrov-ai.uk'),
 });
 
 export type Env = z.infer<typeof Schema>;
