@@ -434,7 +434,7 @@ targets(menu, teamTried: Map<telegramId, Set<beerId>>, beers, overrides, criteri
   репо й віддається тим самим сервером (`/fest/print/niimbluelib.min.js`): на фесті мобільний
   інтернет, і CDN — зайва точка відмови. Проба 2026-09-30 (тарбол npm): `NiimbotBluetoothClient`,
   після `connect()` — `getPrintTaskType()` і `getModelMetadata()` (для D11: 203 dpi,
-  `printDirection: "left"`, голівка 96 точок), `ImageEncoder.encodeCanvas(canvas, 'white', dir)`,
+  `printDirection: "left"`, голівка 96 точок), `ImageEncoder.encodeCanvas(canvas, PageColorType.SingleColor, dir)`,
   `protocol.newPrintTask(task, { totalPages })` → `printInit` / `printPage` / `waitForPageFinished`
   / `waitForFinished` / `printEnd`.
 - Раз на 5 с `GET /fest/print-jobs` (черга команди станції: `queued` і `failed`); лічильник і
