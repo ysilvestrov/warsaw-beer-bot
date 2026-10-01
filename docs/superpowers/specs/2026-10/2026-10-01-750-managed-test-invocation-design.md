@@ -2,7 +2,7 @@
 
 Date: 2026-10-01
 Issue: https://github.com/ysilvestrov/warsaw-beer-bot/issues/750
-Status: Design ready for user review; implementation has not started.
+Status: User approved the design; core implemented and verified on 2026-10-01.
 
 ## Goal
 

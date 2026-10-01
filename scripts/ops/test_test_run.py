@@ -285,6 +285,87 @@ root.mkdir(mode=0o700)
         self.assertEqual(process.returncode, 125, stderr.decode())
         self.assertEqual(next(self.base.glob('run-*/keep')).read_text(), 'keep')
 
+    def test_direct_vitest_requires_supervisor_before_workers(self):
+        project = SCRIPT.parents[2]
+        vitest = project / 'node_modules/vitest/vitest.mjs'
+        message = ('Vitest requires the test supervisor to clean temporary caches. '
+                   'Run npm test -- <arguments> (from the package directory), '
+                   'or wbb-test <arguments> on the operator host.')
+        for package in (project, project / 'extension'):
+            for marker in ({}, {'WBB_TEST_TMPDIR': ''}):
+                with self.subTest(package=package.name, marker=marker):
+                    with tempfile.TemporaryDirectory(dir=self.root) as scratch:
+                        probe = Path(scratch)
+                        fallback = probe / 'fallback'
+                        fallback.mkdir()
+                        sentinel = probe / 'executed'
+                        fixture = probe / 'fixture.ts'
+                        fixture.write_text('export const value: number = 1;')
+                        test = probe / 'probe.test.mjs'
+                        test.write_text(f'''
+import {{it, expect}} from {str((project / 'node_modules/vitest/dist/index.js').as_uri())!r};
+import {{writeFileSync}} from 'node:fs';
+import {{value}} from './fixture.ts';
+it('must not execute outside the supervisor', () => {{
+  writeFileSync({str(sentinel)!r}, 'executed');
+  expect(value).toBe(1);
+}});
+''')
+                        config = probe / 'vitest.config.mjs'
+                        config.write_text(
+                            f'import config from {str(package / "vitest.config.ts")!r}; '
+                            f'export default {{...config,test:{{...config.test,environment:"node",'
+                            f'setupFiles:[],include:[{str(test)!r}]}}}};')
+                        env = {k: v for k, v in os.environ.items()
+                               if k not in ('WBB_TEST_TMPDIR', 'WBB_TEST_RUN_ID')}
+                        env.update(TMPDIR=str(fallback), TMP=str(fallback), TEMP=str(fallback),
+                                   NODE_COMPILE_CACHE=str(probe / 'node-cache'), **marker)
+                        result = subprocess.run(
+                            ['node', str(vitest), 'run', '--cache=false',
+                             '--config', str(config)], cwd=package, env=env,
+                            capture_output=True, text=True, timeout=30)
+                        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                        self.assertIn(message, result.stderr)
+                        self.assertEqual(sentinel.exists(), False)
+                        self.assertEqual(list(fallback.iterdir()), [])
+
+    def test_managed_extension_config_cleans_run_and_avoids_unmanaged_cache(self):
+        project = SCRIPT.parents[2]
+        package = project / 'extension'
+        fallback = self.root / 'fallback'
+        fallback.mkdir()
+        observations = self.root / 'observations.json'
+        test = self.root / 'probe.test.mjs'
+        test.write_text(f'''
+import {{it}} from {str((project / 'node_modules/vitest/dist/index.js').as_uri())!r};
+import {{writeFileSync}} from 'node:fs';
+import {{tmpdir}} from 'node:os';
+it('managed extension probe', () => {{
+  writeFileSync({str(observations)!r}, JSON.stringify({{tmp: tmpdir()}}));
+}});
+''')
+        # Root CI installs only root dependencies. Exercise the extension's actual
+        # config/cache routing without requiring its unrelated UI dependencies.
+        config = self.root / 'vitest.config.mjs'
+        config.write_text(
+            f'import config from {str(package / "vitest.config.ts")!r}; '
+            f'export default {{...config,test:{{...config.test,environment:"node",'
+            f'setupFiles:[],include:[{str(test)!r}]}}}};')
+        env = dict(os.environ, TMPDIR=str(fallback), TMP=str(fallback), TEMP=str(fallback),
+                   WBB_TEST_RUNS_DIR=str(self.base),
+                   NODE_COMPILE_CACHE=str(self.root / 'npm-parent-cache'))
+        result = subprocess.run(
+            [sys.executable, '-B', str(SCRIPT), '--', 'node',
+             str(project / 'node_modules/vitest/vitest.mjs'), 'run',
+             '--config', str(config), '--cache=false'],
+            cwd=package, env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        payload = Path(json.loads(observations.read_text())['tmp'])
+        self.assertEqual(payload.parent.parent, self.base)
+        self.assertEqual(payload.parent.exists(), False)
+        self.assertEqual(list(self.base.iterdir()), [])
+        self.assertEqual(list(fallback.iterdir()), [])
+
     def test_ordinary_npm_success_and_failure_remove_real_vitest_cache(self):
         repo = SCRIPT.parents[2]
         for expected in (0, 1):
