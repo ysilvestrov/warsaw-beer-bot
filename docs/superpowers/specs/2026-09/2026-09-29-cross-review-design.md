@@ -39,7 +39,8 @@ npm run cross-review -- --reviewer codex|claude [--base origin/main] [--model <i
 - `--base` defaults to `origin/main`. The review covers `<base>...HEAD`, meaning the
   committed branch.
 - `--model` is passed through to the reviewer CLI. If it is omitted, the CLI's own default is
-  used, and the code carries no curated model list.
+  used — except for codex, which is pinned to a Sol model since 2026-10-01
+  (`2026-10-01-cross-review-sol-default-design.md`).
 - The script **refuses a dirty working tree**, because the marker names a SHA and an
   uncommitted change would be reviewed without being part of that SHA. It also refuses an
   empty diff against the base.
