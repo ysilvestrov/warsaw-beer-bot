@@ -90,8 +90,15 @@ acknowledgements or historical samples during installation.
 ## Consumer and report text
 
 The bot reads `/var/tmp/wbb-resource-monitor/summary.json` only when it is about to
-send the morning report. The reader accepts a path argument for focused tests;
+send the morning report. The reader accepts path and trusted-UID arguments for focused tests;
 production uses the fixed path, so no new environment key is required.
+Production resolves the UID of the existing `ysi` operator account through the
+system account database using `/usr/bin/id -u ysi`, with a one-second timeout and
+64-byte output cap. This is the same account pinned in the deployment sudoers.
+Both directory and file must belong to that independently obtained UID; matching
+each other alone is insufficient. An unavailable account lookup means unavailable
+telemetry. A deployment with a different operator account must update the lookup
+alongside its sudoers configuration. No UID is accepted from the snapshot itself.
 Read at most 16 KiB; refuse symlink/nonregular files, unsafe directory/file modes,
 multiple hard links, inconsistent directory/file ownership, invalid JSON/version,
 nonfinite timestamps, negative/noninteger counters, and inconsistent inventory
@@ -102,6 +109,8 @@ A snapshot is fresh when its timestamp is not in the future and its age is at mo
 15 minutes. Exact boundary: 900 seconds is accepted, greater than 900 is stale.
 Use the same `now` as the digest. Missing, invalid or unreadable input cannot stop
 delivery of the rest of the report.
+Attempt to close both opened descriptors even if one close fails. A close error
+returns unavailable telemetry and cannot escape into the morning job.
 
 Example with fresh complete inventory:
 
@@ -119,6 +128,7 @@ claim it is safe to delete, or require an immediate action in this report line.
 | Recorded fact or displayed claim | Evidence and limit |
 | --- | --- |
 | Shared snapshot filesystem counters | Validated counters from this tick's `statvfs('/')`; timestamp records when measured |
+| Snapshot belongs to the trusted monitor operator | Directory and file UID equal the independently resolved system-account UID of `ysi`; host probe returned 1000 and verified root-owned `/usr/bin/id` and `/etc/passwd` |
 | `pending_runs = N` | Complete bounded inventory with N statuses other than `active`; does not prove abandonment, byte usage or cleanup safety |
 | Inventory unavailable | Busy lock, failed audit or incomplete inventory; no replacement with zero |
 | Fresh snapshot | Valid timestamp within [now − 900 seconds, now], checked by the reader |

@@ -105,6 +105,7 @@ export interface DailyStatusDeps {
   now?: () => Date;
   repo?: string;
   testDiagnosticsPath?: string;
+  testDiagnosticsUid?: number;
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
@@ -176,7 +177,7 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
       paused, deps.repo,
     );
   }
-  const testDiagnosticsLine = readTestDiagnosticsLine(now, deps.testDiagnosticsPath);
+  const testDiagnosticsLine = readTestDiagnosticsLine(now, deps.testDiagnosticsPath, deps.testDiagnosticsUid);
   const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine, withheldLine,
     bugReportLine, testDiagnosticsLine);
   try {

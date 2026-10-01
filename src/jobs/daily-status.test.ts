@@ -27,6 +27,7 @@ test('morning digest includes test telemetry and sends only once for the day', a
       runs_inventory_available: true, pending_runs: 0 }), { mode: 0o644 });
     const sent: string[] = [];
     const deps = { db, log: silentLog, now: () => now, testDiagnosticsPath: path,
+      testDiagnosticsUid: process.getuid!(),
       notifyAdmin: async (text: string) => { sent.push(text); } };
     await dailyStatus(deps);
     await dailyStatus(deps);

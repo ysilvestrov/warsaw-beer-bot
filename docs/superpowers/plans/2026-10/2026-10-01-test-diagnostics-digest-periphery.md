@@ -103,3 +103,14 @@ Claude reviewed `451b622` once and raised four findings:
 The final shipping marker is `Cross-review: claude @ 451b622 — 4 findings: 3 fixed, 1 rejected`. Re-run the full gate after these changes; do not run a second Claude review for this PR.
 
 Post-review gate completed: 4761 tests pass, one existing skip, both typecheck commands pass. The UID mutation failed with the exact expected reader assertion and the source was restored before this gate. A live temporary snapshot also passed the reader under the actual service user. Production cron and bot remain unchanged until the held rollout.
+
+## GitHub review follow-up
+
+The current-head GitHub review raised two valid findings on the reader:
+
+- Bind the export owner to the known operator, not merely to its directory's owner. The default reader now resolves `ysi` through the existing system account database (the account already pinned in sudoers). A host probe verified UID 1000 and root ownership of `/usr/bin/id` and `/etc/passwd`. Controlled fixture paths accept an explicit trusted UID; no bot environment key or new host permission is introduced.
+- Closing descriptors must not throw past the reader's catch. The reader now attempts both closes, records close failure as unavailable telemetry, and cannot block the digest on this error.
+
+Red tests reproduced a same-owner foreign export being accepted and both close exceptions escaping. Focused green: 89 report/reader tests pass, including account-lookup failure, the trusted operator command boundary, foreign-owner refusal and actual closure of both descriptors. Repeat the full gate before publication and reply to both review-body findings after pushing.
+
+GitHub-fix gate completed: 4766 tests pass, one existing skip, both typecheck commands pass. A fresh real Python export passed the default account-bound reader under `warsaw-beer-bot`. The operational shell file checks the caller's UID against the `ysi` account before installation.

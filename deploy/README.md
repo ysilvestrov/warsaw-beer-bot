@@ -105,6 +105,14 @@ private monitor state. The report marks snapshots older than 15 minutes as stale
 and missing/invalid data as unavailable. Busy, failed or truncated inventory
 does not become zero. No bot environment key is needed.
 
+Run the production monitor as `ysi`, the operator account in the shipped sudoers.
+The reader checks the snapshot owner against that account's system UID, obtained
+independently with `/usr/bin/id -u ysi`. An unrelated local account cannot supply
+a trusted snapshot by creating a directory and file with matching owners. If
+installing under another operator account, update this lookup together with the
+sudoers account. Lookup or descriptor-close failures leave telemetry unavailable
+and allow the rest of the morning report to send.
+
 Changes to the installed monitor use `[deploy:hold]`. After merging, update a
 clean operator checkout to `main`, then run as the operator:
 

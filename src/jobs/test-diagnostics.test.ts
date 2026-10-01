@@ -4,8 +4,13 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import childProcess from 'node:child_process';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { readTestDiagnosticsLine } from './test-diagnostics';
+import { readTestDiagnosticsLine as readWithOwner } from './test-diagnostics';
+
+// Controlled export fixtures belong to the test runner's actual OS account.
+const readTestDiagnosticsLine = (now: Date, path: string): string =>
+  readWithOwner(now, path, process.getuid!());
 
 let directory: string;
 let path: string;
@@ -109,6 +114,91 @@ test('refuses inconsistent directory and file owners', () => {
   syncBuiltinESMExports();
   try {
     expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('refuses a matching directory and file owner that is not the trusted operator', () => {
+  write(snapshot);
+  expect(readWithOwner(now, path, process.getuid!() + 1)).toBe(unavailable);
+});
+
+test('default trust comes from the configured operator account rather than the snapshot', () => {
+  write(snapshot);
+  const spy = vi.spyOn(childProcess, 'execFileSync').mockImplementation((command, args) => {
+    expect(command).toBe('/usr/bin/id');
+    expect(args).toEqual(['-u', 'ysi']);
+    return String(process.getuid!()) + '\n';
+  });
+  syncBuiltinESMExports();
+  try {
+    expect(readWithOwner(now, path)).toBe(
+      'Тести: 1 каталог потребує перевірки · диск: 30.00 GiB вільно · inode: 2 000 000 вільно',
+    );
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('an unavailable operator account returns unknown instead of trusting the export owner', () => {
+  write(snapshot);
+  const spy = vi.spyOn(childProcess, 'execFileSync').mockImplementation(() => {
+    throw new Error('synthetic account lookup failure');
+  });
+  syncBuiltinESMExports();
+  try {
+    expect(readWithOwner(now, path)).toBe(unavailable);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('a file-close failure returns unknown and still closes the directory', () => {
+  write(snapshot);
+  const originalClose = fs.closeSync;
+  const closed: number[] = [];
+  const spy = vi.spyOn(fs, 'closeSync').mockImplementationOnce((fd) => {
+    closed.push(fd);
+    originalClose(fd);
+    throw new Error('synthetic close I/O error');
+  }).mockImplementationOnce((fd) => {
+    closed.push(fd);
+    originalClose(fd);
+  });
+  syncBuiltinESMExports();
+  try {
+    expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
+    expect(closed.length).toBe(2);
+    expect(() => fs.fstatSync(closed[0])).toThrow(/EBADF/);
+    expect(() => fs.fstatSync(closed[1])).toThrow(/EBADF/);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('a directory-close failure cannot escape into the morning job', () => {
+  write(snapshot);
+  const originalClose = fs.closeSync;
+  const closed: number[] = [];
+  const spy = vi.spyOn(fs, 'closeSync').mockImplementationOnce((fd) => {
+    closed.push(fd);
+    originalClose(fd);
+  }).mockImplementationOnce((fd) => {
+    closed.push(fd);
+    originalClose(fd);
+    throw new Error('synthetic close I/O error');
+  });
+  syncBuiltinESMExports();
+  try {
+    expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
+    expect(closed.length).toBe(2);
+    expect(() => fs.fstatSync(closed[0])).toThrow(/EBADF/);
+    expect(() => fs.fstatSync(closed[1])).toThrow(/EBADF/);
   } finally {
     spy.mockRestore();
     syncBuiltinESMExports();
