@@ -140,7 +140,7 @@ export interface ReviewerCommand { cmd: string; args: string[]; reportFromStdout
 export function buildReviewerCommand(p: {
   reviewer: Reviewer; model?: string; prompt: string; reportPath: string; tmpDir: string;
 }): ReviewerCommand {
-  const model = p.model ?? DEFAULT_MODEL[p.reviewer];
+  const model = p.model || DEFAULT_MODEL[p.reviewer]; // '' counts as absent: it must never drop the pin
   if (p.reviewer === 'codex') {
     return {
       cmd: 'codex',

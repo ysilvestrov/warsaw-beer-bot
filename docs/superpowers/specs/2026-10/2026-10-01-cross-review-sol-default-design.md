@@ -20,7 +20,7 @@ class, and a Codex update must not be able to silently switch it to Astra.
 - `claude` → none. The Claude CLI's own default stays, because no one has raised the question
   for that direction, and a default there would be a guess.
 
-`buildReviewerCommand` uses `model ?? DEFAULT_MODEL[reviewer]`. An explicit `--model` still
+`buildReviewerCommand` uses `model || DEFAULT_MODEL[reviewer]` (an empty string counts as absent). An explicit `--model` still
 wins. `parseArgs` rejects an empty value for any flag (`--model ""` from an unset shell variable
 would otherwise drop `-m` and land on the CLI default; found by the pre-PR cross-review). The
 codex command therefore **always** carries `-m <id>`, and the claude command carries
