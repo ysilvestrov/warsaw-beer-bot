@@ -114,11 +114,17 @@ per step). It waits up to 30 s for the merge-deploy lock and refuses while a
 tick watches a rollback window.
 
 Before any privileged command, under that lock, it also checks that HEAD
-contains the recorded `DEPLOYED_SHA`. A backwards or divergent checkout, or
+contains the recorded `DEPLOYED_SHA`. A backwards or divergent HEAD, or
 a recorded commit missing from the checkout, refuses before touching `/opt`.
 Update the checkout first. A missing/empty baseline permits a first deploy;
 unreadable or duplicate baseline records refuse. This check uses local Git
 history and does not fetch `origin/main`.
+
+Admission proves ancestry of HEAD, not the contents of a dirty working tree.
+Dirty deployments keep the existing behavior: they clear DEPLOYED_SHA because
+the copied files cannot be identified by a commit. A subsequent empty-baseline
+deploy can reseed it; the guard cannot prove ancestry in that case. Use clean
+checkouts for deployments whose identity the tick must track.
 
 For a **deliberate rollback or recovery**, `bash deploy/deploy.sh --force`
 bypasses ancestry admission and logs both SHAs. Root refusal and locking
@@ -231,7 +237,43 @@ must be respected. It persists a recovery hold before sending the warning.
 The daily HELD message mentions the regression and any ordinary holds in the
 deployable range. Further merges and partial forward recovery cannot release
 it: production must contain the original pre-regression commit again. Deploy
-current main manually to recover; use `--force` if the histories diverge.
+current main manually to recover when it contains that commit; use `--force`
+if the current production history diverges from main. If main does not contain
+the recovery point, use the operator acknowledgement below.
+
+### Operator acknowledgement of a replacement baseline
+
+Sometimes ancestry cannot recover: a feature commit deployed before a squash
+merge never becomes an ancestor of main, or an earlier observation is removed
+from the private clone after its branch is deleted and Git garbage collection
+runs. The tick keeps that evidence and refuses to guess that newer code replaced
+it correctly. Repeatedly deploying main cannot clear such an observation.
+
+First diagnose the change, deploy the intended clean current main (with
+`--force` if necessary), and verify the bot is healthy. Finish any interrupted
+rollback/window handling before acknowledgement. Then, as the operator,
+explicitly accept the current recorded production as the new observation.
+This forgets the recovery fence; it does not deploy, restore data, clear
+LAST_FAILED_SHA or assert that production is healthy. The saved state file
+keeps the previous observation for diagnosis.
+
+```bash
+ack_state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
+flock -w 30 "$ack_state_dir/lock" bash -c '
+  set -euo pipefail
+  state=$1
+  backup="$state.operator-ack-$(date -u +%Y%m%dT%H%M%SZ)"
+  cp -- "$state" "$backup"
+  sed -i -e "/^LAST_SEEN_DEPLOYED_SHA=/d" \
+    -e "/^REGRESSION_FROM_SHA=/d" -e "/^REGRESSION_TO_SHA=/d" \
+    -e "/^LAST_HOLD_NOTICE=/d" "$state"
+  echo "Operator acknowledged recorded production; prior state saved at $backup"
+' bash "$ack_state_dir/state.env"
+```
+
+The next tick seeds its observation from the resolved DEPLOYED_SHA, just as
+on first installation. Do not use this procedure to hide an unexplained
+rollback or to bypass build, CI or migration failures.
 
 A failed warning delivery remains pending for the next tick; after successful
 delivery it is not repeated on unchanged observations. A crash between sending

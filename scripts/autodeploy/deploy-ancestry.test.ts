@@ -81,15 +81,19 @@ describe('manual deploy ancestry admission', () => {
     writeFileSync(join(r.repo, 'runtime'), 'sibling');
     git(r.repo, 'add', '.');
     git(r.repo, 'commit', '-qm', 'sibling');
+    const before = readFileSync(r.state, 'utf8');
     expect(deploy(r).status).toBe(1);
     expect(existsSync(r.sudoLog)).toBe(false);
+    expect(readFileSync(r.state, 'utf8')).toBe(before);
   });
 
   it('refuses an unresolved recorded commit', () => {
     const r = rig();
     writeFileSync(r.state, `DEPLOYED_SHA=${'a'.repeat(40)}\n`);
+    const before = readFileSync(r.state, 'utf8');
     expect(deploy(r).status).toBe(1);
     expect(existsSync(r.sudoLog)).toBe(false);
+    expect(readFileSync(r.state, 'utf8')).toBe(before);
   });
 
   it.each(['', 'PREVIOUS_SHA=\n', 'DEPLOYED_SHA=\n'])('admits a first deploy or empty baseline (%j)', (state) => {
@@ -135,8 +139,10 @@ describe('manual deploy ancestry admission', () => {
   it('refuses duplicate baseline records', () => {
     const r = rig();
     writeFileSync(r.state, `DEPLOYED_SHA=${r.base}\nDEPLOYED_SHA=${r.next}\n`);
+    const before = readFileSync(r.state, 'utf8');
     expect(deploy(r).status).toBe(1);
     expect(existsSync(r.sudoLog)).toBe(false);
+    expect(readFileSync(r.state, 'utf8')).toBe(before);
   });
 
   it.each([

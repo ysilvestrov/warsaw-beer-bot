@@ -439,7 +439,7 @@ observe_deployment() {
   [ -n "$DEPLOYED_SHA" ] || return 0
   local current previous kind commits c out pr labels count="unknown" pr_count="unknown" prs=() api_ok=1
   if ! current=$(git -C "$REPO" rev-parse --verify "${DEPLOYED_SHA}^{commit}" 2>/dev/null); then
-    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — recorded production (${DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping the previous observation; unattended deploys are blocked."
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — recorded production (${DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping the previous observation; unattended deploys are blocked. Recover the Git history or deploy and verify intended main, then follow deploy/README.md → Operator acknowledgement of a replacement baseline."
     return 1
   fi
   if [ -z "$LAST_SEEN_DEPLOYED_SHA" ]; then
@@ -447,7 +447,7 @@ observe_deployment() {
     write_state
   elif [ "$current" != "$LAST_SEEN_DEPLOYED_SHA" ]; then
     if ! previous=$(git -C "$REPO" rev-parse --verify "${LAST_SEEN_DEPLOYED_SHA}^{commit}" 2>/dev/null); then
-      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — previous observation (${LAST_SEEN_DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping it; unattended deploys are blocked."
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — previous observation (${LAST_SEEN_DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping it; unattended deploys are blocked. Recover the Git history or deploy and verify intended main, then follow deploy/README.md → Operator acknowledgement of a replacement baseline."
       return 1
     fi
     if ! git -C "$REPO" merge-base --is-ancestor "$previous" "$current"; then
@@ -504,7 +504,7 @@ report_regression_hold() {
     if [ "${#HOLDS[@]}" -gt 0 ]; then reasons=$(printf '\n• %s' "${HOLDS[@]}"); fi
   fi
   once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: production is HELD: observed production regression ${REGRESSION_FROM_SHA:0:7} → ${REGRESSION_TO_SHA:0:7}; currently ${DEPLOYED_SHA:0:7}. A deliberate rollback must not be overwritten automatically.${reasons}
-Deploy main by hand (bash deploy/deploy.sh; --force if histories diverge) to regain ${REGRESSION_FROM_SHA:0:7} and release this hold."
+Deploy main by hand (bash deploy/deploy.sh; --force if histories diverge) if it contains ${REGRESSION_FROM_SHA:0:7}. If main omits that commit, verify intended production and follow deploy/README.md → Operator acknowledgement of a replacement baseline."
 }
 
 # --- CI ---------------------------------------------------------------------------
@@ -759,6 +759,9 @@ resume_window() {
   if [ -n "$ROLLBACK_STARTED" ]; then
     # LAST_FAILED_SHA was recorded before the rollback began, so X is not
     # retried; this message is the only thing that is still owed.
+    # deploy.sh may already have recorded old before this tick died in the
+    # health check. That was our rollback, not a new external regression.
+    if [ "$DEPLOYED_SHA" = "$old" ]; then LAST_SEEN_DEPLOYED_SHA="$old"; fi
     clear_window
     write_state
     notify "🔥 ROLLBACK INTERRUPTED: the tick died while rolling ${x:0:7} back to ${old:0:7}. The bot and litestream may be STOPPED, and bot.db may be half-restored. Pre-deploy snapshot: ${pre} (or its -rollback-pre.db name if it was marked). Manual intervention required."
