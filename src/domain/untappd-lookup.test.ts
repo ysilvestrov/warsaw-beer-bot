@@ -3413,5 +3413,112 @@ describe('#664 numbered-series retry', () => {
       });
       expect(out.kind).toBe('not_found');
     });
+
+    it('not_found: non-finite input ABV (NaN) fails closed', async () => {
+      const search = fakeSearch(() => [sarabandaCand, palatumCand]);
+      const out = await lookupBeer({
+        brewery: 'Sarabanda & Palatum Brewery',
+        name: 'Wheat Love 11°',
+        abv: NaN,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('not_found: candidate with non-finite ABV (NaN) fails closed', async () => {
+      const c1: SearchResult = {
+        bid: 411,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Browar Sarabanda',
+        style: 'Wheat Beer',
+        abv: NaN,
+        global_rating: 3.65,
+        rating_count: 50,
+      };
+      const c2: SearchResult = {
+        bid: 412,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Palatum',
+        style: 'Wheat Beer',
+        abv: 4.5,
+        global_rating: 3.60,
+        rating_count: 50,
+      };
+      const search = fakeSearch(() => [c1, c2]);
+      const out = await lookupBeer({
+        brewery: 'Sarabanda & Palatum Brewery',
+        name: 'Wheat Love 11°',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('not_found: unrounded delta exceeding ABV_TOLERANCE (0.304) fails closed', async () => {
+      const c1: SearchResult = {
+        bid: 421,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Browar Sarabanda',
+        style: 'Wheat Beer',
+        abv: 4.804,
+        global_rating: 3.65,
+        rating_count: 50,
+      };
+      const c2: SearchResult = {
+        bid: 422,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Palatum',
+        style: 'Wheat Beer',
+        abv: 5.5,
+        global_rating: 3.60,
+        rating_count: 50,
+      };
+      const search = fakeSearch(() => [c1, c2]);
+      const out = await lookupBeer({
+        brewery: 'Sarabanda & Palatum Brewery',
+        name: 'Wheat Love 11°',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
+    it('not_found: more tied candidates than collaboration parts (pigeonhole) fails closed', async () => {
+      const c1: SearchResult = {
+        bid: 431,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Browar Sarabanda',
+        style: 'Wheat Beer',
+        abv: 4.5,
+        global_rating: 3.65,
+        rating_count: 50,
+      };
+      const c2: SearchResult = {
+        bid: 432,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Palatum',
+        style: 'Wheat Beer',
+        abv: 4.6,
+        global_rating: 3.60,
+        rating_count: 50,
+      };
+      const c3: SearchResult = {
+        bid: 433,
+        beer_name: 'Wheat Love',
+        brewery_name: 'Palatum',
+        style: 'Wheat Beer',
+        abv: 4.7,
+        global_rating: 3.60,
+        rating_count: 50,
+      };
+      const search = fakeSearch(() => [c1, c2, c3]);
+      const out = await lookupBeer({
+        brewery: 'Sarabanda & Palatum Brewery',
+        name: 'Wheat Love 11°',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
   });
 });

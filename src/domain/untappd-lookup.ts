@@ -346,7 +346,7 @@ function collabCoBrewerTiebreak(
   matches: ScoredCandidate[],
 ): SearchResult | null {
   const inputAbv = input.abv;
-  if (inputAbv == null) return null;
+  if (inputAbv == null || !Number.isFinite(inputAbv)) return null;
 
   const rawParts = input.brewery.split(BREWERY_COLLAB_SEP).map((p) => p.trim()).filter(Boolean);
   if (rawParts.length < 2) return null;
@@ -369,8 +369,12 @@ function collabCoBrewerTiebreak(
   const firstIdent = candIdentValue(top[0]);
   if (!top.every((r) => candIdentValue(r) === firstIdent)) return null;
 
-  // All candidates must have a known ABV
-  if (top.some((r) => r.abv == null)) return null;
+  // All candidates must have a known finite ABV
+  if (top.some((r) => r.abv == null || !Number.isFinite(r.abv))) return null;
+
+  // Pigeonhole principle & combinatorial bounds: distinct assignment is impossible
+  // if there are more tied candidates than collaboration parts, and cap search space.
+  if (top.length > collabParts.length || top.length > 5) return null;
 
   // Each candidate must strictly match a different collab part (injective assignment)
   const candidateParts = top.map((cand) => {
@@ -393,10 +397,10 @@ function collabCoBrewerTiebreak(
   };
   if (!canAssignDistinctParts(0)) return null;
 
-  // Calculate delta to input ABV for each candidate (rounded to 2 decimal places to prevent IEEE 754 float drift)
+  // Calculate delta to input ABV for each candidate
   const candidatesWithDelta = top.map((cand) => ({
     cand,
-    delta: Math.round(Math.abs((cand.abv as number) - inputAbv) * 100) / 100,
+    delta: Math.abs((cand.abv as number) - inputAbv),
   }));
 
   // Sort by delta ascending
@@ -405,8 +409,9 @@ function collabCoBrewerTiebreak(
   const secondBest = candidatesWithDelta[1];
 
   // Best candidate must be within ABV_TOLERANCE and strictly closer than second best
+  // (with epsilon tolerance for IEEE 754 float drift on equidistant values)
   if (best.delta > ABV_TOLERANCE) return null;
-  if (best.delta >= secondBest.delta) return null;
+  if (secondBest.delta - best.delta <= 1e-6) return null;
 
   return best.cand;
 }
