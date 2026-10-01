@@ -185,7 +185,8 @@ test('dailyStatus without a repo leaves out the report line', async () => {
 });
 
 test('buildStatusMessage: full message exact string', () => {
-  const out = buildStatusMessage(base, '2026-06-05 09:00');
+  const out = buildStatusMessage(base, '2026-06-05 09:00', null, null, null, null,
+    'Тести: 1 каталог потребує перевірки · диск: 30.00 GiB вільно · inode: 2 000 000 вільно');
   expect(out).toBe(
     [
       '🍺 Статус бота — 2026-06-05 09:00',
@@ -198,6 +199,7 @@ test('buildStatusMessage: full message exact string', () => {
       '• Печатки: 9 unidentifiable (7 переспостережено) · 29 not_a_beer (+0/7д) · 28 спростованих retire',
       '• Замок: 12 під замком · 3 розімкнено/7д · 2 вердиктів пережили фікс/7д · 4 unrescued (1 без негативного маркера/7д)',
       "• БД: 1 976 snapshot'ів / 29 459 кранів · 13.2 МБ",
+      '• Тести: 1 каталог потребує перевірки · диск: 30.00 GiB вільно · inode: 2 000 000 вільно',
       "• Користувачі: 31 профіль (24 прив'язано)",
       '• Розширення /match (вчора): 1 234 запитів · 312 анонім. · 47 210 пив',
       '• MCP /match (вчора): 87 запитів · 1 940 пив',

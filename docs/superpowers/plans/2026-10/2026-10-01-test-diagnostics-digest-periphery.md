@@ -90,3 +90,16 @@ Core commit `3ec8531` already passed 4755 tests and both typecheck commands befo
 - Whole-branch main-thread review checked approved scope, private/shared permissions, legacy notification state, unknown-versus-zero reporting, exact clock/bounds, independent alert/export failures, report retry/idempotency and the held rollout. No unresolved findings.
 - Primary checkout `tmp/install-test-diagnostics-digest.sh` contains the concrete post-merge operations and health/line verification. It has not been executed against production.
 - Independent Claude review and GitHub checks remain shipping gates; their results belong to the PR receipt.
+
+## Claude review disposition
+
+Claude reviewed `451b622` once and raised four findings:
+
+1. **Fixed:** reproduced the inventory truncation race with real temporary directories: listing sizes `[257, 256]`, 256 returned rows, no marker. Added a failing regression and used the same first listing for selecting entries and checking its limit. No test process lifecycle or cleanup changes.
+2. **Rejected:** inaccessible intermediate directories affect a nested `WBB_RESOURCE_SUMMARY_DIR` override. The override is the controlled installer-test seam, not a supported bot configuration; production's fixed `/var/tmp/wbb-resource-monitor` has an existing traversable parent. A separately configurable production export path and permission changes to arbitrary parents are outside this design.
+3. **Fixed:** added narrower-directory-mode cases and UID-mismatch coverage. UID simulation changes only the OS stat boundary; real file reads and reader validation remain in place. A mutation removing the UID comparison must fail this test.
+4. **Fixed:** the existing exact full-message assertion now includes the diagnostic line at its actual position in Стан, before the user/traffic rows and На кранах зараз.
+
+The final shipping marker is `Cross-review: claude @ 451b622 — 4 findings: 3 fixed, 1 rejected`. Re-run the full gate after these changes; do not run a second Claude review for this PR.
+
+Post-review gate completed: 4761 tests pass, one existing skip, both typecheck commands pass. The UID mutation failed with the exact expected reader assertion and the source was restored before this gate. A live temporary snapshot also passed the reader under the actual service user. Production cron and bot remain unchanged until the held rollout.

@@ -13,7 +13,9 @@ This change removes test-inventory notifications, including their recovery
 messages. Existing inode/disk warning, critical and recovery transitions keep
 their thresholds and delivery acknowledgement. It adds one line to `dailyStatus`.
 It does not implement cleanup, change the test supervisor, or repair PID namespace
-classification. PR #773 remains independent.
+classification. The bounded inventory helper must use one directory listing for
+both selecting entries and deciding truncation; test-launch and cleanup behavior
+are unchanged. PR #773 remains independent.
 
 ## Evidence obtained before planning
 
@@ -29,6 +31,10 @@ classification. PR #773 remains independent.
 - A temporary synthetic JSON owned by the operator, in a mode 0755 directory
   with a mode 0644 file, was read successfully as `warsaw-beer-bot`; the received
   contents matched exactly. The probe removed its temporary directory.
+- During cross-review, a controlled live filesystem probe reduced 257 directories
+  to 256 between the inventory helper's two listings. Its old implementation
+  returned 256 rows without a truncation marker, despite omitting an entry from
+  the first listing. Preserve the first listing's completeness evidence.
 - `dailyStatus` already provides the Warsaw morning window, successful-delivery
   marker and restart catch-up. Adding a line uses that existing delivery path.
 
