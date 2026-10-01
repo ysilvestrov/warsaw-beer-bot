@@ -30,7 +30,7 @@ export function parseArgs(argv: string[]): { ok: true; opts: Options } | { ok: f
       return { ok: false, error: `unknown argument "${flag}"` };
     }
     const value = argv[i + 1];
-    if (value === undefined || value.startsWith('--')) return { ok: false, error: `${flag} needs a value` };
+    if (value === undefined || value === '' || value.startsWith('--')) return { ok: false, error: `${flag} needs a value` };
     values[flag] = value;
     i++;
   }

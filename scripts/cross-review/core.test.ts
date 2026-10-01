@@ -26,6 +26,10 @@ describe('parseArgs', () => {
     expect(parseArgs(['--reviewer', '--base', 'x'])).toEqual({ ok: false, error: '--reviewer needs a value' });
     expect(parseArgs(['--reviewer', 'codex', '--model'])).toEqual({ ok: false, error: '--model needs a value' });
   });
+  test('an empty value is rejected, so --model "$UNSET" cannot drop the codex Sol pin', () => {
+    expect(parseArgs(['--reviewer', 'codex', '--model', ''])).toEqual({ ok: false, error: '--model needs a value' });
+    expect(parseArgs(['--reviewer', 'codex', '--base', ''])).toEqual({ ok: false, error: '--base needs a value' });
+  });
   test('an unknown flag is rejected', () => {
     expect(parseArgs(['--reviewer', 'codex', '--fast'])).toEqual({ ok: false, error: 'unknown argument "--fast"' });
   });
