@@ -161,14 +161,14 @@ describe('renderPrompt', () => {
 
 describe('buildReviewerCommand', () => {
   const base = { prompt: 'P', reportPath: '/t/r.md', tmpDir: '/t' };
-  test('codex: read-only sandbox, report via -o', () => {
+  test('codex: read-only sandbox, report via -o, Sol model by default', () => {
     expect(buildReviewerCommand({ ...base, reviewer: 'codex' })).toEqual({
       cmd: 'codex',
-      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', 'P'],
+      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', '-m', 'gpt-6.1-sol', 'P'],
       reportFromStdout: false,
     });
   });
-  test('codex: model passes through as -m', () => {
+  test('codex: an explicit model overrides the default', () => {
     expect(buildReviewerCommand({ ...base, reviewer: 'codex', model: 'gpt-5.5' }).args).toEqual(
       ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', '-m', 'gpt-5.5', 'P'],
     );

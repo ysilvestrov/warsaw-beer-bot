@@ -129,6 +129,10 @@ export function renderPrompt(
   });
 }
 
+// Codex is pinned to the Sol class: its CLI default moves with updates, and Astra costs far more
+// tokens for no better review (spec 2026-10-01). Claude keeps its CLI default.
+export const DEFAULT_MODEL: Partial<Record<Reviewer, string>> = { codex: 'gpt-6.1-sol' };
+
 export interface ReviewerCommand { cmd: string; args: string[]; reportFromStdout: boolean }
 
 // Read-only is enforced by the tool, not requested of the model (spec, probes P2/P3):
@@ -136,17 +140,18 @@ export interface ReviewerCommand { cmd: string; args: string[]; reportFromStdout
 export function buildReviewerCommand(p: {
   reviewer: Reviewer; model?: string; prompt: string; reportPath: string; tmpDir: string;
 }): ReviewerCommand {
+  const model = p.model ?? DEFAULT_MODEL[p.reviewer];
   if (p.reviewer === 'codex') {
     return {
       cmd: 'codex',
-      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', p.reportPath, ...(p.model ? ['-m', p.model] : []), p.prompt],
+      args: ['exec', '-s', 'read-only', '--ephemeral', '-o', p.reportPath, ...(model ? ['-m', model] : []), p.prompt],
       reportFromStdout: false,
     };
   }
   return {
     cmd: 'claude',
     args: ['-p', '--restricted', '--strict-mcp-config', '--tools', 'Read,Grep,Glob', '--add-dir', p.tmpDir,
-      ...(p.model ? ['--model', p.model] : []), '--', p.prompt],
+      ...(model ? ['--model', model] : []), '--', p.prompt],
     reportFromStdout: true,
   };
 }
