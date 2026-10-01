@@ -30,10 +30,10 @@
 Vitest requires the test supervisor to clean temporary caches. Run npm test -- <arguments> (from the package directory), or wbb-test <arguments> on the operator host.
 ```
 
-- [ ] Add a Python integration test to existing `TestRun`. For both root/extension and missing/empty marker cases, create a private fallback temp dir and a probe config importing that package's real config. Include a one-test typed fixture which writes a suite-execution sentinel. Remove `WBB_TEST_TMPDIR`/`WBB_TEST_RUN_ID` from the child environment; set the empty case explicitly. Run the real Vitest CLI with `--cache=false` and assert `returncode == 1`, the exact guard message, sentinel absence and `list(fallback.iterdir()) == []`. The intended red result is returncode 0 and a cache directory, not a missing executable.
-- [ ] Add a managed extension regression: run `npm test -- src/manifest.test.ts --cache=false` with a dedicated `WBB_TEST_RUNS_DIR` and fallback temp directory. Assert `returncode == 0`, that the named suite ran, empty managed base and empty fallback. Existing root real-transformation success/failure coverage stays intact.
-- [ ] Run the new direct test via `PYTHONPATH=scripts/ops python3 -B -m unittest test_test_run.TestRun.test_direct_vitest_requires_supervisor_before_workers` and observe red in both packages.
-- [ ] In each config, immediately after reading `WBB_TEST_TMPDIR`, add exactly:
+- [x] Add a Python integration test to existing `TestRun`. For both root/extension and missing/empty marker cases, create a private fallback temp dir and a probe config importing that package's real config. Include a one-test typed fixture which writes a suite-execution sentinel. Remove `WBB_TEST_TMPDIR`/`WBB_TEST_RUN_ID` from the child environment; set the empty case explicitly. Run the real Vitest CLI with `--cache=false` and assert `returncode == 1`, the exact guard message, sentinel absence and `list(fallback.iterdir()) == []`. The intended red result is returncode 0 and a cache directory, not a missing executable.
+- [x] Add a managed extension regression through the same Python supervisor with a root-installed Vitest CLI and a probe importing the actual extension config. Override environment/setup only to avoid unrelated UI dependencies in root-only CI. Assert `returncode == 0`, the observed payload belongs to the dedicated managed base, its root is removed, and both managed base and fallback are empty. Existing root real-transformation success/failure coverage stays intact.
+- [x] Run the new direct test via `PYTHONPATH=scripts/ops python3 -B -m unittest test_test_run.TestRun.test_direct_vitest_requires_supervisor_before_workers` and observe red in both packages.
+- [x] In each config, immediately after reading `WBB_TEST_TMPDIR`, add exactly:
 
 ```ts
 if (!testTmp) {
@@ -41,13 +41,23 @@ if (!testTmp) {
 }
 ```
 
-- [ ] Replace optional cache routing in each config with `cacheDir: join(testTmp, 'vite-cache')` and `fsModuleCachePath: join(testTmp, 'vitest-module-cache')`.
-- [ ] Run direct rejection, managed extension and existing root real-transformation success/failure regressions. All must pass.
-- [ ] Run `npm test` and `npm run typecheck` in root, and `npm test` plus `npm run typecheck` in extension. These include the Python integration bridge and nested custom-config children.
-- [ ] Review the whole core diff for startup ordering, inherited marker compatibility, deterministic assertions, no unmanaged fallback and no production changes; run `git diff --check`.
-- [ ] Commit configs and Python integration tests with mechanism-naming message `fix(test): reject unmanaged Vitest launches before workers start`.
+- [x] Replace optional cache routing in each config with `cacheDir: join(testTmp, 'vite-cache')` and `fsModuleCachePath: join(testTmp, 'vitest-module-cache')`.
+- [x] Run direct rejection, managed extension and existing root real-transformation success/failure regressions. All must pass.
+- [x] Run `npm test` and `npm run typecheck` in root, and `npm test` plus `npm run typecheck` in extension. These include the Python integration bridge and nested custom-config children.
+- [x] Review the whole core diff for startup ordering, inherited marker compatibility, deterministic assertions, no unmanaged fallback and no production changes; run `git diff --check`.
+- [x] Commit configs and Python integration tests with mechanism-naming message `fix(test): reject unmanaged Vitest launches before workers start`.
 
 ## Task 2: Core review checkpoint
 
-- [ ] Confirm all original design claims about rejection and managed cleanup are evidenced by live subprocess results, not optional marker semantics alone.
-- [ ] Record the core gate and review result here. Only then write the separate documentation/shipping plan. That plan covers `spec.md`, developer instructions, rebase, final gate, Claude cross-review, PR and GitHub checks. Historical cleanup evidence remains operational and no new historical deletion is authorized by this code plan.
+- [x] Confirm all original design claims about rejection and managed cleanup are evidenced by live subprocess results, not optional marker semantics alone.
+- [x] Record the core gate and review result here. Only then write the separate documentation/shipping plan. That plan covers `spec.md`, developer instructions, rebase, final gate, Claude cross-review, PR and GitHub checks. Historical cleanup evidence remains operational and no new historical deletion is authorized by this code plan.
+
+## Core review receipt — 2026-10-01
+
+- Real direct-launch regression was red in all four missing/empty marker and root/extension cases (successful unguarded suite). After the guard it is green with exact error, no execution sentinel and empty fallback.
+- Existing actual transformed-module success/failure cleanup regression and new managed extension-config regression pass.
+- The two new regressions also pass with extension/node_modules temporarily absent, matching root CI's dependency boundary.
+- Root gate: 4,712 passed, one existing skip; both root typechecks pass. Extension: 836 passed and typecheck passes.
+- Inventory after the full run is exactly empty.
+- Sequential whole-core review covered config startup ordering, inherited child context, root-only CI, scope and deterministic assertions. No retained findings. Guard uses the existing marker convention and makes no authentication/liveness claim.
+- No behavior beyond the approved design was added. Proceed to developer documentation and shipping plan.
