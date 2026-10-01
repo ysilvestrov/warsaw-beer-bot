@@ -34,3 +34,9 @@
 - [ ] Verify branch/remote/no existing matching PR, push and create the PR by default.
 - [ ] Wait for current-head GitHub checks and review, resolve technically valid feedback and verify any follow-up push. Do not merge on the user's behalf.
 - [ ] Record PR/evidence in #750. Keep the issue open for merge/checkout update and residual cache audit; preserve unmerged worktree and operational evidence.
+
+## Cross-review and final local gate — 2026-10-01
+
+Claude @ bcd72e0 raised one finding: the extension probe observed managed temp cleanup but did not prove its stated cache-routing claim. Accepted and fixed: it now observes a real typed module transformation inside the payload and asserts the exported Vite/module cache paths against the documented payload locations. Mutation deleting those paths fails; restored code passes. Repeated full root gate: 4,712 passed, one existing skip, both typechecks pass. Extension's unchanged configuration previously passed all 836 tests and its typecheck. Cross-review runs once per PR as required; the receipt is 1 finding fixed, 0 rejected.
+
+A separate read-only bounded operational audit found 161 residual source-confirmed caches (2,670 inodes, 82,231,296 allocated bytes), with a new exact manifest and fresh identity/digest verification. 281 roots lack repository provenance and remain outside that proposal. Neither set was deleted by this code work.

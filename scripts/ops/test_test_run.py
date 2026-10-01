@@ -335,13 +335,22 @@ it('must not execute outside the supervisor', () => {{
         fallback = self.root / 'fallback'
         fallback.mkdir()
         observations = self.root / 'observations.json'
+        cache_paths = self.root / 'cache-paths.json'
+        fixture = self.root / 'fixture.ts'
+        fixture.write_text("export const value: string = '750-extension-transformed-fixture';")
         test = self.root / 'probe.test.mjs'
         test.write_text(f'''
-import {{it}} from {str((project / 'node_modules/vitest/dist/index.js').as_uri())!r};
-import {{writeFileSync}} from 'node:fs';
+import {{it, expect}} from {str((project / 'node_modules/vitest/dist/index.js').as_uri())!r};
+import {{writeFileSync, readdirSync, statSync, readFileSync}} from 'node:fs';
 import {{tmpdir}} from 'node:os';
+import {{join}} from 'node:path';
+import {{value}} from './fixture.ts';
 it('managed extension probe', () => {{
-  writeFileSync({str(observations)!r}, JSON.stringify({{tmp: tmpdir()}}));
+  expect(value).toBe(['750-extension', 'transformed-fixture'].join('-'));
+  const matched = readdirSync(tmpdir(), {{recursive: true}}).map(name => join(tmpdir(), name))
+    .filter(path => statSync(path).isFile() && /[0-9a-f]{{40}}$/.test(path))
+    .filter(path => readFileSync(path, 'utf8').includes(['750-extension', 'transformed-fixture'].join('-')));
+  writeFileSync({str(observations)!r}, JSON.stringify({{tmp: tmpdir(), matched}}));
 }});
 ''')
         # Root CI installs only root dependencies. Exercise the extension's actual
@@ -349,6 +358,9 @@ it('managed extension probe', () => {{
         config = self.root / 'vitest.config.mjs'
         config.write_text(
             f'import config from {str(package / "vitest.config.ts")!r}; '
+            f'import {{writeFileSync}} from "node:fs"; '
+            f'writeFileSync({str(cache_paths)!r}, JSON.stringify({{'
+            f'vite:config.cacheDir, modules:config.test.fsModuleCachePath}})); '
             f'export default {{...config,test:{{...config.test,environment:"node",'
             f'setupFiles:[],include:[{str(test)!r}]}}}};')
         env = dict(os.environ, TMPDIR=str(fallback), TMP=str(fallback), TEMP=str(fallback),
@@ -360,8 +372,13 @@ it('managed extension probe', () => {{
              '--config', str(config), '--cache=false'],
             cwd=package, env=env, capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        payload = Path(json.loads(observations.read_text())['tmp'])
+        values = json.loads(observations.read_text())
+        payload = Path(values['tmp'])
         self.assertEqual(payload.parent.parent, self.base)
+        self.assertEqual(json.loads(cache_paths.read_text()), {
+            'vite': str(payload / 'vite-cache'), 'modules': str(payload / 'vitest-module-cache')})
+        self.assertEqual(len(values['matched']), 1, values)
+        self.assertEqual([Path(p).is_relative_to(payload) for p in values['matched']], [True])
         self.assertEqual(payload.parent.exists(), False)
         self.assertEqual(list(self.base.iterdir()), [])
         self.assertEqual(list(fallback.iterdir()), [])
