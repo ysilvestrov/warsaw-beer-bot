@@ -9,8 +9,9 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
-from test_run import start_time
+from test_run import inventory, start_time
 
 SCRIPT = Path(__file__).with_name('test_run.py')
 
@@ -32,6 +33,19 @@ def process_finished(pid):
 
 
 class TestRun(unittest.TestCase):
+    def test_inventory_retains_truncation_when_a_later_listing_shrinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            names = ['run-' + format(index, '032x') for index in range(257)]
+            # Controlled filesystem snapshots and process-audit boundary; the
+            # real inventory code must preserve the first listing's omission.
+            with patch('test_run.os.listdir', side_effect=[names, names[:-1]]), \
+                    patch('test_run.observed_processes', return_value=({}, 0)):
+                rows = inventory(Path(directory))
+            self.assertEqual(len(rows), 257)
+            self.assertEqual(rows[-1], {'name': '(inventory truncated)',
+                                       'status': 'uncertain_metadata',
+                                       'observed_processes': [], 'audit_errors': 0})
+
     def setUp(self):
         self.scratch = tempfile.TemporaryDirectory(prefix='supervisor-probe-')
         self.root = Path(self.scratch.name)

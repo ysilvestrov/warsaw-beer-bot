@@ -235,7 +235,8 @@ def inventory(base):
     records = []
     try:
         fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
-        for name in sorted(os.listdir(fd))[:256]:
+        names = sorted(os.listdir(fd))
+        for name in names[:256]:
             row = {'name': name, 'status': 'uncertain_metadata'}
             root_fd = lease_fd = None
             try:
@@ -282,7 +283,7 @@ def inventory(base):
                     if handle is not None:
                         os.close(handle)
             records.append(row)
-        if len(os.listdir(fd)) > 256:
+        if len(names) > 256:
             records.append({'name': '(inventory truncated)', 'status': 'uncertain_metadata'})
     finally:
         os.close(fd)

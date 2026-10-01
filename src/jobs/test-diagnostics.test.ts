@@ -1,8 +1,10 @@
 import { chmodSync, linkSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { readTestDiagnosticsLine } from './test-diagnostics';
 
 let directory: string;
@@ -89,10 +91,28 @@ test.each([0o600, 0o666])('refuses wrong snapshot permissions %i', (mode) => {
   expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
 });
 
-test('refuses a directory writable by other users', () => {
+test.each([0o777, 0o700, 0o750])('refuses wrong directory permissions %i', (mode) => {
   write(snapshot);
-  chmodSync(directory, 0o777);
+  chmodSync(directory, mode);
   expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
+});
+
+test('refuses inconsistent directory and file owners', () => {
+  write(snapshot);
+  const directoryInfo = fs.statSync(directory);
+  const fileInfo = fs.statSync(path);
+  // Creating a foreign-owned fixture requires root. Preserve real filesystem
+  // operations and change only the UID reported at the OS stat boundary.
+  const foreignInfo = Object.assign(Object.create(fileInfo) as fs.Stats, { uid: directoryInfo.uid + 1 });
+  const spy = vi.spyOn(fs, 'fstatSync')
+    .mockReturnValueOnce(directoryInfo).mockReturnValueOnce(foreignInfo);
+  syncBuiltinESMExports();
+  try {
+    expect(readTestDiagnosticsLine(now, path)).toBe(unavailable);
+  } finally {
+    spy.mockRestore();
+    syncBuiltinESMExports();
+  }
 });
 
 test('refuses a symlink snapshot', () => {
