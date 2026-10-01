@@ -108,7 +108,7 @@ def evaluate(state, sample):
     return result
 
 
-def atomic_state(fd, state):
+def atomic_state(fd, state, filename='state.json', mode=0o600):
     name = '.state-' + uuid.uuid4().hex
     handle = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
                      0o600, dir_fd=fd)
@@ -116,14 +116,42 @@ def atomic_state(fd, state):
         with os.fdopen(handle, 'w') as stream:
             json.dump(state, stream, allow_nan=False)
             stream.flush()
+            os.fchmod(stream.fileno(), mode)
             os.fsync(stream.fileno())
-        os.replace(name, 'state.json', src_dir_fd=fd, dst_dir_fd=fd)
+        os.replace(name, filename, src_dir_fd=fd, dst_dir_fd=fd)
         os.fsync(fd)
     finally:
         try:
             os.unlink(name, dir_fd=fd)
         except FileNotFoundError:
             pass
+
+
+def inventory_available(runs):
+    return runs is not None and all(
+        row['name'] != '(inventory truncated)' and not row.get('audit_errors', 0)
+        for row in runs)
+
+
+def publish_summary(directory, sample, runs):
+    validate_sample(sample)
+    available = inventory_available(runs)
+    summary = {'version': 1, 'timestamp': sample['timestamp'],
+               'inodes_free': sample['inodes_free'], 'bytes_available': sample['bytes_available'],
+               'runs_inventory_available': available,
+               'pending_runs': sum(row['status'] != 'active' for row in runs) if available else None}
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        for part in Path(directory).absolute().parts[1:]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o755:
+            raise ValueError('unsafe summary directory')
+        atomic_state(fd, summary, 'summary.json', 0o644)
+    finally:
+        os.close(fd)
 
 
 def read_state(fd):
@@ -149,7 +177,7 @@ def read_state(fd):
     return state
 
 
-def tick(state_dir, sample, notify, runs):
+def tick(state_dir, sample, notify, runs, summary_dir=None):
     _, fd = private_directory(state_dir)
     lock = None
     try:
@@ -162,18 +190,17 @@ def tick(state_dir, sample, notify, runs):
         except BlockingIOError:
             return {'skipped': 'already running'}
         state = evaluate(read_state(fd), sample)
-        state['runs_inventory_available'] = runs is not None
-        retained = state['announced']['runs'] if runs is None else sorted(
-            [{'name': row['name'], 'status': row['status']} for row in runs if row['status'] != 'active'],
-            key=lambda row: row['name'])
-        wanted = dict(state['levels'], runs=retained)
+        state['runs_inventory_available'] = inventory_available(runs)
+        wanted = dict(state['levels'], runs=[])
         atomic_state(fd, state)  # Evidence survives a failed external delivery.
+        if summary_dir is not None:
+            try:
+                publish_summary(summary_dir, sample, runs)
+            except (OSError, ValueError):
+                logging.getLogger('resource-monitor').error('diagnostic summary publication failed')
         announced = state['announced']
         changes = [f'{key}: {announced[key]} → {wanted[key]}' for key in ('inode', 'disk')
                    if wanted[key] != announced[key]]
-        if retained != announced['runs']:
-            names = ', '.join(row['name'] for row in retained[:10])
-            changes.append(f'test leftovers retained: {len(retained)} ({names})')
         if changes and notify is not None:
             message = ('wbb root filesystem\n' + '\n'.join(changes) +
                        f"\nfree inodes: {sample['inodes_free']:,}; disk: {sample['bytes_available']/GIB:.2f} GiB")
@@ -227,6 +254,7 @@ def main():
     parser.add_argument('--state-dir', type=Path,
                         default=Path.home() / '.local/state/wbb-resource-monitor')
     parser.add_argument('--runs-dir', type=Path, default=default_base())
+    parser.add_argument('--summary-dir', type=Path)
     parser.add_argument('--notify', choices=('telegram', 'none'), default='none')
     args = parser.parse_args()
     _, fd = private_directory(args.state_dir)
@@ -249,8 +277,9 @@ def main():
         except BlockingIOError:
             runs = None  # No false recovery from an incomplete concurrent snapshot.
         except (OSError, ValueError, SafetyError):
-            runs = [{'name': '(inventory unavailable)', 'status': 'uncertain_metadata'}]
-        result = tick(args.state_dir, collect(), notify if args.notify == 'telegram' else None, runs)
+            runs = None
+        result = tick(args.state_dir, collect(), notify if args.notify == 'telegram' else None,
+                      runs, args.summary_dir)
         print(json.dumps({key: result[key] for key in ('levels', 'forecast', 'runs_inventory_available', 'skipped') if key in result}))
         return 0
     except Exception as error:

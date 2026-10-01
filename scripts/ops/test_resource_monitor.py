@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError
 
+import resource_monitor
 from resource_monitor import evaluate, main, telegram, tick
 
 GIB = 1024**3
@@ -182,7 +183,7 @@ class ResourceMonitor(unittest.TestCase):
         self.assertEqual(transport.call_args.kwargs, {'timeout': 10})
         response.__enter__.return_value.read.assert_called_once_with(65536)
 
-    def test_crash_inventory_announces_changes_without_deleting(self):
+    def test_crash_inventory_appearance_and_disappearance_are_silent(self):
         with tempfile.TemporaryDirectory() as directory:
             messages = []
             active = [{'name': 'run-a', 'status': 'active'}]
@@ -190,20 +191,128 @@ class ResourceMonitor(unittest.TestCase):
             tick(Path(directory), sample(0), messages.append, active)
             tick(Path(directory), sample(300), messages.append, crashed)
             tick(Path(directory), sample(600), messages.append, crashed)
-            self.assertEqual(len(messages), 1)
-            self.assertIn('run-a', messages[0])
+            self.assertEqual(messages, [])
             tick(Path(directory), sample(900), messages.append, [])
-            self.assertEqual(len(messages), 2)
+            self.assertEqual(messages, [])
 
-    def test_busy_inventory_preserves_previous_leftovers_without_false_recovery(self):
+    def test_busy_inventory_is_unavailable_without_notification(self):
         with tempfile.TemporaryDirectory() as directory:
             messages = []
             crashed = [{'name': 'run-a', 'status': 'uncertain_current_boot'}]
             tick(Path(directory), sample(0), messages.append, crashed)
             state = tick(Path(directory), sample(300), messages.append, None)
-            self.assertEqual(len(messages), 1)
-            self.assertEqual(state['announced']['runs'], crashed)
+            self.assertEqual(messages, [])
             self.assertEqual(state['runs_inventory_available'], False)
+
+    def test_upgrade_does_not_send_recovery_for_old_announced_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prior = evaluate(None, sample())
+            prior['announced']['runs'] = [{'name': 'run-a', 'status': 'uncertain_current_boot'}]
+            Path(directory, 'state.json').write_text(json.dumps(prior))
+            messages = []
+            state = tick(Path(directory), sample(300), messages.append, [])
+            self.assertEqual(messages, [])
+            self.assertEqual(state['announced']['inode'], 'normal')
+            self.assertEqual(len(state['history']), 2)
+
+    def test_inventory_never_appears_in_real_resource_alert(self):
+        with tempfile.TemporaryDirectory() as directory:
+            messages = []
+            tick(Path(directory), sample(inodes_free=500_000), messages.append,
+                 [{'name': 'run-secret-name', 'status': 'uncertain_current_boot'}])
+            self.assertEqual(messages, ['wbb root filesystem\ninode: normal → critical\n'
+                                        'free inodes: 500,000; disk: 30.00 GiB'])
+
+    def test_shared_snapshot_exact_payload_and_readable_permissions(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory, 'state')
+            summary = Path(directory, 'summary')
+            summary.mkdir(mode=0o755)
+            messages = []
+            tick(state, sample(300), messages.append,
+                 [{'name': 'run-a', 'status': 'uncertain_current_boot'},
+                  {'name': 'run-b', 'status': 'active'}], summary)
+            self.assertEqual(json.loads((summary/'summary.json').read_text()), {
+                'version': 1, 'timestamp': 300, 'inodes_free': 2_000_000,
+                'bytes_available': 32_212_254_720,
+                'runs_inventory_available': True, 'pending_runs': 1})
+            self.assertEqual((summary/'summary.json').stat().st_mode & 0o777, 0o644)
+            self.assertEqual((state/'state.json').stat().st_mode & 0o777, 0o600)
+            self.assertEqual(messages, [])
+            self.assertEqual(sorted(p.name for p in summary.iterdir()), ['summary.json'])
+
+    def test_empty_inventory_exports_zero(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory, 'summary')
+            summary.mkdir(mode=0o755)
+            tick(Path(directory, 'state'), sample(), None, [], summary)
+            exported = json.loads((summary/'summary.json').read_text())
+            self.assertEqual(exported['pending_runs'], 0)
+            self.assertEqual(exported['runs_inventory_available'], True)
+
+    def test_incomplete_inventory_exports_unknown_instead_of_false_count(self):
+        for runs in [None,
+                     [{'name': '(inventory truncated)', 'status': 'uncertain_metadata'}],
+                     [{'name': 'run-a', 'status': 'active', 'audit_errors': 1}]]:
+            with self.subTest(runs=runs), tempfile.TemporaryDirectory() as directory:
+                summary = Path(directory, 'summary')
+                summary.mkdir(mode=0o755)
+                tick(Path(directory, 'state'), sample(), None, runs, summary)
+                exported = json.loads((summary/'summary.json').read_text())
+                self.assertEqual(exported['pending_runs'], None)
+                self.assertEqual(exported['runs_inventory_available'], False)
+
+    def test_export_precedes_alert_and_survives_transport_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory, 'summary')
+            summary.mkdir(mode=0o755)
+
+            def unavailable(_message):
+                self.assertEqual(json.loads((summary/'summary.json').read_text())['pending_runs'], 0)
+                raise RuntimeError('transport unavailable')
+
+            with self.assertRaisesRegex(RuntimeError, '^transport unavailable$'):
+                tick(Path(directory, 'state'), sample(inodes_free=500_000), unavailable, [], summary)
+            self.assertEqual(json.loads((summary/'summary.json').read_text())['inodes_free'], 500_000)
+            recorded = json.loads(Path(directory, 'state/state.json').read_text())
+            self.assertEqual(recorded['announced']['inode'], 'normal')
+
+    def test_unsafe_export_directory_cannot_prevent_resource_alert(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory, 'summary')
+            summary.mkdir(mode=0o777)
+            summary.chmod(0o777)
+            messages = []
+            with self.assertLogs('resource-monitor', level='ERROR'):
+                tick(Path(directory, 'state'), sample(inodes_free=500_000), messages.append, [], summary)
+            self.assertEqual(messages, ['wbb root filesystem\ninode: normal → critical\n'
+                                        'free inodes: 500,000; disk: 30.00 GiB'])
+            self.assertEqual(list(summary.iterdir()), [])
+
+    def test_symlink_export_directory_is_refused(self):
+        with tempfile.TemporaryDirectory() as directory:
+            real = Path(directory, 'real')
+            real.mkdir(mode=0o755)
+            link = Path(directory, 'summary')
+            link.symlink_to(real, target_is_directory=True)
+            with self.assertRaises(OSError):
+                resource_monitor.publish_summary(link, sample(), [])
+            self.assertEqual(list(real.iterdir()), [])
+
+    def test_inventory_error_in_main_is_unavailable_and_silent(self):
+        with tempfile.TemporaryDirectory() as directory:
+            summary = Path(directory, 'summary')
+            summary.mkdir(mode=0o755)
+            with patch('sys.argv', ['resource_monitor.py', '--state-dir', str(Path(directory, 'state')),
+                                   '--summary-dir', str(summary), '--notify', 'telegram']), \
+                    patch('resource_monitor.inventory', side_effect=OSError('audit failed')), \
+                    patch('resource_monitor.collect', return_value=sample()), \
+                    patch('resource_monitor.telegram') as send, patch('builtins.print'):
+                self.assertEqual(main(), 0)
+                send.assert_not_called()
+            exported = json.loads((summary/'summary.json').read_text())
+            self.assertEqual(exported['pending_runs'], None)
+            self.assertEqual(exported['runs_inventory_available'], False)
 
 
 if __name__ == '__main__':
