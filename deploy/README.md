@@ -113,6 +113,19 @@ sudo install -m 0440 -o root -g root \
 per step). It waits up to 30 s for the merge-deploy lock and refuses while a
 tick watches a rollback window.
 
+Before any privileged command, under that lock, it also checks that HEAD
+contains the recorded `DEPLOYED_SHA`. A backwards or divergent checkout, or
+a recorded commit missing from the checkout, refuses before touching `/opt`.
+Update the checkout first. A missing/empty baseline permits a first deploy;
+unreadable or duplicate baseline records refuse. This check uses local Git
+history and does not fetch `origin/main`.
+
+For a **deliberate rollback or recovery**, `bash deploy/deploy.sh --force`
+bypasses ancestry admission and logs both SHAs. Root refusal and locking
+still apply. This flag does not restore the database or make old code
+compatible with newer migrations: the automatic rollback restores its
+snapshot separately before using the flag.
+
 Subsequent deploys:
 
 ```bash
@@ -151,6 +164,7 @@ its own clone in `~/.local/share/wbb-autodeploy/repo` (never your checkout).
 
 All of these, checked in this order each tick:
 
+0. the observed production record has not regressed (below);
 1. production (`DEPLOYED_SHA`) is an ancestor of `main` (no downgrade), and
    something in the diff actually ships (`deploy/rsync-filter`, both sides);
 2. `main` has not moved for **10 minutes** (serial merges → one restart);
@@ -191,6 +205,9 @@ deployed. Nothing merges the two: **a human reconciles** the writes that exist
 only in `post` (the 🔥 message names the interval). R2 history also keeps the
 post state (`litestream restore -txid …`).
 
+The automatic rollback explicitly passes `--force` and records its own
+observation, so the next tick does not mistake it for a new manual rollback.
+
 After the window a deploy is settled; a later failure is an ordinary incident.
 
 Snapshots live in `/var/lib/warsaw-beer-bot/deploy-snapshots/`, owned by the
@@ -198,6 +215,30 @@ bot user: `<UTC>-<sha7>-pre.db` + `.sha256`. The newest 3 of settled deploys
 are kept. `*-rollback-pre.db` + `*-rollback-post/` (a rollback) and
 `*-unverified-pre.db` (a window nobody watched to its end) are **never**
 deleted by the machine.
+
+### Production moved backwards or diverged
+
+Design: `docs/superpowers/specs/2026-10/2026-10-01-767-768-deploy-regression-design.md`.
+Each tick remembers the last resolved `DEPLOYED_SHA` it observed. If the next
+record is an ancestor of that commit, it sends a separate **production went
+BACKWARDS** warning; unrelated histories say **production DIVERGED**. The
+warning names both SHAs and counts commits no longer reachable from the new
+record, plus distinct PRs returned for them (unknown if an API lookup fails).
+These counts describe Git history; they do not prove which features were lost.
+
+The tick **does not auto-redeploy** over that change: a deliberate rollback
+must be respected. It persists a recovery hold before sending the warning.
+The daily HELD message mentions the regression and any ordinary holds in the
+deployable range. Further merges and partial forward recovery cannot release
+it: production must contain the original pre-regression commit again. Deploy
+current main manually to recover; use `--force` if the histories diverge.
+
+A failed warning delivery remains pending for the next tick; after successful
+delivery it is not repeated on unchanged observations. A crash between sending
+and saving that success may repeat a message. A missing commit blocks assessment
+without erasing the prior observation. The first tick seeds observation without
+inventing history; changes between ticks and rollbacks before first observation
+may be invisible. Old copies of deploy.sh do not enforce the ancestry guard.
 
 ### Messages (Telegram, sent by the deployer, not the bot)
 
@@ -211,6 +252,7 @@ deleted by the machine.
 | 🔥 ROLLED BACK | code and DB went back to `pre` | reconcile `post` |
 | 🔥 ROLLBACK FAILED / INTERRUPTED | production state unknown | intervene now |
 | ⚠️ deploy lock held for N min | a stuck `deploy.sh` blocks every tick | `fuser -v ~/.local/state/wbb-autodeploy/lock` |
+| ⚠️ production went BACKWARDS / DIVERGED | observed deployed record lost ancestry; automatic deployments held | check whether deliberate; deploy current main manually to recover |
 | ⚠️ installed deployer is out of date | a merged fix is not live | `sudo bash deploy/install-autodeploy.sh` |
 
 ### State
@@ -220,6 +262,12 @@ deleted by the machine.
 exact commit), `MAIN_SEEN_*` (the quiet clock), `WINDOW_*` and
 `ROLLBACK_STARTED` (a window or rollback in progress — a tick that finds them
 finishes or reports it), and once-a-day markers `LAST_*_NOTICE`.
+
+`LAST_SEEN_DEPLOYED_SHA` records the last resolved deployed observation.
+`REGRESSION_FROM_SHA` keeps the original recovery point and
+`REGRESSION_TO_SHA` the most recent observed regression target. Manual
+`record-deployed.sh` preserves these keys; only the tick updates/clears them
+from its Git evidence. They are not proof of runtime health.
 
 `deploy.sh` and a tick exclude each other through the same lock: a manual
 deploy waits up to 30 s and refuses while a tick watches a window.
@@ -233,6 +281,10 @@ sudo systemctl daemon-reload
 
 Re-run after any merge that changes an installed copy; those merges are holds
 anyway, and the deployer waits (and says so daily) while its copy is stale.
+
+For #767/#768, update **every checkout used for manual deploys** to current
+main, then run the install above and `bash deploy/deploy.sh` from current main.
+Installing the tick cannot update an old manual script in another checkout.
 
 ### Emergency stop — no password required
 
