@@ -372,20 +372,31 @@ function collabCoBrewerTiebreak(
   // All candidates must have a known ABV
   if (top.some((r) => r.abv == null)) return null;
 
-  // Each candidate must strictly match a different collab part
-  const matchesPart = (cand: SearchResult, part: string): boolean => {
+  // Each candidate must strictly match a different collab part (injective assignment)
+  const candidateParts = top.map((cand) => {
     const aliases = breweryAliases(cand.brewery_name);
-    return breweryAliasesMatch(aliases, [part]);
-  };
-  const distinctMatchedParts = new Set(
-    top.map((cand) => collabParts.find((part) => matchesPart(cand, part))),
-  );
-  if (distinctMatchedParts.has(undefined) || distinctMatchedParts.size < top.length) return null;
+    return collabParts.filter((part) => breweryAliasesMatch(aliases, [part]));
+  });
+  if (candidateParts.some((parts) => parts.length === 0)) return null;
 
-  // Calculate delta to input ABV for each candidate
+  const usedParts = new Set<string>();
+  const canAssignDistinctParts = (idx: number): boolean => {
+    if (idx === top.length) return true;
+    for (const part of candidateParts[idx]) {
+      if (!usedParts.has(part)) {
+        usedParts.add(part);
+        if (canAssignDistinctParts(idx + 1)) return true;
+        usedParts.delete(part);
+      }
+    }
+    return false;
+  };
+  if (!canAssignDistinctParts(0)) return null;
+
+  // Calculate delta to input ABV for each candidate (rounded to 2 decimal places to prevent IEEE 754 float drift)
   const candidatesWithDelta = top.map((cand) => ({
     cand,
-    delta: Math.abs((cand.abv as number) - inputAbv),
+    delta: Math.round(Math.abs((cand.abv as number) - inputAbv) * 100) / 100,
   }));
 
   // Sort by delta ascending

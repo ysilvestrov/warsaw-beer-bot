@@ -72,7 +72,7 @@ The tie-break accepts a candidate only when **all** of the following conditions 
 5. **Known input and candidate ABVs:**
    The input ABV is known (`inputAbv != null`), and each tied candidate has a known non-null ABV.
 6. **Strictly closer ABV within tolerance:**
-   Exactly one candidate's ABV is within `ABV_TOLERANCE` of the input ABV (`|cand.abv - inputAbv| <= ABV_TOLERANCE`), AND that candidate's ABV distance to `inputAbv` is strictly smaller than every other candidate's distance:
+   The closest candidate's ABV is within `ABV_TOLERANCE` of the input ABV (`|cand.abv - inputAbv| <= ABV_TOLERANCE`), AND that candidate's ABV distance to `inputAbv` is strictly smaller than every other candidate's distance:
    `|cand_winner.abv - inputAbv| < |cand_other.abv - inputAbv|`.
 7. **Unique winning candidate:**
    Exactly one distinct `bid` satisfies all conditions.
