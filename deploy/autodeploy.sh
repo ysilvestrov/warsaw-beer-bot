@@ -191,6 +191,9 @@ rm -f "$STATE_DIR/lock-busy-since"
 # --- state ----------------------------------------------------------------------
 DEPLOYED_SHA=""
 PREVIOUS_SHA=""
+LAST_SEEN_DEPLOYED_SHA=""
+REGRESSION_FROM_SHA=""
+REGRESSION_TO_SHA=""
 LAST_FAILED_SHA=""
 MAIN_SEEN_SHA=""
 MAIN_SEEN_S=""
@@ -217,7 +220,8 @@ if [ -f "$STATE" ]; then . "$STATE"; fi
 # #497, kept: every key is carried from a shell variable, so a caller changes
 # one by ASSIGNING it, never by passing it. Keys not listed here — the old
 # DRIFT_SINCE / LAST_DRIFT_NOTICE — are dropped by the first write.
-STATE_KEYS=(LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE
+STATE_KEYS=(LAST_SEEN_DEPLOYED_SHA REGRESSION_FROM_SHA REGRESSION_TO_SHA
+  LAST_FAILED_SHA MAIN_SEEN_SHA MAIN_SEEN_S LAST_CI_NOTICE_SHA LAST_HOLD_NOTICE LAST_STALE_NOTICE LAST_ASSESS_NOTICE
   WINDOW_SHA WINDOW_OLD WINDOW_PRE WINDOW_PRE_T WINDOW_START ROLLBACK_STARTED)
 write_state() {
   local k
@@ -428,6 +432,81 @@ scan_range() {
   done <<< "$commits"
 }
 
+# #768: observe the recorded deployment, never infer runtime health from it.
+# A durable recovery fence survives new main heads and partial recovery.
+# Unlike daily notices, a failed transition notification stays pending.
+observe_deployment() {
+  [ -n "$DEPLOYED_SHA" ] || return 0
+  local current previous kind commits c out pr labels count="unknown" pr_count="unknown" prs=() api_ok=1
+  if ! current=$(git -C "$REPO" rev-parse --verify "${DEPLOYED_SHA}^{commit}" 2>/dev/null); then
+    once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — recorded production (${DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping the previous observation; unattended deploys are blocked."
+    return 1
+  fi
+  if [ -z "$LAST_SEEN_DEPLOYED_SHA" ]; then
+    LAST_SEEN_DEPLOYED_SHA="$current"
+    write_state
+  elif [ "$current" != "$LAST_SEEN_DEPLOYED_SHA" ]; then
+    if ! previous=$(git -C "$REPO" rev-parse --verify "${LAST_SEEN_DEPLOYED_SHA}^{commit}" 2>/dev/null); then
+      once_a_day LAST_ASSESS_NOTICE "⚠️ merge-deploy: cannot assess the deployed transition — previous observation (${LAST_SEEN_DEPLOYED_SHA:0:7}) is not a locally available commit. Keeping it; unattended deploys are blocked."
+      return 1
+    fi
+    if ! git -C "$REPO" merge-base --is-ancestor "$previous" "$current"; then
+      kind="DIVERGED"
+      if git -C "$REPO" merge-base --is-ancestor "$current" "$previous"; then
+        kind="went BACKWARDS"
+      fi
+      REGRESSION_FROM_SHA="${REGRESSION_FROM_SHA:-$previous}"
+      REGRESSION_TO_SHA="$current"
+      LAST_HOLD_NOTICE=""
+      # Persist the brake before GitHub or Telegram can fail.
+      write_state
+      if commits=$(git -C "$REPO" rev-list "${current}..${previous}" 2>/dev/null); then
+        count=0
+        while IFS= read -r c; do
+          [ -n "$c" ] || continue
+          count=$(( count + 1 ))
+          if ! out=$("$PR_LABELS_CMD" "$c" 2>/dev/null); then
+            api_ok=0
+            continue
+          fi
+          while IFS=$'\t' read -r pr labels; do
+            if [ -n "$pr" ]; then add_unique prs "$pr"; fi
+          done <<< "$out"
+        done <<< "$commits"
+        if [ "$api_ok" -eq 1 ]; then pr_count=${#prs[@]}; fi
+      fi
+      # This message is bounded (only short SHAs, counts and fixed prose).
+      # notify() intentionally swallows failures for other callers; here a
+      # successful send is required before advancing the observation.
+      if ! "$NOTIFY_CMD" "⚠️ merge-deploy: production ${kind}: ${previous:0:7} → ${current:0:7} (${count} commits, ${pr_count} PRs no longer reachable) — was this a deliberate rollback? Unattended deploys are HELD. Deploy main by hand to recover."; then
+        echo "WARNING: production regression notification failed; will retry next tick."
+        return 1
+      fi
+    fi
+    LAST_SEEN_DEPLOYED_SHA="$current"
+    write_state
+  fi
+  if [ -n "$REGRESSION_FROM_SHA" ] \
+     && git -C "$REPO" merge-base --is-ancestor "$REGRESSION_FROM_SHA" "$current"; then
+    REGRESSION_FROM_SHA=""
+    REGRESSION_TO_SHA=""
+    LAST_HOLD_NOTICE=""
+    write_state
+  fi
+}
+
+report_regression_hold() {
+  local reasons=""
+  # Divergent production has no ordinary deployable range; the regression
+  # itself still holds. Where the range exists, keep its other hold reasons.
+  if git -C "$REPO" merge-base --is-ancestor "$DEPLOYED_SHA" "$X"; then
+    scan_range "$X"
+    if [ "${#HOLDS[@]}" -gt 0 ]; then reasons=$(printf '\n• %s' "${HOLDS[@]}"); fi
+  fi
+  once_a_day LAST_HOLD_NOTICE "⏸ merge-deploy: production is HELD: observed production regression ${REGRESSION_FROM_SHA:0:7} → ${REGRESSION_TO_SHA:0:7}; currently ${DEPLOYED_SHA:0:7}. A deliberate rollback must not be overwritten automatically.${reasons}
+Deploy main by hand (bash deploy/deploy.sh; --force if histories diverge) to regain ${REGRESSION_FROM_SHA:0:7} and release this hold."
+}
+
 # --- CI ---------------------------------------------------------------------------
 # PASS | WAIT | FAIL <name=conclusion ...>. Non-zero = could not read.
 # The required `ci` must be present AND successful; its absence is WAIT.
@@ -520,6 +599,7 @@ settle() {
   "$PRUNE_CMD" || echo "WARNING: snapshot pruning failed"
   PREVIOUS_SHA="$2"
   DEPLOYED_SHA="$1"
+  LAST_SEEN_DEPLOYED_SHA="$1"
   clear_window
   write_state
   notify "✅ merge-deploy ${1:0:7} is live and settled${prs:+ — $prs}."
@@ -533,6 +613,7 @@ unverified() {
   marked=$("$MARK_UNVERIFIED_CMD" "$pre" 2>&1) || marked="NOT marked (${marked}) — prune may delete ${pre}"
   PREVIOUS_SHA="$old"
   DEPLOYED_SHA="$x"
+  LAST_SEEN_DEPLOYED_SHA="$x"
   clear_window
   write_state
   notify "⚠️ merge-deploy ${x:0:7} is live but UNVERIFIED: ${reason}. Nothing was rolled back.
@@ -578,6 +659,7 @@ roll_back() {
   ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" --force ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
   wait_healthy "$PORT" "$STARTUP_S" || rollback_failed "health after the rollback" "$marked" "$post"
   DEPLOYED_SHA="$old"
+  LAST_SEEN_DEPLOYED_SHA="$old"
   clear_window
   write_state
   notify "🔥 merge-deploy ROLLED BACK ${x:0:7} → ${old:0:7}, code AND database.
@@ -649,6 +731,7 @@ $out"
   fi
   # deploy.sh recorded X; say so here too, or the next write would undo it.
   DEPLOYED_SHA="$x"
+  LAST_SEEN_DEPLOYED_SHA="$x"
   WINDOW_START=$(now)
   write_state
   if ! wait_healthy "$PORT" "$STARTUP_S"; then
@@ -720,6 +803,12 @@ fi
 
 X=$(git -C "$REPO" rev-parse origin/main)
 NOW=$(now)
+
+observe_deployment || exit 0
+if [ -n "$REGRESSION_FROM_SHA" ]; then
+  report_regression_hold
+  exit 0
+fi
 
 if [ -z "$DEPLOYED_SHA" ]; then
   once_a_day LAST_ASSESS_NOTICE "⛔ merge-deploy: no recorded baseline. Deploy once by hand (bash deploy/deploy.sh), then this becomes automatic."

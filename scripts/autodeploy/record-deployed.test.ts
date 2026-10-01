@@ -46,7 +46,7 @@ describe('record-deployed.sh', () => {
     run(home, 'first');
     writeFileSync(
       p,
-      'DEPLOYED_SHA=first\nPREVIOUS_SHA=older\nLAST_FAILED_SHA=badtag\nLAST_DRIFT_NOTICE=2026-08-18\n',
+      'DEPLOYED_SHA=first\nPREVIOUS_SHA=older\nLAST_FAILED_SHA=badtag\nLAST_DRIFT_NOTICE=2026-08-18\nLAST_SEEN_DEPLOYED_SHA=observed\nREGRESSION_FROM_SHA=observed\nREGRESSION_TO_SHA=regressed\n',
     );
     run(home, 'second');
     const out = readFileSync(p, 'utf8');
@@ -54,6 +54,9 @@ describe('record-deployed.sh', () => {
     expect(out).toContain('PREVIOUS_SHA=older');
     expect(out).toContain('LAST_FAILED_SHA=badtag');
     expect(out).toContain('LAST_DRIFT_NOTICE=2026-08-18');
+    expect(out).toContain('LAST_SEEN_DEPLOYED_SHA=observed\n');
+    expect(out).toContain('REGRESSION_FROM_SHA=observed\n');
+    expect(out).toContain('REGRESSION_TO_SHA=regressed\n');
     // Exactly one, not an accumulating pile.
     expect(out.match(/^DEPLOYED_SHA=/gm)).toHaveLength(1);
   });
