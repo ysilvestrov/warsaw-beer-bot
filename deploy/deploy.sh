@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+FORCE=0
+if [ "$#" -eq 1 ] && [ "$1" = --force ]; then
+  FORCE=1
+elif [ "$#" -ne 0 ]; then
+  echo "ERROR: usage: bash deploy/deploy.sh [--force]" >&2
+  exit 1
+fi
+
 # Run as the operator. As root, HOME=/root: another lock (R4 would not hold)
 # and another state file (record-deployed would write a baseline nobody reads).
 if [ "$(id -u)" -eq 0 ]; then
@@ -13,12 +21,40 @@ fi
 # window, a manual deploy here would be undone by that tick's rollback (code
 # AND database). The tick passes WBB_TICK_HOLDS_LOCK=1 to the deploy.sh it
 # runs itself, because it already holds the lock.
+LOCK_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
 if [ -z "${WBB_TICK_HOLDS_LOCK:-}" ]; then
-  LOCK_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/wbb-autodeploy"
   mkdir -p "$LOCK_DIR"
   exec 8>"$LOCK_DIR/lock"
   if ! flock -w "${WBB_LOCK_WAIT_S:-30}" 8; then
     echo "ERROR: a merge-deploy tick holds $LOCK_DIR/lock — it is probably watching a rollback window (up to ~12 min after its deploy). Retry when it ends. 'touch $LOCK_DIR/PAUSED' stops the NEXT tick, not the running one." >&2
+    exit 1
+  fi
+fi
+
+# #767: the lock also covers the admission check, so the baseline cannot
+# change between checking it and copying the tree. Read only this key; do
+# not source the state and let its other variables override this script.
+RECORDED_SHA=""
+STATE="$LOCK_DIR/state.env"
+if [ -e "$STATE" ]; then
+  if [ ! -f "$STATE" ] || ! RECORDED_SHA=$(awk '
+    /^DEPLOYED_SHA=/ { n++; value=substr($0, 14) }
+    END { if (n > 1) exit 1; print value }
+  ' "$STATE"); then
+    echo "ERROR: cannot read a single deployed baseline from $STATE — refusing before touching production." >&2
+    exit 1
+  fi
+fi
+TARGET_SHA=$(git rev-parse --verify 'HEAD^{commit}') || {
+  echo "ERROR: cannot resolve HEAD — run deploy.sh from a Git checkout." >&2
+  exit 1
+}
+if [ "$FORCE" -eq 1 ]; then
+  echo "WARNING: FORCED deployment: ${RECORDED_SHA:-unknown} -> $TARGET_SHA (--force bypasses ancestry admission)." >&2
+elif [ -n "$RECORDED_SHA" ]; then
+  if ! git rev-parse --verify "${RECORDED_SHA}^{commit}" >/dev/null 2>&1 \
+     || ! git merge-base --is-ancestor "$RECORDED_SHA" "$TARGET_SHA"; then
+    echo "ERROR: HEAD ($TARGET_SHA) does not contain recorded production ($RECORDED_SHA), or its commit is unavailable. Refusing before touching production. Update this checkout; use --force only for a deliberate rollback/recovery." >&2
     exit 1
   fi
 fi
