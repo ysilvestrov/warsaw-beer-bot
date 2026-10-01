@@ -7,23 +7,29 @@ import fcntl, hashlib, os, pathlib, shlex, stat, subprocess, sys, tempfile
 
 repo = pathlib.Path(sys.argv[1])
 home = pathlib.Path(os.environ.get('WBB_OPS_HOME', str(pathlib.Path.home()))).absolute()
+summary = pathlib.Path(os.environ.get('WBB_RESOURCE_SUMMARY_DIR', '/var/tmp/wbb-resource-monitor')).absolute()
 crontab = os.environ.get('WBB_CRONTAB', '/usr/bin/crontab')
 marker = '# Managed by warsaw-beer-bot resource monitor installer'
 begin, end = '# BEGIN wbb-resource-monitor', '# END wbb-resource-monitor'
 
-def ensure(path, private=False):
+def ensure(path, private=False, mode=None):
     fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
     try:
-        for part in path.parts[1:]:
+        parts = path.parts[1:]
+        for index, part in enumerate(parts):
             try:
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
             except FileNotFoundError:
                 os.mkdir(part, 0o700, dir_fd=fd)
                 child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                if index == len(parts)-1 and mode is not None:
+                    os.fchmod(child, mode)
             os.close(fd)
             fd = child
         info = os.fstat(fd)
-        if info.st_uid != os.getuid() or (private and stat.S_IMODE(info.st_mode) != 0o700):
+        expected_mode = 0o700 if private else mode
+        if (info.st_uid != os.getuid() or
+                (expected_mode is not None and stat.S_IMODE(info.st_mode) != expected_mode)):
             raise RuntimeError('operator directory ownership/mode mismatch')
     finally:
         os.close(fd)
@@ -52,12 +58,13 @@ def write(path, data, mode=0o600):
             os.unlink(name)
 
 try:
-    if '\n' in str(home) or '%' in str(home):
+    if any('\n' in str(path) or '%' in str(path) for path in (home, summary)):
         raise RuntimeError('unsupported path characters for cron')
     state = home / '.local/state/wbb-resource-monitor'
     tools = home / '.local/lib/wbb-ops'
     binaries = home / '.local/bin'
     ensure(state, private=True)
+    ensure(summary, mode=0o755)
     ensure(tools, private=True)
     ensure(binaries)
     lock = os.open(state/'install.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
@@ -101,6 +108,7 @@ try:
     command = ['/usr/bin/timeout', '60s', '/usr/bin/nice', '-n', '19', '/usr/bin/ionice', '-c', '3',
                '/usr/bin/python3', '-B', str(installed/'resource_monitor.py'),
                '--state-dir', str(state), '--runs-dir', f'/tmp/wbb-test-runs-{os.getuid()}',
+               '--summary-dir', str(summary),
                '--notify', 'telegram']
     block = begin + '\n*/5 * * * * ' + shlex.join(command) + ' >/dev/null 2>&1\n' + end + '\n'
     replacement = unrelated + ('' if not unrelated or unrelated.endswith('\n') else '\n') + block
@@ -119,7 +127,7 @@ try:
             raise RuntimeError('crontab installation failed')
     finally:
         os.unlink(proposal)
-    print(f'Installed operator tools: {installed}; five-minute cron and {wrapper}')
+    print(f'Installed operator tools: {installed}; five-minute cron and {wrapper}; summary: {summary}/summary.json')
 except (OSError, RuntimeError) as error:
     reason = str(error) if isinstance(error, RuntimeError) else type(error).__name__
     print(f'Install refused: {reason}', file=sys.stderr)

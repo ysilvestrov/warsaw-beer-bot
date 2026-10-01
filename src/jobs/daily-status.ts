@@ -8,6 +8,7 @@ import { warsawDateAndHour } from '../domain/warsaw-time';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
 import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
+import { readTestDiagnosticsLine } from './test-diagnostics';
 
 const group = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 
@@ -33,6 +34,7 @@ export function buildStatusMessage(
   triageLine?: string | null, saturatedLine?: string | null,
   withheldLine?: string | null,
   bugReportLine?: string | null,
+  testDiagnosticsLine?: string | null,
 ): string {
   const matchPct = m.beersTotal > 0 ? Math.round((m.beersMatched / m.beersTotal) * 100) : 0;
   const scrapeLine = m.lastScrapeHoursAgo === null
@@ -58,6 +60,7 @@ export function buildStatusMessage(
     ...(withheldLine ? [`• ${withheldLine}`] : []),
     ...(bugReportLine ? [`• ${bugReportLine}`] : []),
     `• БД: ${group(m.snapshots)} snapshot'ів / ${group(m.taps)} кранів${sizeSuffix}`,
+    ...(testDiagnosticsLine ? [`• ${testDiagnosticsLine}`] : []),
     `• Користувачі: ${group(m.usersTotal)} профіль (${group(m.usersLinked)} прив'язано)`,
     `• Розширення /match (вчора): ${group(m.extMatchRequests)} запитів · ${group(m.extMatchAnon)} анонім. · ${group(m.extMatchBeers)} пив`,
     `• MCP /match (вчора): ${group(m.mcpMatchRequests)} запитів · ${group(m.mcpMatchBeers)} пив`,
@@ -101,6 +104,7 @@ export interface DailyStatusDeps {
   notifyAdmin?: (msg: string) => Promise<void>;
   now?: () => Date;
   repo?: string;
+  testDiagnosticsPath?: string;
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
@@ -172,8 +176,9 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
       paused, deps.repo,
     );
   }
+  const testDiagnosticsLine = readTestDiagnosticsLine(now, deps.testDiagnosticsPath);
   const text = buildStatusMessage(metrics, warsawStamp(now), triageLine, saturatedLine, withheldLine,
-    bugReportLine);
+    bugReportLine, testDiagnosticsLine);
   try {
     await notifyAdmin(text);
     setJobState(db, DAILY_STATUS_KEY, dateKey);
