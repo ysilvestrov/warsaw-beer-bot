@@ -383,19 +383,23 @@ function collabCoBrewerTiebreak(
   });
   if (candidateParts.some((parts) => parts.length === 0)) return null;
 
-  const usedParts = new Set<string>();
-  const canAssignDistinctParts = (idx: number): boolean => {
-    if (idx === top.length) return true;
-    for (const part of candidateParts[idx]) {
-      if (!usedParts.has(part)) {
-        usedParts.add(part);
-        if (canAssignDistinctParts(idx + 1)) return true;
-        usedParts.delete(part);
+  // Injective bipartite assignment via polynomial augmenting path (O(V * E))
+  const partOwner = new Map<string, number>();
+  const canAssignPart = (candIdx: number, visited: Set<string>): boolean => {
+    for (const part of candidateParts[candIdx]) {
+      if (visited.has(part)) continue;
+      visited.add(part);
+      const owner = partOwner.get(part);
+      if (owner === undefined || canAssignPart(owner, visited)) {
+        partOwner.set(part, candIdx);
+        return true;
       }
     }
     return false;
   };
-  if (!canAssignDistinctParts(0)) return null;
+  for (let i = 0; i < top.length; i++) {
+    if (!canAssignPart(i, new Set<string>())) return null;
+  }
 
   // Calculate delta to input ABV for each candidate
   const candidatesWithDelta = top.map((cand) => ({
