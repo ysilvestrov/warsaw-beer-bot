@@ -1,4 +1,5 @@
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 
@@ -25,7 +26,7 @@ function pendingWords(count: number): string {
 
 // Linux operator telemetry only. Pin the opened directory while reading its
 // atomically replaced file, and treat every missing/invalid input as unknown.
-export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH): string {
+export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH, trustedUid?: number): string {
   let directory: number | undefined;
   let file: number | undefined;
   try {
@@ -37,6 +38,12 @@ export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH): string 
     file = openSync(`/proc/self/fd/${directory}/${basename(path)}`,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const info = fstatSync(file);
+    // The operator account is the same ysi account pinned in deploy/sudoers.d.
+    // Resolve its UID through the system account database, never from the export.
+    const operatorUid = trustedUid ?? Number(execFileSync('/usr/bin/id', ['-u', 'ysi'], {
+      encoding: 'utf8', timeout: 1_000, maxBuffer: 64, stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim());
+    if (!Number.isSafeInteger(operatorUid) || operatorUid < 0 || dirInfo.uid !== operatorUid) return UNAVAILABLE;
     if (!info.isFile() || info.uid !== dirInfo.uid || info.nlink !== 1
       || (info.mode & 0o777) !== 0o644 || info.size > MAX_BYTES) return UNAVAILABLE;
     const buffer = Buffer.alloc(MAX_BYTES);
@@ -55,7 +62,13 @@ export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH): string 
   } catch {
     return UNAVAILABLE;
   } finally {
-    if (file !== undefined) closeSync(file);
-    if (directory !== undefined) closeSync(directory);
+    let closeFailed = false;
+    for (const fd of [file, directory]) {
+      if (fd !== undefined) {
+        try { closeSync(fd); }
+        catch { closeFailed = true; }
+      }
+    }
+    if (closeFailed) return UNAVAILABLE;
   }
 }
