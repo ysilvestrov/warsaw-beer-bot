@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'vitest';
-import { parseArgs, isNestedRun, preflight, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand } from './core';
+import { parseArgs, isNestedRun, preflight, classifyResult, reviewerErrorLine, markerReason, reportText, spawnOutcome, runDirPrefix, runArtifacts, renderPrompt, buildReviewerCommand, DEFAULT_MODEL } from './core';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -171,6 +171,11 @@ describe('buildReviewerCommand', () => {
       args: ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', '-m', 'gpt-6.1-sol', 'P'],
       reportFromStdout: false,
     });
+  });
+  test('codex: an empty model counts as absent, so the default pin still applies', () => {
+    expect(buildReviewerCommand({ ...base, reviewer: 'codex', model: '' }).args).toEqual(
+      ['exec', '-s', 'read-only', '--ephemeral', '-o', '/t/r.md', '-m', DEFAULT_MODEL.codex, 'P'],
+    );
   });
   test('codex: an explicit model overrides the default', () => {
     expect(buildReviewerCommand({ ...base, reviewer: 'codex', model: 'gpt-5.5' }).args).toEqual(
