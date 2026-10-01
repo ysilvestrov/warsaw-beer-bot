@@ -24,6 +24,7 @@ class InstallMonitor(unittest.TestCase):
                              'else:p.write_text(Path(sys.argv[1]).read_text())\n')
         self.stub.chmod(0o700)
         self.env = dict(os.environ, WBB_OPS_HOME=str(self.home), WBB_CRONTAB=str(self.stub),
+                        WBB_RESOURCE_SUMMARY_DIR=str(self.root/'summary'),
                         TEST_CRONTAB_FILE=str(self.table))
 
     def tearDown(self):
@@ -45,7 +46,8 @@ class InstallMonitor(unittest.TestCase):
         self.assertEqual(table, self.original + '# BEGIN wbb-resource-monitor\n' +
                          f'*/5 * * * * /usr/bin/timeout 60s /usr/bin/nice -n 19 /usr/bin/ionice -c 3 '
                          f'/usr/bin/python3 -B {copies[0]} --state-dir {state} '
-                         f'--runs-dir /tmp/wbb-test-runs-{os.getuid()} --notify telegram >/dev/null 2>&1\n'
+                         f'--runs-dir /tmp/wbb-test-runs-{os.getuid()} '
+                         f'--summary-dir {self.root}/summary --notify telegram >/dev/null 2>&1\n'
                          '# END wbb-resource-monitor\n')
         self.assertEqual(copies[0].read_bytes(),
                          (INSTALLER.parents[1]/'scripts/ops/resource_monitor.py').read_bytes())
@@ -56,6 +58,37 @@ class InstallMonitor(unittest.TestCase):
                          f'exec /usr/bin/python3 -B {copies[0].parent}/test_run.py '
                          '-- node ./node_modules/vitest/vitest.mjs run "$@"\n')
         self.assertEqual((state/'crontab.before-install').read_text(), self.original)
+        self.assertEqual((self.root/'summary').stat().st_mode & 0o777, 0o755)
+        self.assertEqual(state.stat().st_mode & 0o777, 0o700)
+
+    def test_repeat_install_keeps_private_monitor_evidence(self):
+        first = self.install()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        state = self.home/'.local/state/wbb-resource-monitor/state.json'
+        state.write_bytes(b'private monitor history and delivery acknowledgement')
+        state.chmod(0o600)
+        second = self.install()
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual(state.read_bytes(), b'private monitor history and delivery acknowledgement')
+        self.assertEqual(state.stat().st_mode & 0o777, 0o600)
+
+    def test_symlink_export_directory_refuses_without_changing_cron(self):
+        target = self.root/'target'
+        target.mkdir(mode=0o755)
+        (self.root/'summary').symlink_to(target, target_is_directory=True)
+        result = self.install()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.table.read_text(), self.original)
+        self.assertEqual(list(target.iterdir()), [])
+
+    def test_writable_export_directory_is_not_repaired_or_used(self):
+        summary = self.root/'summary'
+        summary.mkdir(mode=0o777)
+        summary.chmod(0o777)
+        result = self.install()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(summary.stat().st_mode & 0o777, 0o777)
+        self.assertEqual(self.table.read_text(), self.original)
 
     def test_foreign_wrapper_is_preserved_and_crontab_not_changed(self):
         wrapper = self.home/'.local/bin/wbb-test'

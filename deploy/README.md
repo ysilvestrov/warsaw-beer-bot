@@ -90,6 +90,47 @@ and replace `ysi` with the correct username before installing.
 
 ## Deploy
 
+### Operator test diagnostics and morning report
+
+Test-directory inventory is diagnostic information in the morning report.
+Directory appearance and disappearance send no separate Telegram notification.
+Existing inode/disk warning, critical and recovery notifications keep their
+thresholds. The report's count covers managed test runs only; it is not proof
+that a directory is abandoned or safe to delete.
+
+The operator's five-minute monitor exports a small snapshot to
+`/var/tmp/wbb-resource-monitor/summary.json`. Its directory is operator-owned
+0755 and its file is 0644 so the bot can read counters without access to the
+private monitor state. The report marks snapshots older than 15 minutes as stale,
+and missing/invalid data as unavailable. Busy, failed or truncated inventory
+does not become zero. No bot environment key is needed.
+
+Changes to the installed monitor use `[deploy:hold]`. After merging, update a
+clean operator checkout to `main`, then run as the operator:
+
+```bash
+bash deploy/install-resource-monitor.sh
+```
+
+This refreshes the immutable installed copies and managed cron, preserving
+other jobs, private history and resource delivery acknowledgements. Verify the
+managed cron includes `--summary-dir /var/tmp/wbb-resource-monitor`. Wait for its
+next tick, or run the installed monitor once with `--notify none`, its existing
+state/runs directories and that summary directory. None mode publishes the
+snapshot without sending Telegram or acknowledging resource alerts.
+
+Verify the actual service user can read the fresh snapshot, then release the
+held deployment with `bash deploy/deploy.sh`. Check `/health` and render the
+line locally as the bot user; this does not send a report:
+
+```bash
+sudo -n -u warsaw-beer-bot /usr/bin/bash -lc 'node -e '\''console.log(require("/opt/warsaw-beer-bot/dist/jobs/test-diagnostics.js").readTestDiagnosticsLine(new Date()))'\'''
+```
+
+Do not widen permissions on `.local/state/wbb-resource-monitor` or remove its
+state to silence inventory notifications. Installing the new monitor is the
+step that disables them; deploying bot code alone cannot update an old cron copy.
+
 From a dev checkout:
 
 ```bash

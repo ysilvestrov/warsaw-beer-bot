@@ -1,4 +1,7 @@
 import pino from 'pino';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { StatusMetrics } from '../storage/stats';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import { openDb } from '../storage/db';
@@ -11,6 +14,77 @@ import { UNLOCK_LAST_RESULT_KEY } from './unlock-fixed-orphans';
 import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
 
 const silentLog = pino({ level: 'silent' });
+
+test('morning digest includes test telemetry and sends only once for the day', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wbb-digest-telemetry-'));
+  const db = emptyDb();
+  try {
+    chmodSync(directory, 0o755);
+    const path = join(directory, 'summary.json');
+    const now = new Date('2026-10-01T07:00:00Z');
+    writeFileSync(path, JSON.stringify({ version: 1, timestamp: now.getTime() / 1000,
+      inodes_free: 2_000_000, bytes_available: 32_212_254_720,
+      runs_inventory_available: true, pending_runs: 0 }), { mode: 0o644 });
+    const sent: string[] = [];
+    const deps = { db, log: silentLog, now: () => now, testDiagnosticsPath: path,
+      notifyAdmin: async (text: string) => { sent.push(text); } };
+    await dailyStatus(deps);
+    await dailyStatus(deps);
+    expect(sent.length).toBe(1);
+    expect(sent[0].split('\n').filter((line) => line.startsWith('• Тести:'))).toEqual([
+      '• Тести: 0 каталогів потребують перевірки · диск: 30.00 GiB вільно · inode: 2 000 000 вільно',
+    ]);
+    expect(getJobState(db, 'daily_status_last_sent')).toBe('2026-10-01');
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('missing test telemetry does not block the report or its successful-delivery marker', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wbb-digest-missing-'));
+  const db = emptyDb();
+  try {
+    const sent: string[] = [];
+    await dailyStatus({ db, log: silentLog, now: () => new Date('2026-10-01T07:00:00Z'),
+      testDiagnosticsPath: join(directory, 'missing.json'),
+      notifyAdmin: async (text) => { sent.push(text); } });
+    expect(sent.length).toBe(1);
+    expect(sent[0].split('\n').filter((line) => line.startsWith('• Тести:'))).toEqual([
+      '• Тести: дані монітора недоступні',
+    ]);
+    expect(getJobState(db, 'daily_status_last_sent')).toBe('2026-10-01');
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('failed morning send retries the diagnostic line without advancing the day marker', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'wbb-digest-retry-'));
+  const db = emptyDb();
+  try {
+    const failed: string[] = [];
+    const common = { db, log: silentLog, now: () => new Date('2026-10-01T07:00:00Z'),
+      testDiagnosticsPath: join(directory, 'missing.json') };
+    await dailyStatus({ ...common, notifyAdmin: async (text) => {
+      failed.push(text);
+      throw new Error('synthetic transport unavailable');
+    } });
+    expect(getJobState(db, 'daily_status_last_sent')).toBeNull();
+    expect(failed.length).toBe(1);
+    expect(failed[0].split('\n').filter((line) => line.startsWith('• Тести:'))).toEqual([
+      '• Тести: дані монітора недоступні',
+    ]);
+    const delivered: string[] = [];
+    await dailyStatus({ ...common, notifyAdmin: async (text) => { delivered.push(text); } });
+    expect(delivered).toEqual(failed);
+    expect(getJobState(db, 'daily_status_last_sent')).toBe('2026-10-01');
+  } finally {
+    db.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 function emptyDb() {
   const db = openDb(':memory:');
