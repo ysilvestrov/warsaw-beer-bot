@@ -1061,6 +1061,15 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     });
   }
 
+  function acknowledge(w: World): void {
+    // Operator action documented in README: clear only observations/fence
+    // under the shared lock. Production and failed-deploy state remain.
+    execFileSync('flock', ['-w', '30', join(w.stateDir, 'wbb-autodeploy/lock'),
+      'sed', '-i', '-e', '/^LAST_SEEN_DEPLOYED_SHA=/d',
+      '-e', '/^REGRESSION_FROM_SHA=/d', '-e', '/^REGRESSION_TO_SHA=/d',
+      '-e', '/^LAST_HOLD_NOTICE=/d', join(w.stateDir, 'wbb-autodeploy/state.env')]);
+  }
+
   function observed() {
     const w = world();
     const one = push(w, { 'src/a.ts': '2' }, 'one');
@@ -1125,6 +1134,7 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     record(w, w.base);
     tick(w);
     record(w, one);
+    ready(w);
     tick(w);
     expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(one);
     expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
@@ -1147,6 +1157,7 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     tick(w);
     record(w, w.base);
     tick(w);
+    ready(w);
     tick(w);
     const warnings = notes(w).filter((m) => m.includes('production went BACKWARDS:'));
     expect(warnings).toHaveLength(2);
@@ -1179,6 +1190,7 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
     expect(events(w)).toEqual([]);
     tick(w);
+    ready(w);
     tick(w);
     expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
     expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
@@ -1238,6 +1250,105 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toEqual([]);
     expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
     expect(readFileSync(join(w.bin, 'deploy-args.log'), 'utf8')).toBe('\n--force\n');
+  });
+
+  it('recognizes a rollback recorded before the tick died during its health check', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = stub(w.bin, 'health-interrupts-rollback', [
+      `last=$(tail -n1 "${w.eventsLog}")`,
+      `[ "$last" != "deploy ${w.base}" ] || { kill -9 $PPID; exit 1; }`,
+      `[ "$last" != "deploy ${x}" ]`,
+    ].join('\n'));
+    ready(w, { WBB_HEALTH_CMD: health });
+    expect(tick(w, { WBB_HEALTH_CMD: health }).code).toBe(null);
+    expect(readState(w).ROLLBACK_STARTED).toBe('1');
+    expect(readState(w).DEPLOYED_SHA).toBe(w.base);
+    expect(tick(w).code).toBe(3);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toEqual([]);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    expect(notes(w).filter((m) => m.startsWith('🔥 ROLLBACK INTERRUPTED:'))).toHaveLength(1);
+  });
+
+  it('releases the fence after manual recovery to a strict descendant of the recovery point', () => {
+    const { w } = observed();
+    record(w, w.base);
+    ready(w);
+    tick(w);
+    expect(events(w)).toEqual([]);
+    const newer = push(w, { 'src/a.ts': '4' }, 'newer main');
+    record(w, newer);
+    tick(w);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(newer);
+    const next = push(w, { 'src/a.ts': '5' }, 'next merge');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${next}`]);
+  });
+
+  it('releases a divergent fence when a forced manual main deploy contains the original recovery point', () => {
+    const { w, two } = observed();
+    git(w.seed, 'checkout', '-q', '-b', 'sibling', w.base);
+    const sibling = commitIn(w.seed, { 'src/a.ts': 'other' }, 'sibling');
+    git(w.seed, 'push', '-q', 'origin', 'sibling');
+    record(w, sibling);
+    tick(w);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    // As deploy.sh --force does: record main, preserving the observation keys.
+    record(w, two);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    git(w.seed, 'checkout', '-q', 'main');
+    const next = push(w, { 'src/a.ts': '4' }, 'next merge');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${next}`]);
+  });
+
+  it('resumes after explicit operator acknowledgement when main cannot contain a squash-merged feature commit', () => {
+    const w = world();
+    git(w.seed, 'checkout', '-q', '-b', 'feature');
+    const feature = commitIn(w.seed, { 'src/a.ts': 'feature' }, 'feature');
+    git(w.seed, 'push', '-q', 'origin', 'feature');
+    record(w, feature);
+    tick(w);
+    git(w.seed, 'checkout', '-q', 'main');
+    const main = push(w, { 'src/a.ts': 'feature' }, 'squash');
+    record(w, main);
+    ready(w);
+    tick(w);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(feature);
+    expect(events(w)).toEqual([]);
+    acknowledge(w);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(main);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    const next = push(w, { 'src/a.ts': 'next' }, 'next merge');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${next}`]);
+  });
+
+  it('resumes from a missing prior observation only after an operator explicitly acknowledges the current record', () => {
+    const w = world();
+    const missing = 'a'.repeat(40);
+    seedState(w, { DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: missing, LAST_FAILED_SHA: missing });
+    ready(w);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(missing);
+    expect(events(w)).toEqual([]);
+    acknowledge(w);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    expect(readState(w).LAST_FAILED_SHA).toBe(missing);
+    const next = push(w, { 'src/a.ts': 'next' }, 'next merge');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${next}`]);
   });
 
   it('refuses before sending the regression warning when its brake cannot be persisted', () => {

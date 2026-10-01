@@ -88,9 +88,22 @@ Files: `spec.md`, `deploy/README.md`, this plan.
 - [x] Review the complete diff for claim/evidence alignment and rollback
   compatibility; run the full gate and shell syntax checks.
 - [x] Fetch main and rebase if moved; rerun the gate after any rebase.
-- [ ] Run `npm run cross-review -- --reviewer claude`, allow its internal
+- [x] Run `npm run cross-review -- --reviewer claude`, allow its internal
   15-minute timeout to finish, evaluate every finding, fix or reject with
   evidence, rerun the gate after fixes.
 - [ ] Push and create a `[deploy:hold]` PR labelled deploy:hold, closing #767
   and #768 with host steps and the cross-review receipt. Wait for checks and
   review; address valid findings before reporting completion. Do not merge.
+
+## Cross-review disposition
+
+Claude reviewed `594dc4c` and raised six findings. Five addressed:
+document explicit operator acknowledgement for an unreachable recovery point
+or missing old Git object; recognize a completed deployment inside an
+interrupted automatic rollback; exercise holds after the quiet period;
+cover strict-descendant/divergent recovery, preserved refusal state and
+operator reseeding. Tests reproduce the interrupted rollback warning before
+the fix. The dirty-tree restriction suggestion is rejected: the agreed guard
+checks HEAD and keeps the existing dirty-tree baseline-clearing policy.
+Documentation now names that limit and the empty-baseline reseeding limit.
+The publishing/checks receipt belongs in the PR body and CI results.

@@ -39,7 +39,13 @@ keys; the tick's writer explicitly lists the keys it preserves.
    block unattended deployment across ticks, even if main moves. The initial
    recovery point is retained across further regressions or partial forward
    recovery. Clear only when the recorded production SHA contains that point.
-   A human deploys main to recover (with `--force` if histories diverge).
+   A human deploys main to recover when it contains that point (with `--force`
+   if histories diverge). If main cannot contain it (a squash-merged feature
+   deployment), or an observation's Git object is lost, the operator can
+   explicitly acknowledge verified intended production: back up state and,
+   under the shared lock, remove only LAST_SEEN_DEPLOYED_SHA, REGRESSION_*
+   and LAST_HOLD_NOTICE. The next tick reseeds from the resolved deployed
+   record. No automatic acknowledgement; failed/window keys stay intact.
 5. Send a bounded standalone warning for each observed regression transition:
    old/new short SHAs, backwards vs divergent, number of commits in new..old,
    and the number of distinct PRs associated with those commits. These counts
@@ -52,7 +58,9 @@ keys; the tick's writer explicitly lists the keys it preserves.
    as DEPLOYED_SHA. The automatic rollback passes `--force` to deploy.sh and
    records its resulting observation itself, avoiding a second manual-regression
    alert after the existing rollback notification. Interrupted rollback/window
-   handling remains authoritative and unchanged.
+   handling remains authoritative; if interrupted rollback already recorded
+   its intended old SHA, its handler accepts that as its own observation
+   while retaining the existing unknown-health warning.
 
 ## Claims and their evidence
 
@@ -64,6 +72,7 @@ keys; the tick's writer explicitly lists the keys it preserves.
 | Warning commit count | These commits were reachable from old but not new | successful git rev-list new..old; no feature-removal claim |
 | Warning PR count | Distinct PRs returned for those lost commits | successful per-commit PR API responses; failures explicitly yield unknown |
 | Advanced observation after warning | Notification command accepted this event | successful notifier exit; Telegram acceptance is not human acknowledgement |
+| Observation after operator acknowledgement | A human chose to discard the previous recovery requirement | explicit locked state reset after manual verification, backed-up prior state; next tick resolves current recorded SHA; not an automatic ancestry/health claim |
 
 ## Scope, tests and rollout
 
@@ -81,3 +90,11 @@ checkout, install the new deployer from current main with
 `sudo bash deploy/install-autodeploy.sh`, then run `bash deploy/deploy.sh` from
 current main. Old script copies cannot enforce the new rule. First observation
 cannot diagnose a rollback that occurred before this version began observing.
+
+## Cross-review clarifications (2026-10-01)
+
+The approved ancestry guard deliberately checks HEAD and keeps the existing
+dirty-tree policy (clear baseline). It does not prove ancestry of uncommitted
+files. An empty baseline permits reseeding, so clean deployments are required
+for persistent commit identity. Human acknowledgement is an operational escape
+for unverifiable/replaced history, not permission for the tick to forget it.
