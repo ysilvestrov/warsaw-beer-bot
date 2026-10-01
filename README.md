@@ -26,6 +26,8 @@ Stack: Node.js, TypeScript, Telegraf (Telegram), SQLite, Vitest.
 - API keys and config are read from a `.env` file.
 - Install deps: `npm install`
 - Run tests: `npm test` (extension tests: `cd extension && npm test`)
+- Run a focused suite: `npm test -- src/domain/name-identity.test.ts`; pass Vitest arguments after `--`.
+- Repository configs reject direct `npx vitest` or `node .../vitest.mjs` launches without the test supervisor. On the operator host, the installed `wbb-test <arguments>` wrapper also supervises runs from older checkouts. Do not set `WBB_TEST_TMPDIR` manually; the supervisor owns the run and its cleanup.
 - Test runs require Linux and Python 3.12+ for descendant supervision and temporary/cache cleanup; unsupported hosts have no cleanup fallback.
 - Run the bot locally: `npm run dev`
 

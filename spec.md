@@ -2569,6 +2569,12 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   прибирається зі збереженням exit code; hooks #744 залишаються per-file cleanup.
   Після SIGKILL supervisor або reboot інвентаризація лише повідомляє про залишки:
   вік чи відсутній PID не дозволяють їх видаляти. Паралельні запуски незалежні.
+  Конфігурації Vitest у root та extension відхиляють відсутній або порожній
+  `WBB_TEST_TMPDIR` до запуску workers: тести запускаються через `npm test -- <arguments>`
+  або встановлену на операторському хості `wbb-test <arguments>`.
+  Marker передає supervisor своїй команді та descendants; вручну його не задають.
+  Це правило входу через repository configs, не автентифікація: довільні зовнішні
+  configs та старі checkout без guard не охоплені ним.
 - `domain/*` — повне unit-покриття (чисті функції).
 - `sources/*` — **контрактні тести на фікстурах** (`tests/fixtures/**`,
   HTML/CSV-снепшоти), що падають при зміні верстки джерела.

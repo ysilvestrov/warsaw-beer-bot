@@ -396,6 +396,12 @@ Prefer existing project dependencies whenever possible.
 
 Testing
 
+Run root and extension tests through `npm test -- <arguments>` from the package
+directory, or the operator host's installed `wbb-test <arguments>`. Direct Vitest
+launches using repository configs require supervisor context and are rejected
+without it. Never set `WBB_TEST_TMPDIR` manually to bypass the guard: the
+supervisor creates the run directory and removes it after descendants finish.
+
 When modifying behavior:
 
 - update affected tests if needed
