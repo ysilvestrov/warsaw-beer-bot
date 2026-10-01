@@ -339,6 +339,67 @@ function collabTokenBoundaryRescue(
   return unique.length === 1 ? unique[0] : null;
 }
 
+// #769: When top-scored candidates tie in Stage 2a.5 / Stage 2b and dominantCandidate cannot
+// select a winner, disambiguate candidates from co-brewers of a collaboration brewery by ABV.
+function collabCoBrewerTiebreak(
+  input: { brewery: string; name: string; abv: number | null },
+  matches: ScoredCandidate[],
+): SearchResult | null {
+  const inputAbv = input.abv;
+  if (inputAbv == null) return null;
+
+  const rawParts = input.brewery.split(BREWERY_COLLAB_SEP).map((p) => p.trim()).filter(Boolean);
+  if (rawParts.length < 2) return null;
+  const collabParts = rawParts.map(normalizeBrewery).filter(Boolean);
+  if (collabParts.length < 2) return null;
+
+  const bestByBid = new Map<number, ScoredCandidate>();
+  for (const match of matches) {
+    const existing = bestByBid.get(match.result.bid);
+    if (!existing || match.score > existing.score) bestByBid.set(match.result.bid, match);
+  }
+  const unique = Array.from(bestByBid.values());
+  if (unique.length < 2) return null;
+
+  const topScore = Math.max(...unique.map((m) => m.score));
+  const top = unique.filter((m) => m.score === topScore).map((m) => m.result);
+  if (top.length < 2) return null;
+
+  // All candidates in the tie must have identical candidate identity
+  const firstIdent = candIdentValue(top[0]);
+  if (!top.every((r) => candIdentValue(r) === firstIdent)) return null;
+
+  // All candidates must have a known ABV
+  if (top.some((r) => r.abv == null)) return null;
+
+  // Each candidate must strictly match a different collab part
+  const matchesPart = (cand: SearchResult, part: string): boolean => {
+    const aliases = breweryAliases(cand.brewery_name);
+    return breweryAliasesMatch(aliases, [part]);
+  };
+  const distinctMatchedParts = new Set(
+    top.map((cand) => collabParts.find((part) => matchesPart(cand, part))),
+  );
+  if (distinctMatchedParts.has(undefined) || distinctMatchedParts.size < top.length) return null;
+
+  // Calculate delta to input ABV for each candidate
+  const candidatesWithDelta = top.map((cand) => ({
+    cand,
+    delta: Math.abs((cand.abv as number) - inputAbv),
+  }));
+
+  // Sort by delta ascending
+  candidatesWithDelta.sort((a, b) => a.delta - b.delta);
+  const best = candidatesWithDelta[0];
+  const secondBest = candidatesWithDelta[1];
+
+  // Best candidate must be within ABV_TOLERANCE and strictly closer than second best
+  if (best.delta > ABV_TOLERANCE) return null;
+  if (best.delta >= secondBest.delta) return null;
+
+  return best.cand;
+}
+
 function bestTokenScore(token: string, others: string[]): number {
   return Math.max(0, ...others.map((other) => fuzzy(token, other)));
 }
@@ -855,7 +916,9 @@ export async function lookupBeer(
         const nearHit = pickScoredCandidate(nearMatches, abv);
         if (nearHit) return { kind: 'matched', result: nearHit };
         const boundaryHit = collabTokenBoundaryRescue({ brewery, name, abv }, strictPool);
-        return boundaryHit ? { kind: 'matched', result: boundaryHit } : notFound();
+        if (boundaryHit) return { kind: 'matched', result: boundaryHit };
+        const collabHit = collabCoBrewerTiebreak({ brewery, name, abv }, nearMatches);
+        return collabHit ? { kind: 'matched', result: collabHit } : notFound();
       }
     }
 
@@ -882,7 +945,12 @@ export async function lookupBeer(
           matches.map((match) => ({ result: match.item, score: match.score })),
           abv,
         );
-        return fuzzyHit ? { kind: 'matched', result: fuzzyHit } : notFound();
+        if (fuzzyHit) return { kind: 'matched', result: fuzzyHit };
+        const collabHit = collabCoBrewerTiebreak(
+          { brewery, name, abv },
+          matches.map((match) => ({ result: match.item, score: match.score })),
+        );
+        return collabHit ? { kind: 'matched', result: collabHit } : notFound();
       }
     }
 
