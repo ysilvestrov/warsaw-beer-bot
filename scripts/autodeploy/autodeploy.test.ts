@@ -579,7 +579,7 @@ describe('merge-deploy: state and notifications', () => {
     const x = push(w, { 'src/a.ts': '2' }, 'feat');
     seedState(w, { DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', DRIFT_SINCE: '5', LAST_DRIFT_NOTICE: '2026-08-20' });
     tick(w);
-    expect(readState(w)).toEqual({ DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000' });
+    expect(readState(w)).toEqual({ DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000' });
   });
 
   it('truncates a message longer than Telegram accepts', () => {
@@ -867,7 +867,7 @@ describe('merge-deploy: review fixes R2–R9', () => {
     const r = tick(w);
     expect(r.code).toBe(0);
     expect(events(w)).toEqual(['mark-unverified 20260930T120000Z-abcdef0-pre.db']);
-    expect(readState(w)).toEqual({ DEPLOYED_SHA: x, PREVIOUS_SHA: w.base, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000' });
+    expect(readState(w)).toEqual({ DEPLOYED_SHA: x, LAST_SEEN_DEPLOYED_SHA: x, PREVIOUS_SHA: w.base, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000' });
     expect(notes(w)[0]).toMatch(/is live but UNVERIFIED: the tick that deployed it died inside its window\./);
   });
 
@@ -926,7 +926,7 @@ describe('merge-deploy: review fixes R2–R9', () => {
     tick(w, { WBB_HEALTH_CMD: health });
     // The stub deploy recorded x first (as deploy.sh does), so this is a real reset.
     expect(readState(w)).toEqual({
-      DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', LAST_FAILED_SHA: x, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000',
+      DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: w.base, PREVIOUS_SHA: '', LAST_FAILED_SHA: x, MAIN_SEEN_SHA: x, MAIN_SEEN_S: '100000',
     });
   });
 
@@ -1051,5 +1051,208 @@ describe('merge-deploy: renames are seen from both ends', () => {
     ready(w);
     tick(w);
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+  });
+});
+
+describe('merge-deploy: observed production regressions (#768)', () => {
+  function record(w: World, sha: string): void {
+    execFileSync('bash', [RECORD_DEPLOYED, sha], {
+      env: { ...process.env, XDG_STATE_HOME: w.stateDir },
+    });
+  }
+
+  function observed() {
+    const w = world();
+    const one = push(w, { 'src/a.ts': '2' }, 'one');
+    const two = push(w, { 'src/a.ts': '3' }, 'two');
+    record(w, two);
+    tick(w);
+    return { w, one, two };
+  }
+
+  it('seeds a first up-to-date observation without claiming a regression', () => {
+    const w = world();
+    expect(tick(w).code).toBe(0);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    expect(notes(w)).toEqual([]);
+    expect(events(w)).toEqual([]);
+  });
+
+  it('reports a backwards transition with lost commit/PR counts and holds across ticks', () => {
+    const { w, two } = observed();
+    record(w, w.base);
+    expect(tick(w).code).toBe(0);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
+    const warning = notes(w).find((m) => m.includes('production went BACKWARDS:')) ?? '';
+    expect(warning).toContain(`${short(two)} → ${short(w.base)}`);
+    expect(warning).toContain('2 commits, 1 PRs no longer reachable');
+    expect(notes(w).find((m) => m.includes('HELD:')) ?? '').toContain('production regression');
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    expect(readState(w).REGRESSION_TO_SHA).toBe(w.base);
+
+    advance(w, 600);
+    tick(w);
+    push(w, { 'src/a.ts': '4' }, 'new main');
+    advance(w, 600);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
+    expect(events(w)).toEqual([]);
+    expect(readState(w).DEPLOYED_SHA).toBe(w.base);
+  });
+
+  it('counts distinct PRs over all lost commits', () => {
+    const { w, one, two } = observed();
+    record(w, w.base);
+    const labels = stub(w.bin, 'lost-prs', `case "$1" in ${one}) printf '17\\t\\n18\\tdeploy:hold\\n' ;; ${two}) printf '18\\tdeploy:hold\\n' ;; esac`);
+    tick(w, { WBB_PR_LABELS_CMD: labels });
+    expect(notes(w)[0]).toContain('2 commits, 2 PRs no longer reachable');
+    expect(notes(w).find((m) => m.includes('HELD:')) ?? '').toContain('PR #18 carries deploy:hold');
+  });
+
+  it('reports unknown PR count when even one lost commit lookup fails', () => {
+    const { w, one, two } = observed();
+    record(w, w.base);
+    const labels = stub(w.bin, 'lost-pr-fails', `[ "$1" != "${one}" ] || exit 1; printf '17\\t\\n'`);
+    tick(w, { WBB_PR_LABELS_CMD: labels });
+    expect(notes(w)[0]).toContain('2 commits, unknown PRs no longer reachable');
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    expect(events(w)).toEqual([]);
+  });
+
+  it('retains the recovery fence during partial forward recovery and clears it when regained', () => {
+    const { w, one, two } = observed();
+    record(w, w.base);
+    tick(w);
+    record(w, one);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(one);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    expect(events(w)).toEqual([]);
+
+    record(w, two);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    expect(readState(w).REGRESSION_TO_SHA).toBeUndefined();
+    const next = push(w, { 'src/a.ts': '4' }, 'recovered main');
+    ready(w);
+    tick(w);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${next}`]);
+  });
+
+  it('reports a further regression once and retains the original recovery point', () => {
+    const { w, one, two } = observed();
+    record(w, one);
+    tick(w);
+    record(w, w.base);
+    tick(w);
+    tick(w);
+    const warnings = notes(w).filter((m) => m.includes('production went BACKWARDS:'));
+    expect(warnings).toHaveLength(2);
+    expect(warnings[1]).toContain(`${short(one)} → ${short(w.base)}`);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    expect(readState(w).REGRESSION_TO_SHA).toBe(w.base);
+    expect(events(w)).toEqual([]);
+  });
+
+  it('reports divergent production and holds instead of guessing that it was a rollback', () => {
+    const { w, two } = observed();
+    git(w.seed, 'checkout', '-q', '-b', 'sibling', w.base);
+    const sibling = commitIn(w.seed, { 'src/a.ts': 'other' }, 'sibling');
+    git(w.seed, 'push', '-q', 'origin', 'sibling');
+    record(w, sibling);
+    tick(w);
+    expect(notes(w)[0]).toContain('production DIVERGED:');
+    expect(notes(w)[0]).toContain(`${short(two)} → ${short(sibling)}`);
+    expect(notes(w)[0]).toContain('2 commits, 1 PRs no longer reachable');
+    expect(events(w)).toEqual([]);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+  });
+
+  it('keeps the observation pending and the brake durable when the notifier fails', () => {
+    const { w, two } = observed();
+    record(w, w.base);
+    const fail = stub(w.bin, 'notify-fails', 'exit 1');
+    expect(tick(w, { WBB_NOTIFY_CMD: fail }).code).toBe(0);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    expect(readState(w).REGRESSION_FROM_SHA).toBe(two);
+    expect(events(w)).toEqual([]);
+    tick(w);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    expect(events(w)).toEqual([]);
+  });
+
+  it('does not erase the last observation when the baseline is cleared', () => {
+    const { w, two } = observed();
+    record(w, '');
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    record(w, w.base);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
+    expect(events(w)).toEqual([]);
+  });
+
+  it('reports unassessable current commit without erasing the prior observation', () => {
+    const { w, two } = observed();
+    record(w, 'a'.repeat(40));
+    tick(w);
+    expect(notes(w)[0]).toContain('cannot assess the deployed transition');
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    expect(events(w)).toEqual([]);
+  });
+
+  it('reports unassessable previous commit rather than inventing a regression', () => {
+    const w = world();
+    seedState(w, { DEPLOYED_SHA: w.base, LAST_SEEN_DEPLOYED_SHA: 'a'.repeat(40) });
+    tick(w);
+    expect(notes(w)[0]).toContain('cannot assess the deployed transition');
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe('a'.repeat(40));
+    expect(events(w)).toEqual([]);
+  });
+
+  it('records own successful deployments as observations and detects a subsequent manual rollback', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    ready(w);
+    tick(w);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(x);
+    record(w, w.base);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toHaveLength(1);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+  });
+
+  it('does not emit a manual-regression warning after its own successful automatic rollback', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const health = stub(w.bin, 'health-new-bad', `tail -n1 "${w.eventsLog}" | grep -q "deploy ${x}" && exit 1; exit 0`);
+    ready(w, { WBB_HEALTH_CMD: health });
+    expect(tick(w, { WBB_HEALTH_CMD: health }).code).toBe(2);
+    expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(w.base);
+    tick(w);
+    expect(notes(w).filter((m) => m.includes('production went BACKWARDS:'))).toEqual([]);
+    expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+    expect(readFileSync(join(w.bin, 'deploy-args.log'), 'utf8')).toBe('\n--force\n');
+  });
+
+  it('refuses before sending the regression warning when its brake cannot be persisted', () => {
+    const { w, two } = observed();
+    record(w, w.base);
+    const dir = join(w.stateDir, 'wbb-autodeploy');
+    chmodSync(dir, 0o500);
+    try {
+      expect(tick(w).code).toBe(4);
+      expect(notes(w)[0]).toMatch(/^🔥 merge-deploy: failed to write /);
+      expect(readState(w).LAST_SEEN_DEPLOYED_SHA).toBe(two);
+      expect(readState(w).REGRESSION_FROM_SHA).toBeUndefined();
+      expect(events(w)).toEqual([]);
+    } finally {
+      chmodSync(dir, 0o755);
+    }
   });
 });
