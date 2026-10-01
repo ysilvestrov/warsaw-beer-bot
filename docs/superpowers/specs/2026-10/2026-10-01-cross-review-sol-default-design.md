@@ -21,7 +21,9 @@ class, and a Codex update must not be able to silently switch it to Astra.
   for that direction, and a default there would be a guess.
 
 `buildReviewerCommand` uses `model ?? DEFAULT_MODEL[reviewer]`. An explicit `--model` still
-wins. The codex command therefore **always** carries `-m <id>`, and the claude command carries
+wins. `parseArgs` rejects an empty value for any flag (`--model ""` from an unset shell variable
+would otherwise drop `-m` and land on the CLI default; found by the pre-PR cross-review). The
+codex command therefore **always** carries `-m <id>`, and the claude command carries
 `--model` only when it is given explicitly, exactly as before.
 
 This reverses the 09-29 line "the code carries no curated model list" on purpose, and only for
@@ -67,3 +69,4 @@ In `scripts/cross-review/core.test.ts`:
 - codex with an explicit model → the explicit model, not the default (existing test, kept);
 - claude without a model → no `--model` in args (existing test, kept, now a guard that the
   default map has no claude entry).
+- `--model ""` / `--base ""` → `needs a value` usage error.
