@@ -139,7 +139,9 @@ describe('manual deploy ancestry admission', () => {
     expect(existsSync(r.sudoLog)).toBe(false);
   });
 
-  it.each([['--unknown'], ['--force', '--unknown'], ['--force', '--force']])('refuses invalid arguments %j', (args) => {
+  it.each([
+    { args: ['--unknown'] }, { args: ['--force', '--unknown'] }, { args: ['--force', '--force'] },
+  ])('refuses invalid arguments $args', ({ args }) => {
     const r = rig();
     expect(deploy(r, args).status).toBe(1);
     expect(existsSync(r.sudoLog)).toBe(false);
