@@ -156,6 +156,7 @@ function stubs(w: World): Record<string, string> {
     // tick did not tell it that the lock is already held (R4).
     WBB_DEPLOY_CMD: stub(b, 'deploy', [
       `[ "\${WBB_TICK_HOLDS_LOCK:-}" = 1 ] || echo "deploy WITHOUT the lock flag" >> "${ev}"`,
+      `printf '%s\\n' "$*" >> "${b}/deploy-args.log"`,
       `echo "deploy $(git rev-parse HEAD)" >> "${ev}"`,
       `cat "${clk}" > "${b}/deployed_at"`,
       `"${RECORD_DEPLOYED}" "$(git rev-parse HEAD)" >/dev/null`,
@@ -795,6 +796,7 @@ describe('merge-deploy: review fixes R2–R9', () => {
     tick(w, { WBB_HEALTH_CMD: health });
     expect(events(w).filter((e) => e.startsWith('deploy ')).length).toBe(2);
     expect(events(w)).not.toContain('deploy WITHOUT the lock flag');
+    expect(readFileSync(join(w.bin, 'deploy-args.log'), 'utf8')).toBe('\n--force\n');
   });
 
   it('R3: a baseline read only after a failed first read still catches a restart', () => {
@@ -1051,4 +1053,3 @@ describe('merge-deploy: renames are seen from both ends', () => {
     expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
   });
 });
-

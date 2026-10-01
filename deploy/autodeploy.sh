@@ -70,7 +70,7 @@ HEALTH_CMD="${WBB_HEALTH_CMD:-_health_default}"
 _restarts_default() { systemctl show -p NRestarts --value warsaw-beer-bot; }
 RESTARTS_CMD="${WBB_RESTARTS_CMD:-_restarts_default}"
 
-_deploy_default() { ./deploy/deploy.sh; }
+_deploy_default() { ./deploy/deploy.sh "$@"; }
 DEPLOY_CMD="${WBB_DEPLOY_CMD:-_deploy_default}"
 _build_default() { npm ci --no-audit --no-fund && npm run build; }
 BUILD_CMD="${WBB_BUILD_CMD:-_build_default}"
@@ -575,7 +575,7 @@ roll_back() {
   "$SERVICE_CMD" start litestream || rollback_failed "start litestream" "$marked" "$post"
   checkout_clean "$old" || rollback_failed "check out ${old:0:7}" "$marked" "$post"
   # deploy.sh restarts the bot itself (and re-records DEPLOYED_SHA=old).
-  ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
+  ( cd "$REPO" && WBB_TICK_HOLDS_LOCK=1 "$DEPLOY_CMD" --force ) || rollback_failed "deploy ${old:0:7}" "$marked" "$post"
   wait_healthy "$PORT" "$STARTUP_S" || rollback_failed "health after the rollback" "$marked" "$post"
   DEPLOYED_SHA="$old"
   clear_window

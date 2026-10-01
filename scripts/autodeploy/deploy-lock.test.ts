@@ -25,7 +25,7 @@ function rig(): Rig {
   const bin = makeTempDirectory('wbb-lock-bin-');
   const sudoLog = join(bin, 'sudo.log');
   executable(join(bin, 'sudo'), `echo "$*" >> "${sudoLog}"`);
-  executable(join(bin, 'git'), 'exit 0');
+  executable(join(bin, 'git'), 'case "$1" in rev-parse) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;; esac');
   executable(join(bin, 'journalctl'), 'exit 0');
   const state = makeTempDirectory('wbb-lock-state-');
   mkdirSync(join(state, 'wbb-autodeploy'), { recursive: true });
