@@ -208,4 +208,28 @@ describe('runFestMcpVenues', () => {
     await runFestMcpVenues(deps, minutesLater(60));
     expect([calls.length - before, getJobState(db, venueCursorKey(db, FEST)), getJobState(db, 'fest_mcp_open_until')]).toEqual([0, '7', null]);
   });
+
+  it('a tick deferred by the budget before any call leaves the shared breaker alone', async () => {
+    const { db, deps, calls } = setup({});
+    setJobState(db, 'fest_mcp_venue_calls', JSON.stringify(Array.from({ length: VENUE_CALLS_PER_HOUR }, () => IN_SESSION.getTime())));
+    deps.breaker.onResult(true, IN_SESSION); // the friend feed fails
+    await runFestMcpVenues(deps, IN_SESSION); // budget spent: no call
+    deps.breaker.onResult(true, minutesLater(1)); // and fails again
+    expect([calls, getJobState(db, 'fest_mcp_open_until')]).toEqual([[], '2026-10-15T18:31:00.000Z']);
+  });
+
+  it('an unreadable budget state is an empty hour: the venues are read and the state is rewritten', async () => {
+    const { db, deps, calls } = setup({ [FEST]: [page([])], [KONF]: [page([])], [STADIUM]: [page([])] });
+    setJobState(db, 'fest_mcp_venue_calls', '{"not":"a list"');
+    await runFestMcpVenues(deps, IN_SESSION);
+    expect([calls.length, getJobState(db, 'fest_mcp_venue_calls'), getJobState(db, 'fest_mcp_open_until')])
+      .toEqual([3, JSON.stringify(Array.from({ length: 3 }, () => IN_SESSION.getTime())), null]);
+  });
+
+  it('a stored cursor that is not a check-in id counts as none: the read goes to the floor and stores a real one', async () => {
+    const { db, deps, calls } = setup({ [FEST]: [page([rec(103, FEST, 2)])], [KONF]: [page([])], [STADIUM]: [page([])] });
+    setJobState(db, venueCursorKey(db, FEST), 'abc');
+    await runFestMcpVenues(deps, IN_SESSION);
+    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(db, FEST))]).toEqual([1, '103']);
+  });
 });
