@@ -20,7 +20,12 @@ export interface McpCheckin {
   rating: number | null;
 }
 
-export type McpPage = { items: McpCheckin[]; count: number } | { error: string };
+/**
+ * `cached` is true unless the body says `mem: false`: Untappd marks a page it served from its own
+ * cache with `mem: true`, and such a page does not show the venue as it is now (spec
+ * 2026-10-02-wfp-mcp-venue-eye-design.md §3.2). A body without the field is not vouched for either.
+ */
+export type McpPage = { items: McpCheckin[]; count: number; cached: boolean } | { error: string };
 
 const recordSchema = z.object({
   checkin_id: z.number().int().positive(),
@@ -37,7 +42,7 @@ const recordSchema = z.object({
   venue: z.union([z.object({ venue_id: z.number().int().positive() }), z.array(z.unknown()).length(0)]),
 });
 
-const bodySchema = z.object({ checkins: z.object({ items: z.array(z.unknown()) }) });
+const bodySchema = z.object({ mem: z.unknown().optional(), checkins: z.object({ items: z.array(z.unknown()) }) });
 
 interface ToolResult {
   isError?: boolean;
@@ -86,5 +91,5 @@ export function parseMcpCheckins(result: ToolResult): McpPage {
       rating: r.data.rating_score ? r.data.rating_score : null,
     });
   }
-  return { items, count: body.data.checkins.items.length };
+  return { items, count: body.data.checkins.items.length, cached: body.data.mem !== false };
 }
