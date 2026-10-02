@@ -31,13 +31,31 @@ const rowOf = (c: McpCheckin) => ({
   checkin_id: c.checkinId, venue_id: c.venueId, bid: c.bid, untappd_user: c.userName, checkin_at: c.checkinAt,
 });
 
-/** Takes one call from the rolling-hour budget; false when the hour is spent. */
+/** The stored call times; anything unreadable is an empty hour, never a failed read. */
+function callTimes(text: string | null): number[] {
+  if (text === null) return [];
+  try {
+    const v: unknown = JSON.parse(text);
+    return Array.isArray(v) ? v.filter((t): t is number => typeof t === 'number' && Number.isFinite(t)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Takes one call from the rolling-hour budget, atomically; false when the hour is spent. */
 function takeCall(db: FestFriendFeedDeps['db'], now: Date): boolean {
-  const text = getJobState(db, CALLS_KEY);
-  const recent = (text === null ? [] : (JSON.parse(text) as number[])).filter((t) => now.getTime() - t < HOUR_MS);
-  if (recent.length >= VENUE_CALLS_PER_HOUR) return false;
-  setJobState(db, CALLS_KEY, JSON.stringify([...recent, now.getTime()]));
-  return true;
+  return db.transaction((): boolean => {
+    const recent = callTimes(getJobState(db, CALLS_KEY)).filter((t) => now.getTime() - t < HOUR_MS);
+    if (recent.length >= VENUE_CALLS_PER_HOUR) return false;
+    setJobState(db, CALLS_KEY, JSON.stringify([...recent, now.getTime()]));
+    return true;
+  }).immediate();
+}
+
+/** A stored cursor, or null when there is none or it is not a check-in id. */
+function storedCursor(text: string | null): number | null {
+  const n = text === null ? NaN : Number(text);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
 /**
@@ -45,17 +63,18 @@ function takeCall(db: FestFriendFeedDeps['db'], now: Date): boolean {
  * `complete: false` when the hourly budget ran out mid-read: the cursor then stays where it was, so
  * the next read pages down to it again (rows already written are deduplicated).
  */
-async function readVenue(deps: FestFriendFeedDeps, cursorKey: string, venueId: number, floorAt: string, now: Date): Promise<{ inserted: number; complete: boolean }> {
-  const cursorText = getJobState(deps.db, cursorKey);
-  const cursor = cursorText === null ? null : Number(cursorText);
+async function readVenue(deps: FestFriendFeedDeps, cursorKey: string, venueId: number, floorAt: string, now: Date): Promise<{ inserted: number; complete: boolean; calls: number }> {
+  const cursor = storedCursor(getJobState(deps.db, cursorKey));
   const seen: number[] = [];
   let inserted = 0;
   let maxId: number | null = null;
+  let calls = 0;
   for (let pageNo = 1; ; pageNo++) {
     if (!takeCall(deps.db, now)) {
       deps.log.warn({ venueId }, 'fest mcp venue: hourly call budget spent; read deferred');
-      return { inserted, complete: false };
+      return { inserted, complete: false, calls };
     }
+    calls++;
     const page = parseMcpCheckins(await deps.mcp.call('get_venue_checkins', {
       venueId, limit: MCP_PAGE_CAP, ...(maxId !== null ? { maxId } : {}),
     }));
@@ -82,7 +101,7 @@ async function readVenue(deps: FestFriendFeedDeps, cursorKey: string, venueId: n
     if (next !== null) setJobState(deps.db, cursorKey, String(next));
     setJobState(deps.db, venueLastKey(venueId), now.toISOString());
   })();
-  return { inserted, complete: true };
+  return { inserted, complete: true, calls };
 }
 
 /**
@@ -106,18 +125,20 @@ export async function runFestMcpVenues(deps: FestFriendFeedDeps, now: Date): Pro
     const attempt = getJobState(deps.db, venueAttemptKey(v.venue_id));
     if (attempt !== null && now.getTime() - Date.parse(attempt) < every) continue;
     setJobState(deps.db, venueAttemptKey(v.venue_id), now.toISOString());
-    read = true;
     try {
       const r = await readVenue(deps, venueCursorKey(active.fest.id, active.session.session_no, v.venue_id), v.venue_id, floorAt, now);
       inserted += r.inserted;
+      if (r.calls > 0) read = true;
       if (!r.complete) break; // the hour's budget is spent: the other venues wait too
     } catch (e) {
+      // Only an MCP call throws past the budget check, so a failure is always a read.
+      read = true;
       failed = true;
       deps.log.warn({ venueId: v.venue_id, err: e instanceof Error ? e.message : String(e) }, 'fest mcp venue: read failed');
     }
   }
-  // A tick that read nothing says nothing: the breaker is shared with the friend feed, and a quiet
-  // minute here must not wipe the count of its failures.
+  // A tick that made no MCP call says nothing — nothing due, or the hour's budget spent: the breaker
+  // is shared with the friend feed, and such a minute must not wipe the count of its failures.
   if (read) deps.breaker.onResult(failed, now);
   return inserted;
 }
