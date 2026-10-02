@@ -35,6 +35,7 @@ import { refreshAllUntappd } from './jobs/refresh-untappd';
 import { refreshFestMenu, runFestMenu, runFestPoll } from './jobs/fest-poll';
 import { runFestAlerts } from './jobs/fest-alerts';
 import { runFestFriendFeed, runFestMcpKeepalive } from './jobs/fest-friend-feed';
+import { runFestMcpVenues } from './jobs/fest-mcp-venues';
 import { createFestMcp } from './sources/untappd/mcp-client';
 import { festPrintUrl } from './bot/commands/fest';
 import { dedupeBreweryAliases } from './jobs/dedupe-brewery-aliases';
@@ -445,8 +446,9 @@ async function main(): Promise<void> {
       .finally(() => { festAlertsInFlight = false; });
   }));
 
-  // Festival MCP eye (spec §4.5): team check-ins through the owner's Untappd token, every 5 min in
-  // a polling window, plus a daily keepalive that keeps the refresh token in use outside the fest.
+  // Festival MCP eyes (spec §4.5): team check-ins through the owner's Untappd token, every 5 min in
+  // a polling window; the three venue feeds (spec 2026-10-02-wfp-mcp-venue-eye-design.md); and a
+  // daily keepalive that keeps the refresh token in use outside the fest.
   // Independent of the cookie'd client; off without FEST_MCP_URL.
   if (env.FEST_MCP_URL) {
     const mcpDeps = {
@@ -464,6 +466,7 @@ async function main(): Promise<void> {
       mcpInFlight = true;
       const now = new Date();
       runFestFriendFeed(mcpDeps, now)
+        .then(() => runFestMcpVenues(mcpDeps, now))
         .then(() => runFestMcpKeepalive(mcpDeps, now))
         .catch((e) => log.error({ err: e }, 'fest mcp cron'))
         .finally(() => { mcpInFlight = false; });
