@@ -13,7 +13,16 @@ import { ingestCheckinRows } from './fest-ingest';
 export const VENUE_EVERY_MS = { menu: 3 * 60 * 1000, other: 6 * 60 * 1000 };
 /** Without a cursor, the first read of a window reaches this far before the session start. */
 export const FIRST_READ_BEFORE_START_MS = 60 * 60 * 1000;
-export const venueCursorKey = (venueId: number): string => `fest_mcp_venue_cursor:${venueId}`;
+/** Per session: the first read of every session starts from the head down to its own floor. */
+export const venueCursorKey = (festId: number, sessionNo: number, venueId: number): string =>
+  `fest_mcp_venue_cursor:${festId}:${sessionNo}:${venueId}`;
+/**
+ * Venue reads share the owner's 100 calls per rolling hour with the friend feed (~24/h) and the
+ * owner's own connector; this eye never spends more than this many in any hour.
+ */
+export const VENUE_CALLS_PER_HOUR = 60;
+const CALLS_KEY = 'fest_mcp_venue_calls';
+const HOUR_MS = 60 * 60 * 1000;
 export const venueLastKey = (venueId: number): string => `fest_mcp_venue_last_at:${venueId}`;
 /** Any read, ok or not: a failing venue is retried at its own cadence, not on every minute's tick. */
 export const venueAttemptKey = (venueId: number): string => `fest_mcp_venue_attempt_at:${venueId}`;
@@ -22,40 +31,58 @@ const rowOf = (c: McpCheckin) => ({
   checkin_id: c.checkinId, venue_id: c.venueId, bid: c.bid, untappd_user: c.userName, checkin_at: c.checkinAt,
 });
 
-/** One venue, head page down to its cursor (or the floor); every page is written as it comes. */
-async function readVenue(deps: FestFriendFeedDeps, venueId: number, floorAt: string, now: Date): Promise<number> {
-  const cursorText = getJobState(deps.db, venueCursorKey(venueId));
+/** Takes one call from the rolling-hour budget; false when the hour is spent. */
+function takeCall(db: FestFriendFeedDeps['db'], now: Date): boolean {
+  const text = getJobState(db, CALLS_KEY);
+  const recent = (text === null ? [] : (JSON.parse(text) as number[])).filter((t) => now.getTime() - t < HOUR_MS);
+  if (recent.length >= VENUE_CALLS_PER_HOUR) return false;
+  setJobState(db, CALLS_KEY, JSON.stringify([...recent, now.getTime()]));
+  return true;
+}
+
+/**
+ * One venue, head page down to its cursor (or the floor); every page is written as it comes.
+ * `complete: false` when the hourly budget ran out mid-read: the cursor then stays where it was, so
+ * the next read pages down to it again (rows already written are deduplicated).
+ */
+async function readVenue(deps: FestFriendFeedDeps, cursorKey: string, venueId: number, floorAt: string, now: Date): Promise<{ inserted: number; complete: boolean }> {
+  const cursorText = getJobState(deps.db, cursorKey);
   const cursor = cursorText === null ? null : Number(cursorText);
   const seen: number[] = [];
   let inserted = 0;
   let maxId: number | null = null;
   for (let pageNo = 1; ; pageNo++) {
+    if (!takeCall(deps.db, now)) {
+      deps.log.warn({ venueId }, 'fest mcp venue: hourly call budget spent; read deferred');
+      return { inserted, complete: false };
+    }
     const page = parseMcpCheckins(await deps.mcp.call('get_venue_checkins', {
       venueId, limit: MCP_PAGE_CAP, ...(maxId !== null ? { maxId } : {}),
     }));
     if ('error' in page) throw new McpToolError(`get_venue_checkins ${venueId}: ${page.error}`);
-    // A page below maxId proves its span up to that check-in, which the page above just stored.
+    // A page below maxId proves its span up to that check-in, which the page above just stored. A
+    // record the parser could not read is a check-in we cannot vouch for: no coverage from that page.
     inserted += ingestCheckinRows(deps.db, {
       venueId, rows: page.items.map(rowOf), cursor: maxId, fetchedAt: now.toISOString(),
-      eye: 'mcp_venue', now: now.toISOString(), provesCoverage: !page.cached,
+      eye: 'mcp_venue', now: now.toISOString(), provesCoverage: !page.cached && page.items.length === page.count,
     }).inserted;
     const ids = page.items.map((c) => c.checkinId);
     seen.push(...ids);
     const oldestAt = page.items.length === 0 ? null : page.items[page.items.length - 1].checkinAt;
-    const step = venuePageStep({ cursor, floorAt, pageNo, ids, oldestAt });
+    const step = venuePageStep({ cursor, floorAt, pageNo, count: page.count, ids, oldestAt });
     if (step === 'hole') {
       // The cursor still moves to the newest check-in: the gap stays visible in coverage as ❔.
-      deps.log.warn({ venueId }, 'fest mcp venue: more new check-ins than 4 pages; some were skipped');
+      deps.log.warn({ venueId }, 'fest mcp venue: could not read down to the cursor; some check-ins were skipped');
     }
     if (step !== 'more') break;
     maxId = Math.min(...ids);
   }
   deps.db.transaction(() => {
     const next = nextCursor(cursor, seen);
-    if (next !== null) setJobState(deps.db, venueCursorKey(venueId), String(next));
+    if (next !== null) setJobState(deps.db, cursorKey, String(next));
     setJobState(deps.db, venueLastKey(venueId), now.toISOString());
   })();
-  return inserted;
+  return { inserted, complete: true };
 }
 
 /**
@@ -81,7 +108,9 @@ export async function runFestMcpVenues(deps: FestFriendFeedDeps, now: Date): Pro
     setJobState(deps.db, venueAttemptKey(v.venue_id), now.toISOString());
     read = true;
     try {
-      inserted += await readVenue(deps, v.venue_id, floorAt, now);
+      const r = await readVenue(deps, venueCursorKey(active.fest.id, active.session.session_no, v.venue_id), v.venue_id, floorAt, now);
+      inserted += r.inserted;
+      if (!r.complete) break; // the hour's budget is spent: the other venues wait too
     } catch (e) {
       failed = true;
       deps.log.warn({ venueId: v.venue_id, err: e instanceof Error ? e.message : String(e) }, 'fest mcp venue: read failed');

@@ -32,11 +32,19 @@ describe('venuePageStep', () => {
   const full = Array.from({ length: MCP_PAGE_CAP }, (_, i) => 1025 - i);
   const FLOOR = '2026-10-15T13:00:00.000Z';
   const step = (p: Partial<Parameters<typeof venuePageStep>[0]>) =>
-    venuePageStep({ cursor: 900, floorAt: FLOOR, pageNo: 1, ids: full, oldestAt: '2026-10-15T14:00:00.000Z', ...p });
+    venuePageStep({ cursor: 900, floorAt: FLOOR, pageNo: 1, count: MCP_PAGE_CAP, ids: full, oldestAt: '2026-10-15T14:00:00.000Z', ...p });
 
-  it('a short page is the bottom of the venue, cursor or not', () => {
-    expect([step({ ids: full.slice(1) }), step({ ids: [] }), step({ cursor: null, ids: full.slice(1) })])
+  it('a short page (by what Untappd sent) is the bottom of the venue, cursor or not', () => {
+    expect([step({ count: MCP_PAGE_CAP - 1 }), step({ count: 0, ids: [] }), step({ cursor: null, count: MCP_PAGE_CAP - 1 })])
       .toEqual(['done', 'done', 'done']);
+  });
+
+  it('a full page with an unreadable record is still full: it does not pass for the bottom', () => {
+    expect(step({ ids: full.slice(1) })).toBe('more');
+  });
+
+  it('a full page with nothing readable cannot be paged below: a hole', () => {
+    expect([step({ ids: [], oldestAt: null }), step({ cursor: null, ids: [], oldestAt: null })]).toEqual(['hole', 'hole']);
   });
 
   it('with a cursor: a full page wholly above it asks for more; a page holding it is done', () => {

@@ -4,13 +4,16 @@ import { migrate } from '../storage/schema';
 import { getJobState, setJobState } from '../storage/job_state';
 import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
 import type { FestMcp, ToolCallResult } from '../sources/untappd/mcp-client';
-import { runFestMcpVenues, venueAttemptKey, venueCursorKey, venueLastKey } from './fest-mcp-venues';
+import { runFestMcpVenues, VENUE_CALLS_PER_HOUR, venueAttemptKey, venueCursorKey as cursorKeyOf, venueLastKey } from './fest-mcp-venues';
+import { getFestBySlug } from '../storage/fests';
 
 // WFP22 seed: session 1 is 2026-10-15 14:00–22:00 UTC, so the first read reaches back to 13:00.
 const FEST = 11142155;
 const KONF = 2815864;
 const STADIUM = 2167060;
 const IN_SESSION = new Date('2026-10-15T18:00:00.000Z');
+/** Cursor key of a venue in a WFP22 session (session 1 unless named). */
+const venueCursorKey = (db: DB, venueId: number, sessionNo = 1) => cursorKeyOf(getFestBySlug(db, 'wfp22')!.id, sessionNo, venueId);
 const minutesLater = (m: number) => new Date(IN_SESSION.getTime() + m * 60 * 1000);
 
 /** A check-in at `venue`, `minutesAgo` before IN_SESSION. */
@@ -71,7 +74,7 @@ describe('runFestMcpVenues', () => {
       [{ from_at: '2026-10-15T17:50:00.000Z', to_at: '2026-10-15T18:00:00.000Z' }],
       [],
     ]);
-    expect([getJobState(db, venueCursorKey(FEST)), getJobState(db, venueCursorKey(KONF)), getJobState(db, venueCursorKey(STADIUM))])
+    expect([getJobState(db, venueCursorKey(db, FEST)), getJobState(db, venueCursorKey(db, KONF)), getJobState(db, venueCursorKey(db, STADIUM))])
       .toEqual(['103', '203', null]);
   });
 
@@ -104,9 +107,9 @@ describe('runFestMcpVenues', () => {
 
   it('with a cursor stops at the page that holds it', async () => {
     const { deps, db, calls } = setup({ [FEST]: [fullPage(FEST, 1050, 0), fullPage(FEST, 1025, 25)], [KONF]: [page([])], [STADIUM]: [page([])] });
-    setJobState(db, venueCursorKey(FEST), '1010');
+    setJobState(db, venueCursorKey(db, FEST), '1010');
     await runFestMcpVenues(deps, IN_SESSION);
-    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(FEST))]).toEqual([2, '1050']);
+    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(db, FEST))]).toEqual([2, '1050']);
   });
 
   it('a page Untappd served from its cache stores its check-ins but proves no coverage', async () => {
@@ -118,11 +121,11 @@ describe('runFestMcpVenues', () => {
 
   it('a failing venue keeps its cursor, the others are still read, and the breaker hears of it', async () => {
     const { db, deps } = setup({ [FEST]: [new Error('mcp down')], [KONF]: [page([rec(203, KONF, 1)])], [STADIUM]: [page([])] });
-    setJobState(db, venueCursorKey(FEST), '100');
+    setJobState(db, venueCursorKey(db, FEST), '100');
     expect(await runFestMcpVenues(deps, IN_SESSION)).toBe(1);
     expect([
-      getJobState(db, venueCursorKey(FEST)), getJobState(db, venueLastKey(FEST)), getJobState(db, venueAttemptKey(FEST)),
-      getJobState(db, venueCursorKey(KONF)), getJobState(db, 'fest_mcp_open_until'),
+      getJobState(db, venueCursorKey(db, FEST)), getJobState(db, venueLastKey(FEST)), getJobState(db, venueAttemptKey(FEST)),
+      getJobState(db, venueCursorKey(db, KONF)), getJobState(db, 'fest_mcp_open_until'),
     ]).toEqual(['100', null, '2026-10-15T18:00:00.000Z', '203', null]);
   });
 
@@ -156,9 +159,9 @@ describe('runFestMcpVenues', () => {
       [FEST]: [fullPage(FEST, 1100, 0), fullPage(FEST, 1075, 25), fullPage(FEST, 1050, 50), fullPage(FEST, 1025, 75)],
       [KONF]: [page([])], [STADIUM]: [page([])],
     });
-    setJobState(db, venueCursorKey(FEST), '900');
+    setJobState(db, venueCursorKey(db, FEST), '900');
     await runFestMcpVenues(deps, IN_SESSION);
-    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(FEST))]).toEqual([4, '1100']);
+    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(db, FEST))]).toEqual([4, '1100']);
   });
 
   it('an open breaker reads nothing', async () => {
@@ -166,5 +169,43 @@ describe('runFestMcpVenues', () => {
     setJobState(db, 'fest_mcp_open_until', '2026-10-15T18:30:00.000Z');
     expect(await runFestMcpVenues(deps, IN_SESSION)).toBe(null);
     expect(calls).toEqual([]);
+  });
+
+  it('a full page with one unreadable record still pages on, and that page proves no coverage of its own', async () => {
+    const broken = { ...rec(1040, FEST, 10), created_at: 'yesterday' };
+    const first = page([...Array.from({ length: 24 }, (_, i) => rec(1050 - i, FEST, i)), broken]);
+    const { db, deps, calls } = setup({ [FEST]: [first, page([rec(1000, FEST, 40)])], [KONF]: [page([])], [STADIUM]: [page([])] });
+    setJobState(db, venueCursorKey(db, FEST), '990');
+    await runFestMcpVenues(deps, IN_SESSION);
+    expect([calls.filter((a) => a.venueId === FEST), coverage(db, FEST)]).toEqual([
+      [{ venueId: FEST, limit: 25 }, { venueId: FEST, limit: 25, maxId: 1027 }],
+      // Only the clean page below proves its span; nothing reaches up to now (18:00).
+      [{ from_at: '2026-10-15T17:20:00.000Z', to_at: '2026-10-15T17:37:00.000Z' }],
+    ]);
+  });
+
+  it('a later session does not inherit the cursor of an earlier one: its first read goes down to its own floor', async () => {
+    // Session 2 starts 2026-10-16 12:00 UTC; its floor is 11:00. Reading at 13:00 (120 min after the floor).
+    const SESSION_2 = new Date('2026-10-16T13:00:00.000Z');
+    const at2 = (minutesAgo: number) => new Date(SESSION_2.getTime() - minutesAgo * 60 * 1000).toUTCString().replace('GMT', '+0000');
+    const r2 = (id: number, minutesAgo: number) => ({ ...rec(id, FEST, 0), created_at: at2(minutesAgo) });
+    const full2 = (top: number, minutesAgo: number) => page(Array.from({ length: 25 }, (_, i) => r2(top - i, minutesAgo + 5 * i)));
+    const { db, deps, calls } = setup({ [FEST]: [full2(3050, 0)], [KONF]: [page([])], [STADIUM]: [page([])] });
+    setJobState(db, venueCursorKey(db, FEST), '3040'); // left by session 1
+    await runFestMcpVenues(deps, SESSION_2);
+    expect([calls.filter((a) => a.venueId === FEST).length, getJobState(db, venueCursorKey(db, FEST, 2))]).toEqual([1, '3050']);
+  });
+
+  it('never spends more than the hourly budget on venue reads; a deferred read keeps its cursor', async () => {
+    const empties = (n: number) => Array.from({ length: n }, () => page([]));
+    const { db, deps, calls } = setup({ [FEST]: empties(40), [KONF]: empties(20), [STADIUM]: empties(20) });
+    for (let m = 0; m < 60; m += 3) await runFestMcpVenues(deps, minutesLater(m));
+    expect(calls.length).toBe(40);
+    // The hour is spent at the 60th call; a busy reread on the next tick is deferred, cursor untouched.
+    setJobState(db, 'fest_mcp_venue_calls', JSON.stringify(Array.from({ length: VENUE_CALLS_PER_HOUR }, () => minutesLater(59).getTime())));
+    setJobState(db, venueCursorKey(db, FEST), '7');
+    const before = calls.length;
+    await runFestMcpVenues(deps, minutesLater(60));
+    expect([calls.length - before, getJobState(db, venueCursorKey(db, FEST)), getJobState(db, 'fest_mcp_open_until')]).toEqual([0, '7', null]);
   });
 });
