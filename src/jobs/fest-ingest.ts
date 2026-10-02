@@ -42,36 +42,73 @@ export interface FeedPageResult {
   nextCursor: string | null;
 }
 
-// The single write path for every eye (spec §4.2): laptop relay, server poller, friend feed.
-export function ingestFeedPage(db: DB, p: FeedPageInput): FeedPageResult {
-  if (isBlockPage(p.html)) throw new BlockedPageError();
-  const page = parseCheckinFeedPage(p.html);
+export type CheckinPageResult = Omit<FeedPageResult, 'nextCursor'>;
 
+/** A check-in as an eye read it, before this venue's rules are applied. */
+export interface CheckinRowInput {
+  checkin_id: number;
+  /** The venue the check-in names; null when it names none. */
+  venue_id: number | null;
+  bid: number;
+  untappd_user: string | null;
+  /** ISO time to the second; null when the source gave no such time. */
+  checkin_at: string | null;
+}
+
+export interface CheckinPageInput {
+  venueId: number;
+  /** The page's check-ins, newest first, as the source listed them. */
+  rows: CheckinRowInput[];
+  /** checkin_id the page was requested below; null for the head page. */
+  cursor: number | null;
+  fetchedAt: string;
+  eye: Eye;
+  now: string;
+  /** False when the source cannot vouch that the page is the venue as it is now (MCP mem). */
+  provesCoverage: boolean;
+}
+
+// The single write path for every eye (spec §4.2): laptop relay, server poller, friend feed, MCP
+// venue eye. HTML pages arrive through ingestFeedPage; the MCP eye hands its rows here directly.
+export function ingestCheckinRows(db: DB, p: CheckinPageInput): CheckinPageResult {
   // A row whose venue link names another venue (or none) does not belong to this feed: a relay
   // that pairs one venue's page with another's id must not create check-ins or coverage there.
-  const here = page.checkins.filter((c) => c.venue_id === p.venueId);
-  const mismatched = page.checkins.length - here.length;
-  const rows = here.flatMap((c) => {
-    const at = feedCheckinTime(c.checkin_at);
-    return at === null
-      ? []
-      : [{ checkin_id: Number(c.checkin_id), venue_id: p.venueId, bid: c.bid, untappd_user: c.author, checkin_at: at }];
-  });
+  const here = p.rows.filter((c) => c.venue_id === p.venueId);
+  const mismatched = p.rows.length - here.length;
+  const rows = here.flatMap((c) => (c.checkin_at === null
+    ? []
+    : [{ checkin_id: c.checkin_id, venue_id: p.venueId, bid: c.bid, untappd_user: c.untappd_user, checkin_at: c.checkin_at }]));
   const dropped = here.length - rows.length;
 
   // A row we could not place in time or in this venue is a check-in we saw but cannot vouch for,
   // so the page proves no span at all. A cursor we never stored leaves the upper bound unproven too.
-  const cursorAt = p.cursor === null ? null : venueCheckinAt(db, Number(p.cursor), p.venueId);
-  const span = dropped > 0 || mismatched > 0 || (p.cursor !== null && cursorAt === null)
+  const cursorAt = p.cursor === null ? null : venueCheckinAt(db, p.cursor, p.venueId);
+  const span = !p.provesCoverage || dropped > 0 || mismatched > 0 || (p.cursor !== null && cursorAt === null)
     ? null
     : pageSpan({ checkinTimes: rows.map((r) => r.checkin_at), cursorAt, fetchedAt: p.fetchedAt, now: p.now });
 
-  return db.transaction((): FeedPageResult => {
+  return db.transaction((): CheckinPageResult => {
     const stitched = span !== null && touches(coverageSince(db, p.venueId, span.from_at), span);
     const inserted = insertVenueCheckins(db, rows, p.eye, p.now);
     if (span !== null) addCoverage(db, p.venueId, span, p.eye, p.now);
-    return { inserted, seen: rows.length, dropped, mismatched, stitched, nextCursor: page.nextMaxId };
+    return { inserted, seen: rows.length, dropped, mismatched, stitched };
   })();
+}
+
+/** An HTML feed page (laptop relay, server poller): parsed here, then the common path above. */
+export function ingestFeedPage(db: DB, p: FeedPageInput): FeedPageResult {
+  if (isBlockPage(p.html)) throw new BlockedPageError();
+  const page = parseCheckinFeedPage(p.html);
+  const result = ingestCheckinRows(db, {
+    venueId: p.venueId,
+    rows: page.checkins.map((c) => ({
+      checkin_id: Number(c.checkin_id), venue_id: c.venue_id, bid: c.bid, untappd_user: c.author,
+      checkin_at: feedCheckinTime(c.checkin_at),
+    })),
+    cursor: p.cursor === null ? null : Number(p.cursor),
+    fetchedAt: p.fetchedAt, eye: p.eye, now: p.now, provesCoverage: true,
+  });
+  return { ...result, nextCursor: page.nextMaxId };
 }
 
 export interface MenuPageResult {

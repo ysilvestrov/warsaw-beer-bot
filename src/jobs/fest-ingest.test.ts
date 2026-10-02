@@ -5,7 +5,7 @@ import { migrate } from '../storage/schema';
 import { getFestBySlug } from '../storage/fests';
 import { menuFor } from '../storage/fest_menu';
 import { insertVenueCheckins } from '../storage/venue_checkins';
-import { BlockedPageError, ingestFeedPage, ingestMenuPage } from './fest-ingest';
+import { BlockedPageError, ingestCheckinRows, ingestFeedPage, ingestMenuPage, type CheckinRowInput } from './fest-ingest';
 
 const FIXTURES = join(__dirname, '../sources/untappd/__fixtures__');
 const DOM = readFileSync(join(FIXTURES, 'venue-activity-dom.html'), 'utf8');
@@ -20,7 +20,7 @@ function fresh(): DB {
   return db;
 }
 
-const coverage = (db: DB) => db.prepare('SELECT venue_id, from_at, to_at, eye FROM fest_coverage').all();
+const coverage = (db: DB) => db.prepare('SELECT venue_id, from_at, to_at, eye FROM fest_coverage ORDER BY from_at').all();
 
 describe('ingestFeedPage', () => {
   it('stores a head page and proves [oldest, fetchedAt]', () => {
@@ -149,5 +149,63 @@ describe('ingestMenuPage', () => {
   it('refuses a Cloudflare page', () => {
     const db = fresh();
     expect(() => ingestMenuPage(db, { festId: 1, html: '<title>Just a moment...</title>', now: NOW })).toThrow(BlockedPageError);
+  });
+});
+
+describe('ingestCheckinRows', () => {
+  const row = (id: number, at: string | null, venue: number | null = VENUE): CheckinRowInput =>
+    ({ checkin_id: id, venue_id: venue, bid: 6134008, untappd_user: 'probe_user', checkin_at: at });
+  const head = (rows: CheckinRowInput[], provesCoverage = true) =>
+    ({ venueId: VENUE, rows, cursor: null, fetchedAt: NOW, eye: 'mcp_venue' as const, now: NOW, provesCoverage });
+
+  it('a head page from the API proves [oldest, fetchedAt] under the mcp_venue eye', () => {
+    const db = fresh();
+    expect(ingestCheckinRows(db, head([row(3, '2026-03-31T12:10:00.000Z'), row(2, '2026-03-31T12:00:00.000Z')])))
+      .toEqual({ inserted: 2, seen: 2, dropped: 0, mismatched: 0, stitched: false });
+    expect(coverage(db)).toEqual([
+      { venue_id: VENUE, from_at: '2026-03-31T12:00:00.000Z', to_at: NOW, eye: 'mcp_venue' },
+    ]);
+  });
+
+  it('a page the source cannot vouch for stores its check-ins and proves nothing', () => {
+    const db = fresh();
+    expect(ingestCheckinRows(db, head([row(3, '2026-03-31T12:10:00.000Z')], false)).inserted).toBe(1);
+    expect(coverage(db)).toEqual([]);
+  });
+
+  it('a row naming no venue is mismatched and the page proves nothing', () => {
+    const db = fresh();
+    expect(ingestCheckinRows(db, head([row(3, '2026-03-31T12:10:00.000Z'), row(2, '2026-03-31T12:00:00.000Z', null)])))
+      .toEqual({ inserted: 1, seen: 1, dropped: 0, mismatched: 1, stitched: false });
+    expect(coverage(db)).toEqual([]);
+  });
+
+  it('a row without a time is dropped and the page proves nothing', () => {
+    const db = fresh();
+    expect(ingestCheckinRows(db, head([row(3, '2026-03-31T12:10:00.000Z'), row(2, null)])))
+      .toEqual({ inserted: 1, seen: 1, dropped: 1, mismatched: 0, stitched: false });
+    expect(coverage(db)).toEqual([]);
+  });
+
+  it('a page below a stored check-in proves [oldest, that check-in] and stitches onto the head page', () => {
+    const db = fresh();
+    ingestCheckinRows(db, head([row(3, '2026-03-31T12:10:00.000Z'), row(2, '2026-03-31T12:00:00.000Z')]));
+    expect(ingestCheckinRows(db, { ...head([row(1, '2026-03-31T11:50:00.000Z')]), cursor: 2 }).stitched).toBe(true);
+    expect(coverage(db)).toEqual([
+      { venue_id: VENUE, from_at: '2026-03-31T11:50:00.000Z', to_at: '2026-03-31T12:00:00.000Z', eye: 'mcp_venue' },
+      { venue_id: VENUE, from_at: '2026-03-31T12:00:00.000Z', to_at: NOW, eye: 'mcp_venue' },
+    ]);
+  });
+
+  it('a page below a check-in never stored writes rows but no coverage', () => {
+    const db = fresh();
+    ingestCheckinRows(db, { ...head([row(1, '2026-03-31T11:50:00.000Z')]), cursor: 2 });
+    expect(coverage(db)).toEqual([]);
+  });
+
+  it('an empty page writes nothing', () => {
+    const db = fresh();
+    expect(ingestCheckinRows(db, head([]))).toEqual({ inserted: 0, seen: 0, dropped: 0, mismatched: 0, stitched: false });
+    expect(coverage(db)).toEqual([]);
   });
 });
