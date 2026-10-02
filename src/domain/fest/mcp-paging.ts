@@ -22,3 +22,16 @@ export function pageStep(p: { cursor: number | null; pageNo: number; count: numb
 export function nextCursor(cursor: number | null, ids: number[]): number | null {
   return ids.reduce<number | null>((max, id) => (max === null || id > max ? id : max), cursor);
 }
+
+/**
+ * After a page of a venue feed read down from the head with maxId (spec
+ * 2026-10-02-wfp-mcp-venue-eye-design.md §3.1). With a cursor (the newest check-in this eye stored
+ * at the venue) the read stops once a page reaches it; without one — the first read of a window —
+ * it stops once a page reaches back to `floorAt` (session start − 60 min). A short page is the
+ * venue's bottom either way.
+ */
+export function venuePageStep(p: { cursor: number | null; floorAt: string; pageNo: number; ids: number[]; oldestAt: string | null }): PageStep {
+  if (p.ids.length < MCP_PAGE_CAP) return 'done';
+  if (p.cursor !== null ? Math.min(...p.ids) <= p.cursor : p.oldestAt !== null && Date.parse(p.oldestAt) <= Date.parse(p.floorAt)) return 'done';
+  return p.pageNo >= MCP_MAX_PAGES ? 'hole' : 'more';
+}
