@@ -10,6 +10,7 @@ describe('parseMcpCheckins', () => {
   it('reads every field the festival needs from a live answer; 0 rating is "no rating", venue [] is none', () => {
     expect(parseMcpCheckins(asTool(BODY))).toEqual({
       count: 3,
+      cached: true,
       items: [
         { checkinId: 1605095696, checkinAt: '2026-09-30T17:04:06.000Z', bid: 6813263, beerName: 'Absztyfikant', breweryName: 'Ziemia Obiecana', style: 'IPA - Session', abv: 5.8, venueId: 10600165, userName: 'friend_1', rating: 3.75 },
         { checkinId: 1605095315, checkinAt: '2026-09-30T17:02:21.000Z', bid: 6753545, beerName: 'INDIGO BLOOM', breweryName: 'Paradox', style: 'Sour - Fruited', abv: 4.5, venueId: 12613920, userName: 'friend_2', rating: null },
@@ -23,7 +24,7 @@ describe('parseMcpCheckins', () => {
     delete body.checkins.items[0].beer.bid;
     body.checkins.items[1].created_at = '30 Sep 26';
     const page = parseMcpCheckins(asTool(JSON.stringify(body)));
-    expect(page).toEqual({ count: 3, items: [expect.objectContaining({ checkinId: 1605095205 })] });
+    expect(page).toEqual({ count: 3, cached: true, items: [expect.objectContaining({ checkinId: 1605095205 })] });
   });
 
   it('a tool error carries its text; a body that is not the Untappd shape is bad_shape', () => {
@@ -33,5 +34,15 @@ describe('parseMcpCheckins', () => {
       parseMcpCheckins(asTool('{"response":{}}')),
       parseMcpCheckins({ content: [] }),
     ]).toEqual([{ error: 'UNTAPPD_NOT_CONNECTED' }, { error: 'bad_shape' }, { error: 'bad_shape' }, { error: 'bad_shape' }]);
+  });
+
+  it('a page is vouched for as live only when Untappd says mem: false', () => {
+    const withMem = (mem: unknown) => JSON.stringify({ ...JSON.parse(BODY), mem });
+    expect([
+      parseMcpCheckins(asTool(withMem(false))),
+      parseMcpCheckins(asTool(withMem(true))),
+      parseMcpCheckins(asTool(BODY)),
+      parseMcpCheckins(asTool('{"checkins":{"items":[],"count":0}}')),
+    ]).toMatchObject([{ cached: false }, { cached: true }, { cached: true }, { cached: true, count: 0, items: [] }]);
   });
 });
