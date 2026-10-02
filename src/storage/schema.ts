@@ -179,6 +179,42 @@ export const V43_FEST_PRINT_SQL = `
   );
 `;
 
+// MCP venue eye (spec 2026-10-02-wfp-mcp-venue-eye-design.md §3.4): a fourth eye value. SQLite
+// cannot alter a CHECK, so both tables are rebuilt with their rows and indexes copied as they are.
+// Re-runnable, because migration tests rewind schema_version over a live database.
+export const V44_FEST_MCP_EYE_SQL = `
+  DROP TABLE IF EXISTS venue_checkins_v44;
+  CREATE TABLE venue_checkins_v44 (
+    checkin_id INTEGER PRIMARY KEY,
+    venue_id INTEGER NOT NULL,
+    bid INTEGER NOT NULL,
+    untappd_user TEXT,
+    checkin_at TEXT NOT NULL,
+    first_eye TEXT NOT NULL CHECK (first_eye IN ('laptop', 'server', 'friend_feed', 'mcp_venue')),
+    observed_at TEXT NOT NULL
+  );
+  INSERT INTO venue_checkins_v44 (checkin_id, venue_id, bid, untappd_user, checkin_at, first_eye, observed_at)
+    SELECT checkin_id, venue_id, bid, untappd_user, checkin_at, first_eye, observed_at FROM venue_checkins;
+  DROP TABLE venue_checkins;
+  ALTER TABLE venue_checkins_v44 RENAME TO venue_checkins;
+  CREATE INDEX IF NOT EXISTS idx_venue_checkins_venue_at ON venue_checkins (venue_id, checkin_at);
+  CREATE INDEX IF NOT EXISTS idx_venue_checkins_bid_at ON venue_checkins (bid, checkin_at);
+
+  DROP TABLE IF EXISTS fest_coverage_v44;
+  CREATE TABLE fest_coverage_v44 (
+    venue_id INTEGER NOT NULL,
+    from_at TEXT NOT NULL,
+    to_at TEXT NOT NULL,
+    eye TEXT NOT NULL CHECK (eye IN ('laptop', 'server', 'friend_feed', 'mcp_venue')),
+    recorded_at TEXT NOT NULL,
+    PRIMARY KEY (venue_id, from_at, to_at, eye)
+  );
+  INSERT INTO fest_coverage_v44 (venue_id, from_at, to_at, eye, recorded_at)
+    SELECT venue_id, from_at, to_at, eye, recorded_at FROM fest_coverage;
+  DROP TABLE fest_coverage;
+  ALTER TABLE fest_coverage_v44 RENAME TO fest_coverage;
+`;
+
 export const V42_FEST_SQL = `
   CREATE TABLE IF NOT EXISTS fests (
     id INTEGER PRIMARY KEY,
@@ -958,6 +994,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   { version: 41, sql: V41_ACCOUNT_HISTORY_SQL },
   { version: 42, sql: V42_FEST_SQL },
   { version: 43, sql: V43_FEST_PRINT_SQL },
+  { version: 44, sql: V44_FEST_MCP_EYE_SQL },
 ];
 
 export function migrate(db: DB): void {

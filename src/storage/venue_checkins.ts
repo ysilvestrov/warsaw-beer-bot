@@ -1,6 +1,6 @@
 import type { DB } from './db';
 
-export type Eye = 'laptop' | 'server' | 'friend_feed';
+export type Eye = 'laptop' | 'server' | 'friend_feed' | 'mcp_venue';
 
 export interface VenueCheckinInput {
   checkin_id: number;
