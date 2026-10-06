@@ -297,7 +297,8 @@ Per CLAUDE.md (core plan → review → periphery plan):
    `spec.md` gets the new report contract. End-to-end review.
 2. **Periphery** (second plan, written after the core review): `ops_events` + producers;
    `/match`/MCP error counters; bot command counter; closed issues; deploy journal
-   (`[deploy:hold]`, host step: reinstall the deployer copy).
+   (`[deploy:hold]`, host step: reinstall the deployer copy);
+   a Сироти rule for `sealUnidentifiable > 0` with `sealUnidentifiableReobserved = 0` (#377: the reachability mechanism is dead) — the field is already in the snapshot.
 3. **Later, own specs:** LLM renderer (b); money (#786).
 
 ## Verification and rollout

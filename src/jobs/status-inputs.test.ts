@@ -8,6 +8,9 @@ import { collectStatusInputs } from './status-inputs';
 import { CANARY_STATE_KEY } from './enrich-orphans';
 import { TRIAGE_LAST_RESULT_KEY, TRIAGE_LAST_RUN_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
+import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
+import { FEST_MENU_LAST_KEY } from './fest-poll';
+import { KEEPALIVE_LAST_KEY } from './fest-friend-feed';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 
 const NOW = new Date('2026-10-06T07:00:00.000Z');
@@ -78,4 +81,20 @@ test('history covers the 13 days before the report date and excludes today', () 
 
 test('fest inputs are null without a current or upcoming fest', () => {
   expect(collectStatusInputs(emptyDb(), new Date('2027-06-01T07:00:00.000Z'), '2027-06-01', missing).fest).toBeNull();
+});
+
+test('persisted pause, unlock result and fest timestamps are carried through as written', () => {
+  const db = emptyDb();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, '{"since":"2026-10-06T04:12:33.000Z","status":401}');
+  setJobState(db, UNLOCK_LAST_RUN_KEY, DATE);
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({ date: DATE, withheld: [{ beerId: 38770, issueNumber: 452 }] }));
+  setJobState(db, FEST_MENU_LAST_KEY, '2026-10-06T01:00:00.000Z');
+  setJobState(db, KEEPALIVE_LAST_KEY, '2026-10-05T07:00:00.000Z');
+  const i = collectStatusInputs(db, NOW, DATE, { ...missing, repo: 'o/r' });
+  expect([i.bugReports?.paused, i.unlock, i.fest]).toEqual([
+    { since: '2026-10-06T04:12:33.000Z', status: 401 },
+    { ranToday: true, withheld: [{ beerId: 38770, issueNumber: 452 }] },
+    { menuLastAt: '2026-10-06T01:00:00.000Z', menuCycleMs: 21_600_000,
+      keepaliveLastAt: '2026-10-05T07:00:00.000Z', keepaliveCycleMs: 86_400_000 },
+  ]);
 });

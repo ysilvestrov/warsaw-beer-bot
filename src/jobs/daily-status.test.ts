@@ -6,6 +6,8 @@ import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { buildBugReportLine, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
+import { insertReport, markDone } from '../storage/bug_reports';
+import { recordMatchUsage } from '../storage/api_usage';
 import { saveStatusSnapshot } from '../storage/status_snapshots';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
@@ -232,4 +234,37 @@ test('a week of history removes the history footer', async () => {
   await dailyStatus({ db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
     notifyAdmin: async (t) => { sent.push(t); } });
   expect(sent[0].includes('історія:')).toBe(false);
+});
+
+const usersBlock = (text: string): string[] | undefined =>
+  text.split('\n\n').find((b) => b.startsWith('Живі користувачі'))?.split('\n');
+
+test('the users block lists extension, MCP and bug-report activity with grouped digits', async () => {
+  const db = emptyDb();
+  recordMatchUsage(db, { date: '2026-10-05', authed: true, beers: 12345, channel: 'extension' });
+  recordMatchUsage(db, { date: '2026-10-05', authed: false, beers: 1000, channel: 'extension' });
+  recordMatchUsage(db, { date: '2026-10-05', authed: true, beers: 700, channel: 'mcp' });
+  recordMatchUsage(db, { date: '2026-10-05', authed: true, beers: 300, channel: 'mcp' });
+  const id = insertReport(db, {
+    telegramId: 101, chatId: 202, statusMessageId: 303, locale: 'uk', city: 'warszawa',
+    source: 'bot', category: 'wrong_beer', text: 'Wrong beer shown', createdAt: '2026-10-06T04:30:00.000Z',
+  });
+  markDone(db, id, { verdict: 'not_a_bug', issueNumber: null, processedAt: '2026-10-06T04:40:00.000Z', related: null });
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, repo: 'ysilvestrov/warsaw-beer-bot', ...missingMonitor,
+    now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async (t) => { sent.push(t); } });
+  expect(usersBlock(sent[0])).toEqual([
+    'Живі користувачі',
+    '  • розширення /match (вчора): 2 запитів · 1 анонім. · 13 345 пив',
+    '  • MCP /match (вчора): 2 запитів · 1 000 пив',
+    '  • скарги за добу: оброблено 1 (нових 0, відкритих дублікатів 0, закритих дублікатів 0, не-баг 1), у черзі 0, потребують перевірки 0, збоїв 0',
+  ]);
+});
+
+test('no extension, MCP or report traffic leaves out the users section entirely', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, repo: 'ysilvestrov/warsaw-beer-bot', ...missingMonitor,
+    now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async (t) => { sent.push(t); } });
+  expect([sent[0].includes('Живі користувачі'), usersBlock(sent[0])]).toEqual([false, undefined]);
 });
