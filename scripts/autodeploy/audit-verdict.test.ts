@@ -59,6 +59,13 @@ describe('auditVerdict — the four probed cases', () => {
 });
 
 describe('auditVerdict — the severity boundary', () => {
+  it('an entry with no severity makes the report unrunnable, never clean', () => {
+    expect(auditVerdict('{"auditReportVersion":2,"vulnerabilities":{"proxy-addr":{}}}')).toEqual({
+      kind: 'unrunnable',
+      reason: 'has a malformed entry for "proxy-addr" — not a well-formed audit report',
+    });
+  });
+
   it('a moderate-only report is clean', () => {
     expect(auditVerdict(report({ a: { severity: 'moderate', via: [] } }))).toEqual({ kind: 'clean' });
   });
@@ -102,6 +109,30 @@ describe('parseAuditReport — anything that is not an audit is an error', () =>
   it('an object with no vulnerabilities field', () => {
     expect(parseAuditReport('{"auditReportVersion":2}')).toEqual({
       error: 'has no "vulnerabilities" field — not a well-formed audit report',
+    });
+  });
+
+  const malformed = (name: string) => ({ error: `has a malformed entry for "${name}" — not a well-formed audit report` });
+
+  it('an empty entry has no severity and is malformed, not ignored', () => {
+    expect(parseAuditReport('{"vulnerabilities":{"proxy-addr":{}}}')).toEqual(malformed('proxy-addr'));
+  });
+
+  it('an unknown severity is malformed', () => {
+    expect(parseAuditReport('{"vulnerabilities":{"b":{"severity":"unknown"}}}')).toEqual(malformed('b'));
+  });
+
+  it('a string entry is malformed', () => {
+    expect(parseAuditReport('{"vulnerabilities":{"a":"high"}}')).toEqual(malformed('a'));
+  });
+
+  it('a via that is not an array is malformed', () => {
+    expect(parseAuditReport('{"vulnerabilities":{"a":{"severity":"high","via":"x"}}}')).toEqual(malformed('a'));
+  });
+
+  it('a valid entry without via parses', () => {
+    expect(parseAuditReport('{"vulnerabilities":{"a":{"severity":"low"}}}')).toEqual({
+      vulnerabilities: { a: { severity: 'low' } },
     });
   });
 

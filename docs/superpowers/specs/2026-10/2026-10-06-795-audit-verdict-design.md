@@ -51,6 +51,9 @@ export function renderVerdict(v: AuditVerdict): string;
 - **Parse** (moved from `qualify-cli.ts` `auditReport()`, same rules): empty stdout,
   unparseable JSON, an `error` key, or a missing `vulnerabilities` object → not an audit.
   The reason names which, plus npm's `error.code`/`error.summary`/`message` when present.
+  A `vulnerabilities` entry that is not an object with a known `severity` (and an array
+  `via` if present) is also "not an audit". A clean verdict needs every listed package to
+  have a known severity below `high`.
 - **Classify**: a package entry whose `severity` is `high` or `critical` is a finding.
   This is the same set as `qualify.ts` `ACTIONABLE`, and `--audit-level=high` uses the
   same threshold. `Severity`, `AuditReport` and the actionable filter **move** here, and

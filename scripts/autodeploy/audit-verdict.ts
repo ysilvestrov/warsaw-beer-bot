@@ -10,6 +10,9 @@
 
 export type Severity = 'info' | 'low' | 'moderate' | 'high' | 'critical';
 
+/** Every severity npm audit emits; an entry carrying anything else is not evidence. */
+const SEVERITIES: readonly Severity[] = ['info', 'low', 'moderate', 'high', 'critical'];
+
 /** The shape we consume from `npm audit --json` (`.vulnerabilities`). */
 export interface AuditReport {
   vulnerabilities: Record<string, { severity: Severity; via?: unknown[] }>;
@@ -69,6 +72,14 @@ export function parseAuditReport(stdout: string): AuditReport | { error: string 
   const v = obj.vulnerabilities;
   if (typeof v !== 'object' || v === null || Array.isArray(v)) {
     return { error: 'has no "vulnerabilities" field — not a well-formed audit report' };
+  }
+  for (const [name, entry] of Object.entries(v)) {
+    const e = entry as { severity?: unknown; via?: unknown } | null;
+    const wellFormed =
+      typeof e === 'object' && e !== null && !Array.isArray(e) &&
+      SEVERITIES.includes(e.severity as Severity) &&
+      (e.via === undefined || Array.isArray(e.via));
+    if (!wellFormed) return { error: `has a malformed entry for "${name}" — not a well-formed audit report` };
   }
   return { vulnerabilities: v as AuditReport['vulnerabilities'] };
 }
