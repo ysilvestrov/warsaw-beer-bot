@@ -22,7 +22,7 @@ test('full layout: reasons only under non-green, footers, then events, users, tr
       { subsystem: 'untappd', colour: 'red', reasons: ['канарка пошуку порожня на останньому запуску (05:30)'] },
       { subsystem: 'orphans', colour: 'yellow', reasons: ['тріаж сиріт сьогодні не відпрацював', 'спростованих retire: 2 → 5'] },
     ],
-    footers: ['історія: 3/7 днів — порівняльні правила ще не діють'],
+    footers: ['історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють'],
     events: ['Тріаж: 7 рядків'],
     users: ['розширення /match (вчора): 3 запитів · 1 анонім. · 200 пив'],
     trends: ['сиріт у черзі: 100 → 121 (+21 % за тиждень)'],
@@ -39,7 +39,7 @@ test('full layout: reasons only under non-green, footers, then events, users, tr
     '  • тріаж сиріт сьогодні не відпрацював',
     '  • спростованих retire: 2 → 5',
     '',
-    'ℹ️ історія: 3/7 днів — порівняльні правила ще не діють',
+    'ℹ️ історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють',
     '',
     'Події',
     '  • Тріаж: 7 рядків',
@@ -67,4 +67,14 @@ test('a report exactly at the limit is not cut', () => {
   const filler = 'x'.repeat(TELEGRAM_LIMIT - head.length - '\n\nПодії\n  • '.length);
   const text = renderStatusReport({ ...allGreen, events: [filler] });
   expect([text.length, text.endsWith(filler)]).toEqual([TELEGRAM_LIMIT, true]);
+});
+
+test('truncation never leaves half of an emoji at the cut', () => {
+  const head = renderStatusReport(allGreen);
+  const cut = TELEGRAM_LIMIT - '\n… (обрізано)'.length;
+  // Put the first UTF-16 unit of 🍺 exactly at the last position the cut keeps.
+  const before = 'x'.repeat(cut - 1 - head.length - '\n\nПодії\n  • '.length);
+  const text = renderStatusReport({ ...allGreen, events: [`${before}🍺${'y'.repeat(100)}`] });
+  expect([text.length, text.endsWith('x\n… (обрізано)'), /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text)])
+    .toEqual([TELEGRAM_LIMIT - 1, true, false]);
 });

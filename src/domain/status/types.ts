@@ -43,9 +43,9 @@ export interface StatusInputs {
   canary: Avail<{ ok: boolean; at: string } | null>; // value null = the canary never ran
   algoliaOpenUntil: string | null;
   profileOpenUntil: string | null;
-  triage: { ranToday: boolean; line: string | null; saturated: string | null };
+  triage: { ranToday: boolean; line: string | null; saturated: string | null; unreadable?: boolean }; // unreadable = today's result exists but cannot be parsed
   unlock: { ranToday: boolean; withheld: { beerId: number; issueNumber: number }[] | null };  // null = today's result exists but is unreadable
-  bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null } | null; // null = no repo configured
+  bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null; pausedUnreadable?: boolean } | null; // null = no repo configured
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   fest: FestInputs | null;         // null = no current or upcoming fest
 }

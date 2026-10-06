@@ -75,6 +75,15 @@ describe('Untappd', () => {
       evaluateUntappd(greenInputs({ algoliaOpenUntil: '2026-10-06T06:59:59.000Z' })).colour,
     ]).toEqual([{ subsystem: 'untappd', colour: 'red', reasons: ['Algolia-breaker відкритий до 12:00'] }, 'green']);
   });
+  test('a breaker timestamp that does not parse is no data, never a closed breaker', () => {
+    expect([
+      evaluateUntappd(greenInputs({ algoliaOpenUntil: 'nope' })),
+      evaluateUntappd(greenInputs({ profileOpenUntil: 'nope' })),
+    ]).toEqual([
+      { subsystem: 'untappd', colour: 'yellow', reasons: ['нема даних: стан Algolia-breaker пошкоджено'] },
+      { subsystem: 'untappd', colour: 'yellow', reasons: ['нема даних: стан breaker профіль-скрейпу пошкоджено'] },
+    ]);
+  });
   test('profile breaker open now is yellow', () => {
     expect(evaluateUntappd(greenInputs({ profileOpenUntil: '2026-10-06T10:00:00.000Z' }))).toEqual({
       subsystem: 'untappd', colour: 'yellow', reasons: ['breaker профіль-скрейпу відкритий до 12:00'],

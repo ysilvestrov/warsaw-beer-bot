@@ -319,3 +319,29 @@ test('no extension, MCP or report traffic leaves out the users section entirely'
     now: () => new Date('2026-10-06T07:00:00Z'), notifyAdmin: async (t) => { sent.push(t); } });
   expect([sent[0].includes('Живі користувачі'), usersBlock(sent[0])]).toEqual([false, undefined]);
 });
+
+test('two overlapping ticks with a broken report send one fallback, not two', async () => {
+  const db = emptyDb();
+  db.exec('DROP TABLE status_snapshots');
+  const sent: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const deps = { db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
+    notifyAdmin: async (t: string) => { sent.push(t); await gate; } };
+  const both = Promise.all([dailyStatus(deps), dailyStatus(deps)]);
+  release();
+  await both;
+  expect(sent.length).toBe(1);
+});
+
+test('a fallback whose send failed is retried by the next tick in the same process', async () => {
+  const db = emptyDb();
+  db.exec('DROP TABLE status_snapshots');
+  const sent: string[] = [];
+  let fail = true;
+  const deps = { db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
+    notifyAdmin: async (t: string) => { if (fail) { fail = false; throw new Error('synthetic transport unavailable'); } sent.push(t); } };
+  await dailyStatus(deps);
+  await dailyStatus(deps);
+  expect(sent.length).toBe(1);
+});

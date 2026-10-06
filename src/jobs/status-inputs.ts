@@ -27,24 +27,37 @@ const parse = (raw: string | null): unknown => {
   try { return JSON.parse(raw) as unknown; } catch { return undefined; }
 };
 
-function readCanary(db: DB): Avail<{ ok: boolean; at: string } | null> {
+// Clock skew a stored timestamp may have against `now` before it counts as "from the future".
+const FUTURE_SKEW_MS = 60_000;
+const validPast = (iso: unknown, now: Date): boolean => {
+  if (typeof iso !== 'string') return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && t <= now.getTime() + FUTURE_SKEW_MS;
+};
+
+function readCanary(db: DB, now: Date): Avail<{ ok: boolean; at: string } | null> {
   const raw = getJobState(db, CANARY_STATE_KEY);
   if (raw === null) return { ok: true, value: null };
   const p = parse(raw) as { ok?: unknown; at?: unknown } | null | undefined;
-  return p && typeof p.ok === 'boolean' && typeof p.at === 'string' && Number.isFinite(Date.parse(p.at))
+  return p && typeof p.ok === 'boolean' && typeof p.at === 'string' && validPast(p.at, now)
     ? { ok: true, value: { ok: p.ok, at: p.at } }
     : { ok: false, reason: 'стан канарки пошкоджено' };
 }
 
 function readTriage(db: DB, dateKey: string): StatusInputs['triage'] {
-  const p = parse(getJobState(db, TRIAGE_LAST_RESULT_KEY)) as { date?: unknown; line?: unknown; saturated?: unknown } | null | undefined;
-  const today = p && p.date === dateKey;
-  return {
-    ranToday: getJobState(db, TRIAGE_LAST_RUN_KEY) === dateKey,
-    line: today && typeof p.line === 'string' ? p.line : null,
-    // `?? null` semantics: a payload written before #431 has no saturated key.
-    saturated: today && typeof p.saturated === 'string' ? p.saturated : null,
-  };
+  const ranToday = getJobState(db, TRIAGE_LAST_RUN_KEY) === dateKey;
+  const p = parse(getJobState(db, TRIAGE_LAST_RESULT_KEY));
+  if (p === null) return { ranToday, line: null, saturated: null };
+  // A result that cannot be read might be today's and might carry saturation: say so, not "nothing".
+  if (p === undefined || typeof p !== 'object' || Array.isArray(p)) {
+    return { ranToday, line: null, saturated: null, unreadable: true };
+  }
+  const r = p as { date?: unknown; line?: unknown; saturated?: unknown };
+  if (r.date !== dateKey) return { ranToday, line: null, saturated: null };
+  // `saturated` absent/null is legitimate: a payload written before #431 has no such key.
+  const saturatedOk = r.saturated === undefined || r.saturated === null || typeof r.saturated === 'string';
+  if (typeof r.line !== 'string' || !saturatedOk) return { ranToday, line: null, saturated: null, unreadable: true };
+  return { ranToday, line: r.line, saturated: typeof r.saturated === 'string' ? r.saturated : null };
 }
 
 const validId = (n: unknown): boolean => Number.isSafeInteger(n) && Number(n) > 0;
@@ -65,9 +78,13 @@ function readUnlock(db: DB, dateKey: string): StatusInputs['unlock'] {
   return { ranToday, withheld: rows.map((x) => ({ beerId: Number(x!.beerId), issueNumber: Number(x!.issueNumber) })) };
 }
 
-function readPaused(db: DB): { since: string; status: number } | null {
+// A pause marker that exists but cannot be read is not "not paused": the worker may be stopped.
+function readPaused(db: DB, now: Date): { paused: { since: string; status: number } | null; pausedUnreadable: boolean } {
   const p = parse(getJobState(db, BUG_REPORT_PAUSED_KEY)) as { since?: unknown; status?: unknown } | null | undefined;
-  return p && typeof p.since === 'string' && typeof p.status === 'number' ? { since: p.since, status: p.status } : null;
+  if (p === null) return { paused: null, pausedUnreadable: false };
+  return p && typeof p === 'object' && typeof p.since === 'string' && validPast(p.since, now) && typeof p.status === 'number'
+    ? { paused: { since: p.since, status: p.status }, pausedUnreadable: false }
+    : { paused: null, pausedUnreadable: true };
 }
 
 function readFest(db: DB, now: Date): FestInputs | null {
@@ -95,13 +112,13 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
       inodesFree: diag.kind === 'ok' ? diag.inodesFree : null,
     },
     history: listStatusSnapshots(db, shiftDate(dateKey, -historyDays), dateKey),
-    canary: readCanary(db),
+    canary: readCanary(db, now),
     algoliaOpenUntil: getJobState(db, 'untappd_circuit_open_until'),
     profileOpenUntil: getJobState(db, 'untappd_profile_http_open_until'),
     triage: readTriage(db, dateKey),
     unlock: readUnlock(db, dateKey),
     bugReports: opts.repo
-      ? { summary: summarizeSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()), paused: readPaused(db) }
+      ? { summary: summarizeSince(db, new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString()), ...readPaused(db, now) }
       : null,
     disk: diag.kind === 'ok'
       ? { ok: true, value: { bytesAvailable: diag.bytesAvailable, inodesFree: diag.inodesFree, pendingRuns: diag.pendingRuns } }

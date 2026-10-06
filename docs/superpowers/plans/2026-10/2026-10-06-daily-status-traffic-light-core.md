@@ -16,7 +16,7 @@
 - **Сироти is capped at 🟡** — no input may make it 🔴.
 - Overall colour = the worst subsystem colour.
 - Fest subsystem appears only when `currentOrNextFests(db, now)` is non-empty.
-- History-based rules are **inactive** (no reason, no colour change) when their snapshots are missing; the report then carries the footer `історія: N/7 днів — порівняльні правила ще не діють`.
+- History-based rules are **inactive** (no reason, no colour change) when their snapshots are missing; the report then carries the footer `історія: N/7 днів — порівняльні правила без потрібних днів ще не діють`.
 - Stage 1 always carries the footer `події: ще не підключені — нічні інциденти, що вже минули, звіт поки не бачить`.
 - Thresholds live only in `src/domain/status/rules.ts` (`STATUS_RULES`), never as literals in evaluators.
 - Snapshot retention 90 days; snapshot written **before** the Telegram send.
@@ -1020,7 +1020,7 @@ describe('evaluateAll', () => {
     expect(result).toEqual({
       overall: 'green',
       subsystems: ['taps', 'untappd', 'orphans', 'channels', 'infra'].map((subsystem) => ({ subsystem, colour: 'green', reasons: [] })),
-      footers: ['історія: 3/7 днів — порівняльні правила ще не діють'],
+      footers: ['історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють'],
     });
   });
   test('fest sits before infra when present, and the overall colour is the worst', () => {
@@ -1099,7 +1099,7 @@ export function evaluateAll(i: StatusInputs): StatusEvaluation {
   const known = Array.from({ length: R.historyDays }, (_, k) => shiftDate(i.dateKey, -(k + 1)))
     .filter((d) => snapshotOn(i.history, d) !== null).length;
   const footers = known < R.historyDays
-    ? [`історія: ${known}/${R.historyDays} днів — порівняльні правила ще не діють`]
+    ? [`історія: ${known}/${R.historyDays} днів — порівняльні правила без потрібних днів ще не діють`]
     : [];
   return { overall: worst(subsystems.map((s) => s.colour)), subsystems, footers };
 }
@@ -1334,7 +1334,7 @@ test('full layout: reasons only under non-green, footers, then events, users, tr
       { subsystem: 'untappd', colour: 'red', reasons: ['канарка пошуку порожня на останньому запуску (05:30)'] },
       { subsystem: 'orphans', colour: 'yellow', reasons: ['тріаж сиріт сьогодні не відпрацював', 'спростованих retire: 2 → 5'] },
     ],
-    footers: ['історія: 3/7 днів — порівняльні правила ще не діють'],
+    footers: ['історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють'],
     events: ['Тріаж: 7 рядків'],
     users: ['розширення /match (вчора): 3 запитів · 1 анонім. · 200 пив'],
     trends: ['сиріт у черзі: 100 → 121 (+21 % за тиждень)'],
@@ -1351,7 +1351,7 @@ test('full layout: reasons only under non-green, footers, then events, users, tr
     '  • тріаж сиріт сьогодні не відпрацював',
     '  • спростованих retire: 2 → 5',
     '',
-    'ℹ️ історія: 3/7 днів — порівняльні правила ще не діють',
+    'ℹ️ історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють',
     '',
     'Події',
     '  • Тріаж: 7 рядків',

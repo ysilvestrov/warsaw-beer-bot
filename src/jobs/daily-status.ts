@@ -157,14 +157,18 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
       }
     }
     if (alreadySent) return;
+    // Claimed BEFORE the await: a concurrent tick (startup catch-up + cron) must see it and stand
+    // down. Released again if the send fails, so the next tick retries.
+    const previous = fallbackSentInProcess;
+    fallbackSentInProcess = dateKey;
     const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     try {
       await notifyAdmin(`🔴 Статус бота — ${warsawStamp(now)} · звіт не зібрано: ${reason}`);
-      fallbackSentInProcess = dateKey;
       try { setJobState(db, FALLBACK_SENT_KEY, dateKey); } catch (markErr) {
         log.error({ err: markErr }, 'daily-status fallback marker not written');
       }
     } catch (sendErr) {
+      fallbackSentInProcess = previous;
       log.error({ err: sendErr }, 'daily-status fallback send failed');
     }
     return;

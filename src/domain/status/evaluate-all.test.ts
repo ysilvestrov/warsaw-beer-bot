@@ -47,9 +47,21 @@ describe('Сироти', () => {
   });
 });
 
+test('an unreadable triage result is no data in Сироти', () => {
+  expect(evaluateOrphans(greenInputs({ triage: { ranToday: true, line: null, saturated: null, unreadable: true } }))).toEqual({
+    subsystem: 'orphans', colour: 'yellow', reasons: ['нема даних: результат тріажу пошкоджено'],
+  });
+});
+
 describe('Канали', () => {
   test('no repo configured means no bug-report channel and green', () => {
     expect(evaluateChannels(greenInputs({ bugReports: null }))).toEqual({ subsystem: 'channels', colour: 'green', reasons: [] });
+  });
+  test('an unreadable pause marker is no data, not "not paused"', () => {
+    const inputs = greenInputs({ bugReports: { summary: idleSummary, paused: null, pausedUnreadable: true } });
+    expect(evaluateChannels(inputs)).toEqual({
+      subsystem: 'channels', colour: 'yellow', reasons: ['нема даних: стан паузи скарг пошкоджено'],
+    });
   });
   test('paused bug reports are red', () => {
     const inputs = greenInputs({ bugReports: { summary: idleSummary, paused: { since: '2026-10-06T04:12:33.000Z', status: 401 } } });
@@ -72,7 +84,7 @@ describe('evaluateAll', () => {
     expect(result).toEqual({
       overall: 'green',
       subsystems: ['taps', 'untappd', 'orphans', 'channels', 'infra'].map((subsystem) => ({ subsystem, colour: 'green', reasons: [] })),
-      footers: ['історія: 3/7 днів — порівняльні правила ще не діють'],
+      footers: ['історія: 3/7 днів — порівняльні правила без потрібних днів ще не діють'],
     });
   });
   test('fest sits before infra when present, and the overall colour is the worst', () => {

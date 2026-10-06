@@ -19,6 +19,12 @@ export interface StatusReport {
   trends: string[];
 }
 
+// Cuts to at most `max` UTF-16 units without leaving a lone high surrogate (half an emoji) at the end.
+function cutAtCodePoint(text: string, max: number): string {
+  const last = text.charCodeAt(max - 1);
+  return text.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
+
 const section = (title: string, lines: string[]): string[][] =>
   lines.length === 0 ? [] : [[title, ...lines.map((l) => `  • ${l}`)]];
 
@@ -41,5 +47,5 @@ export function renderStatusReport(r: StatusReport): string {
   const text = blocks.map((b) => b.join('\n')).join('\n\n');
   return text.length <= TELEGRAM_LIMIT
     ? text
-    : text.slice(0, TELEGRAM_LIMIT - TRUNCATION_MARK.length) + TRUNCATION_MARK;
+    : cutAtCodePoint(text, TELEGRAM_LIMIT - TRUNCATION_MARK.length) + TRUNCATION_MARK;
 }
