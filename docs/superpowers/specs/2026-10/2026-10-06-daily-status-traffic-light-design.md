@@ -77,7 +77,7 @@ Six subsystems in stage (a); money joins with #786.
 | **Untappd** | Algolia search canary + breaker, enrich-orphans, hydrate-ratings, refresh-untappd (profiles, proxy rotation) |
 | **Сироти** | orphan triage + the mechanism audits (`Печатки`, `Замок`, saturation, withheld-after-close). **Capped at 🟡**: an orphan is "rating unknown", never a wrong answer |
 | **Канали** | the paths people use: Telegram bot, extension `/match`, MCP, bug-report worker. The light says whether a channel *works*; how much it was used goes to *Live users* |
-| **Фест** | festival menu poll + MCP keep-alive. Shown **only while a fest is active** (`activeFests`) |
+| **Фест** | festival menu poll + MCP keep-alive. Shown **while a fest is current or ahead** (`currentOrNextFests` non-empty — its last polling window has not closed). Not `activeFests`: that is true only inside a session's polling window, and sessions are in the afternoon, so at 09:00 it would hide the subsystem every day |
 | **Інфраструктура** | disk, inodes, test monitor, DB size, deploy state, GitHub reachability |
 
 Overall colour = the worst subsystem colour.
@@ -95,11 +95,11 @@ General rules, applied to every subsystem:
 | Subsystem | 🔴 | 🟡 |
 |---|---|---|
 | Крани | last scrape > 26 h (two missed 12 h cycles), or 0 pubs in the latest snapshots | last scrape > 14 h (today's threshold); pubs scraped in 24 h < 90 % of the 7-day median |
-| Untappd | canary failed on the **latest** run, or the Algolia breaker is open now | any canary failure / breaker opening / aborted run in 24 h; `hydrate-ratings` blocked or failed; `refresh-untappd` failed or rotated; `ratingsMissing` above its 7-day median by the trend threshold |
-| Сироти | — (capped) | triage did not run today; `unlocked7d = 0` while ≥ 1 `orphan-triage` issue closed in 7 d (lock mechanism dead); `sealRetiredFalsified` grew vs yesterday; `unlockedUnadjudicated7d > 0`; withheld-after-close > 0; saturation present |
+| Untappd | canary failed on the **latest** run, or the Algolia breaker is open now | profile-scrape breaker (`untappd_profile_http_open_until`) open now; any canary failure / breaker opening / aborted run in 24 h; `hydrate-ratings` blocked or failed; `refresh-untappd` failed or rotated; `ratingsMissing` above its 7-day median by the trend threshold |
+| Сироти | — (capped) | triage did not run today; unlock job did not run today; `unlocked7d = 0` while ≥ 1 `orphan-triage` issue closed in 7 d (lock mechanism dead — **stage 2**, needs closed issues); `sealRetiredFalsified` grew vs yesterday; `unlockedUnadjudicated7d > 0`; withheld-after-close > 0; saturation present |
 | Канали | bug-report worker paused (key rejected); `/match` or MCP: ≥ 3 errors **and** error share > 50 % (yesterday) | bug reports failed or needing review; `/match` or MCP: ≥ 3 errors **and** error share > 5 % |
-| Фест | menu or MCP keep-alive not refreshed for > 4 of its own cycles | > 2 of its own cycles |
-| Інфраструктура | free disk < 5 GiB or free inodes < 5 %; a deploy held for a regression (#768) | free disk < 10 GiB, or falling > 1 GiB/day over 7 d; a `deploy:hold` pending > 24 h; test monitor, deploy journal or GitHub unreadable |
+| Фест | menu or MCP keep-alive not refreshed for > 4 of its own cycles | > 2 of its own cycles; never refreshed at all |
+| Інфраструктура | free disk ≤ 5 GiB or free inodes < 100 000 (the monitor's own critical values); a deploy held for a regression (#768) | free disk ≤ 10 GiB (the monitor's warning value), or falling > 1 GiB/day over 7 d; a `deploy:hold` pending > 24 h; test monitor, deploy journal or GitHub unreadable |
 
 **Error definitions.** `/match`: a response with status ≥ 400 except 405. MCP: status
 ≥ 400 except 405, **or** a JSON-RPC `error` member, **or** `result.isError === true`;
@@ -107,8 +107,15 @@ the denominator is `tools/call` requests (handshakes and `tools/list` are not ma
 same reasoning as `recordMatchUsage` today). The reason text names the status classes
 (e.g. `3× 401, 1× 500`), because 4xx and 5xx point at different owners.
 
-**Fest cycles** are read from the jobs' own constants (`fest-poll`,
-`fest-friend-feed`), never duplicated in the evaluator.
+**Fest cycles** are read from the jobs' own constants, never duplicated in the evaluator:
+the menu against `MENU_INTERVAL_RUN_UP_MS` (6 h — the longer of its two cadences, so a
+09:00 report outside a session window never fires on the in-window 2 h cadence), the
+keep-alive against `KEEPALIVE_EVERY_MS` (24 h).
+
+**Inode percentages** (the monitor warns at 80 % used, criticises at 90 %) need
+`inodes_total`, which the published summary does not carry. Stage 1 uses only the absolute
+critical floor; adding `inodes_total` to the summary is a producer change and rides with the
+deploy-journal change in stage 2.
 
 **History-based rules before history exists.** Rules that compare with the past (pubs
 vs 7-day median, `ratingsMissing` vs median, `sealRetiredFalsified` vs yesterday, disk
