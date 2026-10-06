@@ -18,9 +18,15 @@ function auditStepScript(): string {
 // Runs the step under `bash -e`, the shell GitHub uses for `run:` (#789), in a cwd that has
 // the repository's node_modules and scripts (the install step's result), with an `npm` stub
 // that prints `json` and exits `npmExit` (#795: the real npm exits 1 for all three non-clean cases).
-function runAuditStep(json: string, npmExit: number): { status: number | null; output: string; report: string } {
+function runAuditStep(json: string, npmExit: number, tsxStub?: string): { status: number | null; output: string; report: string } {
   const dir = makeTempDirectory('prod-audit-');
-  symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  if (tsxStub === undefined) {
+    symlinkSync(join(ROOT, 'node_modules'), join(dir, 'node_modules'));
+  } else {
+    mkdirSync(join(dir, 'node_modules', '.bin'), { recursive: true });
+    writeFileSync(join(dir, 'node_modules', '.bin', 'tsx'), `#!/usr/bin/env bash\n${tsxStub}\n`);
+    chmodSync(join(dir, 'node_modules', '.bin', 'tsx'), 0o755);
+  }
   symlinkSync(join(ROOT, 'scripts'), join(dir, 'scripts'));
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'report.json'), json);
@@ -52,7 +58,7 @@ describe('prod-audit workflow, audit step under bash -e', () => {
   it('the proxy-addr advisory is vulnerable, and the report names it', () => {
     expect(runAuditStep(fx('advisory.json'), 1)).toEqual({
       status: 0,
-      output: 'state=vulnerable\nexit_code=1\n',
+      output: 'state=vulnerable\nexit_code=10\n',
       report: 'proxy-addr critical — proxy-addr vulnerable to IP spoofing via IPv4-mapped IPv6 trust subnet https://github.com/advisories/GHSA-jqcg-44mw-7w3h\n',
     });
   });
@@ -63,6 +69,16 @@ describe('prod-audit workflow, audit step under bash -e', () => {
       status: 0,
       output: 'state=unknown\nexit_code=2\n',
       report: 'npm audit could not run: the output reports an error, not an audit: request to http://127.0.0.1:9/-/npm/v1/security/advisories/bulk failed, reason: connect ECONNREFUSED 127.0.0.1:9\n',
+    });
+  });
+
+  // Node itself exits 1 when the CLI cannot load: that must not read as an advisory.
+  it('a CLI crash that exits 1 is unknown, not vulnerable', () => {
+    const r = runAuditStep(fx('advisory.json'), 1, 'echo "Error: Cannot find module" >&2; exit 1');
+    expect(r).toEqual({
+      status: 0,
+      output: 'state=unknown\nexit_code=1\n',
+      report: 'Error: Cannot find module\n',
     });
   });
 
@@ -80,6 +96,16 @@ describe('prod-audit workflow, structure', () => {
   // tsx for the verdict CLI, without running any package's install script.
   it('installs dependencies with install scripts disabled', () => {
     expect(WORKFLOW).toContain('        run: npm ci --ignore-scripts --no-audit --no-fund\n');
+  });
+
+  // An install outage must reach the verdict step (missing tsx → unknown → issue), not end the job.
+  it('lets the install step fail so the verdict step still opens the issue', () => {
+    expect(WORKFLOW).toContain([
+      '      - name: Install dependencies (no install scripts)',
+      '        continue-on-error: true',
+      '        run: npm ci --ignore-scripts --no-audit --no-fund',
+      '',
+    ].join('\n'));
   });
 
   // The step survives a finding, so the run would go green; the last step keeps it red.

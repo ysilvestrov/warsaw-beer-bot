@@ -115,13 +115,17 @@ export function renderVerdict(v: AuditVerdict): string {
   }
 }
 
-/** The contract deploy/autodeploy.sh and prod-audit.yml branch on. */
-export function verdictExitCode(v: AuditVerdict): 0 | 1 | 2 {
+/**
+ * The contract deploy/autodeploy.sh and prod-audit.yml branch on: 0 clean, 10 advisory,
+ * 2 could not run. 10, not 1: Node itself exits 1 on any uncaught load or transform error,
+ * so 1 must never mean advisory.
+ */
+export function verdictExitCode(v: AuditVerdict): 0 | 10 | 2 {
   switch (v.kind) {
     case 'clean':
       return 0;
     case 'advisory':
-      return 1;
+      return 10;
     case 'unrunnable':
       return 2;
   }

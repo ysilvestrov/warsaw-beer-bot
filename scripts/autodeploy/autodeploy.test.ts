@@ -1394,7 +1394,54 @@ describe('merge-deploy: the audit verdict comes from the JSON (#795)', () => {
     ].join('\n'));
   }
 
+  /**
+   * Like realAudit, but node_modules is a real directory whose tsx is `tsxBody`
+   * (or absent when null): the CLI never gets to run, as when an import fails.
+   */
+  function brokenTsxAudit(w: World, tsxBody: string | null): string {
+    const cwd = makeTempDirectory('wbb-md-audit-');
+    symlinkSync(join(ROOT, 'scripts'), join(cwd, 'scripts'));
+    mkdirSync(join(cwd, 'bin'));
+    writeFileSync(join(cwd, 'report.json'), readFileSync(join(FIXTURES, 'advisory.json'), 'utf8'));
+    stub(join(cwd, 'bin'), 'npm', `cat "${join(cwd, 'report.json')}"; exit 1`);
+    if (tsxBody !== null) {
+      mkdirSync(join(cwd, 'node_modules', '.bin'), { recursive: true });
+      stub(join(cwd, 'node_modules', '.bin'), 'tsx', tsxBody);
+    }
+    return stub(w.bin, 'audit-broken', [
+      'set -euo pipefail',
+      AUDIT_FN,
+      `cd "${cwd}"`,
+      `PATH="${join(cwd, 'bin')}:$PATH" _audit_default`,
+    ].join('\n'));
+  }
+
   const fx = (name: string) => readFileSync(join(FIXTURES, name), 'utf8');
+
+  // Node itself exits 1 on a failed import or transform: that must not read as an advisory.
+  it('a CLI crash that exits 1 is "could not run", not an advisory', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = brokenTsxAudit(w, `echo "Error: Cannot find module './audit-verdict'" >&2; exit 1`);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(1);
+    expect(readState(w).LAST_FAILED_SHA).toBe(undefined);
+    expect(notes(w)).toEqual([
+      `⚠️ merge-deploy: npm audit could not run (exit 2) for ${short(x)} — NOT a finding, just no verification. Retrying next tick.\n`
+      + "Error: Cannot find module './audit-verdict'",
+    ]);
+  });
+
+  it('a missing tsx is "could not run", not an advisory', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = brokenTsxAudit(w, null);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(1);
+    expect(readState(w).LAST_FAILED_SHA).toBe(undefined);
+  });
 
   it('refuses the proxy-addr advisory and names it', () => {
     const w = world();
