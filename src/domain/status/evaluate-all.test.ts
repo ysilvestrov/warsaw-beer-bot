@@ -35,6 +35,10 @@ describe('Сироти', () => {
       'утримано після закриття: 6 (#401 / beer 1, #402 / beer 2, #403 / beer 3, #404 / beer 4, #405 / beer 5, …)',
     ]);
   });
+  test('an unreadable unlock result is missing data, not zero withheld', () => {
+    const e = evaluateOrphans(greenInputs({ unlock: { ranToday: true, withheld: null } }));
+    expect([e.colour, e.reasons]).toEqual(['yellow', ['нема даних: результат замка пошкоджено']]);
+  });
   test('retire count equal to yesterday does not fire; no yesterday snapshot means inactive', () => {
     expect([
       evaluateOrphans(greenInputs({ history: pastDays(1, { sealRetiredFalsified: 2 }) })).colour,

@@ -49,14 +49,20 @@ function readTriage(db: DB, dateKey: string): StatusInputs['triage'] {
 
 const validId = (n: unknown): boolean => Number.isSafeInteger(n) && Number(n) > 0;
 
+// `withheld: null` means today's result exists but cannot be trusted; it must not read as zero
+// withheld rows. No result, or a result of another date, is simply nothing to report today.
 function readUnlock(db: DB, dateKey: string): StatusInputs['unlock'] {
   const ranToday = getJobState(db, UNLOCK_LAST_RUN_KEY) === dateKey;
-  const p = parse(getJobState(db, UNLOCK_LAST_RESULT_KEY)) as { date?: unknown; withheld?: unknown } | null | undefined;
-  if (!p || p.date !== dateKey || !Array.isArray(p.withheld)) return { ranToday, withheld: [] };
-  const rows = p.withheld as { beerId?: unknown; issueNumber?: unknown }[];
+  const p = parse(getJobState(db, UNLOCK_LAST_RESULT_KEY));
+  if (p === null) return { ranToday, withheld: [] };
+  if (p === undefined || typeof p !== 'object' || Array.isArray(p)) return { ranToday, withheld: null };
+  const r = p as { date?: unknown; withheld?: unknown };
+  if (r.date !== dateKey) return { ranToday, withheld: [] };
+  if (!Array.isArray(r.withheld)) return { ranToday, withheld: null };
+  const rows = r.withheld as ({ beerId?: unknown; issueNumber?: unknown } | null)[];
   // All-or-nothing, as the old digest did: one malformed row means the result is not trustworthy.
-  if (!rows.every((r) => r && validId(r.beerId) && validId(r.issueNumber))) return { ranToday, withheld: [] };
-  return { ranToday, withheld: rows.map((r) => ({ beerId: Number(r.beerId), issueNumber: Number(r.issueNumber) })) };
+  if (!rows.every((x) => x && validId(x.beerId) && validId(x.issueNumber))) return { ranToday, withheld: null };
+  return { ranToday, withheld: rows.map((x) => ({ beerId: Number(x!.beerId), issueNumber: Number(x!.issueNumber) })) };
 }
 
 function readPaused(db: DB): { since: string; status: number } | null {

@@ -77,6 +77,9 @@ export const EVENTS_FOOTER = 'події: ще не підключені — н�
 // so a 🟢 there must not claim those inputs (spec, "Claims and evidence").
 export const NOT_MEASURED_FOOTER = 'не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)';
 const FALLBACK_SENT_KEY = 'daily_status_fallback_sent';
+// Warsaw date a fallback was delivered in this process; covers a DB that cannot hold the marker.
+let fallbackSentInProcess: string | null = null;
+export function resetDailyStatusFallbackForTests(): void { fallbackSentInProcess = null; }
 
 function buildUserLines(m: StatusMetrics, bugReportLine: string | null): string[] {
   return [
@@ -123,7 +126,14 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     return;
   }
   const now = (deps.now ?? (() => new Date()))();
-  const lastSentDate = getJobState(db, DAILY_STATUS_KEY);
+  let lastSentDate: string | null = null;
+  let markerReadable = true;
+  try { lastSentDate = getJobState(db, DAILY_STATUS_KEY); } catch (readErr) {
+    // The DB is unreadable at the very first touch: do not treat that as "never sent" and run the
+    // report; go straight to the fallback, still only inside the morning window.
+    markerReadable = false;
+    log.error({ err: readErr }, 'daily-status: last-sent marker unreadable');
+  }
   const { send, dateKey } = shouldSendDailyStatus({ now, lastSentDate });
   if (!send) {
     log.debug({ dateKey, lastSentDate }, 'daily-status: outside window or already sent');
@@ -131,6 +141,7 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
   }
   let text: string;
   try {
+    if (!markerReadable) throw new Error('daily-status: last-sent marker unreadable');
     text = buildDailyReport(db, now, dateKey, {
       repo: deps.repo, testDiagnosticsPath: deps.testDiagnosticsPath, testDiagnosticsUid: deps.testDiagnosticsUid,
     });
@@ -138,15 +149,18 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery
     // marker stays unset, so every later tick in the window retries the full report.
     log.error({ err: e }, 'daily-status: report assembly failed');
-    // If the DB itself is what failed, reading the marker throws too: better a duplicate than silence.
-    let alreadySent = false;
-    try { alreadySent = getJobState(db, FALLBACK_SENT_KEY) === dateKey; } catch (readErr) {
-      log.error({ err: readErr }, 'daily-status fallback marker unreadable, sending anyway');
+    // Dedupe must not depend on the DB alone: a broken DB can neither read nor keep the marker.
+    let alreadySent = fallbackSentInProcess === dateKey;
+    if (!alreadySent) {
+      try { alreadySent = getJobState(db, FALLBACK_SENT_KEY) === dateKey; } catch (readErr) {
+        log.error({ err: readErr }, 'daily-status fallback marker unreadable, sending anyway');
+      }
     }
     if (alreadySent) return;
     const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     try {
       await notifyAdmin(`🔴 Статус бота — ${warsawStamp(now)} · звіт не зібрано: ${reason}`);
+      fallbackSentInProcess = dateKey;
       try { setJobState(db, FALLBACK_SENT_KEY, dateKey); } catch (markErr) {
         log.error({ err: markErr }, 'daily-status fallback marker not written');
       }

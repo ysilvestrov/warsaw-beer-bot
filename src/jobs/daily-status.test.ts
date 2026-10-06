@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { BugReportSummary } from '../domain/bug-report-types';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { buildBugReportLine, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER } from './daily-status';
+import { buildBugReportLine, dailyStatus, shouldSendDailyStatus, EVENTS_FOOTER, resetDailyStatusFallbackForTests } from './daily-status';
 import { getJobState, setJobState } from '../storage/job_state';
 import { insertReport, markDone } from '../storage/bug_reports';
 import { recordMatchUsage } from '../storage/api_usage';
@@ -13,6 +13,8 @@ import { GREEN_METRICS } from '../domain/status/test-inputs';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
 const silentLog = pino({ level: 'silent' });
+
+beforeEach(() => { resetDailyStatusFallbackForTests(); });
 
 function emptyDb() {
   const db = openDb(':memory:');
@@ -263,6 +265,26 @@ test('a database that cannot be read at all still gets the fallback, once, witho
   await expect(dailyStatus({ db, log: silentLog, now, ...missingMonitor,
     notifyAdmin: async (t) => { sent.push(t); } })).resolves.toBeUndefined();
   expect([sent.length, sent[0].startsWith('🔴 Статус бота — 2026-10-06 09:00 · звіт не зібрано: ')]).toEqual([1, true]);
+});
+
+test('a database that fails on the very first read still gets one fallback per day, deduped in-process', async () => {
+  const db = emptyDb();
+  db.close();
+  const sent: string[] = [];
+  const deps = { db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
+    notifyAdmin: async (t: string) => { sent.push(t); } };
+  await expect(dailyStatus(deps)).resolves.toBeUndefined();
+  await expect(dailyStatus(deps)).resolves.toBeUndefined();
+  expect([sent.length, sent[0].startsWith('🔴 Статус бота — 2026-10-06 09:00 · звіт не зібрано: ')]).toEqual([1, true]);
+});
+
+test('a database that fails on the first read says nothing outside the morning window', async () => {
+  const db = emptyDb();
+  db.close();
+  const sent: string[] = [];
+  await dailyStatus({ db, log: silentLog, now: () => new Date('2026-10-06T13:00:00Z'), ...missingMonitor,
+    notifyAdmin: async (t) => { sent.push(t); } });
+  expect(sent).toEqual([]);
 });
 
 const usersBlock = (text: string): string[] | undefined =>

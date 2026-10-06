@@ -56,11 +56,28 @@ test('triage and unlock: ran today only when their run key is today; stale resul
   ]);
 });
 
-test('unlock withheld rows with an invalid id are dropped as a whole result', () => {
+test('unlock result for today with an invalid row is unreadable, not zero withheld', () => {
   const db = emptyDb();
   setJobState(db, UNLOCK_LAST_RUN_KEY, DATE);
   setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({ date: DATE, withheld: [{ beerId: 1, issueNumber: 2 }, { beerId: -3, issueNumber: 4 }] }));
-  expect(collectStatusInputs(db, NOW, DATE, missing).unlock).toEqual({ ranToday: true, withheld: [] });
+  expect(collectStatusInputs(db, NOW, DATE, missing).unlock).toEqual({ ranToday: true, withheld: null });
+});
+
+test.each([
+  ['unparseable JSON', '{'],
+  ['a non-object', '"x"'],
+  ['a non-array withheld', JSON.stringify({ date: DATE, withheld: 'none' })],
+  ['a null row', JSON.stringify({ date: DATE, withheld: [null] })],
+])('unlock result for today that is %s is unreadable', (_name, raw) => {
+  const db = emptyDb();
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, raw);
+  expect(collectStatusInputs(db, NOW, DATE, missing).unlock.withheld).toBeNull();
+});
+
+test('unlock result of another date with a broken withheld is nothing to report', () => {
+  const db = emptyDb();
+  setJobState(db, UNLOCK_LAST_RESULT_KEY, JSON.stringify({ date: '2026-10-05', withheld: 'broken' }));
+  expect(collectStatusInputs(db, NOW, DATE, missing).unlock.withheld).toEqual([]);
 });
 
 test('missing monitor file is unavailable disk data and null disk metrics', () => {
