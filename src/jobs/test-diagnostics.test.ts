@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import childProcess from 'node:child_process';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
-import { readTestDiagnosticsLine as readWithOwner } from './test-diagnostics';
+import { readTestDiagnosticsLine as readWithOwner, readTestDiagnostics as readStructuredWithOwner } from './test-diagnostics';
 
 // Controlled export fixtures belong to the test runner's actual OS account.
 const readTestDiagnosticsLine = (now: Date, path: string): string =>
@@ -262,4 +262,29 @@ test('reads the actual Python export through the TypeScript contract', () => {
   expect(readTestDiagnosticsLine(now, path)).toBe(
     'Тести: 1 каталог потребує перевірки · диск: 30.00 GiB вільно · inode: 2 000 000 вільно',
   );
+});
+
+const readTestDiagnostics = (at: Date, file: string) => readStructuredWithOwner(at, file, process.getuid!());
+
+test('structured read returns the measured counters', () => {
+  write(snapshot);
+  expect(readTestDiagnostics(now, path)).toEqual({
+    kind: 'ok', bytesAvailable: 32_212_254_720, inodesFree: 2_000_000, pendingRuns: 1,
+  });
+});
+
+test('structured read keeps an unavailable inventory as null, not zero', () => {
+  write({ ...snapshot, runs_inventory_available: false, pending_runs: null });
+  expect(readTestDiagnostics(now, path)).toEqual({
+    kind: 'ok', bytesAvailable: 32_212_254_720, inodesFree: 2_000_000, pendingRuns: null,
+  });
+});
+
+test('structured read marks a snapshot over fifteen minutes old as stale', () => {
+  write({ ...snapshot, timestamp: 299 });
+  expect(readTestDiagnostics(now, path)).toEqual({ kind: 'stale' });
+});
+
+test('structured read reports a missing snapshot as unavailable', () => {
+  expect(readTestDiagnostics(now, join(directory, 'missing.json'))).toEqual({ kind: 'unavailable' });
 });
