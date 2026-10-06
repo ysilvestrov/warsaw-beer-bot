@@ -31,7 +31,7 @@ function readCanary(db: DB): Avail<{ ok: boolean; at: string } | null> {
   const raw = getJobState(db, CANARY_STATE_KEY);
   if (raw === null) return { ok: true, value: null };
   const p = parse(raw) as { ok?: unknown; at?: unknown } | null | undefined;
-  return p && typeof p.ok === 'boolean' && typeof p.at === 'string'
+  return p && typeof p.ok === 'boolean' && typeof p.at === 'string' && Number.isFinite(Date.parse(p.at))
     ? { ok: true, value: { ok: p.ok, at: p.at } }
     : { ok: false, reason: 'стан канарки пошкоджено' };
 }

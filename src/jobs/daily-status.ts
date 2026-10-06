@@ -73,6 +73,9 @@ const DAILY_STATUS_KEY = 'daily_status_last_sent';
 // Stage 1 of the traffic light reads no event log yet, so an incident that ended before 09:00 is
 // invisible; the report says so instead of letting 🟢 claim it (spec, "Claims and evidence").
 export const EVENTS_FOOTER = 'події: ще не підключені — нічні інциденти, що вже минули, звіт поки не бачить';
+// Stage 1 reads only the bug-report worker for Канали and no deploy/GitHub state for Інфраструктура,
+// so a 🟢 there must not claim those inputs (spec, "Claims and evidence").
+export const NOT_MEASURED_FOOTER = 'не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)';
 const FALLBACK_SENT_KEY = 'daily_status_fallback_sent';
 
 function buildUserLines(m: StatusMetrics, bugReportLine: string | null): string[] {
@@ -102,7 +105,7 @@ export function buildDailyReport(db: DB, now: Date, dateKey: string, opts: Statu
     stamp: warsawStamp(now),
     overall: evaluation.overall,
     subsystems: evaluation.subsystems,
-    footers: [...evaluation.footers, EVENTS_FOOTER],
+    footers: [...evaluation.footers, EVENTS_FOOTER, NOT_MEASURED_FOOTER],
     events: inputs.triage.line ? [inputs.triage.line] : [],
     users: buildUserLines(inputs.metrics, bugReportLine),
     trends: computeTrends(dateKey, inputs.metrics, inputs.history),
@@ -135,11 +138,18 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery
     // marker stays unset, so every later tick in the window retries the full report.
     log.error({ err: e }, 'daily-status: report assembly failed');
-    if (getJobState(db, FALLBACK_SENT_KEY) === dateKey) return;
+    // If the DB itself is what failed, reading the marker throws too: better a duplicate than silence.
+    let alreadySent = false;
+    try { alreadySent = getJobState(db, FALLBACK_SENT_KEY) === dateKey; } catch (readErr) {
+      log.error({ err: readErr }, 'daily-status fallback marker unreadable, sending anyway');
+    }
+    if (alreadySent) return;
     const reason = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
     try {
       await notifyAdmin(`🔴 Статус бота — ${warsawStamp(now)} · звіт не зібрано: ${reason}`);
-      setJobState(db, FALLBACK_SENT_KEY, dateKey);
+      try { setJobState(db, FALLBACK_SENT_KEY, dateKey); } catch (markErr) {
+        log.error({ err: markErr }, 'daily-status fallback marker not written');
+      }
     } catch (sendErr) {
       log.error({ err: sendErr }, 'daily-status fallback send failed');
     }

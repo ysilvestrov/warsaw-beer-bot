@@ -24,6 +24,8 @@ export function evaluateTaps(i: StatusInputs): Evaluation {
   const f: Finding[] = [];
   if (m.lastScrapeHoursAgo === null) {
     f.push(red('скрейпів кранів немає взагалі'));
+  } else if (!Number.isFinite(m.lastScrapeHoursAgo) || m.lastScrapeHoursAgo < 0) {
+    f.push(yellow('нема даних: некоректний час останнього скрейпу'));
   } else {
     const ago = `останній скрейп ${Math.round(m.lastScrapeHoursAgo)} год тому`;
     if (m.lastScrapeHoursAgo > R.scrapeRedHours) f.push(red(ago));
@@ -65,6 +67,7 @@ export function evaluateUntappd(i: StatusInputs): Evaluation {
 function staleness(what: string, lastAt: string | null, cycleMs: number, now: Date): Finding[] {
   if (lastAt === null) return [yellow(`${what}: ще жодного успішного оновлення`)];
   const age = now.getTime() - Date.parse(lastAt);
+  if (!Number.isFinite(age) || age < 0) return [yellow(`${what}: нема даних (некоректний час)`)];
   const text = `${what} не оновлювалось ${Math.round(age / 3_600_000)} год`;
   if (age > cycleMs * R.festRedCycles) return [red(text)];
   if (age > cycleMs * R.festYellowCycles) return [yellow(text)];

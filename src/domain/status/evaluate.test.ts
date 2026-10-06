@@ -26,6 +26,11 @@ describe('Крани', () => {
       subsystem: 'taps', colour: 'red', reasons: ['скрейпів кранів немає взагалі'],
     });
   });
+  test.each([Number.NaN, -1])('scrape age %f is "нема даних", never green', (hours) => {
+    expect(evaluateTaps(withMetrics({ lastScrapeHoursAgo: hours }))).toEqual({
+      subsystem: 'taps', colour: 'yellow', reasons: ['нема даних: некоректний час останнього скрейпу'],
+    });
+  });
   test('zero pubs in fresh snapshots is red', () => {
     expect(evaluateTaps(withMetrics({ onTapPubs: 0 }))).toEqual({
       subsystem: 'taps', colour: 'red', reasons: ['у свіжих знімках 0 пабів із кранами'],
@@ -106,6 +111,17 @@ describe('Фест', () => {
     ['2026-10-05T06:59:00.000Z', 'red', ['меню фесту не оновлювалось 24 год']],
   ] as const)('menu last read %s → %s', (menuLastAt, colour, reasons) => {
     expect(evaluateFest(fest({ menuLastAt }), NOW)).toEqual({ subsystem: 'fest', colour, reasons });
+  });
+  test.each([
+    ['2026-10-05T07:00:00.000Z', 'green', []],                                              // 24 h: past 12 h, inside 48 h
+    ['2026-10-04T06:59:00.000Z', 'yellow', ['MCP keep-alive фесту не оновлювалось 48 год']],
+  ] as const)('keep-alive last passed %s → %s (its own 24 h cycle)', (keepaliveLastAt, colour, reasons) => {
+    expect(evaluateFest(fest({ keepaliveLastAt }), NOW)).toEqual({ subsystem: 'fest', colour, reasons });
+  });
+  test.each(['nope', '2026-10-06T08:00:00.000Z'])('unreadable or future menu time %s is "нема даних", never green', (menuLastAt) => {
+    expect(evaluateFest(fest({ menuLastAt }), NOW)).toEqual({
+      subsystem: 'fest', colour: 'yellow', reasons: ['меню фесту: нема даних (некоректний час)'],
+    });
   });
   test('never-read menu and never-passed keep-alive are yellow', () => {
     expect(evaluateFest(fest({ menuLastAt: null, keepaliveLastAt: null }), NOW)).toEqual({

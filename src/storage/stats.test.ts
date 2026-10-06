@@ -145,6 +145,12 @@ it('reports enrich health metrics', () => {
   expect(m.untappdSearchHealthy).toBe(true);
 });
 
+it.each(['garbage', 'null'])('a malformed canary %s reads as unhealthy and does not throw', (raw) => {
+  const db = fresh();
+  setJobState(db, 'untappd_search_canary', raw);
+  expect(collectStatus(db, new Date()).untappdSearchHealthy).toBe(false);
+});
+
 it('orphansPending excludes retired orphans', () => {
   const db = fresh();
   const { lastInsertRowid: a } = db.prepare(
