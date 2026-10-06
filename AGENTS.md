@@ -189,7 +189,10 @@ Every open issue carries one `Severity-1` … `Severity-4` label (1 is the worst
 Harm is judged only against the project's two goals — giving people the right answer about
 beer, and money (the budget is $20–40/month). A wrong answer ranks one level above a missing
 one; a silent failure gets +1; the reach of an orphan issue is counted in live taps, not in
-database rows. The scale, modifiers, reach query and procedure are in
+database rows. Security has its own levels: a `critical`/`high` advisory in a production
+dependency is at least `Severity-2` (merge-deploy then ships nothing), a vulnerability reachable
+from outside that yields secrets, the host or people's data is `Severity-1`; here doubt rounds
+up, not down. The scale, modifiers, reach query and procedure are in
 `docs/issue-severity.md`; label every new issue (including auto-filed orphan issues) by it.
 
 Architecture
