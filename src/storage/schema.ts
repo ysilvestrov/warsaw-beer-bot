@@ -995,6 +995,21 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   { version: 42, sql: V42_FEST_SQL },
   { version: 43, sql: V43_FEST_PRINT_SQL },
   { version: 44, sql: V44_FEST_MCP_EYE_SQL },
+  {
+    version: 45,
+    // Daily status traffic light (spec 2026-10-06): one row per Warsaw date — the metrics the
+    // report was built from and the colours it said — so "worse than usual" and trends have a
+    // past. Idempotent like v42.
+    sql: `
+      CREATE TABLE IF NOT EXISTS status_snapshots (
+        date         TEXT PRIMARY KEY,
+        version      INTEGER NOT NULL,
+        metrics_json TEXT NOT NULL,
+        colours_json TEXT NOT NULL,
+        created_at   TEXT NOT NULL
+      );
+    `,
+  },
 ];
 
 export function migrate(db: DB): void {
