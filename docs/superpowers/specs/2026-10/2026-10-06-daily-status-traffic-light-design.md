@@ -121,7 +121,7 @@ deploy-journal change in stage 2.
 vs 7-day median, `ratingsMissing` vs median, `sealRetiredFalsified` vs yesterday, disk
 falling per day) need snapshots that the first days do not have. Such a rule is
 **inactive**, not 🟡 and not silently 🟢: the report carries one footer line
-`історія: N/7 днів — порівняльні правила ще не діють` until 7 snapshots exist, so a 🟢
+`історія: N/7 днів — порівняльні правила без потрібних днів ще не діють` until 7 snapshots exist, so a 🟢
 in that week visibly claims less. Missing *current* data stays 🟡 as above; missing
 *history* is a known, dated limitation.
 

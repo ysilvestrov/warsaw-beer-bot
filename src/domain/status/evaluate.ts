@@ -16,8 +16,14 @@ function evaluation(subsystem: SubsystemId, findings: Finding[]): Evaluation {
   return { subsystem, colour: worst(findings.map((f) => f.colour)), reasons: findings.map((f) => f.reason) };
 }
 
-const openUntil = (until: string | null, now: Date): string | null =>
-  until !== null && Date.parse(until) > now.getTime() ? until : null;
+// A breaker timestamp that does not parse is unreadable state, not a closed breaker.
+type Breaker = { kind: 'closed' } | { kind: 'open'; until: string } | { kind: 'unreadable' };
+function breakerState(until: string | null, now: Date): Breaker {
+  if (until === null) return { kind: 'closed' };
+  const t = Date.parse(until);
+  if (!Number.isFinite(t)) return { kind: 'unreadable' };
+  return t > now.getTime() ? { kind: 'open', until } : { kind: 'closed' };
+}
 
 export function evaluateTaps(i: StatusInputs): Evaluation {
   const m = i.metrics;
@@ -49,10 +55,12 @@ export function evaluateUntappd(i: StatusInputs): Evaluation {
   else if (!i.canary.value.ok) {
     f.push(red(`канарка пошуку порожня на останньому запуску (${warsawClock(i.canary.value.at)})`));
   }
-  const algolia = openUntil(i.algoliaOpenUntil, i.now);
-  if (algolia !== null) f.push(red(`Algolia-breaker відкритий до ${warsawClock(algolia)}`));
-  const profile = openUntil(i.profileOpenUntil, i.now);
-  if (profile !== null) f.push(yellow(`breaker профіль-скрейпу відкритий до ${warsawClock(profile)}`));
+  const algolia = breakerState(i.algoliaOpenUntil, i.now);
+  if (algolia.kind === 'open') f.push(red(`Algolia-breaker відкритий до ${warsawClock(algolia.until)}`));
+  if (algolia.kind === 'unreadable') f.push(yellow('нема даних: стан Algolia-breaker пошкоджено'));
+  const profile = breakerState(i.profileOpenUntil, i.now);
+  if (profile.kind === 'open') f.push(yellow(`breaker профіль-скрейпу відкритий до ${warsawClock(profile.until)}`));
+  if (profile.kind === 'unreadable') f.push(yellow('нема даних: стан breaker профіль-скрейпу пошкоджено'));
   const week = previousDays(i.history, i.dateKey, R.historyDays);
   if (week !== null) {
     const usual = median(week.map((s) => s.metrics.ratingsMissing));
@@ -106,6 +114,7 @@ export function evaluateOrphans(i: StatusInputs): Evaluation {
   const m = i.metrics;
   const f: Finding[] = [];
   if (!i.triage.ranToday) f.push(yellow('тріаж сиріт сьогодні не відпрацював'));
+  if (i.triage.unreadable === true) f.push(yellow('нема даних: результат тріажу пошкоджено'));
   if (i.triage.saturated !== null) f.push(yellow(i.triage.saturated));
   if (!i.unlock.ranToday) f.push(yellow('замок сьогодні не перевірявся (unlock-fixed-orphans)'));
   const w = i.unlock.withheld;
@@ -129,6 +138,7 @@ export function evaluateChannels(i: StatusInputs): Evaluation {
   const f: Finding[] = [];
   if (i.bugReports !== null) {
     const { summary, paused } = i.bugReports;
+    if (i.bugReports.pausedUnreadable === true) f.push(yellow('нема даних: стан паузи скарг пошкоджено'));
     if (paused !== null) {
       f.push(red(`скарги на паузі з ${paused.since.slice(0, 16).replace('T', ' ')} UTC: ключ відхилено (${paused.status})`));
     }
@@ -156,7 +166,7 @@ export function evaluateAll(i: StatusInputs): StatusEvaluation {
   const known = Array.from({ length: R.historyDays }, (_, k) => shiftDate(i.dateKey, -(k + 1)))
     .filter((d) => snapshotOn(i.history, d) !== null).length;
   const footers = known < R.historyDays
-    ? [`історія: ${known}/${R.historyDays} днів — порівняльні правила ще не діють`]
+    ? [`історія: ${known}/${R.historyDays} днів — порівняльні правила без потрібних днів ще не діють`]
     : [];
   return { overall: worst(subsystems.map((s) => s.colour)), subsystems, footers };
 }

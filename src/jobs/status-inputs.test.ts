@@ -121,3 +121,52 @@ test('persisted pause, unlock result and fest timestamps are carried through as 
       keepaliveLastAt: '2026-10-05T07:00:00.000Z', keepaliveCycleMs: 86_400_000 },
   ]);
 });
+
+test('canary: a timestamp more than a minute in the future is unreadable; within a minute it is kept', () => {
+  const db = emptyDb();
+  setJobState(db, CANARY_STATE_KEY, JSON.stringify({ ok: true, at: '2026-10-06T07:01:00.000Z' }));
+  const withinSkew = collectStatusInputs(db, NOW, DATE, missing).canary;
+  setJobState(db, CANARY_STATE_KEY, JSON.stringify({ ok: true, at: '2026-10-06T07:01:01.000Z' }));
+  const future = collectStatusInputs(db, NOW, DATE, missing).canary;
+  expect([withinSkew, future]).toEqual([
+    { ok: true, value: { ok: true, at: '2026-10-06T07:01:00.000Z' } },
+    { ok: false, reason: 'стан канарки пошкоджено' },
+  ]);
+});
+
+test('triage: unparseable or wrongly typed today result is unreadable; another date or a pre-#431 payload is not', () => {
+  const db = emptyDb();
+  setJobState(db, TRIAGE_LAST_RUN_KEY, DATE);
+  const read = (raw: string) => { setJobState(db, TRIAGE_LAST_RESULT_KEY, raw); return collectStatusInputs(db, NOW, DATE, missing).triage; };
+  expect([
+    read('garbage'),
+    read(JSON.stringify({ date: DATE, line: 7 })),
+    read(JSON.stringify({ date: DATE, line: 'Тріаж: 7 рядків', saturated: 5 })),
+    read(JSON.stringify({ date: '2026-10-05', line: 7 })),
+    read(JSON.stringify({ date: DATE, line: 'Тріаж: 7 рядків' })),
+  ]).toEqual([
+    { ranToday: true, line: null, saturated: null, unreadable: true },
+    { ranToday: true, line: null, saturated: null, unreadable: true },
+    { ranToday: true, line: null, saturated: null, unreadable: true },
+    { ranToday: true, line: null, saturated: null },
+    { ranToday: true, line: 'Тріаж: 7 рядків', saturated: null },
+  ]);
+});
+
+test('pause marker: unparseable, wrongly typed or future-dated is unreadable; absent is not paused', () => {
+  const db = emptyDb();
+  const opts = { ...missing, repo: 'o/r' };
+  const read = () => { const b = collectStatusInputs(db, NOW, DATE, opts).bugReports; return [b?.paused, b?.pausedUnreadable]; };
+  const absent = read();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, 'garbage');
+  const garbage = read();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: 'nope', status: 401 }));
+  const badSince = read();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: '2026-10-06T04:12:33.000Z', status: '401' }));
+  const badStatus = read();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: '2027-01-01T00:00:00.000Z', status: 401 }));
+  const future = read();
+  expect([absent, garbage, badSince, badStatus, future]).toEqual([
+    [null, false], [null, true], [null, true], [null, true], [null, true],
+  ]);
+});
