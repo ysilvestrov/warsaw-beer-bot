@@ -889,3 +889,13 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
   1. on the host, `sudo bash deploy/install-autodeploy.sh` (installs the new `wbb-autodeploy` copy);
   2. `bash deploy/deploy.sh`.
 - After the merge: `gh workflow run prod-audit.yml` must be green, with the install step passing.
+
+## Execution note (whole-branch review)
+
+The final review found that the CLI's "a crash never exits 1" guarantee was false: Node exits 1
+on any uncaught load or transform error before the CLI's `try` runs, which merge-deploy would
+read as an advisory. The CLI contract shipped as **0 clean / 10 advisory / anything else could
+not run**, and both shell callers map it back (`_audit_default` returns 0/1/2 so the tick's
+branches are unchanged; the workflow's `case` is 0/10/*). The prod-audit install step also got
+`continue-on-error: true`. The spec describes the shipped contract; the task texts above keep
+the original 0/1/2 wording as written.
