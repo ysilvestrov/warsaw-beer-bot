@@ -19,6 +19,13 @@ export function previousDays(history: SnapshotRecord[], date: string, n: number)
   return days.every((s): s is SnapshotRecord => s !== null) ? days : null;
 }
 
+// Milliseconds of an ISO-8601 UTC instant as `Date.toISOString()` writes it, or NaN for anything
+// else. Date.parse alone accepts strings like "0" as dates, which would let corrupt state read healthy.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
+export function parseIsoInstant(value: string): number {
+  return ISO_INSTANT.test(value) ? Date.parse(value) : Number.NaN;
+}
+
 export function median(values: number[]): number {
   const sorted = [...values].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);

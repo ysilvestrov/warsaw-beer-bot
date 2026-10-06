@@ -5,7 +5,7 @@ import { getJobState } from '../storage/job_state';
 import { summarizeSince } from '../storage/bug_reports';
 import { listStatusSnapshots } from '../storage/status_snapshots';
 import { currentOrNextFests } from '../storage/fests';
-import { shiftDate } from '../domain/status/helpers';
+import { parseIsoInstant, shiftDate } from '../domain/status/helpers';
 import { STATUS_RULES } from '../domain/status/rules';
 import { MENU_INTERVAL_RUN_UP_MS } from '../domain/fest/schedule';
 import { readTestDiagnostics } from './test-diagnostics';
@@ -31,7 +31,7 @@ const parse = (raw: string | null): unknown => {
 const FUTURE_SKEW_MS = 60_000;
 const validPast = (iso: unknown, now: Date): boolean => {
   if (typeof iso !== 'string') return false;
-  const t = Date.parse(iso);
+  const t = parseIsoInstant(iso);
   return Number.isFinite(t) && t <= now.getTime() + FUTURE_SKEW_MS;
 };
 
@@ -46,14 +46,20 @@ function readCanary(db: DB, now: Date): Avail<{ ok: boolean; at: string } | null
 
 function readTriage(db: DB, dateKey: string): StatusInputs['triage'] {
   const ranToday = getJobState(db, TRIAGE_LAST_RUN_KEY) === dateKey;
-  const p = parse(getJobState(db, TRIAGE_LAST_RESULT_KEY));
-  if (p === null) return { ranToday, line: null, saturated: null };
+  const raw = getJobState(db, TRIAGE_LAST_RESULT_KEY);
+  // Triage publishes its result before closing the day, so "ran today" with no result is a contradiction.
+  if (raw === null) return ranToday ? { ranToday, line: null, saturated: null, unreadable: true } : { ranToday, line: null, saturated: null };
+  const p = parse(raw);
   // A result that cannot be read might be today's and might carry saturation: say so, not "nothing".
-  if (p === undefined || typeof p !== 'object' || Array.isArray(p)) {
+  if (p === null || p === undefined || typeof p !== 'object' || Array.isArray(p)) {
     return { ranToday, line: null, saturated: null, unreadable: true };
   }
   const r = p as { date?: unknown; line?: unknown; saturated?: unknown };
-  if (r.date !== dateKey) return { ranToday, line: null, saturated: null };
+  // A payload of another date is yesterday's news — unless triage says it ran today, in which
+  // case today's result should be here and a missing/mismatched date means it cannot be read.
+  if (r.date !== dateKey) {
+    return ranToday ? { ranToday, line: null, saturated: null, unreadable: true } : { ranToday, line: null, saturated: null };
+  }
   // `saturated` absent/null is legitimate: a payload written before #431 has no such key.
   const saturatedOk = r.saturated === undefined || r.saturated === null || typeof r.saturated === 'string';
   if (typeof r.line !== 'string' || !saturatedOk) return { ranToday, line: null, saturated: null, unreadable: true };
@@ -80,8 +86,9 @@ function readUnlock(db: DB, dateKey: string): StatusInputs['unlock'] {
 
 // A pause marker that exists but cannot be read is not "not paused": the worker may be stopped.
 function readPaused(db: DB, now: Date): { paused: { since: string; status: number } | null; pausedUnreadable: boolean } {
-  const p = parse(getJobState(db, BUG_REPORT_PAUSED_KEY)) as { since?: unknown; status?: unknown } | null | undefined;
-  if (p === null) return { paused: null, pausedUnreadable: false };
+  const raw = getJobState(db, BUG_REPORT_PAUSED_KEY);
+  if (raw === null) return { paused: null, pausedUnreadable: false };
+  const p = parse(raw) as { since?: unknown; status?: unknown } | null | undefined;
   return p && typeof p === 'object' && typeof p.since === 'string' && validPast(p.since, now) && typeof p.status === 'number'
     ? { paused: { since: p.since, status: p.status }, pausedUnreadable: false }
     : { paused: null, pausedUnreadable: true };

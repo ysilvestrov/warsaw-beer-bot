@@ -345,3 +345,22 @@ test('a fallback whose send failed is retried by the next tick in the same proce
   await dailyStatus(deps);
   expect(sent.length).toBe(1);
 });
+
+test('a failed fallback send from yesterday does not release today\'s claim', async () => {
+  const db = emptyDb();
+  // No job_state table: the DB can neither read nor keep any marker, so only the in-process claim dedupes.
+  db.exec('DROP TABLE job_state');
+  const sent: string[] = [];
+  let failYesterday!: () => void;
+  const yesterdayPending = new Promise<void>((_, reject) => { failYesterday = () => reject(new Error('synthetic late failure')); });
+  let day = '2026-10-05T07:00:00Z';
+  const deps = { db, log: silentLog, now: () => new Date(day), ...missingMonitor,
+    notifyAdmin: async (t: string) => { if (t.includes('2026-10-05')) { await yesterdayPending; } sent.push(t); } };
+  const yesterday = dailyStatus(deps);               // claims 2026-10-05, send hangs
+  day = '2026-10-06T07:00:00Z';
+  await dailyStatus(deps);                           // claims 2026-10-06, sends
+  failYesterday();
+  await yesterday;                                   // yesterday's send fails after today's claim
+  await dailyStatus(deps);                           // must still see today as sent
+  expect(sent.map((t) => t.startsWith('🔴 Статус бота — 2026-10-06 09:00 · звіт не зібрано: '))).toEqual([true]);
+});

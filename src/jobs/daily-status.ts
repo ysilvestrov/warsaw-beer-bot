@@ -168,7 +168,8 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
         log.error({ err: markErr }, 'daily-status fallback marker not written');
       }
     } catch (sendErr) {
-      fallbackSentInProcess = previous;
+      // Release only our own claim: a later day's tick may have claimed it meanwhile.
+      if (fallbackSentInProcess === dateKey) fallbackSentInProcess = previous;
       log.error({ err: sendErr }, 'daily-status fallback send failed');
     }
     return;
