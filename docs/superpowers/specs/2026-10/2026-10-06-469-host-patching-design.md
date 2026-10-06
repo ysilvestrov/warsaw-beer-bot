@@ -201,11 +201,11 @@ and litestream's flush run as on any `systemctl stop`.
 | C10 | the nodesource repo never offers another major | probed: source URL is `node_24.x`; its `Packages` carries only 24.x | strong (probe) |
 | C11 | a Node patch upgrade keeps `better-sqlite3` loadable | `NODE_MODULE_VERSION` is fixed per Node major (Node ABI policy) | medium — watched by C1's restart + `/health`; if it fails, the bot is down and the existing monitors fire |
 | C12 | the summary is the host's, not forged by the bot user | owner uid 0, dir `0755` root, read with the `readTestDiagnostics` checks | strong (own code, tested) |
-| C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | systemd ≥ 233 supports a timezone in calendar specs; host has systemd 255 | **weak → probe P4**: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` |
+| C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | probed 2026-10-06 on systemd 255: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` → next elapse `02:00:00 UTC` (CEST) | strong (probe) |
 | C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | strong (probe); re-checked by the stage-1 reboot itself |
 
-P1, P3 run as part of stage 1 (they need its host steps). P2 and P4 run before the
-stage-2 plan. A claim that fails its probe is redesigned, not written into code.
+P1, P3 run as part of stage 1 (they need its host steps). P2 runs before the stage-2
+plan. P4 passed. A claim that fails its probe is redesigned, not written into code.
 
 ## Out of scope
 
