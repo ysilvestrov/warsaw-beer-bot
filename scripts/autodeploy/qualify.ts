@@ -10,12 +10,9 @@
  * Pure by design — the workflow does the fetching, so every branch is testable.
  */
 
-export type Severity = 'info' | 'low' | 'moderate' | 'high' | 'critical';
+import { actionable, type AuditReport, type Severity } from './audit-verdict';
 
-/** The shape we consume from `npm audit --json` (`.vulnerabilities`). */
-export interface AuditReport {
-  vulnerabilities: Record<string, { severity: Severity }>;
-}
+export type { AuditReport, Severity };
 
 export type Verdict =
   | { verdict: 'autodeploy'; reason: string }
@@ -24,14 +21,6 @@ export type Verdict =
 
 /** How long a `high` fix must have been published before it may deploy unattended. */
 export const HOLD_HOURS = 48;
-
-const ACTIONABLE: Severity[] = ['high', 'critical'];
-
-function actionable(r: AuditReport): { name: string; severity: Severity }[] {
-  return Object.entries(r.vulnerabilities)
-    .filter(([, v]) => ACTIONABLE.includes(v.severity))
-    .map(([name, v]) => ({ name, severity: v.severity }));
-}
 
 /**
  * The single measurement `qualify()` and `needsHoldCheck()` both act on —
