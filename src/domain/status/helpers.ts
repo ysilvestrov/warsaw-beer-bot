@@ -23,7 +23,10 @@ export function previousDays(history: SnapshotRecord[], date: string, n: number)
 // else. Date.parse alone accepts strings like "0" as dates, which would let corrupt state read healthy.
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$/;
 export function parseIsoInstant(value: string): number {
-  return ISO_INSTANT.test(value) ? Date.parse(value) : Number.NaN;
+  if (!ISO_INSTANT.test(value)) return Number.NaN;
+  const t = Date.parse(value);
+  // Date.parse rolls impossible calendar dates over (2026-02-29 → 03-01); only a round trip proves it real.
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 19) === value.slice(0, 19) ? t : Number.NaN;
 }
 
 export function median(values: number[]): number {

@@ -1,4 +1,4 @@
-import { gib, groupThousands, median, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
+import { gib, groupThousands, median, parseIsoInstant, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
 import { GREEN_METRICS } from './test-inputs';
 
 const rec = (date: string) => ({ date, metrics: GREEN_METRICS });
@@ -33,4 +33,19 @@ test('warsawClock renders Warsaw wall time across the DST change', () => {
 
 test('groupThousands and gib format numbers for the report', () => {
   expect([groupThousands(2078442), groupThousands(999), gib(34_750_201_856)]).toEqual(['2 078 442', '999', '32.36']);
+});
+
+test('parseIsoInstant accepts only real instants in toISOString form', () => {
+  expect([
+    parseIsoInstant('2026-10-06T07:00:00.000Z'),
+    parseIsoInstant('2026-10-06T07:00:00Z'),
+    parseIsoInstant('2028-02-29T00:00:00.000Z'),
+    parseIsoInstant('2026-02-29T00:00:00.000Z'),
+    parseIsoInstant('2026-10-06T24:00:00.000Z'),
+    parseIsoInstant('0'),
+    parseIsoInstant('2026-10-06 07:00:00'),
+  ]).toEqual([
+    Date.UTC(2026, 9, 6, 7), Date.UTC(2026, 9, 6, 7), Date.UTC(2028, 1, 29),
+    Number.NaN, Number.NaN, Number.NaN, Number.NaN,
+  ]);
 });
