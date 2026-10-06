@@ -145,12 +145,12 @@ describe('renderVerdict', () => {
 });
 
 describe('verdictExitCode', () => {
-  it('maps clean / advisory / unrunnable to 0 / 1 / 2', () => {
+  it('maps clean / advisory / unrunnable to 0 / 10 / 2', () => {
     expect([
       verdictExitCode({ kind: 'clean' }),
       verdictExitCode({ kind: 'advisory', findings: [] }),
       verdictExitCode({ kind: 'unrunnable', reason: 'r' }),
-    ]).toEqual([0, 1, 2]);
+    ]).toEqual([0, 10, 2]);
   });
 });
 
@@ -167,8 +167,8 @@ describe('audit-verdict-cli', () => {
     });
   });
 
-  it('advisory → exit 1', () => {
-    expect(run(fixture('advisory.json'))).toEqual({ code: 1, out: `${ADVISORY_LINE}\n` });
+  it('advisory → exit 10', () => {
+    expect(run(fixture('advisory.json'))).toEqual({ code: 10, out: `${ADVISORY_LINE}\n` });
   });
 
   it('unreachable registry → exit 2', () => {

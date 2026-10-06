@@ -58,9 +58,10 @@ export function renderVerdict(v: AuditVerdict): string;
 - **The exit code is not an input.** With `--json` and no `--audit-level`, npm exits 1
   for any advisory at all, including `low`. The JSON is the only thing that tells
   advisory and failure apart.
-- **Finding** = `{ name, severity, advisories: { title, url }[] }`. The advisories are
-  the object entries of `via`. A package vulnerable only through another one (string
-  `via` entries) lists those names instead.
+- **Finding** = `{ name, severity, advisories: { title, url }[], via: string[] }`. The
+  advisories are the object entries of `via`. A package vulnerable through another one
+  lists that package's name in the separate `via` list (the string entries). Render shows
+  both: `cr critical — T U; via x`.
 - **Render** gives one line per finding, `proxy-addr critical — <title> <url>`, or the
   unrunnable reason. This replaces npm's raw text in the Telegram notice and in the
   prod-audit issue body.
@@ -68,27 +69,44 @@ export function renderVerdict(v: AuditVerdict): string;
 ### The CLI contract
 
 `scripts/autodeploy/audit-verdict-cli.ts` reads npm's stdout on stdin, prints
-`renderVerdict`, and exits **0 clean / 1 advisory / 2 unrunnable**. That is exactly the
-contract both shell callers already branch on, so their branches and tests keep their
-meaning. Only the producer of the code changes.
+`renderVerdict`, and exits **0 clean / 10 advisory / 2 unrunnable**. Advisory is 10, not 1, because Node
+itself exits 1 on any uncaught load or transform error (a failed import, a broken tsx),
+so 1 must never mean advisory. Callers treat anything other than 0 and 10 as could not
+run. The merge-deploy tick keeps its own contract (0 / 1 refuse / other retry) by mapping
+the CLI code back in `_audit_default`; prod-audit branches on the CLI code directly.
 
 ### Callers
 
 - **merge-deploy** (`deploy/autodeploy.sh`):
-  `_audit_default() { npm audit --omit=dev --json 2>/dev/null | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts; }`.
+  ```bash
+  _audit_default() {
+    local report rc=0
+    report=$(npm audit --omit=dev --json 2>/dev/null) || true
+    printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts || rc=$?
+    case "$rc" in
+      0) return 0 ;;
+      10) return 1 ;;
+      *) return 2 ;;
+    esac
+  }
+  ```
+  `printf` feeds the pipe so `pipefail` sees only the CLI's status; 10 is advisory
+  because Node exits 1 on its own crashes, which must read as could not run.
   It runs in the clone after `BUILD_CMD` (`npm ci`), so `tsx` is installed. The CLI
   comes from the commit being deployed, which merge-deploy already trusts with
-  everything else ("a merge is permission"). `pipefail` must not let npm's exit 1
-  override the CLI's code (with `pipefail`, a `low`-only report would exit npm 1 and CLI 0 and read as 1): the CLI's exit status is the function's status. The
+  everything else ("a merge is permission"). The
   comment at `:77` is rewritten. **This is a hold path:** the PR carries
   `[deploy:hold]`, and the human step is `sudo bash deploy/install-autodeploy.sh`,
   then `bash deploy/deploy.sh`.
 - **prod-audit** (`.github/workflows/prod-audit.yml`): `npm ci --ignore-scripts`
   first, for `tsx`. No install script runs, so the step stays as inert as today's
-  install-free one. Then the same pipe, and the existing `case` on 0/1/2. The issue
+  install-free one. The install step is `continue-on-error`, so an install outage reaches the
+  verdict step as a missing tsx (127), which is `unknown` and opens the issue. Then the same pipe, and a `case` on 0 / 10 / `*`. The issue
   body shows the rendered findings or the reason.
 - **dependabot-qualify** (`qualify-cli.ts`): `auditReport(dir)` calls
-  `parseAuditReport` and keeps throwing on a non-audit. No behaviour change.
+  `parseAuditReport` and keeps throwing on a non-audit. No change in what passes or fails;
+  error text changes (ENOLOCK reads `ENOLOCK — <summary>`, non-JSON reads 'is not JSON'
+  instead of a SyntaxError, a null/array `vulnerabilities` is rejected up front).
 
 ### Spec corrections
 

@@ -25,7 +25,10 @@ jobs:
 
       # tsx for the verdict CLI (#795). --ignore-scripts: no package's install
       # script runs, so this job stays as inert as when it installed nothing.
+      # continue-on-error: an install outage then reaches the verdict step as a
+      # missing tsx (127) -> unknown -> issue, instead of ending the job silently.
       - name: Install dependencies (no install scripts)
+        continue-on-error: true
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Audit production dependencies
@@ -34,17 +37,17 @@ jobs:
           set -uo pipefail
           # npm's exit code cannot tell an advisory from a failure to audit: npm 12
           # exits 1 for both (#795). The verdict CLI reads the JSON and exits
-          # 0 clean / 1 advisory / 2 could not run. printf, not npm, feeds the pipe,
-          # so pipefail sees the CLI's status alone. GitHub runs this as `bash -e`:
-          # the `||` keeps a non-zero code from killing the step before `state` is
-          # written (#789).
+          # 0 clean / 10 advisory / anything else could not run (10, because Node itself
+          # exits 1 on a crash). printf, not npm, feeds the pipe, so pipefail sees the
+          # CLI's status alone. GitHub runs this as `bash -e`: the `||` keeps a non-zero
+          # code from killing the step before `state` is written (#789).
           report=$(npm audit --omit=dev --json 2>/dev/null) || true
           code=0
           printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts > audit.txt 2>&1 || code=$?
           cat audit.txt
           case "$code" in
             0) echo "state=clean"   >> "$GITHUB_OUTPUT" ;;
-            1) echo "state=vulnerable" >> "$GITHUB_OUTPUT" ;;
+            10) echo "state=vulnerable" >> "$GITHUB_OUTPUT" ;;
             # The audit did not produce a report (registry outage, ENOLOCK, a CLI
             # crash): we do NOT know whether production is exposed. Silence here
             # is exactly the failure this workflow exists to prevent, so it is

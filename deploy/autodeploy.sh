@@ -76,15 +76,22 @@ _build_default() { npm ci --no-audit --no-fund && npm run build; }
 BUILD_CMD="${WBB_BUILD_CMD:-_build_default}"
 # npm's exit code cannot tell an advisory from a failure to audit: npm 12 exits 1
 # for an advisory, ENOLOCK and an unreachable registry alike (#795). The JSON
-# tells them apart; the verdict CLI turns it back into the contract the tick
-# branches on — 0 clean, 1 advisory (refuse), 2 could not run (retry). printf,
-# not npm, feeds the pipe, so pipefail sees the CLI's status alone. Runs in the
-# clone after BUILD_CMD's `npm ci`, so tsx is installed; a missing tsx is 127,
-# which reads as "could not run", never as an advisory.
+# tells them apart; the verdict CLI exits 0 clean / 10 advisory / 2 could not run,
+# and this maps it back to the contract the tick branches on — 0 clean, 1 advisory
+# (refuse), 2 could not run (retry). 10 is the advisory code because Node itself
+# exits 1 on a crash outside the CLI's try (failed import, transform error): a crash,
+# a missing tsx (127) or Node's own exit 1 all read as could not run, never as an
+# advisory. printf, not npm, feeds the pipe, so pipefail sees the CLI's status
+# alone. Runs in the clone after BUILD_CMD's `npm ci`, so tsx is installed.
 _audit_default() {
-  local report
+  local report rc=0
   report=$(npm audit --omit=dev --json 2>/dev/null) || true
-  printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts
+  printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts || rc=$?
+  case "$rc" in
+    0) return 0 ;;
+    10) return 1 ;;
+    *) return 2 ;;
+  esac
 }
 AUDIT_CMD="${WBB_AUDIT_CMD:-_audit_default}"
 

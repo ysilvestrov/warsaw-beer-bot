@@ -2748,11 +2748,11 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   Мердж — це дозвіл: право писати в `main` означає прод. Перед деплоєм: збірка й `npm audit` у
   клоні (вердикт — з JSON-звіту, не з коду виходу: high/critical → відмова, звіту нема → повтор
   на наступному тіку, #795), знімок БД `VACUUM INTO` і пробна міграція на копії.
-  Протягом 10 хв після рестарту збій
-  (3 невдалі `/health` поспіль, старт довше 120 с, зміна `NRestarts`) відкочує **код і БД** до
-  знімка, зберігаючи `post` для людини. Hold: шлях, що потребує root (sudoers, юніти, litestream,
-  `install-*.sh`, `rsync-filter`, встановлені копії деплоєра), або PR з міткою `deploy:hold` і
-  маркером `[deploy:hold]` на початку заголовка. Hold знімає ручний `bash deploy/deploy.sh`.
+  Протягом 10 хв після рестарту збій (3 невдалі `/health` поспіль, старт довше 120 с, зміна
+  `NRestarts`) відкочує **код і БД** до знімка, зберігаючи `post` для людини. Hold: шлях, що
+  потребує root (sudoers, юніти, litestream, `install-*.sh`, `rsync-filter`, встановлені копії
+  деплоєра), або PR з міткою `deploy:hold` і маркером `[deploy:hold]` на початку заголовка. Hold
+  знімає ручний `bash deploy/deploy.sh`.
   Сам `deploy.sh`: rsync allowlist build/runtime-файлів → `/opt` → `npm ci` → `npm run build` →
   `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**.
   (`enable --now` на запущеному unit'і не перезапускає).
