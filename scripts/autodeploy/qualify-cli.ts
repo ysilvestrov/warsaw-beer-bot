@@ -12,6 +12,7 @@ import { readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { qualify, needsHoldCheck, type AuditReport } from './qualify';
+import { parseAuditReport } from './audit-verdict';
 import { manifestScope, type DepSections } from './manifest-scope';
 
 function readJson<T>(path: string): T {
@@ -27,18 +28,9 @@ function readJson<T>(path: string): T {
  * must stop the run rather than read as "clean".
  */
 export function auditReport(dir: string): AuditReport {
-  const raw = readFileSync(join(dir, 'audit.json'), 'utf8').trim();
-  if (raw === '') {
-    throw new Error(`audit.json in ${dir} is empty — npm audit did not produce a report`);
-  }
-  const parsed = JSON.parse(raw) as { error?: unknown; vulnerabilities?: AuditReport['vulnerabilities'] };
-  if ('error' in parsed) {
-    throw new Error(`audit.json in ${dir} reports an error, not an audit: ${JSON.stringify(parsed.error)}`);
-  }
-  if (parsed.vulnerabilities === undefined) {
-    throw new Error(`audit.json in ${dir} has no "vulnerabilities" field — not a well-formed audit report`);
-  }
-  return { vulnerabilities: parsed.vulnerabilities };
+  const parsed = parseAuditReport(readFileSync(join(dir, 'audit.json'), 'utf8'));
+  if ('error' in parsed) throw new Error(`audit.json in ${dir} ${parsed.error}`);
+  return parsed;
 }
 
 function directDeps(dir: string): DepSections {
