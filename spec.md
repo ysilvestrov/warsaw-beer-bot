@@ -2740,7 +2740,15 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
 - Snapshot-модель замість перезапису — джерела не опитуються частіше, ніж треба.
 
 ### 5.9 Інфраструктура / деплой
-- Runtime: **Node ≥ 20** під systemd (`warsaw-beer-bot.service`).
+- Runtime: **Node 24** (nodesource `node_24.x`) під systemd (`warsaw-beer-bot.service`).
+- **Патчі хоста (#469, спека `docs/superpowers/specs/2026-10/2026-10-06-469-host-patching-design.md`).**
+  unattended-upgrades ставить безпекові оновлення Ubuntu (з Ubuntu Pro — і ESM), а також Node
+  з nodesource (лише лінія 24.x) і cloudflared з репозиторію Cloudflare
+  (`deploy/install-host-patching.sh`). needrestart сам перезапускає сервіси на старих
+  бібліотеках; інсталятор відмовляється працювати, якщо правило needrestart виключає бот,
+  cloudflared, litestream або ssh. Ядро тримає Canonical Livepatch; автоматичного
+  перезавантаження немає — воно вбило б code-server і робочі сесії. litestream оновлюється
+  лише вручну, бо пише бекап.
 - SQLite у `/var/lib/warsaw-beer-bot/bot.db` (WAL).
 - Деплой — **merge-deploy** (`deploy/autodeploy.sh`, таймер кожні 5 хв, спека
   `docs/superpowers/specs/2026-09/2026-09-30-merge-deploy-design.md`): хост сам деплоїть голову

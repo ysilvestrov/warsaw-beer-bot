@@ -412,6 +412,38 @@ first line of defense, not the only one — the privileged `sudo systemctl
 stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
 stop.
 
+## Host patching (#469)
+
+Spec: `docs/superpowers/specs/2026-10/2026-10-06-469-host-patching-design.md`.
+
+What patches what:
+
+| Layer | Patched by | Restart |
+|---|---|---|
+| Ubuntu packages (`-security`, ESM via Ubuntu Pro) | unattended-upgrades | needrestart restarts services automatically |
+| Kernel | unattended-upgrades to disk; Livepatch live | a **reboot** only for what Livepatch cannot cover |
+| Node (`nodesource`, `node_24.x` only) | unattended-upgrades (`52wbb-unattended-upgrades`) | needrestart restarts the bot |
+| cloudflared (`pkg.cloudflare.com`) | unattended-upgrades (`52wbb-unattended-upgrades`) | needrestart restarts the tunnel |
+| litestream | **nobody** — upgraded by hand (it writes the backup) | — |
+
+There is no automatic reboot: a reboot kills code-server and every session in
+it (the same reason as `/etc/needrestart/conf.d/90-code-server.conf`).
+
+### One-time setup (as root)
+
+1. Attach Ubuntu Pro (free personal tier; token from ubuntu.com/pro — it never
+   goes into the repo or `.env`), then enable Livepatch:
+   `sudo pro attach <token>` and `sudo pro enable livepatch`.
+2. `sudo bash deploy/install-host-patching.sh` — refuses, changing nothing, if a
+   needrestart rule names `warsaw-beer-bot`, `cloudflared`, `litestream` or
+   `ssh`, or if Cloudflare's key does not have the pinned fingerprint.
+3. Check the origins: `sudo unattended-upgrade --dry-run -d 2>&1 | grep -E 'Allowed origins|nodejs|cloudflared'`
+   must show the two patterns and treat `nodejs` as upgradable.
+4. Reboot once (`sudo systemctl reboot`) so the host runs the newest installed
+   kernel, then `canonical-livepatch status` must show it as supported.
+
+Re-run step 2 after any merge that changes `deploy/install-host-patching.sh`.
+
 ## Backup: Litestream → Cloudflare R2
 
 Streams SQLite WAL changes from `/var/lib/warsaw-beer-bot/bot.db` to an R2
