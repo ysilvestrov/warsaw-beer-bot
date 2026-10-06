@@ -1,7 +1,7 @@
 import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect } from 'vitest';
 import { execFileSync, spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, chmodSync, symlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /**
@@ -1365,5 +1365,95 @@ describe('merge-deploy: observed production regressions (#768)', () => {
     } finally {
       chmodSync(dir, 0o755);
     }
+  });
+});
+
+/**
+ * #795 — the REAL `_audit_default`, not a stub, driven through a tick. npm is a
+ * stub printing a probed fixture with npm's real exit code; the verdict CLI and
+ * tsx are the repository's own (symlinked into a scratch cwd).
+ */
+describe('merge-deploy: the audit verdict comes from the JSON (#795)', () => {
+  const ROOT = resolve(__dirname, '../..');
+  const FIXTURES = resolve(__dirname, 'fixtures/npm-audit');
+  const AUDIT_FN = execFileSync('sed', ['-n', '/^_audit_default() {/,/^}/p', SCRIPT], { encoding: 'utf8' });
+
+  /** An AUDIT_CMD that runs the real function against `npm` printing `json` and exiting `npmExit`. */
+  function realAudit(w: World, json: string, npmExit: number): string {
+    const cwd = makeTempDirectory('wbb-md-audit-');
+    symlinkSync(join(ROOT, 'node_modules'), join(cwd, 'node_modules'));
+    symlinkSync(join(ROOT, 'scripts'), join(cwd, 'scripts'));
+    mkdirSync(join(cwd, 'bin'));
+    writeFileSync(join(cwd, 'report.json'), json);
+    stub(join(cwd, 'bin'), 'npm', `cat "${join(cwd, 'report.json')}"; exit ${npmExit}`);
+    return stub(w.bin, 'audit-real', [
+      'set -euo pipefail',
+      AUDIT_FN,
+      `cd "${cwd}"`,
+      `PATH="${join(cwd, 'bin')}:$PATH" _audit_default`,
+    ].join('\n'));
+  }
+
+  const fx = (name: string) => readFileSync(join(FIXTURES, name), 'utf8');
+
+  it('refuses the proxy-addr advisory and names it', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = realAudit(w, fx('advisory.json'), 1);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(1);
+    expect(readState(w).LAST_FAILED_SHA).toBe(x);
+    expect(notes(w)).toEqual([
+      `⛔ merge-deploy refused ${short(x)}: npm audit --omit=dev reports a high or critical advisory.\n`
+      + 'proxy-addr critical — proxy-addr vulnerable to IP spoofing via IPv4-mapped IPv6 trust subnet https://github.com/advisories/GHSA-jqcg-44mw-7w3h',
+    ]);
+  });
+
+  // The regression: npm exits 1 here too, and this used to refuse the commit for good.
+  it('an unreachable registry is "could not run": no LAST_FAILED_SHA, retried', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = realAudit(w, fx('registry-down.json'), 1);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(1);
+    expect(readState(w).LAST_FAILED_SHA).toBe(undefined);
+    expect(notes(w)).toEqual([
+      `⚠️ merge-deploy: npm audit could not run (exit 2) for ${short(x)} — NOT a finding, just no verification. Retrying next tick.\n`
+      + 'npm audit could not run: the output reports an error, not an audit: request to http://127.0.0.1:9/-/npm/v1/security/advisories/bulk failed, reason: connect ECONNREFUSED 127.0.0.1:9',
+    ]);
+  });
+
+  it('ENOLOCK is "could not run" too', () => {
+    const w = world();
+    push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = realAudit(w, fx('enolock.json'), 1);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(1);
+    expect(readState(w).LAST_FAILED_SHA).toBe(undefined);
+  });
+
+  it('a clean audit deploys', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const audit = realAudit(w, fx('clean.json'), 0);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(0);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
+  });
+
+  // pipefail: npm exits 1 for ANY advisory under --json; a low-only report must not refuse.
+  it('a low-only report deploys although npm exits 1', () => {
+    const w = world();
+    const x = push(w, { 'src/a.ts': '2' }, 'feat');
+    const low = JSON.stringify({ auditReportVersion: 2, vulnerabilities: { a: { severity: 'low', via: [] } } });
+    const audit = realAudit(w, low, 1);
+    ready(w, { WBB_AUDIT_CMD: audit });
+    const r = tick(w, { WBB_AUDIT_CMD: audit });
+    expect(r.code).toBe(0);
+    expect(events(w).filter((e) => e.startsWith('deploy '))).toEqual([`deploy ${x}`]);
   });
 });

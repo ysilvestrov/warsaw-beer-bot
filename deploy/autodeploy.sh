@@ -74,9 +74,18 @@ _deploy_default() { ./deploy/deploy.sh "$@"; }
 DEPLOY_CMD="${WBB_DEPLOY_CMD:-_deploy_default}"
 _build_default() { npm ci --no-audit --no-fund && npm run build; }
 BUILD_CMD="${WBB_BUILD_CMD:-_build_default}"
-# npm audit's exit 1 = advisories at/above the level; any other non-zero = it
-# could not run (I3). Callers keep the two apart.
-_audit_default() { npm audit --omit=dev --audit-level=high; }
+# npm's exit code cannot tell an advisory from a failure to audit: npm 12 exits 1
+# for an advisory, ENOLOCK and an unreachable registry alike (#795). The JSON
+# tells them apart; the verdict CLI turns it back into the contract the tick
+# branches on — 0 clean, 1 advisory (refuse), 2 could not run (retry). printf,
+# not npm, feeds the pipe, so pipefail sees the CLI's status alone. Runs in the
+# clone after BUILD_CMD's `npm ci`, so tsx is installed; a missing tsx is 127,
+# which reads as "could not run", never as an advisory.
+_audit_default() {
+  local report
+  report=$(npm audit --omit=dev --json 2>/dev/null) || true
+  printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts
+}
 AUDIT_CMD="${WBB_AUDIT_CMD:-_audit_default}"
 
 # GitHub, read as the operator's `gh` (P3: works under the unit's environment).
