@@ -28,8 +28,12 @@ jobs:
         run: |
           set -uo pipefail
           # No install: `npm audit` reads the lockfile, so no install scripts run.
-          npm audit --omit=dev --audit-level=high > audit.txt 2>&1
-          code=$?
+          # GitHub runs this as `bash -e`, and `set -uo` does not turn -e off: a bare
+          # `npm audit` exiting non-zero would kill the step before `state` is written,
+          # silencing exactly the vulnerable and unknown outcomes (#789). The `||`
+          # exempts the line from -e and keeps the exit code.
+          code=0
+          npm audit --omit=dev --audit-level=high > audit.txt 2>&1 || code=$?
           cat audit.txt
           case "$code" in
             0) echo "state=clean"   >> "$GITHUB_OUTPUT" ;;
@@ -82,3 +86,9 @@ jobs:
           if [ -n "$existing" ]; then
             gh issue close "$existing" --comment '`npm audit --omit=dev --audit-level=high` is clean again.'
           fi
+
+      # The issue is the report; a red run is the second signal (GitHub mails the
+      # owner of a failed scheduled run). Last, so the issue step always runs first.
+      - name: Fail the run when production is not clean
+        if: steps.audit.outputs.state != 'clean'
+        run: exit 1
