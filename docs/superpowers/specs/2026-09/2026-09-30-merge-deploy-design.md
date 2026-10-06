@@ -85,8 +85,10 @@ names stay, so no re-arming is needed.
      what the human must do;
    - the installed deployer is current (`wbb-installed-current`, existing): stale → refuse, as today.
 3. **Build in the deployer's clone**, before `/opt` is touched: `npm ci && npm run build`, then
-   `npm audit --omit=dev --audit-level=high` (moved here from the tag path; exit 1 = refuse, any other
-   non-zero = refuse with "could not verify", as I3 today). A failure leaves production untouched →
+   `npm audit --omit=dev --json`, judged by the verdict CLI (#795, which corrected this step: npm exits
+   1 for an advisory, ENOLOCK and an unreachable registry alike, so the exit code was never evidence).
+   A high/critical advisory → refuse: ⛔ + `LAST_FAILED_SHA=X`. No report at all → "could not run",
+   no `LAST_FAILED_SHA`, retried next tick. A failed build leaves production untouched →
    ⛔ + `LAST_FAILED_SHA=X`.
 4. **Snapshot `pre`**: `VACUUM INTO` from a `mode=ro` connection (**not** the backup API, P1) → `/var/lib/warsaw-beer-bot/deploy-snapshots/<utc>-<sha7>-pre.db`
    plus a `.sha256`. The directory lies outside rsync's reach (`/var/lib`, not `/opt`) and is owned by
