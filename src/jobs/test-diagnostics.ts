@@ -15,6 +15,12 @@ const summarySchema = z.object({
 }).refine((value) => value.runs_inventory_available
   ? value.pending_runs !== null : value.pending_runs === null);
 
+export type TestDiagnostics =
+  | { kind: 'ok'; bytesAvailable: number; inodesFree: number; pendingRuns: number | null }
+  | { kind: 'stale' }
+  | { kind: 'unavailable' };
+const UNAVAILABLE_D: TestDiagnostics = { kind: 'unavailable' };
+
 function pendingWords(count: number): string {
   const tail = count % 100;
   if (tail < 11 || tail > 14) {
@@ -26,15 +32,15 @@ function pendingWords(count: number): string {
 
 // Linux operator telemetry only. Pin the opened directory while reading its
 // atomically replaced file, and treat every missing/invalid input as unknown.
-export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH, trustedUid?: number): string {
+export function readTestDiagnostics(now: Date, path = SUMMARY_PATH, trustedUid?: number): TestDiagnostics {
   let directory: number | undefined;
   let file: number | undefined;
   try {
     const parent = dirname(resolve(path));
-    if (realpathSync(parent) !== parent) return UNAVAILABLE;
+    if (realpathSync(parent) !== parent) return UNAVAILABLE_D;
     directory = openSync(parent, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
     const dirInfo = fstatSync(directory);
-    if ((dirInfo.mode & 0o777) !== 0o755) return UNAVAILABLE;
+    if ((dirInfo.mode & 0o777) !== 0o755) return UNAVAILABLE_D;
     file = openSync(`/proc/self/fd/${directory}/${basename(path)}`,
       constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const info = fstatSync(file);
@@ -43,24 +49,24 @@ export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH, trustedU
     const operatorUid = trustedUid ?? Number(execFileSync('/usr/bin/id', ['-u', 'ysi'], {
       encoding: 'utf8', timeout: 1_000, maxBuffer: 64, stdio: ['ignore', 'pipe', 'ignore'],
     }).trim());
-    if (!Number.isSafeInteger(operatorUid) || operatorUid < 0 || dirInfo.uid !== operatorUid) return UNAVAILABLE;
+    if (!Number.isSafeInteger(operatorUid) || operatorUid < 0 || dirInfo.uid !== operatorUid) return UNAVAILABLE_D;
     if (!info.isFile() || info.uid !== dirInfo.uid || info.nlink !== 1
-      || (info.mode & 0o777) !== 0o644 || info.size > MAX_BYTES) return UNAVAILABLE;
+      || (info.mode & 0o777) !== 0o644 || info.size > MAX_BYTES) return UNAVAILABLE_D;
     const buffer = Buffer.alloc(MAX_BYTES);
     const count = readSync(file, buffer, 0, MAX_BYTES, 0);
-    if (count !== info.size || fstatSync(file).size !== info.size) return UNAVAILABLE;
+    if (count !== info.size || fstatSync(file).size !== info.size) return UNAVAILABLE_D;
     const parsed = summarySchema.safeParse(JSON.parse(buffer.toString('utf8', 0, count)));
-    if (!parsed.success) return UNAVAILABLE;
+    if (!parsed.success) return UNAVAILABLE_D;
     const summary = parsed.data;
     const age = now.getTime() / 1000 - summary.timestamp;
-    if (!Number.isFinite(age) || age < 0) return UNAVAILABLE;
-    if (age > 900) return 'Тести: дані монітора застарілі';
-    const inventory = summary.pending_runs === null ? 'дані каталогів недоступні'
-      : `${summary.pending_runs} ${pendingWords(summary.pending_runs)} перевірки`;
-    const inodes = String(summary.inodes_free).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-    return `Тести: ${inventory} · диск: ${(summary.bytes_available / 1024 ** 3).toFixed(2)} GiB вільно · inode: ${inodes} вільно`;
+    if (!Number.isFinite(age) || age < 0) return UNAVAILABLE_D;
+    if (age > 900) return { kind: 'stale' };
+    return {
+      kind: 'ok', bytesAvailable: summary.bytes_available,
+      inodesFree: summary.inodes_free, pendingRuns: summary.pending_runs,
+    };
   } catch {
-    return UNAVAILABLE;
+    return UNAVAILABLE_D;
   } finally {
     let closeFailed = false;
     for (const fd of [file, directory]) {
@@ -69,6 +75,19 @@ export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH, trustedU
         catch { closeFailed = true; }
       }
     }
-    if (closeFailed) return UNAVAILABLE;
+    if (closeFailed) return UNAVAILABLE_D;
   }
+}
+
+export function formatTestDiagnostics(d: TestDiagnostics): string {
+  if (d.kind === 'unavailable') return UNAVAILABLE;
+  if (d.kind === 'stale') return 'Тести: дані монітора застарілі';
+  const inventory = d.pendingRuns === null ? 'дані каталогів недоступні'
+    : `${d.pendingRuns} ${pendingWords(d.pendingRuns)} перевірки`;
+  const inodes = String(d.inodesFree).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `Тести: ${inventory} · диск: ${(d.bytesAvailable / 1024 ** 3).toFixed(2)} GiB вільно · inode: ${inodes} вільно`;
+}
+
+export function readTestDiagnosticsLine(now: Date, path = SUMMARY_PATH, trustedUid?: number): string {
+  return formatTestDiagnostics(readTestDiagnostics(now, path, trustedUid));
 }
