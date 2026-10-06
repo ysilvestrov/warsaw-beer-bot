@@ -78,7 +78,7 @@ describe('Untappd', () => {
   test('a breaker timestamp that does not parse is no data, never a closed breaker', () => {
     expect([
       evaluateUntappd(greenInputs({ algoliaOpenUntil: 'nope' })),
-      evaluateUntappd(greenInputs({ profileOpenUntil: 'nope' })),
+      evaluateUntappd(greenInputs({ profileOpenUntil: '0' })),
     ]).toEqual([
       { subsystem: 'untappd', colour: 'yellow', reasons: ['нема даних: стан Algolia-breaker пошкоджено'] },
       { subsystem: 'untappd', colour: 'yellow', reasons: ['нема даних: стан breaker профіль-скрейпу пошкоджено'] },

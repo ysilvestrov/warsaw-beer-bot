@@ -1,6 +1,6 @@
 import type { Colour, Evaluation, FestInputs, StatusInputs, SubsystemId } from './types';
 import { STATUS_RULES as R } from './rules';
-import { gib, groupThousands, median, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
+import { gib, groupThousands, median, parseIsoInstant, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
 
 type Finding = { colour: 'yellow' | 'red'; reason: string };
 const red = (reason: string): Finding => ({ colour: 'red', reason });
@@ -20,7 +20,7 @@ function evaluation(subsystem: SubsystemId, findings: Finding[]): Evaluation {
 type Breaker = { kind: 'closed' } | { kind: 'open'; until: string } | { kind: 'unreadable' };
 function breakerState(until: string | null, now: Date): Breaker {
   if (until === null) return { kind: 'closed' };
-  const t = Date.parse(until);
+  const t = parseIsoInstant(until);
   if (!Number.isFinite(t)) return { kind: 'unreadable' };
   return t > now.getTime() ? { kind: 'open', until } : { kind: 'closed' };
 }

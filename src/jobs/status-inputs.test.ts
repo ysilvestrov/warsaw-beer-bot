@@ -134,22 +134,48 @@ test('canary: a timestamp more than a minute in the future is unreadable; within
   ]);
 });
 
-test('triage: unparseable or wrongly typed today result is unreadable; another date or a pre-#431 payload is not', () => {
+test('triage that ran today: a missing, unparseable, null, wrongly typed or other-date result is unreadable', () => {
   const db = emptyDb();
   setJobState(db, TRIAGE_LAST_RUN_KEY, DATE);
+  const missingResult = collectStatusInputs(db, NOW, DATE, missing).triage;
   const read = (raw: string) => { setJobState(db, TRIAGE_LAST_RESULT_KEY, raw); return collectStatusInputs(db, NOW, DATE, missing).triage; };
+  const unreadable = { ranToday: true, line: null, saturated: null, unreadable: true };
   expect([
+    missingResult,
     read('garbage'),
+    read('null'),
+    read('{}'),
     read(JSON.stringify({ date: DATE, line: 7 })),
     read(JSON.stringify({ date: DATE, line: 'Тріаж: 7 рядків', saturated: 5 })),
-    read(JSON.stringify({ date: '2026-10-05', line: 7 })),
+    read(JSON.stringify({ date: '2026-10-05', line: 'Тріаж: 3 рядки' })),
     read(JSON.stringify({ date: DATE, line: 'Тріаж: 7 рядків' })),
   ]).toEqual([
-    { ranToday: true, line: null, saturated: null, unreadable: true },
-    { ranToday: true, line: null, saturated: null, unreadable: true },
-    { ranToday: true, line: null, saturated: null, unreadable: true },
-    { ranToday: true, line: null, saturated: null },
+    unreadable, unreadable, unreadable, unreadable, unreadable, unreadable, unreadable,
     { ranToday: true, line: 'Тріаж: 7 рядків', saturated: null },
+  ]);
+});
+
+test('triage that has not run today: an old or missing result is nothing to report', () => {
+  const db = emptyDb();
+  setJobState(db, TRIAGE_LAST_RUN_KEY, '2026-10-05');
+  const none = collectStatusInputs(db, NOW, DATE, missing).triage;
+  setJobState(db, TRIAGE_LAST_RESULT_KEY, JSON.stringify({ date: '2026-10-05', line: 'Тріаж: 3 рядки' }));
+  const old = collectStatusInputs(db, NOW, DATE, missing).triage;
+  expect([none, old]).toEqual([
+    { ranToday: false, line: null, saturated: null },
+    { ranToday: false, line: null, saturated: null },
+  ]);
+});
+
+test('canary: timestamps Date.parse accepts but toISOString never writes are unreadable', () => {
+  const db = emptyDb();
+  setJobState(db, CANARY_STATE_KEY, JSON.stringify({ ok: true, at: '0' }));
+  const zero = collectStatusInputs(db, NOW, DATE, missing).canary;
+  setJobState(db, CANARY_STATE_KEY, JSON.stringify({ ok: true, at: 'Mon, 05 Oct 2026 07:00:00 GMT' }));
+  const rfc = collectStatusInputs(db, NOW, DATE, missing).canary;
+  expect([zero, rfc]).toEqual([
+    { ok: false, reason: 'стан канарки пошкоджено' },
+    { ok: false, reason: 'стан канарки пошкоджено' },
   ]);
 });
 
@@ -160,13 +186,15 @@ test('pause marker: unparseable, wrongly typed or future-dated is unreadable; ab
   const absent = read();
   setJobState(db, BUG_REPORT_PAUSED_KEY, 'garbage');
   const garbage = read();
+  setJobState(db, BUG_REPORT_PAUSED_KEY, 'null');
+  const literalNull = read();
   setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: 'nope', status: 401 }));
   const badSince = read();
   setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: '2026-10-06T04:12:33.000Z', status: '401' }));
   const badStatus = read();
   setJobState(db, BUG_REPORT_PAUSED_KEY, JSON.stringify({ since: '2027-01-01T00:00:00.000Z', status: 401 }));
   const future = read();
-  expect([absent, garbage, badSince, badStatus, future]).toEqual([
-    [null, false], [null, true], [null, true], [null, true], [null, true],
+  expect([absent, garbage, literalNull, badSince, badStatus, future]).toEqual([
+    [null, false], [null, true], [null, true], [null, true], [null, true], [null, true],
   ]);
 });
