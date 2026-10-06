@@ -107,11 +107,12 @@ meaning. Only the producer of the code changes.
 | An `error` key means npm produced no audit | Probe: `ENOLOCK` and the dead registry both carry `error`; the clean and advisory reports do not |
 | A report with a `vulnerabilities` object and no `error` is authoritative | Probe: clean → `{}`, advisory → the proxy-addr entry; matches `metadata.vulnerabilities` counts |
 | A package's `severity` is the highest of its advisories | npm's documented report v2 field; the probe entry `critical` = its only advisory's `critical`. The rule only compares against `high`, so the max is all it needs |
-| High/critical in the JSON = what `--audit-level=high` fails on | Same threshold by npm's definition; asserted by a test that feeds the advisory fixture to both readings |
+| High/critical in the JSON = what `--audit-level=high` fails on | npm's definition of `--audit-level` (fail at or above the level). Tests pin the boundary on our side: a `moderate`-only report is `clean`, a `high` one is `advisory` |
 | The exit code adds nothing once the JSON is read | Probe: exit 1 occurs in all three non-clean cases, so it separates nothing |
 
-Fixtures are the four probe outputs, saved verbatim (the registry URL in the dead-registry
-message stays as captured).
+Fixtures are the four probe outputs, saved verbatim under `scripts/autodeploy/fixtures/npm-audit/`
+(`clean.json`, `advisory.json`, `enolock.json`, `registry-down.json`; the registry URL in the
+dead-registry message stays as captured).
 
 ## Testing
 
