@@ -260,7 +260,7 @@ health (ratings missing, disk) is expressed separately in the colour table. With
   the report still goes out.
 - If assembling the report throws as a whole, the administrator gets a minimal
   `🔴 Статус бота — звіт не зібрано: <error class>: <message>` instead of silence, and
-  the delivery marker is **not** set, so the next tick in the window retries.
+  the delivery marker is **not** set, so the next tick in the window retries the full report; the fallback itself goes out at most once per Warsaw day (`job_state.daily_status_fallback_sent`), because the tick is every 15 minutes and a broken report would otherwise send twelve of them.
 - `status_snapshots` is written before sending; a send failure keeps the day's history
   and keeps today's retry behaviour (marker set only on successful delivery).
 
