@@ -197,10 +197,11 @@ test('dailyStatus sends the traffic light and writes today\'s snapshot first', a
     sent.length,
     sent[0].split('\n')[0],
     sent[0].includes(`ℹ️ ${EVENTS_FOOTER}`),
+    sent[0].split('\n').includes('ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)'),
     sent[0].includes('  • скрейпів кранів немає взагалі'),
     db.prepare('SELECT date FROM status_snapshots').all(),
     getJobState(db, 'daily_status_last_sent'),
-  ]).toEqual([1, '🔴 Статус бота — 2026-10-06 09:00 · потрібна реакція', true, true, [{ date: '2026-10-06' }], '2026-10-06']);
+  ]).toEqual([1, '🔴 Статус бота — 2026-10-06 09:00 · потрібна реакція', true, true, true, [{ date: '2026-10-06' }], '2026-10-06']);
 });
 
 test('a failed send keeps the snapshot and leaves the day open for the next tick', async () => {
@@ -233,7 +234,35 @@ test('a week of history removes the history footer', async () => {
   const sent: string[] = [];
   await dailyStatus({ db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
     notifyAdmin: async (t) => { sent.push(t); } });
-  expect(sent[0].includes('історія:')).toBe(false);
+  expect(sent[0].split('\n').filter((l) => l.startsWith('ℹ️'))).toEqual([
+    `ℹ️ ${EVENTS_FOOTER}`,
+    'ℹ️ не виміряно: помилки /match і MCP, стан деплою, GitHub — ще не підключені (етап 2)',
+  ]);
+});
+
+test('a fallback whose send throws leaves the fallback marker unset so the next tick retries', async () => {
+  const db = emptyDb();
+  db.exec('DROP TABLE status_snapshots');
+  await dailyStatus({ db, log: silentLog, now: () => new Date('2026-10-06T07:00:00Z'), ...missingMonitor,
+    notifyAdmin: async () => { throw new Error('synthetic transport unavailable'); } });
+  expect(getJobState(db, 'daily_status_fallback_sent')).toBeNull();
+});
+
+test('a database that cannot be read at all still gets the fallback, once, without rejecting', async () => {
+  const db = emptyDb();
+  const sent: string[] = [];
+  const now = () => new Date('2026-10-06T07:00:00Z');
+  // The first read (last-sent marker) must succeed for the job to proceed; close right after it.
+  const realPrepare = db.prepare.bind(db);
+  let reads = 0;
+  db.prepare = ((sql: string) => {
+    reads += 1;
+    if (reads === 2) db.close();
+    return realPrepare(sql);
+  }) as typeof db.prepare;
+  await expect(dailyStatus({ db, log: silentLog, now, ...missingMonitor,
+    notifyAdmin: async (t) => { sent.push(t); } })).resolves.toBeUndefined();
+  expect([sent.length, sent[0].startsWith('🔴 Статус бота — 2026-10-06 09:00 · звіт не зібрано: ')]).toEqual([1, true]);
 });
 
 const usersBlock = (text: string): string[] | undefined =>

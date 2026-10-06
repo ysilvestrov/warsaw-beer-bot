@@ -58,6 +58,9 @@ test('list skips rows written by another snapshot version and rows with unreadab
   saveStatusSnapshot(db, { date: '2026-10-03', metrics: metrics(3), colours: [], createdAt: '2026-10-03T07:00:00.000Z' });
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-04', 99, '{}', '[]', '2026-10-04T07:00:00.000Z')`).run();
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-05', ?, '{', '[]', '2026-10-05T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-06', ?, 'null', '[]', '2026-10-06T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-07', ?, '"x"', '[]', '2026-10-07T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-08', ?, '[1]', '[]', '2026-10-08T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
   expect(listStatusSnapshots(db, '2026-10-01', '2026-10-09').map((s) => s.date)).toEqual(['2026-10-03']);
 });
 

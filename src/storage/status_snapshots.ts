@@ -27,7 +27,10 @@ export function listStatusSnapshots(db: DB, fromDate: string, beforeDate: string
   ).all(fromDate, beforeDate, STATUS_SNAPSHOT_VERSION) as { date: string; metrics_json: string }[];
   return rows.flatMap((r) => {
     try {
-      return [{ date: r.date, metrics: JSON.parse(r.metrics_json) as SnapshotMetrics }];
+      const m: unknown = JSON.parse(r.metrics_json);
+      return typeof m === 'object' && m !== null && !Array.isArray(m)
+        ? [{ date: r.date, metrics: m as SnapshotMetrics }]
+        : [];
     } catch {
       return [];
     }

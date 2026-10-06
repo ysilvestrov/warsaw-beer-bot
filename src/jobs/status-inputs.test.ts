@@ -30,6 +30,12 @@ test('canary: absent → never ran; valid → value; malformed → unavailable',
   const valid = collectStatusInputs(db, NOW, DATE, missing).canary;
   setJobState(db, CANARY_STATE_KEY, '{"ok":"yes"}');
   const malformed = collectStatusInputs(db, NOW, DATE, missing).canary;
+  const raws = ['garbage', 'null', '{"ok":false,"at":"nope"}'];
+  const broken = raws.map((raw) => {
+    setJobState(db, CANARY_STATE_KEY, raw);
+    return collectStatusInputs(db, NOW, DATE, missing).canary;
+  });
+  expect(broken).toEqual(raws.map(() => ({ ok: false, reason: 'стан канарки пошкоджено' })));
   expect([absent, valid, malformed]).toEqual([
     { ok: true, value: null },
     { ok: true, value: { ok: false, at: '2026-10-06T03:30:10.000Z' } },

@@ -89,7 +89,14 @@ export function collectStatus(db: DB, now: Date): StatusMetrics {
     (db.prepare(sql).get(...params) as { c: number }).c;
 
   const canaryRaw = getJobState(db, 'untappd_search_canary');
-  const canaryOk = canaryRaw ? (JSON.parse(canaryRaw) as { ok: boolean }).ok : true;
+  // A malformed canary must never read as healthy; it also must not take the whole collector down.
+  let canaryOk = true;
+  if (canaryRaw) {
+    try {
+      const parsed = JSON.parse(canaryRaw) as { ok?: unknown } | null;
+      canaryOk = parsed !== null && typeof parsed === 'object' && parsed.ok === true;
+    } catch { canaryOk = false; }
+  }
   const circuitOpenUntil = getJobState(db, 'untappd_circuit_open_until');
   const circuitOpen = circuitOpenUntil != null && Date.parse(circuitOpenUntil) > nowMs;
 
