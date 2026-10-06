@@ -91,7 +91,7 @@ not invalidate `node_modules`.
 **Collector (root, local facts only).** `deploy/wbb-host-patch-collect` (installed to
 `/usr/local/libexec/`), run by `wbb-host-patch.timer` hourly. It never touches the
 network: the root part stays minimal and its output depends only on the host. It writes
-`/var/tmp/wbb-host-patch/summary.json` atomically (temp file + rename), directory
+`/var/tmp/wbb-host-patch/summary.json` (kernel fields from needrestart's `KCUR`/`KEXP`) atomically (temp file + rename), directory
 `0755` owned by root, file `0644` owned by root:
 
 ```jsonc
@@ -140,7 +140,7 @@ line.
 |---|---|---|
 | reboot pending (`now − reboot_required.since`) | > 3 days | > 14 days |
 | Livepatch `state` ∉ {`applied`, `nothing-to-apply`} | always | — |
-| a unit in `stale_services` (needrestart did not restart it) | `now − since` > 1 day | — |
+| a **watched** unit in `stale_services` (needrestart did not restart it) | `now − since` > 1 day | — |
 | newest Node 24.x security release > installed `nodejs` | — | release `date` > 3 days ago |
 | `security_pending > 0` | unattended-upgrades last run > 2 days ago | — |
 | Node 24 `end` | < 180 days | < 30 days |
@@ -149,7 +149,11 @@ line.
 | summary missing / unreadable / > 3 h old | `нема даних` | — |
 
 The "stale service" rule needs the age of the staleness, which one summary cannot
-give. The collector therefore records `stale_services` as
+give. Only the watched units count — `warsaw-beer-bot.service`, `cloudflared.service`,
+`litestream.service`, `ssh.service`. needrestart deliberately defers the rest
+(`code-server@*` by our override, `dbus`, `systemd-logind`, `getty@*`, … by its defaults;
+probe P2 lists exactly these); they refresh only on reboot, which the reboot rule already
+covers, so counting them would make the line permanently 🟡. The collector therefore records `stale_services` as
 `[{ "unit": "…", "since": <first hourly run that saw it> }]`, keeping `since` across
 runs from its previous summary (a unit that disappears is dropped). 🟡 when
 `now − since > 1 day`.
@@ -193,7 +197,7 @@ and litestream's flush run as on any `systemctl stop`.
 | C2 | `/var/run/reboot-required` + `.pkgs` mean "a reboot is pending, for these packages" | probed: present, mtime 2026-09-26, `.pkgs` lists kernels + `libc6`; running 6.8.0-90 vs installed 6.8.0-142 | strong (probe) |
 | C3 | Livepatch covers the kernel the host runs after the stage-1 reboot | none yet | **weak → probe P1** after `pro enable livepatch` + reboot |
 | C4 | `canonical-livepatch status --format json` gives a state the collector can map to the five values | none yet | **weak → probe P1** |
-| C5 | `needrestart -b` (root) prints `NEEDRESTART-SVC: <unit>` lines for stale services | needrestart docs; not run as root here | **weak → probe P2** (root script in `./tmp/`) |
+| C5 | `needrestart -b` (root) prints `NEEDRESTART-SVC: <unit>` lines for stale services | probed 2026-10-06 (P2, `needrestart -b -r l` as root): `NEEDRESTART-SVC: <unit>` lines, plus `NEEDRESTART-KCUR`/`KEXP` (running/expected kernel); the deferred set was code-server, dbus, getty, logind, unattended-upgrades; prod processes had 0 deleted mappings | strong (probe) |
 | C6 | `Origins-Pattern` `site=deb.nodesource.com,n=nodistro` and `site=pkg.cloudflare.com,o=cloudflared` match the repos | Release files probed (`Origin: . nodistro`, `Origin: cloudflared`, `Codename: any`); matching not yet run | **weak → probe P3**: `sudo unattended-upgrade --dry-run -d` lists `nodejs` as allowed |
 | C7 | nodejs.org `index.json` flags security releases | probed: `v24.18.1 security=true`, others `false` | strong (probe) |
 | C8 | `schedule.json` carries `v24.maintenance` / `v24.end` | probed: 2026-10-20 / 2028-04-30 | strong (probe) |
@@ -204,8 +208,7 @@ and litestream's flush run as on any `systemctl stop`.
 | C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | probed 2026-10-06 on systemd 255: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` → next elapse `02:00:00 UTC` (CEST) | strong (probe) |
 | C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | strong (probe); re-checked by the stage-1 reboot itself |
 
-P1, P3 run as part of stage 1 (they need its host steps). P2 runs before the stage-2
-plan. P4 passed. A claim that fails its probe is redesigned, not written into code.
+P1, P3 run as part of stage 1 (they need its host steps). P2 and P4 passed. A claim that fails its probe is redesigned, not written into code.
 
 ## Out of scope
 
