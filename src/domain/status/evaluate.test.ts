@@ -82,6 +82,13 @@ describe('Untappd', () => {
       evaluateUntappd(greenInputs({ history, metrics: { ...GREEN_METRICS, ratingsMissing: 121 } })),
     ]).toEqual(['green', { subsystem: 'untappd', colour: 'yellow', reasons: ['зматчених без рейтингу 121 проти звичних 100'] }]);
   });
+  test('on a large base the relative 10 % leg decides: exactly 10 % is green, one row more is yellow', () => {
+    const history = pastDays(7, { ratingsMissing: 1000 });
+    expect([
+      evaluateUntappd(greenInputs({ history, metrics: { ...GREEN_METRICS, ratingsMissing: 1100 } })).colour,
+      evaluateUntappd(greenInputs({ history, metrics: { ...GREEN_METRICS, ratingsMissing: 1101 } })),
+    ]).toEqual(['green', { subsystem: 'untappd', colour: 'yellow', reasons: ['зматчених без рейтингу 1 101 проти звичних 1 000'] }]);
+  });
 });
 
 describe('Фест', () => {
