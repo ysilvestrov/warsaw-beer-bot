@@ -109,7 +109,8 @@ export function evaluateOrphans(i: StatusInputs): Evaluation {
   if (i.triage.saturated !== null) f.push(yellow(i.triage.saturated));
   if (!i.unlock.ranToday) f.push(yellow('замок сьогодні не перевірявся (unlock-fixed-orphans)'));
   const w = i.unlock.withheld;
-  if (w.length > 0) {
+  if (w === null) f.push(yellow('нема даних: результат замка пошкоджено'));
+  else if (w.length > 0) {
     const examples = w.slice(0, WITHHELD_EXAMPLES).map((r) => `#${r.issueNumber} / beer ${r.beerId}`).join(', ');
     f.push(yellow(`утримано після закриття: ${w.length} (${examples}${w.length > WITHHELD_EXAMPLES ? ', …' : ''})`));
   }

@@ -53,7 +53,7 @@ test('list is inclusive of fromDate, exclusive of beforeDate, oldest first', () 
   expect(listStatusSnapshots(db, '2026-10-03', '2026-10-05').map((s) => s.date)).toEqual(['2026-10-03', '2026-10-04']);
 });
 
-test('list skips rows written by another snapshot version and rows with unreadable JSON', () => {
+test('list skips rows of another version, unreadable JSON or the wrong metrics shape', () => {
   const db = emptyDb();
   saveStatusSnapshot(db, { date: '2026-10-03', metrics: metrics(3), colours: [], createdAt: '2026-10-03T07:00:00.000Z' });
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-04', 99, '{}', '[]', '2026-10-04T07:00:00.000Z')`).run();
@@ -61,7 +61,12 @@ test('list skips rows written by another snapshot version and rows with unreadab
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-06', ?, 'null', '[]', '2026-10-06T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-07', ?, '"x"', '[]', '2026-10-07T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
   db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-08', ?, '[1]', '[]', '2026-10-08T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
-  expect(listStatusSnapshots(db, '2026-10-01', '2026-10-09').map((s) => s.date)).toEqual(['2026-10-03']);
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-09', ?, '{}', '[]', '2026-10-09T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION);
+  const stringy = JSON.stringify({ ...metrics(1), ratingsMissing: '100' });
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-10', ?, ?, '[]', '2026-10-10T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION, stringy);
+  const nulled = JSON.stringify({ ...metrics(1), usersTotal: null });
+  db.prepare(`INSERT INTO status_snapshots VALUES ('2026-10-11', ?, ?, '[]', '2026-10-11T07:00:00.000Z')`).run(STATUS_SNAPSHOT_VERSION, nulled);
+  expect(listStatusSnapshots(db, '2026-10-01', '2026-10-12').map((s) => s.date)).toEqual(['2026-10-03']);
 });
 
 test('prune deletes strictly older rows and reports how many', () => {
