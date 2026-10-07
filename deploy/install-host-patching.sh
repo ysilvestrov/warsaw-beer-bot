@@ -44,14 +44,15 @@ fi
 for f in "$R/etc/needrestart/needrestart.conf" "$R"/etc/needrestart/conf.d/*.conf; do
   [ -f "$f" ] || continue
   live=$(sed -e 's/#.*$//' "$f")
+  # Perl accepts the hash key bare or quoted: {restart}, {'restart'}, {"restart"}.
   # Under unattended-upgrades only mode 'a' restarts services: 'l' lists, and 'i'
   # (interactive) falls back to listing when there is no terminal.
-  mode=$(sed -nE "s/.*\\\$nrconf\{restart\}[[:space:]]*=[[:space:]]*['\"]([^'\"]*)['\"].*/\1/p" <<< "$live" | tail -n 1)
+  mode=$(sed -nE "s/.*\\\$nrconf\{['\"]?restart['\"]?\}[[:space:]]*=[[:space:]]*['\"]([^'\"]*)['\"].*/\1/p" <<< "$live" | tail -n 1)
   if [ -n "$mode" ] && [ "$mode" != a ]; then
     problems+=("$f sets needrestart restart mode to '$mode' — under unattended-upgrades that is list-only, services would never be restarted")
   fi
   # A configured UI switches off the APT-hook default of restarting automatically.
-  if grep -qE "\\\$nrconf\{ui\}[[:space:]]*=" <<< "$live"; then
+  if grep -qE "\\\$nrconf\{['\"]?ui['\"]?\}[[:space:]]*=" <<< "$live"; then
     problems+=("$f configures a needrestart UI — that disables the automatic restart default, leaving list-only under unattended-upgrades")
   fi
   for u in "${WATCHED_UNITS[@]}"; do

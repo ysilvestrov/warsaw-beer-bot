@@ -18,7 +18,7 @@ const PRIMARY = 'CC94B39C77AE7342A68B89628A682D308D4E5E73';
 interface Host { root: string; bin: string; log: string }
 
 /** A fake host root holding the real needrestart config, and a stub bin dir. */
-function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean; gpgFails?: boolean } = {}): Host {
+function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean; gpgFails?: boolean; aptFails?: 'update' | 'install' } = {}): Host {
   const dir = makeTempDirectory('wbb-hostpatch-');
   const root = join(dir, 'root');
   const bin = join(dir, 'bin');
@@ -35,7 +35,7 @@ function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean; gpgFails
   stub('id', `echo ${opts.uid ?? '0'}`);
   // curl -fsSL <url> -o <file>: log the URL, serve the fixture key.
   stub('curl', `echo "curl $*" >> "${log}"; out=""; while [ $# -gt 0 ]; do if [ "$1" = -o ]; then out="$2"; shift; fi; shift; done; cp "${KEY}" "$out"`);
-  stub('apt-get', `echo "apt-get DEBIAN_FRONTEND=$DEBIAN_FRONTEND $*" >> "${log}"`);
+  stub('apt-get', `echo "apt-get DEBIAN_FRONTEND=$DEBIAN_FRONTEND $*" >> "${log}"; [ "$1" != "${opts.aptFails ?? 'none'}" ] || exit 100`);
   if (opts.gpgFails) {
     stub('gpg', 'echo "gpg: simulated failure" >&2; exit 2');
   } else if (!opts.realGpg) {
@@ -173,6 +173,8 @@ describe('install-host-patching — refusals change nothing', () => {
     ["'l'", "$nrconf{restart} = 'l';\n"],
     ['"l"', '$nrconf{restart} = "l";\n'],
     ["'i'", "$nrconf{restart} = 'i';\n"],
+    ["'l' under a single-quoted key", "$nrconf{'restart'} = 'l';\n"],
+    ['"i" under a double-quoted key', '$nrconf{"restart"} = "i";\n'],
   ])('refuses needrestart restart mode %s as list-only under unattended-upgrades', (_mode, line) => {
     const h = host();
     writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), line);
@@ -183,9 +185,12 @@ describe('install-host-patching — refusals change nothing', () => {
     expect(calls(h)).toEqual([]);
   });
 
-  it('refuses a configured needrestart UI — it disables the automatic APT-hook default', () => {
+  it.each([
+    ['a bare key', "$nrconf{ui} = 'NeedRestart::UI::stdio';\n"],
+    ['a quoted key', "$nrconf{'ui'} = 'NeedRestart::UI::stdio';\n"],
+  ])('refuses a configured needrestart UI under %s — it disables the automatic APT-hook default', (_form, line) => {
     const h = host();
-    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), "$nrconf{ui} = 'NeedRestart::UI::stdio';\n");
+    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), line);
     const r = run(h);
     expect(r.code).toBe(1);
     expect(r.err).toContain('list-only');
@@ -237,5 +242,37 @@ describe('install-host-patching — the needrestart guard reads only live rules'
     const r = run(h);
     expect(r.code).toBe(0);
     expect(r.err).toBe('');
+  });
+});
+
+describe('install-host-patching — an apt-get failure', () => {
+  it('stops after a failed update: no install, no success summary, exit non-zero', () => {
+    const h = host({ aptFails: 'update' });
+    const r = run(h);
+    expect(r.code).toBe(100);
+    expect(calls(h).filter((c) => c.startsWith('apt-get'))).toEqual(['apt-get DEBIAN_FRONTEND=noninteractive update']);
+    expect(r.out).not.toContain('== installed ==');
+  });
+
+  it('reports a failed install as a failure, without the success summary', () => {
+    const h = host({ aptFails: 'install' });
+    const r = run(h);
+    expect(r.code).toBe(100);
+    expect(r.out).not.toContain('== installed ==');
+  });
+
+  it('recovers on a re-run: the files it already wrote are the final ones', () => {
+    const h = host({ aptFails: 'update' });
+    expect(run(h).code).toBe(100);
+    writeFileSync(join(h.bin, 'apt-get'), `#!/usr/bin/env bash\necho "apt-get DEBIAN_FRONTEND=$DEBIAN_FRONTEND $*" >> "${h.log}"\n`);
+    const r = run(h);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain('== installed ==');
+    expect(readFileSync(at(h, UU_CONF), 'utf8')).toBe(EXPECTED_UU_CONF);
+    expect(readFileSync(at(h, LIST), 'utf8')).toBe(EXPECTED_LIST);
+    expect(calls(h).filter((c) => c.startsWith('apt-get')).slice(-2)).toEqual([
+      'apt-get DEBIAN_FRONTEND=noninteractive update',
+      'apt-get DEBIAN_FRONTEND=noninteractive install -y cloudflared',
+    ]);
   });
 });
