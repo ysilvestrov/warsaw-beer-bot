@@ -2746,7 +2746,7 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   з nodesource (лише лінія 24.x) і cloudflared з репозиторію Cloudflare
   (`deploy/install-host-patching.sh`). needrestart сам перезапускає сервіси на старих
   бібліотеках; інсталятор відмовляється працювати, якщо правило needrestart виключає бот,
-  cloudflared, litestream або ssh. Ядро тримає Canonical Livepatch; автоматичного
+  cloudflared, litestream або ssh. Ядро — Canonical Livepatch (вмикається кроком на хості; що він покриває поточне ядро, доводить проба P1); автоматичного
   перезавантаження немає — воно вбило б code-server і робочі сесії. litestream оновлюється
   лише вручну, бо пише бекап.
 - SQLite у `/var/lib/warsaw-beer-bot/bot.db` (WAL).
