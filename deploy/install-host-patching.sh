@@ -38,11 +38,21 @@ trap 'rm -rf "$work"' EXIT
 
 # --- 1. needrestart guard -----------------------------------------------------
 problems=()
+if [ ! -f "$R/etc/needrestart/needrestart.conf" ]; then
+  problems+=("needrestart is not installed (no /etc/needrestart/needrestart.conf) — nothing would restart services after a library upgrade")
+fi
 for f in "$R/etc/needrestart/needrestart.conf" "$R"/etc/needrestart/conf.d/*.conf; do
   [ -f "$f" ] || continue
   live=$(sed -e 's/#.*$//' "$f")
-  if grep -qE "\\\$nrconf\{restart\}[[:space:]]*=[[:space:]]*'l'" <<< "$live"; then
-    problems+=("$f sets needrestart to list-only — services would never be restarted")
+  # Under unattended-upgrades only mode 'a' restarts services: 'l' lists, and 'i'
+  # (interactive) falls back to listing when there is no terminal.
+  mode=$(sed -nE "s/.*\\\$nrconf\{restart\}[[:space:]]*=[[:space:]]*['\"]([^'\"]*)['\"].*/\1/p" <<< "$live" | tail -n 1)
+  if [ -n "$mode" ] && [ "$mode" != a ]; then
+    problems+=("$f sets needrestart restart mode to '$mode' — under unattended-upgrades that is list-only, services would never be restarted")
+  fi
+  # A configured UI switches off the APT-hook default of restarting automatically.
+  if grep -qE "\\\$nrconf\{ui\}[[:space:]]*=" <<< "$live"; then
+    problems+=("$f configures a needrestart UI — that disables the automatic restart default, leaving list-only under unattended-upgrades")
   fi
   for u in "${WATCHED_UNITS[@]}"; do
     # The unit name followed by anything that cannot continue a unit name:
@@ -61,7 +71,10 @@ fi
 # --- 2. fetch and verify the Cloudflare key ------------------------------------
 curl -fsSL "$CF_KEY_URL" -o "$work/key.gpg"
 mkdir -m 700 "$work/gnupg"
-keys=$(GNUPGHOME="$work/gnupg" gpg --show-keys --with-colons "$work/key.gpg" 2>/dev/null)
+if ! keys=$(GNUPGHOME="$work/gnupg" gpg --show-keys --with-colons "$work/key.gpg"); then
+  echo "ERROR: gpg could not read the key from $CF_KEY_URL. Nothing was changed." >&2
+  exit 1
+fi
 # The fingerprint of each primary key is the fpr record right after its pub record.
 primaries=$(awk -F: '$1=="pub"{want=1; next} $1=="fpr" && want {print $10; want=0}' <<< "$keys")
 count=$(grep -c . <<< "$primaries" || true)
