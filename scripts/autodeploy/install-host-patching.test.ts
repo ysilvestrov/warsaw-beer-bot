@@ -1,7 +1,7 @@
 import { makeTempDirectory } from '../test-temp';
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /** #469 stage 1 — spec 2026-10-06-469-host-patching-design.md. */
@@ -18,7 +18,7 @@ const PRIMARY = 'CC94B39C77AE7342A68B89628A682D308D4E5E73';
 interface Host { root: string; bin: string; log: string }
 
 /** A fake host root holding the real needrestart config, and a stub bin dir. */
-function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean } = {}): Host {
+function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean; gpgFails?: boolean } = {}): Host {
   const dir = makeTempDirectory('wbb-hostpatch-');
   const root = join(dir, 'root');
   const bin = join(dir, 'bin');
@@ -36,7 +36,9 @@ function host(opts: { gpgOut?: string; uid?: string; realGpg?: boolean } = {}): 
   // curl -fsSL <url> -o <file>: log the URL, serve the fixture key.
   stub('curl', `echo "curl $*" >> "${log}"; out=""; while [ $# -gt 0 ]; do if [ "$1" = -o ]; then out="$2"; shift; fi; shift; done; cp "${KEY}" "$out"`);
   stub('apt-get', `echo "apt-get DEBIAN_FRONTEND=$DEBIAN_FRONTEND $*" >> "${log}"`);
-  if (!opts.realGpg) {
+  if (opts.gpgFails) {
+    stub('gpg', 'echo "gpg: simulated failure" >&2; exit 2');
+  } else if (!opts.realGpg) {
     stub('gpg', `cat <<'EOF'\n${opts.gpgOut ?? `pub:-:4096\nfpr:::::::::${PRIMARY}:\nuid:::::::::CloudFlare Software Packaging 2025:\nsub:-:4096\nfpr:::::::::06C89DB3B80A8F4349697C76029E1444B7D9F50F:`}\nEOF`);
   }
   return { root, bin, log };
@@ -85,11 +87,12 @@ describe('install-host-patching — a clean host', () => {
   it('fetches the key, then updates and installs cloudflared non-interactively, in that order', () => {
     const h = host();
     run(h);
-    expect(calls(h)).toEqual([
-      'curl -fsSL https://pkg.cloudflare.com/cloudflare-public-v2.gpg -o ' + calls(h)[0].split(' -o ')[1],
+    expect(calls(h)[0]).toMatch(/^curl -fsSL https:\/\/pkg\.cloudflare\.com\/cloudflare-public-v2\.gpg -o \/.+\/key\.gpg$/);
+    expect(calls(h).slice(1)).toEqual([
       'apt-get DEBIAN_FRONTEND=noninteractive update',
       'apt-get DEBIAN_FRONTEND=noninteractive install -y cloudflared',
     ]);
+    expect(calls(h).length).toBe(3);
   });
 
   it('is idempotent: a second run leaves the same bytes', () => {
@@ -144,22 +147,73 @@ describe('install-host-patching — refusals change nothing', () => {
     expect(untouched(h)).toEqual(NOTHING);
   });
 
-  it('refuses when a needrestart rule names a watched unit — and does not even fetch the key', () => {
+  it.each(['warsaw-beer-bot', 'cloudflared', 'litestream', 'ssh'])(
+    'refuses when a needrestart rule names %s — and does not even fetch the key',
+    (unit) => {
+      const h = host();
+      writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), `$nrconf{override_rc}{qr(^${unit})} = 0;\n`);
+      const r = run(h);
+      expect(r.code).toBe(1);
+      expect(r.err).toContain(`names ${unit}`);
+      expect(untouched(h)).toEqual(NOTHING);
+      expect(calls(h)).toEqual([]);
+    },
+  );
+
+  it('refuses a rule written with the \\.service$ anchor', () => {
     const h = host();
-    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), '$nrconf{override_rc}{qr(^cloudflared)} = 0;\n');
+    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), '$nrconf{override_rc}{qr(^ssh\\.service$)} = 0;\n');
     const r = run(h);
     expect(r.code).toBe(1);
-    expect(r.err).toContain('names cloudflared');
+    expect(r.err).toContain('names ssh');
+    expect(untouched(h)).toEqual(NOTHING);
+  });
+
+  it.each([
+    ["'l'", "$nrconf{restart} = 'l';\n"],
+    ['"l"', '$nrconf{restart} = "l";\n'],
+    ["'i'", "$nrconf{restart} = 'i';\n"],
+  ])('refuses needrestart restart mode %s as list-only under unattended-upgrades', (_mode, line) => {
+    const h = host();
+    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), line);
+    const r = run(h);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('list-only');
     expect(untouched(h)).toEqual(NOTHING);
     expect(calls(h)).toEqual([]);
   });
 
-  it('refuses when needrestart is set to list-only', () => {
+  it('refuses a configured needrestart UI — it disables the automatic APT-hook default', () => {
     const h = host();
-    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), "$nrconf{restart} = 'l';\n");
+    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), "$nrconf{ui} = 'NeedRestart::UI::stdio';\n");
     const r = run(h);
     expect(r.code).toBe(1);
     expect(r.err).toContain('list-only');
+    expect(untouched(h)).toEqual(NOTHING);
+    expect(calls(h)).toEqual([]);
+  });
+
+  it('accepts restart mode a set explicitly', () => {
+    const h = host();
+    writeFileSync(at(h, 'etc/needrestart/conf.d/99-local.conf'), "$nrconf{restart} = 'a';\n");
+    expect(run(h).code).toBe(0);
+  });
+
+  it('refuses when needrestart is not installed', () => {
+    const h = host();
+    rmSync(at(h, 'etc/needrestart/needrestart.conf'));
+    const r = run(h);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('needrestart is not installed');
+    expect(untouched(h)).toEqual(NOTHING);
+    expect(calls(h)).toEqual([]);
+  });
+
+  it('refuses with a named error when gpg cannot read the key', () => {
+    const h = host({ gpgFails: true });
+    const r = run(h);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain('gpg could not read the key from https://pkg.cloudflare.com/cloudflare-public-v2.gpg. Nothing was changed.');
     expect(untouched(h)).toEqual(NOTHING);
   });
 });
