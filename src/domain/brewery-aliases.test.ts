@@ -12,6 +12,7 @@ const KNOWN_HUBS = new Set([
   'tradicni v rakovniku',
   'kauno alus',
   'cydrownia',
+  'maryensztadt',
 ]);
 
 // KNOWN_HUBS is the single exemption authority for all three batch blocks below —
@@ -315,7 +316,7 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
   });
 });
 
-describe('Curated brewery alias batch for parent brands, suffixes, and typos (#417, #483, #462, #302, #338, #659, #642)', () => {
+describe('Curated brewery alias batch for parent brands, suffixes, and typos (#417, #483, #462, #302, #338, #659, #642, #775)', () => {
   const PAIRS: ReadonlyArray<readonly [string, string]> = [
     ['transcend', 'transcend beer crafters'],
     ['schladminger', 'schladming'],
@@ -330,12 +331,13 @@ describe('Curated brewery alias batch for parent brands, suffixes, and typos (#4
     ['perennial', 'perennial artisan ales'],
     ['stiegl', 'stieglbrauerei zu salzburg'],
     ['maryensztad', 'maryensztadt'],
+    ['maryesztadt', 'maryensztadt'],
     ['braurei eichhorn', 'eichhorn dorfleins'],
   ];
 
-  test.each(PAIRS)('resolves %s <-> %s symmetrically with no extra neighbours', (shop, untappd) => {
-    expect(aliasNeighbors(shop)).toEqual([untappd]);
-    expect(aliasNeighbors(untappd)).toEqual([shop]);
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
   });
 
   test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
@@ -344,6 +346,15 @@ describe('Curated brewery alias batch for parent brands, suffixes, and typos (#4
       expect(aliasNeighbors(form)).toHaveLength(1);
     },
   );
+
+  test('maryensztadt is a hub over both Maryensztad and Maryesztadt typos (#775)', () => {
+    expect(aliasNeighbors('maryensztadt').sort()).toEqual(['maryensztad', 'maryesztadt']);
+  });
+
+  test('spokes of maryensztadt are not neighbours of each other (#775)', () => {
+    expect(aliasNeighbors('maryensztad')).not.toContain('maryesztadt');
+    expect(aliasNeighbors('maryesztadt')).not.toContain('maryensztad');
+  });
 
   test('normalizes raw brand names to the Teréna alias keys (#642)', () => {
     expect(normalizeBrewery("П'Ю ПЕРШИЙ")).toBe('п ю першии');

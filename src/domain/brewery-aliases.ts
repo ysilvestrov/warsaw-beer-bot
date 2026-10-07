@@ -140,6 +140,7 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['perennial', 'perennial artisan ales'],                // 38063 Colourant (2026) -> bid 5452613, 14.0% (#338)
   ['stiegl', 'stieglbrauerei zu salzburg'],               // 35115 12° Weisse Naturtrüb -> bid 80, 5.1% (#302)
   ['maryensztad', 'maryensztadt'],                        // 12269 Mi to żyto -> bid 6357167, 5.7% = 5.7% (#417)
+  ['maryesztadt', 'maryensztadt'],                        // 38547 By Your Side -> bid 6357164, 6.0% = 6.0% (#775)
   ['braurei eichhorn', 'eichhorn dorfleins'],             // 34816 Kellerbier -> bid 343881, 5.0% vs 5.2% (#483)
   // #658 / Cluster #2: brand-as-brewery for conglomerate lines and series brands
   ['kwak', 'bosteels'],                                   // 26101 Pauwel -> Pauwel Kwak (bid 358)
