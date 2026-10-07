@@ -2,7 +2,12 @@
 Description=merge-deploy: check origin/main every 5 minutes
 
 [Timer]
-OnBootSec=5min
+# OnActiveSec, not OnBootSec (#798): Persistent=true keeps a stamp of the last trigger, and
+# systemd disables an OnBootSec that has already passed when the timer activates if such a
+# stamp exists. After a slow boot (timer up at boot+536 s on 2026-10-06) that left the timer
+# elapsed for good — merge-deploy silently never ran again. OnActiveSec counts from the
+# timer's own activation, so it is always in the future when the timer starts.
+OnActiveSec=5min
 OnUnitActiveSec=5min
 RandomizedDelaySec=60
 Persistent=true
