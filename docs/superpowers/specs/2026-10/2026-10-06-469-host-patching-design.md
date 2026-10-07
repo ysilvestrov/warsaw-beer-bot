@@ -68,15 +68,21 @@ reproducible and reviewable:
    Node cannot jump majors this way: the source is the `node_24.x` repo, which only
    carries 24.x.
 3. **cloudflared from Cloudflare's apt repo** — the script adds
-   `/etc/apt/keyrings/cloudflare-main.gpg` and
-   `/etc/apt/sources.list.d/cloudflared.list`
+   `/usr/share/keyrings/cloudflare-public-v2.gpg` (the probed v2 key, primary
+   fingerprint `CC94B39C77AE7342A68B89628A682D308D4E5E73`, checked before anything is
+   written) and `/etc/apt/sources.list.d/cloudflared.list`
    (`deb [signed-by=…] https://pkg.cloudflare.com/cloudflared any main`), then
    `apt-get install cloudflared`, which upgrades the orphaned `.deb` in place. The
    tunnel unit and its credentials are untouched.
 4. **needrestart stays in automatic mode.** It already restarts services under
-   unattended-upgrades (evidence in the claims table); the script asserts that
-   `warsaw-beer-bot`, `cloudflared` and `litestream` are **not** in any
-   `override_rc`/`blacklist_rc`, and fails loudly if they are.
+   unattended-upgrades (evidence in the claims table). The script reads the live
+   (uncommented) lines of `needrestart.conf` and `conf.d/*.conf` and refuses, changing
+   nothing, on any `qr(...)` rule naming one of the four units (`warsaw-beer-bot`,
+   `cloudflared`, `litestream`, `ssh`), on a restart mode other than `a`, on a
+   configured `$nrconf{ui}` (it disables the automatic APT-hook default), and when
+   needrestart is not installed. Known limit: the guard is a text match, so it cannot
+   see alternations or prefixes (`qr(^(cron|litestream))`, `qr(^cloud)`) or
+   `$nrconf{blacklist}` binary rules.
 5. **One manual reboot** — human, after steps 1–4, to move from 6.8.0-90 to the
    installed kernel so Livepatch has a supported base. This also clears today's
    backlog.

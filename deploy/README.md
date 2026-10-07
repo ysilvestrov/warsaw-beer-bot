@@ -421,7 +421,7 @@ What patches what:
 | Layer | Patched by | Restart |
 |---|---|---|
 | Ubuntu packages (`-security`, ESM via Ubuntu Pro) | unattended-upgrades | needrestart restarts services automatically |
-| Kernel | unattended-upgrades to disk; Livepatch live | a **reboot** only for what Livepatch cannot cover |
+| Kernel | unattended-upgrades to disk; Livepatch live (once enabled; coverage proven by probe P1) | a **reboot** only for what Livepatch cannot cover |
 | Node (`nodesource`, `node_24.x` only) | unattended-upgrades (`52wbb-unattended-upgrades`) | needrestart restarts the bot |
 | cloudflared (`pkg.cloudflare.com`) | unattended-upgrades (`52wbb-unattended-upgrades`) | needrestart restarts the tunnel |
 | litestream | **nobody** — upgraded by hand (it writes the backup) | — |
@@ -436,11 +436,19 @@ it (the same reason as `/etc/needrestart/conf.d/90-code-server.conf`).
    `sudo pro attach <token>` and `sudo pro enable livepatch`.
 2. `sudo bash deploy/install-host-patching.sh` — refuses, changing nothing, if a
    needrestart rule names `warsaw-beer-bot`, `cloudflared`, `litestream` or
-   `ssh`, or if Cloudflare's key does not have the pinned fingerprint.
+   `ssh`; if the needrestart restart mode is not `a` or a UI is configured (both
+   leave services unrestarted under unattended-upgrades); if needrestart is not
+   installed; or if Cloudflare's key has a different fingerprint or more than one
+   primary key. It restarts the tunnel once: the cloudflared upgrade triggers
+   needrestart. If it fails at `apt-get`, fix the cause and re-run it — the files it
+   wrote are the final ones.
 3. Check the origins: `sudo unattended-upgrade --dry-run -d 2>&1 | grep -E 'Allowed origins|nodejs|cloudflared'`
-   must show the two patterns and treat `nodejs` as upgradable.
+   must show the two patterns and treat `nodejs` as upgradable (or show it already at
+   the newest 24.x).
 4. Reboot once (`sudo systemctl reboot`) so the host runs the newest installed
-   kernel, then `canonical-livepatch status` must show it as supported.
+   kernel, then `canonical-livepatch status` must show it as supported. On this host
+   the reboot already happened on 2026-10-06 (6.8.0-142), so only the
+   `canonical-livepatch status` check remains.
 
 Re-run step 2 after any merge that changes `deploy/install-host-patching.sh`.
 
