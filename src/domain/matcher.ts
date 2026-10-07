@@ -39,7 +39,7 @@ export function createFallbackBudget(limit: number = FULL_FALLBACK_BUDGET): Fall
 }
 
 export const ABV_TOLERANCE = 0.3;
-const TRANSITIVE_SAFE_ALIAS_HUBS = new Set(['nepo']);
+const TRANSITIVE_SAFE_ALIAS_HUBS = new Set(['nepo', 'maryensztadt']);
 
 // A catalog row with its normalizations precomputed once, so a batch of input
 // beers does not re-normalize the whole catalog per beer.

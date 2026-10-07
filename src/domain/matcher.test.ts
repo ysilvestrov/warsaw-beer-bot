@@ -146,6 +146,14 @@ describe('breweryAliases', () => {
   test('curated expansion leaves non-aliased breweries untouched', () => {
     expect(breweryAliases('Pinta')).toEqual(['pinta']);
   });
+
+  test('expands Maryensztadt typo family via transitive safe hub (#775)', () => {
+    expect(breweryAliases('Maryesztadt Brewery').sort()).toEqual(['maryensztadt', 'maryesztadt']);
+    expect(breweryAliases('Maryensztad Brewery').sort()).toEqual(['maryensztad', 'maryensztadt']);
+    expect(breweryAliases('Maryensztadt Brewery').sort()).toEqual(['maryensztad', 'maryensztadt', 'maryesztadt']);
+    expect(breweryAliasesMatch(breweryAliases('Maryesztadt'), breweryAliases('Maryensztadt'))).toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('Maryensztad'), breweryAliases('Maryensztadt'))).toBe(true);
+  });
 });
 
 describe('breweryAliasesMatch — Měšťanský pivovar', () => {
