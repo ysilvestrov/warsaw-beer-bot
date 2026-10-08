@@ -866,6 +866,14 @@ describe('stripBreweryFromName', () => {
   test('passthrough when brewery is empty (keeps #138B brand path intact)', () => {
     expect(stripBreweryFromName('murphy s irish stout', '')).toBe('murphy s irish stout');
   });
+  test('#653 strips leading "the" when remaining tokens >= 2 after brewery stripped', () => {
+    expect(stripBreweryFromName('brooklyn the stonewall inn', 'brooklyn')).toBe('stonewall inn');
+    expect(stripBreweryFromName('the stonewall inn', 'other brewery')).toBe('stonewall inn');
+  });
+  test('#653 preserves leading "the" when remaining tokens < 2 after brewery stripped', () => {
+    expect(stripBreweryFromName('brooklyn the alchemist', 'brooklyn')).toBe('the alchemist');
+    expect(stripBreweryFromName('the alchemist', 'other brewery')).toBe('the alchemist');
+  });
 });
 
 describe('hasCuratedAlias', () => {

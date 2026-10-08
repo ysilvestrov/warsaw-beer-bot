@@ -20,6 +20,7 @@ export function stripBreweryFromName(nameNorm: string, breweryNorm: string): str
   }
   while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
   while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
+  if (nt.length >= 3 && nt[0] === 'the') nt.shift();
   return nt.join(' ');
 }
 

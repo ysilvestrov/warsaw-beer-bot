@@ -175,6 +175,9 @@ export function normalizeName(s: string): string {
   const tokens = baseNormalize(preserveDecimalIdentifiers(stripSearchNoise(s)))
     .split(' ')
     .filter((t) => t && !STYLE_WORDS.has(t) && !SPEC_LABEL_WORDS.has(t) && !isNumericNoise(t));
+  if (tokens.length >= 3 && tokens[0] === 'the') {
+    tokens.shift();
+  }
   return tokens.join(' ');
 }
 
