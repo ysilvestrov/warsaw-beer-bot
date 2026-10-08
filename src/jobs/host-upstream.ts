@@ -36,6 +36,28 @@ function readStored(db: DB): Stored | undefined {
   }
 }
 
+// A stored value is a claim, and a corrupted one must read as "нема даних", never as healthy:
+// each field is checked by real type, not by string coercion (["2028-04-30"] is not a date).
+const DAY = /^\d{4}-\d{2}-\d{2}$/;
+const VER = /^\d+\.\d+\.\d+$/;
+const isRec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
+const isDay = (x: unknown): boolean => typeof x === 'string' && DAY.test(x);
+const isVer = (x: unknown): boolean => typeof x === 'string' && VER.test(x);
+const isInstant = (x: unknown): boolean => typeof x === 'string' && Number.isFinite(parseIsoInstant(x));
+const VALID: Record<SourceKey, (v: unknown) => boolean> = {
+  nodeSecurity: (v) => v === null || (isRec(v) && isVer(v.version) && isDay(v.date)),
+  nodeEnd: isDay,
+  litestream: (v) => isRec(v) && isVer(v.version) && isInstant(v.publishedAt),
+};
+
+/** Epoch ms of a stored entry that is well-formed (finite `at`, not from the future, valid value); else null. */
+function entryAt(key: SourceKey, entry: unknown, now: Date): number | null {
+  if (!isRec(entry) || !isInstant(entry.at)) return null;
+  const at = parseIsoInstant(entry.at as string);
+  if (at > now.getTime() + FUTURE_SKEW_MS || !VALID[key](entry.value)) return null;
+  return at;
+}
+
 export interface HostUpstreamDeps {
   db: DB;
   log: pino.Logger;
@@ -50,8 +72,9 @@ export async function hostUpstream(deps: HostUpstreamDeps): Promise<void> {
   const fetchJson = deps.fetchJson ?? jsonFetcher();
   const next: Stored = { ...(readStored(deps.db) ?? {}) };
   for (const s of SOURCES) {
-    const at = next[s.key] ? parseIsoInstant(next[s.key]!.at) : Number.NaN;
-    if (Number.isFinite(at) && now.getTime() - at < REFRESH_MS) continue;
+    // Skip only an entry the reader would call healthy; anything it would condemn is refetched.
+    const at = entryAt(s.key, next[s.key], now);
+    if (at !== null && now.getTime() - at < REFRESH_MS) continue;
     try {
       next[s.key] = { value: s.parse(await fetchJson(s.url)), at: now.toISOString() };
     } catch (e) {
@@ -61,19 +84,6 @@ export async function hostUpstream(deps: HostUpstreamDeps): Promise<void> {
   setJobState(deps.db, HOST_UPSTREAM_KEY, JSON.stringify(next));
 }
 
-// Each source is validated again on read by its own parser's output shape: a stored value is a
-// claim, and a corrupted one must read as "нема даних", never as healthy.
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
-const VER = /^\d+\.\d+\.\d+$/;
-const VALID: Record<SourceKey, (v: unknown) => boolean> = {
-  nodeSecurity: (v) => v === null || (typeof v === 'object' && v !== null
-    && VER.test(String((v as Record<string, unknown>).version)) && DAY.test(String((v as Record<string, unknown>).date))),
-  nodeEnd: (v) => typeof v === 'string' && DAY.test(v),
-  litestream: (v) => typeof v === 'object' && v !== null
-    && VER.test(String((v as Record<string, unknown>).version))
-    && Number.isFinite(parseIsoInstant(String((v as Record<string, unknown>).publishedAt))),
-};
-
 export function readHostUpstream(db: DB, now: Date): HostUpstream {
   const stored = readStored(db);
   const one = <K extends SourceKey>(key: K): HostUpstream[K] => {
@@ -81,8 +91,8 @@ export function readHostUpstream(db: DB, now: Date): HostUpstream {
     if (stored === undefined) return { ok: false, reason: `${what}: збережений стан пошкоджено` } as HostUpstream[K];
     const entry = stored[key];
     if (entry === undefined) return { ok: false, reason: `${what} ще не завантажено` } as HostUpstream[K];
-    const at = typeof entry === 'object' && entry !== null ? parseIsoInstant(String(entry.at)) : Number.NaN;
-    if (!Number.isFinite(at) || at > now.getTime() + FUTURE_SKEW_MS || !VALID[key](entry.value)) {
+    const at = entryAt(key, entry, now);
+    if (at === null) {
       return { ok: false, reason: `${what}: збережений стан пошкоджено` } as HostUpstream[K];
     }
     if (now.getTime() - at > STALE_MS) return { ok: false, reason: `${what} ${stale} (понад 48 год)` } as HostUpstream[K];
