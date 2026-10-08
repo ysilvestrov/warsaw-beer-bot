@@ -17,7 +17,7 @@ const summary = {
   reboot_required: { since: 1_790_500_000, packages: ['linux-image-6.8.0-145-generic', 'libc6'] },
   livepatch: { state: 'nothing-to-apply', upgrade_required_date: '2027-10-02' },
   stale_services: [{ unit: 'litestream.service', since: 1_791_000_000 }],
-  unattended: { last_run: 1_791_439_429, security_pending: 2 },
+  unattended: { last_run: 1_791_400_000, security_pending: 2 },
   packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
 };
 
@@ -44,7 +44,7 @@ describe('readHostPatch', () => {
         rebootRequired: { since: 1_790_500_000, packages: ['linux-image-6.8.0-145-generic', 'libc6'] },
         livepatch: { state: 'nothing-to-apply', upgradeRequiredDate: '2027-10-02' },
         staleServices: [{ unit: 'litestream.service', since: 1_791_000_000 }],
-        unattended: { lastRun: 1_791_439_429, securityPending: 2 },
+        unattended: { lastRun: 1_791_400_000, securityPending: 2 },
         packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
       },
     });
@@ -76,6 +76,26 @@ describe('readHostPatch', () => {
     expect(readHostPatch(now, path, owner()).kind).toBe('ok');
     write({ ...summary, timestamp: 1_791_440_000 - 10_801 });
     expect(readHostPatch(now, path, owner())).toEqual({ kind: 'stale' });
+  });
+
+  // An event newer than the summary itself would read as a negative age — i.e. healthy.
+  it.each([
+    ['reboot since', { reboot_required: { since: 1_791_439_001, packages: [] } }],
+    ['stale since', { stale_services: [{ unit: 'ssh.service', since: 1_791_439_001 }] }],
+    ['last run', { unattended: { last_run: 1_791_439_001, security_pending: 2 } }],
+  ])('refuses a %s later than the summary timestamp', (_what, patch) => {
+    write({ ...summary, ...patch });
+    expect(readHostPatch(now, path, owner())).toEqual({ kind: 'unavailable' });
+  });
+
+  it('accepts events stamped exactly at the summary timestamp', () => {
+    write({
+      ...summary,
+      reboot_required: { since: 1_791_439_000, packages: [] },
+      stale_services: [{ unit: 'ssh.service', since: 1_791_439_000 }],
+      unattended: { last_run: 1_791_439_000, security_pending: 2 },
+    });
+    expect(readHostPatch(now, path, owner()).kind).toBe('ok');
   });
 
   it('refuses a summary from the future', () => {

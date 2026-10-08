@@ -176,12 +176,14 @@ line.
 |---|---|---|
 | reboot pending (`now − reboot_required.since`) | > 3 days | > 14 days |
 | Livepatch `state` ∉ {`applied`, `nothing-to-apply`} | always | — |
-| Livepatch `upgrade_required_date` (kernel leaves Livepatch support; the date's own day counts as past) | < 30 days | past |
+| Livepatch `upgrade_required_date` (kernel leaves Livepatch support; the date's own day counts as past; a missing date is `нема даних`) | < 30 days | past |
 | a **watched** unit in `stale_services` (needrestart did not restart it) | `now − since` > 1 day | — |
 | newest Node 24.x security release > installed `nodejs` | — | release `date` > 3 days ago |
 | `security_pending > 0` | unattended-upgrades last run > 2 days ago | — |
 | Node 24 `end` | < 180 days | < 30 days |
 | Ubuntu 24.04 end of standard support | < 180 days | < 30 days |
+
+Date rules count **UTC calendar days** from today (the date itself is day 0), so a threshold never flips at 00:00:01. Ubuntu's end date is still a supported day (`лишилось 0 днів`); Livepatch's is not. Event times (`since`, `last_run`) later than the summary's own `timestamp` make the summary unreadable: a negative age would otherwise read as healthy.
 | litestream `latest` > installed | `published_at` > 30 days ago | — |
 | summary missing / unreadable / > 3 h old | `нема даних` | — |
 

@@ -34,6 +34,9 @@ export function readHostPatch(now: Date, path = HOST_PATCH_PATH, trustedUid = RO
   const parsed = summarySchema.safeParse(readHardenedJson(path, () => trustedUid, MAX_BYTES));
   if (!parsed.success) return { kind: 'unavailable' };
   const s = parsed.data;
+  // An event newer than the summary itself would read as a negative age, i.e. healthy.
+  const events = [s.reboot_required?.since, s.unattended.last_run, ...(s.stale_services ?? []).map((x) => x.since)];
+  if (events.some((at) => typeof at === 'number' && at > s.timestamp)) return { kind: 'unavailable' };
   const age = now.getTime() / 1000 - s.timestamp;
   if (!Number.isFinite(age) || age < 0) return { kind: 'unavailable' };
   if (age > STALE_SECONDS) return { kind: 'stale' };

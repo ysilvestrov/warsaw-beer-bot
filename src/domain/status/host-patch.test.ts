@@ -64,17 +64,27 @@ describe('hostPatchFindings', () => {
       expect(lp({ state: 'applied', upgradeRequiredDate: '2027-10-02' })).toEqual([]);
     });
     it.each(['unknown', 'unsupported-kernel'] as const)('%s is yellow', (state) => {
-      expect(lp({ state, upgradeRequiredDate: null })).toEqual([{ colour: 'yellow', reason: `Livepatch: ${state}` }]);
+      expect(lp({ state, upgradeRequiredDate: '2027-10-02' })).toEqual([{ colour: 'yellow', reason: `Livepatch: ${state}` }]);
     });
     it('unreadable is "нема даних"', () => {
       expect(lp(null)).toEqual([{ colour: 'yellow', reason: 'нема даних: стан Livepatch' }]);
     });
-    it('a support end 30 days away is silent', () => {
-      expect(lp({ state: 'applied', upgradeRequiredDate: '2026-11-06' })).toEqual([]);
+    // Calendar days in UTC: from 2026-10-06 (any hour), 2026-11-05 is 30 days away.
+    it('a support end 30 calendar days away is silent', () => {
+      expect(lp({ state: 'applied', upgradeRequiredDate: '2026-11-05' })).toEqual([]);
     });
-    it('a support end 29 days away is yellow', () => {
-      expect(lp({ state: 'applied', upgradeRequiredDate: '2026-11-05' })).toEqual([
-        { colour: 'yellow', reason: 'Livepatch покриває ядро лише до 2026-11-05' }]);
+    it('a support end 29 calendar days away is yellow', () => {
+      expect(lp({ state: 'applied', upgradeRequiredDate: '2026-11-04' })).toEqual([
+        { colour: 'yellow', reason: 'Livepatch покриває ядро лише до 2026-11-04' }]);
+    });
+    it('the same date reads the same at 00:00:00 and 23:59:59', () => {
+      const at = (iso: string) => hostPatchFindings(
+        ok({ livepatch: { state: 'applied', upgradeRequiredDate: '2026-11-05' } }), new Date(iso));
+      expect([at('2026-10-06T00:00:00Z'), at('2026-10-06T00:00:01Z'), at('2026-10-06T23:59:59Z')]).toEqual([[], [], []]);
+    });
+    it('a missing support-end date is "нема даних", never healthy', () => {
+      expect(lp({ state: 'applied', upgradeRequiredDate: null })).toEqual([
+        { colour: 'yellow', reason: 'нема даних: дата підтримки ядра в Livepatch' }]);
     });
     it('a support end of today is red', () => {
       expect(lp({ state: 'applied', upgradeRequiredDate: '2026-10-06' })).toEqual([
@@ -149,7 +159,7 @@ describe('hostPatchFindings', () => {
   });
 
   describe('Ubuntu 24.04 end of standard support (2029-05-31)', () => {
-    const quiet = ok({ livepatch: { state: 'applied', upgradeRequiredDate: null }, staleServices: [] });
+    const quiet = ok({ livepatch: { state: 'applied', upgradeRequiredDate: '2031-01-01' }, staleServices: [] });
 
     it('180 days before is silent', () => {
       expect(hostPatchFindings(quiet, at('2028-12-02T00:00:00Z'))).toEqual([]);
@@ -161,6 +171,10 @@ describe('hostPatchFindings', () => {
     it('30 days before is yellow', () => {
       expect(hostPatchFindings(quiet, at('2029-05-01T00:00:00Z'))).toEqual([
         { colour: 'yellow', reason: 'Ubuntu 24.04: стандартна підтримка до 2029-05-31 — лишилось 30 днів' }]);
+    });
+    it('on the end date itself support has not ended yet', () => {
+      expect(hostPatchFindings(quiet, at('2029-05-31T23:59:59Z'))).toEqual([
+        { colour: 'red', reason: 'Ubuntu 24.04: стандартна підтримка до 2029-05-31 — лишилось 0 днів' }]);
     });
     it('29 days before is red', () => {
       expect(hostPatchFindings(quiet, at('2029-05-02T00:00:00Z'))).toEqual([
