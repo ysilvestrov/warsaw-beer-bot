@@ -35,5 +35,7 @@ export const STATUS_RULES = {
   eolRedDays: 30,
   // No machine-readable source is worth a fetch for a date that does not move.
   ubuntuStandardSupportEnd: '2029-05-31',
+  nodeSecurityRedDays: 3,          // a security release unattended-upgrades has not installed in 3 days
+  litestreamYellowDays: 30,        // litestream is upgraded by hand (it writes the backup)
   snapshotRetentionDays: 90,
 } as const;
