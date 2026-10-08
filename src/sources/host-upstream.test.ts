@@ -25,6 +25,9 @@ describe('parseNodeSecurity', () => {
     ['no 24.x release at all', [{ version: 'v26.11.1', date: '2026-10-01', security: true }]],
     ['a malformed security version', [{ version: 'v24.18', date: '2026-07-28', security: true }]],
     ['a malformed date', [{ version: 'v24.18.1', date: '28.07.2026', security: true }]],
+    // A missing or non-boolean flag is "unknown", never "no security release" (cross-review).
+    ['a missing security flag', [{ version: 'v24.22.0', date: '2026-10-01' }]],
+    ['a non-boolean security flag', [{ version: 'v24.22.0', date: '2026-10-01', security: 'true' }]],
   ])('throws on %s', (_what, json) => {
     expect(() => parseNodeSecurity(json)).toThrow();
   });

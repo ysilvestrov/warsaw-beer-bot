@@ -21,6 +21,9 @@ export function parseNodeSecurity(json: unknown): { version: string; date: strin
     && r.version.startsWith(`v${NODE_MAJOR}.`));
   if (line.length === 0) throw new Error(`node index: no v${NODE_MAJOR}.x release`);
   let best: { version: string; date: string } | null = null;
+  // "No security release" is a claim about every release in the line: an absent or non-boolean
+  // flag makes it unknowable, and unknown must never read as healthy.
+  if (line.some((r) => typeof r.security !== 'boolean')) throw new Error('node index: release without a boolean security flag');
   for (const r of line.filter((x) => x.security === true)) {
     const version = TAG.exec(String(r.version))?.[1];
     if (version === undefined || typeof r.date !== 'string' || !DAY.test(r.date)) {
