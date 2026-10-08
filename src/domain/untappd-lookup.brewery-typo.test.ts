@@ -1,3 +1,4 @@
+import assert from 'node:assert';
 import { lookupBeer } from './untappd-lookup';
 import type { BeerSearch, SearchResult } from '../sources/untappd/search';
 
@@ -30,14 +31,16 @@ describe('#407 confirmation-only brewery typo rescue', () => {
     expect(out.result.bid).toBe(10);
   });
 
-  test('rejects a sole exact candidate when known ABVs contradict, including candidate ABV zero', async () => {
+  test('rescues a sole exact candidate when candidate ABV is zero (unknown Untappd ABV)', async () => {
     const search = fakeSearch(() => [
       { bid: 4656416, beer_name: 'Wileńskie Niefiltrowane', brewery_name: 'Vilniaus Alus', style: 'Lager', abv: 0, global_rating: 3.1 },
     ]);
 
     const out = await lookupBeer({ brewery: 'VILINIAUS ALUS', name: 'Wileńskie Niefiltrowane', abv: 5.2, search });
 
-    expect(out.kind).toBe('not_found');
+    expect(out.kind).toBe('matched');
+    assert(out.kind === 'matched');
+    expect(out.result.bid).toBe(4656416);
   });
 
   test('rescues the live generic Hell row only with compatible ABV evidence', async () => {

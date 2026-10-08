@@ -3521,4 +3521,86 @@ describe('#664 numbered-series retry', () => {
       expect(out.kind).toBe('not_found');
     });
   });
+
+  describe('#484 alcohol-class gate & candidate ABV 0', () => {
+    test('alcohol-class gate: candidate with abv null but non-alcoholic style is rejected on descriptor retry', async () => {
+      const search: BeerSearch = {
+        search: async (query: string) => {
+          if (/lager/i.test(query)) return [];
+          return [{
+            bid: 998,
+            beer_name: 'Heineken',
+            brewery_name: 'Heineken',
+            style: 'Non-Alcoholic - Lager',
+            abv: null,
+            global_rating: 2.5,
+          }];
+        },
+      };
+
+      const out = await lookupBeer({ brewery: 'Heineken', name: 'Heineken Lager', abv: 5.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('alcohol-class gate: candidate with known positive ABV <= 0.7 is rejected for alcoholic input', async () => {
+      const search: BeerSearch = {
+        search: async (query: string) => {
+          if (/lager/i.test(query)) return [];
+          return [{
+            bid: 997,
+            beer_name: 'Heineken',
+            brewery_name: 'Heineken',
+            style: 'Lager',
+            abv: 0.5,
+            global_rating: 2.5,
+          }];
+        },
+      };
+
+      const out = await lookupBeer({ brewery: 'Heineken', name: 'Heineken Lager', abv: 5.0, search });
+      expect(out.kind).toBe('not_found');
+    });
+
+    test('alcohol-class gate: candidate with unknown ABV (null) and regular style is not treated as non-alcoholic', async () => {
+      const search: BeerSearch = {
+        search: async (query: string) => {
+          if (/lager/i.test(query)) return [];
+          return [{
+            bid: 12345,
+            beer_name: 'Zero Gravity Conehead',
+            brewery_name: 'Zero Gravity',
+            style: 'IPA - American',
+            abv: null,
+            global_rating: 3.8,
+          }];
+        },
+      };
+
+      const out = await lookupBeer({ brewery: 'Zero Gravity', name: 'Conehead Lager', abv: 6.5, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(12345);
+    });
+
+    test('alcohol-class gate: candidate with known alcoholic ABV is not treated as non-alcoholic', async () => {
+      const search: BeerSearch = {
+        search: async (query: string) => {
+          if (/lager/i.test(query)) return [];
+          return [{
+            bid: 12345,
+            beer_name: 'Zero Gravity Conehead',
+            brewery_name: 'Zero Gravity',
+            style: 'IPA - American',
+            abv: 6.5,
+            global_rating: 3.8,
+          }];
+        },
+      };
+
+      const out = await lookupBeer({ brewery: 'Zero Gravity', name: 'Conehead Lager', abv: 6.5, search });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(12345);
+    });
+  });
 });

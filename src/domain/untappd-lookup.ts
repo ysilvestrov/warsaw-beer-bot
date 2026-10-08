@@ -103,16 +103,24 @@ function numberedSeriesHead(name: string, brewery: string): string | null {
 const NON_ALCOHOLIC_REGEX = /\b(?:bezalkoholow\w*|non[- ]?alcoholic|alkofrei|alkoholfrei|nealko|0[,.]0%?|zero)\b/i;
 
 function isAlcoholClassMismatch(inputAbv: number | null | undefined, rawName: string, cand: SearchResult): boolean {
-  const isInputNonAlco = (inputAbv != null && inputAbv <= 0.7) || NON_ALCOHOLIC_REGEX.test(rawName);
-  const isCandNonAlco = (cand.abv != null && cand.abv <= 0.7) || (cand.style != null && NON_ALCOHOLIC_REGEX.test(cand.style));
+  const isInputNonAlco = (inputAbv != null && Number.isFinite(inputAbv) && inputAbv <= 0.7) || NON_ALCOHOLIC_REGEX.test(rawName);
+  const isCandNonAlco =
+    (cand.abv != null && Number.isFinite(cand.abv) && cand.abv > 0 && cand.abv <= 0.7) ||
+    (cand.style != null && NON_ALCOHOLIC_REGEX.test(cand.style));
 
-  if (isInputNonAlco && cand.abv != null && cand.abv >= 2.0) return true;
-  if (!isInputNonAlco && inputAbv != null && inputAbv >= 2.0 && isCandNonAlco) return true;
+  if (isInputNonAlco && cand.abv != null && Number.isFinite(cand.abv) && cand.abv >= 2.0) return true;
+  if (!isInputNonAlco && inputAbv != null && Number.isFinite(inputAbv) && inputAbv >= 2.0 && isCandNonAlco) return true;
   return false;
 }
 
 function isDescriptorAbvMismatch(inputAbv: number | null | undefined, candAbv: number | null | undefined): boolean {
-  if (inputAbv == null || candAbv == null) return false;
+  if (
+    inputAbv == null ||
+    candAbv == null ||
+    !Number.isFinite(inputAbv) ||
+    !Number.isFinite(candAbv) ||
+    candAbv <= 0
+  ) return false;
   return Math.abs(inputAbv - candAbv) > ABV_TOLERANCE;
 }
 
@@ -150,7 +158,7 @@ const candIdentValue = (c: SearchResult): string => candIdent(c).value;
 // only for Stage 2a / relaxedExact, where all candidates are equally ranked.
 function pickByAbv(results: SearchResult[], abv: number | null): SearchResult {
   if (abv != null) {
-    const hit = results.find((r) => r.abv != null && Math.abs(r.abv - abv) <= ABV_TOLERANCE);
+    const hit = results.find((r) => r.abv != null && r.abv > 0 && Math.abs(r.abv - abv) <= ABV_TOLERANCE);
     if (hit) return hit;
   }
   return results[0];
@@ -170,13 +178,14 @@ function pickUniqueByAbv(
       rejectAbvContradiction &&
       abv != null &&
       only.abv != null &&
+      only.abv > 0 &&
       Math.abs(only.abv - abv) > ABV_TOLERANCE
     ) return null;
     return only;
   }
   if (abv == null) return null;
   const abvHits = unique.filter(
-    (result) => result.abv != null && Math.abs(result.abv - abv) <= ABV_TOLERANCE,
+    (result) => result.abv != null && result.abv > 0 && Math.abs(result.abv - abv) <= ABV_TOLERANCE,
   );
   return abvHits.length === 1 ? abvHits[0] : null;
 }
@@ -879,7 +888,7 @@ export async function lookupBeer(
       if (
         abv != null &&
         exactCandidates.some((result) =>
-          result.abv != null && Math.abs(result.abv - abv) > ABV_TOLERANCE,
+          result.abv != null && result.abv > 0 && Math.abs(result.abv - abv) > ABV_TOLERANCE,
         )
       ) return null;
 
@@ -887,7 +896,7 @@ export async function lookupBeer(
       if (
         nameTokens.length === 1 &&
         GENERIC_TYPO_RESCUE_NAMES.has(nameTokens[0]) &&
-        (abv == null || exactCandidates.some((result) => result.abv == null))
+        (abv == null || exactCandidates.some((result) => result.abv == null || result.abv <= 0))
       ) return null;
 
       return { kind: 'matched', result: candidate };
