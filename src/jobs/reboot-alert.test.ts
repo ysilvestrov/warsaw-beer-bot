@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb, type DB } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { getJobState, setJobState } from '../storage/job_state';
-import { REBOOT_ALERT_KEY, rebootAlert, snoozeRebootAlertNow } from './reboot-alert';
+import { REBOOT_ALERT_KEY, createRebootAlertTick, rebootAlert, snoozeRebootAlertNow } from './reboot-alert';
 
 /** #469 stage 3. The summary is written to a temp dir; no test reads the real host path. */
 const log = pino({ level: 'silent' });
@@ -117,5 +117,47 @@ describe('rebootAlert', () => {
     const sent: string[] = [];
     await run(sent);
     expect(sent.length).toBe(1);
+  });
+});
+
+describe('rebootAlert — the keyboard’s since', () => {
+  it('hands send the since of the alerted reboot', async () => {
+    summary({ since: SINCE, packages: ['libc6'] });
+    const got: number[] = [];
+    await rebootAlert({ db, log, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(),
+      send: async (_text, since) => { got.push(since); } });
+    expect(got).toEqual([SINCE]);
+  });
+});
+
+describe('createRebootAlertTick', () => {
+  it('a tick while the previous run is still sending starts no second run', async () => {
+    summary({ since: SINCE, packages: ['libc6'] });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let sends = 0;
+    const tick = createRebootAlertTick({ db, log, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(),
+      send: async () => { sends += 1; await gate; } });
+    tick();
+    tick();
+    release();
+    await new Promise((r) => setImmediate(r));
+    expect(sends).toBe(1);
+  });
+
+  it('a failed run is logged, not thrown, and frees the guard for the next tick', async () => {
+    summary({ since: SINCE, packages: ['libc6'] });
+    const errors: string[] = [];
+    const errLog = { ...log, error: (_o: unknown, msg: string) => { errors.push(msg); } } as unknown as typeof log;
+    let calls = 0;
+    const tick = createRebootAlertTick({ db, log: errLog, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(),
+      send: async () => { calls += 1; if (calls === 1) throw new Error('telegram down'); } });
+    tick();
+    await new Promise((r) => setImmediate(r));
+    tick();
+    await new Promise((r) => setImmediate(r));
+    expect([errors, calls, getJobState(db, REBOOT_ALERT_KEY)]).toEqual([
+      ['reboot-alert cron'], 2, JSON.stringify({ since: SINCE, snoozeUntil: null }),
+    ]);
   });
 });
