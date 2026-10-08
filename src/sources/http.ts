@@ -19,8 +19,12 @@ export class HttpError extends Error {
   }
 }
 
+export interface HttpGetOpts {
+  onRedirect?: (fromUrl: string, toUrl: string) => void;
+}
+
 export interface Http {
-  get(url: string): Promise<string>;
+  get(url: string, opts?: HttpGetOpts): Promise<string>;
   /** Cumulative proxy rotations; 0 for non-proxied clients. */
   rotations?(): number;
 }
@@ -35,7 +39,10 @@ export interface HttpOpts {
   isBlock?: (status: number, body: string | null) => boolean;
   /** Max rotate+retry attempts on a block before surfacing to the breaker. Default 1. */
   maxBlockRetries?: number;
+  onRedirect?: (fromUrl: string, toUrl: string) => void;
 }
+
+export const MAX_REDIRECTS = 3;
 
 export function createHttp(opts: HttpOpts): Http {
   const queue = new PQueue({ concurrency: 1 });
@@ -46,7 +53,8 @@ export function createHttp(opts: HttpOpts): Http {
 
   type Outcome =
     | { kind: 'ok'; body: string }
-    | { kind: 'block'; reason: string; status: number };
+    | { kind: 'block'; reason: string; status: number }
+    | { kind: 'redirect'; nextUrl: string; status: number };
 
   async function doFetch(url: string): Promise<FetchResponseLike> {
     const headers: Record<string, string> = { 'User-Agent': opts.userAgent };
@@ -61,10 +69,23 @@ export function createHttp(opts: HttpOpts): Http {
   }
 
   async function classify(url: string, res: FetchResponseLike): Promise<Outcome> {
-    // With redirect:'manual', any 3xx means the session cookie is invalid — an
-    // auth problem, never an IP block (so it must not trigger rotation).
+    // Under redirect:'manual', inspect the Location header. Untappd redirects to /login
+    // when session cookie expires. Other 3xx targets (e.g. venue slug changes) are safe redirects.
     if (res.status >= 300 && res.status < 400) {
-      if (opts.redirect === 'manual') throw new CookieExpiredError();
+      if (opts.redirect === 'manual') {
+        const location = res.headers?.get('location');
+        if (!location) throw new HttpError(res.status, url);
+        let target: URL;
+        try {
+          target = new URL(location, url);
+        } catch {
+          throw new HttpError(res.status, url);
+        }
+        if (target.pathname === '/login' || target.pathname.startsWith('/login/')) {
+          throw new CookieExpiredError();
+        }
+        return { kind: 'redirect', nextUrl: target.href, status: res.status };
+      }
       throw new HttpError(res.status, url);
     }
     if (!res.ok) {
@@ -82,31 +103,48 @@ export function createHttp(opts: HttpOpts): Http {
 
   return {
     rotations: () => opts.rotator?.rotations() ?? 0,
-    async get(url: string): Promise<string> {
+    async get(url: string, getOpts?: HttpGetOpts): Promise<string> {
       return queue.add(async () => {
         const wait = Math.max(0, lastAt + gap - Date.now());
         if (wait > 0) await new Promise((r) => setTimeout(r, wait));
 
-        let outcome = await classify(url, await doFetch(url));
-        // Rotate to a fresh exit IP and retry, up to maxBlockRetries (default 1).
-        // Untappd HTML pages sit behind a Cloudflare Managed Challenge that ~1/3 of
-        // residential exit IPs pass, so retrying through fresh IPs beats the lottery.
-        // safe: classify() only returns 'block' when opts.rotator is truthy. Retries
-        // use a fresh IP each time, so no extra throttle gap is applied.
-        const budget = opts.maxBlockRetries ?? 1;
-        let retries = 0;
-        while (outcome.kind === 'block') {
-          if (retries >= budget) {
-            // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
-            // systemic block — including a 200 Cloudflare challenge page — reaches
-            // the circuit breaker. outcome.status may be 200 for a block page.
-            throw new HttpError(outcome.status === 429 ? 429 : 403, url);
+        let currentUrl = url;
+        let hops = 0;
+
+        while (true) {
+          let outcome = await classify(currentUrl, await doFetch(currentUrl));
+          // Rotate to a fresh exit IP and retry, up to maxBlockRetries (default 1).
+          // Untappd HTML pages sit behind a Cloudflare Managed Challenge that ~1/3 of
+          // residential exit IPs pass, so retrying through fresh IPs beats the lottery.
+          // safe: classify() only returns 'block' when opts.rotator is truthy. Retries
+          // use a fresh IP each time, so no extra throttle gap is applied.
+          const budget = opts.maxBlockRetries ?? 1;
+          let retries = 0;
+          while (outcome.kind === 'block') {
+            if (retries >= budget) {
+              // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
+              // systemic block — including a 200 Cloudflare challenge page — reaches
+              // the circuit breaker. outcome.status may be 200 for a block page.
+              throw new HttpError(outcome.status === 429 ? 429 : 403, currentUrl);
+            }
+            opts.rotator!.rotate(outcome.reason);
+            retries++;
+            outcome = await classify(currentUrl, await doFetch(currentUrl));
           }
-          opts.rotator!.rotate(outcome.reason);
-          retries++;
-          outcome = await classify(url, await doFetch(url));
+
+          if (outcome.kind === 'redirect') {
+            if (hops >= MAX_REDIRECTS) {
+              throw new HttpError(outcome.status, currentUrl);
+            }
+            opts.onRedirect?.(currentUrl, outcome.nextUrl);
+            getOpts?.onRedirect?.(currentUrl, outcome.nextUrl);
+            currentUrl = outcome.nextUrl;
+            hops++;
+            continue;
+          }
+
+          return outcome.body;
         }
-        return outcome.body;
       }) as Promise<string>;
     },
   };

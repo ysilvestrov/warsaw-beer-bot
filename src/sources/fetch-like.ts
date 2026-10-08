@@ -14,6 +14,9 @@ import type { Dispatcher } from 'undici';
 export interface FetchResponseLike {
   readonly ok: boolean;
   readonly status: number;
+  readonly headers?: {
+    get(name: string): string | null;
+  };
   text(): Promise<string>;
   json(): Promise<unknown>;
 }
