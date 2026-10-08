@@ -869,10 +869,26 @@ describe('stripBreweryFromName', () => {
   test('#653 strips leading "the" when remaining tokens >= 2 after brewery stripped', () => {
     expect(stripBreweryFromName('brooklyn the stonewall inn', 'brooklyn')).toBe('stonewall inn');
     expect(stripBreweryFromName('the stonewall inn', 'other brewery')).toBe('stonewall inn');
+    expect(stripBreweryFromName('the stonewall inn', '')).toBe('stonewall inn');
+    expect(stripBreweryFromName('the good cider pear', '')).toBe('good cider pear');
+    expect(stripBreweryFromName('the real hr frederiksen', '')).toBe('real hr frederiksen');
   });
   test('#653 preserves leading "the" when remaining tokens < 2 after brewery stripped', () => {
     expect(stripBreweryFromName('brooklyn the alchemist', 'brooklyn')).toBe('the alchemist');
     expect(stripBreweryFromName('the alchemist', 'other brewery')).toBe('the alchemist');
+    expect(stripBreweryFromName('the alchemist', '')).toBe('the alchemist');
+    expect(stripBreweryFromName('the end', '')).toBe('the end');
+    expect(stripBreweryFromName('the abyss', '')).toBe('the abyss');
+  });
+  test('#653 preserves "the" in the middle of phrases', () => {
+    expect(stripBreweryFromName('eye of the tiger', '')).toBe('eye of the tiger');
+    expect(stripBreweryFromName('pinta eye of the tiger', 'pinta')).toBe('eye of the tiger');
+    expect(stripBreweryFromName('son of the son', '')).toBe('son of the son');
+  });
+  test('#653 correctly strips breweries starting with "The" without corruption', () => {
+    expect(stripBreweryFromName('the bruery barrel pie', 'the bruery')).toBe('barrel pie');
+    expect(stripBreweryFromName('the bruery the barrel pie', 'the bruery')).toBe('barrel pie');
+    expect(stripBreweryFromName('the bruery the wanderer', 'the bruery')).toBe('the wanderer');
   });
 });
 
