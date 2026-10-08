@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import pino from 'pino';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb, type DB } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { getJobState, setJobState } from '../storage/job_state';
@@ -149,14 +149,15 @@ describe('createRebootAlertTick', () => {
     summary({ since: SINCE, packages: ['libc6'] });
     const errors: string[] = [];
     const errLog = { ...log, error: (_o: unknown, msg: string) => { errors.push(msg); } } as unknown as typeof log;
-    let calls = 0;
-    const tick = createRebootAlertTick({ db, log: errLog, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(),
-      send: async () => { calls += 1; if (calls === 1) throw new Error('telegram down'); } });
+    const send = vi.fn<(text: string, since: number) => Promise<void>>()
+      .mockRejectedValueOnce(new Error('telegram down'))
+      .mockResolvedValueOnce(undefined);
+    const tick = createRebootAlertTick({ db, log: errLog, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(), send });
     tick();
     await new Promise((r) => setImmediate(r));
     tick();
     await new Promise((r) => setImmediate(r));
-    expect([errors, calls, getJobState(db, REBOOT_ALERT_KEY)]).toEqual([
+    expect([errors, send.mock.calls.length, getJobState(db, REBOOT_ALERT_KEY)]).toEqual([
       ['reboot-alert cron'], 2, JSON.stringify({ since: SINCE, snoozeUntil: null }),
     ]);
   });
