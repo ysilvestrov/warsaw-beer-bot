@@ -80,6 +80,16 @@ describe('hostPatchFindings', () => {
       expect(lp({ state: 'applied', upgradeRequiredDate: '2026-10-06' })).toEqual([
         { colour: 'red', reason: 'Livepatch більше не покриває ядро (з 2026-10-06)' }]);
     });
+    it('a support end is red from the first second of its day', () => {
+      expect(hostPatchFindings(ok({ livepatch: { state: 'applied', upgradeRequiredDate: '2026-10-06' } }),
+        new Date('2026-10-06T00:00:00Z'))).toEqual([
+        { colour: 'red', reason: 'Livepatch більше не покриває ядро (з 2026-10-06)' }]);
+    });
+    it('the last second before that day is still yellow', () => {
+      expect(hostPatchFindings(ok({ livepatch: { state: 'applied', upgradeRequiredDate: '2026-10-06' } }),
+        new Date('2026-10-05T23:59:59Z'))).toEqual([
+        { colour: 'yellow', reason: 'Livepatch покриває ядро лише до 2026-10-06' }]);
+    });
     it('a non-date string is "нема даних"', () => {
       expect(lp({ state: 'applied', upgradeRequiredDate: '02.10.2027' })).toEqual([
         { colour: 'yellow', reason: 'нема даних: дата підтримки ядра в Livepatch' }]);
