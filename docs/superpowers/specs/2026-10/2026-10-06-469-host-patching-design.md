@@ -230,7 +230,17 @@ acts on it:
     loaded" (exit 1, probed C22), which the handler reports as "already scheduled", not as a failure.
 - The bot writes the request atomically (temp file in the same directory + rename); `PathChanged=`
   fires on that rename as on a direct write, and re-arms after each request (probed C21).
-- A compromised bot can, at worst, reboot the host. It gains no root command.
+- **Root acts only while a reboot is pending**: the handler refuses (after deleting the request)
+  when `/run/reboot-required` is absent. That file is root-owned and lives on tmpfs, so a reboot
+  clears it. Without this, a callback Telegram re-delivers after the bot was killed by the reboot
+  (long polling confirms the offset only on the next poll), or a compromised bot, could reboot the
+  host again and again — the summary in `/var/tmp` survives the reboot and still shows the old
+  `since` until the collector's first run.
+- A compromised bot can, at worst, reboot the host **while a reboot is pending**. It gains no root
+  command.
+- Buttons carry the `since` they were issued for. «Зараз»/«О 04:00» write a request only when it
+  matches the current summary's `since`; «Нагадати через 3 дні» snoozes only that reboot. An old
+  message's buttons therefore do nothing (the reply says so).
 
 `systemctl reboot` stops units in order: the bot's SIGTERM handler (`src/shutdown.ts`)
 and litestream's flush run as on any `systemctl stop`.
@@ -254,6 +264,7 @@ and litestream's flush run as on any `systemctl stop`.
 | C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | probed 2026-10-06 on systemd 255: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` → next elapse `02:00:00 UTC` (CEST) | strong (probe) |
 | C21 | a bot-written request reaches the root handler | probed 2026-10-08 (transient path unit): `warsaw-beer-bot` wrote into its own `0700` dir; `PathChanged=` fired on a direct write, on temp+rename, and again on a second request right after the first; the root service read and deleted the file each time | strong (probe) |
 | C22 | a second «О 04:00» press does not schedule a second reboot | probed: `systemd-run --unit=<fixed> --on-calendar=…` twice → the second exits 1, "Unit … already loaded"; the first stays (next elapse 02:00 UTC = 04:00 CEST) | strong (probe) |
+| C24 | a request is acted on only while a reboot is pending | root checks `/run/reboot-required` (root-owned, tmpfs: cleared by every boot); the bot cannot create it | strong (root-owned file; own logic tested) |
 | C23 | one pending reboot produces one alert | own logic: `job_state` keyed by `reboot_required.since`, which is carried forward and reset only at boot (C19) | strong for the logic; it inherits C19 |
 | C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | services: strong (re-checked by the stage-1 reboot 2026-10-06 — all came back). **Not** `wbb-autodeploy.timer`: enabled but never fired after a slow boot (#798, Persistent stamp + passed `OnBootSec`; fixed by #799) — "enabled" did not prove "will run" |
 | C15 | the collector can read Livepatch state | snap CLIs fail inside code-server's cgroup (`is not a snap cgroup`); the same command under `systemd-run --wait --pipe` returned the P1 JSON | strong (probe) → the collector is its own unit |
