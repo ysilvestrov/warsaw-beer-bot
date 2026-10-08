@@ -98,7 +98,8 @@ export function createHttp(opts: HttpOpts): Http {
         }
         // Consume 3xx redirect body to release connection socket before following
         await res.text().catch(() => {});
-        return { kind: 'redirect', nextUrl: target.href, status: res.status };
+        const nextUrl = target.href;
+        return { kind: 'redirect', nextUrl, status: res.status };
       }
       await res.text().catch(() => {});
       throw new HttpError(res.status, url);
