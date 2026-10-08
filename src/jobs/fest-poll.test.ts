@@ -49,7 +49,7 @@ describe('runFestPoll', () => {
   it('reads page 1 of the festival /activity feed and ingests it as the server eye', async () => {
     const { db, deps, urls } = setup([FEED]);
     const r = await runFestPoll(deps, IN_SESSION);
-    expect(urls).toEqual(['https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity']);
+    expect(urls).toEqual(['https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity']);
     expect(r?.inserted).toBe(3);
     expect(db.prepare('SELECT DISTINCT first_eye FROM venue_checkins').all()).toEqual([{ first_eye: 'server' }]);
     expect(getJobState(db, FEST_POLL_LAST_KEY)).toBe(IN_SESSION.toISOString());
@@ -59,7 +59,7 @@ describe('runFestPoll', () => {
     const { db, deps, urls } = setup([
       {
         body: FEED,
-        redirectTo: 'https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity',
+        redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155/activity',
       },
       FEED,
     ]);
@@ -67,11 +67,11 @@ describe('runFestPoll', () => {
     expect(r?.inserted).toBe(3);
     const fest = getFestBySlug(db, 'wfp22')!;
     const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
-    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+    expect(venue?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
 
     // Subsequent poll uses the updated path
     await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
-    expect(urls[1]).toBe('https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity');
+    expect(urls[1]).toBe('https://untappd.com/v/wfp-future-slug/11142155/activity');
   });
 
   it('does nothing outside a polling window and before its 10-minute tick', async () => {
@@ -138,7 +138,7 @@ describe('fest menu job', () => {
     const { db, deps, urls } = setup([MENU]);
     const fest = getFestBySlug(db, 'wfp22')!;
     expect(await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'))).toEqual({ items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false });
-    expect(urls).toEqual(['https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155']);
+    expect(urls).toEqual(['https://untappd.com/v/warszawski-festiwal-piwa/11142155']);
     expect(menuStats(db, fest.id).count).toBe(4);
   });
 
@@ -146,14 +146,14 @@ describe('fest menu job', () => {
     const { db, deps } = setup([
       {
         body: MENU,
-        redirectTo: 'https://untappd.com/v/warszawski-festiwal-piwa/11142155',
+        redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155',
       },
     ]);
     const fest = getFestBySlug(db, 'wfp22')!;
     const res = await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
     expect(res).toMatchObject({ items: 4 });
     const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
-    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+    expect(venue?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
   });
 
   it('refuses a page that is not the fest menu venue', async () => {
