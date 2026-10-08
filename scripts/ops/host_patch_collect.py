@@ -52,7 +52,7 @@ def parse_needrestart(text):
         elif key in ('NEEDRESTART-KCUR', 'NEEDRESTART-KEXP'):
             kernel[key] = value.strip()
     if set(kernel) != {'NEEDRESTART-KCUR', 'NEEDRESTART-KEXP'}:
-        raise ValueError('needrestart printed no kernel lines')
+        return None, services
     return {'running': kernel['NEEDRESTART-KCUR'],
             'newest_installed': kernel['NEEDRESTART-KEXP']}, services
 
@@ -84,8 +84,23 @@ def count_security(text):
     return count
 
 
-def reboot_required(root):
-    """None means no reboot is pending. Any stat error other than ENOENT propagates (no write)."""
+def boot_time(root):
+    """`btime` of /proc/stat, or None when it cannot be read — never guessed."""
+    try:
+        for line in (root / 'proc/stat').read_text().splitlines():
+            key, _sep, value = line.partition(' ')
+            if key == 'btime':
+                return int(value)
+    except Exception:
+        pass
+    return None
+
+
+def reboot_required(root, previous):
+    """None means no reboot is pending. Any stat error other than ENOENT propagates (no write).
+
+    notify-reboot-required rewrites the flag per package, so its mtime is the LATEST request;
+    `since` carries forward the first one seen, unless a reboot has happened since."""
     try:
         since = int((root / 'var/run/reboot-required').stat().st_mtime)
     except FileNotFoundError:
@@ -94,6 +109,11 @@ def reboot_required(root):
         lines = (root / 'var/run/reboot-required.pkgs').read_text().splitlines()
     except FileNotFoundError:
         lines = []
+    carried = (previous.get('reboot_required') or {}).get('since') if isinstance(previous, dict) \
+        and isinstance(previous.get('reboot_required'), dict) else None
+    booted = boot_time(root)
+    if type(carried) is int and booted is not None and carried >= booted:
+        since = min(carried, since)
     return {'since': since, 'packages': list(dict.fromkeys(l.strip() for l in lines if l.strip()))}
 
 
@@ -115,7 +135,9 @@ def merge_stale(services, previous, now):
 
 
 def package_version(run_command, name):
-    return run_command(['dpkg-query', '-W', '-f=${Version}', name]).strip() or None
+    status, _tab, version = run_command(
+        ['dpkg-query', '-W', '-f=${db:Status-Abbrev}\t${Version}', name]).partition('\t')
+    return version.strip() or None if status.startswith('ii') else None
 
 
 def collect(run_command, root, now, previous):
@@ -124,7 +146,7 @@ def collect(run_command, root, now, previous):
         'version': 1,
         'timestamp': now,
         'kernel': needrestart[0] if needrestart else None,
-        'reboot_required': reboot_required(root),
+        'reboot_required': reboot_required(root, previous),
         'livepatch': attempt(lambda: map_livepatch(
             run_command(['canonical-livepatch', 'status', '--format', 'json']))),
         'stale_services': merge_stale(needrestart[1], previous, now) if needrestart else None,
@@ -174,6 +196,7 @@ def main(argv=None):
     parser.add_argument('--out-dir', default=OUT_DIR)
     parser.add_argument('--root', default='/', help=argparse.SUPPRESS)  # tests only
     args = parser.parse_args(argv)
+    prepare_directory(args.out_dir)  # root reads nothing from a directory it has not verified
     summary = collect(run, Path(args.root), int(time.time()), read_previous(args.out_dir))
     write_summary(args.out_dir, summary)
     return 0

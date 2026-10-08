@@ -11,6 +11,8 @@ import host_patch_collect as hp
 FIX = Path(__file__).parent / 'fixtures' / 'host-patch'
 NOW = 1_791_440_000
 STAMP = 1_791_439_429
+BTIME = 1_789_000_000
+DPKG = ('dpkg-query', '-W', '-f=${db:Status-Abbrev}\t${Version}')
 
 
 def fixture(name):
@@ -23,9 +25,9 @@ def runner(overrides=None):
         ('needrestart', '-b', '-r', 'l'): fixture('needrestart-b.txt'),
         ('canonical-livepatch', 'status', '--format', 'json'): fixture('livepatch-status.json'),
         ('apt', 'list', '--upgradable'): fixture('apt-list-upgradable.txt'),
-        ('dpkg-query', '-W', '-f=${Version}', 'nodejs'): '24.21.0-1nodesource1',
-        ('dpkg-query', '-W', '-f=${Version}', 'cloudflared'): '2026.10.0',
-        ('dpkg-query', '-W', '-f=${Version}', 'litestream'): '0.5.11',
+        (*DPKG, 'nodejs'): 'ii \t24.21.0-1nodesource1',
+        (*DPKG, 'cloudflared'): 'ii \t2026.10.0',
+        (*DPKG, 'litestream'): 'ii \t0.5.11',
     }
     table.update(overrides or {})
 
@@ -44,6 +46,8 @@ class Host(unittest.TestCase):
         periodic = self.root / 'var/lib/apt/periodic'
         periodic.mkdir(parents=True)
         (self.root / 'var/run').mkdir(parents=True)
+        (self.root / 'proc').mkdir()
+        (self.root / 'proc/stat').write_text(f'cpu  1 2 3\nbtime {BTIME}\nprocesses 9\n')
         stamp = periodic / 'unattended-upgrades-stamp'
         stamp.write_text('')
         os.utime(stamp, (STAMP, STAMP))
@@ -84,6 +88,35 @@ class TestCollect(Host):
         os.utime(flag, (1_790_500_000, 1_790_500_000))
         self.assertEqual(self.collect()['reboot_required'], {'since': 1_790_500_000, 'packages': []})
 
+    def reboot_flag(self, mtime=1_790_500_000):
+        flag = self.root / 'var/run/reboot-required'
+        flag.write_text('')
+        os.utime(flag, (mtime, mtime))
+
+    def since(self, previous):
+        return self.collect(previous=previous)['reboot_required']['since']
+
+    def test_reboot_since_carries_forward_the_first_request(self):
+        self.reboot_flag()
+        self.assertEqual(self.since({'reboot_required': {'since': 1_790_000_000, 'packages': []}}), 1_790_000_000)
+
+    def test_reboot_since_older_than_boot_is_dropped(self):
+        self.reboot_flag()
+        self.assertEqual(self.since({'reboot_required': {'since': 1_788_000_000, 'packages': []}}), 1_790_500_000)
+
+    def test_reboot_since_without_a_previous_summary_is_the_mtime(self):
+        self.reboot_flag()
+        self.assertEqual(self.since(None), 1_790_500_000)
+
+    def test_reboot_since_later_than_the_mtime_is_the_mtime(self):
+        self.reboot_flag()
+        self.assertEqual(self.since({'reboot_required': {'since': 1_791_000_000, 'packages': []}}), 1_790_500_000)
+
+    def test_reboot_since_without_boot_time_is_the_mtime(self):
+        self.reboot_flag()
+        (self.root / 'proc/stat').unlink()
+        self.assertEqual(self.since({'reboot_required': {'since': 1_790_000_000, 'packages': []}}), 1_790_500_000)
+
     def test_a_failing_needrestart_nulls_kernel_and_stale_services_only(self):
         s = self.collect({('needrestart', '-b', '-r', 'l'): RuntimeError('needrestart exited 1')})
         self.assertEqual((s['kernel'], s['stale_services'], s['livepatch']['state']),
@@ -91,7 +124,11 @@ class TestCollect(Host):
 
     def test_needrestart_output_without_kernel_lines_is_unreadable(self):
         s = self.collect({('needrestart', '-b', '-r', 'l'): 'NEEDRESTART-VER: 3.6\n'})
-        self.assertEqual((s['kernel'], s['stale_services']), (None, None))
+        self.assertEqual((s['kernel'], s['stale_services']), (None, []))
+
+    def test_service_lines_survive_missing_kernel_lines(self):
+        s = self.collect({('needrestart', '-b', '-r', 'l'): 'NEEDRESTART-VER: 3.6\nNEEDRESTART-SVC: ssh.service\n'})
+        self.assertEqual((s['kernel'], s['stale_services']), (None, [{'unit': 'ssh.service', 'since': NOW}]))
 
     def test_a_newer_installed_kernel_is_reported_as_is(self):
         s = self.collect({('needrestart', '-b', '-r', 'l'): fixture('needrestart-b-stale.txt')})
@@ -111,10 +148,14 @@ class TestCollect(Host):
 
     def test_a_package_dpkg_cannot_name_is_null(self):
         s = self.collect({
-            ('dpkg-query', '-W', '-f=${Version}', 'litestream'): RuntimeError('dpkg-query exited 1'),
-            ('dpkg-query', '-W', '-f=${Version}', 'cloudflared'): '',
+            (*DPKG, 'litestream'): RuntimeError('dpkg-query exited 1'),
+            (*DPKG, 'cloudflared'): '',
         })
         self.assertEqual(s['packages'], {'nodejs': '24.21.0-1nodesource1', 'cloudflared': None, 'litestream': None})
+
+    def test_a_removed_package_with_kept_config_is_null(self):
+        s = self.collect({(*DPKG, 'litestream'): 'rc \t0.5.11'})
+        self.assertEqual(s['packages']['litestream'], None)
 
 
 def livepatch(supported='supported', state='applied', running=True, date='2027-10-02'):
@@ -190,6 +231,17 @@ class TestWrite(Host):
         with self.assertRaises(RuntimeError):
             hp.write_summary(str(self.out), {'version': 1})
         self.assertEqual(os.listdir(target), [])
+
+    def test_main_refuses_a_symlinked_out_dir_before_reading_anything_in_it(self):
+        target = Path(self.tmp.name) / 'elsewhere'
+        target.mkdir()
+        (target / 'summary.json').write_text('{"reboot_required": {"since": 1}}')
+        self.out.symlink_to(target)
+        argv = ['--out-dir', str(self.out), '--root', str(self.root)]
+        with patch.object(hp, 'run', runner()), patch.object(hp, 'read_previous', side_effect=AssertionError('read before verify')):
+            with self.assertRaises(RuntimeError):
+                hp.main(argv)
+        self.assertEqual(os.listdir(target), ['summary.json'])
 
     def test_main_twice_keeps_the_first_since_across_runs(self):
         argv = ['--out-dir', str(self.out), '--root', str(self.root)]
