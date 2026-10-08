@@ -449,6 +449,16 @@ it (the same reason as `/etc/needrestart/conf.d/90-code-server.conf`).
    kernel, then `canonical-livepatch status` must show it as supported. On this host
    the reboot already happened on 2026-10-06 (6.8.0-142), so only the
    `canonical-livepatch status` check remains.
+5. Stage 2 — the hourly collector (`[deploy:hold]` PR): `sudo bash deploy/install-host-patch-collector.sh`.
+   It installs `wbb-host-patch.service`/`.timer`, creates `/var/tmp/wbb-host-patch` and runs the
+   collector once. Check `python3 -m json.tool /var/tmp/wbb-host-patch/summary.json`: `livepatch`
+   must not be `null` (if it is, the snap CLI did not start in the unit — see spec C15). Only then
+   `bash deploy/deploy.sh`, which starts the bot reading it.
+
+The Інфраструктура row of the daily status reads that summary (reboot pending, Livepatch,
+stale watched units, security backlog) and the upstream facts the bot fetches daily (Node 24
+security releases and end of life, litestream releases). Thresholds: `src/domain/status/rules.ts`.
+Re-run the installer after any merge that changes `scripts/ops/host_patch_collect.py` or the units.
 
 Re-run step 2 after any merge that changes `deploy/install-host-patching.sh`.
 

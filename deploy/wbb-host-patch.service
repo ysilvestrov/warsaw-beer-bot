@@ -1,0 +1,12 @@
+[Unit]
+Description=#469 host-patch collector: local patch facts for the daily status
+After=snapd.service
+
+[Service]
+Type=oneshot
+# Root: needrestart -b and canonical-livepatch need it. Its own unit is also what lets the
+# snap CLI start at all (spec C15). No PrivateTmp/ProtectSystem/NoNewPrivileges: the bot must
+# see /var/tmp/wbb-host-patch, and snap confinement breaks under those.
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/wbb-host-patch-collect
+TimeoutStartSec=15min
+Nice=10

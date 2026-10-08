@@ -1,0 +1,12 @@
+[Unit]
+Description=#469 host-patch collector, hourly
+
+[Timer]
+# OnActiveSec, not OnBootSec, and no Persistent (#798): a Persistent stamp plus an OnBootSec
+# that passed during a slow boot left the autodeploy timer elapsed for good.
+OnActiveSec=2min
+OnUnitActiveSec=1h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
