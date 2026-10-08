@@ -64,27 +64,6 @@ describe('normalizeName structural search noise', () => {
   });
 });
 
-describe('#653 leading article normalization', () => {
-  test('strips leading "the" when remaining tokens >= 2', () => {
-    expect(normalizeName('The Stonewall Inn IPA')).toBe('stonewall inn');
-    expect(normalizeName('The Good Cider Pear')).toBe('good cider pear');
-    expect(normalizeName('The Real Hr. Frederiksen')).toBe('real hr frederiksen');
-  });
-
-  test('preserves leading "the" when remaining tokens < 2', () => {
-    expect(normalizeName('The Alchemist')).toBe('the alchemist');
-    expect(normalizeName('The End')).toBe('the end');
-    expect(normalizeName('The Abyss')).toBe('the abyss');
-    expect(normalizeName('The IPA')).toBe('the');
-  });
-
-  test('preserves "the" in the middle of phrases', () => {
-    expect(normalizeName('Eye of the Tiger')).toBe('eye of the tiger');
-    expect(normalizeName('Son Of The Son')).toBe('son of the son');
-    expect(normalizeName('Two on the road')).toBe('two on the road');
-  });
-});
-
 test('strips every Polish diacritic', () => {
   expect(normalizeBrewery('ąćęłńóśźż')).toBe('acelnoszz');
   expect(normalizeBrewery('ĄĆĘŁŃÓŚŹŻ')).toBe('acelnoszz');

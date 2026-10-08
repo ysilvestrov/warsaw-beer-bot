@@ -3604,25 +3604,29 @@ describe('#664 numbered-series retry', () => {
     });
 
     describe('#653 leading article normalization in lookup', () => {
-      test('matches candidate with leading "The" when input lacks it and remainder >= 2 tokens', async () => {
-        const search = fakeSearch(() => [
-          {
-            bid: 6992173,
-            beer_name: 'The Stonewall Inn IPA Session IPA',
-            brewery_name: 'Brooklyn Brewery',
-            style: 'IPA - Session',
-            abv: 4.6,
-            global_rating: 3.39,
-          },
-          {
-            bid: 2885563,
-            beer_name: 'The Stonewall Inn IPA',
-            brewery_name: 'Brooklyn Brewery',
-            style: 'IPA - Session',
-            abv: 4.0,
-            global_rating: 3.42,
-          },
-        ]);
+      const stonewallCandidates = [
+        {
+          bid: 2885563,
+          beer_name: 'The Stonewall Inn IPA',
+          brewery_name: 'Brooklyn Brewery',
+          style: 'IPA - Session',
+          abv: 4.0,
+          rating_count: 122449,
+          global_rating: 3.42,
+        },
+        {
+          bid: 6992173,
+          beer_name: 'The Stonewall Inn IPA Session IPA',
+          brewery_name: 'Brooklyn Brewery',
+          style: 'IPA - Session',
+          abv: 4.6,
+          rating_count: 50,
+          global_rating: 3.39,
+        },
+      ];
+
+      test('matches candidate with leading "The" when input lacks it and ABV 4.6 selects European variant', async () => {
+        const search = fakeSearch(() => stonewallCandidates);
 
         const out = await lookupBeer({
           brewery: 'Brooklyn Brewery',
@@ -3634,6 +3638,36 @@ describe('#664 numbered-series retry', () => {
         expect(out.kind).toBe('matched');
         assert(out.kind === 'matched');
         expect(out.result.bid).toBe(6992173);
+      });
+
+      test('matches candidate with leading "The" when input ABV 4.0 selects canonical US variant', async () => {
+        const search = fakeSearch(() => stonewallCandidates);
+
+        const out = await lookupBeer({
+          brewery: 'Brooklyn Brewery',
+          name: 'Brooklyn Stonewall Inn IPA',
+          abv: 4.0,
+          search,
+        });
+
+        expect(out.kind).toBe('matched');
+        assert(out.kind === 'matched');
+        expect(out.result.bid).toBe(2885563);
+      });
+
+      test('matches candidate with leading "The" when input ABV is null, picking dominant candidate', async () => {
+        const search = fakeSearch(() => stonewallCandidates);
+
+        const out = await lookupBeer({
+          brewery: 'Brooklyn Brewery',
+          name: 'Brooklyn Stonewall Inn IPA',
+          abv: null,
+          search,
+        });
+
+        expect(out.kind).toBe('matched');
+        assert(out.kind === 'matched');
+        expect(out.result.bid).toBe(2885563);
       });
 
       test('matches candidate when input has leading "The" and candidate lacks it (remainder >= 2 tokens)', async () => {
@@ -3660,12 +3694,20 @@ describe('#664 numbered-series retry', () => {
         expect(out.result.bid).toBe(11111);
       });
 
-      test('preserves leading "The" for short names (< 2 remainder tokens)', async () => {
+      test('distinguishes "The End" from "End" when both exist in pool', async () => {
         const search = fakeSearch(() => [
           {
             bid: 22222,
             beer_name: 'End',
-            brewery_name: 'Brewery',
+            brewery_name: 'Pinta',
+            style: 'Stout',
+            abv: 5.0,
+            global_rating: 3.5,
+          },
+          {
+            bid: 22223,
+            beer_name: 'The End',
+            brewery_name: 'Pinta',
             style: 'Stout',
             abv: 5.0,
             global_rating: 3.5,
@@ -3673,14 +3715,63 @@ describe('#664 numbered-series retry', () => {
         ]);
 
         const out = await lookupBeer({
-          brewery: 'Brewery',
+          brewery: 'Pinta',
           name: 'The End',
           abv: 5.0,
           search,
         });
 
-        // "The End" keeps "the", candidate is "end", so they should not match
-        expect(out.kind).toBe('not_found');
+        expect(out.kind).toBe('matched');
+        assert(out.kind === 'matched');
+        expect(out.result.bid).toBe(22223);
+      });
+
+      test('matches multi-token name with leading "The" against candidate without "The"', async () => {
+        const search = fakeSearch(() => [
+          {
+            bid: 22223,
+            beer_name: 'End Of Days',
+            brewery_name: 'Pinta',
+            style: 'Stout',
+            abv: 5.0,
+            global_rating: 3.5,
+          },
+        ]);
+
+        const out = await lookupBeer({
+          brewery: 'Pinta',
+          name: 'The End Of Days',
+          abv: 5.0,
+          search,
+        });
+
+        expect(out.kind).toBe('matched');
+        assert(out.kind === 'matched');
+        expect(out.result.bid).toBe(22223);
+      });
+
+      test('correctly matches beer from brewery whose name starts with "The"', async () => {
+        const search = fakeSearch(() => [
+          {
+            bid: 99999,
+            beer_name: 'Barrel Pie',
+            brewery_name: 'The Bruery',
+            style: 'Stout - Imperial / Double',
+            abv: 10.0,
+            global_rating: 4.1,
+          },
+        ]);
+
+        const out = await lookupBeer({
+          brewery: 'The Bruery',
+          name: 'The Bruery Barrel Pie',
+          abv: 10.0,
+          search,
+        });
+
+        expect(out.kind).toBe('matched');
+        assert(out.kind === 'matched');
+        expect(out.result.bid).toBe(99999);
       });
     });
   });

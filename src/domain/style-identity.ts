@@ -7,19 +7,21 @@ import { stripSearchNoise, baseNormalize, BREWERY_NOISE } from './normalize';
  * strips the name to empty, then trims any leftover leading/trailing BREWERY_NOISE.
  */
 export function stripBreweryFromName(nameNorm: string, breweryNorm: string): string {
-  if (!breweryNorm) return nameNorm;
-  const bt = breweryNorm.split(' ').filter(Boolean);
-  if (!bt.length) return nameNorm;
   const nt = nameNorm.split(' ').filter(Boolean);
-  for (let i = 0; i + bt.length <= nt.length; ) {
-    if (nt.length - bt.length >= 1 && bt.every((t, j) => nt[i + j] === t)) {
-      nt.splice(i, bt.length);
-    } else {
-      i++;
+  if (breweryNorm) {
+    const bt = breweryNorm.split(' ').filter(Boolean);
+    if (bt.length) {
+      for (let i = 0; i + bt.length <= nt.length; ) {
+        if (nt.length - bt.length >= 1 && bt.every((t, j) => nt[i + j] === t)) {
+          nt.splice(i, bt.length);
+        } else {
+          i++;
+        }
+      }
+      while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
+      while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
     }
   }
-  while (nt.length > 1 && BREWERY_NOISE.has(nt[0])) nt.shift();
-  while (nt.length > 1 && BREWERY_NOISE.has(nt[nt.length - 1])) nt.pop();
   if (nt.length >= 3 && nt[0] === 'the') nt.shift();
   return nt.join(' ');
 }
