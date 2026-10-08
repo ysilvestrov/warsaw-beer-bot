@@ -242,7 +242,8 @@ async function main(): Promise<void> {
 
   bot.use(
     cityGate,
-    // #469 stage 3: the admin's reboot buttons (rb:<kind>:<since>); admin check first.
+    // #469 stage 3: the admin's reboot buttons (rb:<kind>:<since>); the composer checks the admin
+    // first. cityGate above matches /commands only, so callbacks pass through it.
     createRebootCommand({
       now: () => new Date(),
       currentSince: (now) => currentRebootSince(readHostPatch(now)),
