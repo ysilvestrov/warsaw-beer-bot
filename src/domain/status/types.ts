@@ -26,6 +26,18 @@ export interface SnapshotRecord {
   metrics: SnapshotMetrics;
 }
 
+// What the root host-patch collector reports (#469 stage 2). Times are unix seconds.
+// rebootRequired null = no reboot pending; every other null = the collector could not read it.
+export interface HostPatchFacts {
+  timestamp: number;
+  kernel: { running: string; newestInstalled: string } | null;
+  rebootRequired: { since: number; packages: string[] } | null;
+  livepatch: { state: 'applied' | 'nothing-to-apply' | 'unsupported-kernel' | 'unknown'; upgradeRequiredDate: string | null } | null;
+  staleServices: { unit: string; since: number }[] | null;
+  unattended: { lastRun: number | null; securityPending: number | null };
+  packages: { nodejs: string | null; cloudflared: string | null; litestream: string | null };
+}
+
 // Cycle lengths come from the fest jobs' own constants (filled in by the collector), so the
 // evaluator never duplicates a schedule.
 export interface FestInputs {
