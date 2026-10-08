@@ -13,7 +13,7 @@ export class CookieExpiredError extends Error {
 }
 
 export class HttpError extends Error {
-  constructor(public readonly status: number, url: string) {
+  constructor(public readonly status: number, public readonly url: string) {
     super(`HTTP ${status} for ${url}`);
     this.name = 'HttpError';
   }
@@ -76,9 +76,15 @@ export function createHttp(opts: HttpOpts): Http {
         const location = res.headers?.get('location');
         if (!location) throw new HttpError(res.status, url);
         let target: URL;
+        let current: URL;
         try {
           target = new URL(location, url);
+          current = new URL(url);
         } catch {
+          throw new HttpError(res.status, url);
+        }
+        // Protect credentials: only follow HTTPS redirects on the same origin.
+        if (target.protocol !== 'https:' || target.origin !== current.origin) {
           throw new HttpError(res.status, url);
         }
         if (target.pathname === '/login' || target.pathname.startsWith('/login/')) {
@@ -136,11 +142,14 @@ export function createHttp(opts: HttpOpts): Http {
             if (hops >= MAX_REDIRECTS) {
               throw new HttpError(outcome.status, currentUrl);
             }
-            opts.onRedirect?.(currentUrl, outcome.nextUrl);
-            getOpts?.onRedirect?.(currentUrl, outcome.nextUrl);
             currentUrl = outcome.nextUrl;
             hops++;
             continue;
+          }
+
+          if (currentUrl !== url) {
+            opts.onRedirect?.(url, currentUrl);
+            getOpts?.onRedirect?.(url, currentUrl);
           }
 
           return outcome.body;

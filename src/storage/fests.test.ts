@@ -58,13 +58,30 @@ describe('migration 42 — festival mode', () => {
     ]);
   });
 
-  it('updateFestVenueFeedPath updates feed_path for matching venue', () => {
+  it('updateFestVenueFeedPath updates feed_path for matching venue and scopes to festId when provided', () => {
     const fest = getFestBySlug(db, 'wfp22')!;
-    const changes = updateFestVenueFeedPath(db, 11142155, '/v/wfp-future-slug/11142155/activity');
+    // Insert another fest that shares the same venue_id
+    db.prepare('INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES (?, ?, ?, ?, ?)')
+      .run('wfp23', 'WFP 23', 11142155, 3.8, '[]');
+    const fest2 = getFestBySlug(db, 'wfp23')!;
+    db.prepare('INSERT INTO fest_venues (fest_id, venue_id, label, feed_path) VALUES (?, ?, ?, ?)')
+      .run(fest2.id, 11142155, 'WFP 23 Venue', '/v/wfp23-original/11142155/activity');
+
+    // Scoped update to fest.id
+    const changes = updateFestVenueFeedPath(db, 11142155, '/v/wfp-future-slug/11142155/activity', fest.id);
     expect(changes).toBe(1);
-    const venues = festVenues(db, fest.id);
-    const wfp = venues.find((v) => v.venue_id === 11142155);
-    expect(wfp?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
+
+    const venues1 = festVenues(db, fest.id);
+    expect(venues1.find((v) => v.venue_id === 11142155)?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
+
+    const venues2 = festVenues(db, fest2.id);
+    expect(venues2.find((v) => v.venue_id === 11142155)?.feed_path).toBe('/v/wfp23-original/11142155/activity');
+
+    // Unscoped update updates both
+    const allChanges = updateFestVenueFeedPath(db, 11142155, '/v/wfp-unscoped/11142155/activity');
+    expect(allChanges).toBe(2);
+    expect(festVenues(db, fest.id).find((v) => v.venue_id === 11142155)?.feed_path).toBe('/v/wfp-unscoped/11142155/activity');
+    expect(festVenues(db, fest2.id).find((v) => v.venue_id === 11142155)?.feed_path).toBe('/v/wfp-unscoped/11142155/activity');
   });
 
   it('deleting a fest cascades to its sessions, venues, menu and teams', () => {

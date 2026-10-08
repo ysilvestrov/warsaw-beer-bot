@@ -2213,7 +2213,7 @@ submit сторінки до backend або паузу між сторінкам
 - **Breaker фесту** — `job_state.fest_poll_open_until`, поріг 2 блоки поспіль, пауза 30 хв; спільний
   для обох джоб і **окремий** від `untappd_profile_http_open_until`, хоча кука й проксі ті самі:
   фестивальний блок не глушить нічний `refreshAllUntappd`, і навпаки. `CookieExpiredError` — алерт
-  адміну, не блок. У куковому клієнті (`createHttp` з `redirect: 'manual'`, #809) `CookieExpiredError` кидається **лише** коли `Location` редиректу веде на `/login`; не-логін редиректи (зміна slug) прозоро проходять до 3 хопів зі збереженням куки й проксі. Перехід trip/recover — алерт адміну.
+  адміну, не блок. У куковому клієнті (`createHttp` з `redirect: 'manual'`, #809, спільному для фестивального ока/меню та `refreshAllUntappd`) `CookieExpiredError` кидається **лише** коли `Location` HTTPS-редиректу на той самий origin веде на `/login`; безпечні same-origin HTTPS-редиректи (зміна slug) прозоро проходять до 3 хопів зі збереженням куки й проксі. Редиректи без `Location`, на інші origin або через незахищений HTTP кидають `HttpError`. Перехід trip/recover — алерт адміну.
 - **Око ноута** (`scripts/fest-eye`, окремий `package.json` з `playwright-core`; у проді не працює):
   persistent-профіль справжнього Chrome (тека `scripts/fest-eye/profile/` у `.gitignore` — там сесія
   Untappd), у вікні: локація меню раз на 3 хв, інші раз на 6 хв (`eyeTasks`); якщо `stitched=false` —
@@ -2501,7 +2501,7 @@ scraping продовжується, але без inline enrich, коли ві�
 адміну лише на переходах: trip (`closed→open`) і recovery (`open→closed`), з міткою
 шляху («Untappd Algolia» / «Untappd профіль-скрейп»); restart під час активного
 `open_until` не шле повторний trip alert. `CookieExpiredError` у `refreshAllUntappd`
-лишається окремим session/cookie шляхом і сам по собі не є IP-ban сигналом.
+(кидається лише на same-origin HTTPS редирект до `/login`, #809) лишається окремим session/cookie шляхом і сам по собі не є IP-ban сигналом.
 Browser/extension relay не гейтиться цими breaker-ами: блок у браузері користувача не
 впливає на VPS cooldown.
 

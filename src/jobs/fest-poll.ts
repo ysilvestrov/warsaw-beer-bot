@@ -74,21 +74,10 @@ export async function runFestPoll(deps: FestServerDeps, now: Date): Promise<Feed
   const venue = festVenues(deps.db, active!.fest.id).find((v) => v.venue_id === active!.fest.menu_venue_id);
   if (!venue) return null;
   setJobState(deps.db, FEST_POLL_LAST_KEY, now.toISOString());
+  let redirectedTo: string | null = null;
   const html = await guardedGet(deps, UNTAPPD + venue.feed_path, now, {
     onRedirect: (_fromUrl, toUrl) => {
-      try {
-        const u = new URL(toUrl);
-        if (u.pathname.includes(`/${venue.venue_id}/`) || u.pathname.endsWith(`/${venue.venue_id}`)) {
-          let newFeedPath = u.pathname;
-          if (venue.feed_path.endsWith('/activity') && !newFeedPath.endsWith('/activity')) {
-            newFeedPath = `${newFeedPath.replace(/\/+$/, '')}/activity`;
-          }
-          if (newFeedPath !== venue.feed_path) {
-            updateFestVenueFeedPath(deps.db, venue.venue_id, newFeedPath);
-            deps.log.info({ venueId: venue.venue_id, from: venue.feed_path, to: newFeedPath }, 'fest: venue slug updated');
-          }
-        }
-      } catch {}
+      redirectedTo = toUrl;
     },
   });
   if (html === null) return null;
@@ -97,6 +86,21 @@ export async function runFestPoll(deps: FestServerDeps, now: Date): Promise<Feed
       venueId: venue.venue_id, html, cursor: null, fetchedAt: now.toISOString(), eye: 'server', now: now.toISOString(),
     });
     deps.breaker.onResult(false, now);
+    if (redirectedTo) {
+      try {
+        const u = new URL(redirectedTo);
+        const match = u.pathname.match(/^\/v\/([^/]+)\/(\d+)(?:\/activity)?\/?$/);
+        if (match && Number(match[2]) === venue.venue_id) {
+          const newFeedPath = `/v/${match[1]}/${venue.venue_id}/activity`;
+          if (newFeedPath !== venue.feed_path) {
+            updateFestVenueFeedPath(deps.db, venue.venue_id, newFeedPath, active!.fest.id);
+            deps.log.info({ venueId: venue.venue_id, from: venue.feed_path, to: newFeedPath }, 'fest: venue slug updated');
+          }
+        }
+      } catch (err) {
+        deps.log.warn({ err, venueId: venue.venue_id }, 'fest: failed to update venue feed_path in db');
+      }
+    }
     return result;
   } catch (e) {
     if (e instanceof BlockedPageError) {
@@ -122,24 +126,30 @@ export async function refreshFestMenu(deps: FestServerDeps, fest: Fest, now: Dat
   // The schedule counts only a read that landed: a blocked, expired or wrong page leaves
   // FEST_MENU_LAST_KEY where it was, so the job retries (after MENU_RETRY_MS) instead of waiting hours.
   setJobState(deps.db, FEST_MENU_ATTEMPT_KEY, now.toISOString());
+  let redirectedTo: string | null = null;
   const html = await guardedGet(deps, UNTAPPD + path, now, {
     onRedirect: (_fromUrl, toUrl) => {
-      try {
-        const u = new URL(toUrl);
-        if (u.pathname.includes(`/${fest.menu_venue_id}/`) || u.pathname.endsWith(`/${fest.menu_venue_id}`)) {
-          const basePath = u.pathname.replace(/\/activity$/, '').replace(/\/+$/, '');
-          const newFeedPath = `${basePath}/activity`;
-          if (newFeedPath !== menuVenue?.feed_path) {
-            updateFestVenueFeedPath(deps.db, fest.menu_venue_id, newFeedPath);
-            deps.log.info({ venueId: fest.menu_venue_id, from: menuVenue?.feed_path, to: newFeedPath }, 'fest: menu venue slug updated');
-          }
-        }
-      } catch {}
+      redirectedTo = toUrl;
     },
   });
   if (html === null) return 'blocked';
   const menu = parseVenueMenu(html);
   if (menu.venueId !== fest.menu_venue_id) return 'wrong_page';
+  if (redirectedTo) {
+    try {
+      const u = new URL(redirectedTo);
+      const match = u.pathname.match(/^\/v\/([^/]+)\/(\d+)(?:\/activity)?\/?$/);
+      if (match && Number(match[2]) === fest.menu_venue_id) {
+        const newFeedPath = `/v/${match[1]}/${fest.menu_venue_id}/activity`;
+        if (newFeedPath !== menuVenue?.feed_path) {
+          updateFestVenueFeedPath(deps.db, fest.menu_venue_id, newFeedPath, fest.id);
+          deps.log.info({ venueId: fest.menu_venue_id, from: menuVenue?.feed_path, to: newFeedPath }, 'fest: menu venue slug updated');
+        }
+      }
+    } catch (err) {
+      deps.log.warn({ err, venueId: fest.menu_venue_id }, 'fest: failed to update venue feed_path in db');
+    }
+  }
   deps.breaker.onResult(false, now);
   const result = applyMenu(deps.db, fest.id, menu, now.toISOString());
   setJobState(deps.db, FEST_MENU_LAST_KEY, now.toISOString());
