@@ -61,3 +61,11 @@ export interface StatusInputs {
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
   fest: FestInputs | null;         // null = no current or upcoming fest
 }
+
+// Upstream facts the host is judged against (#469 stage 2), fetched daily by jobs/host-upstream.
+// Each source is its own Avail: one failing fetch must not blank the others.
+export interface HostUpstream {
+  nodeSecurity: Avail<{ version: string; date: string } | null>; // null = the 24.x line has no security release
+  nodeEnd: Avail<string>;                                       // YYYY-MM-DD
+  litestream: Avail<{ version: string; publishedAt: string }>;  // publishedAt: ISO instant
+}
