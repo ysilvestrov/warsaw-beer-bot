@@ -25,5 +25,15 @@ export const STATUS_RULES = {
   diskTrendAbsBytes: GIB_BYTES,
   flowRel: 0.5,
   flowAbs: 10,
+  // Хост-патчі (#469 stage 2, spec rules table). Ages compare in seconds: "> 3 days" is strict.
+  rebootYellowDays: 3,
+  rebootRedDays: 14,
+  staleServiceYellowDays: 1,
+  unattendedStaleYellowDays: 2,
+  livepatchSupportYellowDays: 30,
+  eolYellowDays: 180,
+  eolRedDays: 30,
+  // No machine-readable source is worth a fetch for a date that does not move.
+  ubuntuStandardSupportEnd: '2029-05-31',
   snapshotRetentionDays: 90,
 } as const;

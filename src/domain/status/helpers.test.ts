@@ -1,4 +1,4 @@
-import { gib, groupThousands, median, parseIsoInstant, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
+import { gib, groupThousands, median, parseIsoInstant, previousDays, shiftDate, snapshotOn, ukDays, warsawClock } from './helpers';
 import { GREEN_METRICS } from './test-inputs';
 
 const rec = (date: string) => ({ date, metrics: GREEN_METRICS });
@@ -48,4 +48,13 @@ test('parseIsoInstant accepts only real instants in toISOString form', () => {
     Date.UTC(2026, 9, 6, 7), Date.UTC(2026, 9, 6, 7), Date.UTC(2028, 1, 29),
     Number.NaN, Number.NaN, Number.NaN, Number.NaN,
   ]);
+});
+
+describe('ukDays', () => {
+  it.each([
+    [0, '0 днів'], [1, '1 день'], [2, '2 дні'], [4, '4 дні'], [5, '5 днів'],
+    [11, '11 днів'], [14, '14 днів'], [21, '21 день'], [22, '22 дні'], [111, '111 днів'],
+  ])('%i → %s', (n, words) => {
+    expect(ukDays(n)).toBe(words);
+  });
 });
