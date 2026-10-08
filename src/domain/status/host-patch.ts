@@ -16,12 +16,13 @@ export const WATCHED_UNITS: readonly string[] = [
   'warsaw-beer-bot.service', 'cloudflared.service', 'litestream.service', 'ssh.service',
 ];
 
-// Whole days from now to the start of `date` (UTC), or null for anything that is not a real date.
+// Calendar days (UTC) from today to `date`: 0 on the date itself, whatever the hour — so a
+// threshold never flips at 00:00:01. Null for anything that is not a real date.
 function daysUntil(date: string, nowSeconds: number): number | null {
   const t = Date.parse(`${date}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(t)
     || new Date(t).toISOString().slice(0, 10) !== date) return null;
-  return Math.floor((t / 1000 - nowSeconds) / DAY);
+  return Math.round((t / 1000 - Math.floor(nowSeconds / DAY) * DAY) / DAY);
 }
 
 function ubuntuSupport(nowSeconds: number): HostFinding[] {
@@ -52,13 +53,11 @@ export function hostPatchFindings(hp: Avail<HostPatchFacts>, now: Date): HostFin
   else {
     if (!LIVEPATCH_OK.includes(h.livepatch.state)) f.push(yellow(`Livepatch: ${h.livepatch.state}`));
     const end = h.livepatch.upgradeRequiredDate;
-    if (end !== null) {
-      const left = daysUntil(end, t);
-      if (left === null) f.push(yellow('нема даних: дата підтримки ядра в Livepatch'));
-      // The date's own day counts as past (spec), from its first second: compare calendar days, not floored hours.
-      else if (end <= new Date(t * 1000).toISOString().slice(0, 10)) f.push(red(`Livepatch більше не покриває ядро (з ${end})`));
-      else if (left < R.livepatchSupportYellowDays) f.push(yellow(`Livepatch покриває ядро лише до ${end}`));
-    }
+    const left = end === null ? null : daysUntil(end, t);
+    // A missing date is "could not read", never healthy. The date's own day counts as past (spec).
+    if (left === null) f.push(yellow('нема даних: дата підтримки ядра в Livepatch'));
+    else if (left <= 0) f.push(red(`Livepatch більше не покриває ядро (з ${end})`));
+    else if (left < R.livepatchSupportYellowDays) f.push(yellow(`Livepatch покриває ядро лише до ${end}`));
   }
 
   if (h.staleServices === null) f.push(yellow('нема даних: needrestart'));
