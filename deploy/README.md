@@ -457,6 +457,13 @@ it (the same reason as `/etc/needrestart/conf.d/90-code-server.conf`).
    Only `reboot_required` and `unattended.last_run` may legitimately be `null`. Only then
    `bash deploy/deploy.sh`, which starts the bot reading it. After a merge that changes the
    collector or the units, re-run the installer (the PR will be held for it).
+6. Stage 3 — the reboot button (`[deploy:hold]` PR): `sudo bash deploy/install-reboot-request.sh`.
+   It installs `wbb-reboot-request.path`/`.service` and creates `/var/lib/wbb-host-patch` (0700,
+   owned by `warsaw-beer-bot`). Prove the chain without rebooting: as the bot user write an invalid
+   request (`sudo -u warsaw-beer-bot sh -c 'echo bogus > /var/lib/wbb-host-patch/reboot-request'`),
+   then `journalctl -u wbb-reboot-request.service -n 5` must show the handler refusing it and the
+   file must be gone. Only then `bash deploy/deploy.sh`. Re-run the installer after any merge that
+   changes `scripts/ops/reboot_request.py` or the units.
 
 The Інфраструктура row of the daily status reads that summary (reboot pending, Livepatch,
 stale watched units, security backlog) and the upstream facts the bot fetches daily (Node 24
