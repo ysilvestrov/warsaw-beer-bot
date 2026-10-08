@@ -4,7 +4,7 @@ import type { Avail, HostUpstream } from '../domain/status/types';
 import { getJobState, setJobState } from '../storage/job_state';
 import { parseIsoInstant } from '../domain/status/helpers';
 import {
-  LITESTREAM_LATEST_URL, NODE_INDEX_URL, NODE_SCHEDULE_URL, jsonFetcher,
+  LITESTREAM_LATEST_URL, NODE_INDEX_URL, NODE_SCHEDULE_URL, isCalendarDay, jsonFetcher,
   parseLitestreamLatest, parseNodeEnd, parseNodeSecurity, type FetchJson,
 } from '../sources/host-upstream';
 
@@ -38,10 +38,9 @@ function readStored(db: DB): Stored | undefined {
 
 // A stored value is a claim, and a corrupted one must read as "нема даних", never as healthy:
 // each field is checked by real type, not by string coercion (["2028-04-30"] is not a date).
-const DAY = /^\d{4}-\d{2}-\d{2}$/;
 const VER = /^\d+\.\d+\.\d+$/;
 const isRec = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
-const isDay = (x: unknown): boolean => typeof x === 'string' && DAY.test(x);
+const isDay = isCalendarDay;
 const isVer = (x: unknown): boolean => typeof x === 'string' && VER.test(x);
 const isInstant = (x: unknown): boolean => typeof x === 'string' && Number.isFinite(parseIsoInstant(x));
 const VALID: Record<SourceKey, (v: unknown) => boolean> = {
@@ -71,17 +70,20 @@ export async function hostUpstream(deps: HostUpstreamDeps): Promise<void> {
   const now = (deps.now ?? (() => new Date()))();
   const fetchJson = deps.fetchJson ?? jsonFetcher();
   const next: Stored = { ...(readStored(deps.db) ?? {}) };
+  const refreshed: Stored = {};
   for (const s of SOURCES) {
     // Skip only an entry the reader would call healthy; anything it would condemn is refetched.
     const at = entryAt(s.key, next[s.key], now);
     if (at !== null && now.getTime() - at < REFRESH_MS) continue;
     try {
-      next[s.key] = { value: s.parse(await fetchJson(s.url)), at: now.toISOString() };
+      refreshed[s.key] = { value: s.parse(await fetchJson(s.url)), at: now.toISOString() };
     } catch (e) {
       deps.log.warn({ err: e, url: s.url }, 'host-upstream: fetch failed, keeping the previous value');
     }
   }
-  setJobState(deps.db, HOST_UPSTREAM_KEY, JSON.stringify(next));
+  // Merge onto the row as it is NOW, not as it was at the start: the startup run and the :50
+  // tick can overlap, and the later writer must not discard what the other one refreshed.
+  setJobState(deps.db, HOST_UPSTREAM_KEY, JSON.stringify({ ...(readStored(deps.db) ?? {}), ...refreshed }));
 }
 
 export function readHostUpstream(db: DB, now: Date): HostUpstream {
