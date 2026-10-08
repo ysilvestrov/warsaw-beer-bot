@@ -204,7 +204,10 @@ Lines are Ukrainian, one per finding, e.g. `ядро: перезавантаже
 
 **Immediate alert.** An hourly bot job reads the summary. When `reboot_required` turns
 non-null (or a snooze expires while it still is), the bot sends the admin one message:
-the reason (packages), how long it has waited, and the Livepatch state — with three
+the reason (packages), how long it has waited, and the Livepatch state. The text names the
+packages and never claims kernel coverage: under Livepatch, kernel packages do not set the
+flag (C19), so a pending reboot here is for libc6/dbus-class libraries. An unreadable summary
+sends nothing — the daily status already says «нема даних» — with three
 inline buttons: **«Зараз»**, **«О 04:00»**, **«Нагадати через 3 дні»**. The state
 (`notified_since`, `snooze_until`) lives in `job_state`, keyed by `reboot_required.since`,
 so one pending reboot produces one alert, not one per hour. Only `ADMIN_TELEGRAM_ID` can
@@ -221,8 +224,12 @@ acts on it:
   content other than the two forms, or a timestamp older than 10 minutes, **deletes the
   file**, and then:
   - `now` → `systemctl reboot`;
-  - `0400` → `systemd-run --on-calendar='*-*-* 04:00:00 Europe/Warsaw' --timer-property=AccuracySec=1min systemctl reboot`
+  - `0400` → `systemd-run --unit=wbb-reboot-0400 --on-calendar='*-*-* 04:00:00 Europe/Warsaw' --timer-property=AccuracySec=1min systemctl reboot`
     (host is `Etc/UTC`; the calendar spec carries the timezone, so DST is not our arithmetic).
+    The **fixed unit name** makes a second press harmless: `systemd-run` refuses with "already
+    loaded" (exit 1, probed C22), which the handler reports as "already scheduled", not as a failure.
+- The bot writes the request atomically (temp file in the same directory + rename); `PathChanged=`
+  fires on that rename as on a direct write, and re-arms after each request (probed C21).
 - A compromised bot can, at worst, reboot the host. It gains no root command.
 
 `systemctl reboot` stops units in order: the bot's SIGTERM handler (`src/shutdown.ts`)
@@ -245,6 +252,9 @@ and litestream's flush run as on any `systemctl stop`.
 | C11 | a Node patch upgrade keeps `better-sqlite3` loadable | `NODE_MODULE_VERSION` is fixed per Node major (Node ABI policy) | medium — watched by C1's restart + `/health`; if it fails, the bot is down and the existing monitors fire |
 | C12 | the summary is the host's, not forged by the bot user | owner uid 0, dir `0755` root, read with the `readTestDiagnostics` checks | strong (own code, tested) |
 | C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | probed 2026-10-06 on systemd 255: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` → next elapse `02:00:00 UTC` (CEST) | strong (probe) |
+| C21 | a bot-written request reaches the root handler | probed 2026-10-08 (transient path unit): `warsaw-beer-bot` wrote into its own `0700` dir; `PathChanged=` fired on a direct write, on temp+rename, and again on a second request right after the first; the root service read and deleted the file each time | strong (probe) |
+| C22 | a second «О 04:00» press does not schedule a second reboot | probed: `systemd-run --unit=<fixed> --on-calendar=…` twice → the second exits 1, "Unit … already loaded"; the first stays (next elapse 02:00 UTC = 04:00 CEST) | strong (probe) |
+| C23 | one pending reboot produces one alert | own logic: `job_state` keyed by `reboot_required.since`, which is carried forward and reset only at boot (C19) | strong for the logic; it inherits C19 |
 | C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | services: strong (re-checked by the stage-1 reboot 2026-10-06 — all came back). **Not** `wbb-autodeploy.timer`: enabled but never fired after a slow boot (#798, Persistent stamp + passed `OnBootSec`; fixed by #799) — "enabled" did not prove "will run" |
 | C15 | the collector can read Livepatch state | snap CLIs fail inside code-server's cgroup (`is not a snap cgroup`); the same command under `systemd-run --wait --pipe` returned the P1 JSON | strong (probe) → the collector is its own unit |
 | C16 | `unattended.last_run` = mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp` | probed 2026-10-08: mtime 06:03:49; the run in `unattended-upgrades-dpkg.log` ended 06:03:48 | strong (probe) |
