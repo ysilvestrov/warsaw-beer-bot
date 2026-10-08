@@ -12,6 +12,8 @@ import { readTestDiagnostics } from './test-diagnostics';
 import { CANARY_STATE_KEY } from './enrich-orphans';
 import { TRIAGE_LAST_RESULT_KEY, TRIAGE_LAST_RUN_KEY } from './orphan-triage';
 import { UNLOCK_LAST_RESULT_KEY, UNLOCK_LAST_RUN_KEY } from './unlock-fixed-orphans';
+import { readHostPatch } from './host-patch';
+import { readHostUpstream } from './host-upstream';
 import { BUG_REPORT_PAUSED_KEY } from './bug-report-worker';
 import { FEST_MENU_LAST_KEY } from './fest-poll';
 import { KEEPALIVE_EVERY_MS, KEEPALIVE_LAST_KEY } from './fest-friend-feed';
@@ -20,6 +22,8 @@ export interface StatusInputOptions {
   repo?: string;
   testDiagnosticsPath?: string;
   testDiagnosticsUid?: number;
+  hostPatchPath?: string;
+  hostPatchUid?: number;
 }
 
 const parse = (raw: string | null): unknown => {
@@ -104,6 +108,13 @@ function readFest(db: DB, now: Date): FestInputs | null {
   };
 }
 
+// #469: the reader's kinds as report text; "stale" is the spec's wording for a silent collector.
+function readHostPatchInput(now: Date, opts: StatusInputOptions): StatusInputs['hostPatch'] {
+  const r = readHostPatch(now, opts.hostPatchPath, opts.hostPatchUid);
+  if (r.kind === 'ok') return { ok: true, value: r.facts };
+  return { ok: false, reason: r.kind === 'stale' ? 'збирач патчів мовчить' : 'підсумок патчів хоста недоступний' };
+}
+
 // The only place the morning report reads the DB, job_state and files. Every source that can be
 // missing comes back as a value the evaluators can colour, never as an exception.
 export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: StatusInputOptions): StatusInputs {
@@ -130,6 +141,8 @@ export function collectStatusInputs(db: DB, now: Date, dateKey: string, opts: St
     disk: diag.kind === 'ok'
       ? { ok: true, value: { bytesAvailable: diag.bytesAvailable, inodesFree: diag.inodesFree, pendingRuns: diag.pendingRuns } }
       : { ok: false, reason: diag.kind === 'stale' ? 'дані монітора застарілі' : 'дані монітора недоступні' },
+    hostPatch: readHostPatchInput(now, opts),
+    upstream: readHostUpstream(db, now),
     fest: readFest(db, now),
   };
 }

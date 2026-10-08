@@ -1,4 +1,4 @@
-import type { SnapshotMetrics, SnapshotRecord, StatusInputs } from './types';
+import type { HostPatchFacts, HostUpstream, SnapshotMetrics, SnapshotRecord, StatusInputs } from './types';
 import { GIB_BYTES } from './rules';
 import { shiftDate } from './helpers';
 
@@ -19,6 +19,22 @@ export const GREEN_METRICS: SnapshotMetrics = {
   diskBytesAvailable: 32 * GIB_BYTES, inodesFree: 2_000_000,
 };
 
+const T = NOW.getTime() / 1000;
+export const GREEN_HOST_PATCH: HostPatchFacts = {
+  timestamp: T - 600,
+  kernel: { running: '6.8.0-142-generic', newestInstalled: '6.8.0-142-generic' },
+  rebootRequired: null,
+  livepatch: { state: 'nothing-to-apply', upgradeRequiredDate: '2027-10-02' },
+  staleServices: [{ unit: 'code-server@ysi.service', since: T - 30 * 86_400 }],
+  unattended: { lastRun: T - 3600, securityPending: 0 },
+  packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: '0.5.17' },
+};
+export const GREEN_UPSTREAM: HostUpstream = {
+  nodeSecurity: { ok: true, value: { version: '24.18.1', date: '2026-07-28' } },
+  nodeEnd: { ok: true, value: '2028-04-30' },
+  litestream: { ok: true, value: { version: '0.5.17', publishedAt: '2026-08-31T21:59:32Z' } },
+};
+
 export function greenInputs(overrides: Partial<StatusInputs> = {}): StatusInputs {
   return {
     now: NOW,
@@ -32,6 +48,8 @@ export function greenInputs(overrides: Partial<StatusInputs> = {}): StatusInputs
     unlock: { ranToday: true, withheld: [] },
     bugReports: null,
     disk: { ok: true, value: { bytesAvailable: 32 * GIB_BYTES, inodesFree: 2_000_000, pendingRuns: 0 } },
+    hostPatch: { ok: true, value: GREEN_HOST_PATCH },
+    upstream: GREEN_UPSTREAM,
     fest: null,
     ...overrides,
   };

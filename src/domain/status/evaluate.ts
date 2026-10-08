@@ -1,4 +1,6 @@
 import type { Colour, Evaluation, FestInputs, StatusInputs, SubsystemId } from './types';
+import { hostPatchFindings } from './host-patch';
+import { upstreamFindings } from './host-upstream';
 import { STATUS_RULES as R } from './rules';
 import { gib, groupThousands, median, parseIsoInstant, previousDays, shiftDate, snapshotOn, warsawClock } from './helpers';
 
@@ -89,8 +91,17 @@ export function evaluateFest(fest: FestInputs, now: Date): Evaluation {
   ]);
 }
 
+// The host-patch and upstream findings are computed independently of the disk monitor (#469):
+// an unreadable disk summary must not hide a red reboot line.
+function hostFindings(i: StatusInputs): Finding[] {
+  return [
+    ...hostPatchFindings(i.hostPatch, i.now),
+    ...upstreamFindings(i.upstream, i.hostPatch.ok ? i.hostPatch.value.packages : null, i.now),
+  ];
+}
+
 export function evaluateInfra(i: StatusInputs): Evaluation {
-  if (!i.disk.ok) return evaluation('infra', [yellow(`нема даних: ${i.disk.reason}`)]);
+  if (!i.disk.ok) return evaluation('infra', [yellow(`нема даних: ${i.disk.reason}`), ...hostFindings(i)]);
   const d = i.disk.value;
   const f: Finding[] = [];
   if (d.bytesAvailable <= R.diskRedBytes) f.push(red(`диск: ${gib(d.bytesAvailable)} GiB вільно`));
@@ -103,7 +114,7 @@ export function evaluateInfra(i: StatusInputs): Evaluation {
     const perDay = (weekAgo.metrics.diskBytesAvailable - d.bytesAvailable) / R.historyDays;
     if (perDay > R.diskFallYellowBytesPerDay) f.push(yellow(`диск тане ~${gib(perDay)} GiB/добу`));
   }
-  return evaluation('infra', f);
+  return evaluation('infra', [...f, ...hostFindings(i)]);
 }
 
 const WITHHELD_EXAMPLES = 5;

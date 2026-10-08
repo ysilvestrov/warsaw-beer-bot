@@ -48,6 +48,7 @@ import { cleanupOldSnapshots } from './jobs/cleanup-old-snapshots';
 import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
+import { hostUpstream } from './jobs/host-upstream';
 import { announceRelease, ANNOUNCED_VERSION_KEY } from './jobs/announce-release';
 import { createReportCommand } from './bot/commands/report';
 import { createNotifier } from './bot/bug-report-media';
@@ -363,6 +364,12 @@ async function main(): Promise<void> {
       unlockFixedOrphans({ db, log, github: triageGithub })
         .catch((e) => log.error({ err: e }, 'unlock-fixed-orphans cron'));
     }),
+    // #469 stage 2: upstream facts for the host-patch rules (Node 24 security releases and EOL,
+    // litestream releases). Hourly UTC tick; each source refreshes once per ~20 h and a failed
+    // fetch retries on the next tick. The morning report only reads job_state.
+    cron.schedule('50 * * * *', () => {
+      hostUpstream({ db, log }).catch((e) => log.error({ err: e }, 'host-upstream cron'));
+    }),
     // announce-release (#379): tell token holders when a new extension version is
     // actually live. Hourly UTC tick; the job checks the Warsaw [09:00,22:00) send
     // window and its own job_state version marker, so it sends once per version
@@ -493,6 +500,7 @@ async function main(): Promise<void> {
   // the day's digest already went out.
   dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
     .catch((e) => log.error({ err: e }, 'daily-status startup'));
+  hostUpstream({ db, log }).catch((e) => log.error({ err: e }, 'host-upstream startup'));
 
   const apiApp = createApiApp({
     db, env, log, webFallback,

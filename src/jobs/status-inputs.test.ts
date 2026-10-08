@@ -15,7 +15,11 @@ import { GREEN_METRICS } from '../domain/status/test-inputs';
 
 const NOW = new Date('2026-10-06T07:00:00.000Z');
 const DATE = '2026-10-06';
-const missing = { testDiagnosticsPath: join(tmpdir(), 'wbb-status-inputs-missing', 'summary.json') };
+// This dev host is the production host: no test may fall back to the real default paths.
+const missing = {
+  testDiagnosticsPath: join(tmpdir(), 'wbb-status-inputs-missing', 'summary.json'),
+  hostPatchPath: join(tmpdir(), 'wbb-status-inputs-missing', 'host-patch.json'),
+};
 
 function emptyDb() {
   const db = openDb(':memory:');
@@ -84,6 +88,14 @@ test('missing monitor file is unavailable disk data and null disk metrics', () =
   const i = collectStatusInputs(emptyDb(), NOW, DATE, missing);
   expect([i.disk, i.metrics.diskBytesAvailable, i.metrics.inodesFree]).toEqual([
     { ok: false, reason: 'дані монітора недоступні' }, null, null,
+  ]);
+});
+
+test('#469: a missing host summary is "підсумок патчів хоста недоступний" and upstream is "ще не завантажено"', () => {
+  const inputs = collectStatusInputs(emptyDb(), NOW, DATE, missing);
+  expect([inputs.hostPatch, inputs.upstream.nodeEnd]).toEqual([
+    { ok: false, reason: 'підсумок патчів хоста недоступний' },
+    { ok: false, reason: 'графік підтримки Node ще не завантажено' },
   ]);
 });
 
