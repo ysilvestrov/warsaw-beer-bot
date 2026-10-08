@@ -38,7 +38,7 @@ export function dominantCandidate(results: SearchResult[], abv: number | null): 
     return null;
   }
 
-  if (abv != null && leader.abv != null && Math.abs(leader.abv - abv) > ABV_TOLERANCE) return null;
+  if (abv != null && leader.abv != null && leader.abv > 0 && Math.abs(leader.abv - abv) > ABV_TOLERANCE) return null;
 
   return leader;
 }
