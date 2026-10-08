@@ -114,6 +114,31 @@ describe('hostUpstream + readHostUpstream', () => {
     expect(readHostUpstream(db, NOW).nodeSecurity).toEqual({ ok: true, value: null });
   });
 
+  it('refetches a source whose stored timestamp is in the future, and repairs it', async () => {
+    setJobState(db, HOST_UPSTREAM_KEY, JSON.stringify({
+      nodeEnd: { value: '2028-04-30', at: new Date(NOW.getTime() + 365 * 24 * HOUR).toISOString() },
+    }));
+    const asked: string[] = [];
+    await hostUpstream({ db, log, now: () => NOW, fetchJson: fetcher(ALL, asked) });
+    expect(asked).toContain(NODE_SCHEDULE_URL);
+    expect(readHostUpstream(db, NOW).nodeEnd).toEqual({ ok: true, value: '2028-04-30' });
+  });
+
+  it('refetches a source whose fresh entry holds an invalid value, and repairs it', async () => {
+    setJobState(db, HOST_UPSTREAM_KEY, JSON.stringify({ nodeEnd: { value: 'April', at: NOW.toISOString() } }));
+    const asked: string[] = [];
+    const later = new Date(NOW.getTime() + HOUR);
+    await hostUpstream({ db, log, now: () => later, fetchJson: fetcher(ALL, asked) });
+    expect(asked).toContain(NODE_SCHEDULE_URL);
+    expect(readHostUpstream(db, later).nodeEnd).toEqual({ ok: true, value: '2028-04-30' });
+  });
+
+  it('a stored value of the wrong type (a one-element array) is "пошкоджено"', () => {
+    setJobState(db, HOST_UPSTREAM_KEY, JSON.stringify({ nodeEnd: { value: ['2028-04-30'], at: NOW.toISOString() } }));
+    expect(readHostUpstream(db, NOW).nodeEnd)
+      .toEqual({ ok: false, reason: 'графік підтримки Node: збережений стан пошкоджено' });
+  });
+
   it('writes one job_state row', async () => {
     await hostUpstream({ db, log, now: () => NOW, fetchJson: fetcher(ALL) });
     expect(JSON.parse(getJobState(db, HOST_UPSTREAM_KEY)!)).toEqual({
