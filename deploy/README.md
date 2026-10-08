@@ -412,6 +412,31 @@ first line of defense, not the only one — the privileged `sudo systemctl
 stop wbb-autodeploy.timer` (or disabling the timer) remains the real, load-bearing
 stop.
 
+## Runtime artifact (CI only, not used by the host yet)
+
+Design: `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`.
+Stage Ядро-1 is CI only: every push to `main` runs the `package` job in
+`.github/workflows/ci.yml`, which publishes `wbb-release-<sha>-<run_id>-<attempt>`
+(`runtime.tar.gz` + `runtime.tar.gz.sha256`, kept 30 days). Nothing on the host reads
+it yet; `deploy.sh` and the merge-deploy tick still build on the host as described above.
+
+The tools live in `deploy/release/` (Python 3.12+ stdlib):
+
+- `package_runtime.py` — assembles the payload (`dist`, production `node_modules`,
+  `src/api/fest-print/**`, the allowlisted TS ops commands and their imports), writes
+  `release.json` + `tree-manifest.json`, packs a deterministic archive. CI only.
+- `tree_manifest.py` — the manifest format and the exact tree check (`verify <root>`).
+- `verify_payload.py` + `payload-probe.cjs` — unpacks into a new directory, checks the
+  tree, then runs the read-only payload with an empty environment (SQLite, migrations
+  twice, fest-print assets, every ops command loads, `dist/index.js` reaches `loadEnv`).
+
+To check a downloaded artifact by hand (no production access needed, any scratch directory):
+
+```bash
+python3 deploy/release/verify_payload.py --archive runtime.tar.gz \
+  --checksum runtime.tar.gz.sha256 --sha <full-sha> --workdir /tmp/wbb-verify-<sha>
+```
+
 ## Host patching (#469)
 
 Spec: `docs/superpowers/specs/2026-10/2026-10-06-469-host-patching-design.md`.

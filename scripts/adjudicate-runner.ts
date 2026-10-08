@@ -100,6 +100,10 @@ async function main(argv: string[]): Promise<number> {
   }
 }
 
-main(process.argv.slice(2))
-  .then((code) => { process.exitCode = code; })
-  .catch((err) => { console.error(err); process.exitCode = 1; });
+// Guarded like the other ops commands: the runtime artifact's payload proof loads every
+// ops entrypoint with require() and must not run any of them (artifact deployment, spec §3).
+if (require.main === module) {
+  main(process.argv.slice(2))
+    .then((code) => { process.exitCode = code; })
+    .catch((err) => { console.error(err); process.exitCode = 1; });
+}

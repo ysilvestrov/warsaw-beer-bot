@@ -16,6 +16,8 @@
     // production gets patched with nobody watching, so they are the last
     // place an untypechecked file belongs.
     "scripts/test-temp*.ts",
+    // Artifact deployment Ядро-1: the workflow contract of the runtime artifact.
+    "scripts/release.test.ts",
     "scripts/ops.test.ts",
     "scripts/autodeploy/**/*",
     "scripts/ai-review/**/*",

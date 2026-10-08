@@ -49,17 +49,92 @@ jobs:
         run: npm test
         working-directory: ${{ matrix.dir }}
 
+  # Artifact deployment, Ядро-1 (docs/superpowers/specs/2026-10/
+  # 2026-10-08-wbb-artifact-deployment-design.md §3 BUILD-001): the runtime payload
+  # of exactly this main SHA — dist, production node_modules, the read-by-path
+  # assets and the TS ops commands — proven from its UNPACKED bytes, with an empty
+  # environment, before it is published. The host does not consume it yet (Ядро-2).
+  # Its own pinned platform: the artifact's ABI/glibc contract must not move with
+  # ubuntu-latest.
+  package:
+    name: package
+    runs-on: ubuntu-24.04
+    needs: [build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Build dist
+        run: npx tsc -p tsconfig.release.json --outDir "$RUNNER_TEMP/dist"
+
+      - name: Install production dependencies
+        run: |
+          mkdir "$RUNNER_TEMP/prod"
+          cp package.json package-lock.json "$RUNNER_TEMP/prod/"
+          cd "$RUNNER_TEMP/prod"
+          npm ci --omit=dev --no-audit --no-fund
+
+      # Spec §5, audit 1 of 2: the production tree as it will ship. npm's exit code
+      # cannot tell an advisory from a failure to audit; the verdict CLI decides
+      # (0 clean, 10 advisory, anything else could not run) and any non-zero is red.
+      - name: Audit production dependencies
+        run: |
+          report=$(cd "$RUNNER_TEMP/prod" && npm audit --omit=dev --json 2>/dev/null) || true
+          printf '%s' "$report" | ./node_modules/.bin/tsx scripts/autodeploy/audit-verdict-cli.ts
+
+      - name: Package runtime
+        run: >-
+          python3 deploy/release/package_runtime.py --repo . --dist "$RUNNER_TEMP/dist"
+          --modules "$RUNNER_TEMP/prod/node_modules" --out "$RUNNER_TEMP/release"
+          --repo-slug "$GITHUB_REPOSITORY" --sha "$GITHUB_SHA" --workflow .github/workflows/ci.yml
+          --run-id "$GITHUB_RUN_ID" --run-attempt "$GITHUB_RUN_ATTEMPT"
+
+      - name: Verify unpacked payload
+        run: >-
+          python3 deploy/release/verify_payload.py --archive "$RUNNER_TEMP/release/runtime.tar.gz"
+          --checksum "$RUNNER_TEMP/release/runtime.tar.gz.sha256" --sha "$GITHUB_SHA"
+          --workdir "$RUNNER_TEMP/verify"
+
+      # One name per run attempt: a re-run never overwrites what an earlier attempt published.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wbb-release-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/release/runtime.tar.gz
+            ${{ runner.temp }}/release/runtime.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
+
   # Single stable name for branch protection and auto-merge to depend on.
   # `if: always()` so this job runs even when `build` failed — otherwise a
   # failed matrix leg would leave the required check *pending* forever and
   # every PR would hang instead of going red.
+  # On a main push `package` must succeed too (spec §5): a main SHA without its
+  # runtime artifact is not deployable. Elsewhere `package` is skipped by design,
+  # and skipped is accepted only there.
   ci:
     name: ci
     runs-on: ubuntu-latest
-    needs: [build]
+    needs: [build, package]
     if: always()
     steps:
-      - name: Report matrix result
+      - name: Report results
+        env:
+          BUILD: ${{ needs.build.result }}
+          PACKAGE: ${{ needs.package.result }}
+          MAIN_PUSH: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
         run: |
-          echo "build result: ${{ needs.build.result }}"
-          [ "${{ needs.build.result }}" = "success" ]
+          echo "build: $BUILD; package: $PACKAGE; main push: $MAIN_PUSH"
+          [ "$BUILD" = success ] || exit 1
+          [ "$PACKAGE" = success ] && exit 0
+          [ "$MAIN_PUSH" = false ] && [ "$PACKAGE" = skipped ]

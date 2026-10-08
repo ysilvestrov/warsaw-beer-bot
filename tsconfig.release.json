@@ -1,0 +1,18 @@
+{
+  // Production build of the runtime artifact (docs/superpowers/specs/2026-10/
+  // 2026-10-08-wbb-artifact-deployment-design.md §3): dist without tests. The
+  // vitest globals are left out on purpose, so a production module that leans
+  // on them fails this build instead of shipping.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "tests",
+    "src/**/*.test.ts",
+    "src/**/*.testing.ts",
+    "src/domain/status/test-inputs.ts"
+  ]
+}

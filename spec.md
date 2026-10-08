@@ -49,7 +49,7 @@ Telegram-бот для пивних краулів у Варшаві. Він д�
 
 | Шар | Технологія | Призначення |
 |-----|-----------|-------------|
-| Runtime | **Node.js ≥ 20** | базова платформа |
+| Runtime | **Node.js 24** (`engines >=24`; зміна major — окреме рішення, бо від неї залежить нативний runtime artifact, §5.9) | базова платформа |
 | Мова | **TypeScript** (strict) | уся кодова база |
 | Telegram | **Telegraf 4.x** | бот-фреймворк, long polling |
 | База даних | **better-sqlite3** (SQLite, WAL) | увесь персистентний стан |
@@ -2792,6 +2792,24 @@ Browser/extension relay не гейтиться цими breaker-ами: бло�
   Сам `deploy.sh`: rsync allowlist build/runtime-файлів → `/opt` → `npm ci` → `npm run build` →
   `npm prune --omit=dev` → `systemctl enable` + явний **`restart`**.
   (`enable --now` на запущеному unit'і не перезапускає).
+- **Runtime artifact (перехід на деплой готових артефактів, спека
+  `docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md`; зараз зроблено
+  Ядро-1 — лише CI).** На кожен push у `main` job `package` у `.github/workflows/ci.yml`
+  (`ubuntu-24.04`, Node 24, тільки після зеленого `build`) збирає payload саме цього SHA:
+  `dist` без тестів (`tsconfig.release.json`), production `node_modules` (`npm ci --omit=dev`),
+  `src/api/fest-print/**` (сторінку й бібліотеку роут читає з диска) і TS-джерела десяти ops-команд
+  (`alias-key`, `rearm-aliased-orphans`, `rearm-matcher-bug-orphans`, `adjudicate`,
+  `close-orphan-issue`, `pin-match`, `repair-legacy-card`, `dispose-legacy-orphan`,
+  `retire-resolved-orphans`, `cluster-triage`) з їхніми імпортами — `tsx` лишається production-залежністю.
+  `release.json` називає SHA, run/attempt, Node/ABI і glibc; `tree-manifest.json` перелічує кожен
+  файл (mode, розмір, SHA256), теку й symlink. Перед публікацією CI розпаковує архів у нову теку,
+  звіряє дерево з маніфестом і запускає payload з порожнім оточенням: SQLite, двічі міграцію,
+  сторінку fest-print через її роут, завантаження кожної ops-команди та старт `dist/index.js` до
+  першої перевірки env. Тоді ж `npm audit --omit=dev` по дереву, яке їде (high/critical — червоно).
+  Артефакт `wbb-release-<sha>-<run_id>-<attempt>` (`runtime.tar.gz` + `.sha256`) живе 30 днів.
+  На `main` стабільний check `ci` зелений лише з успішним `package`; на PR `package` пропускається.
+  **Хост артефакт поки не використовує**: `deploy.sh` і merge-deploy збирають код як описано вище,
+  доки не встановлено Ядро-2 (перевірка походження, пробний запуск і перемикання релізу з відкатом).
 - **Захист від регресії деплою (#767/#768).** Дизайн:
   `docs/superpowers/specs/2026-10/2026-10-01-767-768-deploy-regression-design.md`.
   Ручний `deploy.sh` під спільним lock, до першого `sudo`, дозволяє лише HEAD,
