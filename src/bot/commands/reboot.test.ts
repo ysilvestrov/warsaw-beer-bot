@@ -72,7 +72,8 @@ function callback(updateId: number, from: number, data: string, chatType: 'priva
       : { id: -100, type: 'supergroup' as const, title: 'G' } } } };
 }
 
-function setup(opts: { current?: number | null | 'unknown'; snoozeOk?: boolean; requestThrows?: boolean } = {}) {
+function setup(opts: { current?: number | null | 'unknown'; snoozeOk?: boolean; requestThrows?: boolean;
+  snoozeThrows?: boolean; answerRejects?: boolean } = {}) {
   const requests: Array<[RebootKind, number]> = [];
   const snoozes: number[] = [];
   const answers: (string | undefined)[] = [];
@@ -83,7 +84,9 @@ function setup(opts: { current?: number | null | 'unknown'; snoozeOk?: boolean; 
   bot.botInfo = BOT_INFO;
   bot.use((ctx, next) => {
     ctx.deps = { db: {}, env: { ADMIN_TELEGRAM_ID: String(ADMIN) }, log: {} } as never;
-    ctx.answerCbQuery = (async (text?: string) => { answers.push(text); return true; }) as never;
+    ctx.answerCbQuery = (opts.answerRejects
+      ? async () => { throw new Error('query is too old'); }
+      : async (text?: string) => { answers.push(text); return true; }) as never;
     ctx.reply = (async (m: string) => { replies.push(m); return { message_id: 9 }; }) as never;
     ctx.editMessageReplyMarkup = (async (m: unknown) => { edits.push(m); return true; }) as never;
     return next();
@@ -95,7 +98,11 @@ function setup(opts: { current?: number | null | 'unknown'; snoozeOk?: boolean; 
       if (opts.requestThrows) throw new Error('EACCES');
       requests.push([kind, now.getTime()]);
     },
-    snooze: (since) => { snoozes.push(since); return opts.snoozeOk ?? true; },
+    snooze: (since) => {
+      if (opts.snoozeThrows) throw new Error('SQLITE_READONLY');
+      snoozes.push(since);
+      return opts.snoozeOk ?? true;
+    },
     log: { error: (_o, msg) => { errors.push(msg); } },
   }));
   return { bot, requests, snoozes, answers, replies, edits, errors };
@@ -146,7 +153,7 @@ describe('createRebootCommand', () => {
   it('a failed request write is logged, reported, and keeps the keyboard', async () => {
     const s = setup({ requestThrows: true });
     await press(s.bot, ADMIN, `rb:now:${SINCE}`);
-    expect([s.errors, s.answers, s.replies, s.edits]).toEqual([['reboot request write failed'], [PRESS_TEXT.failed], [], []]);
+    expect([s.errors, s.answers, s.replies, s.edits]).toEqual([['reboot press failed'], [PRESS_TEXT.failed], [], []]);
   });
 
   it('«Нагадати через 3 дні» snoozes that since', async () => {
@@ -159,6 +166,20 @@ describe('createRebootCommand', () => {
     const s = setup({ current: null });
     await press(s.bot, ADMIN, `rb:snooze:${SINCE}`);
     expect([s.snoozes, s.replies, s.edits]).toEqual([[], [PRESS_TEXT.stale], [undefined]]);
+  });
+
+  it('a snooze whose state write throws is logged and reported, and keeps the keyboard', async () => {
+    const s = setup({ snoozeThrows: true });
+    await press(s.bot, ADMIN, `rb:snooze:${SINCE}`);
+    expect([s.errors, s.answers, s.replies, s.edits]).toEqual([['reboot press failed'], [PRESS_TEXT.failed], [], []]);
+  });
+
+  it('an expired callback query still drops the keyboard and leaves the reply, after the request was written', async () => {
+    const s = setup({ answerRejects: true });
+    await press(s.bot, ADMIN, `rb:now:${SINCE}`);
+    expect([s.requests, s.errors, s.edits, s.replies]).toEqual([
+      [['now', NOW.getTime()]], ['reboot press toast failed'], [undefined], [PRESS_TEXT.requested_now],
+    ]);
   });
 
   it('a snooze the alert state refuses is stale', async () => {

@@ -66,24 +66,30 @@ export function createRebootCommand(deps: RebootCommandDeps): Composer<BotContex
       return;
     }
     let text: string;
-    if (outcome === 'request') {
-      const kind = action as RebootKind;
-      try {
+    try {
+      if (outcome === 'request') {
+        const kind = action as RebootKind;
         deps.request(kind, now);
-      } catch (e) {
-        deps.log.error({ err: e }, 'reboot request write failed');
-        await ctx.answerCbQuery(PRESS_TEXT.failed);
-        return;
+        text = kind === 'now' ? PRESS_TEXT.requested_now : PRESS_TEXT.requested_0400;
+      } else if (outcome === 'snooze') {
+        text = deps.snooze(since, now) ? PRESS_TEXT.snoozed : PRESS_TEXT.stale;
+      } else {
+        text = PRESS_TEXT.stale;
       }
-      text = kind === 'now' ? PRESS_TEXT.requested_now : PRESS_TEXT.requested_0400;
-    } else if (outcome === 'snooze') {
-      text = deps.snooze(since, now) ? PRESS_TEXT.snoozed : PRESS_TEXT.stale;
-    } else {
-      text = PRESS_TEXT.stale;
+    } catch (e) {
+      deps.log.error({ err: e }, 'reboot press failed');
+      await ctx.answerCbQuery(PRESS_TEXT.failed);
+      return;
     }
-    await ctx.answerCbQuery(text);
-    await ctx.editMessageReplyMarkup(undefined);
-    await ctx.reply(text);
+    // The action is already done: each Telegram call is independent, so an expired callback
+    // query (or a message too old to edit) still leaves the admin the chat reply (AI review #808).
+    for (const [what, call] of [
+      ['toast', () => ctx.answerCbQuery(text)],
+      ['keyboard removal', () => ctx.editMessageReplyMarkup(undefined)],
+      ['reply', () => ctx.reply(text)],
+    ] as const) {
+      await call().catch((e: unknown) => deps.log.error({ err: e }, `reboot press ${what} failed`));
+    }
   });
   return composer;
 }
