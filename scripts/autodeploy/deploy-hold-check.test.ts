@@ -23,6 +23,7 @@ const TABLE: Array<[string, boolean]> = [
   ['deploy/db-snapshot.sh', true],
   ['deploy/trial-migrate.cjs', true],
   ['scripts/ops/host_patch_collect.py', true],
+  ['scripts/ops/reboot_request.py', true],
   ['deploy/warsaw-beer-bot.service', false],
   ['deploy/deploy.sh', false],
   ['deploy/record-deployed.sh', false],

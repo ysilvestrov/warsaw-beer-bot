@@ -1,0 +1,10 @@
+[Unit]
+Description=#469 stage 3: watch for the bot's reboot request
+
+[Path]
+# Fires on a direct write and on the bot's temp+rename, and re-arms after each request (spec C21).
+PathChanged=/var/lib/wbb-host-patch/reboot-request
+Unit=wbb-reboot-request.service
+
+[Install]
+WantedBy=paths.target

@@ -1,0 +1,9 @@
+[Unit]
+Description=#469 stage 3: act on the bot's reboot request (the bot asks, root decides)
+
+[Service]
+Type=oneshot
+# The handler deletes the request first, validates it, and acts only while /run/reboot-required
+# exists (spec C24). Its own delete re-fires PathChanged; that run finds no request and exits 0.
+ExecStart=/usr/bin/python3 -I -B /usr/local/libexec/wbb-reboot-request
+TimeoutStartSec=2min
