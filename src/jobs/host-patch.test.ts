@@ -65,6 +65,12 @@ describe('readHostPatch', () => {
     });
   });
 
+  it('keeps an odd Livepatch date so the rules can call it "нема даних"', () => {
+    write({ ...summary, livepatch: { state: 'applied', upgrade_required_date: '02.10.2027' } });
+    expect(readHostPatch(now, path, owner())).toMatchObject({
+      kind: 'ok', facts: { livepatch: { state: 'applied', upgradeRequiredDate: '02.10.2027' } } });
+  });
+
   it('accepts a summary exactly three hours old and calls one second older stale', () => {
     write({ ...summary, timestamp: 1_791_440_000 - 10_800 });
     expect(readHostPatch(now, path, owner()).kind).toBe('ok');
@@ -81,7 +87,6 @@ describe('readHostPatch', () => {
     ['version 2', { version: 2 }],
     ['fractional timestamp', { timestamp: 1.5 }],
     ['unknown livepatch state', { livepatch: { state: 'disabled', upgrade_required_date: null } }],
-    ['malformed date', { livepatch: { state: 'applied', upgrade_required_date: '02.10.2027' } }],
     ['negative security count', { unattended: { last_run: null, security_pending: -1 } }],
     ['string since', { stale_services: [{ unit: 'ssh.service', since: '1' }] }],
     ['extra top-level key', { surprise: true }],
