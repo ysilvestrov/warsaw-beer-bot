@@ -35,16 +35,24 @@ def run(argv):
 
 
 def take(path):
-    """The request's bytes, or None for anything but a small regular file that was deleted.
+    """Claim the request, then read it: its bytes, or None for anything but a small regular file.
 
-    Deletes it either way; a request that could not be deleted is a refusal, never an action.
+    The claim is an atomic rename to a private name in the same directory, BEFORE reading: a newer
+    request the bot renames over `path` meanwhile lands untouched and is handled on the next
+    PathChanged (cross-review: an unlink by name after reading deleted it). The claimed copy is
+    deleted either way; one that could not be deleted is a refusal, never an action.
     """
+    claimed = f'{path}.taken.{os.getpid()}'
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        os.rename(path, claimed)  # renames a symlink itself, never its target
     except FileNotFoundError:
         return b''  # nothing there: the caller tells "no request" from "refused" by existence
     except OSError:
-        fd = None  # a symlink (ELOOP), a directory, …
+        return None
+    try:
+        fd = os.open(claimed, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        fd = None  # a symlink (ELOOP), …
     data = None
     try:
         if fd is not None:
@@ -55,9 +63,7 @@ def take(path):
         if fd is not None:
             os.close(fd)
         try:
-            os.unlink(path)  # never follows a symlink: removes the link, not its target
-        except FileNotFoundError:
-            pass
+            os.unlink(claimed)  # never follows a symlink: removes the link, not its target
         except OSError:  # IsADirectoryError, PermissionError, …
             data = None
     return data

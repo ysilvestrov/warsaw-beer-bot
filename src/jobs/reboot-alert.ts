@@ -44,7 +44,12 @@ export async function rebootAlert(deps: RebootAlertDeps): Promise<void> {
     return;
   }
   await deps.send(decision.text); // throws → nothing saved → the next tick retries
-  writeState(deps.db, decision.state);
+  // A snooze the admin pressed while this was being sent is newer than our decision: keep it.
+  const current = readState(deps.db);
+  const t = Math.floor(now.getTime() / 1000);
+  const snoozedMeanwhile = current !== null && current.since === decision.state.since
+    && current.snoozeUntil !== null && current.snoozeUntil > t;
+  if (!snoozedMeanwhile) writeState(deps.db, decision.state);
 }
 
 /**

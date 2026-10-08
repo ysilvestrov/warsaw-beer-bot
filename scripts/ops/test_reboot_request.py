@@ -3,6 +3,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from unittest import mock
 
 import reboot_request as rr
@@ -131,6 +132,29 @@ class Handler(unittest.TestCase):
         (code, message), run = self.handle()
         self.assertEqual((code, message, run.calls), (0, 'no request', []))
 
+
+
+class Race(Handler):
+    def test_a_newer_request_written_while_the_old_one_is_read_survives(self):
+        # Cross-review (codex @ 237922c): the bot renames request B over the path while root
+        # reads request A. Root must act on A and leave B in place for the next PathChanged.
+        real_read = os.read
+        newer = f'now {NOW}\n'.encode()
+
+        def read_while_bot_writes(fd, n):
+            self.path.write_bytes(newer)
+            return real_read(fd, n)
+
+        self.path.write_bytes(f'0400 {NOW}\n'.encode())
+        run = Recorder()
+        with patch.object(rr.os, 'read', side_effect=read_while_bot_writes):
+            code, message = rr.handle(str(self.path), run, NOW, str(self.flag))
+        self.assertEqual((code, message, run.calls, self.path.read_bytes()),
+                         (0, 'reboot scheduled for 04:00 Europe/Warsaw', [AT_0400], newer))
+
+    def test_the_claimed_request_is_removed_after_handling(self):
+        (code, _), _ = self.handle(f'now {NOW}\n'.encode())
+        self.assertEqual((code, sorted(os.listdir(self.dir))), (0, sorted([self.flag.name])))
 
 if __name__ == '__main__':
     unittest.main()
