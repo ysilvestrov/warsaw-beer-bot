@@ -113,7 +113,16 @@ network: the root part stays minimal and its output depends only on the host. It
 }
 ```
 
-`reboot_required.since` is the mtime of `/var/run/reboot-required`. `unattended.last_run`
+`reboot_required.since` is when the reboot **first** became pending, not the flag's mtime:
+`notify-reboot-required` rewrites `/var/run/reboot-required` (`>`) for every package that
+asks for a reboot, so the raw mtime is the *latest* request and would reset the "чекає N днів"
+clock on every libc6/dbus update — the 🔴 at 14 days could then never fire. The collector
+carries it forward like `stale_services[].since`: `min(previous.since, mtime)` while the flag
+exists; a previous `since` older than boot time (`btime` in `/proc/stat`) is dropped, because
+`/run` is emptied on reboot. Under Livepatch, kernel packages exit `notify-reboot-required`
+early, so the flag tracks non-kernel packages; a pending kernel shows only as
+`kernel.running ≠ kernel.newest_installed`, which no rule reads — `upgrade_required_date`
+covers the kernel. `unattended.last_run`
 is the mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp`. `security_pending`
 counts lines of `apt list --upgradable` whose archive list names a `-security` pocket
 (`noble-security`, `noble-apps-security`, `noble-infra-security`). Package versions come
@@ -163,7 +172,7 @@ line.
 |---|---|---|
 | reboot pending (`now − reboot_required.since`) | > 3 days | > 14 days |
 | Livepatch `state` ∉ {`applied`, `nothing-to-apply`} | always | — |
-| Livepatch `upgrade_required_date` (kernel leaves Livepatch support) | < 30 days | past |
+| Livepatch `upgrade_required_date` (kernel leaves Livepatch support; the date's own day counts as past) | < 30 days | past |
 | a **watched** unit in `stale_services` (needrestart did not restart it) | `now − since` > 1 day | — |
 | newest Node 24.x security release > installed `nodejs` | — | release `date` > 3 days ago |
 | `security_pending > 0` | unattended-upgrades last run > 2 days ago | — |
@@ -233,7 +242,9 @@ and litestream's flush run as on any `systemctl stop`.
 | C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | services: strong (re-checked by the stage-1 reboot 2026-10-06 — all came back). **Not** `wbb-autodeploy.timer`: enabled but never fired after a slow boot (#798, Persistent stamp + passed `OnBootSec`; fixed by #799) — "enabled" did not prove "will run" |
 | C15 | the collector can read Livepatch state | snap CLIs fail inside code-server's cgroup (`is not a snap cgroup`); the same command under `systemd-run --wait --pipe` returned the P1 JSON | strong (probe) → the collector is its own unit |
 | C16 | `unattended.last_run` = mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp` | probed 2026-10-08: mtime 06:03:49; the run in `unattended-upgrades-dpkg.log` ended 06:03:48 | strong (probe) |
-| C17 | `apt list --upgradable` marks security candidates by a `-security` archive | format `pkg/<archive>[,<archive>…] <ver> <arch> [upgradable from: …]` seen 2026-10-08 on 53 lines; **no** live security line (0 pending: u-u had applied them) | medium — the positive case is a fixture, not a live line; the rule fires only 🟡 and only when u-u is also > 2 days stale |
+| C17 | `apt list --upgradable` marks security candidates by a `-security` archive | format `pkg/<archive>[,<archive>…] <ver> <arch> [upgradable from: …]` seen 2026-10-08 on 53 lines; **no** live security line (0 pending: u-u had applied them) | medium — the positive case is a fixture, not a live line; the rule fires only 🟡 and only when u-u is also > 2 days stale. Also only as fresh as the apt lists: if `apt update` keeps failing while u-u runs, the count stays 0 and nothing shows |
+| C19 | `reboot_required.since` = when the reboot first became pending | read 2026-10-08: `/usr/share/update-notifier/notify-reboot-required` writes the flag with `>` per package (so mtime = latest request); C2's own probe showed it — mtime 2026-09-26 against a kernel pending since April. Hence carried forward from the previous summary, reset at boot (`btime`) | strong (source) for the defect; the carry-forward is the collector's own logic, tested |
+| C20 | `stale_services[].since` = first hourly run that saw the unit stale | the collector's own carry-forward (precision: one timer period). Lost if the previous summary is unreadable — then it restarts at "now", which can only *delay* a 🟡, never invent one | medium — under-reports after a lost summary, never over-reports |
 | C18 | package versions come from `dpkg-query -W` | probed 2026-10-08 unprivileged: `nodejs 24.21.0-1nodesource1`, `cloudflared 2026.10.0`, `litestream 0.5.11` | strong (probe) |
 
 P1–P4 passed (P1/P3 on 2026-10-07, after stage 1's host steps). A claim that fails its probe is redesigned, not written into code.
