@@ -1,5 +1,5 @@
 import { openDb } from './db';
-import { migrate, V24_NOT_A_BEER_IDS } from './schema';
+import { migrate, V24_NOT_A_BEER_IDS, V46_CANONICALIZE_WFP22_SQL } from './schema';
 import { restoreV40History } from './history-v40.testing';
 import { upsertPub } from './pubs';
 import { createSnapshot, insertTaps } from './snapshots';
@@ -915,12 +915,24 @@ describe('v34 legacy_card_repairs (#696)', () => {
 });
 
 describe('v46 fest venue slug canonicalization (#809)', () => {
-  it('migration v46 canonicalizes wfp22 venue feed_path', () => {
+  it('migration v46 canonicalizes wfp22 venue feed_path and preserves other fests', () => {
     const db = openDb(':memory:');
     migrate(db);
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 46').get()).toEqual({ version: 46 });
-    const row = db.prepare('SELECT feed_path FROM fest_venues WHERE venue_id = 11142155').get() as { feed_path: string } | undefined;
+    const row = db.prepare("SELECT feed_path FROM fest_venues WHERE venue_id = 11142155 AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')").get() as { feed_path: string } | undefined;
     expect(row?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    // Insert another fest sharing venue 11142155
+    db.prepare("INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('other', 'Other', 11142155, 3.8, '[]')").run();
+    const otherFest = db.prepare("SELECT id FROM fests WHERE slug = 'other'").get() as { id: number };
+    db.prepare("INSERT INTO fest_venues (fest_id, venue_id, label, feed_path) VALUES (?, 11142155, 'Other', '/v/other/11142155/activity')").run(otherFest.id);
+
+    // Re-run migration 46 SQL
+    db.exec(V46_CANONICALIZE_WFP22_SQL);
+
+    const otherRow = db.prepare('SELECT feed_path FROM fest_venues WHERE fest_id = ?').get(otherFest.id) as { feed_path: string };
+    expect(otherRow.feed_path).toBe('/v/other/11142155/activity');
+
     db.close();
   });
 });

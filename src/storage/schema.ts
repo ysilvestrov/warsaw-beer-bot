@@ -341,6 +341,13 @@ export const V42_FEST_SQL = `
            '/v/stadion-legii-warszawa-im-marszalka-jozefa-pilsudskiego/2167060' FROM fests WHERE slug = 'wfp22';
 `;
 
+export const V46_CANONICALIZE_WFP22_SQL = `
+  UPDATE fest_venues
+     SET feed_path = '/v/warszawski-festiwal-piwa/11142155/activity'
+   WHERE venue_id = 11142155
+     AND fest_id IN (SELECT id FROM fests WHERE slug = 'wfp22');
+`;
+
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 1,
@@ -1013,11 +1020,7 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
   {
     version: 46,
     // #809: canonicalize WFP22 festival venue feed_path in existing databases
-    sql: `
-      UPDATE fest_venues
-         SET feed_path = '/v/warszawski-festiwal-piwa/11142155/activity'
-       WHERE venue_id = 11142155;
-    `,
+    sql: V46_CANONICALIZE_WFP22_SQL,
   },
 ];
 
