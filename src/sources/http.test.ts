@@ -397,3 +397,55 @@ test('rotates and retries when a followed redirect hop encounters a block', asyn
   expect(rotator.rotations()).toBe(1);
   expect(hop2Calls).toBe(2);
 });
+
+test('bounds block retries by maxBlockRetries across the entire redirect chain', async () => {
+  const rotator = fakeRotator();
+  let call = 0;
+  const fetchImpl: typeof fetch = async () => {
+    call++;
+    // Hop 1 blocks, then rotates and redirects to hop 2
+    if (call === 1) return new Response('', { status: 403 });
+    if (call === 2) return new Response('', { status: 307, headers: { Location: 'https://untappd.com/hop/1' } });
+    // Hop 2 blocks again - should exceed budget (budget=1) and throw HttpError without 2nd rotation
+    if (call === 3) return new Response('', { status: 403 });
+    return new Response('ok', { status: 200 });
+  };
+  const http = createHttp({
+    userAgent: 'ua',
+    minGapMs: 0,
+    fetchImpl,
+    rotator,
+    isBlock: untappdBlock,
+    redirect: 'manual',
+    maxBlockRetries: 1,
+  });
+  await expect(http.get('https://untappd.com/hop/0')).rejects.toMatchObject({
+    name: 'HttpError',
+    status: 403,
+  });
+  expect(rotator.rotations()).toBe(1);
+  expect(call).toBe(3);
+});
+
+test('consumes response body on 3xx redirect to free connection resources', async () => {
+  let bodyConsumed = false;
+  const fetchImpl: typeof fetch = async (url) => {
+    if (url === 'https://untappd.com/v/old/1') {
+      const res = new Response('redirect-payload', {
+        status: 307,
+        headers: { Location: 'https://untappd.com/v/new/1' },
+      });
+      const origText = res.text.bind(res);
+      res.text = async () => {
+        bodyConsumed = true;
+        return origText();
+      };
+      return res;
+    }
+    return new Response('final-body', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  const body = await http.get('https://untappd.com/v/old/1');
+  expect(body).toBe('final-body');
+  expect(bodyConsumed).toBe(true);
+});

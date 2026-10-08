@@ -74,24 +74,31 @@ export function createHttp(opts: HttpOpts): Http {
     if (res.status >= 300 && res.status < 400) {
       if (opts.redirect === 'manual') {
         const location = res.headers?.get('location');
-        if (!location) throw new HttpError(res.status, url);
+        if (!location) {
+          await res.text().catch(() => {});
+          throw new HttpError(res.status, url);
+        }
         let target: URL;
         let current: URL;
         try {
           target = new URL(location, url);
           current = new URL(url);
         } catch {
+          await res.text().catch(() => {});
           throw new HttpError(res.status, url);
         }
         // Protect credentials: only follow HTTPS redirects on the same origin.
         if (target.protocol !== 'https:' || target.origin !== current.origin) {
+          await res.text().catch(() => {});
           throw new HttpError(res.status, url);
         }
+        await res.text().catch(() => {});
         if (target.pathname === '/login' || target.pathname.startsWith('/login/')) {
           throw new CookieExpiredError();
         }
         return { kind: 'redirect', nextUrl: target.href, status: res.status };
       }
+      await res.text().catch(() => {});
       throw new HttpError(res.status, url);
     }
     if (!res.ok) {
@@ -116,6 +123,8 @@ export function createHttp(opts: HttpOpts): Http {
 
         let currentUrl = url;
         let hops = 0;
+        let retries = 0;
+        const budget = opts.maxBlockRetries ?? 1;
 
         while (true) {
           let outcome = await classify(currentUrl, await doFetch(currentUrl));
@@ -124,8 +133,6 @@ export function createHttp(opts: HttpOpts): Http {
           // residential exit IPs pass, so retrying through fresh IPs beats the lottery.
           // safe: classify() only returns 'block' when opts.rotator is truthy. Retries
           // use a fresh IP each time, so no extra throttle gap is applied.
-          const budget = opts.maxBlockRetries ?? 1;
-          let retries = 0;
           while (outcome.kind === 'block') {
             if (retries >= budget) {
               // Surface a status the jobs' isBlockStatus() recognises (403/429) so a
