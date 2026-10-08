@@ -301,3 +301,31 @@ describe('rating boundary (#616)', () => {
     expect(out?.global_rating).toBeNull();
   });
 });
+
+describe('abv normalization (#484)', () => {
+  it('parseAlgoliaResponse normalizes beer_abv 0 or negative to null', () => {
+    const parsed = parseAlgoliaResponse({
+      hits: [
+        { bid: 1, beer_name: 'Zero ABV', brewery_name: 'B', beer_abv: 0, rating_score: 3 },
+        { bid: 2, beer_name: 'Zero Float', brewery_name: 'B', beer_abv: '0.0', rating_score: 3 },
+        { bid: 3, beer_name: 'Negative ABV', brewery_name: 'B', beer_abv: -1, rating_score: 3 },
+        { bid: 4, beer_name: 'Normal ABV', brewery_name: 'B', beer_abv: 5.2, rating_score: 3 },
+      ],
+    });
+    expect(parsed[0].abv).toBeNull();
+    expect(parsed[1].abv).toBeNull();
+    expect(parsed[2].abv).toBeNull();
+    expect(parsed[3].abv).toBe(5.2);
+  });
+
+  it('parseHydratedBeer normalizes beer_abv 0 to null', () => {
+    const parsed = parseHydratedBeer({
+      bid: 10,
+      beer_name: 'Hydrated',
+      brewery_name: 'B',
+      beer_abv: 0,
+      rating_score: 3,
+    });
+    expect(parsed?.abv).toBeNull();
+  });
+});
