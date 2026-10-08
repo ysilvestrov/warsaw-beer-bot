@@ -3,7 +3,7 @@ import type { DB } from '../storage/db';
 import type { Http } from '../sources/http';
 import { CookieExpiredError, HttpError } from '../sources/http';
 import { isBlockStatus } from '../sources/untappd/block';
-import { activeFest, currentOrNextFests, festSessions, festVenues, POLL_MARGIN_MS, type Fest } from '../storage/fests';
+import { activeFest, currentOrNextFests, festSessions, festVenues, updateFestVenueFeedPath, POLL_MARGIN_MS, type Fest } from '../storage/fests';
 import { getJobState, setJobState } from '../storage/job_state';
 import { sendThrottledAlert } from './alert-slot';
 import { parseVenueMenu } from '../sources/untappd/venue-menu';
@@ -35,10 +35,15 @@ const isBlock = (e: unknown): boolean =>
 
 // One guarded fetch: breaker gate, block → breaker, expired cookie → admin alert (not a block:
 // it is a session problem, and rotating or cooling down would not fix it).
-async function guardedGet(deps: FestServerDeps, url: string, now: Date): Promise<string | null> {
+async function guardedGet(
+  deps: FestServerDeps,
+  url: string,
+  now: Date,
+  opts?: { onRedirect?: (fromUrl: string, toUrl: string) => void },
+): Promise<string | null> {
   if (!deps.breaker.canAttempt(now)) return null;
   try {
-    const html = await deps.http.get(url);
+    const html = await deps.http.get(url, opts);
     return html;
   } catch (e) {
     if (e instanceof CookieExpiredError) {
@@ -69,7 +74,23 @@ export async function runFestPoll(deps: FestServerDeps, now: Date): Promise<Feed
   const venue = festVenues(deps.db, active!.fest.id).find((v) => v.venue_id === active!.fest.menu_venue_id);
   if (!venue) return null;
   setJobState(deps.db, FEST_POLL_LAST_KEY, now.toISOString());
-  const html = await guardedGet(deps, UNTAPPD + venue.feed_path, now);
+  const html = await guardedGet(deps, UNTAPPD + venue.feed_path, now, {
+    onRedirect: (_fromUrl, toUrl) => {
+      try {
+        const u = new URL(toUrl);
+        if (u.pathname.includes(`/${venue.venue_id}/`) || u.pathname.endsWith(`/${venue.venue_id}`)) {
+          let newFeedPath = u.pathname;
+          if (venue.feed_path.endsWith('/activity') && !newFeedPath.endsWith('/activity')) {
+            newFeedPath = `${newFeedPath.replace(/\/+$/, '')}/activity`;
+          }
+          if (newFeedPath !== venue.feed_path) {
+            updateFestVenueFeedPath(deps.db, venue.venue_id, newFeedPath);
+            deps.log.info({ venueId: venue.venue_id, from: venue.feed_path, to: newFeedPath }, 'fest: venue slug updated');
+          }
+        }
+      } catch {}
+    },
+  });
   if (html === null) return null;
   try {
     const result = ingestFeedPage(deps.db, {
@@ -101,7 +122,21 @@ export async function refreshFestMenu(deps: FestServerDeps, fest: Fest, now: Dat
   // The schedule counts only a read that landed: a blocked, expired or wrong page leaves
   // FEST_MENU_LAST_KEY where it was, so the job retries (after MENU_RETRY_MS) instead of waiting hours.
   setJobState(deps.db, FEST_MENU_ATTEMPT_KEY, now.toISOString());
-  const html = await guardedGet(deps, UNTAPPD + path, now);
+  const html = await guardedGet(deps, UNTAPPD + path, now, {
+    onRedirect: (_fromUrl, toUrl) => {
+      try {
+        const u = new URL(toUrl);
+        if (u.pathname.includes(`/${fest.menu_venue_id}/`) || u.pathname.endsWith(`/${fest.menu_venue_id}`)) {
+          const basePath = u.pathname.replace(/\/activity$/, '').replace(/\/+$/, '');
+          const newFeedPath = `${basePath}/activity`;
+          if (newFeedPath !== menuVenue?.feed_path) {
+            updateFestVenueFeedPath(deps.db, fest.menu_venue_id, newFeedPath);
+            deps.log.info({ venueId: fest.menu_venue_id, from: menuVenue?.feed_path, to: newFeedPath }, 'fest: menu venue slug updated');
+          }
+        }
+      } catch {}
+    },
+  });
   if (html === null) return 'blocked';
   const menu = parseVenueMenu(html);
   if (menu.venueId !== fest.menu_venue_id) return 'wrong_page';

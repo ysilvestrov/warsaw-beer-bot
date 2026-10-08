@@ -97,3 +97,9 @@ export function activeFests(db: DB, now: Date): { fest: Fest; session: FestSessi
 export function activeFest(db: DB, now: Date): { fest: Fest; session: FestSession } | null {
   return activeFests(db, now)[0] ?? null;
 }
+
+export function updateFestVenueFeedPath(db: DB, venueId: number, feedPath: string): number {
+  const info = db.prepare('UPDATE fest_venues SET feed_path = ? WHERE venue_id = ?').run(feedPath, venueId);
+  return info.changes as number;
+}
+

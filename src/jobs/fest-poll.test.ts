@@ -3,10 +3,10 @@ import { join } from 'node:path';
 import pino from 'pino';
 import { openDb, type DB } from '../storage/db';
 import { migrate } from '../storage/schema';
-import { getFestBySlug } from '../storage/fests';
+import { getFestBySlug, festVenues } from '../storage/fests';
 import { getJobState, setJobState } from '../storage/job_state';
 import { menuStats } from '../storage/fest_menu';
-import { CookieExpiredError, HttpError, type Http } from '../sources/http';
+import { CookieExpiredError, HttpError, type Http, type HttpGetOpts } from '../sources/http';
 import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
 import { runFestMenu, runFestPoll, refreshFestMenu, FEST_MENU_LAST_KEY, FEST_POLL_LAST_KEY } from './fest-poll';
 
@@ -16,17 +16,23 @@ const MENU = readFileSync(join(FIX, 'venue-menu.html'), 'utf8');
 const FEED = readFileSync(join(FIX, 'venue-more-feed-raw.html'), 'utf8');
 const IN_SESSION = new Date('2026-10-15T15:00:00.000Z');
 
-function setup(responses: (string | Error)[]) {
+type FakeResponse = string | Error | { body: string; redirectTo?: string };
+
+function setup(responses: FakeResponse[]) {
   const db: DB = openDb(':memory:');
   migrate(db);
   const urls: string[] = [];
   const http: Http = {
-    async get(url: string) {
+    async get(url: string, opts?: HttpGetOpts) {
       urls.push(url);
       const r = responses.shift();
       if (r === undefined) throw new Error('unexpected request');
       if (r instanceof Error) throw r;
-      return r;
+      if (typeof r === 'object' && 'redirectTo' in r && r.redirectTo) {
+        opts?.onRedirect?.(url, r.redirectTo);
+        return r.body;
+      }
+      return typeof r === 'string' ? r : r.body;
     },
   };
   const trips: string[] = [];
@@ -47,6 +53,25 @@ describe('runFestPoll', () => {
     expect(r?.inserted).toBe(3);
     expect(db.prepare('SELECT DISTINCT first_eye FROM venue_checkins').all()).toEqual([{ first_eye: 'server' }]);
     expect(getJobState(db, FEST_POLL_LAST_KEY)).toBe(IN_SESSION.toISOString());
+  });
+
+  it('updates fest_venues.feed_path when runFestPoll encounters a venue redirect', async () => {
+    const { db, deps, urls } = setup([
+      {
+        body: FEED,
+        redirectTo: 'https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity',
+      },
+      FEED,
+    ]);
+    const r = await runFestPoll(deps, IN_SESSION);
+    expect(r?.inserted).toBe(3);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    // Subsequent poll uses the updated path
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
+    expect(urls[1]).toBe('https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity');
   });
 
   it('does nothing outside a polling window and before its 10-minute tick', async () => {
@@ -115,6 +140,20 @@ describe('fest menu job', () => {
     expect(await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'))).toEqual({ items: 4, updatedAt: '2026-09-29T12:15:39.465Z', stale: false });
     expect(urls).toEqual(['https://untappd.com/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155']);
     expect(menuStats(db, fest.id).count).toBe(4);
+  });
+
+  it('updates fest_venues.feed_path when refreshFestMenu encounters a venue redirect', async () => {
+    const { db, deps } = setup([
+      {
+        body: MENU,
+        redirectTo: 'https://untappd.com/v/warszawski-festiwal-piwa/11142155',
+      },
+    ]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const res = await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
+    expect(res).toMatchObject({ items: 4 });
+    const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
   });
 
   it('refuses a page that is not the fest menu venue', async () => {
