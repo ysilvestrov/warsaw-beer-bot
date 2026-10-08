@@ -47,10 +47,13 @@ export async function rebootAlert(deps: RebootAlertDeps): Promise<void> {
   writeState(deps.db, decision.state);
 }
 
-/** The «Нагадати через 3 дні» button. False when there is no alerted reboot to snooze. */
-export function snoozeRebootAlertNow(db: DB, now: Date): boolean {
+/**
+ * The «Нагадати через 3 дні» button, bound to the `since` of the alert it sits under.
+ * False when there is no alerted reboot, or the button belongs to an older reboot.
+ */
+export function snoozeRebootAlertNow(db: DB, since: number, now: Date): boolean {
   const state = readState(db);
-  if (state === null) return false;
+  if (state === null || state.since !== since) return false;
   writeState(db, snoozeRebootAlert(state, now));
   return true;
 }

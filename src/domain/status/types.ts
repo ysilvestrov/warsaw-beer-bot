@@ -38,6 +38,8 @@ export interface HostPatchFacts {
   packages: { nodejs: string | null; cloudflared: string | null; litestream: string | null };
 }
 
+export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'stale' } | { kind: 'unavailable' };
+
 // Cycle lengths come from the fest jobs' own constants (filled in by the collector), so the
 // evaluator never duplicates a schedule.
 export interface FestInputs {

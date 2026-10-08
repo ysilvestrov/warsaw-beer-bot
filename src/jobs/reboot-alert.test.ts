@@ -66,7 +66,7 @@ describe('rebootAlert', () => {
   it('a snooze silences the reboot for 3 days, then it is alerted again', async () => {
     summary({ since: SINCE, packages: ['libc6'] });
     await run([]);
-    expect(snoozeRebootAlertNow(db, NOW)).toBe(true);
+    expect(snoozeRebootAlertNow(db, SINCE, NOW)).toBe(true);
     const quiet: string[] = [];
     summary({ since: SINCE, packages: ['libc6'] }, T + 3 * DAY - 1); // fresh summary, or the read is stale
     await run(quiet, { now: new Date((T + 3 * DAY - 1) * 1000) });
@@ -77,7 +77,20 @@ describe('rebootAlert', () => {
   });
 
   it('nothing to snooze when no alert is pending', () => {
-    expect(snoozeRebootAlertNow(db, NOW)).toBe(false);
+    expect(snoozeRebootAlertNow(db, SINCE, NOW)).toBe(false);
+  });
+
+  it('a snooze bound to a different since is refused and leaves the state as it was', () => {
+    const stored = JSON.stringify({ since: SINCE, snoozeUntil: null });
+    setJobState(db, REBOOT_ALERT_KEY, stored);
+    expect(snoozeRebootAlertNow(db, SINCE - DAY, NOW)).toBe(false);
+    expect(getJobState(db, REBOOT_ALERT_KEY)).toBe(stored);
+  });
+
+  it('a snooze bound to the alerted since stores the snooze', () => {
+    setJobState(db, REBOOT_ALERT_KEY, JSON.stringify({ since: SINCE, snoozeUntil: null }));
+    expect(snoozeRebootAlertNow(db, SINCE, NOW)).toBe(true);
+    expect(getJobState(db, REBOOT_ALERT_KEY)).toBe(JSON.stringify({ since: SINCE, snoozeUntil: T + 3 * DAY }));
   });
 
   it('clears its state when no reboot is pending', async () => {

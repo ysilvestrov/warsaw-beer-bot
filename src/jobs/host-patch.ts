@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { HostPatchFacts } from '../domain/status/types';
+import type { HostPatchFacts, HostPatchRead } from '../domain/status/types';
 import { readHardenedJson } from './hardened-json';
 
 // The root collector's summary (#469 stage 2, scripts/ops/host_patch_collect.py).
@@ -28,7 +28,7 @@ const summarySchema = z.object({
   packages: z.object({ nodejs: text.nullable(), cloudflared: text.nullable(), litestream: text.nullable() }).strict(),
 }).strict();
 
-export type HostPatchRead = { kind: 'ok'; facts: HostPatchFacts } | { kind: 'stale' } | { kind: 'unavailable' };
+export type { HostPatchRead };
 
 export function readHostPatch(now: Date, path = HOST_PATCH_PATH, trustedUid = ROOT_UID): HostPatchRead {
   const parsed = summarySchema.safeParse(readHardenedJson(path, () => trustedUid, MAX_BYTES));
