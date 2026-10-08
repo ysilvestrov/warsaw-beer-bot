@@ -498,9 +498,13 @@ async function main(): Promise<void> {
   // within the morning window, emit today's digest now instead of waiting for the
   // next 15-min tick. Idempotent via job_state, so a normal start is a no-op once
   // the day's digest already went out.
-  dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
-    .catch((e) => log.error({ err: e }, 'daily-status startup'));
-  hostUpstream({ db, log }).catch((e) => log.error({ err: e }, 'host-upstream startup'));
+  // #469: the upstream facts first, so a first deploy inside the morning window does not send
+  // a digest that says "ще не завантажено" for every upstream line. A failed fetch still lets
+  // the digest go out (finally), reading whatever job_state holds.
+  hostUpstream({ db, log })
+    .catch((e) => log.error({ err: e }, 'host-upstream startup'))
+    .finally(() => dailyStatus({ db, log, notifyAdmin, repo: env.GITHUB_REPO })
+      .catch((e) => log.error({ err: e }, 'daily-status startup')));
 
   const apiApp = createApiApp({
     db, env, log, webFallback,
