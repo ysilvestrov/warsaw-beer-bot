@@ -197,22 +197,39 @@ class TestStaleSince(Host):
     STALE = {('needrestart', '-b', '-r', 'l'): fixture('needrestart-b-stale.txt')}
 
     def test_since_survives_from_the_previous_summary_and_gone_units_drop(self):
-        previous = {'stale_services': [{'unit': 'litestream.service', 'since': 100},
-                                       {'unit': 'gone.service', 'since': 50}]}
-        self.assertEqual(self.collect(self.STALE, previous, now=500)['stale_services'],
-                         [{'unit': 'code-server@ysi.service', 'since': 500},
-                          {'unit': 'litestream.service', 'since': 100}])
+        previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME + 100},
+                                       {'unit': 'gone.service', 'since': BTIME + 50}]}
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'],
+                         [{'unit': 'code-server@ysi.service', 'since': BTIME + 500},
+                          {'unit': 'litestream.service', 'since': BTIME + 100}])
 
     def test_a_since_from_the_future_is_clamped_to_now(self):
-        previous = {'stale_services': [{'unit': 'litestream.service', 'since': 900}]}
-        self.assertEqual(self.collect(self.STALE, previous, now=500)['stale_services'][1],
-                         {'unit': 'litestream.service', 'since': 500})
+        previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME + 900}]}
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'][1],
+                         {'unit': 'litestream.service', 'since': BTIME + 500})
 
     def test_a_malformed_previous_summary_restarts_every_since(self):
         previous = {'stale_services': [{'unit': 'litestream.service', 'since': '100'}]}
-        self.assertEqual(self.collect(self.STALE, previous, now=500)['stale_services'],
-                         [{'unit': 'code-server@ysi.service', 'since': 500},
-                          {'unit': 'litestream.service', 'since': 500}])
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'],
+                         [{'unit': 'code-server@ysi.service', 'since': BTIME + 500},
+                          {'unit': 'litestream.service', 'since': BTIME + 500}])
+
+    def test_a_since_from_before_the_last_boot_restarts_at_now(self):
+        # /var/tmp survives a reboot; the reboot proves every process is fresh.
+        previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME - 1}]}
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'][1],
+                         {'unit': 'litestream.service', 'since': BTIME + 500})
+
+    def test_a_since_from_exactly_boot_time_is_kept(self):
+        previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME}]}
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'][1],
+                         {'unit': 'litestream.service', 'since': BTIME})
+
+    def test_an_unknown_boot_time_carries_nothing_forward(self):
+        (self.root / 'proc/stat').unlink()
+        previous = {'stale_services': [{'unit': 'litestream.service', 'since': BTIME + 100}]}
+        self.assertEqual(self.collect(self.STALE, previous, now=BTIME + 500)['stale_services'][1],
+                         {'unit': 'litestream.service', 'since': BTIME + 500})
 
 
 class TestWrite(Host):
@@ -245,13 +262,13 @@ class TestWrite(Host):
 
     def test_main_twice_keeps_the_first_since_across_runs(self):
         argv = ['--out-dir', str(self.out), '--root', str(self.root)]
-        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=1_000.4):
+        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=BTIME + 1_000.4):
             self.assertEqual(hp.main(argv), 0)
-        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=5_000.9):
+        with patch.object(hp, 'run', runner()), patch.object(hp.time, 'time', return_value=BTIME + 5_000.9):
             self.assertEqual(hp.main(argv), 0)
         summary = json.loads((self.out / 'summary.json').read_text())
         self.assertEqual((summary['timestamp'], summary['stale_services']),
-                         (5_000, [{'unit': 'code-server@ysi.service', 'since': 1_000}]))
+                         (BTIME + 5_000, [{'unit': 'code-server@ysi.service', 'since': BTIME + 1_000}]))
 
     def test_an_unreadable_previous_summary_is_ignored(self):
         self.out.mkdir(mode=0o755)

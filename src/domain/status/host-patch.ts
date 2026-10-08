@@ -55,7 +55,8 @@ export function hostPatchFindings(hp: Avail<HostPatchFacts>, now: Date): HostFin
     if (end !== null) {
       const left = daysUntil(end, t);
       if (left === null) f.push(yellow('нема даних: дата підтримки ядра в Livepatch'));
-      else if (left < 0) f.push(red(`Livepatch більше не покриває ядро (з ${end})`));
+      // The date's own day counts as past (spec), from its first second: compare calendar days, not floored hours.
+      else if (end <= new Date(t * 1000).toISOString().slice(0, 10)) f.push(red(`Livepatch більше не покриває ядро (з ${end})`));
       else if (left < R.livepatchSupportYellowDays) f.push(yellow(`Livepatch покриває ядро лише до ${end}`));
     }
   }

@@ -124,12 +124,16 @@ def last_run(root):
         return None
 
 
-def merge_stale(services, previous, now):
-    """A unit keeps the `since` of the first run that saw it stale; a unit no longer listed drops."""
+def merge_stale(services, previous, now, booted):
+    """A unit keeps the `since` of the first run that saw it stale; a unit no longer listed drops.
+
+    /var/tmp survives a reboot, but the reboot proves every process fresh: a `since` from before
+    the last boot is dropped, and with no readable boot time nothing is carried forward."""
     seen = {}
-    entries = previous.get('stale_services') if isinstance(previous, dict) else None
+    entries = previous.get('stale_services') if isinstance(previous, dict) and booted is not None else None
     for entry in entries if isinstance(entries, list) else []:
-        if isinstance(entry, dict) and isinstance(entry.get('unit'), str) and type(entry.get('since')) is int:
+        if (isinstance(entry, dict) and isinstance(entry.get('unit'), str)
+                and type(entry.get('since')) is int and entry['since'] >= booted):
             seen[entry['unit']] = entry['since']
     return [{'unit': unit, 'since': min(seen.get(unit, now), now)} for unit in dict.fromkeys(services)]
 
@@ -149,7 +153,7 @@ def collect(run_command, root, now, previous):
         'reboot_required': reboot_required(root, previous),
         'livepatch': attempt(lambda: map_livepatch(
             run_command(['canonical-livepatch', 'status', '--format', 'json']))),
-        'stale_services': merge_stale(needrestart[1], previous, now) if needrestart else None,
+        'stale_services': merge_stale(needrestart[1], previous, now, boot_time(root)) if needrestart else None,
         'unattended': {
             'last_run': last_run(root),
             'security_pending': attempt(lambda: count_security(run_command(['apt', 'list', '--upgradable']))),
