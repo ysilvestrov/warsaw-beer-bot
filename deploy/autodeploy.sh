@@ -405,6 +405,8 @@ path_is_held() {
     deploy/installed-current.sh|deploy/db-snapshot.sh|deploy/trial-migrate.cjs) return 0 ;;
     # #469: root runs the installed copy; re-run deploy/install-host-patch-collector.sh
     scripts/ops/host_patch_collect.py) return 0 ;;
+    # #469 stage 3: root runs the installed copy; re-run deploy/install-reboot-request.sh
+    scripts/ops/reboot_request.py) return 0 ;;
     *) return 1 ;;
   esac
 }
