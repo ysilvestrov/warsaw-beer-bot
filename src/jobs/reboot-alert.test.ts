@@ -76,6 +76,17 @@ describe('rebootAlert', () => {
     expect([quiet.length, again.length]).toEqual([0, 1]);
   });
 
+  // Cross-review (codex @ 237922c): a snooze pressed while the reminder is being sent must survive.
+  it('a snooze accepted while the reminder is being sent is not overwritten', async () => {
+    summary({ since: SINCE, packages: ['libc6'] }, T);
+    setJobState(db, REBOOT_ALERT_KEY, JSON.stringify({ since: SINCE, snoozeUntil: T - 1 }));
+    await rebootAlert({
+      db, log, now: () => NOW, hostPatchPath: path, hostPatchUid: process.getuid!(),
+      send: async () => { snoozeRebootAlertNow(db, SINCE, NOW); },
+    });
+    expect(getJobState(db, REBOOT_ALERT_KEY)).toBe(JSON.stringify({ since: SINCE, snoozeUntil: T + 3 * DAY }));
+  });
+
   it('nothing to snooze when no alert is pending', () => {
     expect(snoozeRebootAlertNow(db, SINCE, NOW)).toBe(false);
   });
