@@ -20,6 +20,8 @@ const HELD_EXACT = new Set([
   'deploy/installed-current.sh',
   'deploy/db-snapshot.sh',
   'deploy/trial-migrate.cjs',
+  // #469: root runs the installed copy; re-run deploy/install-host-patch-collector.sh
+  'scripts/ops/host_patch_collect.py',
 ]);
 
 /** Mirrors path_is_held() in deploy/autodeploy.sh; a parity test pins the two. */
