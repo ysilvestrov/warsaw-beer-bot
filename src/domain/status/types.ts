@@ -59,6 +59,8 @@ export interface StatusInputs {
   unlock: { ranToday: boolean; withheld: { beerId: number; issueNumber: number }[] | null };  // null = today's result exists but is unreadable
   bugReports: { summary: BugReportSummary; paused: { since: string; status: number } | null; pausedUnreadable?: boolean } | null; // null = no repo configured
   disk: Avail<{ bytesAvailable: number; inodesFree: number; pendingRuns: number | null }>;
+  hostPatch: Avail<HostPatchFacts>; // #469 stage 2: the root collector's summary
+  upstream: HostUpstream;           // #469 stage 2: Node/litestream releases, fetched daily
   fest: FestInputs | null;         // null = no current or upcoming fest
 }
 

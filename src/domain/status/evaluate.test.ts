@@ -1,5 +1,5 @@
 import { evaluateFest, evaluateInfra, evaluateTaps, evaluateUntappd, worst } from './evaluate';
-import { GREEN_METRICS, greenInputs, NOW, pastDays } from './test-inputs';
+import { GREEN_HOST_PATCH, GREEN_METRICS, greenInputs, NOW, pastDays } from './test-inputs';
 import { GIB_BYTES } from './rules';
 import type { FestInputs } from './types';
 
@@ -176,5 +176,33 @@ describe('Інфраструктура', () => {
       evaluateInfra(greenInputs({ history: weekAgo(today + 7 * GIB_BYTES), disk: { ok: true, value: { bytesAvailable: today, inodesFree: 2_000_000, pendingRuns: 0 } } })).colour,
       evaluateInfra(greenInputs({ history: weekAgo(today + 7 * GIB_BYTES + 7), disk: { ok: true, value: { bytesAvailable: today, inodesFree: 2_000_000, pendingRuns: 0 } } })),
     ]).toEqual(['green', { subsystem: 'infra', colour: 'yellow', reasons: ['диск тане ~1.00 GiB/добу'] }]);
+  });
+  // #469 stage 2: host-patch and upstream findings join the row and survive an unreadable disk summary.
+  it('adds the host-patch findings to the disk findings', () => {
+    const hostPatch = { ok: true as const, value: { ...GREEN_HOST_PATCH, rebootRequired: { since: NOW.getTime() / 1000 - 15 * 86_400, packages: ['libc6'] } } };
+    expect(evaluateInfra(greenInputs({ hostPatch }))).toEqual({
+      subsystem: 'infra', colour: 'red', reasons: ['ядро: перезавантаження чекає 15 днів (libc6)'],
+    });
+  });
+
+  it('an unreadable disk summary no longer hides a red host line', () => {
+    const hostPatch = { ok: true as const, value: { ...GREEN_HOST_PATCH, rebootRequired: { since: NOW.getTime() / 1000 - 15 * 86_400, packages: [] } } };
+    expect(evaluateInfra(greenInputs({ hostPatch, disk: { ok: false, reason: 'дані монітора недоступні' } }))).toEqual({
+      subsystem: 'infra', colour: 'red',
+      reasons: ['нема даних: дані монітора недоступні', 'ядро: перезавантаження чекає 15 днів'],
+    });
+  });
+
+  it('upstream findings join the row, using the host packages', () => {
+    const hostPatch = { ok: true as const, value: { ...GREEN_HOST_PATCH, packages: { ...GREEN_HOST_PATCH.packages, litestream: '0.5.11' } } };
+    expect(evaluateInfra(greenInputs({ hostPatch }))).toEqual({
+      subsystem: 'infra', colour: 'yellow', reasons: ['litestream 0.5.11 < 0.5.17 (вийшов 2026-08-31)'],
+    });
+  });
+
+  it('an unreadable host summary is one "нема даних" line, and the upstream package rules stay quiet', () => {
+    expect(evaluateInfra(greenInputs({ hostPatch: { ok: false, reason: 'збирач патчів мовчить' } }))).toEqual({
+      subsystem: 'infra', colour: 'yellow', reasons: ['нема даних: збирач патчів мовчить'],
+    });
   });
 });

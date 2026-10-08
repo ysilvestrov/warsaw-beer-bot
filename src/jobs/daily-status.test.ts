@@ -12,6 +12,12 @@ import { saveStatusSnapshot } from '../storage/status_snapshots';
 import { GREEN_METRICS } from '../domain/status/test-inputs';
 import { TRIAGE_LAST_RESULT_KEY } from './orphan-triage';
 
+// This dev host is the production host: no test may fall back to the real default paths.
+const missingMonitor = {
+  testDiagnosticsPath: join(tmpdir(), 'wbb-daily-missing', 'summary.json'),
+  hostPatchPath: join(tmpdir(), 'wbb-daily-missing', 'host-patch.json'),
+};
+
 const silentLog = pino({ level: 'silent' });
 
 beforeEach(() => { resetDailyStatusFallbackForTests(); });
@@ -64,7 +70,7 @@ test('buildBugReportLine puts a paused warning first even with zero activity', (
 test('dailyStatus: no-op when notifyAdmin is undefined', async () => {
   const db = emptyDb();
   await expect(
-    dailyStatus({ db, log: silentLog, now: () => new Date('2026-06-04T07:00:00Z') }),
+    dailyStatus({ db, log: silentLog, ...missingMonitor, now: () => new Date('2026-06-04T07:00:00Z') }),
   ).resolves.toBeUndefined();
 });
 
@@ -72,7 +78,7 @@ test('dailyStatus: sends once in window and records the Warsaw date', async () =
   const db = emptyDb();
   const sent: string[] = [];
   await dailyStatus({
-    db, log: silentLog,
+    db, log: silentLog, ...missingMonitor,
     notifyAdmin: async (msg: string) => { sent.push(msg); },
     now: () => new Date('2026-06-21T07:00:00Z'), // 09:00 Warsaw
   });
@@ -84,7 +90,7 @@ test('dailyStatus: no-op outside the window', async () => {
   const db = emptyDb();
   const sent: string[] = [];
   await dailyStatus({
-    db, log: silentLog,
+    db, log: silentLog, ...missingMonitor,
     notifyAdmin: async (msg: string) => { sent.push(msg); },
     now: () => new Date('2026-06-21T11:00:00Z'), // 13:00 Warsaw
   });
@@ -96,7 +102,7 @@ test('dailyStatus: no-op when already sent today (idempotent across ticks)', asy
   const db = emptyDb();
   const sent: string[] = [];
   const deps = {
-    db, log: silentLog,
+    db, log: silentLog, ...missingMonitor,
     notifyAdmin: async (msg: string) => { sent.push(msg); },
     now: () => new Date('2026-06-21T07:00:00Z'),
   };
@@ -109,7 +115,7 @@ test('dailyStatus: does NOT record the date when send fails (retried next tick)'
   const db = emptyDb();
   let calls = 0;
   const deps = {
-    db, log: silentLog,
+    db, log: silentLog, ...missingMonitor,
     notifyAdmin: async () => { calls += 1; throw new Error('telegram down'); },
     now: () => new Date('2026-06-21T07:00:00Z'),
   };
@@ -161,7 +167,7 @@ test('dailyStatus: picks up today\'s triage result from job_state', async () => 
   const now = () => new Date('2026-07-05T07:30:00Z'); // 09:30 Warsaw
   setJobState(db, TRIAGE_LAST_RESULT_KEY,
     JSON.stringify({ date: '2026-07-05', line: 'Тріаж: 1 нових' }));
-  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  await dailyStatus({ db, log: silentLog, ...missingMonitor, notifyAdmin: async (m) => { sent.push(m); }, now });
   expect(sent[0]).toContain('• Тріаж: 1 нових');
 });
 
@@ -171,7 +177,7 @@ test('dailyStatus: stale (yesterday) triage result is ignored', async () => {
   const now = () => new Date('2026-07-05T07:30:00Z');
   setJobState(db, TRIAGE_LAST_RESULT_KEY,
     JSON.stringify({ date: '2026-07-04', line: 'Тріаж: 9 нових' }));
-  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  await dailyStatus({ db, log: silentLog, ...missingMonitor, notifyAdmin: async (m) => { sent.push(m); }, now });
   expect(sent[0]).not.toContain('Тріаж');
 });
 
@@ -183,12 +189,11 @@ test('#431: a payload written before this change reads as no saturated line', as
   const now = () => new Date('2026-07-05T07:30:00Z');
   setJobState(db, TRIAGE_LAST_RESULT_KEY,
     JSON.stringify({ date: '2026-07-05', line: 'Тріаж: 50 нових' }));
-  await dailyStatus({ db, log: silentLog, notifyAdmin: async (m) => { sent.push(m); }, now });
+  await dailyStatus({ db, log: silentLog, ...missingMonitor, notifyAdmin: async (m) => { sent.push(m); }, now });
   expect(sent[0]).toContain('• Тріаж: 50 нових');
   expect(sent[0]).not.toContain('Насичені');
 });
 
-const missingMonitor = { testDiagnosticsPath: join(tmpdir(), 'wbb-daily-missing', 'summary.json') };
 
 test('dailyStatus sends the traffic light and writes today\'s snapshot first', async () => {
   const db = emptyDb();

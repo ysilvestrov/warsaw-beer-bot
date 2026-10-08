@@ -141,7 +141,7 @@ def merge_stale(services, previous, now, booted):
 def package_version(run_command, name):
     status, _tab, version = run_command(
         ['dpkg-query', '-W', '-f=${db:Status-Abbrev}\t${Version}', name]).partition('\t')
-    return version.strip() or None if status.startswith('ii') else None
+    return version.strip() or None if status[1:2] == 'i' else None
 
 
 def collect(run_command, root, now, previous):

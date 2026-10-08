@@ -157,6 +157,10 @@ class TestCollect(Host):
         s = self.collect({(*DPKG, 'litestream'): 'rc \t0.5.11'})
         self.assertEqual(s['packages']['litestream'], None)
 
+    def test_a_held_package_still_reports_its_version(self):
+        s = self.collect({(*DPKG, 'nodejs'): 'hi \t24.21.0-1nodesource1'})
+        self.assertEqual(s['packages']['nodejs'], '24.21.0-1nodesource1')
+
 
 def livepatch(supported='supported', state='applied', running=True, date='2027-10-02'):
     return json.dumps({'Status': [

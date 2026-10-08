@@ -66,6 +66,8 @@ export interface DailyStatusDeps {
   repo?: string;
   testDiagnosticsPath?: string;
   testDiagnosticsUid?: number;
+  hostPatchPath?: string;
+  hostPatchUid?: number;
 }
 
 const DAILY_STATUS_KEY = 'daily_status_last_sent';
@@ -144,6 +146,7 @@ export async function dailyStatus(deps: DailyStatusDeps): Promise<void> {
     if (!markerReadable) throw new Error('daily-status: last-sent marker unreadable');
     text = buildDailyReport(db, now, dateKey, {
       repo: deps.repo, testDiagnosticsPath: deps.testDiagnosticsPath, testDiagnosticsUid: deps.testDiagnosticsUid,
+      hostPatchPath: deps.hostPatchPath, hostPatchUid: deps.hostPatchUid,
     });
   } catch (e) {
     // The report itself broke. Say so once per Warsaw day instead of going silent; the delivery
