@@ -18,7 +18,7 @@ const summarySchema = z.object({
   reboot_required: z.object({ since: seconds, packages: z.array(text).max(100) }).strict().nullable(),
   livepatch: z.object({
     state: z.enum(['applied', 'nothing-to-apply', 'unsupported-kernel', 'unknown']),
-    upgrade_required_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+    upgrade_required_date: text.nullable(),
   }).strict().nullable(),
   stale_services: z.array(z.object({ unit: text, since: seconds }).strict()).max(200).nullable(),
   unattended: z.object({
