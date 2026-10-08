@@ -27,10 +27,10 @@ function host(opts: { uid?: string } = {}): Host {
   return { root, bin, log };
 }
 
-function run(h: Host, opts: { hostRoot?: boolean } = {}) {
+function run(h: Host, opts: { hostRoot?: boolean; cwd?: string } = {}) {
   const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${h.bin}:${process.env.PATH}`, WBB_HOST_ROOT: h.root };
   if (opts.hostRoot === false) delete env.WBB_HOST_ROOT;
-  const r = spawnSync('bash', [SCRIPT], { encoding: 'utf8', env, cwd: REPO });
+  const r = spawnSync('bash', [SCRIPT], { encoding: 'utf8', env, cwd: opts.cwd ?? REPO });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
@@ -59,14 +59,30 @@ describe('install-host-patch-collector — a clean host', () => {
     expect([statSync(at(h, OUT)).isDirectory(), mode(at(h, OUT))]).toEqual([true, 0o755]);
   });
 
-  it('reloads, enables the timer, then runs the collector once, in that order', () => {
+  it('reloads, enables and re-arms the timer, then runs the collector once, in that order', () => {
     const h = host();
     run(h);
     expect(calls(h)).toEqual([
       'systemctl daemon-reload',
       'systemctl enable --now wbb-host-patch.timer',
+      'systemctl restart wbb-host-patch.timer',
       'systemctl start wbb-host-patch.service',
     ]);
+  });
+
+  it('runs from any directory, not only the repo root', () => {
+    const h = host();
+    const elsewhere = makeTempDirectory('wbb-hostpatch-cwd-');
+    expect(run(h, { cwd: elsewhere }).code).toBe(0);
+    expect(readFileSync(at(h, COLLECTOR))).toEqual(readFileSync(join(REPO, 'scripts/ops/host_patch_collect.py')));
+  });
+
+  it('leaves an existing summary directory alone: no chmod through a path it did not create', () => {
+    const h = host();
+    mkdirSync(at(h, OUT), { mode: 0o700 });
+    chmodSync(at(h, OUT), 0o700);
+    expect(run(h).code).toBe(0);
+    expect(mode(at(h, OUT))).toBe(0o700);
   });
 
   it('is idempotent', () => {

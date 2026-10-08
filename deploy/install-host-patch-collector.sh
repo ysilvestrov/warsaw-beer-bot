@@ -18,9 +18,13 @@ if [ "$(id -u)" != 0 ] && [ -z "$R" ]; then
   exit 1
 fi
 
+cd "$(dirname "$0")/.."
+
 OUT=/var/tmp/wbb-host-patch
 # /var/tmp is world-writable: anyone could pre-create the summary directory and make root write
 # (and the bot trust) a file they control. Refuse anything but a directory owned like the root.
+# The root-owner comparison cannot be tested as non-root; the collector (st_uid != geteuid) and the
+# reader (dir uid 0) re-enforce it.
 want_uid=$(stat -c %u "${R:-/}")
 if [ -L "$R$OUT" ] || { [ -e "$R$OUT" ] && { [ ! -d "$R$OUT" ] || [ "$(stat -c %u "$R$OUT")" != "$want_uid" ]; }; }; then
   echo "ERROR: $OUT exists and is not a root-owned directory — remove it (sudo rm -rf $OUT) and re-run. Nothing was changed." >&2
@@ -31,11 +35,13 @@ install -d "$R/usr/local/libexec" "$R/etc/systemd/system"
 install -m 0755 scripts/ops/host_patch_collect.py "$R/usr/local/libexec/wbb-host-patch-collect"
 install -m 0644 deploy/wbb-host-patch.service     "$R/etc/systemd/system/wbb-host-patch.service"
 install -m 0644 deploy/wbb-host-patch.timer       "$R/etc/systemd/system/wbb-host-patch.timer"
-install -d -m 0755 "$R$OUT"
-chmod 0755 "$R$OUT"
+# mkdir does not follow a final symlink and fails if anything appeared there since the check (set -e).
+[ -e "$R$OUT" ] || mkdir -m 0755 "$R$OUT"
 
 systemctl daemon-reload
 systemctl enable --now wbb-host-patch.timer
+# enable --now does not re-arm an already active timer: a changed timer needs the restart.
+systemctl restart wbb-host-patch.timer
 # Synchronous for a oneshot: the first summary exists when this returns.
 systemctl start wbb-host-patch.service
 
