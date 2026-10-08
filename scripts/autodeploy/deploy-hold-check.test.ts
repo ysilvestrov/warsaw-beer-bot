@@ -13,6 +13,7 @@ const TABLE: Array<[string, boolean]> = [
   ['deploy/litestream.service', true],
   ['deploy/wbb-autodeploy.service', true],
   ['deploy/wbb-autodeploy.timer', true],
+  ['deploy/wbb-reboot-request.path', true],
   ['deploy/install-autodeploy.sh', true],
   ['deploy/install-resource-monitor.sh', true],
   ['deploy/rsync-filter', true],

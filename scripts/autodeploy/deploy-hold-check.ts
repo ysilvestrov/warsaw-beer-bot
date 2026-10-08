@@ -30,7 +30,7 @@ const HELD_EXACT = new Set([
 export function isHoldPath(path: string): boolean {
   if (path === 'deploy/warsaw-beer-bot.service') return false;
   if (path.startsWith('deploy/sudoers.d/')) return true;
-  if (/^deploy\/.*\.(service|timer)$/.test(path)) return true;
+  if (/^deploy\/.*\.(service|timer|path)$/.test(path)) return true;
   if (path.startsWith('deploy/litestream.')) return true;
   if (/^deploy\/install-.*\.sh$/.test(path)) return true;
   return HELD_EXACT.has(path);

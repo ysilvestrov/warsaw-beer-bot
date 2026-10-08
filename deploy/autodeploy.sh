@@ -397,7 +397,7 @@ shipping_paths() {
 path_is_held() {
   case "$1" in
     deploy/warsaw-beer-bot.service) return 1 ;;
-    deploy/sudoers.d/*|deploy/*.service|deploy/*.timer|deploy/litestream.*|deploy/install-*.sh) return 0 ;;
+    deploy/sudoers.d/*|deploy/*.service|deploy/*.timer|deploy/*.path|deploy/litestream.*|deploy/install-*.sh) return 0 ;;
     # R5: the operand of the root rsync pinned in sudoers. A narrowing empties
     # /opt (--delete-excluded) or silently drops scripts/.
     deploy/rsync-filter) return 0 ;;

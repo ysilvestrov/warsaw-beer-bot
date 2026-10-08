@@ -13,7 +13,13 @@ describe('src/index.ts wires #469 stage 3', () => {
     const start = INDEX.indexOf('bot.use(\n    cityGate,');
     const use = INDEX.slice(start, INDEX.indexOf('createRefreshCommand(', start));
     expect(start > 0).toBe(true);
-    expect(use.includes('createRebootCommand({')).toBe(true);
+    expect(use.includes(`createRebootCommand({
+      now: () => new Date(),
+      currentSince: (now) => currentRebootSince(readHostPatch(now)),
+      request: (kind, now) => writeRebootRequest(kind, now),
+      snooze: (since, now) => snoozeRebootAlertNow(db, since, now),
+      log,
+    }),`)).toBe(true);
   });
 
   it('schedules the guarded tick hourly at :10, only when an admin is configured', () => {
