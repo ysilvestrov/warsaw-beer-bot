@@ -18,7 +18,7 @@ export const WATCHED_UNITS: readonly string[] = [
 
 // Calendar days (UTC) from today to `date`: 0 on the date itself, whatever the hour — so a
 // threshold never flips at 00:00:01. Null for anything that is not a real date.
-function daysUntil(date: string, nowSeconds: number): number | null {
+export function calendarDaysUntil(date: string, nowSeconds: number): number | null {
   const t = Date.parse(`${date}T00:00:00Z`);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(t)
     || new Date(t).toISOString().slice(0, 10) !== date) return null;
@@ -26,7 +26,7 @@ function daysUntil(date: string, nowSeconds: number): number | null {
 }
 
 function ubuntuSupport(nowSeconds: number): HostFinding[] {
-  const left = daysUntil(R.ubuntuStandardSupportEnd, nowSeconds)!;
+  const left = calendarDaysUntil(R.ubuntuStandardSupportEnd, nowSeconds)!;
   const text = `Ubuntu 24.04: стандартна підтримка до ${R.ubuntuStandardSupportEnd} — ${
     left < 0 ? 'уже минула' : `лишилось ${ukDays(left)}`}`;
   if (left < R.eolRedDays) return [red(text)];
@@ -53,7 +53,7 @@ export function hostPatchFindings(hp: Avail<HostPatchFacts>, now: Date): HostFin
   else {
     if (!LIVEPATCH_OK.includes(h.livepatch.state)) f.push(yellow(`Livepatch: ${h.livepatch.state}`));
     const end = h.livepatch.upgradeRequiredDate;
-    const left = end === null ? null : daysUntil(end, t);
+    const left = end === null ? null : calendarDaysUntil(end, t);
     // A missing date is "could not read", never healthy. The date's own day counts as past (spec).
     if (left === null) f.push(yellow('нема даних: дата підтримки ядра в Livepatch'));
     else if (left <= 0) f.push(red(`Livepatch більше не покриває ядро (з ${end})`));
