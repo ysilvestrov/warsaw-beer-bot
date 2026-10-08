@@ -28,6 +28,9 @@ describe('parseNodeSecurity', () => {
     // A missing or non-boolean flag is "unknown", never "no security release" (cross-review).
     ['a missing security flag', [{ version: 'v24.22.0', date: '2026-10-01' }]],
     ['a non-boolean security flag', [{ version: 'v24.22.0', date: '2026-10-01', security: 'true' }]],
+    // AI review on #805: regex-valid but impossible dates, and a v24 record that is not a version.
+    ['an impossible security date', [{ version: 'v24.22.0', date: '2026-02-30', security: true }]],
+    ['a v24 record that is not a version', [{ version: 'v24.garbage', date: 'bad', security: false }]],
   ])('throws on %s', (_what, json) => {
     expect(() => parseNodeSecurity(json)).toThrow();
   });
@@ -40,6 +43,7 @@ describe('parseNodeEnd', () => {
   it.each([
     ['no v24 key', { v26: { end: '2029-04-30' } }],
     ['a malformed end', { v24: { end: 'April 2028' } }],
+    ['an impossible end date', { v24: { end: '2028-02-30' } }],
     ['not an object', []],
   ])('throws on %s', (_what, json) => {
     expect(() => parseNodeEnd(json)).toThrow();

@@ -139,6 +139,29 @@ describe('hostUpstream + readHostUpstream', () => {
       .toEqual({ ok: false, reason: 'графік підтримки Node: збережений стан пошкоджено' });
   });
 
+  it('a stored impossible date reads as "пошкоджено"', () => {
+    setJobState(db, HOST_UPSTREAM_KEY, JSON.stringify({ nodeEnd: { value: '2028-02-30', at: NOW.toISOString() } }));
+    expect(readHostUpstream(db, NOW).nodeEnd)
+      .toEqual({ ok: false, reason: 'графік підтримки Node: збережений стан пошкоджено' });
+  });
+
+  // AI review on #805: the startup run and the :50 tick can overlap; the later writer must not
+  // discard what the earlier one refreshed.
+  it('two overlapping runs keep each other\'s refreshed sources', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slowIndex = async (url: string): Promise<unknown> => {
+      if (url === NODE_INDEX_URL) { await gate; return ALL[url]; }
+      throw new Error('HTTP 503');
+    };
+    const first = hostUpstream({ db, log, now: () => NOW, fetchJson: slowIndex });
+    await hostUpstream({ db, log, now: () => NOW,
+      fetchJson: fetcher({ ...ALL, [NODE_INDEX_URL]: new Error('HTTP 503') }) });
+    release();
+    await first;
+    expect(readHostUpstream(db, NOW)).toEqual(FRESH);
+  });
+
   it('writes one job_state row', async () => {
     await hostUpstream({ db, log, now: () => NOW, fetchJson: fetcher(ALL) });
     expect(JSON.parse(getJobState(db, HOST_UPSTREAM_KEY)!)).toEqual({

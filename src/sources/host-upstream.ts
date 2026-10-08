@@ -10,6 +10,12 @@ export const LITESTREAM_LATEST_URL = 'https://api.github.com/repos/benbjohnson/l
 const NODE_MAJOR = 24;
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/;
+/** A real calendar date, not just its shape: '2026-02-30' is refused (Date.parse would roll it over). */
+export function isCalendarDay(x: unknown): x is string {
+  if (typeof x !== 'string' || !DAY.test(x)) return false;
+  const t = Date.parse(`${x}T00:00:00Z`);
+  return Number.isFinite(t) && new Date(t).toISOString().slice(0, 10) === x;
+}
 const TAG = /^v(\d+\.\d+\.\d+)$/;
 type Rec = Record<string, unknown>;
 const isRec = (x: unknown): x is Rec => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -24,9 +30,11 @@ export function parseNodeSecurity(json: unknown): { version: string; date: strin
   // "No security release" is a claim about every release in the line: an absent or non-boolean
   // flag makes it unknowable, and unknown must never read as healthy.
   if (line.some((r) => typeof r.security !== 'boolean')) throw new Error('node index: release without a boolean security flag');
+  // Same for the version: a record that is not vX.Y.Z makes "no security release" unprovable.
+  if (line.some((r) => !TAG.test(String(r.version)))) throw new Error('node index: a v24 record is not a version');
   for (const r of line.filter((x) => x.security === true)) {
     const version = TAG.exec(String(r.version))?.[1];
-    if (version === undefined || typeof r.date !== 'string' || !DAY.test(r.date)) {
+    if (version === undefined || !isCalendarDay(r.date)) {
       throw new Error(`node index: malformed security release ${String(r.version)}`);
     }
     if (best === null || compareVersions(version, best.version) > 0) best = { version, date: r.date };
@@ -38,7 +46,7 @@ export function parseNodeSecurity(json: unknown): { version: string; date: strin
 export function parseNodeEnd(json: unknown): string {
   const line = isRec(json) ? json[`v${NODE_MAJOR}`] : undefined;
   const end = isRec(line) ? line.end : undefined;
-  if (typeof end !== 'string' || !DAY.test(end)) throw new Error(`node schedule: no v${NODE_MAJOR}.end`);
+  if (!isCalendarDay(end)) throw new Error(`node schedule: no v${NODE_MAJOR}.end`);
   return end;
 }
 
