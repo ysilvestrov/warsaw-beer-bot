@@ -50,8 +50,17 @@ describe('decideRebootPress', () => {
   it('a reboot press with an unreadable summary is unknown', () => {
     expect(decideRebootPress({ action: 'now', since: SINCE, current: 'unknown' })).toBe('unknown');
   });
-  it('a snooze does not consult the summary: its binding is the alert state', () => {
+  it('a snooze with an unreadable summary still snoozes: its binding is the alert state', () => {
     expect(decideRebootPress({ action: 'snooze', since: SINCE, current: 'unknown' })).toBe('snooze');
+  });
+  it('a snooze for the pending since snoozes', () => {
+    expect(decideRebootPress({ action: 'snooze', since: SINCE, current: SINCE })).toBe('snooze');
+  });
+  it('a snooze for a reboot the summary no longer shows is stale', () => {
+    expect([
+      decideRebootPress({ action: 'snooze', since: SINCE, current: SINCE + 3600 }),
+      decideRebootPress({ action: 'snooze', since: SINCE, current: null }),
+    ]).toEqual(['stale', 'stale']);
   });
 });
 
@@ -144,6 +153,12 @@ describe('createRebootCommand', () => {
     const s = setup();
     await press(s.bot, ADMIN, `rb:snooze:${SINCE}`);
     expect([s.snoozes, s.requests, s.replies, s.edits]).toEqual([[SINCE], [], [PRESS_TEXT.snoozed], [undefined]]);
+  });
+
+  it('an old message’s snooze, after the summary moved on, records nothing and says it is stale', async () => {
+    const s = setup({ current: null });
+    await press(s.bot, ADMIN, `rb:snooze:${SINCE}`);
+    expect([s.snoozes, s.replies, s.edits]).toEqual([[], [PRESS_TEXT.stale], [undefined]]);
   });
 
   it('a snooze the alert state refuses is stale', async () => {

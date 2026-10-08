@@ -35,7 +35,9 @@ export function currentRebootSince(read: HostPatchRead): number | null | 'unknow
 }
 
 export function decideRebootPress(p: { action: RebootAction; since: number; current: number | null | 'unknown' }): PressOutcome {
-  if (p.action === 'snooze') return 'snooze';
+  // A snooze is bound by the alert state (snoozeRebootAlertNow), so an unreadable summary does not
+  // block it — but a summary that shows another reboot, or none, makes the promise false (codex).
+  if (p.action === 'snooze') return p.current === 'unknown' || p.current === p.since ? 'snooze' : 'stale';
   if (p.current === 'unknown') return 'unknown';
   return p.current === p.since ? 'request' : 'stale';
 }
@@ -58,7 +60,7 @@ export function createRebootCommand(deps: RebootCommandDeps): Composer<BotContex
     const action = ctx.match[1] as RebootAction;
     const since = Number(ctx.match[2]);
     const now = deps.now();
-    const outcome = decideRebootPress({ action, since, current: action === 'snooze' ? 'unknown' : deps.currentSince(now) });
+    const outcome = decideRebootPress({ action, since, current: deps.currentSince(now) });
     if (outcome === 'unknown') {
       await ctx.answerCbQuery(PRESS_TEXT.unknown);
       return;
