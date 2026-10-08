@@ -210,8 +210,10 @@ flag (C19), so a pending reboot here is for libc6/dbus-class libraries. An unrea
 sends nothing — the daily status already says «нема даних» — with three
 inline buttons: **«Зараз»**, **«О 04:00»**, **«Нагадати через 3 дні»**. The state
 (`notified_since`, `snooze_until`) lives in `job_state`, keyed by `reboot_required.since`,
-so one pending reboot produces one alert, not one per hour. Only `ADMIN_TELEGRAM_ID` can
-press the buttons; anyone else gets the standard "admins only" answer.
+so one pending reboot produces one alert, not one per hour. Only `ADMIN_TELEGRAM_ID`, in
+the private chat, can press the buttons; anyone else gets the toast «Лише для
+адміністратора.» and nothing happens. A reboot press while the summary is unreadable
+writes nothing and keeps the buttons («стан хоста невідомий»).
 
 **The bot cannot reboot the host — by design.** The button writes a request file; root
 acts on it:

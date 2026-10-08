@@ -35,7 +35,7 @@ test('src/index.ts schedules announceRelease hourly at minute 40, not on a timez
 });
 
 test('src/index.ts mounts the /announce command composer', () => {
-  expect(src()).toMatch(/bot\.use\([\s\S]{0,600}announceCommand,/);
+  expect(src()).toMatch(/bot\.use\([\s\S]{0,1000}announceCommand,/);
 });
 
 // #564: the AI reviewer found that the hourly tick has no in-flight guard, so two

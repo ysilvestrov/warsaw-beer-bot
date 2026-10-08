@@ -49,6 +49,10 @@ import { dailyStatus } from './jobs/daily-status';
 import { orphanTriage } from './jobs/orphan-triage';
 import { unlockFixedOrphans } from './jobs/unlock-fixed-orphans';
 import { hostUpstream } from './jobs/host-upstream';
+import { createRebootCommand, currentRebootSince, rebootKeyboard } from './bot/commands/reboot';
+import { createRebootAlertTick, snoozeRebootAlertNow } from './jobs/reboot-alert';
+import { writeRebootRequest } from './jobs/reboot-request';
+import { readHostPatch } from './jobs/host-patch';
 import { announceRelease, ANNOUNCED_VERSION_KEY } from './jobs/announce-release';
 import { createReportCommand } from './bot/commands/report';
 import { createNotifier } from './bot/bug-report-media';
@@ -238,6 +242,14 @@ async function main(): Promise<void> {
 
   bot.use(
     cityGate,
+    // #469 stage 3: the admin's reboot buttons (rb:<kind>:<since>); admin check first.
+    createRebootCommand({
+      now: () => new Date(),
+      currentSince: (now) => currentRebootSince(readHostPatch(now)),
+      request: (kind, now) => writeRebootRequest(kind, now),
+      snooze: (since, now) => snoozeRebootAlertNow(db, since, now),
+      log,
+    }),
     createReportCommand({ available: bugReportsAvailable, mediaDir: env.BUG_REPORT_MEDIA_DIR ?? null,
       now: () => new Date(), triggerWorker: () => { void worker?.runOnce().catch((e) => log.error({ err: e }, 'bug-report worker')); },
       downloadFile }),
@@ -285,6 +297,12 @@ async function main(): Promise<void> {
   // #379/#564: guards the announce-release cron below against overlapping runs — see
   // the comment on that cron for why a run can outlast the hourly tick.
   let announceInFlight = false;
+
+  // #469 stage 3: one alert per pending reboot; the tick carries its own in-flight guard.
+  const rebootAlertTick = createRebootAlertTick({
+    db, log,
+    send: (text, since) => bot.telegram.sendMessage(env.ADMIN_TELEGRAM_ID!, text, rebootKeyboard(since)).then(() => {}),
+  });
 
   const cronJobs = [
     cron.schedule('0 */12 * * *', () => {
@@ -370,6 +388,9 @@ async function main(): Promise<void> {
     cron.schedule('50 * * * *', () => {
       hostUpstream({ db, log }).catch((e) => log.error({ err: e }, 'host-upstream cron'));
     }),
+    // #469 stage 3: tell the admin a reboot is pending (and again after a snooze). Hourly;
+    // the collector also runs hourly, so the alert lags the flag by at most ~2 h.
+    ...(env.ADMIN_TELEGRAM_ID ? [cron.schedule('10 * * * *', rebootAlertTick)] : []),
     // announce-release (#379): tell token holders when a new extension version is
     // actually live. Hourly UTC tick; the job checks the Warsaw [09:00,22:00) send
     // window and its own job_state version marker, so it sends once per version

@@ -78,6 +78,6 @@ test('import before report swallows the image document from an active media draf
 test('src/index.ts registers report after cityGate and before import inside bot.use', () => {
   const source = readFileSync(path.join(__dirname, '../../index.ts'), 'utf8');
   const wiring = source.match(/bot\.use\(([\s\S]*?)\n  \);/)?.[1];
-  expect(wiring).toMatch(/cityGate,\s*createReportCommand\(/);
+  expect(wiring).toMatch(/cityGate,[\s\S]*?createReportCommand\(/);
   expect(wiring).toMatch(/createReportCommand\([\s\S]*?\),\s*startCommand,[\s\S]*?importCommand,/);
 });
