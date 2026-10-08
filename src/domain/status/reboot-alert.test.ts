@@ -69,6 +69,16 @@ describe('decideRebootAlert', () => {
       .toEqual({ send: true, text: TEXT, state: { since: SINCE, snoozeUntil: null } });
   });
 
+  // AI review on #807: a stored snooze is a claim. Only snoozeRebootAlertNow writes it, never further
+  // than 3 days ahead; anything later is corrupt and must not silence a pending reboot.
+  it('a snooze further away than 3 days is corrupt: the reboot is alerted', () => {
+    expect(decideRebootAlert(ok(), { since: SINCE, snoozeUntil: T + 3 * DAY + 1 }, NOW).send).toBe(true);
+  });
+
+  it('a snooze exactly 3 days away is honoured', () => {
+    expect(decideRebootAlert(ok(), { since: SINCE, snoozeUntil: T + 3 * DAY }, NOW).send).toBe(false);
+  });
+
   it('a snooze one second from expiry stays quiet', () => {
     expect(decideRebootAlert(ok(), { since: SINCE, snoozeUntil: T + 1 }, NOW))
       .toEqual({ send: false, state: { since: SINCE, snoozeUntil: T + 1 } });
