@@ -26,10 +26,85 @@ test('sends Cookie header with untappd_user_v3_e when cookie option is set', asy
   expect((calls[0].headers as Record<string, string>)['Cookie']).toBe('untappd_user_v3_e=abc123');
 });
 
-test('throws CookieExpiredError on any 3xx when redirect is manual', async () => {
-  const fetchImpl: typeof fetch = async () => new Response('', { status: 307 });
+test('throws CookieExpiredError on 3xx redirecting to /login when redirect is manual', async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response('', { status: 307, headers: { Location: 'https://untappd.com/login?go_to=https%3A%2F%2Funtappd.com%2Fuser%2Ffoo%2Fbeers' } });
   const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
   await expect(http.get('https://untappd.com/user/foo/beers')).rejects.toBeInstanceOf(CookieExpiredError);
+});
+
+test('throws CookieExpiredError on 3xx with relative /login Location when redirect is manual', async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response('', { status: 307, headers: { Location: '/login?go_to=%2Fuser%2Ffoo%2Fbeers' } });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  await expect(http.get('https://untappd.com/user/foo/beers')).rejects.toBeInstanceOf(CookieExpiredError);
+});
+
+test('follows safe 3xx redirect when redirect is manual and returns body', async () => {
+  const calls: string[] = [];
+  const fetchImpl: typeof fetch = async (url) => {
+    calls.push(String(url));
+    if (url === 'https://untappd.com/v/old-slug/11142155/activity') {
+      return new Response('', {
+        status: 307,
+        headers: { Location: 'https://untappd.com/v/new-slug/11142155/activity' },
+      });
+    }
+    return new Response('canonical-body', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  const body = await http.get('https://untappd.com/v/old-slug/11142155/activity');
+  expect(body).toBe('canonical-body');
+  expect(calls).toEqual([
+    'https://untappd.com/v/old-slug/11142155/activity',
+    'https://untappd.com/v/new-slug/11142155/activity',
+  ]);
+});
+
+test('invokes onRedirect callback when safe redirect is followed', async () => {
+  const redirected: { from: string; to: string }[] = [];
+  const fetchImpl: typeof fetch = async (url) => {
+    if (url === 'https://untappd.com/v/old/1') {
+      return new Response('', { status: 307, headers: { Location: '/v/new/1' } });
+    }
+    return new Response('done', { status: 200 });
+  };
+  const http = createHttp({
+    userAgent: 'ua',
+    minGapMs: 0,
+    fetchImpl,
+    redirect: 'manual',
+    onRedirect: (from, to) => redirected.push({ from, to }),
+  });
+  const reqRedirected: { from: string; to: string }[] = [];
+  const body = await http.get('https://untappd.com/v/old/1', {
+    onRedirect: (from, to) => reqRedirected.push({ from, to }),
+  });
+  expect(body).toBe('done');
+  expect(redirected).toEqual([{ from: 'https://untappd.com/v/old/1', to: 'https://untappd.com/v/new/1' }]);
+  expect(reqRedirected).toEqual([{ from: 'https://untappd.com/v/old/1', to: 'https://untappd.com/v/new/1' }]);
+});
+
+test('throws HttpError when redirect chain exceeds 3 hops', async () => {
+  let count = 0;
+  const fetchImpl: typeof fetch = async () => {
+    count++;
+    return new Response('', { status: 307, headers: { Location: `https://untappd.com/hop/${count}` } });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  await expect(http.get('https://untappd.com/hop/0')).rejects.toMatchObject({
+    name: 'HttpError',
+    status: 307,
+  });
+});
+
+test('throws HttpError on 3xx without Location header when redirect is manual', async () => {
+  const fetchImpl: typeof fetch = async () => new Response('', { status: 307 });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  await expect(http.get('https://untappd.com/v/old/1')).rejects.toMatchObject({
+    name: 'HttpError',
+    status: 307,
+  });
 });
 
 test('throws generic Error (not CookieExpiredError) on 4xx', async () => {
@@ -143,7 +218,8 @@ test('a persistent 429 retains 429 status', async () => {
 
 test('does not rotate on a 3xx under redirect:manual (cookie expiry, not an IP block)', async () => {
   const rotator = fakeRotator();
-  const fetchImpl: typeof fetch = async () => new Response('', { status: 307 });
+  const fetchImpl: typeof fetch = async () =>
+    new Response('', { status: 307, headers: { Location: 'https://untappd.com/login?go_to=x' } });
   const http = createHttp({
     userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock, redirect: 'manual',
   });
