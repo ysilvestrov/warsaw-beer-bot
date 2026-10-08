@@ -1,3 +1,4 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb } from '../storage/db';
@@ -97,6 +98,29 @@ test('#469: a missing host summary is "підсумок патчів хоста 
     { ok: false, reason: 'підсумок патчів хоста недоступний' },
     { ok: false, reason: 'графік підтримки Node ще не завантажено' },
   ]);
+});
+
+test('#469: a valid host summary four hours old is "збирач патчів мовчить"', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'wbb-status-inputs-stale-'));
+  try {
+    chmodSync(dir, 0o755);
+    const file = join(dir, 'summary.json');
+    writeFileSync(file, JSON.stringify({
+      version: 1,
+      timestamp: NOW.getTime() / 1000 - 4 * 3600,
+      kernel: { running: '6.8.0-142-generic', newest_installed: '6.8.0-142-generic' },
+      reboot_required: null,
+      livepatch: { state: 'nothing-to-apply', upgrade_required_date: '2027-10-02' },
+      stale_services: [],
+      unattended: { last_run: null, security_pending: 0 },
+      packages: { nodejs: '24.21.0-1nodesource1', cloudflared: '2026.10.0', litestream: null },
+    }), { mode: 0o644 });
+    chmodSync(file, 0o644);
+    const inputs = collectStatusInputs(emptyDb(), NOW, DATE, { ...missing, hostPatchPath: file, hostPatchUid: process.getuid!() });
+    expect(inputs.hostPatch).toEqual({ ok: false, reason: 'збирач патчів мовчить' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('no repo → no bug-report channel; a repo → summary and paused state', () => {
