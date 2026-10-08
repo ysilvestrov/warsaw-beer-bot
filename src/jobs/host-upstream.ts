@@ -83,7 +83,19 @@ export async function hostUpstream(deps: HostUpstreamDeps): Promise<void> {
   }
   // Merge onto the row as it is NOW, not as it was at the start: the startup run and the :50
   // tick can overlap, and the later writer must not discard what the other one refreshed.
-  setJobState(deps.db, HOST_UPSTREAM_KEY, JSON.stringify({ ...(readStored(deps.db) ?? {}), ...refreshed }));
+  // Per source, the newer fetch wins: an older overlapping run must not replace a healthy value the
+  // other run fetched later.
+  // The clock again, at write time: a run that started later may have written meanwhile, and its
+  // `at` must not look like "from the future" against this run's start.
+  const writeNow = (deps.now ?? (() => new Date()))();
+  const merged: Stored = { ...(readStored(deps.db) ?? {}) };
+  for (const key of Object.keys(refreshed) as SourceKey[]) {
+    // Only an entry the reader would call healthy can outrank this fetch: a corrupt or
+    // future-dated one is exactly what this run is repairing.
+    const theirs = entryAt(key, merged[key], writeNow);
+    if (theirs === null || theirs <= parseIsoInstant(refreshed[key]!.at)) merged[key] = refreshed[key];
+  }
+  setJobState(deps.db, HOST_UPSTREAM_KEY, JSON.stringify(merged));
 }
 
 export function readHostUpstream(db: DB, now: Date): HostUpstream {

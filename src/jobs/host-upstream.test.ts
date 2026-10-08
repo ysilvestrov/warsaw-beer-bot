@@ -162,6 +162,23 @@ describe('hostUpstream + readHostUpstream', () => {
     expect(readHostUpstream(db, NOW)).toEqual(FRESH);
   });
 
+  it('when both overlapping runs refresh one source, the newer fetch wins whoever writes last', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    // The older run's clock moves on: its write happens after the newer run (5 minutes later) wrote.
+    const clock = [NOW, new Date(NOW.getTime() + 6 * 60_000)];
+    const older = hostUpstream({ db, log, now: () => clock.shift() ?? clock[0], fetchJson: async (url) => {
+      if (url === NODE_INDEX_URL) { await gate; return ALL[url]; }
+      throw new Error('HTTP 503');
+    } });
+    const noSecurity = [{ version: 'v24.21.0', date: '2026-09-07', security: false }];
+    await hostUpstream({ db, log, now: () => new Date(NOW.getTime() + 5 * 60_000),
+      fetchJson: fetcher({ ...ALL, [NODE_INDEX_URL]: noSecurity }) });
+    release();
+    await older;
+    expect(readHostUpstream(db, new Date(NOW.getTime() + 6 * 60_000)).nodeSecurity).toEqual({ ok: true, value: null });
+  });
+
   it('writes one job_state row', async () => {
     await hostUpstream({ db, log, now: () => NOW, fetchJson: fetcher(ALL) });
     expect(JSON.parse(getJobState(db, HOST_UPSTREAM_KEY)!)).toEqual({
