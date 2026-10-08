@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { openDb, type DB } from './db';
 import { migrate } from './schema';
-import { activeFest, currentOrNextFest, festSessions, festVenues, getFestBySlug, pollingSessionAt } from './fests';
+import { activeFest, currentOrNextFest, festSessions, festVenues, getFestBySlug, pollingSessionAt, updateFestVenueFeedPath } from './fests';
 import { menuFor, menuStats, upsertMenuItem } from './fest_menu';
 import { checkinsSince, insertVenueCheckins, venueCheckinAt } from './venue_checkins';
 import { addCoverage, coverageSince } from './fest_coverage';
@@ -56,6 +56,15 @@ describe('migration 42 — festival mode', () => {
       { venue_id: 2815864, label: 'Centrum Konferencyjne Legia', feed_path: '/v/centrum-konferencyjne-legia/2815864' },
       { venue_id: 11142155, label: 'Warszawski Festiwal Piwa', feed_path: '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity' },
     ]);
+  });
+
+  it('updateFestVenueFeedPath updates feed_path for matching venue', () => {
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const changes = updateFestVenueFeedPath(db, 11142155, '/v/warszawski-festiwal-piwa/11142155/activity');
+    expect(changes).toBe(1);
+    const venues = festVenues(db, fest.id);
+    const wfp = venues.find((v) => v.venue_id === 11142155);
+    expect(wfp?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
   });
 
   it('deleting a fest cascades to its sessions, venues, menu and teams', () => {
