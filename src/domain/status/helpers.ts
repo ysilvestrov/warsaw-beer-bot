@@ -48,3 +48,13 @@ export function groupThousands(n: number): string {
 export function gib(bytes: number): string {
   return (bytes / GIB_BYTES).toFixed(2);
 }
+
+// "N днів" with the Ukrainian plural: 1 день, 2–4 дні, 5–20 днів, 21 день, 111 днів.
+export function ukDays(n: number): string {
+  const tail = n % 100;
+  if (tail < 11 || tail > 14) {
+    if (n % 10 === 1) return `${n} день`;
+    if (n % 10 >= 2 && n % 10 <= 4) return `${n} дні`;
+  }
+  return `${n} днів`;
+}
