@@ -98,7 +98,11 @@ export function activeFest(db: DB, now: Date): { fest: Fest; session: FestSessio
   return activeFests(db, now)[0] ?? null;
 }
 
-export function updateFestVenueFeedPath(db: DB, venueId: number, feedPath: string): number {
+export function updateFestVenueFeedPath(db: DB, venueId: number, feedPath: string, festId?: number): number {
+  if (festId !== undefined) {
+    const info = db.prepare('UPDATE fest_venues SET feed_path = ? WHERE fest_id = ? AND venue_id = ?').run(feedPath, festId, venueId);
+    return info.changes as number;
+  }
   const info = db.prepare('UPDATE fest_venues SET feed_path = ? WHERE venue_id = ?').run(feedPath, venueId);
   return info.changes as number;
 }

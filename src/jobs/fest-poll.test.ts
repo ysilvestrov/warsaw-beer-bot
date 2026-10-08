@@ -6,7 +6,7 @@ import { migrate } from '../storage/schema';
 import { getFestBySlug, festVenues } from '../storage/fests';
 import { getJobState, setJobState } from '../storage/job_state';
 import { menuStats } from '../storage/fest_menu';
-import { CookieExpiredError, HttpError, type Http, type HttpGetOpts } from '../sources/http';
+import { createHttp, CookieExpiredError, HttpError, type Http, type HttpGetOpts } from '../sources/http';
 import { createPersistentCircuitBreaker } from '../domain/untappd-circuit';
 import { runFestMenu, runFestPoll, refreshFestMenu, FEST_MENU_LAST_KEY, FEST_POLL_LAST_KEY } from './fest-poll';
 
@@ -72,6 +72,83 @@ describe('runFestPoll', () => {
     // Subsequent poll uses the updated path
     await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
     expect(urls[1]).toBe('https://untappd.com/v/wfp-future-slug/11142155/activity');
+  });
+
+  it('does not update feed_path when redirect target has a different venue_id or invalid path', async () => {
+    const { db, deps } = setup([
+      { body: FEED, redirectTo: 'https://untappd.com/v/other-fest/9999999/activity' },
+      { body: FEED, redirectTo: 'https://untappd.com/v/warszawski-festiwal-piwa/11142155/photos' },
+    ]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    await runFestPoll(deps, IN_SESSION);
+    let venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    await runFestPoll(deps, new Date(IN_SESSION.getTime() + 10 * 60 * 1000));
+    venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+  });
+
+  it('does not update feed_path in runFestPoll when ingestion encounters a block page', async () => {
+    const { db, deps } = setup([
+      {
+        body: '<html>Just a moment... cf-challenge</html>',
+        redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155/activity',
+      },
+    ]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const res = await runFestPoll(deps, IN_SESSION);
+    expect(res).toBeNull();
+    const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+  });
+
+  it('logs warning when updateFestVenueFeedPath encounters a database error', async () => {
+    const { db, deps } = setup([
+      { body: FEED, redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155/activity' },
+    ]);
+    const logged: unknown[] = [];
+    deps.log = {
+      ...deps.log,
+      warn: (obj: unknown, msg: string) => { logged.push({ obj, msg }); },
+      info: () => {},
+    } as unknown as pino.Logger;
+
+    // Attach trigger to cause UPDATE to fail with SqliteError
+    db.prepare("CREATE TRIGGER fail_update BEFORE UPDATE ON fest_venues BEGIN SELECT RAISE(FAIL, 'db error'); END;").run();
+    const r = await runFestPoll(deps, IN_SESSION);
+    expect(r?.inserted).toBe(3);
+    expect(logged).toEqual([
+      expect.objectContaining({ msg: 'fest: failed to update venue feed_path in db' }),
+    ]);
+  });
+
+  it('integrates with real createHttp: follows safe redirect and updates fest_venues.feed_path', async () => {
+    const db: DB = openDb(':memory:');
+    migrate(db);
+    const fetchImpl: typeof fetch = async (url) => {
+      if (url === 'https://untappd.com/v/warszawski-festiwal-piwa/11142155/activity') {
+        return new Response('', {
+          status: 307,
+          headers: { Location: 'https://untappd.com/v/wfp-future-slug/11142155/activity' },
+        });
+      }
+      if (url === 'https://untappd.com/v/wfp-future-slug/11142155/activity') {
+        return new Response(FEED, { status: 200 });
+      }
+      throw new Error(`Unexpected url ${url}`);
+    };
+    const http = createHttp({ userAgent: 'test-ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+    const breaker = createPersistentCircuitBreaker({
+      db, key: 'fest_poll_open_until', cooldownMs: 30 * 60 * 1000, blockThreshold: 2,
+      onTrip: () => {}, onRecover: () => {},
+    });
+    const deps = { db, log: pino({ level: 'silent' }), http, breaker };
+    const r = await runFestPoll(deps, IN_SESSION);
+    expect(r?.inserted).toBe(3);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
   });
 
   it('does nothing outside a polling window and before its 10-minute tick', async () => {
@@ -143,17 +220,72 @@ describe('fest menu job', () => {
   });
 
   it('updates fest_venues.feed_path when refreshFestMenu encounters a venue redirect', async () => {
-    const { db, deps } = setup([
+    const { db, deps, urls } = setup([
       {
         body: MENU,
         redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155',
       },
+      MENU,
     ]);
     const fest = getFestBySlug(db, 'wfp22')!;
     const res = await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
     expect(res).toMatchObject({ items: 4 });
     const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
     expect(venue?.feed_path).toBe('/v/wfp-future-slug/11142155/activity');
+
+    // Subsequent menu fetch uses the updated path (without /activity)
+    await refreshFestMenu(deps, fest, new Date('2026-10-09T13:00:00.000Z'));
+    expect(urls[1]).toBe('https://untappd.com/v/wfp-future-slug/11142155');
+  });
+
+  it('does not update feed_path in refreshFestMenu when redirect target has wrong venue_id or invalid path', async () => {
+    const { db, deps } = setup([
+      { body: MENU, redirectTo: 'https://untappd.com/v/other/9999999' },
+      { body: MENU, redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155/photos' },
+    ]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
+    let venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    await refreshFestMenu(deps, fest, new Date('2026-10-09T13:00:00.000Z'));
+    venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+  });
+
+  it('does not update feed_path in refreshFestMenu when redirected page is wrong_page', async () => {
+    const { db, deps } = setup([
+      {
+        body: MENU.replace('/11142155"', '/999"'),
+        redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155',
+      },
+    ]);
+    const fest = getFestBySlug(db, 'wfp22')!;
+    const res = await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
+    expect(res).toBe('wrong_page');
+    const venue = festVenues(db, fest.id).find((v) => v.venue_id === 11142155);
+    expect(venue?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+  });
+
+  it('logs warning when updateFestVenueFeedPath encounters a database error in refreshFestMenu', async () => {
+    const { db, deps } = setup([
+      { body: MENU, redirectTo: 'https://untappd.com/v/wfp-future-slug/11142155' },
+    ]);
+    const logged: unknown[] = [];
+    deps.log = {
+      ...deps.log,
+      warn: (obj: unknown, msg: string) => { logged.push({ obj, msg }); },
+      info: () => {},
+    } as unknown as pino.Logger;
+
+    const fest = getFestBySlug(db, 'wfp22')!;
+    // Attach trigger to cause UPDATE to fail with SqliteError
+    db.prepare("CREATE TRIGGER fail_update_menu BEFORE UPDATE ON fest_venues BEGIN SELECT RAISE(FAIL, 'db error'); END;").run();
+    const res = await refreshFestMenu(deps, fest, new Date('2026-10-09T12:00:00.000Z'));
+    expect(res).toMatchObject({ items: 4 });
+    expect(logged).toEqual([
+      expect.objectContaining({ msg: 'fest: failed to update venue feed_path in db' }),
+    ]);
   });
 
   it('refuses a page that is not the fest menu venue', async () => {

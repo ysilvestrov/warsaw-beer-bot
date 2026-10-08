@@ -85,17 +85,61 @@ test('invokes onRedirect callback when safe redirect is followed', async () => {
   expect(reqRedirected).toEqual([{ from: 'https://untappd.com/v/old/1', to: 'https://untappd.com/v/new/1' }]);
 });
 
-test('throws HttpError when redirect chain exceeds 3 hops', async () => {
+test('throws HttpError and does not leak cookies on cross-origin redirect', async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response('', { status: 307, headers: { Location: 'https://evil.example/login' } });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual', cookie: 'secret123' });
+  const err = await http.get('https://untappd.com/user/foo/beers').catch((e) => e);
+  expect(err).toBeInstanceOf(HttpError);
+  expect(err).not.toBeInstanceOf(CookieExpiredError);
+  expect(err.status).toBe(307);
+  expect(err.url).toBe('https://untappd.com/user/foo/beers');
+});
+
+test('throws HttpError on insecure plain HTTP redirect', async () => {
+  const fetchImpl: typeof fetch = async () =>
+    new Response('', { status: 307, headers: { Location: 'http://untappd.com/v/new/1' } });
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual', cookie: 'secret123' });
+  const err = await http.get('https://untappd.com/v/old/1').catch((e) => e);
+  expect(err).toBeInstanceOf(HttpError);
+  expect(err.status).toBe(307);
+});
+
+test('succeeds when redirect chain has exactly 3 hops followed by 200', async () => {
+  let count = 0;
+  const urls: string[] = [];
+  const fetchImpl: typeof fetch = async (url) => {
+    count++;
+    urls.push(String(url));
+    if (count <= 3) {
+      return new Response('', { status: 307, headers: { Location: `https://untappd.com/hop/${count}` } });
+    }
+    return new Response('hop-3-success', { status: 200 });
+  };
+  const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
+  const body = await http.get('https://untappd.com/hop/0');
+  expect(body).toBe('hop-3-success');
+  expect(count).toBe(4);
+  expect(urls).toEqual([
+    'https://untappd.com/hop/0',
+    'https://untappd.com/hop/1',
+    'https://untappd.com/hop/2',
+    'https://untappd.com/hop/3',
+  ]);
+});
+
+test('throws HttpError when redirect chain exceeds 3 hops (at 4th redirect)', async () => {
   let count = 0;
   const fetchImpl: typeof fetch = async () => {
     count++;
     return new Response('', { status: 307, headers: { Location: `https://untappd.com/hop/${count}` } });
   };
   const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, redirect: 'manual' });
-  await expect(http.get('https://untappd.com/hop/0')).rejects.toMatchObject({
-    name: 'HttpError',
-    status: 307,
-  });
+  const err = await http.get('https://untappd.com/hop/0').catch((e) => e);
+  expect(err).toBeInstanceOf(HttpError);
+  expect(err.status).toBe(307);
+  expect(err.url).toBe('https://untappd.com/hop/3');
+  expect(count).toBe(4);
 });
 
 test('throws HttpError on 3xx without Location header when redirect is manual', async () => {
@@ -288,4 +332,68 @@ test('exhausts maxBlockRetries then throws a block HttpError (rotates exactly bu
   const http = createHttp({ userAgent: 'ua', minGapMs: 0, fetchImpl, rotator, isBlock: untappdBlock, maxBlockRetries: 3 });
   await expect(http.get('https://untappd.com/beer/1')).rejects.toMatchObject({ name: 'HttpError', status: 403 });
   expect(rotator.rotations()).toBe(3);
+});
+
+test('preserves headers and proxy dispatcher across followed safe redirect hops', async () => {
+  const calls: { url: string; init?: RequestInit }[] = [];
+  const fakeDispatcher = {} as unknown as import('undici').Dispatcher;
+  const rotator = {
+    rotations: () => 0,
+    current: () => fakeDispatcher,
+    rotate: () => {},
+    close: () => {},
+  };
+  const fetchImpl: typeof fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    if (url === 'https://untappd.com/v/old/1') {
+      return new Response('', { status: 307, headers: { Location: 'https://untappd.com/v/new/1' } });
+    }
+    return new Response('ok', { status: 200 });
+  };
+  const http = createHttp({
+    userAgent: 'test-ua',
+    cookie: 'session123',
+    minGapMs: 0,
+    fetchImpl,
+    redirect: 'manual',
+    rotator,
+  });
+  const body = await http.get('https://untappd.com/v/old/1');
+  expect(body).toBe('ok');
+  expect(calls).toHaveLength(2);
+  expect((calls[0].init?.headers as Record<string, string>)['User-Agent']).toBe('test-ua');
+  expect((calls[0].init?.headers as Record<string, string>)['Cookie']).toBe('untappd_user_v3_e=session123');
+  expect((calls[0].init as Record<string, unknown>)['dispatcher']).toBe(fakeDispatcher);
+  expect((calls[1].init?.headers as Record<string, string>)['User-Agent']).toBe('test-ua');
+  expect((calls[1].init?.headers as Record<string, string>)['Cookie']).toBe('untappd_user_v3_e=session123');
+  expect((calls[1].init as Record<string, unknown>)['dispatcher']).toBe(fakeDispatcher);
+});
+
+test('rotates and retries when a followed redirect hop encounters a block', async () => {
+  const rotator = fakeRotator();
+  let hop2Calls = 0;
+  const fetchImpl: typeof fetch = async (url) => {
+    if (url === 'https://untappd.com/v/old/1') {
+      return new Response('', { status: 307, headers: { Location: 'https://untappd.com/v/new/1' } });
+    }
+    if (url === 'https://untappd.com/v/new/1') {
+      hop2Calls++;
+      return hop2Calls === 1
+        ? new Response('', { status: 403 })
+        : new Response('redirected-body', { status: 200 });
+    }
+    throw new Error(`Unexpected url ${url}`);
+  };
+  const http = createHttp({
+    userAgent: 'ua',
+    minGapMs: 0,
+    fetchImpl,
+    redirect: 'manual',
+    rotator,
+    isBlock: untappdBlock,
+  });
+  const body = await http.get('https://untappd.com/v/old/1');
+  expect(body).toBe('redirected-body');
+  expect(rotator.rotations()).toBe(1);
+  expect(hop2Calls).toBe(2);
 });
