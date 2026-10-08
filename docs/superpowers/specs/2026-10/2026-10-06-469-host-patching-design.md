@@ -106,16 +106,33 @@ network: the root part stays minimal and its output depends only on the host. It
   "timestamp": 1791000000,                 // unix seconds
   "kernel": { "running": "6.8.0-142-generic", "newest_installed": "6.8.0-142-generic" },
   "reboot_required": { "since": 1790500000, "packages": ["libc6", "linux-image-…"] } | null,
-  "livepatch": { "state": "applied" | "nothing-to-apply" | "unsupported-kernel" | "disabled" | "unknown" },
-  "stale_services": [{ "unit": "litestream.service", "since": 1790900000 }], // needrestart -b
+  "livepatch": { "state": "applied" | "nothing-to-apply" | "unsupported-kernel" | "unknown", "upgrade_required_date": "2027-10-02" | null },
+  "stale_services": [{ "unit": "litestream.service", "since": 1790900000 }], // needrestart -b -r l (list only — never restarts)
   "unattended": { "last_run": 1790990000, "security_pending": 0 },
   "packages": { "nodejs": "24.21.0-1nodesource1", "cloudflared": "2026.10.0", "litestream": "0.5.11" }
 }
 ```
 
-`reboot_required.since` is the mtime of `/var/run/reboot-required`. `security_pending`
-counts upgradable packages whose candidate comes from a `-security` pocket. A field the
-collector could not read is written as `null`, never guessed.
+`reboot_required.since` is the mtime of `/var/run/reboot-required`. `unattended.last_run`
+is the mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp`. `security_pending`
+counts lines of `apt list --upgradable` whose archive list names a `-security` pocket
+(`noble-security`, `noble-apps-security`, `noble-infra-security`). Package versions come
+from `dpkg-query -W`. A field the collector could not read is written as `null`, never
+guessed.
+
+needrestart is called as `needrestart -b -r l`: batch output, **list-only** restart
+mode. Without `-r l` the hourly collector would itself restart services.
+
+**Livepatch mapping** (from `canonical-livepatch status --format json`, `Status[0]` is the
+running kernel): `Supported` ≠ `"supported"` → `unsupported-kernel`; else
+`Livepatch.State` ∈ {`applied`, `nothing-to-apply`} is kept as is; any other value →
+`unknown`. A failing command or unparsable output → `livepatch: null`.
+`upgrade_required_date` is copied from `Status[0].UpgradeRequiredDate`.
+
+**The collector must run as its own systemd unit.** Snap CLIs (`canonical-livepatch`, and
+`pro`, which calls it) refuse to start inside another service's cgroup — probed from a
+code-server terminal: `…code-server@ysi.service is not a snap cgroup`. They work under
+`systemd-run --wait --pipe`, i.e. in their own unit (C15).
 
 **Bot-side upstream facts (unprivileged; the bot already has network).** Once a day,
 the daily-status collector fetches:
@@ -146,6 +163,7 @@ line.
 |---|---|---|
 | reboot pending (`now − reboot_required.since`) | > 3 days | > 14 days |
 | Livepatch `state` ∉ {`applied`, `nothing-to-apply`} | always | — |
+| Livepatch `upgrade_required_date` (kernel leaves Livepatch support) | < 30 days | past |
 | a **watched** unit in `stale_services` (needrestart did not restart it) | `now − since` > 1 day | — |
 | newest Node 24.x security release > installed `nodejs` | — | release `date` > 3 days ago |
 | `security_pending > 0` | unattended-upgrades last run > 2 days ago | — |
@@ -201,10 +219,10 @@ and litestream's flush run as on any `systemctl stop`.
 |---|---|---|---|
 | C1 | needrestart restarts services automatically under unattended-upgrades | `unattended-upgrades-dpkg.log*`: "Restarting services… systemctl restart ssh.service …" and "systemctl restart code-server@root.service" (the 09-03 incident) | strong (log) |
 | C2 | `/var/run/reboot-required` + `.pkgs` mean "a reboot is pending, for these packages" | probed: present, mtime 2026-09-26, `.pkgs` lists kernels + `libc6`; running 6.8.0-90 vs installed 6.8.0-142 | strong (probe) |
-| C3 | Livepatch covers the kernel the host runs after the stage-1 reboot | none yet | **weak → probe P1** after `pro enable livepatch` + reboot |
-| C4 | `canonical-livepatch status --format json` gives a state the collector can map to the five values | none yet | **weak → probe P1** |
+| C3 | Livepatch covers the kernel the host runs after the stage-1 reboot | P1 2026-10-07 (`systemd-run`, after `pro attach` + `enable livepatch`): `Status[0]` `Kernel 6.8.0-142.142-generic`, `Supported: "supported"`, `UpgradeRequiredDate: 2027-10-02` | strong (probe) |
+| C4 | `canonical-livepatch status --format json` gives a state the collector can map | P1: `Status[0].Livepatch.State: "nothing-to-apply"`, `CheckState: "checked"`; the JSON is the collector's fixture. Only this one state value was observed | strong for the shape; other state strings map to `unknown` (🟡), so an unseen string cannot read as healthy |
 | C5 | `needrestart -b` (root) prints `NEEDRESTART-SVC: <unit>` lines for stale services | probed 2026-10-06 (P2, `needrestart -b -r l` as root): `NEEDRESTART-SVC: <unit>` lines, plus `NEEDRESTART-KCUR`/`KEXP` (running/expected kernel); the deferred set was code-server, dbus, getty, logind, unattended-upgrades; prod processes had 0 deleted mappings | strong (probe) |
-| C6 | `Origins-Pattern` `site=deb.nodesource.com,n=nodistro` and `site=pkg.cloudflare.com,o=cloudflared` match the repos | Release files probed (`Origin: . nodistro`, `Origin: cloudflared`, `Codename: any`); matching not yet run | **weak → probe P3**: `sudo unattended-upgrade --dry-run -d` lists `nodejs` as allowed |
+| C6 | `Origins-Pattern` `site=deb.nodesource.com,n=nodistro` and `site=pkg.cloudflare.com,o=cloudflared` match the repos | Release files probed (`Origin: . nodistro`, `Origin: cloudflared`, `Codename: any`); P3 2026-10-07 (`unattended-upgrade --dry-run -d`): "Allowed origins" lists both patterns, `nodejs` 24.19 → 24.21 selected. Live: the 2026-10-08 06:03 run installed nodejs 24.21.0 and needrestart restarted `warsaw-beer-bot` (deferring `code-server@ysi`) | strong (probe + live run) |
 | C7 | nodejs.org `index.json` flags security releases | probed: `v24.18.1 security=true`, others `false` | strong (probe) |
 | C8 | `schedule.json` carries `v24.maintenance` / `v24.end` | probed: 2026-10-20 / 2028-04-30 | strong (probe) |
 | C9 | GitHub `releases/latest` gives litestream's tag | probed: `v0.5.17` | strong (probe); unauthenticated limit 60/h, we call once a day |
@@ -212,9 +230,13 @@ and litestream's flush run as on any `systemctl stop`.
 | C11 | a Node patch upgrade keeps `better-sqlite3` loadable | `NODE_MODULE_VERSION` is fixed per Node major (Node ABI policy) | medium — watched by C1's restart + `/health`; if it fails, the bot is down and the existing monitors fire |
 | C12 | the summary is the host's, not forged by the bot user | owner uid 0, dir `0755` root, read with the `readTestDiagnostics` checks | strong (own code, tested) |
 | C13 | `systemd-run --on-calendar … Europe/Warsaw` fires at 04:00 Warsaw on a UTC host | probed 2026-10-06 on systemd 255: `systemd-analyze calendar '*-*-* 04:00:00 Europe/Warsaw'` → next elapse `02:00:00 UTC` (CEST) | strong (probe) |
-| C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | strong (probe); re-checked by the stage-1 reboot itself |
+| C14 | the services come back after a reboot | probed: `warsaw-beer-bot`, `cloudflared`, `litestream`, `wbb-autodeploy.timer` are `enabled` | services: strong (re-checked by the stage-1 reboot 2026-10-06 — all came back). **Not** `wbb-autodeploy.timer`: enabled but never fired after a slow boot (#798, Persistent stamp + passed `OnBootSec`; fixed by #799) — "enabled" did not prove "will run" |
+| C15 | the collector can read Livepatch state | snap CLIs fail inside code-server's cgroup (`is not a snap cgroup`); the same command under `systemd-run --wait --pipe` returned the P1 JSON | strong (probe) → the collector is its own unit |
+| C16 | `unattended.last_run` = mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp` | probed 2026-10-08: mtime 06:03:49; the run in `unattended-upgrades-dpkg.log` ended 06:03:48 | strong (probe) |
+| C17 | `apt list --upgradable` marks security candidates by a `-security` archive | format `pkg/<archive>[,<archive>…] <ver> <arch> [upgradable from: …]` seen 2026-10-08 on 53 lines; **no** live security line (0 pending: u-u had applied them) | medium — the positive case is a fixture, not a live line; the rule fires only 🟡 and only when u-u is also > 2 days stale |
+| C18 | package versions come from `dpkg-query -W` | probed 2026-10-08 unprivileged: `nodejs 24.21.0-1nodesource1`, `cloudflared 2026.10.0`, `litestream 0.5.11` | strong (probe) |
 
-P1, P3 run as part of stage 1 (they need its host steps). P2 and P4 passed. A claim that fails its probe is redesigned, not written into code.
+P1–P4 passed (P1/P3 on 2026-10-07, after stage 1's host steps). A claim that fails its probe is redesigned, not written into code.
 
 ## Out of scope
 
