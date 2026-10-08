@@ -92,10 +92,12 @@ export function createHttp(opts: HttpOpts): Http {
           await res.text().catch(() => {});
           throw new HttpError(res.status, url);
         }
-        await res.text().catch(() => {});
         if (target.pathname === '/login' || target.pathname.startsWith('/login/')) {
+          await res.text().catch(() => {});
           throw new CookieExpiredError();
         }
+        // Consume 3xx redirect body to release connection socket before following
+        await res.text().catch(() => {});
         return { kind: 'redirect', nextUrl: target.href, status: res.status };
       }
       await res.text().catch(() => {});

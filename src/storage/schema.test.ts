@@ -915,12 +915,18 @@ describe('v34 legacy_card_repairs (#696)', () => {
 });
 
 describe('v46 fest venue slug canonicalization (#809)', () => {
-  it('migration v46 canonicalizes wfp22 venue feed_path and preserves other fests', () => {
+  it('migration v46 canonicalizes obsolete wfp22 venue feed_path and preserves other or newer fests', () => {
     const db = openDb(':memory:');
     migrate(db);
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 46').get()).toEqual({ version: 46 });
-    const row = db.prepare("SELECT feed_path FROM fest_venues WHERE venue_id = 11142155 AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')").get() as { feed_path: string } | undefined;
-    expect(row?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    // Simulate an existing database that had the obsolete seed
+    db.prepare(`
+      UPDATE fest_venues
+         SET feed_path = '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity'
+       WHERE venue_id = 11142155
+         AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')
+    `).run();
 
     // Insert another fest sharing venue 11142155
     db.prepare("INSERT INTO fests (slug, name, menu_venue_id, target_min_rating, target_style_patterns) VALUES ('other', 'Other', 11142155, 3.8, '[]')").run();
@@ -930,8 +936,24 @@ describe('v46 fest venue slug canonicalization (#809)', () => {
     // Re-run migration 46 SQL
     db.exec(V46_CANONICALIZE_WFP22_SQL);
 
+    // Obsolete path was canonicalized
+    const row = db.prepare("SELECT feed_path FROM fest_venues WHERE venue_id = 11142155 AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')").get() as { feed_path: string };
+    expect(row.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
+
+    // Other fest was untouched
     const otherRow = db.prepare('SELECT feed_path FROM fest_venues WHERE fest_id = ?').get(otherFest.id) as { feed_path: string };
     expect(otherRow.feed_path).toBe('/v/other/11142155/activity');
+
+    // Newer/future path is not regressed
+    db.prepare(`
+      UPDATE fest_venues
+         SET feed_path = '/v/wfp-future/11142155/activity'
+       WHERE venue_id = 11142155
+         AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')
+    `).run();
+    db.exec(V46_CANONICALIZE_WFP22_SQL);
+    const futureRow = db.prepare("SELECT feed_path FROM fest_venues WHERE venue_id = 11142155 AND fest_id = (SELECT id FROM fests WHERE slug = 'wfp22')").get() as { feed_path: string };
+    expect(futureRow.feed_path).toBe('/v/wfp-future/11142155/activity');
 
     db.close();
   });

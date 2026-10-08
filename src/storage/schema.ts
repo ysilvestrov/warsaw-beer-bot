@@ -345,7 +345,8 @@ export const V46_CANONICALIZE_WFP22_SQL = `
   UPDATE fest_venues
      SET feed_path = '/v/warszawski-festiwal-piwa/11142155/activity'
    WHERE venue_id = 11142155
-     AND fest_id IN (SELECT id FROM fests WHERE slug = 'wfp22');
+     AND fest_id IN (SELECT id FROM fests WHERE slug = 'wfp22')
+     AND feed_path = '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity';
 `;
 
 const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
