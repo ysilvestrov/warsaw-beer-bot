@@ -1,5 +1,5 @@
-import type { HostPatchRead } from '../../jobs/host-patch';
 import { ukDays } from './helpers';
+import type { HostPatchRead } from './types';
 
 // #469 stage 3 — one alert per pending reboot (keyed by reboot_required.since, which the collector
 // carries forward and resets only at boot, C19/C23), and one more after each snooze expires.
@@ -8,13 +8,16 @@ export type RebootDecision =
   | { send: true; text: string; state: RebootAlertState }
   | { send: false; state: RebootAlertState | null };
 export const REBOOT_SNOOZE_SECONDS = 3 * 86_400;
+const MAX_LISTED_PACKAGES = 10;
 
 // Names the packages and never claims the kernel: under Livepatch, kernel packages do not set
 // the reboot flag (C19), so what is pending here is a library such as libc6 or dbus.
 function alertText(since: number, packages: string[], livepatch: string | null, nowSeconds: number): string {
-  const waited = ukDays(Math.floor((nowSeconds - since) / 86_400));
-  const list = packages.length === 0 ? '' : `: ${packages.join(', ')}`;
-  return `🔁 Хосту потрібне перезавантаження — чекає ${waited}${list}.\nLivepatch: ${livepatch ?? 'нема даних'}.`;
+  const days = Math.floor((nowSeconds - since) / 86_400);
+  const waited = days >= 1 ? ` — чекає ${ukDays(days)}` : '';
+  const shown = packages.slice(0, MAX_LISTED_PACKAGES).join(', ') + (packages.length > MAX_LISTED_PACKAGES ? ', …' : '');
+  const list = packages.length === 0 ? '' : `: ${shown}`;
+  return `🔁 Хосту потрібне перезавантаження${waited}${list}.\nLivepatch: ${livepatch ?? 'нема даних'}.`;
 }
 
 export function decideRebootAlert(hp: HostPatchRead, prev: RebootAlertState | null, now: Date): RebootDecision {

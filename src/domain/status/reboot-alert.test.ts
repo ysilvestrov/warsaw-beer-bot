@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { HostPatchFacts } from './types';
-import type { HostPatchRead } from '../../jobs/host-patch';
+import type { HostPatchFacts, HostPatchRead } from './types';
 import { decideRebootAlert, snoozeRebootAlert } from './reboot-alert';
 
 /** #469 stage 3 — spec "Immediate alert", claims C19/C23. */
@@ -32,6 +31,37 @@ describe('decideRebootAlert', () => {
 
   it('a different since is a new reboot and is alerted', () => {
     expect(decideRebootAlert(ok(), { since: SINCE - DAY, snoozeUntil: null }, NOW).send).toBe(true);
+  });
+
+  it('a new since while the old one is snoozed is a new reboot and is alerted', () => {
+    expect(decideRebootAlert(ok(), { since: SINCE - DAY, snoozeUntil: T + DAY }, NOW))
+      .toEqual({ send: true, text: TEXT, state: { since: SINCE, snoozeUntil: null } });
+  });
+
+  it('caps the package list at 10 and marks the rest with an ellipsis', () => {
+    const packages = Array.from({ length: 11 }, (_, i) => `pkg${i + 1}`);
+    expect(decideRebootAlert(ok({ rebootRequired: { since: SINCE, packages } }), null, NOW)).toMatchObject({
+      text: '🔁 Хосту потрібне перезавантаження — чекає 4 дні: pkg1, pkg2, pkg3, pkg4, pkg5, pkg6, pkg7, pkg8, pkg9, pkg10, ….\nLivepatch: nothing-to-apply.',
+    });
+  });
+
+  it('exactly 10 packages are listed in full', () => {
+    const packages = Array.from({ length: 10 }, (_, i) => `pkg${i + 1}`);
+    expect(decideRebootAlert(ok({ rebootRequired: { since: SINCE, packages } }), null, NOW)).toMatchObject({
+      text: '🔁 Хосту потрібне перезавантаження — чекає 4 дні: pkg1, pkg2, pkg3, pkg4, pkg5, pkg6, pkg7, pkg8, pkg9, pkg10.\nLivepatch: nothing-to-apply.',
+    });
+  });
+
+  it('under a day of waiting there is no wait clause (with packages)', () => {
+    expect(decideRebootAlert(ok({ rebootRequired: { since: T - 3600, packages: ['libc6'] } }), null, NOW)).toMatchObject({
+      text: '🔁 Хосту потрібне перезавантаження: libc6.\nLivepatch: nothing-to-apply.',
+    });
+  });
+
+  it('under a day of waiting there is no wait clause (without packages)', () => {
+    expect(decideRebootAlert(ok({ rebootRequired: { since: T - 3600, packages: [] } }), null, NOW)).toMatchObject({
+      text: '🔁 Хосту потрібне перезавантаження.\nLivepatch: nothing-to-apply.',
+    });
   });
 
   it('an expired snooze alerts again and clears the snooze', () => {
