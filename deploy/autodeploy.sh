@@ -403,6 +403,8 @@ path_is_held() {
     deploy/rsync-filter) return 0 ;;
     deploy/autodeploy.sh|deploy/ships.sh|deploy/read-env.sh) return 0 ;;
     deploy/installed-current.sh|deploy/db-snapshot.sh|deploy/trial-migrate.cjs) return 0 ;;
+    # #469: root runs the installed copy; re-run deploy/install-host-patch-collector.sh
+    scripts/ops/host_patch_collect.py) return 0 ;;
     *) return 1 ;;
   esac
 }
