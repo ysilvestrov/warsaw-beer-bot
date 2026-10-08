@@ -29,7 +29,8 @@ function writeState(db: DB, state: RebootAlertState | null): void {
 export interface RebootAlertDeps {
   db: DB;
   log: pino.Logger;
-  send: (text: string) => Promise<void>;
+  // since: the reboot this alert is for — the keyboard's buttons carry it
+  send: (text: string, since: number) => Promise<void>;
   now?: () => Date;
   hostPatchPath?: string;
   hostPatchUid?: number;
@@ -43,7 +44,7 @@ export async function rebootAlert(deps: RebootAlertDeps): Promise<void> {
     if (decision.state !== prev) writeState(deps.db, decision.state);
     return;
   }
-  await deps.send(decision.text); // throws → nothing saved → the next tick retries
+  await deps.send(decision.text, decision.state.since); // throws → nothing saved → the next tick retries
   // A snooze the admin pressed while this was being sent is newer than our decision: keep it.
   const current = readState(deps.db);
   const t = Math.floor(now.getTime() / 1000);
@@ -61,4 +62,24 @@ export function snoozeRebootAlertNow(db: DB, since: number, now: Date): boolean 
   if (state === null || state.since !== since) return false;
   writeState(db, snoozeRebootAlert(state, now));
   return true;
+}
+
+/**
+ * The hourly cron's body. A run can outlast the tick (Telegraf caps a call at 500 s and a
+ * failed send is retried next hour), and two overlapping runs would both alert the same
+ * reboot — so a tick while one is in flight is skipped. A throw is logged: the state stays
+ * unsaved and the next tick retries.
+ */
+export function createRebootAlertTick(deps: RebootAlertDeps): () => void {
+  let inFlight = false;
+  return () => {
+    if (inFlight) {
+      deps.log.warn('reboot-alert: previous run still in flight, skipping this tick');
+      return;
+    }
+    inFlight = true;
+    rebootAlert(deps)
+      .catch((e) => deps.log.error({ err: e }, 'reboot-alert cron'))
+      .finally(() => { inFlight = false; });
+  };
 }
