@@ -1,0 +1,6 @@
+NEEDRESTART-VER: 3.6
+NEEDRESTART-KCUR: 6.8.0-142-generic
+NEEDRESTART-KEXP: 6.8.0-145-generic
+NEEDRESTART-KSTA: 3
+NEEDRESTART-SVC: code-server@ysi.service
+NEEDRESTART-SVC: litestream.service

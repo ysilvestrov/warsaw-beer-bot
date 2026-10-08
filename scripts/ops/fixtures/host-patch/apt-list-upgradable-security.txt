@@ -1,0 +1,4 @@
+Listing...
+base-files/noble-updates 13ubuntu10.5 amd64 [upgradable from: 13ubuntu10.4]
+libc6/noble-updates,noble-security 2.39-0ubuntu8.7 amd64 [upgradable from: 2.39-0ubuntu8.6]
+libxml2/noble-infra-security 2.9.14+dfsg-1.3ubuntu3.6 amd64 [upgradable from: 2.9.14+dfsg-1.3ubuntu3.5]
