@@ -1,0 +1,68 @@
+[
+ {
+  "version": "v26.11.1",
+  "date": "2026-10-07",
+  "lts": false,
+  "security": false
+ },
+ {
+  "version": "v26.11.0",
+  "date": "2026-10-07",
+  "lts": false,
+  "security": false
+ },
+ {
+  "version": "v24.21.0",
+  "date": "2026-09-07",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v24.20.0",
+  "date": "2026-08-26",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v24.19.0",
+  "date": "2026-08-03",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v24.18.1",
+  "date": "2026-07-28",
+  "lts": "Krypton",
+  "security": true
+ },
+ {
+  "version": "v24.18.0",
+  "date": "2026-06-23",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v24.17.0",
+  "date": "2026-06-17",
+  "lts": "Krypton",
+  "security": true
+ },
+ {
+  "version": "v24.16.0",
+  "date": "2026-05-21",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v24.15.0",
+  "date": "2026-04-15",
+  "lts": "Krypton",
+  "security": false
+ },
+ {
+  "version": "v22.23.2",
+  "date": "2026-07-28",
+  "lts": "Jod",
+  "security": true
+ }
+]
