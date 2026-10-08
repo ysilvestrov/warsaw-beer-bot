@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
+from unittest import mock
 
 import reboot_request as rr
 
@@ -26,6 +28,8 @@ class Handler(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.dir = Path(self.tmp.name)
         self.path = self.dir / 'reboot-request'
+        self.flag = self.dir / 'reboot-required'
+        self.flag.write_text('*** System restart required ***\n')
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -34,7 +38,7 @@ class Handler(unittest.TestCase):
         if content is not None:
             self.path.write_bytes(content)
         run = runner or Recorder()
-        return rr.handle(str(self.path), run, now), run
+        return rr.handle(str(self.path), run, now, str(self.flag)), run
 
     def test_now_reboots_and_deletes_the_request(self):
         (code, message), run = self.handle(f'now {NOW}\n'.encode())
@@ -42,7 +46,37 @@ class Handler(unittest.TestCase):
 
     def test_0400_schedules_the_fixed_name_timer(self):
         (code, message), run = self.handle(f'0400 {NOW}\n'.encode())
-        self.assertEqual((code, message, run.calls), (0, 'reboot scheduled for 04:00 Europe/Warsaw', [AT_0400]))
+        self.assertEqual((code, message, run.calls, self.path.exists()),
+                         (0, 'reboot scheduled for 04:00 Europe/Warsaw', [AT_0400], False))
+
+    def test_a_failing_systemctl_reboot_fails_with_its_stderr(self):
+        (code, message), _ = self.handle(f'now {NOW}\n'.encode(), Recorder((1, 'x\n')))
+        self.assertEqual((code, message), (1, 'systemctl reboot failed: x'))
+
+    def test_no_pending_reboot_refuses_both_kinds_and_deletes_the_request(self):
+        self.flag.unlink()
+        for kind in ('now', '0400'):
+            with self.subTest(kind=kind):
+                (code, message), run = self.handle(f'{kind} {NOW}\n'.encode())
+                self.assertEqual((code, message, run.calls, self.path.exists()),
+                                 (1, 'refused: no reboot pending', [], False))
+
+    def test_a_fifo_in_its_place_is_refused_removed_and_does_not_hang(self):
+        os.mkfifo(self.path)
+        run, result = Recorder(), []
+        t = threading.Thread(target=lambda: result.append(rr.handle(str(self.path), run, NOW, str(self.flag))), daemon=True)
+        t.start()
+        t.join(timeout=5)
+        self.assertFalse(t.is_alive())
+        self.assertEqual((result, run.calls, os.path.lexists(self.path)),
+                         ([(1, 'refused: not a small regular file')], [], False))
+
+    def test_a_request_that_cannot_be_deleted_is_refused_not_acted_on(self):
+        self.path.write_bytes(f'now {NOW}\n'.encode())
+        run = Recorder()
+        with mock.patch('reboot_request.os.unlink', side_effect=PermissionError):
+            result = rr.handle(str(self.path), run, NOW, str(self.flag))
+        self.assertEqual((result, run.calls), ((1, 'refused: not a small regular file'), []))
 
     def test_a_second_0400_is_already_scheduled_not_a_failure(self):
         busy = Recorder((1, 'Failed to start transient timer unit: Unit wbb-reboot-0400.timer was already loaded or has a fragment file.\n'))

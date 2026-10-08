@@ -16,6 +16,8 @@ import sys
 import time
 
 REQUEST = '/var/lib/wbb-host-patch/reboot-request'
+# Debian's pending-reboot flag: root acts only while the host really needs a reboot.
+PENDING_FLAG = '/run/reboot-required'
 MAX_BYTES = 64
 MAX_AGE_SECONDS = 600
 FUTURE_SKEW_SECONDS = 60
@@ -33,30 +35,35 @@ def run(argv):
 
 
 def take(path):
-    """The request's bytes, or None for anything but a small regular file. Deletes it either way."""
+    """The request's bytes, or None for anything but a small regular file that was deleted.
+
+    Deletes it either way; a request that could not be deleted is a refusal, never an action.
+    """
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except FileNotFoundError:
         return b''  # nothing there: the caller tells "no request" from "refused" by existence
     except OSError:
         fd = None  # a symlink (ELOOP), a directory, …
+    data = None
     try:
-        if fd is None:
-            return None
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MAX_BYTES:
-            return None
-        return os.read(fd, MAX_BYTES + 1)
+        if fd is not None:
+            info = os.fstat(fd)
+            if stat.S_ISREG(info.st_mode) and info.st_size <= MAX_BYTES:
+                data = os.read(fd, MAX_BYTES + 1)
     finally:
         if fd is not None:
             os.close(fd)
         try:
             os.unlink(path)  # never follows a symlink: removes the link, not its target
-        except (FileNotFoundError, IsADirectoryError, PermissionError):
+        except FileNotFoundError:
             pass
+        except OSError:  # IsADirectoryError, PermissionError, …
+            data = None
+    return data
 
 
-def handle(path, run_command, now):
+def handle(path, run_command, now, flag=PENDING_FLAG):
     """(exit code, journal message)."""
     if not os.path.lexists(path):
         return 0, 'no request'
@@ -69,6 +76,8 @@ def handle(path, run_command, now):
     kind, at = m.group(1).decode(), int(m.group(2))
     if not (now - MAX_AGE_SECONDS <= at <= now + FUTURE_SKEW_SECONDS):
         return 1, 'refused: stale or future request'
+    if not os.path.exists(flag):
+        return 1, 'refused: no reboot pending'
     if kind == 'now':
         code, err = run_command(REBOOT)
         return (0, 'reboot now') if code == 0 else (1, f'systemctl reboot failed: {err.strip()}')
@@ -83,8 +92,9 @@ def handle(path, run_command, now):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--path', default=REQUEST, help=argparse.SUPPRESS)
+    parser.add_argument('--flag', default=PENDING_FLAG, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
-    code, message = handle(args.path, run, int(time.time()))
+    code, message = handle(args.path, run, int(time.time()), args.flag)
     print(f'wbb-reboot-request: {message}', file=sys.stderr if code else sys.stdout)
     return code
 
