@@ -27,7 +27,10 @@ export function decideRebootAlert(hp: HostPatchRead, prev: RebootAlertState | nu
   if (pending === null) return { send: false, state: null };
   const t = Math.floor(now.getTime() / 1000);
   const fresh = prev === null || prev.since !== pending.since;
-  const snoozeOver = !fresh && prev!.snoozeUntil !== null && t >= prev!.snoozeUntil;
+  // A stored snooze is a claim: only snoozeRebootAlertNow writes it, never further than 3 days
+  // ahead, so a later one is corrupt and must not silence a pending reboot (AI review, #807).
+  const snoozeOver = !fresh && prev!.snoozeUntil !== null
+    && (t >= prev!.snoozeUntil || prev!.snoozeUntil > t + REBOOT_SNOOZE_SECONDS);
   if (!fresh && !snoozeOver) return { send: false, state: prev };
   return {
     send: true,
