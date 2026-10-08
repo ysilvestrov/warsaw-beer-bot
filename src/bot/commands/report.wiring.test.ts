@@ -79,6 +79,6 @@ test('src/index.ts registers report after cityGate and before import inside bot.
   const source = readFileSync(path.join(__dirname, '../../index.ts'), 'utf8');
   const wiring = source.match(/bot\.use\(([\s\S]*?)\n  \);/)?.[1];
   // #469: only the reboot composer (callback-only, rb:*) may sit between cityGate and report.
-  expect(wiring).toMatch(/cityGate,\s*\/\/[^\n]*\n\s*createRebootCommand\(\{[\s\S]*?\n    \}\),\s*createReportCommand\(/);
+  expect(wiring).toMatch(/cityGate,\s*(?:\/\/[^\n]*\n\s*)*createRebootCommand\(\{[\s\S]*?\n    \}\),\s*createReportCommand\(/);
   expect(wiring).toMatch(/createReportCommand\([\s\S]*?\),\s*startCommand,[\s\S]*?importCommand,/);
 });
