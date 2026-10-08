@@ -187,7 +187,12 @@ def main(argv):
     glibc = os.confstr('CS_GNU_LIBC_VERSION').split()[1]
     payload = prepare(a.archive, a.checksum, a.sha, os.path.realpath(a.workdir), abi, glibc)
     make_read_only(payload)
-    run_probes(payload, os.path.realpath(a.workdir), node)
+    try:
+        run_probes(payload, os.path.realpath(a.workdir), node)
+    finally:
+        # Writable again, so whoever cleans the work directory (the CI runner) can.
+        for dirpath, _, filenames in os.walk(payload):
+            os.chmod(dirpath, 0o755)
     print(f'VERIFIED {a.sha}')
     return 0
 
