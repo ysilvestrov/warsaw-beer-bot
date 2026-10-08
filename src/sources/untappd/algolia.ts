@@ -46,6 +46,13 @@ function ratingCount(v: unknown): number | undefined {
   return n === null ? undefined : n;
 }
 
+// #484: Untappd uses 0 for beers whose ABV was never filled in; treating it as 0.0%
+// turns missing evidence into disqualifying contradiction. Only a positive number counts.
+function parseAbv(v: unknown): number | null {
+  const n = num(v);
+  return n !== null && n > 0 ? n : null;
+}
+
 export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
   const hits = Array.isArray(json.hits) ? json.hits : [];
   const out: SearchResult[] = [];
@@ -58,7 +65,7 @@ export function parseAlgoliaResponse(json: AlgoliaResponse): SearchResult[] {
       beer_name: str(h.beer_name),
       brewery_name: str(h.brewery_name),
       style: style.length > 0 ? style : null,
-      abv: num(h.beer_abv),
+      abv: parseAbv(h.beer_abv),
       global_rating: untappdRating(h.rating_score),
       brewery_alias: strList(h.brewery_alias),
       alias_alt: strList(h.alias_alt),
@@ -84,7 +91,7 @@ export function parseHydratedBeer(h: Record<string, unknown> | null): HydratedBe
     beer_name: str(h.beer_name),
     brewery_name: str(h.brewery_name),
     style: style.length > 0 ? style : null,
-    abv: num(h.beer_abv),
+    abv: parseAbv(h.beer_abv),
     global_rating: untappdRating(h.rating_score),
     beer_slug: slug.length > 0 ? slug : null,
     brewery_alias: strList(h.brewery_alias),
