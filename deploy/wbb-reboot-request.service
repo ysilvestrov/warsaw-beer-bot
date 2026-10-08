@@ -1,5 +1,9 @@
 [Unit]
 Description=#469 stage 3: act on the bot's reboot request (the bot asks, root decides)
+# Every request starts this twice (the handler's own claim re-fires PathChanged): the default
+# 5-starts-per-10s limit would put the path unit into failed after three quick presses, and it
+# would stop watching for good.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
