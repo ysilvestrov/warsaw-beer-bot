@@ -19,6 +19,9 @@ describe('debianUpstreamVersion', () => {
     ['0.5.11', '0.5.11'],
     ['1:2.39-0ubuntu8.7', '2.39'],
     ['2026.10.0', '2026.10.0'],
+    ['2.9.14+dfsg-1.3ubuntu3.6', '2.9.14'],
+    ['5', '5'],
+    ['24.22.0~rc1', '24.22.0'],
   ])('%s → %s', (raw, expected) => {
     expect(debianUpstreamVersion(raw)).toBe(expected);
   });
@@ -47,6 +50,13 @@ describe('upstreamFindings', () => {
     it('compares numerically: 24.9.0 is older than 24.10.0', () => {
       expect(at(security('24.10.0', '2026-01-01'), { ...PACKAGES, nodejs: '24.9.0-1nodesource1' })).toEqual([
         { colour: 'red', reason: 'Node 24.9.0 < безпековий 24.10.0 (з 2026-01-01)' }]);
+    });
+    it('a release dated tomorrow is silent', () => {
+      expect(at(security('24.22.0', '2026-10-09'))).toEqual([]);
+    });
+    it('an impossible date is "нема даних", not a pass', () => {
+      expect(at(security('24.22.0', '2026-02-30'))).toEqual([
+        { colour: 'yellow', reason: 'нема даних: дата безпекового релізу Node' }]);
     });
     it('no security release in the line is silent', () => {
       expect(at({ nodeSecurity: { ok: true, value: null } })).toEqual([]);
@@ -81,6 +91,10 @@ describe('upstreamFindings', () => {
       expect(at(end('2026-10-07'), null)).toEqual([
         { colour: 'red', reason: 'Node 24: підтримка до 2026-10-07 — уже минула' }]);
     });
+    it('an impossible date is "нема даних", not a false red', () => {
+      expect(at(end('2026-02-30'))).toEqual([
+        { colour: 'yellow', reason: 'нема даних: дата кінця підтримки Node 24' }]);
+    });
     it('an unreadable schedule is "нема даних"', () => {
       expect(at({ nodeEnd: { ok: false, reason: 'графік підтримки Node застарів (понад 48 год)' } })).toEqual([
         { colour: 'yellow', reason: 'нема даних: графік підтримки Node застарів (понад 48 год)' }]);
@@ -97,6 +111,10 @@ describe('upstreamFindings', () => {
     it('a newer release 30 days old is silent; 31 days is yellow', () => {
       expect([at(latest('0.5.18', '2026-09-08T12:00:00Z')), at(latest('0.5.18', '2026-09-07T12:00:00Z'))]).toEqual([[], [
         { colour: 'yellow', reason: 'litestream 0.5.17 < 0.5.18 (вийшов 2026-09-07)' }]]);
+    });
+    it('an impossible release date is "нема даних", not a pass', () => {
+      expect(at(latest('0.5.18', '2026-02-30T00:00:00Z'))).toEqual([
+        { colour: 'yellow', reason: 'нема даних: дата релізу litestream' }]);
     });
     it('an unreadable source is "нема даних"', () => {
       expect(at({ litestream: { ok: false, reason: 'релізи litestream ще не завантажено' } })).toEqual([
