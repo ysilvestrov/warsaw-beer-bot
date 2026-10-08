@@ -127,7 +127,11 @@ is the mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp`. `security_pen
 counts lines of `apt list --upgradable` whose archive list names a `-security` pocket
 (`noble-security`, `noble-apps-security`, `noble-infra-security`). Package versions come
 from `dpkg-query -W`. A field the collector could not read is written as `null`, never
-guessed.
+guessed. Two facts are exceptions because their `null` already means something:
+`reboot_required: null` is "no reboot pending" and `unattended.last_run: null` is "never ran"
+(the rule prints «ще не запускався»). For those, a read error other than "file not found"
+aborts the run without writing; the summary then ages into 🟡 `нема даних` after 3 h —
+honest, where a `null` would print a false answer.
 
 needrestart is called as `needrestart -b -r l`: batch output, **list-only** restart
 mode. Without `-r l` the hourly collector would itself restart services.
@@ -244,7 +248,7 @@ and litestream's flush run as on any `systemctl stop`.
 | C16 | `unattended.last_run` = mtime of `/var/lib/apt/periodic/unattended-upgrades-stamp` | probed 2026-10-08: mtime 06:03:49; the run in `unattended-upgrades-dpkg.log` ended 06:03:48 | strong (probe) |
 | C17 | `apt list --upgradable` marks security candidates by a `-security` archive | format `pkg/<archive>[,<archive>…] <ver> <arch> [upgradable from: …]` seen 2026-10-08 on 53 lines; **no** live security line (0 pending: u-u had applied them) | medium — the positive case is a fixture, not a live line; the rule fires only 🟡 and only when u-u is also > 2 days stale. Also only as fresh as the apt lists: if `apt update` keeps failing while u-u runs, the count stays 0 and nothing shows |
 | C19 | `reboot_required.since` = when the reboot first became pending | read 2026-10-08: `/usr/share/update-notifier/notify-reboot-required` writes the flag with `>` per package (so mtime = latest request); C2's own probe showed it — mtime 2026-09-26 against a kernel pending since April. Hence carried forward from the previous summary, reset at boot (`btime`) | strong (source) for the defect; the carry-forward is the collector's own logic, tested |
-| C20 | `stale_services[].since` = first hourly run that saw the unit stale | the collector's own carry-forward (precision: one timer period). Lost if the previous summary is unreadable — then it restarts at "now", which can only *delay* a 🟡, never invent one | medium — under-reports after a lost summary, never over-reports |
+| C20 | `stale_services[].since` = first hourly run that saw the unit stale | the collector's own carry-forward (precision: one timer period). A `since` from before the last boot (`btime`) is dropped — `/var/tmp` survives a reboot, but the reboot proves every process fresh — and with no readable boot time nothing is carried. Lost if the previous summary is unreadable — then it restarts at "now", which can only *delay* a 🟡, never invent one | medium — under-reports after a lost summary, never over-reports |
 | C18 | package versions come from `dpkg-query -W` | probed 2026-10-08 unprivileged: `nodejs 24.21.0-1nodesource1`, `cloudflared 2026.10.0`, `litestream 0.5.11` | strong (probe) |
 
 P1–P4 passed (P1/P3 on 2026-10-07, after stage 1's host steps). A claim that fails its probe is redesigned, not written into code.
