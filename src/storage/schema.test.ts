@@ -912,7 +912,9 @@ describe('v34 legacy_card_repairs (#696)', () => {
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 34').get()).toEqual({ version: 34 });
     db.close();
   });
+});
 
+describe('v46 fest venue slug canonicalization (#809)', () => {
   it('migration v46 canonicalizes wfp22 venue feed_path', () => {
     const db = openDb(':memory:');
     migrate(db);
