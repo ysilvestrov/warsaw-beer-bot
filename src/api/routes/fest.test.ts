@@ -175,11 +175,11 @@ describe('GET /fest/config', () => {
         { start_at: '2026-10-17T10:00:00.000Z', end_at: '2026-10-17T22:00:00.000Z' },
       ],
       menuVenueId: 11142155,
-      menuPath: '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155',
+      menuPath: '/v/warszawski-festiwal-piwa/11142155',
       venues: [
         { venueId: 2167060, feedPath: '/v/stadion-legii-warszawa-im-marszalka-jozefa-pilsudskiego/2167060' },
         { venueId: 2815864, feedPath: '/v/centrum-konferencyjne-legia/2815864' },
-        { venueId: 11142155, feedPath: '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity' },
+        { venueId: 11142155, feedPath: '/v/warszawski-festiwal-piwa/11142155/activity' },
       ],
     }]);
   });

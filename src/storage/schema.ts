@@ -332,7 +332,7 @@ export const V42_FEST_SQL = `
     SELECT id, 3, '2026-10-17T10:00:00.000Z', '2026-10-17T22:00:00.000Z' FROM fests WHERE slug = 'wfp22';
   INSERT OR IGNORE INTO fest_venues (fest_id, venue_id, label, feed_path)
     SELECT id, 11142155, 'Warszawski Festiwal Piwa',
-           '/v/warsaw-beer-festival-warszawski-festiwal-piwa/11142155/activity' FROM fests WHERE slug = 'wfp22'
+           '/v/warszawski-festiwal-piwa/11142155/activity' FROM fests WHERE slug = 'wfp22'
     UNION ALL
     SELECT id, 2815864, 'Centrum Konferencyjne Legia',
            '/v/centrum-konferencyjne-legia/2815864' FROM fests WHERE slug = 'wfp22'
@@ -1008,6 +1008,15 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         colours_json TEXT NOT NULL,
         created_at   TEXT NOT NULL
       );
+    `,
+  },
+  {
+    version: 46,
+    // #809: canonicalize WFP22 festival venue feed_path in existing databases
+    sql: `
+      UPDATE fest_venues
+         SET feed_path = '/v/warszawski-festiwal-piwa/11142155/activity'
+       WHERE venue_id = 11142155;
     `,
   },
 ];

@@ -149,12 +149,12 @@ describe('schema migrations', () => {
   // Tests of an individual migration assert that THEIR version is recorded, never
   // the head — a head pinned inside such a test silently collides with any branch
   // that adds a migration in parallel (#701 pinned 34 while #695 was adding v35).
-  it('records every migration 1..45 on a fresh db, with no gaps', () => {
+  it('records every migration 1..46 on a fresh db, with no gaps', () => {
     const db = openDb(':memory:');
     migrate(db);
     const versions = (db.prepare('SELECT version FROM schema_version ORDER BY version').all() as { version: number }[])
       .map((r) => r.version);
-    expect(versions).toEqual(Array.from({ length: 45 }, (_, i) => i + 1));
+    expect(versions).toEqual(Array.from({ length: 46 }, (_, i) => i + 1));
     db.close();
   });
 
@@ -910,6 +910,15 @@ describe('v34 legacy_card_repairs (#696)', () => {
       expect(() => insert.run(...invalid)).toThrow(/CHECK constraint failed/);
     }
     expect(db.prepare('SELECT version FROM schema_version WHERE version = 34').get()).toEqual({ version: 34 });
+    db.close();
+  });
+
+  it('migration v46 canonicalizes wfp22 venue feed_path', () => {
+    const db = openDb(':memory:');
+    migrate(db);
+    expect(db.prepare('SELECT version FROM schema_version WHERE version = 46').get()).toEqual({ version: 46 });
+    const row = db.prepare('SELECT feed_path FROM fest_venues WHERE venue_id = 11142155').get() as { feed_path: string } | undefined;
+    expect(row?.feed_path).toBe('/v/warszawski-festiwal-piwa/11142155/activity');
     db.close();
   });
 });

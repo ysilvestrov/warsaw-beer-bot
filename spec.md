@@ -816,6 +816,7 @@ pubs          *───* pubs             via pub_distances (a<b)
 | 43 | Станція друку WFP: `fest_print_stations` (SHA-256 токена станції, команда, термін). Ідемпотентна |
 | 44 | Значення ока `mcp_venue` у `venue_checkins.first_eye` і `fest_coverage.eye`. SQLite не змінює `CHECK`, тож обидві таблиці перебудовуються з копіюванням усіх рядків та індексів; без переписування даних. Можна прогнати повторно |
 | 45 | `status_snapshots` (date PK, version, metrics_json, colours_json, created_at) — щоденний знімок метрик і кольорів світлофора; без бекфілу, ідемпотентна |
+| 46 | Оновлення канонічного `feed_path` фест-локації WFP22 (venue `11142155`) у `fest_venues` (#809); ідемпотентна |
 
 ---
 
@@ -2200,10 +2201,10 @@ submit сторінки до backend або паузу між сторінкам
 - **Серверне око** (`runFestPoll`, крон `* * * * *`, no-op поза фестом): у вікні опитування (сесія ±
   30 хв) раз на 10 хв **лише сторінка 1** `feed_path` локації меню через куковий клієнт →
   `ingestFeedPage(eye: 'server')`. Пагінацію сервер не робить: `createHttp` не шле `X-Requested-With`,
-  а з Webshare-IP вона однаково ловить Cloudflare (ДК §3.1.3).
+  а з Webshare-IP вона однаково ловить Cloudflare (ДК §3.1.3). Якщо Untappd відповідає 3xx-редиректом на новий slug для того самого `venue_id` (як-от перейменування WFP22, #809), клієнт іде за редиректом і оновлює `fest_venues.feed_path` у SQLite, щоб наступні опитування й `/fest/config` використовували канонічний шлях.
 - **Читач меню** (`runFestMenu` / `refreshFestMenu`): головна сторінка локації меню (`feed_path` без
   `/activity`) → `parseVenueMenu` → лише якщо canonical-локація сторінки = `menu_venue_id`, інакше
-  `wrong_page` і нічого не пишеться → `applyMenu`. Розклад (`dueMenuRefresh`): раз на 6 год до першого
+  `wrong_page` і нічого не пишеться → `applyMenu`. При 3xx-редиректі на новий slug локації меню оновлює `fest_venues.feed_path` на канонічний `${basePath}/activity`. Розклад (`dueMenuRefresh`): раз на 6 год до першого
   вікна, на відкритті кожного вікна й далі раз на 2 год, після останнього вікна — ніколи.
   Розклад рахує лише **успішне** читання (`job_state.fest_menu_last_at`); блок, протухла кука чи чужа
   сторінка його не зсувають, а повторна спроба — не раніше ніж за 10 хв (`fest_menu_attempt_at`).
@@ -2212,7 +2213,7 @@ submit сторінки до backend або паузу між сторінкам
 - **Breaker фесту** — `job_state.fest_poll_open_until`, поріг 2 блоки поспіль, пауза 30 хв; спільний
   для обох джоб і **окремий** від `untappd_profile_http_open_until`, хоча кука й проксі ті самі:
   фестивальний блок не глушить нічний `refreshAllUntappd`, і навпаки. `CookieExpiredError` — алерт
-  адміну, не блок. Перехід trip/recover — алерт адміну.
+  адміну, не блок. У куковому клієнті (`createHttp` з `redirect: 'manual'`, #809) `CookieExpiredError` кидається **лише** коли `Location` редиректу веде на `/login`; не-логін редиректи (зміна slug) прозоро проходять до 3 хопів зі збереженням куки й проксі. Перехід trip/recover — алерт адміну.
 - **Око ноута** (`scripts/fest-eye`, окремий `package.json` з `playwright-core`; у проді не працює):
   persistent-профіль справжнього Chrome (тека `scripts/fest-eye/profile/` у `.gitignore` — там сесія
   Untappd), у вікні: локація меню раз на 3 хв, інші раз на 6 хв (`eyeTasks`); якщо `stitched=false` —
