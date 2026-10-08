@@ -451,9 +451,12 @@ it (the same reason as `/etc/needrestart/conf.d/90-code-server.conf`).
    `canonical-livepatch status` check remains.
 5. Stage 2 — the hourly collector (`[deploy:hold]` PR): `sudo bash deploy/install-host-patch-collector.sh`.
    It installs `wbb-host-patch.service`/`.timer`, creates `/var/tmp/wbb-host-patch` and runs the
-   collector once. Check `python3 -m json.tool /var/tmp/wbb-host-patch/summary.json`: `livepatch`
-   must not be `null` (if it is, the snap CLI did not start in the unit — see spec C15). Only then
-   `bash deploy/deploy.sh`, which starts the bot reading it.
+   collector once. Check `python3 -m json.tool /var/tmp/wbb-host-patch/summary.json`: `livepatch`,
+   `kernel`, `stale_services`, `unattended.security_pending` and the three `packages` must not be
+   `null` (for `livepatch`, `null` means the snap CLI did not start in the unit — see spec C15).
+   Only `reboot_required` and `unattended.last_run` may legitimately be `null`. Only then
+   `bash deploy/deploy.sh`, which starts the bot reading it. After a merge that changes the
+   collector or the units, re-run the installer (the PR will be held for it).
 
 The Інфраструктура row of the daily status reads that summary (reboot pending, Livepatch,
 stale watched units, security backlog) and the upstream facts the bot fetches daily (Node 24
