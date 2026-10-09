@@ -82,18 +82,18 @@ Production activation, як і раніше, заборонена до кінц�
 
 **Files:** modify `deploy/release/wbb_release.py`, `trial.py`, `sandbox.py`, `host_audit.py`, `payload-probe.cjs`, їхні тести, `test_host_audit.py` (S4); `spec.md` §5.9 (коди виходу); спека §10a (межі N3, N5, N6).
 
-- [ ] **Коди виходу** `wbb_release.py` (B1): `0` ok, `1` **лише** кандидат поганий і лише разом із рядком `… FAILED`/`AUDIT ADVISORY`, `2` refused (вхід чи передумова — не вердикт), `64` usage, `70` внутрішня помилка (верхній `except Exception`, traceback у stderr), `75` transient. `OSError` у підготовці (scratch, `getpwnam`, `chown`, `mkdtemp` аудиту) → `transient`. Контролер 2в пише failed SHA лише за `1` **і** рядком вердикту.
-- [ ] **B2:** без рядка `PROBE` і з `result=exit-code`, кодом 200–243, або `result=resources` → `transient` («unit не стартував»). Тест: `exit-code`/226/порожній stdout → transient; `exit-code`/1/без рядка → failed (Node стартував і впав).
-- [ ] **N1:** `Finished with result:` — останній збіг. Тест: кандидат друкує фальшивий рядок перед справжнім.
-- [ ] **N2:** `confirm_stopped` у `finally` `run_sandboxed`; `KeyboardInterrupt` під час очікування → scratch лишається, якщо зупинку не підтверджено.
-- [ ] **B3 + N9:** sandbox запускає `ident.realpath`; рядок `PROBE|TRIAL <KIND> <sha>: <detail>` + другий фіксований рядок `NODE <realpath> <sha256> <version> <modules>`, коли identity відома.
-- [ ] **S1:** перед запуском — `systemctl list-units --all --plain --no-legend 'wbb-trial-*'`; будь-який unit → `transient` без запуску. Невдача `list-units` → `transient`.
-- [ ] **S2:** `--snapshot <ім'я>` (не шлях): `^[0-9A-Za-z][0-9A-Za-z._-]*-pre\.db$`; корінь — константа `SNAPSHOT_ROOT = /var/lib/warsaw-beer-bot/deploy-snapshots`; знімок і `.sha256` відкриваються через `dir_fd` кореня з `O_NOFOLLOW`; корінь — `O_DIRECTORY|O_NOFOLLOW`.
-- [ ] **S3:** `audit` — перший рядок лише `AUDIT <KIND> <sha> tree <hex>`; деталі — з наступного рядка.
-- [ ] **N5:** `payload-probe.cjs migrate` друкує також найбільшу версію, яку знає кандидат (`schema <before> -> <after> (knows <max>)`); trial — `failed`, якщо `after` null, `after < before` або `before > max`.
-- [ ] **N4:** тести CLI на `ok→0`, `failed→1` для probe і trial; тест, що trial перевіряє дерево вдруге після копії знімка (дерево змінюється між копією й запуском → refused).
-- [ ] **S4:** тест cross-uid створює ланцюжок тек, прохідний для 65534 (власна тека `0755` під `/tmp`, яку тест і прибирає).
-- [ ] Спека §10a: межі «TRIAL OK» (рядок результату друкує процес кандидата — захист від поломки, не від зловмисного коду), «Host audit PASS» (CLEAN не доводить, що lockfile щось покриває), «Sandbox isolation» (диск scratch не обмежений квотою — N3).
+- [x] **Коди виходу** `wbb_release.py` (B1): `0` ok, `1` **лише** кандидат поганий і лише разом із рядком `… FAILED`/`AUDIT ADVISORY`, `2` refused (вхід чи передумова — не вердикт), `64` usage, `70` внутрішня помилка (верхній `except Exception`, traceback у stderr), `75` transient. `OSError` у підготовці (scratch, `getpwnam`, `chown`, `mkdtemp` аудиту) → `transient`. Контролер 2в пише failed SHA лише за `1` **і** рядком вердикту.
+- [x] **B2:** без рядка `PROBE` і з `result=exit-code`, кодом 200–243, або `result=resources` → `transient` («unit не стартував»). Тест: `exit-code`/226/порожній stdout → transient; `exit-code`/1/без рядка → failed (Node стартував і впав).
+- [x] **N1:** `Finished with result:` — останній збіг. Тест: кандидат друкує фальшивий рядок перед справжнім.
+- [x] **N2:** `confirm_stopped` у `finally` `run_sandboxed`; `KeyboardInterrupt` під час очікування → scratch лишається, якщо зупинку не підтверджено.
+- [x] **B3 + N9:** sandbox запускає `ident.realpath`; рядок `PROBE|TRIAL <KIND> <sha>: <detail>` + другий фіксований рядок `NODE <realpath> <sha256> <version> <modules>`, коли identity відома.
+- [x] **S1:** перед запуском — `systemctl list-units --all --plain --no-legend 'wbb-trial-*'`; будь-який unit → `transient` без запуску. Невдача `list-units` → `transient`.
+- [x] **S2:** `--snapshot <ім'я>` (не шлях): `^[0-9A-Za-z][0-9A-Za-z._-]*-pre\.db$`; корінь — константа `SNAPSHOT_ROOT = /var/lib/warsaw-beer-bot/deploy-snapshots`; знімок і `.sha256` відкриваються через `dir_fd` кореня з `O_NOFOLLOW`; корінь — `O_DIRECTORY|O_NOFOLLOW`.
+- [x] **S3:** `audit` — перший рядок лише `AUDIT <KIND> <sha> tree <hex>`; деталі — з наступного рядка.
+- [x] **N5:** `payload-probe.cjs migrate` друкує також найбільшу версію, яку знає кандидат (`schema <before> -> <after> (knows <max>)`); trial — `failed`, якщо `after` null, `after < before` або `before > max`.
+- [x] **N4:** тести CLI на `ok→0`, `failed→1` для probe і trial; тест, що trial перевіряє дерево вдруге після копії знімка (дерево змінюється між копією й запуском → refused).
+- [x] **S4:** тест cross-uid створює ланцюжок тек, прохідний для 65534 (власна тека `0755` під `/tmp`, яку тест і прибирає).
+- [x] Спека §10a: межі «TRIAL OK» (рядок результату друкує процес кандидата — захист від поломки, не від зловмисного коду), «Host audit PASS» (CLEAN не доводить, що lockfile щось покриває), «Sandbox isolation» (диск scratch не обмежений квотою — N3).
 
 ### Task 1: `deploy_state.py` — versioned state v2
 

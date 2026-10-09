@@ -70,15 +70,23 @@ FINISHED_OK = 'Running as unit: x.service\nFinished with result: success\nMain p
 GONE = 'LoadState=not-found\nActiveState=inactive\n'
 
 
+LIST_UNITS = [sb.SYSTEMCTL, 'list-units', '--all', '--plain', '--no-legend', 'wbb-trial-*']
+
+
 class FakeSystemd:
-    """systemd-run, systemctl stop and systemctl show, each answer configurable, every call recorded."""
+    """systemctl list-units, systemd-run, systemctl stop and show, each answer configurable, every call recorded."""
 
     def __init__(self, run=(0, 'PROBE OK native: sqlite 3\n', FINISHED_OK), run_raises=None, show=(0, GONE),
-                 stop_raises=None):
+                 stop_raises=None, units=(0, ''), units_raises=None):
         self.run, self.run_raises, self.show, self.stop_raises, self.calls = run, run_raises, show, stop_raises, []
+        self.units, self.units_raises = units, units_raises
 
     def __call__(self, argv, **kw):
         self.calls.append((argv, kw))
+        if argv[1:2] == ['list-units']:
+            if self.units_raises:
+                raise self.units_raises
+            return subprocess.CompletedProcess(argv, self.units[0], self.units[1], '')
         if argv[0] == sb.SYSTEMD_RUN:
             if self.run_raises:
                 raise self.run_raises
@@ -99,10 +107,48 @@ class Run(unittest.TestCase):
     def test_a_unit_that_ran(self):
         fake = FakeSystemd(run=(1, 'PROBE FAILED native: x\n', 'Finished with result: exit-code\n'))
         self.assertEqual(self.run_probe(fake), sb.Ran('exit-code', 1, 'PROBE FAILED native: x\n'))
-        unit = fake.calls[0][0][4].split('=', 1)[1]
-        self.assertEqual([c[0] for c in fake.calls[1:]], [
-            [sb.SYSTEMCTL, 'stop', unit], [sb.SYSTEMCTL, 'show', '--property=LoadState,ActiveState', unit]])
-        self.assertEqual(fake.calls[0][1]['timeout'], 30 + 10 + 30)
+        unit = fake.calls[1][0][4].split('=', 1)[1]
+        self.assertEqual([c[0] for c in fake.calls[:1] + fake.calls[2:]], [
+            LIST_UNITS, [sb.SYSTEMCTL, 'stop', unit], [sb.SYSTEMCTL, 'show', '--property=LoadState,ActiveState', unit]])
+        self.assertEqual((fake.calls[1][0][0], fake.calls[1][1]['timeout']), (sb.SYSTEMD_RUN, 30 + 10 + 30))
+
+    def test_the_last_result_line_is_systemds(self):
+        # 2b review N1: with --pipe the candidate's stderr is this stream; systemd-run's footer comes last.
+        fake = FakeSystemd(run=(1, '', 'Finished with result: success\nboom\nFinished with result: exit-code\n'))
+        self.assertEqual(self.run_probe(fake), sb.Ran('exit-code', 1, ''))
+
+    def test_interrupt_while_waiting_stops_the_unit_then_goes_on(self):
+        # 2b review N2: the unit is stopped and confirmed before the interrupt reaches the caller.
+        fake = FakeSystemd(run_raises=KeyboardInterrupt())
+        with self.assertRaises(KeyboardInterrupt):
+            self.run_probe(fake)
+        self.assertEqual([c[0][1] for c in fake.calls[2:]], ['stop', 'show'])
+
+    def test_interrupt_with_the_unit_unconfirmed_is_unconfirmed(self):
+        # 2b review N2: the caller must keep the scratch, so Unconfirmed replaces the interrupt.
+        fake = FakeSystemd(run_raises=KeyboardInterrupt(), show=(0, 'LoadState=loaded\nActiveState=active\n'))
+        with self.assertRaisesRegex(sb.Unconfirmed, 'could not be confirmed stopped$') as caught:
+            self.run_probe(fake)
+        self.assertEqual(type(caught.exception.__context__), KeyboardInterrupt)
+
+    def test_a_loaded_trial_unit_blocks_the_run(self):
+        # 2b review S1: two wbb-trial units at once would see each other's processes.
+        fake = FakeSystemd(units=(0, 'wbb-trial-trial-e58da52c0e62-0123abcd.service loaded active running x\n'))
+        with self.assertRaisesRegex(sb.Transient, '^wbb-trial unit\\(s\\) still loaded, not starting another: '
+                                                  'wbb-trial-trial-e58da52c0e62-0123abcd.service$'):
+            self.run_probe(fake)
+        self.assertEqual([c[0] for c in fake.calls], [LIST_UNITS])
+
+    def test_an_unlistable_systemd_blocks_the_run(self):
+        cases = [(FakeSystemd(units=(1, '')), 'cannot list wbb-trial units (systemctl exit 1)'),
+                 (FakeSystemd(units_raises=FileNotFoundError(2, 'x')), 'cannot list wbb-trial units (FileNotFoundError)'),
+                 (FakeSystemd(units_raises=subprocess.TimeoutExpired('systemctl', 10)),
+                  'cannot list wbb-trial units (TimeoutExpired)')]
+        for fake, message in cases:
+            with self.subTest(message=message):
+                with self.assertRaises(sb.Transient) as caught:
+                    self.run_probe(fake)
+                self.assertEqual((str(caught.exception), len(fake.calls)), (message, 1))
 
     def test_systemd_never_ran_the_unit_is_transient(self):
         # #817 review: exit 1, empty stdout, a bus error on stderr — the candidate never ran.
@@ -128,20 +174,20 @@ class Run(unittest.TestCase):
         fake = FakeSystemd(run_raises=FileNotFoundError(2, 'No such file or directory'))
         with self.assertRaisesRegex(sb.Transient, '^systemd-run could not start \\(No such file or directory\\)$'):
             self.run_probe(fake)
-        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual([c[0][0] for c in fake.calls], [sb.SYSTEMCTL, sb.SYSTEMD_RUN])
 
     def test_any_exec_failure_is_transient(self):
         # #817 AI review: not only a missing binary — EPERM, EIO, EAGAIN at exec never start a unit either.
         fake = FakeSystemd(run_raises=PermissionError(13, 'Permission denied'))
         with self.assertRaisesRegex(sb.Transient, '^systemd-run could not start \\(Permission denied\\)$'):
             self.run_probe(fake)
-        self.assertEqual(len(fake.calls), 1)
+        self.assertEqual([c[0][0] for c in fake.calls], [sb.SYSTEMCTL, sb.SYSTEMD_RUN])
 
     def test_systemd_run_hanging_stops_the_unit_then_is_transient(self):
         fake = FakeSystemd(run_raises=subprocess.TimeoutExpired('systemd-run', 70))
         with self.assertRaisesRegex(sb.Transient, '^systemd-run did not return within 70 s$'):
             self.run_probe(fake)
-        self.assertEqual(fake.calls[1][0][1], 'stop')
+        self.assertEqual(fake.calls[2][0][1], 'stop')
 
 
 class Identity(unittest.TestCase):

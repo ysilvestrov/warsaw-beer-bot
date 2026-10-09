@@ -134,24 +134,39 @@ def audit_release(release_dir, workdir, owner=(0, 0), runner=None, npm=NPM, extr
     # it has filled memory (#817 AI review).
     runner = runner or functools.partial(bounded.run, cap=MAX_REPORT_BYTES + 1)
     files, tree_sha256 = release_inputs(release_dir, owner)
-    base = tempfile.mkdtemp(dir=workdir, prefix='audit-')
+    base = None
     try:
-        project = os.path.join(base, 'project')
-        home = os.path.join(base, 'home')
-        os.mkdir(project, 0o700)
-        os.mkdir(home, 0o700)
-        for name, data in files.items():
-            fd = os.open(os.path.join(project, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-            with os.fdopen(fd, 'wb') as f:
-                f.write(data)
-        userconfig = os.path.join(base, 'user.npmrc')
-        globalconfig = os.path.join(base, 'global.npmrc')
-        for path in (userconfig, globalconfig):
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        base = tempfile.mkdtemp(dir=workdir, prefix='audit-')
+        project, home, userconfig, globalconfig = _prepare(base, files)
+    except OSError as e:
+        # A work directory this host cannot make (missing, full) says nothing about the
+        # lockfile: no report, retry later — never a traceback (2b review B1).
+        if base:
+            shutil.rmtree(base, ignore_errors=True)
+        return AuditResult(Verdict('unrunnable', reason=f'never arrived — the audit directory could not be prepared '
+                                                        f'({e.strerror or type(e).__name__})'), tree_sha256)
+    try:
         env = {'PATH': PATH, 'HOME': home, **(extra_env or {})}
         return AuditResult(_run_audit(runner, npm, userconfig, globalconfig, project, env), tree_sha256)
     finally:
         shutil.rmtree(base, ignore_errors=True)
+
+
+def _prepare(base, files):
+    """The project with only the two files, an empty HOME and two empty npm configs, under base."""
+    project = os.path.join(base, 'project')
+    home = os.path.join(base, 'home')
+    os.mkdir(project, 0o700)
+    os.mkdir(home, 0o700)
+    for name, data in files.items():
+        fd = os.open(os.path.join(project, name), os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, 'wb') as f:
+            f.write(data)
+    userconfig = os.path.join(base, 'user.npmrc')
+    globalconfig = os.path.join(base, 'global.npmrc')
+    for path in (userconfig, globalconfig):
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+    return project, home, userconfig, globalconfig
 
 
 def _run_audit(runner, npm, userconfig, globalconfig, project, env):

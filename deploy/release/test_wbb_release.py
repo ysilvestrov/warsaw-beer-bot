@@ -1,7 +1,7 @@
 import contextlib
+import hashlib
 import io
 import os
-import subprocess
 import sys
 import tempfile
 import unittest
@@ -16,6 +16,7 @@ from release_testkit import SHA, packed  # noqa: E402
 from zip_admission import sha256_file  # noqa: E402
 from audit_verdict import Finding, Verdict  # noqa: E402
 from host_audit import AuditResult  # noqa: E402
+from test_trial import Fake  # noqa: E402
 
 REPO = 'ysilvestrov/warsaw-beer-bot'
 
@@ -85,12 +86,12 @@ class Cli(unittest.TestCase):
     def test_publish_refuses_a_release_for_another_repository(self):
         self.zip = self.artifact('fork', 'o/r')
         code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
-        self.assertEqual((code, err), (1, f"REFUSED: release.json does not match the trusted run: repo='o/r'\n"))
+        self.assertEqual((code, err), (2, f"REFUSED: release.json does not match the trusted run: repo='o/r'\n"))
         self.assertEqual(self.tokens_seen, ['tok'])
 
     def test_verify_without_receipt(self):
         code, _, err = self.run_cli(['verify', '--sha', SHA])
-        self.assertEqual((code, err), (1, f'REFUSED: {SHA}: no receipt — not an accepted release\n'))
+        self.assertEqual((code, err), (2, f'REFUSED: {SHA}: no receipt — not an accepted release\n'))
 
     def test_usage(self):
         code, _, _ = self.run_cli(['publish', '--sha', SHA])
@@ -99,23 +100,27 @@ class Cli(unittest.TestCase):
     def test_token_file_readable_by_others(self):
         os.chmod(self.token, 0o640)
         code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
-        self.assertEqual((code, err), (1, f'REFUSED: {self.token}: must be a regular file owned by this user, not readable by others\n'))
+        self.assertEqual((code, err), (2, f'REFUSED: {self.token}: must be a regular file owned by this user, not readable by others\n'))
         self.assertEqual(self.tokens_seen, [])
 
     def test_token_file_without_the_key(self):
         with open(self.token, 'w') as f:
             f.write('OTHER=x\n')
         code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
-        self.assertEqual((code, err), (1, f'REFUSED: {self.token}: expected exactly one non-empty WBB_GITHUB_TOKEN=\n'))
+        self.assertEqual((code, err), (2, f'REFUSED: {self.token}: expected exactly one non-empty WBB_GITHUB_TOKEN=\n'))
 
     def published(self):
         self.assertEqual(self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])[0], 0)
 
     def run_step(self, argv, **kw):
+        code, out, _ = self.run_step_err(argv, **kw)
+        return code, out
+
+    def run_step_err(self, argv, **kw):
         out, err = io.StringIO(), io.StringIO()
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = cli.main(argv, self.roots, self.token, self.api_factory(), **kw)
-        return code, out.getvalue()
+        return code, out.getvalue(), err.getvalue()
 
     def test_audit_exit_codes(self):
         self.published()
@@ -131,26 +136,89 @@ class Cli(unittest.TestCase):
         code, out = self.run_step(['audit', '--sha', SHA], audit=lambda release, work, owner: got.append(
             (release, owner)) or AuditResult(Verdict('clean'), 'd' * 64))
         self.assertEqual((code, got, out), (0, [(os.path.join(self.roots.releases, SHA), self.roots.owner)],
-                         f'AUDIT CLEAN {SHA} tree {"d" * 64}: npm audit: no high or critical advisory in production dependencies\n'))
+                         f'AUDIT CLEAN {SHA} tree {"d" * 64}\n'
+                         'npm audit: no high or critical advisory in production dependencies\n'))
+
+    def test_audit_details_never_share_the_first_line(self):
+        # 2b review S3: the controller reads one fixed first line; the findings follow it.
+        v = Verdict('advisory', findings=(Finding('a', 'high', (('T', 'https://u'),)), Finding('b', 'critical')))
+        code, out = self.run_step(['audit', '--sha', SHA], audit=lambda *a: AuditResult(v, 'd' * 64))
+        self.assertEqual((code, out), (1, f'AUDIT ADVISORY {SHA} tree {"d" * 64}\na high — T https://u\nb critical\n'))
 
     def test_audit_of_a_bad_sha(self):
         code, _ = self.run_step(['audit', '--sha', '../x'], audit=lambda *a: self.fail('audit ran'))
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 2)
 
-    def test_probe_transient_is_75(self):
-        self.published()
+    def test_internal_error_is_70_with_a_traceback(self):
+        # 2b review B1: an unexpected exception exited 1, the code of a bad candidate.
+        def broken(*a):
+            raise RuntimeError('bug')
+        code, out, err = self.run_step_err(['audit', '--sha', SHA], audit=broken)
+        self.assertEqual((code, out, err.splitlines()[0], err.splitlines()[-1]),
+                         (70, '', 'Traceback (most recent call last):', 'RuntimeError: bug'))
+
+    def sandboxed(self, argv, fake, **kw):
         patcher = mock.patch.object(sb, 'HIDDEN_BY_PRIVATE_TMP', ())  # this test's scratch is under /tmp
         patcher.start()
         self.addCleanup(patcher.stop)
-        def runner(argv, **kw):
-            if argv[0] == '/usr/bin/systemd-run':
-                raise FileNotFoundError()
-            return subprocess.CompletedProcess(argv, 0, 'v24.1.0 137\n', '')
         trial_root = os.path.join(self.base, 'trial')
-        os.makedirs(trial_root)
-        code, out = self.run_step(['probe', '--sha', SHA], trial_root=trial_root, runner=runner, node=sys.executable,
-                                  ids=lambda: (os.geteuid(), os.getegid()))
-        self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run could not start (FileNotFoundError)\n'))
+        os.makedirs(trial_root, exist_ok=True)
+        snaps = os.path.join(self.base, 'snaps')
+        os.makedirs(snaps, exist_ok=True)
+        with open(os.path.join(snaps, 'x-pre.db'), 'wb') as f:
+            f.write(b'db')
+        with open(os.path.join(snaps, 'x-pre.db.sha256'), 'w') as f:
+            f.write(hashlib.sha256(b'db').hexdigest() + '\n')
+        args = dict(trial_root=trial_root, snapshot_root=snaps, runner=fake, node=sys.executable,
+                    ids=lambda: (os.geteuid(), os.getegid()), glibc=lambda: '2.39')
+        return self.run_step_err(argv, **{**args, **kw})
+
+    def node_line(self):
+        real = os.path.realpath(sys.executable)
+        with open(real, 'rb') as f:
+            return f'NODE {real} {hashlib.sha256(f.read()).hexdigest()} 24.1.0 137\n'
+
+    def test_probe_and_trial_verdicts_and_their_exit_codes(self):
+        # 2b review N4: ok -> 0 and failed -> 1, with the verdict line and the Node it ran on (B3).
+        self.published()
+        cases = [
+            (['probe', '--sha', SHA], Fake(), 0, f'PROBE OK {SHA}: native: sqlite 3.53.4\n'),
+            (['probe', '--sha', SHA], Fake(sandbox_out='PROBE FAILED native: x\n', sandbox_exit=1, result='exit-code'), 1,
+             f'PROBE FAILED {SHA}: native: x\n'),
+            (['trial', '--sha', SHA, '--snapshot', 'x-pre.db'], Fake(sandbox_out='PROBE OK migrate: schema 1 -> 2 (knows 2)\n'),
+             0, f'TRIAL OK {SHA}: migrate: schema 1 -> 2 (knows 2)\n'),
+            (['trial', '--sha', SHA, '--snapshot', 'x-pre.db'],
+             Fake(sandbox_out='PROBE FAILED migrate: boom\n', sandbox_exit=1, result='exit-code'), 1,
+             f'TRIAL FAILED {SHA}: migrate: boom\n'),
+        ]
+        got = [self.sandboxed(argv, fake)[:2] for argv, fake, _, _ in cases]
+        self.assertEqual(got, [(code, line + self.node_line()) for _, _, code, line in cases])
+
+    def test_missing_trial_user_is_75_without_a_node_line(self):
+        def no_user():
+            raise KeyError('wbb-trial')
+        self.published()
+        code, out, err = self.sandboxed(['probe', '--sha', SHA], Fake(), ids=no_user)
+        self.assertEqual((code, out, err), (75, f'PROBE TRANSIENT {SHA}: no wbb-trial user on this host\n', ''))
+
+    def test_trial_of_an_unaccepted_release_is_refused(self):
+        code, out, err = self.sandboxed(['trial', '--sha', SHA, '--snapshot', 'x-pre.db'], Fake())
+        self.assertEqual((code, out, err), (2, '', f'REFUSED: {SHA}: no receipt — not an accepted release\n'))
+
+    def test_trial_takes_a_snapshot_name_not_a_path(self):
+        self.published()
+        fake = Fake()
+        code, out, err = self.sandboxed(['trial', '--sha', SHA, '--snapshot', '/etc/shadow'], fake)
+        self.assertEqual((code, out, err, fake.calls), (2, '', "REFUSED: not a pre snapshot name: '/etc/shadow'\n", []))
+
+    def test_production_snapshot_root(self):
+        self.assertEqual(cli.SNAPSHOT_ROOT, '/var/lib/warsaw-beer-bot/deploy-snapshots')
+
+    def test_probe_transient_is_75(self):
+        self.published()
+        code, out, _ = self.sandboxed(['probe', '--sha', SHA], Fake(sandbox_raises=FileNotFoundError()))
+        self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run could not start (FileNotFoundError)\n'
+                                           + self.node_line()))
 
     def test_production_releases_are_root_owned(self):
         self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
