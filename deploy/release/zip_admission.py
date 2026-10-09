@@ -22,7 +22,12 @@ from package_runtime import ARCHIVE  # noqa: E402
 from safe_tar import CHECKSUM_MAX_BYTES, Refused, check_checksum  # noqa: E402
 
 CHECKSUM_NAME = ARCHIVE + '.sha256'
-ALLOWED_METHODS = (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+# Gate G1 (2026-10-09, a real artifact downloaded on the VPS): both entries are STORED
+# (CI uploads with compression-level: 0), unix mode 0o100644, flags 0x8 (data descriptor).
+# Only STORED is accepted, so no decompressor runs on downloaded bytes; a change to the
+# upload's compression level must come with a change here (scripts/release.test.ts).
+ALLOWED_METHODS = (zipfile.ZIP_STORED,)
+ENCRYPTION_FLAGS = 0x1 | 0x40  # traditional and strong encryption
 
 
 @dataclass(frozen=True)
@@ -43,12 +48,11 @@ def sha256_file(path):
 def _entry_problem(info):
     if info.is_dir():
         return 'is a directory'
-    if info.flag_bits & 0x1:
+    if info.flag_bits & ENCRYPTION_FLAGS:
         return 'is encrypted'
     if info.compress_type not in ALLOWED_METHODS:
         return f'uses compression method {info.compress_type}'
-    kind = stat.S_IFMT(info.external_attr >> 16)
-    if kind not in (0, stat.S_IFREG):
+    if stat.S_IFMT(info.external_attr >> 16) != stat.S_IFREG:
         return 'is not a regular file'
     return None
 
