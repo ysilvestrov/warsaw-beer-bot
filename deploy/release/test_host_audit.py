@@ -3,6 +3,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import host_audit as ha  # noqa: E402
@@ -162,6 +163,22 @@ class Audit(unittest.TestCase):
         runner = Runner(b' ' * (ha.MAX_REPORT_BYTES + 1))
         self.assertEqual(self.audit(runner).verdict.reason, f'is over {ha.MAX_REPORT_BYTES} bytes — not a report we read')
 
+    def test_unmakeable_work_directory_is_unrunnable(self):
+        # 2b review B1: a missing or full work directory was a traceback; it says nothing about the lockfile.
+        runner = Runner()
+        result = ha.audit_release(self.release, os.path.join(self.work, 'gone'), IDS, runner=runner, euid=operator)
+        self.assertEqual((result, runner.calls), (ha.AuditResult(Verdict(
+            'unrunnable', reason='never arrived — the audit directory could not be prepared (No such file or directory)'),
+            tm.tree_digest(self.manifest)), []))
+
+    def test_failure_while_preparing_removes_the_directory(self):
+        def full(*a, **kw):
+            raise OSError(28, 'No space left on device')
+        with mock.patch.object(ha.os, 'mkdir', full):
+            result = self.audit(Runner())
+        self.assertEqual((result.verdict.reason, os.listdir(self.work)),
+                         ('never arrived — the audit directory could not be prepared (No space left on device)', []))
+
     def test_refuses_to_run_as_root(self):
         runner = Runner()
         with self.assertRaisesRegex(Refused, '^the host audit must not run as root$'):
@@ -174,8 +191,13 @@ class RootPublisherOperatorAuditor(unittest.TestCase):
     """#817 review P1, end to end: published by uid 0 with a 0600 receipt, audited by uid 65534."""
 
     def test_operator_audit_reaches_npm(self):
-        with tempfile.TemporaryDirectory() as base:
+        # 2b review S4: under /tmp itself, not the test supervisor's temp root — that one is
+        # 0700, and uid 65534 could not reach anything below it.
+        with tempfile.TemporaryDirectory(dir='/tmp') as base:
             os.chmod(base, 0o755)
+            work = os.path.join(base, 'work')
+            os.mkdir(work, 0o700)
+            os.chown(work, 65534, 65534)
             roots = pub.Roots(*(os.path.join(base, d) for d in ('releases', 'receipts', 'scratch')), (0, 0))
             for d in (roots.releases, roots.receipts, roots.scratch):
                 os.makedirs(d)
@@ -184,15 +206,15 @@ class RootPublisherOperatorAuditor(unittest.TestCase):
             pub.publish(trusted_for(z), z, roots, lambda: 'now')
             code = (
                 'import sys; sys.path.insert(0, %r); import host_audit as ha, tempfile;'
-                'r = ha.audit_release(%r, tempfile.mkdtemp(), (0, 0), npm="/nonexistent/npm");'
+                'r = ha.audit_release(%r, %r, (0, 0), npm="/nonexistent/npm");'
                 'print(r.verdict.kind, r.verdict.reason)'
-            ) % (os.path.dirname(os.path.abspath(__file__)), os.path.join(roots.releases, SHA))
+            ) % (os.path.dirname(os.path.abspath(__file__)), os.path.join(roots.releases, SHA), work)
 
             def drop():
                 os.setgid(65534)
                 os.setuid(65534)
             r = subprocess.run([sys.executable, '-B', '-c', code], capture_output=True, text=True,
-                               preexec_fn=drop, env={'PATH': '/usr/bin:/bin', 'TMPDIR': '/tmp'})
+                               preexec_fn=drop, env={'PATH': '/usr/bin:/bin', 'TMPDIR': work})
             self.assertEqual((r.returncode, r.stdout, r.stderr),
                              (0, 'unrunnable never arrived — npm could not start (No such file or directory)\n', ''))
 

@@ -132,6 +132,26 @@ class Unconfirmed(Transient):
 
 
 FINISHED = re.compile(r'^Finished with result: (\S+)$', re.M)
+LIST_UNITS_S = 10
+
+
+def no_trial_units(runner=bounded.run):
+    """Raise Transient unless systemd shows no wbb-trial-* unit at all (2b review S1).
+
+    ProtectProc=invisible does not hide processes of the same user (gate G3), so two units
+    alive at once would see each other: an unconfirmed unit from an earlier tick must be
+    gone before the next one starts. A listing that cannot be had proves nothing.
+    """
+    try:
+        r = runner([SYSTEMCTL, 'list-units', '--all', '--plain', '--no-legend', 'wbb-trial-*'],
+                   capture_output=True, text=True, check=False, timeout=LIST_UNITS_S)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Transient(f'cannot list wbb-trial units ({type(e).__name__})') from None
+    if r.returncode != 0:
+        raise Transient(f'cannot list wbb-trial units (systemctl exit {r.returncode})')
+    units = [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
+    if units:
+        raise Transient(f'wbb-trial unit(s) still loaded, not starting another: {" ".join(units)}')
 
 
 def confirm_stopped(unit, runner=bounded.run):
@@ -153,30 +173,40 @@ def run_sandboxed(kind, sha, release, scratch, probe, args, runner=bounded.run, 
     """Run the probe in the sandbox and confirm the unit is stopped on every path.
 
     Returns Ran when systemd ran the unit to an end. Raises Transient when systemd could
-    not run it (no binary, no bus, systemd-run hanging) and Unconfirmed when the unit
-    cannot be shown stopped afterwards — then the caller must keep the scratch.
+    not run it (no binary, no bus, systemd-run hanging, another wbb-trial unit loaded) and
+    Unconfirmed when the unit cannot be shown stopped afterwards — then the caller must
+    keep the scratch. Unconfirmed also replaces any other exception (a Ctrl-C while
+    waiting): whatever was in flight, a unit that may be alive keeps its scratch.
     """
     unit = unit_name(kind, sha)
     argv = sandbox_argv(kind, sha, release, scratch, probe, args, unit, node)
+    no_trial_units(runner)
+    limit = RUNTIME_MAX_S[kind] + STOP_TIMEOUT_S + WAIT_MARGIN_S
+    created = True
     failure = None
     ran = None
     try:
-        r = runner(argv, capture_output=True, text=True, check=False,
-                   timeout=RUNTIME_MAX_S[kind] + STOP_TIMEOUT_S + WAIT_MARGIN_S, stdin=subprocess.DEVNULL)
-        m = FINISHED.search(r.stderr or '')
-        if m:
-            ran = Ran(m.group(1), r.returncode, r.stdout)
+        r = runner(argv, capture_output=True, text=True, check=False, timeout=limit, stdin=subprocess.DEVNULL)
+        # The last match (2b review N1): with --pipe the candidate writes to this same stream
+        # and can print the line too, but systemd-run's own footer comes after the unit ended.
+        found = FINISHED.findall(r.stderr or '')
+        if found:
+            ran = Ran(found[-1], r.returncode, r.stdout)
         else:
             # No result line: systemd never ran the unit (e.g. "Failed to connect to bus").
             failure = f'systemd-run did not run the unit (exit {r.returncode}): {(r.stderr or "").strip()[-500:]!r}'
     except OSError as e:
         # exec of systemd-run itself failed (missing, not executable, out of resources): the
         # process never started, so no unit was ever created — nothing to stop or confirm.
+        created = False
         raise Transient(f'systemd-run could not start ({e.strerror or type(e).__name__})') from None
     except subprocess.TimeoutExpired:
-        failure = f'systemd-run did not return within {RUNTIME_MAX_S[kind] + STOP_TIMEOUT_S + WAIT_MARGIN_S} s'
-    if not confirm_stopped(unit, runner):
-        raise Unconfirmed(f'sandbox unit {unit} could not be confirmed stopped' + (f' ({failure})' if failure else ''))
+        failure = f'systemd-run did not return within {limit} s'
+    finally:
+        # 2b review N2: on every way out, an exception that is not ours included, the unit is
+        # stopped and confirmed before the caller may remove its scratch.
+        if created and not confirm_stopped(unit, runner):
+            raise Unconfirmed(f'sandbox unit {unit} could not be confirmed stopped' + (f' ({failure})' if failure else ''))
     if failure:
         raise Transient(failure)
     return ran

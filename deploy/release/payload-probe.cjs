@@ -30,26 +30,37 @@ const probes = {
   // The same contract as deploy/trial-migrate.cjs: the payload's own openDb/migrate,
   // twice, then SQLite's own soundness checks. Without an argument, on a fresh database
   // (CI); with one, on that file — the host's private copy of a pre snapshot (Ядро-2б).
+  // `knows` is the newest schema the payload's own migrate() reaches from nothing, so the
+  // host can tell a database newer than the release from a migration that did nothing
+  // (2b review N5); it is derived on an in-memory database, the schema module is untouched.
   migrate([dbPath]) {
     const scratch = dbPath ? null : fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'wbb-probe-'));
     const { openDb } = inPayload('dist/storage/db.js');
     const { migrate } = inPayload('dist/storage/schema.js');
+    const version = (db) => {
+      const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
+      return table ? db.prepare('SELECT MAX(version) AS v FROM schema_version').get().v : null;
+    };
+    const fresh = openDb(':memory:');
+    let knows;
+    try {
+      migrate(fresh);
+      knows = version(fresh);
+    } finally {
+      fresh.close();
+    }
     const db = openDb(dbPath || path.join(scratch, 'probe.db'));
     try {
-      const version = () => {
-        const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'").get();
-        return table ? db.prepare('SELECT MAX(version) AS v FROM schema_version').get().v : null;
-      };
-      const before = version();
+      const before = version(db);
       migrate(db);
-      const after = version();
+      const after = version(db);
       migrate(db);
-      if (version() !== after) throw new Error(`a second migrate() moved the schema: ${after} -> ${version()}`);
+      if (version(db) !== after) throw new Error(`a second migrate() moved the schema: ${after} -> ${version(db)}`);
       const fk = db.pragma('foreign_key_check');
       if (fk.length !== 0) throw new Error(`foreign_key_check: ${fk.length} violation(s), first ${JSON.stringify(fk[0])}`);
       const ic = db.pragma('integrity_check');
       if (ic.length !== 1 || ic[0].integrity_check !== 'ok') throw new Error(`integrity_check: ${JSON.stringify(ic)}`);
-      return `schema ${before ?? 'none'} -> ${after}`;
+      return `schema ${before ?? 'none'} -> ${after} (knows ${knows})`;
     } finally {
       db.close();
       if (scratch) fs.rmSync(scratch, { recursive: true, force: true });

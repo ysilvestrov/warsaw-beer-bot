@@ -13,9 +13,21 @@ Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
        wbb_release.py verify  --sha <full sha>                            (root)
        wbb_release.py audit   --sha <full sha>                            (operator, never root)
        wbb_release.py probe   --sha <full sha>                            (root; runs the sandbox)
-       wbb_release.py trial   --sha <full sha> --snapshot <pre.db>        (root; runs the sandbox)
-Exit:  0 done/ok, 1 refused or the candidate failed (reason on stderr), 75 could not judge
-       now — retry, never a failed SHA (EX_TEMPFAIL), 64 usage.
+       wbb_release.py trial   --sha <full sha> --snapshot <name>-pre.db   (root; runs the sandbox)
+The snapshot is a NAME in SNAPSHOT_ROOT, never a path.
+
+Output: one verdict line on stdout — `VERIFIED <sha>: tree <hex> ...`, `ACCEPTED|ALREADY-ACCEPTED <sha>: ...`,
+`AUDIT <KIND> <sha> tree <hex>` (details from the next line on), `PROBE|TRIAL <KIND> <sha>: <detail>`
+followed, when the Node identity is known, by `NODE <realpath> <sha256> <version> <modules>`.
+Exit (2b review B1; the controller records a failed SHA only on 1 together with its verdict line):
+   0  done / ok / clean
+   1  ONLY the candidate is bad: `PROBE FAILED`, `TRIAL FAILED` or `AUDIT ADVISORY` is on stdout
+   2  refused: an input or a precondition (no receipt, changed tree, bad name; `REFUSED:` on stderr) —
+      not a verdict on the candidate
+  64  usage
+  70  internal error (a traceback on stderr) — not a verdict on the candidate
+  75  could not judge now — retry, never a failed SHA (EX_TEMPFAIL): no wbb-trial user, no scratch,
+      a unit systemd did not start, another wbb-trial unit loaded, an audit with no report
 Nothing is activated: no unit, pointer or database is touched.
 """
 import argparse
@@ -24,6 +36,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bounded  # noqa: E402
@@ -44,7 +57,15 @@ PRODUCTION_ROOTS = pub.Roots(
 TOKEN_FILE = '/etc/wbb-deploy/github.env'
 # Parent of the per-run sandbox scratch directories (root-owned; each run is 0700 wbb-trial).
 TRIAL_ROOT = '/var/lib/wbb-trial'
+# Where db-snapshot.sh keeps the pre snapshots; `trial --snapshot` names one in it (2b review S2).
+SNAPSHOT_ROOT = '/var/lib/warsaw-beer-bot/deploy-snapshots'
+EX_FAILED = 1
+EX_REFUSED = 2
+EX_USAGE = 64
+EX_SOFTWARE = 70
 EX_TEMPFAIL = 75
+STEP_EXIT = {'ok': 0, 'failed': EX_FAILED, 'transient': EX_TEMPFAIL}
+AUDIT_EXIT = {'clean': 0, 'advisory': EX_FAILED, 'unrunnable': EX_TEMPFAIL}
 TOKEN_KEY = 'WBB_GITHUB_TOKEN'
 
 
@@ -62,8 +83,7 @@ def read_token(path):
     return values[0]
 
 
-def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
-         runner=bounded.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release):
+def _parser():
     ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept, audit, probe or trial a runtime release.')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('publish')
@@ -73,38 +93,64 @@ def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.Git
         sub.add_parser(name).add_argument('--sha', required=True)
     t = sub.add_parser('trial')
     t.add_argument('--sha', required=True)
-    t.add_argument('--snapshot', required=True)
-    try:
-        a = ap.parse_args(argv)
-    except SystemExit as e:
-        return 64 if e.code else 0
-    try:
-        if a.cmd == 'verify':
-            receipt = pub.verify_release(a.sha, roots)
-            print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
-            return 0
-        if a.cmd == 'audit':
-            # Runs as the operator, who cannot read the root-only receipt: the audit proves its
-            # inputs against the tree's manifest and prints that manifest's digest, which the
-            # controller matches with the receipt through `verify` (root) before trusting it.
-            if not gt.SHA.fullmatch(a.sha):
-                raise Refused(f'not a full lowercase SHA: {a.sha!r}')
-            result = audit(os.path.join(roots.releases, a.sha), tempfile.gettempdir(), roots.owner)
-            print(f'AUDIT {result.verdict.kind.upper()} {a.sha} tree {result.tree_sha256}: {render_verdict(result.verdict)}')
-            return {'clean': 0, 'advisory': 1}.get(result.verdict.kind, EX_TEMPFAIL)
-        if a.cmd in ('probe', 'trial'):
-            step = (tr.probe(a.sha, roots, trial_root, runner, node, ids) if a.cmd == 'probe'
-                    else tr.trial(a.sha, a.snapshot, roots, trial_root, runner, node, ids))
-            print(f'{a.cmd.upper()} {step.kind.upper()} {a.sha}: {step.detail}')
-            return {'ok': 0, 'failed': 1}.get(step.kind, EX_TEMPFAIL)
-        api = api_factory(read_token(token_file))
-        trusted = gt.fetch_trusted(api, gt.REPO, a.sha)
-        outcome = pub.publish(trusted, a.archive, roots)
-        print(f'{outcome.upper()} {a.sha}: run {trusted.run_id} attempt {trusted.run_attempt}, artifact {trusted.artifact_id}')
+    t.add_argument('--snapshot', required=True, help='a <name>-pre.db in ' + SNAPSHOT_ROOT)
+    return ap
+
+
+def _print_step(cmd, sha, step):
+    print(f'{cmd.upper()} {step.kind.upper()} {sha}: {step.detail}')
+    if step.node is not None:
+        # 2b review B3: the controller compares this Node with the one it is about to start the bot on.
+        n = step.node
+        print(f'NODE {n.realpath} {n.sha256} {n.version} {n.modules}')
+    return STEP_EXIT[step.kind]
+
+
+def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc):
+    if a.cmd == 'verify':
+        receipt = pub.verify_release(a.sha, roots)
+        print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
         return 0
+    if a.cmd == 'audit':
+        # Runs as the operator, who cannot read the root-only receipt: the audit proves its
+        # inputs against the tree's manifest and prints that manifest's digest, which the
+        # controller matches with the receipt through `verify` (root) before trusting it.
+        if not gt.SHA.fullmatch(a.sha):
+            raise Refused(f'not a full lowercase SHA: {a.sha!r}')
+        result = audit(os.path.join(roots.releases, a.sha), tempfile.gettempdir(), roots.owner)
+        # 2b review S3: the first line is fixed; npm's details, one or many lines, come after it.
+        print(f'AUDIT {result.verdict.kind.upper()} {a.sha} tree {result.tree_sha256}')
+        print(render_verdict(result.verdict))
+        return AUDIT_EXIT[result.verdict.kind]
+    if a.cmd == 'probe':
+        return _print_step(a.cmd, a.sha, tr.probe(a.sha, roots, trial_root, runner, node, ids, glibc))
+    if a.cmd == 'trial':
+        return _print_step(a.cmd, a.sha, tr.trial(a.sha, a.snapshot, roots, trial_root, snapshot_root, runner, node,
+                                                  ids, glibc))
+    api = api_factory(read_token(token_file))
+    trusted = gt.fetch_trusted(api, gt.REPO, a.sha)
+    outcome = pub.publish(trusted, a.archive, roots)
+    print(f'{outcome.upper()} {a.sha}: run {trusted.run_id} attempt {trusted.run_attempt}, artifact {trusted.artifact_id}')
+    return 0
+
+
+def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
+         runner=bounded.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release,
+         snapshot_root=SNAPSHOT_ROOT, glibc=tr.host_glibc):
+    try:
+        a = _parser().parse_args(argv)
+    except SystemExit as e:
+        return EX_USAGE if e.code else 0
+    try:
+        return _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, node, ids, audit, glibc)
     except (Refused, gt.Untrusted) as e:
+        # Not a verdict on the candidate: nothing here may be recorded as its failure (2b review B1).
         print(f'REFUSED: {e}', file=sys.stderr)
-        return 1
+        return EX_REFUSED
+    except Exception:
+        # Before this, a Python traceback exited 1 — the code of a bad candidate (2b review B1).
+        traceback.print_exc()
+        return EX_SOFTWARE
 
 
 if __name__ == '__main__':

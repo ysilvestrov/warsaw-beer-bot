@@ -160,10 +160,21 @@ describe.skipIf(process.platform !== 'linux')('payload-probe.cjs migrate', () =>
   it('migrates a given database twice and reports the move, then a second run moves nothing', () => {
     const db = resolve(work, 'copy.db');
     const first = probe(db);
-    const head = /^PROBE OK migrate: schema none -> (\d+)\n$/.exec(first.stdout);
-    expect([first.status, head === null]).toEqual([0, false]);
+    const head = /^PROBE OK migrate: schema none -> (\d+) \(knows (\d+)\)\n$/.exec(first.stdout);
+    // From nothing, the release's migrate() reaches exactly the newest schema it knows (2b review N5).
+    expect([first.status, head?.[1], head?.[1] === head?.[2]]).toEqual([0, expect.stringMatching(/^\d+$/), true]);
     const again = probe(db);
-    expect([again.status, again.stdout]).toEqual([0, `PROBE OK migrate: schema ${head?.[1]} -> ${head?.[1]}\n`]);
+    expect([again.status, again.stdout]).toEqual([0, `PROBE OK migrate: schema ${head?.[1]} -> ${head?.[1]} (knows ${head?.[1]})\n`]);
+  }, 60_000);
+
+  it('reports what the release knows, not what the database holds, for a database newer than the release', () => {
+    const db = resolve(work, 'newer.db');
+    const head = /^PROBE OK migrate: schema none -> (\d+) \(knows \d+\)\n$/.exec(probe(db).stdout)?.[1];
+    const bump = spawnSync('python3', ['-B', '-c',
+      'import sqlite3, sys; c = sqlite3.connect(sys.argv[1]); c.execute("INSERT INTO schema_version VALUES (9999)"); c.commit()', db]);
+    expect(bump.status).toBe(0);
+    const r = probe(db);
+    expect([r.status, r.stdout]).toEqual([0, `PROBE OK migrate: schema 9999 -> 9999 (knows ${head})\n`]);
   }, 60_000);
 
   it('refuses a file that is not a database', () => {

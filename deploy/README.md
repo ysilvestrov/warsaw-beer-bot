@@ -445,7 +445,14 @@ Host side, stage Ядро-2б (code only; the `wbb-trial` user and sudo rules co
 - `sandbox.py` / `trial.py` — `wbb_release.py probe|trial`: the release's code runs only inside
   the fixed `systemd-run` sandbox (`wbb-trial`, no network, no secrets, read-only system,
   limits, whole-cgroup kill); `trial` migrates a private, checksum-verified copy of a pre snapshot.
-- Exit codes: 0 ok, 1 refused / candidate failed, 75 could not judge now (retry).
+- `trial --snapshot` takes a name (`<name>-pre.db`) in `/var/lib/warsaw-beer-bot/deploy-snapshots`,
+  never a path. `probe`/`trial` print one verdict line and then `NODE <realpath> <sha256> <version> <abi>`;
+  `audit` prints `AUDIT <KIND> <sha> tree <hex>` first and its details from the second line.
+- Exit codes: 0 ok; 1 only a bad candidate, always with its `PROBE FAILED` / `TRIAL FAILED` /
+  `AUDIT ADVISORY` line; 2 refused (input or precondition, `REFUSED:` on stderr — not a verdict);
+  64 usage; 70 internal error (traceback on stderr); 75 could not judge now (retry — no `wbb-trial`
+  user, no scratch, a unit systemd did not start, another `wbb-trial-*` unit loaded, no audit report).
+  Only 1 with its verdict line may become a failed SHA.
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
