@@ -13,9 +13,18 @@ import type { GatedFinding, VerifyRequest } from './ai-review/types';
 
 export const INCLUDE_PATTERNS = [
   'src/**/*.ts',
+  'src/api/**/*.html',
   'tests/**/*.ts',
   'scripts/**/*.ts',
+  'scripts/**/*.py',
+  'scripts/**/*.sh',
+  'deploy/**/*.py',
+  'deploy/**/*.sh',
+  'deploy/**/*.cjs',
   'extension/**/*.ts',
+  'extension/**/*.py',
+  'extension/src/**/*.html',
+  'extension/src/**/*.css',
   '.github/workflows/*.yml',
 ];
 
@@ -39,13 +48,27 @@ export const IGNORE_PATTERNS = ['package-lock.json', '*.md', 'docs/**'];
 export const BODY_EXCLUDE_PATTERNS = [
   '**/*.test.ts',
   'tests/**/*.ts',
-  // Both test roots are named explicitly, mirroring INCLUDE_PATTERNS above,
+  // Test roots are named explicitly, mirroring INCLUDE_PATTERNS above,
   // because `**/tests/**/*.ts` would be wrong here: globToRegExp compiles `**`
   // to `.*` with no path-boundary anchoring, so that pattern also matches
   // `src/contests/foo.ts`. An over-broad body exclusion is the one failure this
   // file cannot afford — it would hide real source from the reviewer.
   'extension/tests/**/*.ts',
+  'deploy/release/test_*.py',
+  'deploy/release/release_testkit.py',
+  'scripts/ops/test_*.py',
 ];
+
+/**
+ * Returns true if the file body should be suppressed from the review context.
+ *
+ * Explicitly protects `scripts/ops/test_run.py`: it is the production test supervisor
+ * running on the host, not a test, despite its name matching `test_*.py`.
+ */
+export function isBodyExcluded(path: string): boolean {
+  if (path === 'scripts/ops/test_run.py') return false;
+  return matchesAny(path, BODY_EXCLUDE_PATTERNS);
+}
 
 /**
  * Wrap a file reader for CONTEXT ASSEMBLY ONLY.
@@ -62,8 +85,9 @@ export const BODY_EXCLUDE_PATTERNS = [
 export function contextReader(
   readFile: (path: string) => string | null,
 ): (path: string) => string | null {
-  return (path) => (matchesAny(path, BODY_EXCLUDE_PATTERNS) ? null : readFile(path));
+  return (path) => (isBodyExcluded(path) ? null : readFile(path));
 }
+
 
 export function globToRegExp(glob: string): RegExp {
   let re = '';
