@@ -177,6 +177,33 @@ class CrashMatrix(unittest.TestCase):
                 self.assertEqual((world.running, world.current, world.db_files(), world.violations),
                                  (CAND, CAND, migrated(world), []))
 
+    def test_a_reboot_after_the_switch_rolls_back_code_and_database(self):
+        # 2v review: `current` is on the candidate and the start not yet observed; the reboot starts
+        # the enabled unit from `current` — the candidate, which writes. The no-DB abort would keep
+        # those writes under the old code; the next tick must restore pre and keep them in post.
+        with mock.patch('os.fsync'):
+            points = self.points('success')
+            first, last = points.index('switch after'), points.index('save observing/None before')
+            n = len(points)
+            for i in range(first, last + 1):
+                with self.subTest(point=f'reboot {i + 1}/{n}: {points[i]}'):
+                    world, store, host, pre = self.world('success', Faults(i))
+                    with self.assertRaises(Crash):
+                        tick(store, host, pre)
+                    world.reboot()
+                    self.assertEqual((world.running, world.db_files()), (CAND, migrated(world)))
+                    store = store.reopened()
+                    out = tick(store, FakeHost(world), pre)
+                    s = store.load()
+                    rollbacks = [e['result'] for e in s.evidence if e['what'] == 'rollback']
+                    self.assertEqual((out.kind, s.phase, s.settled, s.last_failed_sha, rollbacks),
+                                     ('rolled-back', 'settled', OLD_SETTLED, CAND,
+                                      [f'reboot while activating (boot {BOOT_A} -> {BOOT_B}) with current on ccccccc: '
+                                       'the boot may have started it unobserved']))
+                    self.assertEqual((world.bot, world.running, world.current, world.litestream, world.violations),
+                                     ('active', OLD, OLD, 'active', []))
+                    self.assertEqual((world.db_files(), post_files(world)), (pre_db(world), migrated_post(world)))
+
     def test_success(self):
         self.check('success')
 
