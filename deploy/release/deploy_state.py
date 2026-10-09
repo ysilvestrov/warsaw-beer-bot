@@ -89,10 +89,18 @@ class _Pattern(_Kind):
             _fail(where, f'not {self.what}: {v!r}')
 
 
+def _finite(v):
+    """math.isfinite, but an int too big for a float is not finite (2v review: it raised OverflowError)."""
+    try:
+        return math.isfinite(v)
+    except OverflowError:
+        return False
+
+
 class _Number(_Kind):
     """A time in seconds: a finite, non-negative int or float (never a bool)."""
     def check(self, v, where):
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0:
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not _finite(v) or v < 0:
             _fail(where, f'not a finite non-negative number: {v!r}')
 
 
