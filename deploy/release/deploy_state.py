@@ -314,6 +314,9 @@ class State(_Record):
     observe: Observe | None = None
     settled: Settled | None = None
     last_failed_sha: str | None = None
+    # The transaction that ended last (settled, rolled back or aborted; 2в e2e review Ф6): the periphery
+    # reports an end once per txn, also when the tick that reached it died before its notification.
+    last_txn: str | None = None
     unverified: Unverified | None = None
     evidence: tuple = ()
     _SPEC = (
@@ -328,6 +331,7 @@ class State(_Record):
         ('observe', 'observe', _Opt(_Rec(Observe))),
         ('settled', 'settled', _Opt(_Rec(Settled))),
         ('last_failed_sha', 'lastFailedSha', _Opt(_Pattern(_SHA, 'a full lowercase SHA'))),
+        ('last_txn', 'lastTxn', _Opt(_Pattern(_TXN, 'a 32-hex transaction id'))),
         ('unverified', 'unverified', _Opt(_Rec(Unverified))),
         ('evidence', 'evidence', _Evidence()),
     )
@@ -358,8 +362,13 @@ class State(_Record):
         return dc_replace(self, **changes)
 
     def log(self, at, what, result, **detail):
-        """A new State with one more evidence event (scalar details only)."""
-        event = _event(dict(detail, at=at, what=what, result=result), f'State.evidence[{len(self.evidence)}]')
+        """A new State with one more evidence event (scalar or list-of-strings details).
+
+        Every event carries the transaction it belongs to (2в e2e review Ф6): the open `txn`, or, for
+        the event that ends one (txn already cleared), `lastTxn` — so a notification is keyed by txn.
+        """
+        txn = self.txn if self.txn is not None else self.last_txn
+        event = _event(dict(detail, at=at, what=what, result=result, txn=txn), f'State.evidence[{len(self.evidence)}]')
         return self.replace(evidence=_Frozen(self.evidence + (event,)))
 
     def to_json(self):

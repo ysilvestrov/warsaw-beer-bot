@@ -230,8 +230,8 @@ def _to_rollback(store, s, boot, at, reason):
 
 def _settle(store, s, boot, at):
     c = s.candidate
-    done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, candidate=None, previous=None,
-                     pre=None, posts=(), observe=None, unverified=None,
+    done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, last_txn=s.txn, candidate=None,
+                     previous=None, pre=None, posts=(), observe=None, unverified=None,
                      settled=Settled(c.sha, c.tree_sha256, at)).log(at, 'settled', 'ok', sha=c.sha)
     return _put(store, done, 'settled')
 
@@ -427,8 +427,9 @@ def _start_baseline(store, host, s, boot):
     except HostError as e:
         return _blocked(s, 'start-baseline', e)
     cand = s.candidate.sha
-    done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, candidate=None, previous=None,
-                     pre=None, posts=(), observe=None, unverified=None)
+    # lastTxn (2в e2e review Ф6): the end is reported once per transaction, from the state.
+    done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, last_txn=s.txn, candidate=None,
+                     previous=None, pre=None, posts=(), observe=None, unverified=None)
     if not _verdict(s):
         reason = f'{_short(cand)} never started; back on {_short(prev)}, database untouched'
         return _put(store, done.log(at, 'aborted', reason, candidate=cand, previous=prev), 'aborted', reason)

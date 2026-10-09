@@ -26,7 +26,7 @@ SETTLED = Settled(PREV.sha, PREV.tree_sha256, 1759990000)
 OPEN = dict(txn=TXN, candidate=CAND, previous=PREV, pre=PRE, settled=SETTLED)
 EXAMPLES = [
     State('settled', BOOT),
-    State('settled', BOOT, settled=SETTLED, last_failed_sha='d' * 40),
+    State('settled', BOOT, settled=SETTLED, last_failed_sha='d' * 40, last_txn=TXN),
     State('activating', BOOT, intent='stop', **OPEN),
     State('activating', BOOT, intent='switch', **OPEN),
     State('activating', BOOT, intent='start', **OPEN),
@@ -83,8 +83,8 @@ class RoundTrip(Tmp):
         ds.save(self.path, State('settled', BOOT, settled=SETTLED).log(5, 'settle', 'ok'))
         self.assertEqual(self.read(), (
             '{"bootId":"0f0e0d0c-0b0a-4908-8706-050403020100","candidate":null,'
-            '"evidence":[{"at":5,"result":"ok","what":"settle"}],"formatVersion":2,"intent":null,'
-            '"lastFailedSha":null,"observe":null,"phase":"settled","posts":[],"pre":null,"previous":null,'
+            '"evidence":[{"at":5,"result":"ok","txn":null,"what":"settle"}],"formatVersion":2,"intent":null,'
+            '"lastFailedSha":null,"lastTxn":null,"observe":null,"phase":"settled","posts":[],"pre":null,"previous":null,'
             '"settled":{"settledAt":1759990000,"sha":"' + 'b' * 40 + '","treeSha256":"' + '2' * 64 + '"},'
             '"txn":null,"unverified":null}').encode())
 
@@ -278,8 +278,21 @@ class Immutable(unittest.TestCase):
     def test_log_appends_one_event(self):
         state = EXAMPLES[2].log(10, 'stop', 'ok').log(11, 'switch', 'ok', sha=CAND.sha)
         self.assertEqual([dict(e) for e in state.evidence],
-                         [{'at': 10, 'what': 'stop', 'result': 'ok'},
-                          {'at': 11, 'what': 'switch', 'result': 'ok', 'sha': CAND.sha}])
+                         [{'at': 10, 'what': 'stop', 'result': 'ok', 'txn': TXN},
+                          {'at': 11, 'what': 'switch', 'result': 'ok', 'sha': CAND.sha, 'txn': TXN}])
+
+    def test_an_event_after_the_transaction_ended_carries_the_last_txn(self):
+        # 2в e2e review Ф6: the ending event is logged once txn is cleared; it still names its txn.
+        ended = EXAMPLES[2].replace(phase='settled', intent=None, txn=None, last_txn=TXN)
+        self.assertEqual((dict(ended.log(12, 'settled', 'ok').evidence[0]),
+                          dict(EXAMPLES[0].log(1, 'x', 'ok').evidence[0])),
+                         ({'at': 12, 'what': 'settled', 'result': 'ok', 'txn': TXN},
+                          {'at': 1, 'what': 'x', 'result': 'ok', 'txn': None}))
+
+    def test_last_txn_must_be_a_txn(self):
+        with self.assertRaises(StateError) as cm:
+            State('settled', BOOT, last_txn='x' * 32)
+        self.assertEqual(str(cm.exception), f"State.lastTxn: not a 32-hex transaction id: '{'x' * 32}'")
 
     def test_log_refuses_a_detail_that_is_not_a_scalar(self):
         with self.assertRaises(StateError) as cm:
@@ -301,7 +314,7 @@ class Immutable(unittest.TestCase):
         moved = logged.replace(intent='switch')
         self.assertEqual((type(moved.evidence), moved.evidence[0] is logged.evidence[0], moved),
                          (tuple, True, State('activating', BOOT, intent='switch', evidence=[
-                             {'at': 10, 'what': 'stop', 'result': 'ok'}], **OPEN)))
+                             {'at': 10, 'what': 'stop', 'result': 'ok', 'txn': TXN}], **OPEN)))
 
     def test_constructor_refuses_a_bad_record(self):
         with self.assertRaises(StateError) as cm:
