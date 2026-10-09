@@ -51,7 +51,8 @@ class _Drain:
                         self.end_len -= len(self.end.popleft())
                         self.dropped = True
         except (OSError, ValueError):
-            pass
+            # A read that failed part-way leaves the capture incomplete: say so (#817 AI review).
+            self.dropped = True
 
     def value(self):
         end = b''.join(self.end)
@@ -65,6 +66,8 @@ def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None
         text=False, check=False, capture_output=True, join_grace=JOIN_GRACE_S):
     """Like subprocess.run(argv, capture_output=True, ...) with bounded capture and bounded waiting."""
     del capture_output  # always captured; accepted so callers can pass subprocess.run's keywords
+    if not (isinstance(cap, int) and cap >= 0 and isinstance(tail, int) and tail >= 1):
+        raise ValueError(f'cap must be >= 0 and tail >= 1, got cap={cap!r} tail={tail!r}')
     proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=stdin, cwd=cwd, env=env)
     drains = [_Drain(proc.stdout, cap, tail), _Drain(proc.stderr, cap, tail)]
     for d in drains:
