@@ -51,9 +51,9 @@ Production activation, як і раніше, заборонена до кінц�
 | `current = X` | Новий старт піде з дерева X | `readlink(current)` дорівнює рівно `releases/<X>` + `verify_release(X)` у root helper безпосередньо перед rename | сильний |
 | `bot stopped` | Старий процес більше не пише | `ActiveState ∈ {inactive, failed}` після `stop`; інше — крок не завершено | сильний (контракт systemd) |
 | процес працює X | Відповідає саме процес із дерева X | `health().releaseSha == X` — **заявка обв'язки** (`/health.releaseSha`); у ядрі це інтерфейс `Host`. Засновок realpath — проба вище | сильний за умови обв'язки |
-| `settled` | X спостерігався 600 с без тригера відкату | Persisted вибірки: кожна в тому самому `bootId`, проміжок між сусідніми ≤ `GAP_S`; від старту ≥ `WINDOW_S`; підряд невдач < 3; `NRestarts` прочитано хоч раз і він не мінявся | сильний |
+| `settled` | X спостерігався 600 с без тригера відкату | Persisted вибірки: кожна в тому самому `bootId`, проміжок між сусідніми ≤ `GAP_S` і **не від'ємний** — годинник не йде назад від попередньої вибірки (інакше `unverified`, наскрізне рев'ю Ф2); від старту ≥ `WINDOW_S`; підряд невдач < 3; `NRestarts` прочитано хоч раз і він не мінявся. Межа: проміжки міряє `now()` хоста (wall clock); крок годинника **вперед** у межах `GAP_S` вікно скорочує — монотонного годинника між tick-ами немає | сильний |
 | `previous settled` | Цей реліз — базова лінія для відкату | Тільки перехід у `settled` після повного вікна; `unverified` його не створює | сильний |
-| post complete | Байти БД після зупинки writers | Тека, атомарно перейменована з `.partial`, з `post.json` (розмір і sha256 кожного файлу), записаним після fsync файлів | сильний |
+| post complete | Байти БД після **останньої** зупинки writers | Тека, атомарно перейменована з `.partial`, з `post.json` (розмір і sha256 кожного файлу), записаним після fsync файлів; кожна зупинка writers у відкаті має власну теку (`-rollback-post`, `-rollback-post-2`, …), тож повний post ніколи не видається за БД, що змінилася після нього (наскрізне рев'ю Ф1) | сильний |
 | БД відновлено з pre | Живий `bot.db` — це pre | `sha256(bot.db) == pre.sha256` і немає `-wal`/`-shm`; робиться лише після complete post | сильний |
 
 Рядків із лічильником чи припущенням про зовнішній файл тут немає. Єдина залежність від обв'язки — `releaseSha` — позначена явно.
@@ -61,18 +61,18 @@ Production activation, як і раніше, заборонена до кінц�
 ## Global Constraints
 
 - **State v2** — один JSON-файл `deploy-state.json` у теці state, canonical JSON, `formatVersion: 2`. Запис: temp у тій самій теці → `fsync(file)` → `rename` → `fsync(dir)`. Читання: відсутній файл → `None` (перший запуск); зіпсований, невідома версія або порушена схема → `StateError`, **ніколи** не «чистий аркуш».
-- Поля: `txn` (hex, нова на кожну активацію; `null` у спокої), `phase`, `intent`, `bootId` (boot, у якому записано поточний phase/intent), `candidate`/`previous` (`{sha, treeSha256}`), `pre` (`{path, sha256, takenAt}`), `post` (шлях або `null`), `observe` (`{startedAt, bootId, nrestarts0, lastSampleAt, fails}`), `settled` (`{sha, treeSha256, settledAt}` — останній settled, тобто baseline відкату), `lastFailedSha`, `unverified` (`{sha, reason, pre}` або `null`), `evidence` (список подій останньої транзакції: що, коли, результат).
+- Поля: `txn` (hex, нова на кожну активацію; `null` у спокої), `phase`, `intent`, `bootId` (boot, у якому записано поточний phase/intent), `candidate`/`previous` (`{sha, treeSha256}`), `pre` (`{path, sha256, takenAt}`), `posts` (список повних post-ів відкату, від найстаршого; був `post` — наскрізне рев'ю Ф1), `observe` (`{startedAt, bootId, nrestarts0, lastSampleAt, fails}`), `settled` (`{sha, treeSha256, settledAt}` — останній settled, тобто baseline відкату), `lastFailedSha`, `lastTxn` (транзакція, що завершилась останньою — рев'ю Ф6), `unverified` (`{sha, reason, pre}` або `null`), `evidence` (список подій останньої транзакції: що, коли, результат, `txn`).
 - **Phase / intent** (§10b):
   - `settled` — спокій; `intent=null`.
   - `activating`: `stop` → `switch` → `start`. Після завершення `start` — `observing`.
   - `observing` — вікно; `intent=null`.
-  - `rolling-back`: `stop-writers` → `save-post` → `restore-pre` → `switch-previous` → `start-baseline`. Якщо candidate ще **не стартував** (`start` не було persisted), відкат іде без БД: `switch-previous` → `start-baseline` (§10b рядок `switch`: «повернути old без DB restore»).
+  - `rolling-back`: `stop-writers` → `save-post` → `restore-pre` → `switch-previous` → `start-baseline`. Без БД (`switch-previous` → `start-baseline`, §10b рядок `switch`: «повернути old без DB restore») відкат іде **лише** тоді, коли доведено, що candidate не стартував: перемикання на нього відмовило (або `current` не розпізнано) **до** кроку `start`. Відсутність persisted `start` цього не доводить: reboot після перемикання стартує unit з `current`, тож такий випадок іде далі до `start` і звичайного вікна (рев'ю 2в).
   - `unverified` — вікно не доведено (gap, reboot, `NRestarts` жодного разу не прочитано). Нова unattended activation заблокована до явного ack; відкату немає (§8, §10b).
   - `recovery-failed` — відкат не вдався; evidence лишається, нової активації немає.
 - **Порядок кожного кроку:** persist `intent` → дія → спостереження → persist наступний `intent` (це і є completion). Кожна дія ідемпотентна й перевіряється спостереженням, тому resume просто повторює поточний `intent`.
 - **Константи** (з чинного merge-deploy і §7): `STARTUP_S = 120`, `WINDOW_S = 600`, `POLL_S = 10`, `HEALTH_FAILS_MAX = 3`, `GAP_S = 30` (три пропущені опитування — це вже не безперервне спостереження).
 - **Health** — невдача: не ok **або** `releaseSha != candidate` (старий процес на порту — не успіх, §7).
-- **Host** — протокол (класи з методами), який рушій отримує параметром: `bot_state()`, `stop_bot()`, `start_bot()`, `litestream_state()`, `stop_litestream()`, `start_litestream()`, `current()`, `switch(sha)`, `health()`, `nrestarts()`, `boot_id()`, `post(dir)`, `restore(pre)`, `now()`, `sleep(s)`. Ядро постачає лише фейк для тестів і справжні `switch`/`post`/`restore` (Task 2); решта справжнього адаптера — обв'язка.
+- **Host** — протокол (класи з методами), який рушій отримує параметром: `bot_state()`, `stop_bot()`, `start_bot()`, `litestream_state()`, `stop_litestream()`, `start_litestream()`, `current()` (`Refused` для непізнаного pointer), `verify(sha) -> treeSha256`, `switch(sha) -> treeSha256`, `health()`, `nrestarts()`, `boot_id()`, `post(dir)`, `restore(pre_path, post_dir)`, `now()`, `sleep(s)`. Ядро постачає лише фейк для тестів і справжні `switch`/`post`/`restore` (Task 2); решта справжнього адаптера — обв'язка.
 - **Шляхи** — константи (`/opt/warsaw-beer-bot/current`, теки state і БД) лише в CLI; функції беруть їх параметром, тести production-шляхів не чіпають.
 - Тести: `npm test -- <args>`; повний гейт кожної задачі — `npm test && npm run typecheck`. Python-тести — `deploy/release/test_*.py`, кожен новий файл додається в `scripts/deploy-rsync.test.ts`. Правила тестів CLAUDE.md діють; crash-тести перевіряють **стан світу** (процес, pointer, файли БД), а не лише state-файл.
 
@@ -112,10 +112,10 @@ Production activation, як і раніше, заборонена до кінц�
 **Files:** modify `deploy/release/publish.py` (`current_path`, `current_sha`), `deploy/release/wbb_release.py` (`switch --sha`, root); create `deploy/release/dbsnap.py`, `deploy/release/test_dbsnap.py`; extend `test_publish.py`, `test_wbb_release.py`.
 
 - [x] `current_sha(roots)`: `readlink(<dirname(releases)>/current)`; рівно `releases/<40 hex>` → SHA; відсутній → `None`; будь-що інше (не symlink, абсолютна чи чужа ціль) → `Refused`.
-- [x] `switch(sha, roots)`: `verify_release(sha)` → symlink `current.tmp-<rand>` → `releases/<sha>` (відносна ціль) → `os.replace` → `fsync(dir)`. Уже вказує на sha → no-op. CLI: `switch --sha`, exit 0/1/64 (за кодами Task 0: 0 ok, 2 refused, 64 usage, 70 internal — 1 лишається тільки вердиктом про поганого кандидата); рядок `SWITCHED <sha>` або `CURRENT <sha>`.
+- [x] `switch(sha, roots)`: `verify_release(sha)` → symlink `current.tmp-<rand>` → `releases/<sha>` (відносна ціль) → `os.replace` → `fsync(dir)`. Уже вказує на sha → no-op. CLI: `switch --sha`, exit 0 ok, 2 refused, 64 usage, 70 internal (коди Task 0; 1 — лише вердикт про поганого кандидата, а `switch` вердикту не дає); рядок `SWITCHED <sha> tree <hex>` або `CURRENT <sha> tree <hex>` (`tree` — treeSha256 receipt-а; додано наскрізним рев'ю Ф4).
 - [x] `dbsnap.post(db, out_dir)`: якщо `out_dir/post.json` валідний і файли йому відповідають → повернути його (ідемпотентно). Інакше прибрати `out_dir.partial`, скопіювати `db`, `-wal`, `-shm` (наявні) з fsync, записати `post.json` (`{files: {name: {size, sha256}}}`) з fsync, `rename` → `out_dir`, `fsync(parent)`. `out_dir` існує без валідного `post.json` → `Refused` (не переписуємо те, чого не розуміємо).
 - [x] `dbsnap.restore(pre, db, post_dir)`: вимагає валідний complete post; sha256 `pre` дорівнює його `.sha256`. Якщо `db` уже дорівнює pre і немає `-wal`/`-shm` → no-op. Інакше: прибрати `-wal`, `-shm` (**до** заміни — коментар із причиною), копія `pre` → `db.restore-partial` з fsync → `rename` → `fsync(dir)`.
-- [x] CLI `dbsnap.py post|restore` (exit 0/1/64; за кодами Task 0: 0, 2 refused, 64, 70, 75 — `OSError`, повторити) — його запускатиме обв'язка від користувача бота.
+- [x] CLI `dbsnap.py post|restore` (exit 0 ok, 2 refused, 64 usage, 70 internal, 75 `OSError` — повторити; коди Task 0) — його запускатиме обв'язка від користувача бота.
 - [x] Тести:
   - `current_sha`: symlink на реліз, відсутній, звичайна тека, абсолютна ціль, `releases/../x`;
   - `switch` на неприйнятий SHA → відмова, `current` не змінено; повторний switch → no-op;
@@ -162,3 +162,30 @@ Production activation, як і раніше, заборонена до кінц�
 ## Після ядра
 
 Наскрізне рев'ю ядра 2в (рушій, crash-матриця, примітиви). Далі план обв'язки 2в: tick (lock, PAUSED: спершу `resume`, потім гейт admission — спека §7 «Явна зміна PAUSED»), гейти §5 з таблиці «Гейти за шляхом», виклики `wbb_release.py`, pre snapshot, справжній `Host`, notifications, `/health.releaseSha` + `WBB_RELEASE_REQUIRED` (`[deploy:hold]`), `deploy.sh`, retention/prune із захистом pre/post, на які посилається state, міграція state v1→v2. Acceptance рушія на справжньому systemd — на disposable VM (спека §10).
+
+## Наскрізне рев'ю ядра 2в
+
+Рев'ю (окремий агент, 2026-10-09) перечитало рушій, state v2, фейк і crash-матрицю проти спеки §7, §8, §10a, §10b. Знахідки про механізм рушія виправлено в ядрі (кожна — тестом, що падає без фіксу, перевірено мутацією):
+
+- **Ф1 — втрачені записи після reboot у відкаті.** Після повного post reboot стартував кандидата з `current`, він писав, а повторний `save-post` повертав **старий** повний post — `restore-pre` знищував нові записи, а `lostTo`/«лише в post» брехали. Тепер кожна зупинка writers у відкаті знімає post у власну теку (`-rollback-post`, `-rollback-post-2`, …; номер — кількість завершених `stop-writers` у транзакції), state v2 тримає `posts` (повні post-и, від найстаршого; `restore-pre` бере останній), подія `rolled-back` називає всі, `lostTo` — час **останньої** зупинки. Фейк пише різні рядки на кожен старт кандидата.
+- **Ф2 — годинник назад.** Вибірка, раніша за попередню (чи за старт), — `unverified` одразу, без сну до `due`.
+- **Ф4 — дерева до зупинки production.** `Host.verify(sha) -> treeSha256`; `begin` перевіряє кандидата й попередній settled і відмовляє без запису, якщо дерево не верифікується або digest не той, що записаний. `publish.switch` повертає treeSha256 receipt-а (`SWITCHED|CURRENT <sha> tree <hex>`), рушій звіряє: розбіжність на шляху до кандидата — abort без вироку, назад — `recovery-failed`.
+- **`current()` → `Refused`** (непізнаний pointer): до `start` — abort без вироку; на `start` — `blocked` (як зсунутий `current`); у відкаті — `recovery-failed`; у спокої — `drift`.
+- **Ф5 — baseline не healthy.** Лишається `rolling-back/start-baseline` (наступний tick повторює, unit стартує лише неактивний), Outcome `recovery-failed`, перша невдача в evidence один раз. Термінальна фаза — лише для відмов, які повтор не вилікує.
+- **Ф6 — ідемпотентність сповіщень.** Кожна подія evidence несе `txn`; settled/відкат/abort зберігають `lastTxn`.
+- **Контракт health.** Проба `/health` без відповіді — провалена проба (семантика merge-deploy, свідомо); docstring і `spec.md` кажуть саме це.
+- **Мутації, що виживали:** `start-baseline` приймав `ok` з чужим `releaseSha`; значення `lostTo`; `save-post` при працюючому writer — тепер кожну вбиває тест.
+
+У план обв'язки 2в (не механізм рушія, а його оточення):
+
+- **Ф3** — `blocked` із ботом, що лежить (writers зупинено, крок повторюється): алерт і дедлайн, після якого це інцидент, а не тихий повтор.
+- **Ф6** — розрізнити `unreachable` (health/current не прочитано) і `drift` у спокої; повідомлення раз на `txn` за `lastTxn`/evidence.
+- **Ф7** — backoff admission після `aborted` (той самий SHA не має пробуватися кожен tick).
+- Ack / повторне спостереження з `unverified`; ручне відновлення з `recovery-failed`; контракт першого встановлення (без settled baseline).
+- Верхній `catch` tick-а без вироку (будь-який неперехоплений виняток — алерт, не `lastFailedSha`).
+- Справжній `Host`: мапа exit-код → виняток (`wbb_release.py`: 2 → `Refused`, 70/75 → `HostError`; `dbsnap.py` так само), таймаути (`health` + `nrestarts` ≪ 30 с, щоб проба не з'їдала `GAP_S`; deploy service `TimeoutStartSec` > ~12 хв — вікно 600 с плюс старт і відкат).
+- Retention, що захищає кожен pre/post/tree, на який посилається state чи evidence (усі `posts`, `-rollback-post-N`).
+- `/health.releaseSha` обов'язковий з першого settled артефакту (`null` у production не приймається).
+- Падіння контролера у вікні production → `unverified`: вирішити, чи швидкий рестарт deploy service (до `GAP_S`) рятує вікно.
+- Перелік подвійних падінь (crash + crash, crash + reboot у відкаті) поверх однократної crash-матриці.
+- Цикл `start-baseline` міряє 120 с `now()`; крок годинника назад посеред нього подовжує цикл (той самий клас, що Ф2) — обмежити кількістю проб разом зі справжнім адаптером.

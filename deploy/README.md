@@ -465,7 +465,8 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   first run; an empty, non-JSON, other-version or schema-breaking file is an error, never a blank slate.
 - `publish.py` `current_sha`/`switch` — `wbb_release.py switch --sha <sha>` (root): re-verifies the tree
   against its receipt, then points `current` at the relative `releases/<sha>` by symlink + one rename +
-  fsync of the directory; prints `SWITCHED <sha>`, or `CURRENT <sha>` when it already pointed there. A
+  fsync of the directory; prints `SWITCHED <sha> tree <hex>`, or `CURRENT <sha> tree <hex>` when it already
+  pointed there (`tree`: the receipt's treeSha256, which the engine compares with its record). A
   `current` that is not exactly `releases/<40 hex>` (a directory, an absolute or foreign target) is refused,
   never replaced. `current` says where the next start runs from, not what is running now.
 - `dbsnap.py post|restore` (bot user, writers stopped) — replaces `db-snapshot.sh post|restore` for the
@@ -479,13 +480,21 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   complete post, `restore`'s `ALREADY`, `switch`'s `CURRENT`) still fsyncs the directory. Exit 0; 2 refused (nothing changed); 64 usage; 70 internal; 75 OS error.
 - `activate.py` — the activation and rollback engine, over an injected state store and `Host` (the real
   sudo/systemctl/HTTP adapter and the tick come with the periphery). `begin` opens an activation only from
-  `settled` with a settled baseline, never for the last failed or the settled SHA. Every `step` persists the
+  `settled` with a settled baseline, never for the last failed or the settled SHA, and only when both the
+  candidate's and the baseline's trees verify as the recorded digests (`Host.verify`); every switch's
+  returned tree is compared again (a mismatch: the no-DB abort going in, `recovery-failed` going back). Every `step` persists the
   intent before acting and the next one only after reading the result back from the host, so `resume` at
   the start of a tick repeats the persisted intent. Window as merge-deploy: the candidate's own
   `releaseSha` healthy within 120 s, then a probe every 10 s until 600 s from the start; 3 failures in a row
-  or an NRestarts change roll back; a gap over 30 s, a reboot or NRestarts never read → `unverified`.
-  Rollback: lastFailedSha, stop bot + Litestream, `dbsnap` post once, restore pre, `current` back to the
-  settled release, start Litestream + bot, its `releaseSha` healthy within 120 s. A candidate that never
+  or an NRestarts change roll back (a probe with no answer is a failed probe, as in merge-deploy); a gap
+  over 30 s, a clock that went back, a reboot or NRestarts never read → `unverified`.
+  Rollback: lastFailedSha, stop bot + Litestream, `dbsnap` post, restore pre, `current` back to the
+  settled release, start Litestream + bot, its `releaseSha` healthy within 120 s. Writers a reboot started
+  again are stopped again, and every stop takes a post of its own (`-rollback-post`, `-rollback-post-2`, …;
+  `posts` in the state, all named by the `rolled-back` event, `lostTo` = the last stop). A baseline that
+  does not answer healthy leaves the rollback pending at `start-baseline` (retried next tick, Outcome
+  `recovery-failed` for the alert). Every evidence event carries its `txn`; an ended transaction is kept
+  as `lastTxn`, so its end is reported once. A candidate that never
   started (refused switch) goes back without touching the DB and without a verdict. A reboot while
   `activating` with `current` already on the candidate may have started it from the enabled unit: the
   engine logs `rebooted` and goes on to `start` (no restart of an active unit) and the normal window —
