@@ -246,8 +246,8 @@ class Blocked(Engine):
         activate.step(self.store, self.host)
         out = activate.step(self.store, self.host)
         s = self.store.load()
-        self.assertEqual((out.kind, s.phase, s.intent, s.last_failed_sha, s.post),
-                         ('continue', 'rolling-back', 'switch-previous', None, None))
+        self.assertEqual((out.kind, s.phase, s.intent, s.last_failed_sha, s.posts),
+                         ('continue', 'rolling-back', 'switch-previous', None, ()))
         self.assertEqual(self.last_event(), {
             'at': T0, 'what': 'abort', 'result': f'switch to ccccccc refused: {CAND}: no receipt — not an accepted release'})
         self.assertEqual((self.world.current, self.world.starts), (OLD, []))
@@ -284,13 +284,13 @@ class Rollback(Engine):
                   f'2025-10-09T08:55:20Z '
                   f'exist only in {self.post_dir()}')
         self.assertEqual((out.kind, out.reason), ('rolled-back', reason))
-        self.assertEqual((s.phase, s.intent, s.txn, s.settled, s.last_failed_sha, s.candidate, s.post),
-                         ('settled', None, None, OLD_SETTLED, CAND, None, None))
+        self.assertEqual((s.phase, s.intent, s.txn, s.settled, s.last_failed_sha, s.candidate, s.posts),
+                         ('settled', None, None, OLD_SETTLED, CAND, None, ()))
         self.assertEqual(self.whats(), ['begin', 'stop', 'switch', 'start', 'rollback', 'stop-writers', 'save-post',
                                         'restore-pre', 'switch-previous', 'rolled-back'])
         self.assertEqual(self.last_event(), {
             'at': T0 + 120, 'what': 'rolled-back', 'result': reason, 'candidate': CAND, 'previous': OLD,
-            'pre': self.world.pre, 'post': self.post_dir(), 'lostFrom': T0 - 60, 'lostTo': T0 + 120})
+            'pre': self.world.pre, 'posts': (self.post_dir(),), 'lostFrom': T0 - 60, 'lostTo': T0 + 120})
         # The world: the old release runs again on exactly pre; what the candidate wrote is in post.
         self.assertEqual((self.world.bot, self.world.running, self.world.current, self.world.litestream),
                          ('active', OLD, OLD, 'active'))
@@ -367,22 +367,68 @@ class Rollback(Engine):
             'recovery-failed'))
         self.assertEqual((self.world.now, self.world.running, self.world.db_files()), (T0 + 240, OLD, {'': PRE_DB}))
 
+    def post_files(self, path):
+        return {name: pathlib.Path(path, name).read_bytes() for name in ('bot.db', 'bot.db-wal')}
+
     def test_writers_started_by_a_reboot_are_stopped_before_the_restore(self):
         self.roll_to('restore-pre')
-        # The reboot starts both units, the bot from `current` — the candidate, on the post-state DB.
+        # The reboot starts both units, the bot from `current` — the candidate, on the post-state DB,
+        # where it applies the first start's WAL and writes rows of its own.
         self.world.reboot()
-        self.assertEqual(self.world.running, CAND)
+        db1, wal1 = self.world.candidate_writes(1)
+        db2, wal2 = db1 + wal1 + f' | migrated by {CAND}, start 2'.encode(), f'WAL of {CAND}, start 2'.encode()
+        self.assertEqual((self.world.running, self.world.db_files()), (CAND, {'': db2, '-wal': wal2}))
         self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
         self.assertEqual(self.whats()[-7:], ['save-post', 'restore-pre', 'stop-writers', 'save-post', 'restore-pre',
                                              'switch-previous', 'rolled-back'])
         self.assertEqual((self.world.db_files(), self.world.running, self.world.violations), ({'': PRE_DB}, OLD, []))
+        # 2в e2e review Ф1: the second stop takes a post of its own, which holds the second start's rows;
+        # the first post is left as it was.
+        second = self.post_dir() + '-2'
+        self.assertEqual((self.post_files(self.post_dir()), self.post_files(second), self.world.restores[-1]),
+                         ({'bot.db': db1, 'bot.db-wal': wal1}, {'bot.db': db2, 'bot.db-wal': wal2},
+                          (self.world.pre, second)))
+
+    def test_a_post_that_landed_before_a_reboot_is_not_the_post_of_the_next_stop(self):
+        # 2в e2e review Ф1: the tick died after the post was complete but before its completion was
+        # saved; the reboot started the candidate, which wrote. The next stop needs a NEW post.
+        self.roll_to('save-post')
+        self.host.post(self.post_dir())
+        self.world.reboot()
+        db1, wal1 = self.world.candidate_writes(1)
+        db2 = db1 + wal1 + f' | migrated by {CAND}, start 2'.encode()
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
+        second = self.post_dir() + '-2'
+        self.assertEqual((self.post_files(self.post_dir()), self.post_files(second)['bot.db'], self.world.restores,
+                          self.last_event()['posts']),
+                         ({'bot.db': db1, 'bot.db-wal': wal1}, db2, [(self.world.pre, second)], (second,)))
 
     def test_a_candidate_rebooted_onto_the_restored_database_is_restored_again(self):
         self.roll_to('switch-previous')
         self.world.reboot()
-        self.assertEqual(self.world.db_files(), self.migrated())
-        self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
-        self.assertEqual((self.world.db_files(), self.world.running, self.world.current), ({'': PRE_DB}, OLD, OLD))
+        # The second start found the restored pre: its rows are not in the first post.
+        db2, wal2 = self.world.candidate_writes(2)
+        self.assertEqual(self.world.db_files(), {'': db2, '-wal': wal2})
+        # The previous release answers healthy 4 s after its start: the end is later than the last stop.
+        self.world.healthy = lambda sha, age: sha == OLD and age >= 4
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files(), self.world.running, self.world.current),
+                         ('rolled-back', {'': PRE_DB}, OLD, OLD))
+        # 2в e2e review Ф1: before, save-post handed back the first (complete) post and the restore
+        # destroyed the second start's rows. Now the second stop has a post of its own.
+        second = self.post_dir() + '-2'
+        db1, wal1 = self.world.candidate_writes(1)
+        self.assertEqual((self.post_files(self.post_dir()), self.post_files(second), self.world.restores[-1]),
+                         ({'bot.db': db1, 'bot.db-wal': wal1}, {'bot.db': db2, 'bot.db-wal': wal2},
+                          (self.world.pre, second)))
+        # The writes are lost to the live DB until the LAST stop (T0 + 125, after the 5 s reboot), not the
+        # first (T0 + 120) nor the end (T0 + 129); the evidence names both posts.
+        e = self.last_event()
+        self.assertEqual((e['at'], e['lostFrom'], e['lostTo'], e['posts']),
+                         (T0 + 129, T0 - 60, T0 + 125, (self.post_dir(), second)))
+        self.assertEqual(out.reason, 'ccccccc rolled back to bbbbbbb, code and database; writes between '
+                                     f'2025-10-09T08:52:20Z and 2025-10-09T08:55:25Z exist only in '
+                                     f'{self.post_dir()}, {second}')
 
 
 class Resume(Engine):
@@ -428,8 +474,8 @@ class Resume(Engine):
         self.assertEqual((out.kind, out.reason, s.phase, s.unverified, s.settled, s.last_failed_sha),
                          ('unverified', why, 'unverified', Unverified(CAND, why, self.pre), OLD_SETTLED, None))
         # Nothing is rolled back: the candidate (restarted by the boot) keeps running on its own writes.
-        self.assertEqual((self.world.running, self.world.db_files(), self.world.restores),
-                         (CAND, self.migrated(), []))
+        self.assertEqual((self.world.running, len(self.world.cand_writes), self.world.db_files(), self.world.restores),
+                         (CAND, 2, self.world.cand_writes[-1], []))
 
     def test_a_gap_over_30_s_is_unverified(self):
         self.run_until('observing')

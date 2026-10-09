@@ -130,7 +130,7 @@ def begin(store, host, candidate, pre):
     previous = ds.Release(state.settled.sha, state.settled.tree_sha256)
     opened = state.replace(
         phase='activating', intent='stop', boot_id=boot, txn=ds.new_txn(), candidate=candidate,
-        previous=previous, pre=pre, post=None, observe=None, unverified=None, evidence=(),
+        previous=previous, pre=pre, posts=(), observe=None, unverified=None, evidence=(),
     ).log(at, 'begin', 'ok', candidate=candidate.sha, previous=previous.sha, pre=pre.path)
     store.save(opened)
     return opened
@@ -231,7 +231,7 @@ def _to_rollback(store, s, boot, at, reason):
 def _settle(store, s, boot, at):
     c = s.candidate
     done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, candidate=None, previous=None,
-                     pre=None, post=None, observe=None, unverified=None,
+                     pre=None, posts=(), observe=None, unverified=None,
                      settled=Settled(c.sha, c.tree_sha256, at)).log(at, 'settled', 'ok', sha=c.sha)
     return _put(store, done, 'settled')
 
@@ -302,10 +302,20 @@ def _booted_onto_candidate(store, host, s, boot):
     return _put(store, s.replace(intent='start', boot_id=boot).log(host.now(), 'rebooted', reason))
 
 
-def post_dir(pre_path):
-    """Where the rollback keeps the post DB: fixed by the pre snapshot, so a retry finds the same one."""
+def post_dir(pre_path, n=1):
+    """Where the rollback keeps its n-th post DB: fixed by the pre snapshot and n, so a retry finds the same one.
+
+    n counts the times the writers were stopped in this rollback (2в e2e review Ф1): writers that ran
+    again after a post (a reboot) may have written, so the next stop gets a directory of its own and
+    a complete post is never handed back for a database that changed after it was taken.
+    """
     stem = pre_path[:-len('-pre.db')] if pre_path.endswith('-pre.db') else pre_path
-    return stem + '-rollback-post'
+    return stem + '-rollback-post' + ('' if n == 1 else f'-{n}')
+
+
+def _stops(s):
+    """The stop-writers completions of this transaction, oldest first: their times."""
+    return [e['at'] for e in s.evidence if e['what'] == 'stop-writers' and e['result'] == 'ok']
 
 
 def _writers_stopped(host):
@@ -337,7 +347,9 @@ def _stop_writers(store, host, s, boot):
 
 
 def _save_post(store, host, s, boot):
-    out = post_dir(s.pre.path)
+    # One directory per stop of the writers (2в e2e review Ф1): a post taken before writers ran again
+    # does not hold what they wrote, and dbsnap.post returns a complete post as it is.
+    out = post_dir(s.pre.path, len(_stops(s)))
     try:
         at = host.now()
         if not _writers_stopped(host):
@@ -349,7 +361,8 @@ def _save_post(store, host, s, boot):
             return _failed(store, s, boot, at, 'save-post', str(e))
     except HostError as e:
         return _blocked(s, 'save-post', e)
-    return _put(store, s.replace(intent='restore-pre', boot_id=boot, post=out).log(at, 'save-post', 'ok', post=out))
+    return _put(store, s.replace(intent='restore-pre', boot_id=boot, posts=s.posts + (out,))
+                .log(at, 'save-post', 'ok', post=out))
 
 
 def _restore_pre(store, host, s, boot):
@@ -359,7 +372,7 @@ def _restore_pre(store, host, s, boot):
             return _restop(store, s, boot, at, 'writers running')
         try:
             # dbsnap.restore checks the complete post and pre's checksum before the first change.
-            host.restore(s.pre.path, s.post)
+            host.restore(s.pre.path, s.posts[-1])
         except Refused as e:
             return _failed(store, s, boot, at, 'restore-pre', str(e))
     except HostError as e:
@@ -391,10 +404,6 @@ def _switch_previous(store, host, s, boot):
     return _put(store, s.replace(intent='start-baseline', boot_id=boot).log(at, 'switch-previous', 'ok'))
 
 
-def _first(s, what):
-    return next(e['at'] for e in s.evidence if e['what'] == what)
-
-
 def _start_baseline(store, host, s, boot):
     prev = s.previous.sha
     try:
@@ -419,15 +428,17 @@ def _start_baseline(store, host, s, boot):
         return _blocked(s, 'start-baseline', e)
     cand = s.candidate.sha
     done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, candidate=None, previous=None,
-                     pre=None, post=None, observe=None, unverified=None)
+                     pre=None, posts=(), observe=None, unverified=None)
     if not _verdict(s):
         reason = f'{_short(cand)} never started; back on {_short(prev)}, database untouched'
         return _put(store, done.log(at, 'aborted', reason, candidate=cand, previous=prev), 'aborted', reason)
-    lost_to = _first(s, 'stop-writers')
+    # The LAST stop (2в e2e review Ф1): writers a reboot started again wrote until then, and those
+    # writes are in the last post, not in the first.
+    lost_to = _stops(s)[-1]
     reason = (f'{_short(cand)} rolled back to {_short(prev)}, code and database; writes between '
-              f'{_utc(s.pre.taken_at)} and {_utc(lost_to)} exist only in {s.post}')
+              f'{_utc(s.pre.taken_at)} and {_utc(lost_to)} exist only in {", ".join(s.posts)}')
     return _put(store, done.log(at, 'rolled-back', reason, candidate=cand, previous=prev, pre=s.pre.path,
-                                post=s.post, lostFrom=s.pre.taken_at, lostTo=lost_to), 'rolled-back', reason)
+                                posts=s.posts, lostFrom=s.pre.taken_at, lostTo=lost_to), 'rolled-back', reason)
 
 
 _STEPS = {

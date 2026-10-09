@@ -51,7 +51,7 @@ REQUIRED = {
     'recovery-failed': ('txn', 'candidate'),
 }
 # A restore never starts without a complete post (§10b "restore pre": verify complete post).
-REQUIRED_BY_INTENT = {'restore-pre': ('post',)}
+REQUIRED_BY_INTENT = {'restore-pre': ('posts',)}
 
 _SHA = re.compile(r'[0-9a-f]{40}')
 _HEX64 = re.compile(r'[0-9a-f]{64}')
@@ -155,8 +155,13 @@ class _Rec(_Kind):
 _SCALARS = (str, int, float, bool, type(None))
 
 
+def _strings(v):
+    """A detail that lists names (the rollback's posts, 2в e2e review Ф1): a list of non-empty strings."""
+    return isinstance(v, (list, tuple)) and all(isinstance(x, str) and x for x in v)
+
+
 def _event(e, where):
-    """One evidence entry: at, what, result, plus scalar details — frozen."""
+    """One evidence entry: at, what, result, plus scalar or list-of-strings details — frozen."""
     if not isinstance(e, (dict, MappingProxyType)):
         _fail(where, f'not an object: {e!r}')
     for key in ('at', 'what', 'result'):
@@ -165,10 +170,16 @@ def _event(e, where):
     _Number().check(e['at'], f'{where}.at')
     _Text().check(e['what'], f'{where}.what')
     _Text().check(e['result'], f'{where}.result')
+    frozen = {}
     for k, v in e.items():
-        if not isinstance(k, str) or not isinstance(v, _SCALARS) or (isinstance(v, float) and not math.isfinite(v)):
-            _fail(where, f'detail {k!r} is not a finite JSON scalar: {v!r}')
-    return MappingProxyType(dict(e))
+        if not isinstance(k, str):
+            _fail(where, f'detail {k!r} is not a string key')
+        if _strings(v):
+            v = tuple(v)
+        elif not isinstance(v, _SCALARS) or (isinstance(v, float) and not math.isfinite(v)):
+            _fail(where, f'detail {k!r} is not a finite JSON scalar or a list of strings: {v!r}')
+        frozen[k] = v
+    return MappingProxyType(frozen)
 
 
 class _Frozen(tuple):
@@ -186,7 +197,26 @@ class _Evidence(_Kind):
         return tuple(_event(e, f'{where}[{i}]') for i, e in enumerate(v))
 
     def dump(self, v):
-        return [dict(e) for e in v]
+        return [{k: list(x) if isinstance(x, tuple) else x for k, x in e.items()} for e in v]
+
+
+class _Paths(_Kind):
+    """A tuple of absolute paths (JSON: a list)."""
+    def check(self, v, where):
+        if not isinstance(v, tuple):
+            _fail(where, f'not a tuple of paths: {v!r}')
+        for i, p in enumerate(v):
+            _AbsPath().check(p, f'{where}[{i}]')
+
+    def load(self, v, where):
+        if not isinstance(v, list):
+            _fail(where, f'not a list: {v!r}')
+        v = tuple(v)
+        self.check(v, where)
+        return v
+
+    def dump(self, v):
+        return list(v)
 
 
 def _exact_keys(obj, keys, where):
@@ -278,7 +308,9 @@ class State(_Record):
     candidate: Release | None = None
     previous: Release | None = None
     pre: Pre | None = None
-    post: str | None = None
+    # Complete rollback posts, oldest first (2в e2e review Ф1): writers started again after a post was
+    # taken (a reboot) mean a NEW post, never the old one returned; restore-pre uses the last.
+    posts: tuple = ()
     observe: Observe | None = None
     settled: Settled | None = None
     last_failed_sha: str | None = None
@@ -292,7 +324,7 @@ class State(_Record):
         ('candidate', 'candidate', _Opt(_Rec(Release))),
         ('previous', 'previous', _Opt(_Rec(Release))),
         ('pre', 'pre', _Opt(_Rec(Pre))),
-        ('post', 'post', _Opt(_AbsPath())),
+        ('posts', 'posts', _Paths()),
         ('observe', 'observe', _Opt(_Rec(Observe))),
         ('settled', 'settled', _Opt(_Rec(Settled))),
         ('last_failed_sha', 'lastFailedSha', _Opt(_Pattern(_SHA, 'a full lowercase SHA'))),
@@ -317,7 +349,7 @@ class State(_Record):
         for attrs, where in ((REQUIRED[self.phase], self.phase),
                              (REQUIRED_BY_INTENT.get(self.intent, ()), f'{self.phase}/{self.intent}')):
             for attr in attrs:
-                if getattr(self, attr) is None:
+                if getattr(self, attr) in (None, ()):
                     _fail(f'State.{by_key[attr]}', f'required in {where}')
 
     def replace(self, **changes):

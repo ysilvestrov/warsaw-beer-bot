@@ -17,7 +17,8 @@ TXN = '0123456789abcdef0123456789abcdef'
 CAND = Release('c' * 40, '1' * 64)
 PREV = Release('b' * 40, '2' * 64)
 PRE = Pre('/var/lib/warsaw-beer-bot/deploy-snapshots/20261009T080000Z-pre.db', '3' * 64, 1760000000)
-POST = '/var/lib/warsaw-beer-bot/deploy-snapshots/20261009T080000Z-post'
+POST = '/var/lib/warsaw-beer-bot/deploy-snapshots/20261009T080000Z-rollback-post'
+POST2 = POST + '-2'
 OBS = Observe(1760000100, BOOT, 0, 1760000110.5, 1, 1760000102)
 SETTLED = Settled(PREV.sha, PREV.tree_sha256, 1759990000)
 
@@ -33,13 +34,13 @@ EXAMPLES = [
     State('observing', BOOT, observe=Observe(1760000100, BOOT, None, None, 0), **OPEN),
     State('rolling-back', BOOT, intent='stop-writers', **OPEN),
     State('rolling-back', BOOT, intent='save-post', **OPEN),
-    State('rolling-back', BOOT, intent='restore-pre', post=POST, **OPEN),
+    State('rolling-back', BOOT, intent='restore-pre', posts=(POST,), **OPEN),
     State('rolling-back', BOOT, intent='switch-previous', **OPEN),
-    State('rolling-back', BOOT, intent='start-baseline', post=POST, **OPEN),
+    State('rolling-back', BOOT, intent='start-baseline', posts=(POST, POST2), **OPEN),
     State('unverified', OTHER_BOOT, observe=OBS, unverified=Unverified(CAND.sha, 'reboot during the window', PRE),
           **OPEN),
     State('unverified', BOOT, unverified=Unverified(CAND.sha, 'gap 41 s', None), **OPEN),
-    State('recovery-failed', BOOT, post=POST, **OPEN).log(1760000200, 'start-baseline', 'health timeout',
+    State('recovery-failed', BOOT, posts=(POST,), **OPEN).log(1760000200, 'start-baseline', 'health timeout',
                                                           sha=PREV.sha, fails=3, ok=False, note=None),
 ]
 
@@ -83,7 +84,7 @@ class RoundTrip(Tmp):
         self.assertEqual(self.read(), (
             '{"bootId":"0f0e0d0c-0b0a-4908-8706-050403020100","candidate":null,'
             '"evidence":[{"at":5,"result":"ok","what":"settle"}],"formatVersion":2,"intent":null,'
-            '"lastFailedSha":null,"observe":null,"phase":"settled","post":null,"pre":null,"previous":null,'
+            '"lastFailedSha":null,"observe":null,"phase":"settled","posts":[],"pre":null,"previous":null,'
             '"settled":{"settledAt":1759990000,"sha":"' + 'b' * 40 + '","treeSha256":"' + '2' * 64 + '"},'
             '"txn":null,"unverified":null}').encode())
 
@@ -154,8 +155,17 @@ class Load(Tmp):
         self.assertEqual(self.mutated(EXAMPLES[5], observe=None), f'{self.path}: State.observe: required in observing')
 
     def test_restore_without_a_complete_post(self):
-        self.assertEqual(self.mutated(EXAMPLES[9], post=None),
-                         f'{self.path}: State.post: required in rolling-back/restore-pre')
+        self.assertEqual(self.mutated(EXAMPLES[9], posts=[]),
+                         f'{self.path}: State.posts: required in rolling-back/restore-pre')
+
+    def test_posts_is_a_list(self):
+        self.assertEqual(self.mutated(EXAMPLES[9], posts=POST),
+                         f'{self.path}: state.posts: not a list: {POST!r}')
+
+    def test_a_post_absent_is_an_error_not_an_empty_list(self):
+        obj = as_json(EXAMPLES[0])
+        del obj['posts']
+        self.assertEqual(self.refused(json.dumps(obj).encode()), f"{self.path}: state: missing ['posts'], unknown []")
 
     def test_unverified_without_its_record(self):
         self.assertEqual(self.mutated(EXAMPLES[13], unverified=None),
@@ -217,8 +227,8 @@ class Load(Tmp):
                          f'{self.path}: state.observe.healthyAt: not a finite non-negative number: -1')
 
     def test_relative_post_path(self):
-        self.assertEqual(self.mutated(EXAMPLES[9], post='post'),
-                         f"{self.path}: state.post: not an absolute path: 'post'")
+        self.assertEqual(self.mutated(EXAMPLES[11], posts=[POST, 'post']),
+                         f"{self.path}: state.posts[1]: not an absolute path: 'post'")
 
     def test_evidence_entry_without_result(self):
         self.assertEqual(self.mutated(EXAMPLES[0], evidence=[{'at': 1, 'what': 'stop'}]),
@@ -226,7 +236,12 @@ class Load(Tmp):
 
     def test_evidence_detail_that_is_not_a_scalar(self):
         self.assertEqual(self.mutated(EXAMPLES[0], evidence=[{'at': 1, 'what': 'stop', 'result': 'ok', 'x': [1]}]),
-                         f"{self.path}: state.evidence[0]: detail 'x' is not a finite JSON scalar: [1]")
+                         f"{self.path}: state.evidence[0]: detail 'x' is not a finite JSON scalar or a list of strings: [1]")
+
+    def test_evidence_detail_list_with_an_empty_string(self):
+        self.assertEqual(self.mutated(EXAMPLES[0], evidence=[{'at': 1, 'what': 'x', 'result': 'ok', 'posts': [POST, '']}]),
+                         f"{self.path}: state.evidence[0]: detail 'posts' is not a finite JSON scalar or a list of strings: "
+                         f"[{POST!r}, '']")
 
     def test_oversized_file(self):
         self.assertEqual(self.refused(b' ' * (ds.MAX_BYTES + 1)), f'{self.path}: over {ds.MAX_BYTES} bytes')
@@ -268,8 +283,18 @@ class Immutable(unittest.TestCase):
 
     def test_log_refuses_a_detail_that_is_not_a_scalar(self):
         with self.assertRaises(StateError) as cm:
-            EXAMPLES[2].log(10, 'stop', 'ok', units=['bot'])
-        self.assertEqual(str(cm.exception), "State.evidence[0]: detail 'units' is not a finite JSON scalar: ['bot']")
+            EXAMPLES[2].log(10, 'stop', 'ok', units={'bot': 1})
+        self.assertEqual(str(cm.exception),
+                         "State.evidence[0]: detail 'units' is not a finite JSON scalar or a list of strings: {'bot': 1}")
+
+    def test_a_list_of_strings_is_kept_frozen_and_round_trips(self):
+        # 2в e2e review Ф1: the rolled-back event names every post of the rollback.
+        posts = [POST, POST2]
+        state = EXAMPLES[0].log(10, 'rolled-back', 'ok', posts=posts)
+        posts.append('/x')
+        self.assertEqual((state.evidence[0]['posts'], as_json(state)['evidence'][0]['posts'],
+                          State.from_json(as_json(state)) == state),
+                         ((POST, POST2), [POST, POST2], True))
 
     def test_replace_carries_the_frozen_events_as_a_plain_tuple(self):
         logged = EXAMPLES[2].log(10, 'stop', 'ok')
