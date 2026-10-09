@@ -21,6 +21,34 @@ const base = {
 };
 
 describe('renderBody', () => {
+  it('renders sub-caption when unreviewedCount > 0 (#816, #526)', () => {
+    const body = renderBody({
+      ...base,
+      open: [],
+      closed: [],
+      unreviewedCount: 3,
+    });
+    expect(body).toContain('No verified findings.');
+    expect(body).toContain('<sub>3 changed file(s) outside reviewer scope.</sub>');
+  });
+
+  it('omits sub-caption when unreviewedCount is 0 or undefined (#816, #526)', () => {
+    const body0 = renderBody({
+      ...base,
+      open: [],
+      closed: [],
+      unreviewedCount: 0,
+    });
+    expect(body0).not.toContain('outside reviewer scope');
+
+    const bodyUndef = renderBody({
+      ...base,
+      open: [],
+      closed: [],
+    });
+    expect(bodyUndef).not.toContain('outside reviewer scope');
+  });
+
   it('states plainly when nothing is open, and still shows the counters', () => {
     const body = renderBody({
       ...base,
