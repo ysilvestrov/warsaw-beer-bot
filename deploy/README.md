@@ -472,9 +472,11 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   rollback. `post <db> <out>` copies db, -wal, -shm into `<out>.partial` with fsync, writes `post.json`
   (size + sha256 per file) and only then renames to `<out>`: an existing `<out>` is a complete post and is
   never rewritten (a repeat returns it; one without a valid `post.json` is refused). `restore <pre> <db>
-  <post>` needs that complete post and a `pre` matching its `.sha256`; it drops -wal/-shm *before* the
-  replace (a stale post-state WAL next to the restored pre would be replayed by SQLite), then copies pre
-  in with fsync and one rename. Exit 0; 2 refused (nothing changed); 64 usage; 70 internal; 75 OS error.
+  <post>` needs that complete post and a `pre` matching its `.sha256`; it first copies pre to
+  `<db>.restore-partial` (fsync, sha256 checked) — a failed copy leaves the db and its WAL as they were —
+  then drops -wal/-shm *before* the replace (a stale post-state WAL next to the restored pre would be
+  replayed by SQLite), and renames the copy in. A repeat with nothing left to do (`post`'s existing
+  complete post, `restore`'s `ALREADY`, `switch`'s `CURRENT`) still fsyncs the directory. Exit 0; 2 refused (nothing changed); 64 usage; 70 internal; 75 OS error.
 - `activate.py` — the activation and rollback engine, over an injected state store and `Host` (the real
   sudo/systemctl/HTTP adapter and the tick come with the periphery). `begin` opens an activation only from
   `settled` with a settled baseline, never for the last failed or the settled SHA. Every `step` persists the

@@ -421,6 +421,22 @@ class Switch(Tmp):
             pub.switch(SHA, self.roots)
         self.assertEqual(events, [('replace', f'releases/{SHA}', self.current), ('fsync', True)])
 
+    def test_a_no_op_repeat_still_makes_the_rename_durable(self):
+        # 2v review: the attempt that renamed may have died before its fsync of the directory.
+        self.published()
+        pub.switch(SHA, self.roots)
+        base_ino = os.stat(self.base).st_ino
+        synced = []
+        real_fsync = os.fsync
+
+        def fsync(fd):
+            synced.append(os.fstat(fd).st_ino == base_ino)
+            return real_fsync(fd)
+
+        with mock.patch.object(os, 'fsync', fsync):
+            self.assertEqual(pub.switch(SHA, self.roots), 'current')
+        self.assertEqual(synced, [True])
+
 
 if __name__ == '__main__':
     unittest.main()
