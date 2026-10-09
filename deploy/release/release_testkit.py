@@ -31,15 +31,16 @@ def make_inputs(base):
     return repo, dist, modules
 
 
-def release(sha=SHA, glibc='glibc 2.39'):
-    return pr.release_info('o/r', sha, '.github/workflows/ci.yml', '7', '2', 'v24.1.0', '137', glibc, 'f' * 64)
+def release(sha=SHA, glibc='glibc 2.39', repo='o/r'):
+    return pr.release_info(repo, sha, '.github/workflows/ci.yml', '7', '2', 'v24.1.0', '137', glibc, 'f' * 64)
 
 
-def packed(base, mutate=None):
+def packed(base, mutate=None, repo='o/r'):
     """assemble + write_archive; `mutate(payload)` runs between the manifest and the archive."""
+    release_repo = repo
     repo, dist, modules = make_inputs(base)
     payload = os.path.join(base, 'payload')
-    manifest = pr.assemble(repo, dist, modules, payload, release(), ['scripts/op.ts'])
+    manifest = pr.assemble(repo, dist, modules, payload, release(repo=release_repo), ['scripts/op.ts'])
     if mutate:
         mutate(payload)
     out = os.path.join(base, 'out')
