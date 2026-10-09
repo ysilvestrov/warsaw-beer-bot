@@ -6,7 +6,53 @@ import {
   globToRegExp,
   isBodyExcluded,
   matchesAny,
+  partitionPrFiles,
+  renderSkipBody,
+  wrapBody,
 } from './ai-pr-review';
+
+describe('partitionPrFiles (#816, #526)', () => {
+  it('correctly partitions reviewable, ignored, and unreviewed files', () => {
+    const files = [
+      'src/sources/http.ts',
+      'docs/superpowers/specs/2026-10-09-spec.md',
+      'package-lock.json',
+      'deploy/warsaw-beer-bot.service',
+      'deploy/sudoers.d/warsaw-beer-bot',
+    ];
+    const { reviewable, ignored, unreviewed } = partitionPrFiles(files);
+    expect(reviewable).toEqual(['src/sources/http.ts']);
+    expect(ignored).toEqual(['docs/superpowers/specs/2026-10-09-spec.md', 'package-lock.json']);
+    expect(unreviewed).toEqual([
+      'deploy/warsaw-beer-bot.service',
+      'deploy/sudoers.d/warsaw-beer-bot',
+    ]);
+  });
+});
+
+describe('renderSkipBody (#816, #526)', () => {
+  it('renders unreviewed file list when unreviewed files exist', () => {
+    const body = wrapBody(
+      renderSkipBody({
+        unreviewed: ['deploy/warsaw-beer-bot.service', 'deploy/sudoers.d/warsaw-beer-bot'],
+      }),
+    );
+    expect(body).toContain('<!-- ai-pr-review -->');
+    expect(body).not.toContain('ai-pr-review-state');
+    expect(body).toContain('2 changed file(s) not reviewed (outside reviewer scope)');
+    expect(body).toContain('- `deploy/warsaw-beer-bot.service`');
+    expect(body).toContain('- `deploy/sudoers.d/warsaw-beer-bot`');
+  });
+
+  it('renders documentation notice when all changed files are ignored assets', () => {
+    const body = wrapBody(renderSkipBody({ unreviewed: [] }));
+    expect(body).toContain('<!-- ai-pr-review -->');
+    expect(body).not.toContain('ai-pr-review-state');
+    expect(body).toContain(
+      'No reviewable code changed in this pull request (all changed files are documentation or ignored assets).',
+    );
+  });
+});
 
 describe('filterReviewableFiles scope expansion (#816, #526)', () => {
   it('includes Python, shell, CJS, and extension/API HTML & CSS', () => {
@@ -196,7 +242,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response;
 }
 
-import { upsertReview, wrapBody, MARKER } from './ai-pr-review';
+import { upsertReview, MARKER } from './ai-pr-review';
 
 describe('wrapBody', () => {
   it('embeds the hidden marker', () => {
@@ -636,6 +682,54 @@ describe('runReview — full mode', () => {
     expect(failureSignal).toBeInstanceOf(AbortSignal);
     expect(logs.some((message) => message.includes('failure comment could not be posted'))).toBe(
       true,
+    );
+  });
+});
+
+describe('skip comment lifecycle (#816, #526)', () => {
+  it('posts skip comment on initial run with 0 reviewable files, and updates it on subsequent push with code', async () => {
+    const ghInitial = githubFetch(null);
+    await runReview(
+      CFG,
+      deps({
+        githubFetch: ghInitial.fetchFn,
+        listChangedFiles: () => ['deploy/warsaw-beer-bot.service'],
+      }),
+    );
+    expect(ghInitial.put.body).toContain('<!-- ai-pr-review -->');
+    expect(ghInitial.put.body).not.toContain('ai-pr-review-state');
+    expect(ghInitial.put.body).toContain('1 changed file(s) not reviewed (outside reviewer scope)');
+    expect(ghInitial.put.body).toContain('- `deploy/warsaw-beer-bot.service`');
+
+    const ghSecond = githubFetch(ghInitial.put.body!);
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: ghSecond.fetchFn,
+        listChangedFiles: () => ['src/a.ts', 'deploy/warsaw-beer-bot.service'],
+      }),
+    );
+    expect(ghSecond.put.body).toContain('<!-- ai-pr-review -->');
+    expect(ghSecond.put.body).toContain('ai-pr-review-state');
+    expect(ghSecond.put.body).toContain('No verified findings.');
+    expect(ghSecond.put.body).toContain('<sub>1 changed file(s) outside reviewer scope.</sub>');
+  });
+
+  it('posts docs-only skip comment when all files are ignored assets', async () => {
+    const gh = githubFetch(null);
+    await runReview(
+      CFG,
+      deps({
+        githubFetch: gh.fetchFn,
+        listChangedFiles: () => ['docs/spec.md'],
+      }),
+    );
+    expect(gh.put.body).toContain('<!-- ai-pr-review -->');
+    expect(gh.put.body).not.toContain('ai-pr-review-state');
+    expect(gh.put.body).toContain(
+      'No reviewable code changed in this pull request (all changed files are documentation or ignored assets).',
     );
   });
 });

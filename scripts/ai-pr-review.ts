@@ -120,6 +120,26 @@ export function filterReviewableFiles(files: string[]): string[] {
   );
 }
 
+export function partitionPrFiles(files: string[]): {
+  reviewable: string[];
+  ignored: string[];
+  unreviewed: string[];
+} {
+  const reviewable: string[] = [];
+  const ignored: string[] = [];
+  const unreviewed: string[] = [];
+  for (const f of files) {
+    if (matchesAny(f, INCLUDE_PATTERNS) && !matchesAny(f, IGNORE_PATTERNS)) {
+      reviewable.push(f);
+    } else if (matchesAny(f, IGNORE_PATTERNS)) {
+      ignored.push(f);
+    } else {
+      unreviewed.push(f);
+    }
+  }
+  return { reviewable, ignored, unreviewed };
+}
+
 export interface Config {
   openaiApiKey: string;
   openaiEndpoint: string;
@@ -183,6 +203,16 @@ export const MARKER = '<!-- ai-pr-review -->';
 
 export function wrapBody(summary: string): string {
   return `${MARKER}\n\n## 🤖 AI PR Review\n\n${summary.trim()}\n`;
+}
+
+export function renderSkipBody(params: { unreviewed: string[] }): string {
+  if (params.unreviewed.length > 0) {
+    return [
+      `**Review skipped:** ${params.unreviewed.length} changed file(s) not reviewed (outside reviewer scope):`,
+      ...params.unreviewed.map((f) => `- \`${f}\``),
+    ].join('\n');
+  }
+  return '**Review skipped:** No reviewable code changed in this pull request (all changed files are documentation or ignored assets).';
 }
 
 export interface GithubDeps {
@@ -419,10 +449,14 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
 
   const sinceDiffSpec = deps.listChangedFiles(decision.diffSpec);
   let changedFiles = sinceDiffSpec;
+  const prFiles =
+    decision.diffSpec === decision.prSpec
+      ? sinceDiffSpec
+      : deps.listChangedFiles(decision.prSpec);
   if (decision.mode === 'incremental') {
     // A merge from the base keeps the stored head an ancestor, so stored..HEAD also
     // carries what the base gained; review only what this PR itself changes (#742).
-    const { inScope, mergedIn } = incrementalScope(sinceDiffSpec, deps.listChangedFiles(decision.prSpec));
+    const { inScope, mergedIn } = incrementalScope(sinceDiffSpec, prFiles);
     if (mergedIn.length > 0) {
       deps.log(
         `::notice::AI review: ${mergedIn.length} file(s) changed since the last review are not in this PR's own diff (merged in from the base, or reverted to it) — left out of scope.`,
@@ -431,10 +465,13 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
     changedFiles = inScope;
   }
   const reviewable = filterReviewableFiles(changedFiles);
+  const { unreviewed } = partitionPrFiles(prFiles);
 
   // A first review with nothing in scope has nothing to publish. An incremental
   // one still does — the previous run's findings are open until proven closed.
   if (reviewable.length === 0 && !state) {
+    const skipBody = wrapBody(renderSkipBody({ unreviewed }));
+    await upsertReview(gh, skipBody, existing);
     deps.log('::notice::AI review skipped: no changed files are in the reviewer scope.');
     return;
   }
@@ -584,6 +621,7 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
     costLine,
     head: deps.headSha,
     spend,
+    unreviewedCount: unreviewed.length,
   });
 
   const how = await upsertReview(gh, wrapBody(body), existing);
