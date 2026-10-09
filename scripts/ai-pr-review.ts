@@ -205,14 +205,51 @@ export function wrapBody(summary: string): string {
   return `${MARKER}\n\n## 🤖 AI PR Review\n\n${summary.trim()}\n`;
 }
 
+export function formatCodeSpan(text: string): string {
+  if (!text.includes('`')) {
+    return `\`${text}\``;
+  }
+  const matches = text.match(/`+/g) ?? [];
+  let maxLen = 0;
+  for (const m of matches) {
+    if (m.length > maxLen) {
+      maxLen = m.length;
+    }
+  }
+  const delimiter = '`'.repeat(maxLen + 1);
+  const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${delimiter}${pad}${text}${pad}${delimiter}`;
+}
+
+export const MAX_UNREVIEWED_DISPLAY = 50;
+
 export function renderSkipBody(params: { unreviewed: string[] }): string {
   if (params.unreviewed.length > 0) {
-    return [
-      `**Review skipped:** ${params.unreviewed.length} changed file(s) not reviewed (outside reviewer scope):`,
-      ...params.unreviewed.map((f) => `- \`${f}\``),
-    ].join('\n');
+    const total = params.unreviewed.length;
+    const displayed = params.unreviewed.slice(0, MAX_UNREVIEWED_DISPLAY);
+    const lines = [
+      `**Review skipped:** ${total} changed file(s) not reviewed (outside reviewer scope):`,
+      ...displayed.map((f) => `- ${formatCodeSpan(f)}`),
+    ];
+    if (total > MAX_UNREVIEWED_DISPLAY) {
+      lines.push(`- … and ${total - MAX_UNREVIEWED_DISPLAY} more file(s)`);
+    }
+    return lines.join('\n');
   }
   return '**Review skipped:** No reviewable code changed in this pull request (all changed files are documentation or ignored assets).';
+}
+
+export function isSkipReview(body: string): boolean {
+  const stripped = body.trimStart();
+  if (!stripped.startsWith(MARKER)) {
+    return false;
+  }
+  const content = stripped.slice(MARKER.length).trimStart();
+  if (!content.startsWith('## 🤖 AI PR Review')) {
+    return false;
+  }
+  const rest = content.slice('## 🤖 AI PR Review'.length).trimStart();
+  return rest.startsWith('**Review skipped:**');
 }
 
 export interface GithubDeps {
@@ -470,7 +507,7 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
   // A first review with nothing in scope has nothing to publish. An incremental
   // one still does — the previous run's findings are open until proven closed.
   if (reviewable.length === 0 && !state) {
-    if (existing && !existing.body.includes('**Review skipped:**')) {
+    if (existing && existing.body && !isSkipReview(existing.body)) {
       deps.log(
         '::notice::AI review skipped: no changed files in reviewer scope; retaining existing review.',
       );
