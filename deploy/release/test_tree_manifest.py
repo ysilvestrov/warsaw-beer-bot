@@ -192,6 +192,14 @@ class Verify(Tree):
         m = {'formatVersion': 1, 'entries': [{'path': 'a', 'type': 'file', 'mode': 0o4755, 'size': 0, 'sha256': ''}]}
         self.assertEqual(tm.verify_tree(self.root, tm.canonical_bytes(m)), ['a: malformed file entry'])
 
+    def test_entry_without_path(self):
+        m = {'formatVersion': 1, 'entries': [{'type': 'dir', 'mode': 0o755}]}
+        self.assertEqual(tm.verify_tree(self.root, tm.canonical_bytes(m)), ["None: path is not a string"])
+
+    def test_entry_with_non_string_path(self):
+        m = {'formatVersion': 1, 'entries': [{'path': 7, 'type': 'dir', 'mode': 0o755}]}
+        self.assertEqual(tm.verify_tree(self.root, tm.canonical_bytes(m)), ['7: path is not a string'])
+
     def test_not_json(self):
         self.assertEqual(tm.verify_tree(self.root, b'\xff')[0][:27], 'manifest is not UTF-8 JSON:')
 

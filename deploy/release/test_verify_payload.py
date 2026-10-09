@@ -48,6 +48,23 @@ class Prepare(Tmp):
         with self.assertRaisesRegex(vp.Refused, 'not a single "<sha256>  runtime.tar.gz" line'):
             self.prepare(archive)
 
+    def checksum_refused(self, text):
+        archive, _ = packed(os.path.join(self.base, 'src'))
+        digest = pr._sha256(archive)
+        with open(archive + '.sha256', 'w', encoding='ascii') as f:
+            f.write(text.format(digest))
+        with self.assertRaisesRegex(vp.Refused, 'not a single "<sha256>  runtime.tar.gz" line'):
+            self.prepare(archive)
+
+    def test_checksum_with_trailing_blank_line(self):
+        self.checksum_refused('{}  runtime.tar.gz\n\n')
+
+    def test_checksum_without_newline(self):
+        self.checksum_refused('{}  runtime.tar.gz')
+
+    def test_checksum_file_over_256_bytes(self):
+        self.checksum_refused('{}  runtime.tar.gz\n' + ' ' * 200)
+
     def test_file_changed_after_the_manifest(self):
         archive, _ = packed(os.path.join(self.base, 'src'),
                             mutate=lambda p: write(p, 'dist/index.js', b'console.log(2);\n'))
