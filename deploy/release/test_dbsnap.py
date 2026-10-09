@@ -313,6 +313,7 @@ class Restore(Tmp):
             os.umask(old)
         self.assertEqual(stat.S_IMODE(os.stat(self.db).st_mode), 0o660)
 
+    @unittest.skipUnless(os.path.isdir('/proc/self/fd'), 'counts descriptors through Linux procfs')
     def test_a_failing_fchmod_closes_the_descriptor(self):
         # #823 AI review: the fchmod ran before the descriptor had an owner that closes it.
         self.scenario()

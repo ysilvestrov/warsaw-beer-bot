@@ -523,7 +523,7 @@ class Rollback(Engine):
                          ({'bot.db': db1, 'bot.db-wal': wal1}, []))
         self.assertEqual(self.whats(), ['begin', 'stop', 'abort', 'switch-previous', 'stop-writers', 'save-post',
                                         'restore-pre', 'switch-previous', 'rolled-back'])
-        self.assertEqual(s.evidence[3]['result'], 'another release than the previous could have run during the abort')
+        self.assertEqual(s.evidence[3]['result'], f'boot {BOOT_A} -> {BOOT_B} with current on another release than the previous')
 
     def test_a_candidate_a_reboot_ran_and_that_died_since_still_restores_the_database(self):
         # #823 AI review, second pass: the check used to hang on a RUNNING bot; a candidate that wrote
@@ -535,6 +535,62 @@ class Rollback(Engine):
         self.world.reboot()
         self.world.bot, self.world.running = 'failed', None
         self.assertEqual(self.world.db_files(), self.migrated())
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load().last_failed_sha, self.world.db_files(), self.world.running),
+                         ('rolled-back', None, {'': PRE_DB}, OLD))
+
+    def test_a_candidate_a_reboot_ran_on_the_restored_database_and_that_died_is_restored_again(self):
+        # #823 AI review, third pass (P0): after restore-pre the pointer is still on the candidate; a reboot
+        # starts it on the restored pre, it writes and fails before the next tick. A stopped bot proved
+        # nothing: the writes must get a post of their own and pre must be restored again.
+        self.roll_to('switch-previous')
+        self.world.reboot()
+        self.world.bot, self.world.running = 'failed', None
+        db2, wal2 = self.world.candidate_writes(2)
+        self.assertEqual(self.world.db_files(), {'': db2, '-wal': wal2})
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files(), self.world.running, self.world.current),
+                         ('rolled-back', {'': PRE_DB}, OLD, OLD))
+        self.assertEqual(self.post_files(self.post_dir() + '-2'), {'bot.db': db2, 'bot.db-wal': wal2})
+
+    def test_a_post_taken_before_a_reboot_is_not_reused_for_the_writes_after_it(self):
+        # The same class at restore-pre: the post is complete, a reboot ran the candidate, which wrote
+        # and died; restoring now would destroy those writes, which no post holds.
+        self.roll_to('restore-pre')
+        self.world.reboot()
+        # Both writers down again by the next tick: only the reboot itself tells that the DB moved.
+        self.world.bot, self.world.running, self.world.litestream = 'failed', None, 'inactive'
+        after = self.world.db_files()
+        # The second start found the first start's rows and WAL (no restore yet), applied it, added its own.
+        db1, wal1 = self.world.candidate_writes(1)
+        self.assertEqual(after[''], db1 + wal1 + f' | migrated by {CAND}, start 2'.encode())
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files()), ('rolled-back', {'': PRE_DB}))
+        self.assertEqual(self.post_files(self.post_dir() + '-2')['bot.db'], after[''])
+
+    def test_a_complete_post_a_reboot_outdated_is_not_handed_back(self):
+        # save-post repeated after a tick died between a complete post and its record, and a reboot ran
+        # the candidate in between: dbsnap.post would hand back the complete (older) post.
+        self.roll_to('save-post')
+        activate.step(self.store, self.host)
+        self.store.save(self.store.load().replace(intent='save-post', posts=()))  # the record never landed
+        self.world.reboot()
+        self.world.bot, self.world.running, self.world.litestream = 'failed', None, 'inactive'
+        after = self.world.db_files()
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files()), ('rolled-back', {'': PRE_DB}))
+        self.assertEqual(self.post_files(self.post_dir() + '-2')['bot.db'], after[''])
+
+    def test_a_running_bot_on_an_abort_is_stopped_only_if_it_answers_as_the_previous_release(self):
+        # #823 AI review, third pass: `current` back on the previous release says nothing about the
+        # process; the candidate a reboot started may still run. Its own releaseSha decides.
+        self.begin()
+        self.world.trees[CAND] = '9' * 64
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.world.reboot()
+        self.world.current = OLD  # an operator moved the pointer back; the candidate keeps running
+        self.assertEqual(self.world.running, CAND)
         out = activate.run(self.store, self.host)
         self.assertEqual((out.kind, self.store.load().last_failed_sha, self.world.db_files(), self.world.running),
                          ('rolled-back', None, {'': PRE_DB}, OLD))
