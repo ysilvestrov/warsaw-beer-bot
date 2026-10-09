@@ -28,7 +28,7 @@ export const INCLUDE_PATTERNS = [
   '.github/workflows/*.yml',
 ];
 
-export const IGNORE_PATTERNS = ['package-lock.json', '*.md', 'docs/**'];
+export const IGNORE_PATTERNS = ['package-lock.json', '**/*.md', 'docs/**'];
 
 /**
  * Paths whose BODY is never embedded in the review context — their diff still is,
@@ -470,6 +470,12 @@ async function runReviewOnce(cfg: Config, deps: ReviewDeps): Promise<void> {
   // A first review with nothing in scope has nothing to publish. An incremental
   // one still does — the previous run's findings are open until proven closed.
   if (reviewable.length === 0 && !state) {
+    if (existing && !existing.body.includes('**Review skipped:**')) {
+      deps.log(
+        '::notice::AI review skipped: no changed files in reviewer scope; retaining existing review.',
+      );
+      return;
+    }
     const skipBody = wrapBody(renderSkipBody({ unreviewed }));
     await upsertReview(gh, skipBody, existing);
     deps.log('::notice::AI review skipped: no changed files are in the reviewer scope.');

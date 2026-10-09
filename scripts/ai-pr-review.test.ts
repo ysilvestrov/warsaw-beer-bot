@@ -17,12 +17,21 @@ describe('partitionPrFiles (#816, #526)', () => {
       'src/sources/http.ts',
       'docs/superpowers/specs/2026-10-09-spec.md',
       'package-lock.json',
+      'extension/CHANGELOG.md',
+      'deploy/README.md',
+      '.github/ai-review/AGENTS.md',
       'deploy/warsaw-beer-bot.service',
       'deploy/sudoers.d/warsaw-beer-bot',
     ];
     const { reviewable, ignored, unreviewed } = partitionPrFiles(files);
     expect(reviewable).toEqual(['src/sources/http.ts']);
-    expect(ignored).toEqual(['docs/superpowers/specs/2026-10-09-spec.md', 'package-lock.json']);
+    expect(ignored).toEqual([
+      'docs/superpowers/specs/2026-10-09-spec.md',
+      'package-lock.json',
+      'extension/CHANGELOG.md',
+      'deploy/README.md',
+      '.github/ai-review/AGENTS.md',
+    ]);
     expect(unreviewed).toEqual([
       'deploy/warsaw-beer-bot.service',
       'deploy/sudoers.d/warsaw-beer-bot',
@@ -442,14 +451,19 @@ function deps(over: Partial<ReviewDeps> = {}): ReviewDeps {
   };
 }
 
-function githubFetch(existingBody: string | null): { fetchFn: typeof fetch; put: { body?: string } } {
-  const put: { body?: string } = {};
-  const fetchFn = (async (_url: string, init?: RequestInit) => {
+function githubFetch(existingBody: string | null): {
+  fetchFn: typeof fetch;
+  put: { method?: string; url?: string; body?: string };
+} {
+  const put: { method?: string; url?: string; body?: string } = {};
+  const fetchFn = (async (url: string, init?: RequestInit) => {
     if (!init || init.method === undefined) {
       return jsonResponse(
         existingBody === null ? [] : [{ id: 42, body: existingBody, user: { type: 'Bot' } }],
       );
     }
+    put.method = init.method;
+    put.url = url;
     put.body = JSON.parse(init.body as string).body;
     return jsonResponse({ id: 42 });
   }) as unknown as typeof fetch;
@@ -696,6 +710,7 @@ describe('skip comment lifecycle (#816, #526)', () => {
         listChangedFiles: () => ['deploy/warsaw-beer-bot.service'],
       }),
     );
+    expect(ghInitial.put.method).toBe('POST');
     expect(ghInitial.put.body).toContain('<!-- ai-pr-review -->');
     expect(ghInitial.put.body).not.toContain('ai-pr-review-state');
     expect(ghInitial.put.body).toContain('1 changed file(s) not reviewed (outside reviewer scope)');
@@ -711,6 +726,8 @@ describe('skip comment lifecycle (#816, #526)', () => {
         listChangedFiles: () => ['src/a.ts', 'deploy/warsaw-beer-bot.service'],
       }),
     );
+    expect(ghSecond.put.method).toBe('PUT');
+    expect(ghSecond.put.url).toContain('/pulls/7/reviews/42');
     expect(ghSecond.put.body).toContain('<!-- ai-pr-review -->');
     expect(ghSecond.put.body).toContain('ai-pr-review-state');
     expect(ghSecond.put.body).toContain('No verified findings.');
@@ -726,11 +743,90 @@ describe('skip comment lifecycle (#816, #526)', () => {
         listChangedFiles: () => ['docs/spec.md'],
       }),
     );
+    expect(gh.put.method).toBe('POST');
     expect(gh.put.body).toContain('<!-- ai-pr-review -->');
     expect(gh.put.body).not.toContain('ai-pr-review-state');
     expect(gh.put.body).toContain(
       'No reviewable code changed in this pull request (all changed files are documentation or ignored assets).',
     );
+  });
+
+  it('retains existing non-skip review when state parsing failed on 0-reviewable push', async () => {
+    const nonSkipBody =
+      '<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\n### Open findings\n\nExisting bug finding';
+    const gh = githubFetch(nonSkipBody);
+    const logs: string[] = [];
+    await runReview(
+      CFG,
+      deps({
+        githubFetch: gh.fetchFn,
+        listChangedFiles: () => ['deploy/warsaw-beer-bot.service'],
+        log: (msg) => logs.push(msg),
+      }),
+    );
+    expect(gh.put.body).toBeUndefined();
+    expect(logs.some((l) => l.includes('retaining existing review'))).toBe(true);
+  });
+
+  it('omits out-of-scope caption when mixed PR touches only reviewable code and docs/markdown', async () => {
+    const gh = githubFetch(null);
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: gh.fetchFn,
+        listChangedFiles: () => [
+          'src/a.ts',
+          'docs/spec.md',
+          'extension/CHANGELOG.md',
+          'deploy/README.md',
+        ],
+      }),
+    );
+    expect(gh.put.body).toContain('No verified findings.');
+    expect(gh.put.body).not.toContain('outside reviewer scope');
+  });
+
+  it('counts unreviewed files from prSpec in incremental mode when diffSpec differs', async () => {
+    const storedState = renderState({
+      v: 1,
+      head: 'a'.repeat(40),
+      findings: [
+        {
+          file: 'src/a.ts',
+          quote: "return 'not_found';",
+          matchedLine: 2,
+          matchedEndLine: 2,
+          claim: 'merge reported as failure',
+          why_it_breaks: 'cron stats count a success as a miss',
+          severity: 'P1',
+          evidence: 'evidence',
+        },
+      ],
+      spend: { usd: 0, runs: 1, unpriced: 0 },
+    });
+    const existingReview = `<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\nNo verified findings.\n\n${storedState}`;
+    const gh = githubFetch(existingReview);
+    const ai = openaiFetch([JSON.stringify({ findings: [] })]);
+
+    await runReview(
+      CFG,
+      deps({
+        openaiFetch: ai.fetchFn,
+        githubFetch: gh.fetchFn,
+        hasCommit: (sha) => sha === 'a'.repeat(40) || sha === 'b'.repeat(40),
+        isAncestor: (ancestor, desc) => ancestor === 'a'.repeat(40) && desc === 'b'.repeat(40),
+        listChangedFiles: (spec) => {
+          if (spec === 'origin/main...HEAD') {
+            return ['src/a.ts', 'deploy/warsaw-beer-bot.service'];
+          }
+          return ['src/a.ts'];
+        },
+      }),
+    );
+
+    expect(gh.put.body).toContain('<sub>1 changed file(s) outside reviewer scope.</sub>');
   });
 });
 
