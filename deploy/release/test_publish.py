@@ -6,6 +6,7 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import package_runtime as pr  # noqa: E402
@@ -17,6 +18,7 @@ from safe_tar import Refused  # noqa: E402
 from zip_admission import sha256_file  # noqa: E402
 
 NOW = '2026-10-09T08:00:00Z'
+OWNER = (os.geteuid(), os.getegid())
 
 
 def zip_up(archive, dest):
@@ -46,8 +48,8 @@ class Tmp(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.base = self._tmp.name
-        self.roots = pub.Roots(*(os.path.join(self.base, d) for d in ('releases', 'receipts', 'scratch')))
-        for d in self.roots.__dict__.values():
+        self.roots = pub.Roots(*(os.path.join(self.base, d) for d in ('releases', 'receipts', 'scratch')), OWNER)
+        for d in (self.roots.releases, self.roots.receipts, self.roots.scratch):
             os.makedirs(d)
         self.archive, self.manifest = packed(os.path.join(self.base, 'src'))
         self.zip = zip_up(self.archive, os.path.join(self.base, 'artifact.zip'))
@@ -166,6 +168,51 @@ class Publish(Tmp):
                                          'does not match this artifact; operator recovery required')
         self.assertEqual(os.listdir(self.roots.receipts), [])
 
+    def test_loosened_tree_left_without_receipt_is_refused(self):
+        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        os.remove(self.receipt_path())
+        os.chmod(os.path.join(self.roots.releases, SHA, 'dist/index.js'), 0o666)
+        self.assertEqual(self.refused(), f'{os.path.join(self.roots.releases, SHA)} exists without a receipt and '
+                                         'does not match this artifact; operator recovery required')
+
+    def fsync_log(self, action):
+        seen = []
+        real = os.fsync
+
+        def spy(fd):
+            seen.append(os.readlink(f'/proc/self/fd/{fd}'))
+            return real(fd)
+        with mock.patch('os.fsync', spy):
+            action()
+        return seen
+
+    def durable_before_receipt(self, seen, tree_prefix):
+        """Tree entries fsynced (as relative paths) and the index of the receipt's own fsync."""
+        receipt_at = next(i for i, p in enumerate(seen) if os.path.basename(p).startswith('.receipt-'))
+        synced = {os.path.relpath(p, tree_prefix) for p in seen[:receipt_at]
+                  if p == tree_prefix or p.startswith(tree_prefix + '/')}
+        return synced, receipt_at
+
+    def tree_entries(self):
+        files = {e['path'] for e in self.manifest['entries'] if e['type'] != 'symlink'}
+        return files | {'.', tm.MANIFEST_NAME}
+
+    def test_whole_tree_is_durable_before_the_receipt(self):
+        # #815 review P2: every file, directory and the root, then releases/, then the receipt.
+        seen = self.fsync_log(lambda: pub.publish(self.trusted, self.zip, self.roots, lambda: NOW))
+        scratch_tree = next(p for p in seen if p.endswith('/tree'))
+        synced, receipt_at = self.durable_before_receipt(seen, scratch_tree)
+        self.assertEqual(synced, self.tree_entries())
+        self.assertEqual(seen.index(self.roots.releases) < receipt_at, True)
+        self.assertEqual(seen[receipt_at + 1:], [self.roots.receipts])
+
+    def test_reconciled_tree_is_made_durable_before_its_receipt(self):
+        pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
+        os.remove(self.receipt_path())
+        seen = self.fsync_log(lambda: pub.publish(self.trusted, self.zip, self.roots, lambda: NOW))
+        synced, _ = self.durable_before_receipt(seen, os.path.join(self.roots.releases, SHA))
+        self.assertEqual(synced, self.tree_entries())
+
     def test_malformed_existing_receipt_is_a_refusal(self):
         with open(self.receipt_path(), 'w') as f:
             f.write('{}')
@@ -196,6 +243,38 @@ class VerifyRelease(Tmp):
         with self.assertRaises(Refused) as cm:
             pub.verify_release(SHA, self.roots)
         self.assertEqual(str(cm.exception), f'{SHA}: tree digest {tm.tree_digest(self.manifest)} != receipt {"0" * 64}')
+
+    def verify_refused(self, roots=None):
+        with self.assertRaises(Refused) as cm:
+            pub.verify_release(SHA, roots or self.roots)
+        return str(cm.exception)
+
+    def test_loosened_permissions(self):
+        # #815 review P1: modes are checked as they are, not normalised to 0644/0755.
+        os.chmod(os.path.join(self.release_dir, 'dist'), 0o777)
+        os.chmod(os.path.join(self.release_dir, 'dist/index.js'), 0o666)
+        os.chmod(os.path.join(self.release_dir, 'node_modules/pkg/cli.js'), 0o777)
+        head, *problems = self.verify_refused().splitlines()
+        self.assertEqual((head, sorted(problems)), (f'{SHA}: release tree changed:', [
+            'dist/index.js: differs from manifest (mode)', 'dist: differs from manifest (mode)',
+            'node_modules/pkg/cli.js: differs from manifest (mode)']))
+
+    def test_writable_root(self):
+        os.chmod(self.release_dir, 0o777)
+        self.assertEqual(self.verify_refused(), f'{SHA}: release tree changed:\n.: expected mode 0755, got 0777')
+
+    def test_writable_manifest(self):
+        os.chmod(os.path.join(self.release_dir, tm.MANIFEST_NAME), 0o666)
+        self.assertEqual(self.verify_refused(),
+                         f'{SHA}: release tree changed:\ntree-manifest.json: expected mode 0644, got 0666')
+
+    def test_tree_owned_by_someone_else(self):
+        other = pub.Roots(self.roots.releases, self.roots.receipts, self.roots.scratch, (OWNER[0] + 1, OWNER[1]))
+        message = self.verify_refused(other)
+        self.assertEqual(message.splitlines()[:3], [
+            f'{SHA}: release tree changed:',
+            f'.: owned by {OWNER[0]}:{OWNER[1]}, expected {OWNER[0] + 1}:{OWNER[1]}',
+            f'tree-manifest.json: owned by {OWNER[0]}:{OWNER[1]}, expected {OWNER[0] + 1}:{OWNER[1]}'])
 
     def test_no_receipt(self):
         os.remove(self.receipt_path())
