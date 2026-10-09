@@ -125,13 +125,18 @@ def _fsync_dir(path):
         os.close(fd)
 
 
-def write_receipt(path, receipt):
+def write_atomic(path, data, prefix):
+    """Replace path with data (0600) durably: temp in the same directory, fsync it, rename, fsync the directory.
+
+    A crash leaves either the old file or the new one, never a torn one; a failed write
+    or rename leaves the old file as it was and no temp behind.
+    """
     directory = os.path.dirname(path)
-    fd, tmp = tempfile.mkstemp(dir=directory, prefix='.receipt-')
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=prefix)
     try:
         with os.fdopen(fd, 'wb') as f:
             os.fchmod(f.fileno(), 0o600)
-            f.write(tm.canonical_bytes(receipt))
+            f.write(data)
             f.flush()
             os.fsync(f.fileno())
         os.rename(tmp, path)
@@ -140,6 +145,10 @@ def write_receipt(path, receipt):
             os.unlink(tmp)
         raise
     _fsync_dir(directory)
+
+
+def write_receipt(path, receipt):
+    write_atomic(path, tm.canonical_bytes(receipt), '.receipt-')
 
 
 def read_receipt(path):

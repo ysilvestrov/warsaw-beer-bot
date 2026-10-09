@@ -99,9 +99,9 @@ Production activation, як і раніше, заборонена до кінц�
 
 **Files:** create `deploy/release/deploy_state.py`, `deploy/release/test_deploy_state.py`.
 
-- [ ] `load(path) -> State | None` і `save(path, state)` за Global Constraints; `State` — frozen dataclass з валідацією в конструкторі (дозволені пари phase/intent, SHA — 40 hex, обов'язкові поля для кожного phase).
-- [ ] `new_txn()`, `read_boot_id(path='/proc/sys/kernel/random/boot_id')`.
-- [ ] Тести:
+- [x] `load(path) -> State | None` і `save(path, state)` за Global Constraints; `State` — frozen dataclass з валідацією в конструкторі (дозволені пари phase/intent, SHA — 40 hex, обов'язкові поля для кожного phase).
+- [x] `new_txn()`, `read_boot_id(path='/proc/sys/kernel/random/boot_id')`.
+- [x] Тести:
   - round-trip кожного phase;
   - відсутній файл → `None`; порожній, не JSON, `formatVersion: 1`, невідомий phase, `activating` без `candidate`, intent з чужого phase → `StateError` з причиною;
   - `save` не лишає temp при успіху; при збої `rename` (мок) старий файл цілий;
