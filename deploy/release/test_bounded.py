@@ -72,6 +72,33 @@ class Bounded(unittest.TestCase):
             bounded.run(py('import time; time.sleep(30)'), timeout=20, join_grace=1)
         self.assertEqual(len(killed), 1)
 
+    def test_limits_are_validated_before_anything_runs(self):
+        # #817 AI review: tail=0 used to kill the reader thread with IndexError.
+        for cap, tail in ((0, 0), (-1, 10), (10, -5)):
+            with self.subTest(cap=cap, tail=tail), self.assertRaisesRegex(ValueError, '^cap must be >= 0 and tail >= 1'):
+                bounded.run(py('print(1)'), timeout=5, cap=cap, tail=tail)
+
+    def test_zero_head_keeps_only_the_tail(self):
+        r = bounded.run(py('import sys; sys.stdout.write("abcdef")'), timeout=30, cap=0, tail=3)
+        self.assertEqual((r.stdout, r.truncated), (bounded.MARK + b'def', True))
+
+    def test_a_failed_read_marks_the_capture_truncated(self):
+        # #817 AI review: a read error part-way must not pass for a complete capture.
+        class Broken:
+            calls = 0
+
+            def read1(self, n):
+                Broken.calls += 1
+                if Broken.calls == 1:
+                    return b'partial'
+                raise OSError(5, 'Input/output error')
+
+            def close(self):
+                pass
+        d = bounded._Drain(Broken(), 100, 10)
+        d._run()
+        self.assertEqual((bytes(d.head), d.dropped), (b'partial', True))
+
     def test_check_raises_on_failure(self):
         with self.assertRaises(subprocess.CalledProcessError) as cm:
             bounded.run(py('import sys; sys.exit(2)'), timeout=30, check=True)
