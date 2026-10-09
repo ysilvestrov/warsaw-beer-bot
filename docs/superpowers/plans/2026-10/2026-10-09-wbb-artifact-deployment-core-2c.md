@@ -18,7 +18,20 @@ Production activation, як і раніше, заборонена до кінц�
 
 ### Наскрізне рев'ю Ядра-2б (2026-10-09)
 
-_Заповнюється з висновків рев'ю перед стартом Task 1._
+Рев'ю (окремий агент, лише читання, 2026-10-09) перечитало `deploy/release/*` проти спеки §2, §4–§6, §10a з питанням «на що 2в не може спертися». Кожну знахідку звірено з кодом; дві — живою пробою.
+
+**Блокери для 2в** — усі про одне правило §5: `LAST_FAILED_SHA` лише для поганого кандидата, ніколи для збою хоста.
+- **B1.** Exit 1 означає водночас «кандидат поганий», `Refused` (немає receipt, тека недоступна), будь-який неперехоплений виняток (traceback Python — теж 1) і збій `sudo`. Неперехоплені: `pwd.getpwnam` без користувача `wbb-trial`, `mkdtemp`/`chown` scratch (немає теки, ENOSPC), `os.chown` після копії знімка, `mkdtemp` аудиту, EIO у `verify_release`. Сценарій: забули створити `wbb-trial` → traceback → контролер записав би добрий SHA як failed.
+- **B2.** `trial._outcome`: unit, який systemd створив, але процес не стартував (`226/NAMESPACE` — саме це бачила перша проба G2; `217/USER`, `200/CHDIR`, `203/EXEC`, результат `resources`), або Node без доступу до `payload-probe.cjs` — дає `failed`, бо рядка `PROBE` нема. Це збій налаштування хоста.
+- **B3.** Identity Node (`Step.node`) не виходить із CLI, а контролер (`ysi`) мусить звірити її перед stop/start (спека §4).
+
+**Should-fix:** S1 — два unit-и `wbb-trial` можуть жити одночасно (unconfirmed → `transient` → наступний tick запускає новий), а межа G3 тримається лише поки під `wbb-trial` нічого іншого не працює; S2 — `--snapshot` приймає довільний абсолютний шлях, який читає root, а `.sha256` відкривається окремим `open` (підміна батьківського symlink між читаннями); S3 — stdout аудиту багаторядковий (`advisory`, хвіст stderr npm); S4 — гейт під root падає в `test_host_audit` (temp-root supervisor-а `0700`, uid 65534 не проходить).
+
+**Notes, що беремо в Task 0:** N1 — `Finished with result:` береться першим збігом, а через `--pipe` кандидат пише в той самий потік: брати останній; N2 — виняток, крім `OSError`/`TimeoutExpired`, оминає `confirm_stopped`, і `finally` прибирає scratch живого unit; N4 — тести не ловлять видалення другого `verify_release` у trial і мапу `ok→0`/`failed→1` у CLI; N5 — `TRIAL OK` приймає `after = null`, `after < before` і БД, новішу за кандидата; N9 — sandbox запускає `/usr/bin/node` за шляхом, а identity рахувалась за `realpath`.
+
+**Notes, що йдуть далі:** N3 (диск у sandbox не обмежений) і N6 (CLEAN аудиту не доводить покриття lockfile) — записуються як межі рядків §10a в Task 0; N7 (аудит до виконання — інваріант контролера, root не може довіряти результату оператора) і N8 (дешевий ре-арм для `timeout`/`oom-kill`, які залежать від хоста) — у план обв'язки 2в.
+
+Інтерфейси, на які 2в спирається (після Task 0): `verify` — `VERIFIED <sha>: tree <hex> …`, і `tree` = digest, який друкує `audit`; `publish` — `ACCEPTED|ALREADY-ACCEPTED`; `probe`/`trial` — один рядок; перевірка дерева в `verify_release` точна (власник, mode, без зайвого й без hardlink-ів).
 
 ### Проба засновків (2026-10-09, до плану)
 
@@ -64,6 +77,23 @@ _Заповнюється з висновків рев'ю перед старт�
 - Тести: `npm test -- <args>`; повний гейт кожної задачі — `npm test && npm run typecheck`. Python-тести — `deploy/release/test_*.py`, кожен новий файл додається в `scripts/deploy-rsync.test.ts`. Правила тестів CLAUDE.md діють; crash-тести перевіряють **стан світу** (процес, pointer, файли БД), а не лише state-файл.
 
 ---
+
+### Task 0: дефекти з рев'ю 2б — вердикт, якому може вірити контролер
+
+**Files:** modify `deploy/release/wbb_release.py`, `trial.py`, `sandbox.py`, `host_audit.py`, `payload-probe.cjs`, їхні тести, `test_host_audit.py` (S4); `spec.md` §5.9 (коди виходу); спека §10a (межі N3, N5, N6).
+
+- [ ] **Коди виходу** `wbb_release.py` (B1): `0` ok, `1` **лише** кандидат поганий і лише разом із рядком `… FAILED`/`AUDIT ADVISORY`, `2` refused (вхід чи передумова — не вердикт), `64` usage, `70` внутрішня помилка (верхній `except Exception`, traceback у stderr), `75` transient. `OSError` у підготовці (scratch, `getpwnam`, `chown`, `mkdtemp` аудиту) → `transient`. Контролер 2в пише failed SHA лише за `1` **і** рядком вердикту.
+- [ ] **B2:** без рядка `PROBE` і з `result=exit-code`, кодом 200–243, або `result=resources` → `transient` («unit не стартував»). Тест: `exit-code`/226/порожній stdout → transient; `exit-code`/1/без рядка → failed (Node стартував і впав).
+- [ ] **N1:** `Finished with result:` — останній збіг. Тест: кандидат друкує фальшивий рядок перед справжнім.
+- [ ] **N2:** `confirm_stopped` у `finally` `run_sandboxed`; `KeyboardInterrupt` під час очікування → scratch лишається, якщо зупинку не підтверджено.
+- [ ] **B3 + N9:** sandbox запускає `ident.realpath`; рядок `PROBE|TRIAL <KIND> <sha>: <detail>` + другий фіксований рядок `NODE <realpath> <sha256> <version> <modules>`, коли identity відома.
+- [ ] **S1:** перед запуском — `systemctl list-units --all --plain --no-legend 'wbb-trial-*'`; будь-який unit → `transient` без запуску. Невдача `list-units` → `transient`.
+- [ ] **S2:** `--snapshot <ім'я>` (не шлях): `^[0-9A-Za-z][0-9A-Za-z._-]*-pre\.db$`; корінь — константа `SNAPSHOT_ROOT = /var/lib/warsaw-beer-bot/deploy-snapshots`; знімок і `.sha256` відкриваються через `dir_fd` кореня з `O_NOFOLLOW`; корінь — `O_DIRECTORY|O_NOFOLLOW`.
+- [ ] **S3:** `audit` — перший рядок лише `AUDIT <KIND> <sha> tree <hex>`; деталі — з наступного рядка.
+- [ ] **N5:** `payload-probe.cjs migrate` друкує також найбільшу версію, яку знає кандидат (`schema <before> -> <after> (knows <max>)`); trial — `failed`, якщо `after` null, `after < before` або `before > max`.
+- [ ] **N4:** тести CLI на `ok→0`, `failed→1` для probe і trial; тест, що trial перевіряє дерево вдруге після копії знімка (дерево змінюється між копією й запуском → refused).
+- [ ] **S4:** тест cross-uid створює ланцюжок тек, прохідний для 65534 (власна тека `0755` під `/tmp`, яку тест і прибирає).
+- [ ] Спека §10a: межі «TRIAL OK» (рядок результату друкує процес кандидата — захист від поломки, не від зловмисного коду), «Host audit PASS» (CLEAN не доводить, що lockfile щось покриває), «Sandbox isolation» (диск scratch не обмежений квотою — N3).
 
 ### Task 1: `deploy_state.py` — versioned state v2
 
