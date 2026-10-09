@@ -430,6 +430,14 @@ The tools live in `deploy/release/` (Python 3.12+ stdlib):
   tree, then runs the read-only payload with an empty environment (SQLite, migrations
   twice, fest-print assets, every ops command loads, `dist/index.js` reaches `loadEnv`).
 
+Host side, stage Ядро-2а (code only; nothing is installed on the host yet):
+
+- `github_trust.py` — which CI run and artifact may stand for a SHA (trusted run metadata,
+  same-attempt `package`/`ci`, run-scoped artifact with a `digest`); token only to api.github.com.
+- `zip_admission.py` — ZIP sha256 equals the trusted digest; exactly the two files; streamed sizes.
+- `publish.py` / `wbb_release.py publish|verify` — private copy, checks, `releases/<sha>` by one
+  rename, then the 0600 receipt; `verify` re-checks a tree against its receipt without network.
+
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
 ```bash
