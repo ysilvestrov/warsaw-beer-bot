@@ -521,6 +521,31 @@ class Resume(Engine):
         self.assertEqual((out.kind, out.reason, self.store.load().settled),
                          ('unverified', 'no sample for 31 s (over 30 s)', OLD_SETTLED))
 
+    def test_a_clock_stepped_back_is_unverified_without_a_sleep(self):
+        # 2в e2e review Ф2: in startup, with the candidate not healthy yet; before, the next probe waited
+        # for `due` — a sleep as long as the step — and the window went on over broken timestamps.
+        self.world.healthy = lambda sha, age: False
+        self.run_until('observing')
+        for _ in range(3):
+            activate.step(self.store, self.host)
+        self.assertEqual(self.store.load().observe.last_sample_at, T0 + 4)
+        self.world.now -= 300
+        calls = len(self.world.health_calls)
+        out = activate.resume(self.store, self.host)
+        s = self.store.load()
+        why = 'the clock went back 300 s behind the last sample'
+        self.assertEqual((out.kind, out.reason, s.phase, s.unverified, s.last_failed_sha),
+                         ('unverified', why, 'unverified', Unverified(CAND, why, self.pre), None))
+        self.assertEqual((self.world.now, len(self.world.health_calls), self.world.running), (T0 + 4 - 300, calls, CAND))
+
+    def test_the_same_time_as_the_last_sample_is_not_a_step_back(self):
+        # The boundary: a sample at the very time of the last one waits for its pause, as always.
+        self.run_until('observing')
+        activate.step(self.store, self.host)
+        self.assertEqual(self.store.load().observe.last_sample_at, T0)
+        self.assertEqual((activate.step(self.store, self.host).kind, self.store.load().observe.last_sample_at),
+                         ('continue', T0 + 10))
+
     def test_a_gap_of_exactly_30_s_continues_the_window(self):
         self.run_until('observing')
         for _ in range(3):
