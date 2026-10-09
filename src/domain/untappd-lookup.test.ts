@@ -2336,6 +2336,7 @@ describe('#665 Czech grade lookup context', () => {
       const out = await lookupBeer({
         brewery: 'Chyliczki',
         name: 'Cydr Chyliczki - Japoński Sad',
+        abv: 7.2,
         search,
       });
       expect(out.kind).toBe('matched');
@@ -2358,6 +2359,19 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.result.bid).toBe(825830);
     });
 
+    test('rejects Cydr polski Brewery candidate from an unrelated cider producer (#485)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 9999999, beer_name: 'Dzik', brewery_name: 'Cydr Smykan', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.3, rating_count: 500 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Cydr polski Brewery',
+        name: 'DZIK',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
+    });
+
     test('matches Magick road Brewery / Cherry & dark grapes to Magic Road Fufty / Fifty - Cherry & Dark Grapes via curated alias (#814)', async () => {
       const search = fakeSearch(() => [
         { bid: 6919376, beer_name: 'Fufty / Fifty - Cherry & Dark Grapes', brewery_name: 'Magic Road', style: 'Sour - Smoothie / Pastry', abv: 4.2, global_rating: 3.9, rating_count: 100 },
@@ -2371,6 +2385,19 @@ describe('#665 Czech grade lookup context', () => {
       expect(out.kind).toBe('matched');
       assert(out.kind === 'matched');
       expect(out.result.bid).toBe(6919376);
+    });
+
+    test('rejects Magick road Brewery candidate from an unrelated brewery (e.g. Magic Rock) (#814)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 8888888, beer_name: 'Cherry & dark grapes', brewery_name: 'Magic Rock Brewing', style: 'Sour - Other', abv: 4.2, global_rating: 3.9, rating_count: 100 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Magick road Brewery',
+        name: 'Cherry & dark grapes',
+        abv: 4.2,
+        search,
+      });
+      expect(out.kind).toBe('not_found');
     });
 
     test('matches Maddriver Brewery / Vermont IPA 7,5° to Mad Driver Bezalkoholowe Vermont IPA via curated alias (#814)', async () => {
