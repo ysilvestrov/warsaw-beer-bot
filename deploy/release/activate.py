@@ -485,6 +485,21 @@ def _held(s):
     return s.unverified.reason if s.phase == 'unverified' else s.evidence[-1]['result']
 
 
+def _pointer_refused(store, host, s, boot, e):
+    """`current` is not a pointer publish understands (2в e2e review, item 4): nobody can say what starts.
+
+    Before `start` the candidate has not run: the no-DB abort (no verdict) — whose switch back then
+    refuses too, honestly, rather than start something unknown. At `start` the candidate may have run:
+    as with a moved `current`, an operator decides. In a rollback: recovery-failed, evidence kept.
+    """
+    why = f'current: {e}'
+    if s.phase == 'activating' and s.intent in ('stop', 'switch'):
+        return _abort(store, s, boot, host.now(), why)
+    if s.phase == 'rolling-back':
+        return _failed(store, s, boot, host.now(), s.intent, why)
+    return Outcome('blocked', s, f'{s.phase}/{s.intent}: {why}')
+
+
 def step(store, host):
     """Do the current intent once and persist what follows; see Outcome for the kinds."""
     s = store.load()
@@ -494,11 +509,15 @@ def step(store, host):
         return Outcome(s.phase, s, _held(s))
     try:
         boot = host.boot_id()
-        if s.phase == 'activating':
-            booted = _booted_onto_candidate(store, host, s, boot)
-            if booted is not None:
-                return booted
-        return _STEPS[(s.phase, s.intent)](store, host, s, boot)
+        try:
+            if s.phase == 'activating':
+                booted = _booted_onto_candidate(store, host, s, boot)
+                if booted is not None:
+                    return booted
+            return _STEPS[(s.phase, s.intent)](store, host, s, boot)
+        except Refused as e:
+            # Every other refusal is handled where it is raised; this is `current()` (publish.current_sha).
+            return _pointer_refused(store, host, s, boot, e)
     except HostError as e:
         # The clock, the boot id or a sleep failed: nothing was judged, the next tick repeats.
         return Outcome('blocked', s, f'{s.phase}/{s.intent}: {e}')
@@ -534,6 +553,9 @@ def resume(store, host):
         cur, h = host.current(), _health(host)
     except HostError as e:
         return _blocked(s, 'resume', e)
+    except Refused as e:
+        # 2в e2e review, item 4: a pointer nobody understands is drift too — reported, nothing done.
+        return Outcome('drift', s, f'settled is {_short(s.settled.sha)}, current: {e}')
     if cur != s.settled.sha or h.release_sha != s.settled.sha:
         return Outcome('drift', s, f'settled is {_short(s.settled.sha)}, current is {_short(cur)}, '
                                    f'the running process says {_short(h.release_sha)}')
