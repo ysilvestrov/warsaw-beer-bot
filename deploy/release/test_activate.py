@@ -459,27 +459,26 @@ class Resume(Engine):
                          ('switch', CAND, self.migrated()))
 
     def test_a_candidate_a_reboot_started_is_never_aborted_without_the_database(self):
-        # 2v review: the switch is repeated after the boot and refused (the tree no longer verifies).
-        # Before, that was the no-DB abort — the old code then ran on the candidate's writes.
+        # 2v review: repeating the switch after the boot could be refused (the tree no longer
+        # verifies) — the no-DB abort, old code on the candidate's writes. The step goes on to `start`.
         self.switched_then_rebooted()
         self.world.accepted = {OLD}
         out = activate.resume(self.store, self.host)
         s = self.store.load()
-        self.assertEqual((out.kind, s.settled, s.last_failed_sha, self.whats()),
-                         ('rolled-back', OLD_SETTLED, CAND, ['begin', 'stop', 'rollback', 'stop-writers', 'save-post',
-                                                             'restore-pre', 'switch-previous', 'rolled-back']))
-        post = {name: pathlib.Path(self._tmp.name, POST_DIR_NAME, name).read_bytes() for name in ('bot.db', 'bot.db-wal')}
-        self.assertEqual((self.world.db_files(), post, self.world.running, self.world.violations),
-                         ({'': PRE_DB}, {'bot.db': self.migrated()[''], 'bot.db-wal': self.migrated()['-wal']}, OLD, []))
+        self.assertEqual((out.kind, s.settled.sha, s.last_failed_sha, self.whats()[:5]),
+                         ('settled', CAND, None, ['begin', 'stop', 'rebooted', 'start', 'healthy']))
+        # Not restarted: the process the boot started is the one watched; its writes stay.
+        self.assertEqual((self.world.starts, self.world.db_files(), self.world.posts, self.world.restores,
+                          self.world.violations), ([(CAND, T0 + 5)], self.migrated(), [], [], []))
 
-    def test_a_reboot_before_the_switch_is_not_a_rollback(self):
+    def test_a_reboot_before_the_switch_is_not_a_started_candidate(self):
         # The boundary of the rule: `current` still on the old release, so the boot started that one.
         self.begin()
         activate.step(self.store, self.host)
         self.world.reboot()
         out = activate.resume(self.store, self.host)
-        self.assertEqual((out.kind, 'rollback' in self.whats(), self.world.starts[-1][0], self.world.db_files()),
-                         ('settled', False, CAND, self.migrated()))
+        self.assertEqual((out.kind, 'rebooted' in self.whats(), self.world.starts, self.world.db_files()),
+                         ('settled', False, [(OLD, T0 + 5), (CAND, T0 + 5)], self.migrated()))
 
     def test_a_dead_start_is_finished_by_the_next_tick(self):
         self.begin()

@@ -177,10 +177,9 @@ class CrashMatrix(unittest.TestCase):
                 self.assertEqual((world.running, world.current, world.db_files(), world.violations),
                                  (CAND, CAND, migrated(world), []))
 
-    def test_a_reboot_after_the_switch_rolls_back_code_and_database(self):
-        # 2v review: `current` is on the candidate and the start not yet observed; the reboot starts
-        # the enabled unit from `current` — the candidate, which writes. The no-DB abort would keep
-        # those writes under the old code; the next tick must restore pre and keep them in post.
+    def reboot_after_the_switch(self, healthy, check):
+        """Each crash point from the switch to the window's first save, then a reboot that starts the
+        enabled unit from `current` — the candidate, which writes — then the next tick; check(out, state, world)."""
         with mock.patch('os.fsync'):
             points = self.points('success')
             first, last = points.index('switch after'), points.index('save observing/None before')
@@ -188,21 +187,40 @@ class CrashMatrix(unittest.TestCase):
             for i in range(first, last + 1):
                 with self.subTest(point=f'reboot {i + 1}/{n}: {points[i]}'):
                     world, store, host, pre = self.world('success', Faults(i))
+                    world.healthy = healthy
                     with self.assertRaises(Crash):
                         tick(store, host, pre)
                     world.reboot()
                     self.assertEqual((world.running, world.db_files()), (CAND, migrated(world)))
                     store = store.reopened()
                     out = tick(store, FakeHost(world), pre)
-                    s = store.load()
-                    rollbacks = [e['result'] for e in s.evidence if e['what'] == 'rollback']
-                    self.assertEqual((out.kind, s.phase, s.settled, s.last_failed_sha, rollbacks),
-                                     ('rolled-back', 'settled', OLD_SETTLED, CAND,
-                                      [f'reboot while activating (boot {BOOT_A} -> {BOOT_B}) with current on ccccccc: '
-                                       'the boot may have started it unobserved']))
-                    self.assertEqual((world.bot, world.running, world.current, world.litestream, world.violations),
-                                     ('active', OLD, OLD, 'active', []))
-                    self.assertEqual((world.db_files(), post_files(world)), (pre_db(world), migrated_post(world)))
+                    check(out, store.load(), world)
+
+    def rebooted(self, s):
+        return [e['result'] for e in s.evidence if e['what'] == 'rebooted']
+
+    def test_a_reboot_after_the_switch_goes_on_to_the_candidates_window(self):
+        # 2v review: the boot may have started the candidate; §10b "start may already have happened":
+        # no restart, its own window decides — never the no-DB abort, never a verdict for the reboot.
+        def check(out, s, world):
+            self.assertEqual((out.kind, s.phase, s.settled, s.last_failed_sha, self.rebooted(s)),
+                             ('settled', 'settled', Settled(CAND, '1' * 64, T0 + 605), None,
+                              [f'boot {BOOT_A} -> {BOOT_B} with current on ccccccc: the candidate may already run']))
+            self.assertEqual((world.bot, world.running, world.current, world.litestream, world.violations,
+                              world.starts[-1], world.db_files(), post_files(world)),
+                             ('active', CAND, CAND, 'active', [], (CAND, T0 + 5), migrated(world), None))
+        self.reboot_after_the_switch(lambda sha, age: True, check)
+
+    def test_a_reboot_after_the_switch_then_a_failed_window_rolls_back_code_and_database(self):
+        def check(out, s, world):
+            self.assertEqual((out.kind, s.phase, s.settled, s.last_failed_sha, len(self.rebooted(s))),
+                             ('rolled-back', 'settled', OLD_SETTLED, CAND, 1))
+            self.assertEqual((world.bot, world.running, world.current, world.litestream, world.violations,
+                              world.starts[-2:]),
+                             ('active', OLD, OLD, 'active', [], [(CAND, T0 + 5), (OLD, T0 + 125)]))
+            # The boot-time writes are kept in post; the DB is pre again.
+            self.assertEqual((world.db_files(), post_files(world)), (pre_db(world), migrated_post(world)))
+        self.reboot_after_the_switch(lambda sha, age: sha == OLD, check)
 
     def test_success(self):
         self.check('success')
