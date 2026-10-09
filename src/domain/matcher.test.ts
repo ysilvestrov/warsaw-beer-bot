@@ -1198,6 +1198,13 @@ describe('Curated brewery alias matching for cider makers and spelling variants 
     expect(breweryAliasesMatch(breweryAliases('Maddriver Brewery'), breweryAliases('Mad Driver'))).toBe(true);
   });
 
+  test('rejects unrelated breweries without curated aliases', () => {
+    expect(breweryAliasesMatch(breweryAliases('Cydr polski Brewery'), breweryAliases('Cydr Smykan'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Magick road Brewery'), breweryAliases('Magic Rock'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Chyliczki'), breweryAliases('Cydrownia'))).toBe(false);
+    expect(breweryAliasesMatch(breweryAliases('Maddriver Brewery'), breweryAliases('Mad Monk'))).toBe(false);
+  });
+
   test('matches catalog beers under curated aliases', () => {
     const cat: CatalogBeer[] = [
       c({ id: 101, brewery: 'Cydr Chyliczki', name: 'Japoński Sad' }),
@@ -1213,6 +1220,16 @@ describe('Curated brewery alias matching for cider makers and spelling variants 
       .toMatchObject({ id: 103, source: 'exact' });
     expect(matchBeer({ brewery: 'Maddriver Brewery', name: 'Vermont IPA' }, cat))
       .toMatchObject({ id: 104, source: 'exact' });
+  });
+
+  test('resolves vintage ABV tiebreak for catalog matching under curated alias (#485)', () => {
+    const cat: CatalogBeer[] = [
+      c({ id: 101, brewery: 'Cydr Chyliczki', name: 'Japoński Sad', abv: 7.0 }),
+      c({ id: 102, brewery: 'Cydr Chyliczki', name: 'Japoński Sad', abv: 8.5 }),
+    ];
+    // 7.2% selects 101 (delta 0.2 <= 0.3) over 102 (delta 1.3)
+    expect(matchBeer({ brewery: 'Chyliczki', name: 'Japoński Sad', abv: 7.2 }, cat))
+      .toMatchObject({ id: 101, source: 'exact' });
   });
 });
 
