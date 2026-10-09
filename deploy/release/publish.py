@@ -236,10 +236,13 @@ def switch(sha, roots):
     this does not understand (a directory, a foreign target) is refused, never replaced.
     """
     verify_release(sha, roots)
-    if current_sha(roots) == sha:
-        return 'current'
     path = current_path(roots)
     parent = os.path.dirname(path)
+    if current_sha(roots) == sha:
+        # 2v review: an attempt that renamed and died before its fsync left the rename not yet
+        # durable; the no-op retry makes it so before it answers 'current'.
+        fsync_dir(parent)
+        return 'current'
     tmp = os.path.join(parent, f'current.tmp-{secrets.token_hex(8)}')
     os.symlink(os.path.join(os.path.basename(roots.releases), sha), tmp)
     try:

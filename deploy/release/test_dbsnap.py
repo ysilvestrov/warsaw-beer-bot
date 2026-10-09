@@ -65,6 +65,16 @@ class Tmp(unittest.TestCase):
         finally:
             db.close()
 
+    def fsynced(self, fn, *args):
+        """(fn's result, inode numbers of everything fsynced while it ran)."""
+        seen, real = [], os.fsync
+
+        def spy(fd):
+            seen.append(os.fstat(fd).st_ino)
+            return real(fd)
+        with mock.patch.object(os, 'fsync', spy):
+            return fn(*args), seen
+
     def files(self, directory):
         return {n: read(os.path.join(directory, n)) for n in sorted(os.listdir(directory))}
 
@@ -103,6 +113,12 @@ class Post(Tmp):
         self.crashed_writer('b')  # the live db moves on; the post must not follow it
         self.assertEqual(dbsnap.post(self.db, self.out), first)
         self.assertEqual((self.stamps(self.out), self.files(self.out)), (stamps, content))
+
+    def test_a_repeat_makes_the_rename_durable(self):
+        # 2v review: the attempt that renamed may have died before its fsync of the parent.
+        self.crashed_writer('a')
+        first = dbsnap.post(self.db, self.out)
+        self.assertEqual(self.fsynced(dbsnap.post, self.db, self.out), (first, [os.stat(self.dir).st_ino]))
 
     def test_a_partial_left_by_a_crash_is_thrown_away(self):
         os.makedirs(self.out + '.partial/nested')
@@ -243,6 +259,12 @@ class Restore(Tmp):
         self.assertEqual(dbsnap.restore(self.pre, self.db, self.out), 'already')
         self.assertEqual(self.stamps(self.dir)['bot.db'], stamp)
 
+    def test_a_repeat_makes_the_replace_durable(self):
+        # 2v review: the attempt that replaced the db may have died before its fsync of the directory.
+        self.scenario()
+        dbsnap.restore(self.pre, self.db, self.out)
+        self.assertEqual(self.fsynced(dbsnap.restore, self.pre, self.db, self.out), ('already', [os.stat(self.dir).st_ino]))
+
     def test_a_db_equal_to_pre_but_with_a_wal_is_still_restored(self):
         self.scenario()
         write(self.db, read(self.pre))
@@ -261,6 +283,14 @@ class Restore(Tmp):
         self.assertEqual(dbsnap.restore(self.pre, self.db, self.out), 'restored')
         self.assertEqual(sorted(os.listdir(self.dir)), ['bot.db', 'x-post', 'x-pre.db', 'x-pre.db.sha256'])
         self.assertEqual(self.rows(), ['a', 'b'])
+
+    def test_a_copy_of_pre_that_fails_leaves_the_db_and_its_wal(self):
+        # 2v review: the WAL was dropped before the copy existed; a full disk then left the db without it.
+        live = self.scenario()
+        with mock.patch.object(dbsnap, '_copy', side_effect=OSError(28, 'No space left on device')):
+            with self.assertRaises(OSError):
+                dbsnap.restore(self.pre, self.db, self.out)
+        self.assertEqual({n: read(os.path.join(self.dir, n)) for n in sorted(os.listdir(self.dir)) if n in live}, live)
 
     def test_a_missing_db_is_restored(self):
         self.scenario()

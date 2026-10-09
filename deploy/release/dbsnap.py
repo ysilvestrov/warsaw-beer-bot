@@ -14,7 +14,7 @@ Replaces `db-snapshot.sh post|restore` for the rollback engine (plan 2v, premise
   rewritten.
 - restore: the shell version replaced the database and only then removed -wal/-shm; a
   crash in between left pre next to the post-state WAL, which SQLite replays on open.
-  Here the WAL/SHM go first.
+  Here the WAL/SHM go before the replace, once the copy of pre is complete and durable.
 The `pre` snapshot and its `.sha256` sidecar are what `db-snapshot.sh snapshot` writes.
 
 The writers (bot, Litestream) must be stopped before either runs; that is the engine's
@@ -151,7 +151,10 @@ def post(db, out_dir):
     a crash past the rename); one that is not is refused, never rewritten.
     """
     if os.path.lexists(out_dir):
-        return read_post(out_dir, db)
+        manifest = read_post(out_dir, db)
+        # 2v review: the attempt that renamed it may have died before the fsync of the parent.
+        fsync_dir(os.path.dirname(os.path.abspath(out_dir)))
+        return manifest
     if not os.path.isfile(db):
         raise Refused(f'no database at {db}')
     partial = out_dir + '.partial'
@@ -213,16 +216,13 @@ def restore(pre, db, post_dir):
     if got != want:
         raise Refused(f'checksum mismatch for {pre}: want {want}, got {got}')
     side = [db + s for s in SUFFIXES[1:] if os.path.lexists(db + s)]
-    if not side and _digest_or_none(db) == want:
-        return 'already'
     directory = os.path.dirname(os.path.abspath(db))
-    # The WAL/SHM go BEFORE the database is replaced. They belong to the post-state db (and
-    # are kept in the complete post): left next to the restored pre, SQLite would replay
-    # that WAL onto pre on the next open. Crashing after this point leaves the post-state
-    # db without its WAL — nobody runs on it (writers are stopped) and the retry restores.
-    for path in side:
-        os.unlink(path)
-    fsync_dir(directory)
+    if not side and _digest_or_none(db) == want:
+        # 2v review: the attempt that replaced it may have died before the fsync of the directory.
+        fsync_dir(directory)
+        return 'already'
+    # pre is copied (fsynced, its sha checked) BEFORE anything live is touched (2v review): a
+    # copy that fails (ENOSPC, EIO) leaves the post-state db with its WAL, as it was.
     tmp = db + '.restore-partial'
     _remove(tmp)
     try:
@@ -233,6 +233,13 @@ def restore(pre, db, post_dir):
     if copied != want:
         os.unlink(tmp)
         raise Refused(f'{pre} changed while it was copied: {copied}, want {want}')
+    # The WAL/SHM go BEFORE the database is replaced. They belong to the post-state db (and
+    # are kept in the complete post): left next to the restored pre, SQLite would replay
+    # that WAL onto pre on the next open. Crashing after this point leaves the post-state
+    # db without its WAL — nobody runs on it (writers are stopped) and the retry restores.
+    for path in side:
+        os.unlink(path)
+    fsync_dir(directory)
     os.replace(tmp, db)
     fsync_dir(directory)
     return 'restored'
