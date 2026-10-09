@@ -1,0 +1,225 @@
+"""Publish a trusted runtime artifact as an immutable release tree with a receipt (host, root).
+
+Spec: docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md §2, §4
+("Publication TOCTOU boundary"), §10a, §10b row prepared/publish.
+Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2a.md, Task 3.
+
+Every check runs on bytes this process copied into its own private scratch: the
+operator's download is opened once, without following a final symlink, and copied
+with a bounded read; after that the operator can change their file all they like.
+The tree becomes releases/<sha> by one rename, and only then does the receipt
+appear, written atomically. A release tree without a receipt is never activated;
+the next publish re-verifies it in full before writing the receipt. Nothing from
+the payload is executed here.
+"""
+import errno
+import hashlib
+import json
+import os
+import shutil
+import stat
+import sys
+import tempfile
+import time
+from dataclasses import dataclass
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import tree_manifest as tm  # noqa: E402
+from github_trust import SHA  # noqa: E402
+from safe_tar import Refused, extract  # noqa: E402
+from zip_admission import ZipCaps, admit_zip, sha256_file  # noqa: E402
+
+RECEIPT_FORMAT = 1
+RECEIPT_KEYS = ('formatVersion', 'repo', 'sourceSha', 'runId', 'runAttempt', 'artifactId',
+                'zipSha256', 'tarSha256', 'treeSha256', 'acceptedAt')
+
+
+@dataclass(frozen=True)
+class Roots:
+    releases: str
+    receipts: str
+    scratch: str
+
+
+def _utc_now():
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+
+
+def copy_operator_archive(src, dest, cap):
+    """Copy src (a regular file, final component not a symlink) into dest (new, 0600), at most cap bytes."""
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NOCTTY | os.O_NONBLOCK)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise Refused(f'{src}: is a symlink') from None
+        raise Refused(f'{src}: cannot open ({e.strerror})') from None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise Refused(f'{src}: not a regular file')
+    with os.fdopen(fd, 'rb') as f:
+        out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(out_fd, 'wb') as out:
+            total = 0
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > cap:
+                    raise Refused(f'{src}: over {cap} bytes')
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+
+
+def check_identity(payload, trusted):
+    """release.json must name exactly the trusted repo, SHA, workflow, run and attempt."""
+    with open(os.path.join(payload, 'release.json'), encoding='utf-8') as f:
+        rel = json.load(f)
+    want = {'formatVersion': 1, 'repo': trusted.repo, 'sourceSha': trusted.sha, 'workflow': trusted.workflow,
+            'runId': trusted.run_id, 'runAttempt': trusted.run_attempt}
+    bad = [f'{k}={rel.get(k)!r}' for k, v in want.items() if rel.get(k) != v or type(rel.get(k)) is not type(v)]
+    if bad:
+        raise Refused(f'release.json does not match the trusted run: {", ".join(bad)}')
+
+
+def normalize(tree, manifest):
+    """Modes exactly as the manifest says; as root, everything owned by root."""
+    as_root = os.geteuid() == 0
+    for e in manifest['entries']:
+        path = os.path.join(tree, e['path'])
+        if as_root:
+            os.lchown(path, 0, 0)
+        if e['type'] != 'symlink':
+            os.chmod(path, e['mode'])
+    if as_root:
+        os.chown(tree, 0, 0)
+    os.chmod(tree, tm.DIR_MODE)
+
+
+def _fsync_dir(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def write_receipt(path, receipt):
+    directory = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix='.receipt-')
+    try:
+        with os.fdopen(fd, 'wb') as f:
+            os.fchmod(f.fileno(), 0o600)
+            f.write(tm.canonical_bytes(receipt))
+            f.flush()
+            os.fsync(f.fileno())
+        os.rename(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+    _fsync_dir(directory)
+
+
+def read_receipt(path):
+    """The receipt at path, None if absent; a malformed one is a refusal, never a blank slate."""
+    try:
+        with open(path, 'rb') as f:
+            data = f.read(64 * 1024)
+    except FileNotFoundError:
+        return None
+    try:
+        receipt = json.loads(data)
+    except ValueError:
+        raise Refused(f'{path}: not JSON') from None
+    if not isinstance(receipt, dict) or tuple(sorted(receipt)) != tuple(sorted(RECEIPT_KEYS)) \
+            or receipt['formatVersion'] != RECEIPT_FORMAT:
+        raise Refused(f'{path}: not a version-{RECEIPT_FORMAT} receipt')
+    return receipt
+
+
+def _paths(sha, roots):
+    if not isinstance(sha, str) or not SHA.fullmatch(sha):
+        raise Refused(f'not a full lowercase SHA: {sha!r}')
+    return os.path.join(roots.releases, sha), os.path.join(roots.receipts, f'{sha}.json')
+
+
+def _manifest_bytes(tree):
+    with open(os.path.join(tree, tm.MANIFEST_NAME), 'rb') as f:
+        return f.read()
+
+
+def verify_release(sha, roots):
+    """releases/<sha> is exactly the tree its receipt accepted. No network. Returns the receipt."""
+    final, receipt_path = _paths(sha, roots)
+    receipt = read_receipt(receipt_path)
+    if receipt is None:
+        raise Refused(f'{sha}: no receipt — not an accepted release')
+    if receipt['sourceSha'] != sha:
+        raise Refused(f'{sha}: receipt names {receipt["sourceSha"]}')
+    try:
+        data = _manifest_bytes(final)
+    except OSError as e:
+        raise Refused(f'{sha}: release tree unreadable ({e.strerror})') from None
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != receipt['treeSha256']:
+        raise Refused(f'{sha}: tree digest {digest} != receipt {receipt["treeSha256"]}')
+    problems = tm.verify_tree(final, data)
+    if problems:
+        raise Refused(f'{sha}: release tree changed:\n' + '\n'.join(problems[:50]))
+    return receipt
+
+
+def publish(trusted, operator_zip, roots, now=_utc_now):
+    """Accept trusted.sha from the operator's ZIP. Returns 'accepted' or 'already-accepted'."""
+    final, receipt_path = _paths(trusted.sha, roots)
+    existing = read_receipt(receipt_path)
+    if os.stat(roots.scratch).st_dev != os.stat(roots.releases).st_dev:
+        raise Refused('scratch and releases are on different filesystems; publication needs one atomic rename')
+    work = tempfile.mkdtemp(dir=roots.scratch, prefix=f'publish-{trusted.sha[:12]}-')
+    try:
+        zip_copy = os.path.join(work, 'artifact.zip')
+        copy_operator_archive(operator_zip, zip_copy, ZipCaps().zip_bytes)
+        tar, tar_sha = admit_zip(zip_copy, trusted.zip_sha256, os.path.join(work, 'zip'))
+        tree = os.path.join(work, 'tree')
+        extract(tar, tree)
+        data = _manifest_bytes(tree)
+        problems = tm.verify_tree(tree, data)
+        if problems:
+            raise Refused('tree does not match tree-manifest.json:\n' + '\n'.join(problems[:50]))
+        check_identity(tree, trusted)
+        tree_sha = hashlib.sha256(data).hexdigest()
+
+        if existing is not None:
+            if (existing['tarSha256'], existing['treeSha256']) != (tar_sha, tree_sha):
+                raise Refused(f'{trusted.sha} was already accepted with tar {existing["tarSha256"]} / tree '
+                              f'{existing["treeSha256"]}; this artifact has tar {tar_sha} / tree {tree_sha}. '
+                              'Explicit operator recovery or a new commit is required.')
+            verify_release(trusted.sha, roots)
+            return 'already-accepted'
+
+        if os.path.lexists(final):
+            # A crash between rename and receipt: accept the tree only if it is exactly these bytes.
+            if not os.path.isdir(final) or os.path.islink(final):
+                raise Refused(f'{final} exists and is not a release directory')
+            try:
+                same = _manifest_bytes(final) == data
+            except OSError:
+                same = False
+            if not same or tm.verify_tree(final, data):
+                raise Refused(f'{final} exists without a receipt and does not match this artifact; operator recovery required')
+        else:
+            manifest = json.loads(data)
+            normalize(tree, manifest)
+            os.rename(tree, final)
+            _fsync_dir(roots.releases)
+
+        write_receipt(receipt_path, {
+            'formatVersion': RECEIPT_FORMAT, 'repo': trusted.repo, 'sourceSha': trusted.sha,
+            'runId': trusted.run_id, 'runAttempt': trusted.run_attempt, 'artifactId': trusted.artifact_id,
+            'zipSha256': trusted.zip_sha256, 'tarSha256': tar_sha, 'treeSha256': tree_sha, 'acceptedAt': now(),
+        })
+        return 'accepted'
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
