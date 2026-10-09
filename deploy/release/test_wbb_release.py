@@ -5,10 +5,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import publish as pub  # noqa: E402
+import sandbox as sb  # noqa: E402
 import wbb_release as cli  # noqa: E402
 from release_testkit import SHA, packed  # noqa: E402
 from zip_admission import sha256_file  # noqa: E402
@@ -137,6 +139,9 @@ class Cli(unittest.TestCase):
 
     def test_probe_transient_is_75(self):
         self.published()
+        patcher = mock.patch.object(sb, 'HIDDEN_BY_PRIVATE_TMP', ())  # this test's scratch is under /tmp
+        patcher.start()
+        self.addCleanup(patcher.stop)
         def runner(argv, **kw):
             if argv[0] == '/usr/bin/systemd-run':
                 raise FileNotFoundError()
@@ -151,6 +156,7 @@ class Cli(unittest.TestCase):
         self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
 
     def test_production_trial_root(self):
+        # Outside /tmp and /var/tmp, which PrivateTmp hides from the unit (gate G2).
         self.assertEqual(cli.TRIAL_ROOT, '/var/lib/wbb-trial')
 
     def test_production_roots_share_one_filesystem_tree(self):

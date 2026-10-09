@@ -67,11 +67,35 @@ def unit_name(kind, sha):
     return f'wbb-trial-{kind}-{sha[:12]}-{secrets.token_hex(4)}'
 
 
+# Gate G2 (VPS, systemd 255): systemd-run rewrites $NAME / ${NAME} in the command line from
+# the environment, silently, and resolves %-specifiers. Every value we splice into the
+# argv or a property is a path or name of our own making, so anything carrying one of
+# those characters (or whitespace) is refused rather than escaped: it was never meant to be there.
+UNSAFE = re.compile(r'[$%\s\\\x00-\x1f\x7f]')
+# Gate G2: PrivateTmp=yes hides /tmp and /var/tmp inside the unit; a scratch under them
+# makes the unit die with 226/NAMESPACE before the probe starts.
+HIDDEN_BY_PRIVATE_TMP = ('/tmp', '/var/tmp')
+
+
+def _check_value(what, value):
+    if not isinstance(value, str) or value == '' or UNSAFE.search(value):
+        raise Refused(f'{what} {value!r} is empty or has a character systemd would rewrite')
+
+
 def sandbox_argv(kind, sha, release, scratch, probe, args, unit, node=NODE):
     if kind not in RUNTIME_MAX_S:
         raise Refused(f'unknown sandbox kind {kind!r}')
     if not SHA.fullmatch(sha) or os.path.basename(release) != sha:
         raise Refused(f'release path {release!r} is not releases/<{sha}>')
+    for what, value in (('release', release), ('scratch', scratch), ('probe', probe), ('node', node), ('unit', unit),
+                        *(('argument', a) for a in args)):
+        _check_value(what, value)
+    for path in (release, scratch, probe, node):
+        if not os.path.isabs(path):
+            raise Refused(f'{path!r} is not an absolute path')
+    norm = os.path.normpath(scratch)
+    if any(norm == d or norm.startswith(d + '/') for d in HIDDEN_BY_PRIVATE_TMP):
+        raise Refused(f'scratch {scratch!r} is under /tmp or /var/tmp, which PrivateTmp hides from the unit')
     props = [
         f'User={TRIAL_USER}', f'Group={TRIAL_USER}',
         'PrivateNetwork=yes', 'ProtectHome=yes', 'NoNewPrivileges=yes', 'ProtectSystem=strict',

@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import publish as pub  # noqa: E402
@@ -47,6 +48,11 @@ class Fake:
 
 class Tmp(unittest.TestCase):
     def setUp(self):
+        # These tests keep their scratch under the test temp dir, which lives in /tmp. A real
+        # unit could not see it (gate G2); that refusal is test_sandbox's to prove, not these.
+        patcher = mock.patch.object(sb, 'HIDDEN_BY_PRIVATE_TMP', ())
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self._tmp = tempfile.TemporaryDirectory()
         base = self._tmp.name
         self.roots = pub.Roots(*(os.path.join(base, d) for d in ('releases', 'receipts', 'scratch')), IDS)

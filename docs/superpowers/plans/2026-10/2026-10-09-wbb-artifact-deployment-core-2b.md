@@ -35,7 +35,7 @@
 | A3. Той самий шлях для user- і global-конфігу | `--userconfig /dev/null --globalconfig /dev/null` | npm відмовляє (`double-loading config "/dev/null"`). Наслідок: два окремі порожні файли |
 | A4. Недоступний registry | `--registry https://127.0.0.1:9/` | exit 1, JSON `{"message": "...ECONNREFUSED...", "error": {...}}`. За правилами `audit-verdict.ts` (#795) це `unrunnable`, а не `clean` |
 | A5. Що аудит бачить у контейнері | без CA bundle проксі | TLS-помилка, бо `env -i` прибирає `NODE_EXTRA_CA_CERTS`. Це артефакт хмарного контейнера: на VPS проксі немає. На хості env аудиту = рівно `PATH` і `HOME`; додаткові змінні передаються лише явним параметром тестів |
-| **G2.** systemd sandbox з властивостями §2 справді ізолює: немає мережі, `/home` і секретів, root FS read-only, scratch writable, capabilities нульові, `RuntimeMaxSec` вбиває всю cgroup разом із нащадком | з контейнера неможливо: тут немає systemd | **ВІДКРИТО — гейт G2.** Проба `probe-trial-sandbox.sh` передана власнику (тимчасові unit-и від `nobody`, без змін на хості). Задачі 3–4 не вважаються завершеними, доки G2 не дав відповіді. Список властивостей у коді звіряється з тим, що G2 показав робочим |
+| **G2.** systemd sandbox з властивостями §2 справді ізолює | `probe-trial-sandbox.sh` на VPS (власник, 2026-10-09; systemd 255.4-1ubuntu8.17, Node 24.21.0/ABI 137), unit-и від `nobody` | **ЗАКРИТО.** Усередині unit 10/10 ok: немає `/etc/warsaw-beer-bot`, `/etc/wbb-deploy`, `/var/lib/warsaw-beer-bot`, `/home`; `/opt` читається й лише на читання; scratch writable; uid 65534; `CapEff=0`; мережі немає. `RuntimeMaxSec=3` вбив unit за 3 с, нащадок `sleep 60` не вижив. Без `--quiet` stderr несе `Finished with result: exit-code` (exit=3, `code=exited/status=3`) і `Finished with result: timeout` (exit=1, `code=killed/status=TERM`); `systemctl show` прибраного unit — `LoadState=not-found`, `ActiveState=inactive`, exit 0. **Дві нові вимоги з проби:** (1) перший запуск упав на `226/NAMESPACE` — scratch лежав у `/tmp`, а `PrivateTmp=yes` ховає `/tmp` і `/var/tmp` усередині unit; (2) systemd-run 255 тихо підставляє `$NAME`/`${NAME}` у рядку команди (назви перевірок у `node -e` стали порожніми). Обидві закріплено в `sandbox_argv`: scratch під `/tmp`/`/var/tmp` і будь-яке значення з `$`, `%`, пробілом чи керівним символом — відмова (не екранування: такі значення ми ніколи не мали передавати). `--expand-environment=no` не перевірено на 255 — на нього не покладаємось |
 
 ## Global Constraints
 
@@ -109,7 +109,7 @@
   - не порожня cgroup → відмова;
   - `systemd-run` відсутній → `Transient`;
   - `migrate <db>` справжнім Node на скопійованій фікстурній БД у Python-тесті (без systemd), включно з БД, що ламає `integrity_check`.
-- [ ] **Гейт G2:** звірити список властивостей з виводом `probe-trial-sandbox.sh`. Розбіжність означає зупинку й правку плану.
+- [x] **Гейт G2:** звірено з виводом `probe-trial-sandbox.sh` (2026-10-09); список властивостей підтверджено, додано дві вимоги (scratch поза `/tmp`/`/var/tmp`, жодного `$`/`%` в argv).
 
 ### Task 4: `trial.py` — оркестрація кроків 2б і CLI
 
