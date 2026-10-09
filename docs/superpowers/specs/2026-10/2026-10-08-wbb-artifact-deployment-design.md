@@ -47,6 +47,8 @@ Controller/state працюють як `ysi`; root-owned fixed helpers відп�
 
 Probe/trial SHALL виконуватися як окремий system user `wbb-trial` (nologin, без sudo, GitHub token чи production config), через fixed systemd sandbox: PrivateNetwork=yes, ProtectHome=yes, NoNewPrivileges=yes, ProtectSystem=strict, PrivateTmp=yes, явні InaccessiblePaths для `/etc/warsaw-beer-bot`, `/etc/wbb-deploy`, production data й operator state. Доступ read-only лише до root-owned candidate та системного runtime; writable — приватна копія trial DB/scratch. Усі capabilities прибрані. Початкові ліміти: MemoryMax=768M, CPUQuota=100%, TasksMax=64; probe <=30s, trial <=120s. Timeout припиняє весь cgroup; перед publication/cleanup підтверджується його порожність. Production secrets не передаються в env/argv/fd.
 
+**Виміряно гейтом G2 (Ядро-2б, VPS, systemd 255):** scratch SHALL лежати поза `/tmp` і `/var/tmp` — `PrivateTmp=yes` ховає їх усередині unit, і той падає з `226/NAMESPACE` до старту процесу. systemd-run тихо підставляє `$NAME`/`${NAME}` зі свого оточення в рядок команди й розгортає `%`-специфікатори, тож жодне значення в argv чи властивостях unit SHALL NOT містити `$`, `%`, пробілів чи керівних символів — такі значення відкидаються, а не екрануються. Результат запуску читається з рядка `Finished with result:` (без `--quiet`), а не лише з коду виходу.
+
 Чинні runtime paths для env/data/media/OAuth не змінюються. Новий code layout:
 
 | Шлях | Вміст і права |
@@ -262,6 +264,7 @@ Installer SHALL перенести legacy flat `/opt/warsaw-beer-bot` в нов�
 | rollback post/pre | Bytes після зупинки / snapshot до activation | Checksum coherent snapshots, stopped writer/replicator evidence, atomic marked receipt; не автоматичний merge writes |
 | legacy byte capture | Захоплені bytes старого дерева | Path/time/tree hashes й operator receipt; **без** заявки відповідності Git SHA |
 | Disk admission PASS | Після фактичного staging є policy reserve | statvfs/allocated-byte вимір під lock на реальній FS; 10 GiB — policy, не емпірична потреба |
+| Sandbox isolation (wbb-trial) | Код кандидата не бачить мережі, секретів і живих даних, не пише поза scratch і не переживає ліміт часу | Гейт G2 (Ядро-2б): ті самі властивості як transient unit на VPS — 10/10 перевірок усередині, вбивство всієї cgroup за `RuntimeMaxSec`; argv/властивості фіксовані в `sandbox_argv`. Межа: перевірено від `nobody`, не від `wbb-trial` (його створює обв'язка) |
 | No host builds observed | У виміряному deployment interval відсутні заборонені execs | Exec-event trace у controller/helper/trial cgroups і їх descendants, тільки exe/time/cgroup; не inference за cache mtimes |
 
 ## 10b. Crash/recovery matrix

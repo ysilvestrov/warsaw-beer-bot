@@ -45,6 +45,22 @@ class Argv(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'is not releases/<'):
             sb.sandbox_argv('probe', SHA, '/opt/warsaw-beer-bot/current', SCRATCH, PROBE, [], UNIT)
 
+    def test_scratch_under_tmp_is_refused(self):
+        # Gate G2: PrivateTmp=yes hid it and the unit died with 226/NAMESPACE.
+        for scratch in ('/tmp/wbb-trial/run-1', '/var/tmp/run-1', '/tmp'):
+            with self.subTest(scratch=scratch), self.assertRaisesRegex(Refused, 'which PrivateTmp hides from the unit$'):
+                sb.sandbox_argv('probe', SHA, RELEASE, scratch, PROBE, ['native'], UNIT)
+
+    def test_values_systemd_would_rewrite_are_refused(self):
+        # Gate G2: systemd-run 255 expanded ${name} in a node -e argument to an empty string.
+        for arg in ('${HOME}/x', '$HOME', '100%', 'a b', 'a\nb'):
+            with self.subTest(arg=arg), self.assertRaisesRegex(Refused, 'has a character systemd would rewrite$'):
+                sb.sandbox_argv('trial', SHA, RELEASE, SCRATCH, PROBE, ['migrate', arg], UNIT)
+
+    def test_relative_path_is_refused(self):
+        with self.assertRaisesRegex(Refused, "^'run-1' is not an absolute path$"):
+            sb.sandbox_argv('probe', SHA, RELEASE, 'run-1', PROBE, ['native'], UNIT)
+
     def test_unit_name(self):
         self.assertRegex(sb.unit_name('trial', SHA), rf'^wbb-trial-trial-{SHA[:12]}-[0-9a-f]{{8}}$')
 
