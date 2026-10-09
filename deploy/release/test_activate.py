@@ -36,7 +36,9 @@ class Engine(unittest.TestCase):
         self._tmp.cleanup()
 
     def begin(self):
-        return activate.begin(self.store, self.host, CAND_REL, self.pre)
+        s = activate.begin(self.store, self.host, CAND_REL, self.pre)
+        self.txn = s.txn
+        return s
 
     def run_engine(self):
         self.begin()
@@ -60,7 +62,10 @@ class Engine(unittest.TestCase):
         return [e['what'] for e in self.store.load().evidence]
 
     def last_event(self):
-        return dict(self.store.load().evidence[-1])
+        """The last evidence event without its txn, which must be this activation's (2в e2e review Ф6)."""
+        e = dict(self.store.load().evidence[-1])
+        self.assertEqual(e.pop('txn'), self.txn)
+        return e
 
 
 class Begin(Engine):
@@ -70,7 +75,8 @@ class Begin(Engine):
                          ('activating', 'stop', CAND_REL, Release(OLD, '2' * 64), self.pre, OLD_SETTLED, BOOT_A))
         self.assertRegex(s.txn, r'^[0-9a-f]{32}$')
         self.assertEqual([dict(e) for e in s.evidence], [
-            {'at': T0, 'what': 'begin', 'result': 'ok', 'candidate': CAND, 'previous': OLD, 'pre': self.world.pre}])
+            {'at': T0, 'what': 'begin', 'result': 'ok', 'candidate': CAND, 'previous': OLD, 'pre': self.world.pre,
+             'txn': s.txn}])
         self.assertEqual(self.store.load(), s)
         # Nothing on the host moved: begin only records the plan.
         self.assertEqual((self.world.bot, self.world.running, self.world.current), ('active', OLD, OLD))
@@ -130,6 +136,34 @@ class HappyPath(Engine):
         activate.step(self.store, self.host)
         o = self.store.load().observe
         self.assertEqual((self.store.saves - saves, o.last_sample_at, o.nrestarts0, o.fails), (2, T0 + 10, 0, 0))
+
+
+class Transactions(Engine):
+    """2в e2e review Ф6: notifications are idempotent per transaction."""
+
+    def test_every_event_of_a_rollback_carries_its_txn_and_the_end_keeps_it(self):
+        self.world.healthy = lambda sha, age: sha == OLD
+        self.assertEqual(self.run_engine().kind, 'rolled-back')
+        s = self.store.load()
+        self.assertEqual((s.txn, s.last_txn, {e['txn'] for e in s.evidence}, len(s.evidence)),
+                         (None, self.txn, {self.txn}, 10))
+
+    def test_settled_and_aborted_keep_the_txn_they_ended(self):
+        for name, accepted, kind in (('settled', {OLD, CAND}, 'settled'), ('aborted', {OLD}, 'aborted')):
+            with self.subTest(name):
+                self.fresh(tempfile.mkdtemp(dir=self._tmp.name))
+                self.world.accepted = accepted
+                self.assertEqual(self.run_engine().kind, kind)
+                s = self.store.load()
+                self.assertEqual((s.txn, s.last_txn, s.evidence[-1]['txn']), (None, self.txn, self.txn))
+
+    def test_the_next_activation_keeps_the_last_txn_until_it_ends(self):
+        self.assertEqual(self.run_engine().kind, 'settled')
+        first = self.txn
+        state = self.store.load()
+        store = MemoryStore(state=state.replace(settled=OLD_SETTLED))
+        s = activate.begin(store, self.host, CAND_REL, self.pre)
+        self.assertEqual((s.last_txn, s.txn != first, s.evidence[0]['txn']), (first, True, s.txn))
 
 
 class Startup(Engine):
