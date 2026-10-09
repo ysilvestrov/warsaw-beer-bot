@@ -220,6 +220,20 @@ class Cli(unittest.TestCase):
         self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run could not start (FileNotFoundError)\n'
                                            + self.node_line()))
 
+    def test_switch_then_again(self):
+        self.published()
+        got = [self.run_cli(['switch', '--sha', SHA]), self.run_cli(['switch', '--sha', SHA])]
+        self.assertEqual(got, [(0, f'SWITCHED {SHA}\n', ''), (0, f'CURRENT {SHA}\n', '')])
+        self.assertEqual(os.readlink(os.path.join(self.base, 'current')), f'releases/{SHA}')
+
+    def test_switch_to_an_unaccepted_release_is_refused(self):
+        code, out, err = self.run_cli(['switch', '--sha', SHA])
+        self.assertEqual((code, out, err, os.path.lexists(os.path.join(self.base, 'current'))),
+                         (2, '', f'REFUSED: {SHA}: no receipt — not an accepted release\n', False))
+
+    def test_switch_usage(self):
+        self.assertEqual([self.run_cli(argv)[0] for argv in (['switch'], ['switch', '--sha'])], [64, 64])
+
     def test_production_releases_are_root_owned(self):
         self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
 

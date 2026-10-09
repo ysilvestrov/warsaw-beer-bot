@@ -461,6 +461,18 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   done (`settled`; `activating`: stop/switch/start; `observing`; `rolling-back`: stop-writers/save-post/
   restore-pre/switch-previous/start-baseline; `unverified`; `recovery-failed`). A missing file is the
   first run; an empty, non-JSON, other-version or schema-breaking file is an error, never a blank slate.
+- `publish.py` `current_sha`/`switch` — `wbb_release.py switch --sha <sha>` (root): re-verifies the tree
+  against its receipt, then points `current` at the relative `releases/<sha>` by symlink + one rename +
+  fsync of the directory; prints `SWITCHED <sha>`, or `CURRENT <sha>` when it already pointed there. A
+  `current` that is not exactly `releases/<40 hex>` (a directory, an absolute or foreign target) is refused,
+  never replaced. `current` says where the next start runs from, not what is running now.
+- `dbsnap.py post|restore` (bot user, writers stopped) — replaces `db-snapshot.sh post|restore` for the
+  rollback. `post <db> <out>` copies db, -wal, -shm into `<out>.partial` with fsync, writes `post.json`
+  (size + sha256 per file) and only then renames to `<out>`: an existing `<out>` is a complete post and is
+  never rewritten (a repeat returns it; one without a valid `post.json` is refused). `restore <pre> <db>
+  <post>` needs that complete post and a `pre` matching its `.sha256`; it drops -wal/-shm *before* the
+  replace (a stale post-state WAL next to the restored pre would be replayed by SQLite), then copies pre
+  in with fsync and one rename. Exit 0; 2 refused (nothing changed); 64 usage; 70 internal; 75 OS error.
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 

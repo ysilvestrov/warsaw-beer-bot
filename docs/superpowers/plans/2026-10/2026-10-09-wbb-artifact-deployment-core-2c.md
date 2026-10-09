@@ -111,12 +111,12 @@ Production activation, як і раніше, заборонена до кінц�
 
 **Files:** modify `deploy/release/publish.py` (`current_path`, `current_sha`), `deploy/release/wbb_release.py` (`switch --sha`, root); create `deploy/release/dbsnap.py`, `deploy/release/test_dbsnap.py`; extend `test_publish.py`, `test_wbb_release.py`.
 
-- [ ] `current_sha(roots)`: `readlink(<dirname(releases)>/current)`; рівно `releases/<40 hex>` → SHA; відсутній → `None`; будь-що інше (не symlink, абсолютна чи чужа ціль) → `Refused`.
-- [ ] `switch(sha, roots)`: `verify_release(sha)` → symlink `current.tmp-<rand>` → `releases/<sha>` (відносна ціль) → `os.replace` → `fsync(dir)`. Уже вказує на sha → no-op. CLI: `switch --sha`, exit 0/1/64; рядок `SWITCHED <sha>` або `CURRENT <sha>`.
-- [ ] `dbsnap.post(db, out_dir)`: якщо `out_dir/post.json` валідний і файли йому відповідають → повернути його (ідемпотентно). Інакше прибрати `out_dir.partial`, скопіювати `db`, `-wal`, `-shm` (наявні) з fsync, записати `post.json` (`{files: {name: {size, sha256}}}`) з fsync, `rename` → `out_dir`, `fsync(parent)`. `out_dir` існує без валідного `post.json` → `Refused` (не переписуємо те, чого не розуміємо).
-- [ ] `dbsnap.restore(pre, db, post_dir)`: вимагає валідний complete post; sha256 `pre` дорівнює його `.sha256`. Якщо `db` уже дорівнює pre і немає `-wal`/`-shm` → no-op. Інакше: прибрати `-wal`, `-shm` (**до** заміни — коментар із причиною), копія `pre` → `db.restore-partial` з fsync → `rename` → `fsync(dir)`.
-- [ ] CLI `dbsnap.py post|restore` (exit 0/1/64) — його запускатиме обв'язка від користувача бота.
-- [ ] Тести:
+- [x] `current_sha(roots)`: `readlink(<dirname(releases)>/current)`; рівно `releases/<40 hex>` → SHA; відсутній → `None`; будь-що інше (не symlink, абсолютна чи чужа ціль) → `Refused`.
+- [x] `switch(sha, roots)`: `verify_release(sha)` → symlink `current.tmp-<rand>` → `releases/<sha>` (відносна ціль) → `os.replace` → `fsync(dir)`. Уже вказує на sha → no-op. CLI: `switch --sha`, exit 0/1/64 (за кодами Task 0: 0 ok, 2 refused, 64 usage, 70 internal — 1 лишається тільки вердиктом про поганого кандидата); рядок `SWITCHED <sha>` або `CURRENT <sha>`.
+- [x] `dbsnap.post(db, out_dir)`: якщо `out_dir/post.json` валідний і файли йому відповідають → повернути його (ідемпотентно). Інакше прибрати `out_dir.partial`, скопіювати `db`, `-wal`, `-shm` (наявні) з fsync, записати `post.json` (`{files: {name: {size, sha256}}}`) з fsync, `rename` → `out_dir`, `fsync(parent)`. `out_dir` існує без валідного `post.json` → `Refused` (не переписуємо те, чого не розуміємо).
+- [x] `dbsnap.restore(pre, db, post_dir)`: вимагає валідний complete post; sha256 `pre` дорівнює його `.sha256`. Якщо `db` уже дорівнює pre і немає `-wal`/`-shm` → no-op. Інакше: прибрати `-wal`, `-shm` (**до** заміни — коментар із причиною), копія `pre` → `db.restore-partial` з fsync → `rename` → `fsync(dir)`.
+- [x] CLI `dbsnap.py post|restore` (exit 0/1/64; за кодами Task 0: 0, 2 refused, 64, 70, 75 — `OSError`, повторити) — його запускатиме обв'язка від користувача бота.
+- [x] Тести:
   - `current_sha`: symlink на реліз, відсутній, звичайна тека, абсолютна ціль, `releases/../x`;
   - `switch` на неприйнятий SHA → відмова, `current` не змінено; повторний switch → no-op;
   - post: повтор після готового post нічого не переписує (mtime/inode); залишений `.partial` прибирається; WAL і SHM потрапляють; `out_dir` без `post.json` → відмова;
