@@ -279,7 +279,10 @@ def _observe(store, host, s, boot):
         due = o.last_sample_at + (POLL_S if o.healthy_at is not None else STARTUP_POLL_S)
         if now < due:
             host.sleep(due - now)
-            now = host.now()
+            # #823 AI review: the sleep itself can outlast GAP_S (a suspended process) or cross a
+            # reboot or clock step; the checks above must judge the time the probe will carry, so
+            # the next step starts over from them instead of probing now.
+            return Outcome('continue', s)
     t = now - o.started_at
     if o.healthy_at is None:
         h = _health(host)
@@ -413,9 +416,14 @@ def _switch_previous(store, host, s, boot):
     try:
         at = host.now()
         if host.bot_state() not in STOPPED:
-            if _verdict(s):
+            if _verdict(s) or s.posts:
                 # Started by a reboot from `current` — maybe the candidate, on the restored DB.
                 return _restop(store, s, boot, at, 'bot running')
+            if host.current() == s.candidate.sha:
+                # #823 AI review: an abort whose switch had already moved `current` (another tree
+                # than admitted) and a reboot that started the unit from it — the candidate ran and
+                # may have written. Not a verdict on it, but the database goes back like a rollback.
+                return _restop(store, s, boot, at, 'candidate started by a reboot during the abort')
             host.stop_bot()
             if host.bot_state() not in STOPPED:
                 return Outcome('blocked', s, 'switch-previous: the bot does not stop')
@@ -476,7 +484,7 @@ def _start_baseline(store, host, s, boot):
     # lastTxn (2в e2e review Ф6): the end is reported once per transaction, from the state.
     done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, last_txn=s.txn, candidate=None,
                      previous=None, pre=None, posts=(), observe=None, unverified=None)
-    if not _verdict(s):
+    if not _verdict(s) and not s.posts:
         reason = f'{_short(cand)} never started; back on {_short(prev)}, database untouched'
         return _put(store, done.log(at, 'aborted', reason, candidate=cand, previous=prev), 'aborted', reason)
     # The LAST stop (2в e2e review Ф1): writers a reboot started again wrote until then, and those

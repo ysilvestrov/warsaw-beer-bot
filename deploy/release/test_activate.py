@@ -10,7 +10,7 @@ import activate  # noqa: E402
 import deploy_state as ds  # noqa: E402
 from activate import HostError, Outcome  # noqa: E402
 from deploy_state import Pre, Release, Settled, State, Unverified  # noqa: E402
-from fake_host import BOOT_A, PRE_DB, T0, FakeHost, MemoryStore, World  # noqa: E402
+from fake_host import BOOT_A, BOOT_B, PRE_DB, T0, FakeHost, MemoryStore, World  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 
 OLD = 'b' * 40
@@ -159,6 +159,9 @@ class HappyPath(Engine):
         o = self.store.load().observe
         self.assertEqual((out.kind, self.store.saves - saves, o.last_sample_at, o.healthy_at, o.nrestarts0),
                          ('continue', 1, T0, T0, None))
+        # The pause is a step of its own and persists nothing; the sample after it is judged afresh.
+        self.assertEqual((activate.step(self.store, self.host).kind, self.store.saves - saves, self.world.now),
+                         ('continue', 1, T0 + 10))
         activate.step(self.store, self.host)
         o = self.store.load().observe
         self.assertEqual((self.store.saves - saves, o.last_sample_at, o.nrestarts0, o.fails), (2, T0 + 10, 0, 0))
@@ -499,6 +502,29 @@ class Rollback(Engine):
     def post_files(self, path):
         return {name: pathlib.Path(path, name).read_bytes() for name in ('bot.db', 'bot.db-wal')}
 
+    def test_a_reboot_onto_an_aborted_switch_restores_the_database_without_a_verdict(self):
+        # #823 AI review: the switch moved `current` and then answered another tree, so the abort is
+        # persisted with `current` still on the candidate; a reboot starts the unit from it and the
+        # candidate writes. Before, switch-previous just stopped it and reported "database untouched".
+        self.begin()
+        self.world.trees[CAND] = '9' * 64
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.assertEqual((self.store.load().intent, self.world.current), ('switch-previous', CAND))
+        self.world.reboot()
+        self.assertEqual((self.world.running, self.world.db_files()), (CAND, self.migrated()))
+        out = activate.run(self.store, self.host)
+        s = self.store.load()
+        self.assertEqual((out.kind, s.phase, s.last_failed_sha, s.settled),
+                         ('rolled-back', 'settled', None, OLD_SETTLED))
+        self.assertEqual((self.world.running, self.world.current, self.world.db_files()), (OLD, OLD, {'': PRE_DB}))
+        db1, wal1 = self.world.candidate_writes(1)
+        self.assertEqual((self.post_files(self.post_dir()), self.world.violations),
+                         ({'bot.db': db1, 'bot.db-wal': wal1}, []))
+        self.assertEqual(self.whats(), ['begin', 'stop', 'abort', 'switch-previous', 'stop-writers', 'save-post',
+                                        'restore-pre', 'switch-previous', 'rolled-back'])
+        self.assertEqual(s.evidence[3]['result'], 'candidate started by a reboot during the abort')
+
     def test_writers_started_by_a_reboot_are_stopped_before_the_restore(self):
         self.roll_to('restore-pre')
         # The reboot starts both units, the bot from `current` — the candidate, on the post-state DB,
@@ -621,7 +647,8 @@ class Resume(Engine):
         # for `due` — a sleep as long as the step — and the window went on over broken timestamps.
         self.world.healthy = lambda sha, age: False
         self.run_until('observing')
-        for _ in range(3):
+        # Samples at T0, T0 + 2, T0 + 4, each pause a step of its own.
+        for _ in range(5):
             activate.step(self.store, self.host)
         self.assertEqual(self.store.load().observe.last_sample_at, T0 + 4)
         self.world.now -= 300
@@ -639,7 +666,29 @@ class Resume(Engine):
         activate.step(self.store, self.host)
         self.assertEqual(self.store.load().observe.last_sample_at, T0)
         self.assertEqual((activate.step(self.store, self.host).kind, self.store.load().observe.last_sample_at),
+                         ('continue', T0))
+        self.assertEqual((activate.step(self.store, self.host).kind, self.store.load().observe.last_sample_at),
                          ('continue', T0 + 10))
+
+    def test_a_pause_that_outlasts_the_gap_is_unverified_not_a_sample(self):
+        # #823 AI review: a 10 s pause that returns 40 s later (a suspended process) used to probe and
+        # persist that time as the next sample, hiding a 40 s hole in the window.
+        self.run_until('observing')
+        activate.step(self.store, self.host)
+        self.assertEqual(self.store.load().observe.last_sample_at, T0)
+        self.host.sleep = lambda seconds: setattr(self.world, 'now', self.world.now + 40)
+        calls = len(self.world.health_calls)
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.load().settled, len(self.world.health_calls)),
+                         ('unverified', 'no sample for 40 s (over 30 s)', OLD_SETTLED, calls))
+
+    def test_a_reboot_during_a_pause_is_unverified(self):
+        self.run_until('observing')
+        activate.step(self.store, self.host)
+        self.host.sleep = lambda seconds: self.world.reboot(seconds)
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load().settled), ('unverified', OLD_SETTLED))
+        self.assertEqual(out.reason, f'reboot during the window (boot {BOOT_A} -> {BOOT_B})')
 
     def test_a_gap_of_exactly_30_s_continues_the_window(self):
         self.run_until('observing')
