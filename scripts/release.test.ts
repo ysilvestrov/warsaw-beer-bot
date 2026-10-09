@@ -1,6 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync, readdirSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { auditVerdict, renderVerdict } from './autodeploy/audit-verdict';
 
@@ -129,4 +130,46 @@ describe.skipIf(process.platform !== 'linux')('audit verdict: Python port agrees
     expect(py.stderr).toBe('');
     expect(py.stdout).toBe(renderVerdict(auditVerdict(stdout)));
   });
+});
+
+// Ядро-2б: `payload-probe.cjs migrate <db>` runs the release's own openDb/migrate on the
+// host's private copy of a pre snapshot. A real payload exists only inside CI's package
+// job, so this builds the smallest one that runs the REAL code: dist/storage/{db,schema}.js
+// load src/storage/*.ts through tsx, node_modules is this checkout's.
+describe.skipIf(process.platform !== 'linux')('payload-probe.cjs migrate', () => {
+  let payload = '';
+  let work = '';
+  beforeAll(() => {
+    work = mkdtempSync(resolve(tmpdir(), 'wbb-probe-migrate-'));
+    payload = resolve(work, 'payload');
+    mkdirSync(resolve(payload, 'dist/storage'), { recursive: true });
+    writeFileSync(resolve(payload, 'package.json'), '{}');
+    symlinkSync(resolve(root, 'node_modules'), resolve(payload, 'node_modules'));
+    for (const mod of ['db', 'schema']) {
+      writeFileSync(resolve(payload, `dist/storage/${mod}.js`),
+        `require(${JSON.stringify(resolve(root, 'node_modules/tsx/dist/cjs/index.cjs'))});\n` +
+        `module.exports = require(${JSON.stringify(resolve(root, `src/storage/${mod}.ts`))});\n`);
+    }
+  });
+  afterAll(() => rmSync(work, { recursive: true, force: true }));
+
+  const probe = (...args: string[]) => spawnSync(process.execPath, [resolve(root, 'deploy/release/payload-probe.cjs'), 'migrate', ...args], {
+    encoding: 'utf8', env: { PATH: process.env.PATH, WBB_PAYLOAD: payload, TMPDIR: work }, timeout: 60_000,
+  });
+
+  it('migrates a given database twice and reports the move, then a second run moves nothing', () => {
+    const db = resolve(work, 'copy.db');
+    const first = probe(db);
+    const head = /^PROBE OK migrate: schema none -> (\d+)\n$/.exec(first.stdout);
+    expect([first.status, head === null]).toEqual([0, false]);
+    const again = probe(db);
+    expect([again.status, again.stdout]).toEqual([0, `PROBE OK migrate: schema ${head?.[1]} -> ${head?.[1]}\n`]);
+  }, 60_000);
+
+  it('refuses a file that is not a database', () => {
+    const bad = resolve(work, 'not-a-db.db');
+    writeFileSync(bad, 'x'.repeat(4096));
+    const r = probe(bad);
+    expect([r.status, r.stdout]).toEqual([1, 'PROBE FAILED migrate: file is not a database\n']);
+  }, 60_000);
 });
