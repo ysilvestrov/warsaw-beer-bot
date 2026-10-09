@@ -359,17 +359,22 @@ def _failed(store, s, boot, at, what, reason):
                 'recovery-failed', f'{what}: {reason}')
 
 
-def _rebooted_onto_another(host, s, boot):
+def _rebooted_onto_another(host, s, boot, pointer_proves=False):
     """Why the DB may have changed since the last persisted step, or None (#823 AI review).
 
-    A reboot since that step starts the bot unit from `current`. Unless `current` is the previous
-    release, what started may have written — and may have failed and stopped again by now, so a
-    stopped bot proves nothing. Every rollback step that relies on the DB as it last saw it (a post
-    already taken, a pre already restored) must then stop the writers again and take a new post.
+    A reboot since that step starts the bot unit, and what started may have written — and may have
+    failed and stopped again by now, so a stopped bot proves nothing. Every rollback step that relies
+    on the DB as it last saw it (a post already taken, a pre already restored) must then stop the
+    writers again and take a new post. Before switch-previous, `current` is still the candidate by
+    the engine's own record, so the pointer proves nothing there and any reboot counts. Only at
+    switch-previous may `current` on the previous release (pointer_proves) mean the previous release
+    is what ran — writing legitimately, on the pre it is to run on.
     """
-    if boot != s.boot_id and host.current() != s.previous.sha:
-        return f'boot {s.boot_id} -> {boot} with current on another release than the previous'
-    return None
+    if boot == s.boot_id:
+        return None
+    if pointer_proves and host.current() == s.previous.sha:
+        return None
+    return f'boot {s.boot_id} -> {boot}: the bot unit may have run since the last step'
 
 
 def _restop(store, s, boot, at, why):
@@ -434,7 +439,7 @@ def _switch_previous(store, host, s, boot):
     prev = s.previous.sha
     try:
         at = host.now()
-        why = _rebooted_onto_another(host, s, boot)
+        why = _rebooted_onto_another(host, s, boot, pointer_proves=True)
         if why:
             return _restop(store, s, boot, at, why)
         if host.bot_state() not in STOPPED:

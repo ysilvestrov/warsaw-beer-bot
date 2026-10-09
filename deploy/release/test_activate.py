@@ -523,7 +523,7 @@ class Rollback(Engine):
                          ({'bot.db': db1, 'bot.db-wal': wal1}, []))
         self.assertEqual(self.whats(), ['begin', 'stop', 'abort', 'switch-previous', 'stop-writers', 'save-post',
                                         'restore-pre', 'switch-previous', 'rolled-back'])
-        self.assertEqual(s.evidence[3]['result'], f'boot {BOOT_A} -> {BOOT_B} with current on another release than the previous')
+        self.assertEqual(s.evidence[3]['result'], f'boot {BOOT_A} -> {BOOT_B}: the bot unit may have run since the last step')
 
     def test_a_candidate_a_reboot_ran_and_that_died_since_still_restores_the_database(self):
         # #823 AI review, second pass: the check used to hang on a RUNNING bot; a candidate that wrote
@@ -567,6 +567,28 @@ class Rollback(Engine):
         out = activate.resume(self.store, self.host)
         self.assertEqual((out.kind, self.world.db_files()), ('rolled-back', {'': PRE_DB}))
         self.assertEqual(self.post_files(self.post_dir() + '-2')['bot.db'], after[''])
+
+    def test_before_switch_previous_the_pointer_proves_nothing_after_a_reboot(self):
+        # #823 AI review, fourth pass: a reboot ran the candidate, which wrote and died, and the pointer
+        # was moved to the previous release before the next tick. The restore must still take a post.
+        self.roll_to('restore-pre')
+        self.world.reboot()
+        self.world.bot, self.world.running, self.world.litestream = 'failed', None, 'inactive'
+        self.world.current = OLD
+        after = self.world.db_files()
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files()), ('rolled-back', {'': PRE_DB}))
+        self.assertEqual(self.post_files(self.post_dir() + '-2')['bot.db'], after[''])
+
+    def test_at_switch_previous_a_reboot_onto_the_previous_release_keeps_its_writes(self):
+        # The boundary: the tick died after `current` moved back but before it said so; the reboot started
+        # the previous release on the restored pre, and what it writes there is production's, kept.
+        self.roll_to('switch-previous')
+        self.host.switch(OLD)
+        self.world.reboot()
+        self.world.bot, self.world.running = 'inactive', None
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, len(self.store.load().evidence[-1]['posts'])), ('rolled-back', 1))
 
     def test_a_complete_post_a_reboot_outdated_is_not_handed_back(self):
         # save-post repeated after a tick died between a complete post and its record, and a reboot ran
