@@ -30,7 +30,8 @@ from package_runtime import ARCHIVE, FORMAT_VERSION, NODE_MAJOR, OPS_ALLOWLIST, 
 
 PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payload-probe.cjs')
 PROBE_TIMEOUT_S = 120
-CHECKSUM_LINE = re.compile(r'^([0-9a-f]{64})  ' + re.escape(ARCHIVE) + r'\n$')
+CHECKSUM_LINE = re.compile(r'([0-9a-f]{64})  ' + re.escape(ARCHIVE) + r'\n')
+CHECKSUM_MAX_BYTES = 256
 
 
 class Refused(Exception):
@@ -39,8 +40,8 @@ class Refused(Exception):
 
 def check_checksum(archive, checksum_file):
     with open(checksum_file, 'rb') as f:
-        raw = f.read(257)
-    m = CHECKSUM_LINE.match(raw.decode('ascii', 'replace'))
+        raw = f.read(CHECKSUM_MAX_BYTES + 1)
+    m = CHECKSUM_LINE.fullmatch(raw.decode('ascii', 'replace')) if len(raw) <= CHECKSUM_MAX_BYTES else None
     if not m:
         raise Refused(f'{checksum_file}: not a single "<sha256>  {ARCHIVE}" line')
     h = hashlib.sha256()

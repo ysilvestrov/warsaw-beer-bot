@@ -42,7 +42,9 @@ def tree_digest(manifest):
 
 def path_problem(path):
     """Why `path` is not a safe payload-relative path, or None."""
-    if not isinstance(path, str) or path == '':
+    if not isinstance(path, str):
+        return 'path is not a string'
+    if path == '':
         return 'empty path'
     if path.startswith('/'):
         return 'absolute path'
@@ -199,11 +201,12 @@ def verify_tree(root, manifest_bytes):
         return ['entries must be a list of objects']
     if canonical_bytes(manifest) != manifest_bytes:
         return ['manifest bytes are not canonical']
-    if manifest['entries'] != _sorted(manifest['entries']):
-        return ['manifest entries are not sorted']
+    # Structure first: sorting needs every entry to carry a string path.
     problems = check_entries(manifest['entries'])
     if problems:
         return problems
+    if manifest['entries'] != _sorted(manifest['entries']):
+        return ['manifest entries are not sorted']
     expected = {e['path']: e for e in manifest['entries']}
     seen = set()
     try:
