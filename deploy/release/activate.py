@@ -30,9 +30,13 @@ Host (the real adapter is the periphery's; tests use fake_host.FakeHost):
   nrestarts() -> int, or None when it cannot be read
   boot_id() -> this boot's id;  now() -> seconds;  sleep(s)
   post(dir) -> dbsnap.post of the bot DB;  restore(pre_path, post_dir) -> dbsnap.restore
-A host method raises HostError for a failure that says nothing about the candidate (sudo,
-systemctl, I/O): such a step is `blocked` and the next tick repeats it. Only the window — the
-candidate's own health and restarts — ever produces a verdict on the candidate.
+A host method raises HostError for a failure of the host itself (sudo, systemctl, I/O): such a step
+is `blocked`, the next tick repeats it, and it is never a verdict on the candidate. One deliberate
+exception, kept from merge-deploy (2в e2e review, item 7): health() raising HostError is a probe that
+got no answer, and — as a curl without an answer is in wait_healthy/watch_window — it counts as a
+FAILED probe, in startup and in the window, so a /health that stays unreachable (whatever the cause)
+rolls the candidate back. nrestarts() raising HostError is an unread NRestarts: neither a change nor
+a pass. Only the window — its probes and restarts — ever produces a verdict on the candidate.
 
 The window keeps merge-deploy's timing (deploy/autodeploy.sh wait_healthy/watch_window):
 startup — a healthy answer FROM THE CANDIDATE within STARTUP_S, probed every STARTUP_POLL_S;
@@ -218,6 +222,7 @@ def _start(store, host, s, boot):
 
 
 def _health(host):
+    """One probe; no answer (HostError) is a failed probe, as in merge-deploy (see the module docstring)."""
     try:
         return host.health()
     except HostError:
