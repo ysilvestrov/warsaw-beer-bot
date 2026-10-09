@@ -148,6 +148,12 @@ const ALIAS_PAIRS: ReadonlyArray<readonly [string, string]> = [
   ['pilsner urquell', 'plzensky prazdroj'],               // 25926 Pilsner Urquell -> Plzeňský Prazdroj
   ['corona extra', 'grupo modelo'],                       // 25927 Corona Extra -> Grupo Modelo
   ['cappuccino', 'mad brew'],                             // 29924 Cappuccino Night Pulse -> Mad Brew
+  // Curated brewery alias batch for cider makers and spelling variants (#485, #814).
+  // Each pair is proven against an orphan in enrich_failures and rescues it live.
+  ['chyliczki', 'cydr chyliczki'],                        // 31246 Cydr Chyliczki - Japoński Sad -> bid 4382570, 7.2% vs 7.0% (#485)
+  ['cydr polski', 'cydrownia'],                           // 30028 DZIK -> bid 825830, 4.5% = 4.5% (#485)
+  ['magick road', 'magic road'],                          // 38912 Cherry & dark grapes -> bid 6919376, 4.2% = 4.2% (#814)
+  ['maddriver', 'mad driver'],                            // 38899 Vermont IPA 7,5° -> bid 2498571, 0.5% = 0.5% (#814)
 ];
 
 // normForm -> directly-paired forms. Built once at module load.

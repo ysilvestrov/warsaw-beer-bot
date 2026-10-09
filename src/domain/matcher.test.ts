@@ -1190,6 +1190,32 @@ describe('Cluster 5 brewery alias matching', () => {
   });
 });
 
+describe('Curated brewery alias matching for cider makers and spelling variants (#485, #814)', () => {
+  test('cider makers and spelling variants pass breweryAliasesMatch', () => {
+    expect(breweryAliasesMatch(breweryAliases('Chyliczki'), breweryAliases('Cydr Chyliczki'))).toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('Cydr polski Brewery'), breweryAliases('Cydrownia'))).toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('Magick road Brewery'), breweryAliases('Magic Road'))).toBe(true);
+    expect(breweryAliasesMatch(breweryAliases('Maddriver Brewery'), breweryAliases('Mad Driver'))).toBe(true);
+  });
+
+  test('matches catalog beers under curated aliases', () => {
+    const cat: CatalogBeer[] = [
+      c({ id: 101, brewery: 'Cydr Chyliczki', name: 'Japoński Sad' }),
+      c({ id: 102, brewery: 'Cydrownia', name: 'Dzik', abv: 4.5 }),
+      c({ id: 103, brewery: 'Magic Road', name: 'Cherry & dark grapes' }),
+      c({ id: 104, brewery: 'Mad Driver', name: 'Vermont IPA' }),
+    ];
+    expect(matchBeer({ brewery: 'Chyliczki', name: 'Japoński Sad' }, cat))
+      .toMatchObject({ id: 101, source: 'exact' });
+    expect(matchBeer({ brewery: 'Cydr polski Brewery', name: 'DZIK', abv: 4.5 }, cat))
+      .toMatchObject({ id: 102, source: 'exact' });
+    expect(matchBeer({ brewery: 'Magick road Brewery', name: 'Cherry & dark grapes' }, cat))
+      .toMatchObject({ id: 103, source: 'exact' });
+    expect(matchBeer({ brewery: 'Maddriver Brewery', name: 'Vermont IPA' }, cat))
+      .toMatchObject({ id: 104, source: 'exact' });
+  });
+});
+
 describe('#636 fuzzy stage: the best hit must not carry different digits', () => {
   const przetwornia = (id: number, name: string) => c({ id, brewery: 'Przetwórnia Chmielu', name });
   const cat = [przetwornia(233, 'Przetwór #3'), przetwornia(900, 'Modernizm')];

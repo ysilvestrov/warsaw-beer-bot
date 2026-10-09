@@ -296,8 +296,8 @@ describe('Cluster 3 parent/portfolio, cider, and brewery suffix alias batch', ()
     },
   );
 
-  test('cydrownia is a hub over Dzik and Cydr Dzik labels', () => {
-    expect(aliasNeighbors('cydrownia').sort()).toEqual(['cydr dzik', 'dzik']);
+  test('cydrownia is a hub over Dzik, Cydr Dzik, and Cydr Polski labels', () => {
+    expect(aliasNeighbors('cydrownia').sort()).toEqual(['cydr dzik', 'cydr polski', 'dzik']);
   });
 
   test('spokes of cydrownia are not neighbours of each other', () => {
@@ -387,6 +387,45 @@ describe('Cluster #2 conglomerate line and series brand alias batch (#658)', () 
   test('cappuccino is a spoke of mad brew and not a neighbor of smoothiemaker', () => {
     expect(aliasNeighbors('cappuccino')).toEqual(['mad brew']);
     expect(aliasNeighbors('cappuccino')).not.toContain('smoothiemaker');
+  });
+});
+
+describe('Curated brewery alias batch for cider makers and spelling variants (#485, #814)', () => {
+  const PAIRS: ReadonlyArray<readonly [string, string]> = [
+    ['chyliczki', 'cydr chyliczki'],
+    ['cydr polski', 'cydrownia'],
+    ['magick road', 'magic road'],
+    ['maddriver', 'mad driver'],
+  ];
+
+  test.each(PAIRS)('resolves %s <-> %s symmetrically', (shop, untappd) => {
+    expect(aliasNeighbors(shop)).toContain(untappd);
+    expect(aliasNeighbors(untappd)).toContain(shop);
+  });
+
+  test.each(PAIRS.flat().filter((f) => !KNOWN_HUBS.has(f)))(
+    'form %s has exactly one neighbour (no unintended hub)',
+    (form) => {
+      expect(aliasNeighbors(form)).toHaveLength(1);
+    },
+  );
+
+  test('spokes of cydrownia are not neighbours of each other', () => {
+    expect(aliasNeighbors('cydr polski')).not.toContain('dzik');
+    expect(aliasNeighbors('cydr polski')).not.toContain('cydr dzik');
+    expect(aliasNeighbors('dzik')).not.toContain('cydr polski');
+    expect(aliasNeighbors('cydr dzik')).not.toContain('cydr polski');
+  });
+
+  test('normalizes raw labels to alias keys (#485, #814)', () => {
+    expect(normalizeBrewery('Chyliczki')).toBe('chyliczki');
+    expect(normalizeBrewery('Cydr Chyliczki')).toBe('cydr chyliczki');
+    expect(normalizeBrewery('Cydr polski Brewery')).toBe('cydr polski');
+    expect(normalizeBrewery('Cydrownia')).toBe('cydrownia');
+    expect(normalizeBrewery('Magick road Brewery')).toBe('magick road');
+    expect(normalizeBrewery('Magic Road')).toBe('magic road');
+    expect(normalizeBrewery('Maddriver Brewery')).toBe('maddriver');
+    expect(normalizeBrewery('Mad Driver')).toBe('mad driver');
   });
 });
 
