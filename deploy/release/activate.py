@@ -359,6 +359,19 @@ def _failed(store, s, boot, at, what, reason):
                 'recovery-failed', f'{what}: {reason}')
 
 
+def _rebooted_onto_another(host, s, boot):
+    """Why the DB may have changed since the last persisted step, or None (#823 AI review).
+
+    A reboot since that step starts the bot unit from `current`. Unless `current` is the previous
+    release, what started may have written — and may have failed and stopped again by now, so a
+    stopped bot proves nothing. Every rollback step that relies on the DB as it last saw it (a post
+    already taken, a pre already restored) must then stop the writers again and take a new post.
+    """
+    if boot != s.boot_id and host.current() != s.previous.sha:
+        return f'boot {s.boot_id} -> {boot} with current on another release than the previous'
+    return None
+
+
 def _restop(store, s, boot, at, why):
     """Writers run again (a reboot starts the units): the DB may have changed; stop them before touching it."""
     return _put(store, s.replace(intent='stop-writers', boot_id=boot).log(at, s.intent, why))
@@ -383,6 +396,9 @@ def _save_post(store, host, s, boot):
     out = post_dir(s.pre.path, len(_stops(s)))
     try:
         at = host.now()
+        why = _rebooted_onto_another(host, s, boot)
+        if why:
+            return _restop(store, s, boot, at, why)
         if not _writers_stopped(host):
             return _restop(store, s, boot, at, 'writers running')
         try:
@@ -399,6 +415,9 @@ def _save_post(store, host, s, boot):
 def _restore_pre(store, host, s, boot):
     try:
         at = host.now()
+        why = _rebooted_onto_another(host, s, boot)
+        if why:
+            return _restop(store, s, boot, at, why)
         if not _writers_stopped(host):
             return _restop(store, s, boot, at, 'writers running')
         try:
@@ -415,18 +434,16 @@ def _switch_previous(store, host, s, boot):
     prev = s.previous.sha
     try:
         at = host.now()
-        running = host.bot_state() not in STOPPED
-        if not _verdict(s) and not s.posts and (running or boot != s.boot_id) and host.current() != prev:
-            # #823 AI review: the abort's database is untouched only while nothing but the previous
-            # release could have run. A reboot starts the unit from `current`; if that is not the
-            # previous release (the switch had moved it), whatever started may have written — and
-            # may have stopped or failed again by now. Not a verdict on the candidate, but the
-            # database goes back like a rollback, with its own post.
-            return _restop(store, s, boot, at, 'another release than the previous could have run during the abort')
-        if running:
-            if _verdict(s) or s.posts:
-                # Started by a reboot from `current` — maybe the candidate, on the restored DB.
-                return _restop(store, s, boot, at, 'bot running')
+        why = _rebooted_onto_another(host, s, boot)
+        if why:
+            return _restop(store, s, boot, at, why)
+        if host.bot_state() not in STOPPED:
+            # Something started the bot since the writers were stopped (a reboot, an operator). The
+            # `current` pointer does not say what runs; the process's own releaseSha does. Only the
+            # previous release on an abort's untouched DB may simply be stopped (#823 AI review).
+            h = _health(host)
+            if _verdict(s) or s.posts or not (h.ok and h.release_sha == prev):
+                return _restop(store, s, boot, at, f'bot running ({_describe(h)})')
             host.stop_bot()
             if host.bot_state() not in STOPPED:
                 return Outcome('blocked', s, 'switch-previous: the bot does not stop')
