@@ -36,6 +36,13 @@ Not: subjective style, formatting, naming preferences, broad refactors without a
 concrete bug, or missing tests unless the diff creates a specific untested failure path
 you can describe as an input and a wrong result.
 
+## Language-specific defect patterns
+
+- **Shell (`.sh`)**: Unquoted variables leading to word splitting or glob expansion, commands executing without error checking in pipelines under `set -euo pipefail`, unsafe temporary file handling, signal traps, sudo/root path or argument injection.
+- **Python (`.py`)**: File/descriptor resource leaks, unhandled exceptions in daemon or ops loops, subprocess argument splitting/injection, file mode/permissions normalization errors, missing `fsync` on critical files/directories before commit/receipt.
+- **UI (`.html`, `.css`)**: Accessibility regressions (broken `aria-*` associations, missing accessible names/labels, keyboard tab order disruptions, missing focus indicators), invalid markup, dead/unreachable selectors.
+
+
 ## Fields
 
 - `claim` — one sentence: what is wrong.
