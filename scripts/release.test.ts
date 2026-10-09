@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { auditVerdict, renderVerdict } from './autodeploy/audit-verdict';
 
 // Artifact deployment, Ядро-1 (docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md).
 const root = resolve(__dirname, '..');
@@ -100,5 +101,32 @@ describe('ci.yml aggregator (spec §5)', () => {
       encoding: 'utf8', env: { PATH: process.env.PATH, BUILD: build, PACKAGE: pkgResult, MAIN_PUSH: mainPush },
     });
     expect(r.status).toBe(code);
+  });
+});
+
+// Ядро-2б: the host judges audits with deploy/release/audit_verdict.py, a stdlib port of
+// audit-verdict.ts. The two must render the same text for the same report.
+describe.skipIf(process.platform !== 'linux')('audit verdict: Python port agrees with audit-verdict.ts', () => {
+  const fixtures = resolve(root, 'scripts/autodeploy/fixtures/npm-audit');
+  const inputs: [string, string][] = [
+    ...readdirSync(fixtures).sort().map((f): [string, string] => [f, readFileSync(resolve(fixtures, f), 'utf8')]),
+    ['empty', ''],
+    ['not json', 'npm ERR! oops'],
+    ['array', '[]'],
+    ['error as a string', '{"error": "boom"}'],
+    ['no vulnerabilities', '{"auditReportVersion": 2}'],
+    ['unknown severity', '{"vulnerabilities": {"x": {"severity": "severe"}}}'],
+    ['via null', '{"vulnerabilities": {"x": {"severity": "high", "via": null}}}'],
+    ['moderate only', '{"vulnerabilities": {"a": {"severity": "moderate", "via": []}}}'],
+    ['two findings', '{"vulnerabilities": {"a": {"severity": "critical", "via": ["b"]}, "b": {"severity": "high", "via": [{"title": "T", "url": "https://u"}]}}}'],
+  ];
+
+  it.each(inputs)('%s', (_name, stdout) => {
+    const py = spawnSync('python3', ['-B', '-c',
+      'import sys; sys.path.insert(0, "deploy/release"); import audit_verdict as a; ' +
+      'print(a.render_verdict(a.audit_verdict(sys.stdin.read())), end="")'],
+    { cwd: root, input: stdout, encoding: 'utf8' });
+    expect(py.stderr).toBe('');
+    expect(py.stdout).toBe(renderVerdict(auditVerdict(stdout)));
   });
 });
