@@ -353,6 +353,10 @@ class Switch(Tmp):
     def published(self):
         self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
 
+    def tree(self):
+        """The digest of the published tree's manifest (2в e2e review Ф4: switch returns its receipt's)."""
+        return tm.tree_digest(self.manifest)
+
     def switch_refused(self, sha=SHA):
         with self.assertRaises(Refused) as cm:
             pub.switch(sha, self.roots)
@@ -361,19 +365,19 @@ class Switch(Tmp):
     def test_switches_by_a_relative_symlink_and_leaves_no_temp(self):
         self.published()
         os.symlink(f'releases/{OTHER}', self.current)
-        self.assertEqual(pub.switch(SHA, self.roots), 'switched')
+        self.assertEqual(pub.switch(SHA, self.roots), ('switched', self.tree()))
         self.assertEqual((os.readlink(self.current), sorted(os.listdir(self.base))),
                          (f'releases/{SHA}', ['artifact.zip', 'current', 'receipts', 'releases', 'scratch', 'src']))
 
     def test_first_switch_creates_current(self):
         self.published()
-        self.assertEqual((pub.switch(SHA, self.roots), pub.current_sha(self.roots)), ('switched', SHA))
+        self.assertEqual((pub.switch(SHA, self.roots), pub.current_sha(self.roots)), (('switched', self.tree()), SHA))
 
     def test_repeat_is_a_no_op(self):
         self.published()
         pub.switch(SHA, self.roots)
         ino = os.lstat(self.current).st_ino
-        self.assertEqual((pub.switch(SHA, self.roots), os.lstat(self.current).st_ino), ('current', ino))
+        self.assertEqual((pub.switch(SHA, self.roots), os.lstat(self.current).st_ino), (('current', self.tree()), ino))
 
     def test_unaccepted_sha_is_refused_and_current_is_unchanged(self):
         os.symlink(f'releases/{OTHER}', self.current)
@@ -434,7 +438,7 @@ class Switch(Tmp):
             return real_fsync(fd)
 
         with mock.patch.object(os, 'fsync', fsync):
-            self.assertEqual(pub.switch(SHA, self.roots), 'current')
+            self.assertEqual(pub.switch(SHA, self.roots), ('current', self.tree()))
         self.assertEqual(synced, [True])
 
 

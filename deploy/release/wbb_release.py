@@ -18,7 +18,8 @@ Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
 The snapshot is a NAME in SNAPSHOT_ROOT, never a path.
 
 Output: one verdict line on stdout — `VERIFIED <sha>: tree <hex> ...`, `ACCEPTED|ALREADY-ACCEPTED <sha>: ...`,
-`SWITCHED|CURRENT <sha>` (CURRENT: `current` already pointed there, nothing changed),
+`SWITCHED|CURRENT <sha> tree <hex>` (CURRENT: `current` already pointed there, nothing changed; tree: the
+receipt's treeSha256 the tree was verified against, which the controller compares with its record),
 `AUDIT <KIND> <sha> tree <hex>` (details from the next line on), `PROBE|TRIAL <KIND> <sha>: <detail>`
 followed, when the Node identity is known, by `NODE <realpath> <sha256> <version> <modules>`.
 Exit (2b review B1; the controller records a failed SHA only on 1 together with its verdict line):
@@ -115,7 +116,8 @@ def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, n
         print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
         return 0
     if a.cmd == 'switch':
-        print(f'{pub.switch(a.sha, roots).upper()} {a.sha}')
+        kind, tree = pub.switch(a.sha, roots)
+        print(f'{kind.upper()} {a.sha} tree {tree}')
         return 0
     if a.cmd == 'audit':
         # Runs as the operator, who cannot read the root-only receipt: the audit proves its

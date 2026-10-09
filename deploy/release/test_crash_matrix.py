@@ -46,20 +46,20 @@ def no_post(world):
 # name: how the world behaves, and what must be true after the tick that follows ANY crash.
 SCENARIOS = {
     'success': dict(
-        healthy=lambda sha, age: True, accepted=None,
+        healthy=lambda sha, age: True, tampered=set(),
         kind='settled', settled=Settled(CAND, '1' * 64, T0 + 600), last_failed=None, db=migrated, post=no_post,
         starts=[(CAND, T0)]),
     'rollback in startup': dict(
-        healthy=lambda sha, age: sha == OLD, accepted=None,
+        healthy=lambda sha, age: sha == OLD, tampered=set(),
         kind='rolled-back', settled=OLD_SETTLED, last_failed=CAND, db=pre_db, post=migrated_post,
         starts=[(CAND, T0), (OLD, T0 + 120)]),
     # Healthy from 8 s, so the probes fall on 8, 18, ... 598 s: the third failure is the last probe.
     'rollback at 9:58': dict(
-        healthy=lambda sha, age: sha == OLD or 8 <= age < 578, accepted=None,
+        healthy=lambda sha, age: sha == OLD or 8 <= age < 578, tampered=set(),
         kind='rolled-back', settled=OLD_SETTLED, last_failed=CAND, db=pre_db, post=migrated_post,
         starts=[(CAND, T0), (OLD, T0 + 598)]),
     'abort, switch refused': dict(
-        healthy=lambda sha, age: True, accepted={OLD},
+        healthy=lambda sha, age: True, tampered={CAND},
         kind='aborted', settled=OLD_SETTLED, last_failed=None, db=pre_db, post=no_post,
         starts=[(OLD, T0)]),
 }
@@ -99,7 +99,8 @@ class CrashMatrix(unittest.TestCase):
 
     def world(self, scenario, faults):
         sc = SCENARIOS[scenario]
-        world = World(tempfile.mkdtemp(dir=self._tmp.name), OLD, CAND, accepted=sc['accepted'])
+        world = World(tempfile.mkdtemp(dir=self._tmp.name), OLD, CAND)
+        world.tampered = set(sc['tampered'])
         world.healthy = sc['healthy']
         store = MemoryStore(faults, state=State('settled', BOOT_A, settled=OLD_SETTLED))
         pre = Pre(world.pre, hashlib.sha256(PRE_DB).hexdigest(), T0 - 60)

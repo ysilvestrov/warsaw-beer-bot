@@ -230,19 +230,22 @@ def current_sha(roots):
 
 
 def switch(sha, roots):
-    """Point `current` at releases/<sha> by one atomic rename. Returns 'switched' or 'current' (already there).
+    """Point `current` at releases/<sha> by one atomic rename.
 
+    Returns (kind, tree): kind 'switched' or 'current' (already there), tree the receipt's
+    treeSha256 the tree was just verified against — the controller compares it with the digest it
+    admitted (2в e2e review Ф4), so a receipt replaced since then is not switched to silently.
     The tree is verified against its receipt immediately before the rename; a `current`
     this does not understand (a directory, a foreign target) is refused, never replaced.
     """
-    verify_release(sha, roots)
+    tree = verify_release(sha, roots)['treeSha256']
     path = current_path(roots)
     parent = os.path.dirname(path)
     if current_sha(roots) == sha:
         # 2v review: an attempt that renamed and died before its fsync left the rename not yet
         # durable; the no-op retry makes it so before it answers 'current'.
         fsync_dir(parent)
-        return 'current'
+        return 'current', tree
     tmp = os.path.join(parent, f'current.tmp-{secrets.token_hex(8)}')
     os.symlink(os.path.join(os.path.basename(roots.releases), sha), tmp)
     try:
@@ -251,7 +254,7 @@ def switch(sha, roots):
         os.unlink(tmp)
         raise
     fsync_dir(parent)
-    return 'switched'
+    return 'switched', tree
 
 
 def publish(trusted, operator_zip, roots, now=_utc_now):

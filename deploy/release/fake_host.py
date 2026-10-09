@@ -29,6 +29,9 @@ T0 = 1_760_000_000
 BOOT_A = '0f0e0d0c-0b0a-4908-8706-050403020100'
 BOOT_B = '11111111-2222-4333-8444-555555555555'
 PRE_DB = b'SQLite pre: the database before the activation'
+# The treeSha256 each release's receipt accepted (what verify/switch report back).
+OLD_TREE = '2' * 64
+CAND_TREE = '1' * 64
 
 
 class Crash(BaseException):
@@ -101,13 +104,16 @@ class World:
     healthy(sha, age) and restarts(sha, age) script the bot by the release a process serves and
     the seconds since it started; restarts returning None models an unreadable NRestarts.
     """
-    def __init__(self, base, old, cand, accepted=None):
+    def __init__(self, base, old, cand, accepted=None, trees=None):
         self.base, self.old, self.cand = base, old, cand
         self.db = os.path.join(base, 'bot.db')
         self.pre = os.path.join(base, '20261009T080000Z-ccccccc-pre.db')
         self.now = T0
         self.boot = BOOT_A
         self.accepted = {old, cand} if accepted is None else set(accepted)
+        self.trees = {old: OLD_TREE, cand: CAND_TREE} if trees is None else dict(trees)
+        # Releases whose tree changed after `begin` verified it: the switch's own re-verification refuses.
+        self.tampered = set()
         self.current = old
         self.bot = 'active'
         self.running = old
@@ -167,9 +173,17 @@ class World:
     def switch(self, sha):
         if self.bot == 'active':
             self.violations.append(f'switch to {sha[:7]} under a running bot')
+        if sha in self.tampered:
+            raise Refused(f'{sha}: release tree changed:\ndist/index.js: differs from manifest (sha256)')
+        tree = self.verify(sha)
+        self.current = sha
+        return tree
+
+    def verify(self, sha):
+        """publish.verify_release: the receipt's treeSha256, or Refused."""
         if sha not in self.accepted:
             raise Refused(f'{sha}: no receipt — not an accepted release')
-        self.current = sha
+        return self.trees[sha]
 
     def health(self):
         self.health_calls.append((self.now, self.running))
@@ -252,6 +266,9 @@ class FakeHost:
 
     def switch(self, sha):
         return self._do('switch', lambda: self.world.switch(sha))
+
+    def verify(self, sha):
+        return self._do('verify', lambda: self.world.verify(sha))
 
     def health(self):
         return self._do('health', self.world.health)

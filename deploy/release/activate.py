@@ -20,8 +20,12 @@ current intent.
 Host (the real adapter is the periphery's; tests use fake_host.FakeHost):
   bot_state() / litestream_state() -> systemd ActiveState ('active', 'inactive', 'failed', ...)
   stop_bot() / start_bot() / stop_litestream() / start_litestream()  -- systemctl, idempotent
-  current() -> the SHA `current` points at (publish.current_sha), or None
-  switch(sha)  -- publish.switch through the root helper; Refused if the tree does not verify
+  current() -> the SHA `current` points at (publish.current_sha), or None; Refused for a pointer
+               publish does not understand (a directory, a foreign target)
+  verify(sha) -> the treeSha256 its receipt accepted, after verifying the tree (`wbb_release.py verify`);
+               Refused if it does not verify
+  switch(sha) -> the receipt's treeSha256 (`wbb_release.py switch`: `SWITCHED|CURRENT <sha> tree <hex>`);
+               publish.switch through the root helper; Refused if the tree does not verify
   health() -> Health(ok, release_sha): one /health probe, release_sha as the process read it at startup
   nrestarts() -> int, or None when it cannot be read
   boot_id() -> this boot's id;  now() -> seconds;  sleep(s)
@@ -125,9 +129,18 @@ def begin(store, host, candidate, pre):
         raise Refused(f'{candidate.sha} is the last failed SHA')
     if candidate.sha == state.settled.sha:
         raise Refused(f'{candidate.sha} is already settled')
+    previous = ds.Release(state.settled.sha, state.settled.tree_sha256)
+    # 2в e2e review Ф4 (§8, §10b row switch): both trees verified, and as the digests recorded, BEFORE
+    # production is stopped — a rollback must not discover that its baseline does not verify.
+    for role, rel in (('candidate', candidate), ('previous', previous)):
+        try:
+            tree = host.verify(rel.sha)
+        except Refused as e:
+            raise Refused(f'{role} {_short(rel.sha)} does not verify: {e}') from None
+        if tree != rel.tree_sha256:
+            raise Refused(f'{role} {_short(rel.sha)}: its receipt accepted tree {tree}, recorded {rel.tree_sha256}')
     boot = host.boot_id()
     at = host.now()
-    previous = ds.Release(state.settled.sha, state.settled.tree_sha256)
     opened = state.replace(
         phase='activating', intent='stop', boot_id=boot, txn=ds.new_txn(), candidate=candidate,
         previous=previous, pre=pre, posts=(), observe=None, unverified=None, evidence=(),
@@ -164,16 +177,20 @@ def _switch(store, host, s, boot):
         if host.bot_state() not in STOPPED:
             return _put(store, s.replace(intent='stop', boot_id=boot).log(host.now(), 'switch', 'bot running'))
         try:
-            host.switch(sha)
+            tree = host.switch(sha)
             refused = None
         except Refused as e:
-            refused = str(e)
+            tree, refused = None, str(e)
         cur = host.current()
         at = host.now()
     except HostError as e:
         return _blocked(s, 'switch', e)
     if refused is not None:
         return _abort(store, s, boot, at, f'switch to {_short(sha)} refused: {refused}')
+    if tree != s.candidate.tree_sha256:
+        # 2в e2e review Ф4: the receipt switched to is not the one admitted; never start it.
+        return _abort(store, s, boot, at, f'switch to {_short(sha)}: its receipt accepted tree {tree}, '
+                                          f'admitted {s.candidate.tree_sha256}')
     if cur != sha:
         return _abort(store, s, boot, at, f'current is {_short(cur)} after the switch to {_short(sha)}')
     return _put(store, s.replace(intent='start', boot_id=boot).log(at, 'switch', 'ok'))
@@ -396,7 +413,7 @@ def _switch_previous(store, host, s, boot):
             if host.bot_state() not in STOPPED:
                 return Outcome('blocked', s, 'switch-previous: the bot does not stop')
         try:
-            host.switch(prev)
+            tree = host.switch(prev)
         except Refused as e:
             # The baseline does not verify: never start some other release instead (§10b).
             return _failed(store, s, boot, at, 'switch-previous', str(e))
@@ -405,6 +422,10 @@ def _switch_previous(store, host, s, boot):
         return _blocked(s, 'switch-previous', e)
     if cur != prev:
         return _failed(store, s, boot, at, 'switch-previous', f'current is {_short(cur)} after the switch to {_short(prev)}')
+    if tree != s.previous.tree_sha256:
+        # 2в e2e review Ф4: not the tree that settled; starting it would not be the baseline (§10b).
+        return _failed(store, s, boot, at, 'switch-previous',
+                       f'its receipt accepted tree {tree}, settled {s.previous.tree_sha256}')
     return _put(store, s.replace(intent='start-baseline', boot_id=boot).log(at, 'switch-previous', 'ok'))
 
 

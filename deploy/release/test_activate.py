@@ -105,6 +105,32 @@ class Begin(Engine):
                 self.assertEqual((str(cm.exception), store.data, store.saves), (why, before, 0))
 
 
+    def test_both_trees_are_verified_before_anything_is_written(self):
+        # 2в e2e review Ф4 (§8, §10b row switch): a baseline that does not verify is found before the
+        # bot is stopped, not in the middle of a rollback.
+        cases = (
+            ('candidate refused', dict(accepted={OLD}),
+             f'candidate ccccccc does not verify: {CAND}: no receipt — not an accepted release'),
+            ('previous refused', dict(accepted={CAND}),
+             f'previous bbbbbbb does not verify: {OLD}: no receipt — not an accepted release'),
+            ('candidate tree', dict(trees={OLD: '2' * 64, CAND: '9' * 64}),
+             f'candidate ccccccc: its receipt accepted tree {"9" * 64}, recorded {"1" * 64}'),
+            ('previous tree', dict(trees={OLD: '9' * 64, CAND: '1' * 64}),
+             f'previous bbbbbbb: its receipt accepted tree {"9" * 64}, recorded {"2" * 64}'),
+        )
+        for name, world, why in cases:
+            with self.subTest(name):
+                self.fresh(tempfile.mkdtemp(dir=self._tmp.name))
+                for k, v in world.items():
+                    setattr(self.world, k, v)
+                before = self.store.data
+                with self.assertRaises(Refused) as cm:
+                    activate.begin(self.store, self.host, CAND_REL, self.pre)
+                self.assertEqual((str(cm.exception), self.store.data, self.store.saves),
+                                 (why, before, 0))
+                self.assertEqual((self.world.bot, self.world.running, self.world.current), ('active', OLD, OLD))
+
+
 class HappyPath(Engine):
     def test_settles_after_a_full_window_from_the_start(self):
         out = self.run_engine()
@@ -149,10 +175,10 @@ class Transactions(Engine):
                          (None, self.txn, {self.txn}, 10))
 
     def test_settled_and_aborted_keep_the_txn_they_ended(self):
-        for name, accepted, kind in (('settled', {OLD, CAND}, 'settled'), ('aborted', {OLD}, 'aborted')):
+        for name, tampered, kind in (('settled', set(), 'settled'), ('aborted', {CAND}, 'aborted')):
             with self.subTest(name):
                 self.fresh(tempfile.mkdtemp(dir=self._tmp.name))
-                self.world.accepted = accepted
+                self.world.tampered = tampered
                 self.assertEqual(self.run_engine().kind, kind)
                 s = self.store.load()
                 self.assertEqual((s.txn, s.last_txn, s.evidence[-1]['txn']), (None, self.txn, self.txn))
@@ -275,7 +301,7 @@ class Blocked(Engine):
         self.assertEqual((out.kind, out.reason, self.store.data), ('blocked', 'observing/None: clock unavailable', before))
 
     def test_switch_refused_aborts_without_a_verdict(self):
-        self.world.accepted = {OLD}
+        self.world.tampered = {CAND}
         self.begin()
         activate.step(self.store, self.host)
         out = activate.step(self.store, self.host)
@@ -283,8 +309,20 @@ class Blocked(Engine):
         self.assertEqual((out.kind, s.phase, s.intent, s.last_failed_sha, s.posts),
                          ('continue', 'rolling-back', 'switch-previous', None, ()))
         self.assertEqual(self.last_event(), {
-            'at': T0, 'what': 'abort', 'result': f'switch to ccccccc refused: {CAND}: no receipt — not an accepted release'})
+            'at': T0, 'what': 'abort', 'result': f'switch to ccccccc refused: {CAND}: release tree changed:\ndist/index.js: differs from manifest (sha256)'})
         self.assertEqual((self.world.current, self.world.starts), (OLD, []))
+
+    def test_a_switch_to_another_tree_than_admitted_aborts_without_a_verdict(self):
+        # 2в e2e review Ф4: the receipt changed after begin; the candidate is never started.
+        self.begin()
+        self.world.trees[CAND] = '9' * 64
+        out = activate.run(self.store, self.host)
+        s = self.store.load()
+        self.assertEqual((out.kind, s.last_failed_sha, s.evidence[2]['what'], s.evidence[2]['result']),
+                         ('aborted', None, 'abort', f'switch to ccccccc: its receipt accepted tree {"9" * 64}, '
+                                                    f'admitted {"1" * 64}'))
+        self.assertEqual((self.world.running, self.world.current, self.world.starts, self.world.db_files()),
+                         (OLD, OLD, [(OLD, T0)], {'': PRE_DB}))
 
     def test_switch_with_the_bot_running_goes_back_to_stop(self):
         self.begin()
@@ -335,7 +373,7 @@ class Rollback(Engine):
         self.assertEqual(self.world.violations, [])
 
     def test_an_aborted_activation_never_touches_the_database(self):
-        self.world.accepted = {OLD}
+        self.world.tampered = {CAND}
         out = self.run_engine()
         s = self.store.load()
         reason = 'ccccccc never started; back on bbbbbbb, database untouched'
@@ -391,6 +429,17 @@ class Rollback(Engine):
         self.assertEqual((out.kind, out.reason),
                          ('recovery-failed', f'switch-previous: {OLD}: no receipt — not an accepted release'))
         self.assertEqual((self.world.current, self.world.bot, self.world.db_files()), (CAND, 'inactive', {'': PRE_DB}))
+
+    def test_a_previous_release_with_another_tree_than_settled_is_never_started(self):
+        # 2в e2e review Ф4: the baseline's receipt is not the one that settled.
+        self.roll_to('switch-previous')
+        self.world.trees[OLD] = '9' * 64
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.load().phase),
+                         ('recovery-failed', f'switch-previous: its receipt accepted tree {"9" * 64}, settled {"2" * 64}',
+                          'recovery-failed'))
+        self.assertEqual((self.world.bot, self.world.starts, self.world.db_files()),
+                         ('inactive', [(CAND, T0)], {'': PRE_DB}))
 
     def test_a_previous_release_that_stays_unhealthy_fails_the_recovery(self):
         self.world.healthy = lambda sha, age: False
