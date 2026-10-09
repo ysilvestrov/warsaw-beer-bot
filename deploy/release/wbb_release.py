@@ -26,6 +26,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bounded  # noqa: E402
 import github_trust as gt  # noqa: E402
 import host_audit  # noqa: E402
 import publish as pub  # noqa: E402
@@ -62,7 +63,7 @@ def read_token(path):
 
 
 def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
-         runner=subprocess.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release):
+         runner=bounded.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release):
     ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept, audit, probe or trial a runtime release.')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('publish')

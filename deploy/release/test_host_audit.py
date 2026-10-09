@@ -106,6 +106,17 @@ class Audit(unittest.TestCase):
         with self.assertRaisesRegex(Refused, 'not a directory only the release owner can change$'):
             ha.audit_release(self.release, self.work, (IDS[0] + 1, IDS[1]), runner=Runner(), euid=operator)
 
+    def test_release_not_published(self):
+        # #817 AI review: a valid but unpublished SHA is a refusal, not a traceback.
+        missing = os.path.join(self.roots.releases, 'b' * 40)
+        with self.assertRaisesRegex(Refused, f'^{missing}: No such file or directory — no accepted release here$'):
+            ha.audit_release(missing, self.work, IDS, runner=Runner(), euid=operator)
+
+    def test_report_cut_while_streaming_is_unrunnable(self):
+        # #817 AI review: the default runner stops keeping bytes at the cap instead of buffering it all.
+        runner = Runner(b'x' * (ha.MAX_REPORT_BYTES + 1))
+        self.assertEqual(self.audit(runner).verdict.reason, f'is over {ha.MAX_REPORT_BYTES} bytes — not a report we read')
+
     def test_symlinked_lockfile(self):
         target = os.path.join(self.release, 'package-lock.json')
         os.rename(target, target + '.real')

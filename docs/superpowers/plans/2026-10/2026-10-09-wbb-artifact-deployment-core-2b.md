@@ -132,6 +132,17 @@
 
 G2 доповнено перевірками формату `Finished with result:`, `systemctl show` зібраного unit і `TimeoutStopSec`.
 
+## AI-рев'ю (голова `5c5be59`, перше з Python у межах після #816) — вісім знахідок, виправлено
+
+1. **Вивід sandbox без межі.** `capture_output` тримав у пам'яті root-helper'а все, що кандидат пише в stdout/stderr за 30–120 с. Тепер `bounded.run` читає обидва pipe потоково й тримає ≤ 1 MiB кожного, решту відкидає.
+2. **Процеси хоста видно.** Додано `ProtectProc=invisible`. `ProcSubset=pid` свідомо **не** додано: він ховає `/proc/meminfo` тощо, на які може спиратися Node, а G2 цього не міряв. `ProtectProc=invisible` також не входив у G2 — його підтверджує наступна проба на VPS або acceptance на VM.
+3. **Збій `node_identity` вилітав винятком** (CLI exit 1). Тепер це `transient`.
+4. **Копія знімка без межі.** Тепер до копіювання вимагається, щоб після копії лишалося ≥ 10 GiB вільного (спека §4). Будь-яка I/O-помилка (зокрема `ENOSPC`) — відмова з прибраною частковою копією → `transient`.
+5. **`trial` виконував код без перевірки ABI/glibc.** Тепер той самий `_compatible`, що й у `probe`.
+6. **Лише `FileNotFoundError` при exec `systemd-run` ставав `Transient`.** Тепер будь-який `OSError` exec: процес не стартував, unit не створено.
+7. **Звіт npm буферизувався цілком.** Аудит теж іде через `bounded.run` (ліміт = `MAX_REPORT_BYTES + 1`).
+8. **`audit` неопублікованого SHA падав traceback'ом.** Тепер `Refused`.
+
 ## Після 2б
 
 Наскрізне рев'ю 2б. Далі план 2в: контролер (state v2, активація, crash/recovery-матриця §10b, локальний code+DB rollback) поверх `publish`/`verify_release` (2а) і `audit`/`probe`/`trial` (2б). Production activation, як і раніше, заборонена до кінця 2в. Acceptance sandbox і rollback — на disposable Ubuntu 24.04 VM (спека §10).

@@ -75,8 +75,9 @@ class Tmp(unittest.TestCase):
         return tr.probe(SHA, self.roots, self.trial_root, runner=fake, node=sys.executable, ids=lambda: IDS,
                         glibc=lambda: '2.39', **kw)
 
-    def trial(self, fake):
-        return tr.trial(SHA, self.snapshot, self.roots, self.trial_root, runner=fake, node=sys.executable, ids=lambda: IDS)
+    def trial(self, fake, free=1 << 40, glibc='2.39'):
+        return tr.trial(SHA, self.snapshot, self.roots, self.trial_root, runner=fake, node=sys.executable, ids=lambda: IDS,
+                        glibc=lambda: glibc, free=lambda path: free)
 
 
 class Probe(Tmp):
@@ -141,7 +142,8 @@ class Trial(Tmp):
         fake = Fake(sandbox_out='PROBE OK migrate: schema 40 -> 45\n')
         step = self.trial(fake)
         self.assertEqual((step.kind, step.detail), ('ok', 'migrate: schema 40 -> 45'))
-        name, args, listing, db = fake.calls[0]
+        self.assertEqual([c[0] for c in fake.calls], ['node -p', 'systemd-run', 'systemctl stop', 'systemctl show'])
+        name, args, listing, db = fake.calls[1]
         self.assertEqual((name, args[:2], os.path.basename(args[2]), listing, db),
                          ('systemd-run', [tr.PROBE_FILE, 'migrate'], 'trial.db', ['tmp', 'trial.db'],
                           (b'SQLite pretend bytes', 0o600)))
@@ -154,7 +156,7 @@ class Trial(Tmp):
         step = self.trial(fake)
         got, want = hashlib.sha256(b'SQLite pretend bytes!').hexdigest(), hashlib.sha256(b'SQLite pretend bytes').hexdigest()
         self.assertEqual(step, tr.Step('transient', f'snapshot unusable: {self.snapshot}: sha256 {got} != {want}'))
-        self.assertEqual(fake.calls, [])
+        self.assertEqual(fake.calls, [('node -p',)])
         self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_symlinked_snapshot_runs_nothing(self):
@@ -162,17 +164,59 @@ class Trial(Tmp):
         os.symlink(self.snapshot, link)
         os.symlink(self.snapshot + '.sha256', link + '.sha256')
         fake = Fake()
-        step = tr.trial(SHA, link, self.roots, self.trial_root, runner=fake, node=sys.executable, ids=lambda: IDS)
+        step = tr.trial(SHA, link, self.roots, self.trial_root, runner=fake, node=sys.executable, ids=lambda: IDS,
+                        glibc=lambda: '2.39', free=lambda path: 1 << 40)
         self.assertEqual(step, tr.Step('transient', f'snapshot unusable: {link}: cannot open (Too many levels of symbolic links)'))
-        self.assertEqual(fake.calls, [])
+        self.assertEqual(fake.calls, [('node -p',)])
 
     def test_relative_snapshot_path(self):
-        step = tr.trial(SHA, 'x-pre.db', self.roots, self.trial_root, runner=Fake(), node=sys.executable, ids=lambda: IDS)
+        step = tr.trial(SHA, 'x-pre.db', self.roots, self.trial_root, runner=Fake(), node=sys.executable, ids=lambda: IDS,
+                        glibc=lambda: '2.39', free=lambda path: 1 << 40)
         self.assertEqual(step, tr.Step('transient', "snapshot unusable: snapshot path must be absolute: 'x-pre.db'"))
 
     def test_migration_failure_fails_the_candidate(self):
         step = self.trial(Fake(sandbox_out='PROBE FAILED migrate: integrity_check: [...]\n', sandbox_exit=1))
         self.assertEqual((step.kind, step.detail), ('failed', 'migrate: integrity_check: [...]'))
+
+    def test_incompatible_release_is_refused_before_the_trial_runs(self):
+        # #817 AI review: the trial applies the probe's ABI/glibc gate too.
+        fake = Fake(node_out='v24.1.0 141\n')
+        step = self.trial(fake)
+        self.assertEqual((step.kind, [c[0] for c in fake.calls]), ('failed', ['node -p']))
+
+    def test_unanswering_node_is_transient(self):
+        fake = Fake(node_out='garbage\n')
+        step = self.trial(fake)
+        self.assertEqual((step, [c[0] for c in fake.calls]), (tr.Step(
+            'transient', 'host Node identity unavailable: ValueError: not enough values to unpack (expected 2, got 1)'),
+            ['node -p']))
+
+    def test_copy_that_would_eat_the_disk_reserve_is_refused(self):
+        # #817 AI review: never let the trial copy take the host under its free-space reserve.
+        fake = Fake()
+        size = len(b'SQLite pretend bytes')
+        step = self.trial(fake, free=tr.MIN_FREE_AFTER_COPY + size - 1)
+        self.assertEqual(step, tr.Step('transient', f'snapshot unusable: {self.snapshot}: copying {size} bytes would leave '
+                                                    f'{tr.MIN_FREE_AFTER_COPY - 1} free, under the {tr.MIN_FREE_AFTER_COPY} '
+                                                    'the host must keep'))
+        self.assertEqual((os.listdir(self.trial_root), [c[0] for c in fake.calls]), ([], ['node -p']))
+
+    def test_reserve_exactly_kept_is_fine(self):
+        step = self.trial(Fake(sandbox_out='PROBE OK migrate: schema 1 -> 1\n'),
+                          free=tr.MIN_FREE_AFTER_COPY + len(b'SQLite pretend bytes'))
+        self.assertEqual(step.kind, 'ok')
+
+    def test_disk_full_during_the_copy_is_transient_and_leaves_nothing(self):
+        real_open = os.open
+
+        def full(path, flags, *a, **kw):
+            if str(path).endswith('trial.db'):
+                raise OSError(28, 'No space left on device')
+            return real_open(path, flags, *a, **kw)
+        with mock.patch.object(tr.os, 'open', full):
+            step = self.trial(Fake())
+        self.assertEqual(step, tr.Step('transient', f'snapshot unusable: {self.snapshot}: copy failed (No space left on device)'))
+        self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_killed_at_the_time_limit_fails_the_candidate(self):
         step = self.trial(Fake(sandbox_out='', sandbox_exit=1, result='timeout'))

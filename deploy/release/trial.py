@@ -23,6 +23,7 @@ import tempfile
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bounded  # noqa: E402
 import publish as pub  # noqa: E402
 import sandbox as sb  # noqa: E402
 from safe_tar import Refused  # noqa: E402
@@ -31,6 +32,9 @@ from verify_payload import check_release  # noqa: E402
 PROBE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payload-probe.cjs')
 SNAPSHOT_SUM = re.compile(r'([0-9a-f]{64})\n?')
 RESULT = re.compile(r'PROBE (OK|FAILED) (native|migrate): (.*)')
+# Spec §4: after preparation the host keeps more than 10 GiB free. The trial copy must not
+# be what takes it below that (#817 AI review: an unbounded copy could fill /var).
+MIN_FREE_AFTER_COPY = 10 * 1024 ** 3
 
 
 @dataclass(frozen=True)
@@ -81,15 +85,27 @@ def _run(kind, sha, release, scratch, args, mode, ident, runner, node):
         return Step('transient', str(e), ident), False
 
 
-def probe(sha, roots, scratch_root, runner=subprocess.run, node=sb.NODE, ids=trial_ids, glibc=_host_glibc):
-    """Tree still exact, built for this Node/ABI/glibc, and its native SQLite opens in the sandbox."""
-    pub.verify_release(sha, roots)
-    release = os.path.join(roots.releases, sha)
-    ident = sb.node_identity(node, runner)
+def _compatible(sha, release, runner, node, glibc):
+    """(Node identity, None) when this host can run the release, else (identity or None, Step without running it)."""
+    try:
+        ident = sb.node_identity(node, runner)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        # A Node that will not answer says nothing about the candidate (#817 AI review).
+        return None, Step('transient', f'host Node identity unavailable: {type(e).__name__}: {e}')
     try:
         check_release(release, sha, ident.modules, glibc())
     except Refused as e:
-        return Step('failed', f'incompatible with this host: {e}', ident)
+        return ident, Step('failed', f'incompatible with this host: {e}', ident)
+    return ident, None
+
+
+def probe(sha, roots, scratch_root, runner=bounded.run, node=sb.NODE, ids=trial_ids, glibc=_host_glibc):
+    """Tree still exact, built for this Node/ABI/glibc, and its native SQLite opens in the sandbox."""
+    pub.verify_release(sha, roots)
+    release = os.path.join(roots.releases, sha)
+    ident, refused = _compatible(sha, release, runner, node, glibc)
+    if refused:
+        return refused
     scratch = _scratch(scratch_root, ids())
     keep = False
     try:
@@ -112,8 +128,12 @@ def _expected_snapshot_sum(snapshot):
     return m.group(1)
 
 
-def copy_snapshot(snapshot, dest, ids):
-    """Copy snapshot into dest (new, 0600, owned by ids), hashing the same bytes; refuse on mismatch."""
+def copy_snapshot(snapshot, dest, ids, free=lambda path: shutil.disk_usage(path).free):
+    """Copy snapshot into dest (new, 0600, owned by ids), hashing the same bytes; refuse on mismatch.
+
+    Refuses before copying when the copy would leave less than MIN_FREE_AFTER_COPY free, and
+    turns any I/O failure (ENOSPC included) into a refusal with the partial copy removed.
+    """
     if not os.path.isabs(snapshot):
         raise Refused(f'snapshot path must be absolute: {snapshot!r}')
     want = _expected_snapshot_sum(snapshot)
@@ -122,33 +142,48 @@ def copy_snapshot(snapshot, dest, ids):
     except OSError as e:
         raise Refused(f'{snapshot}: cannot open ({e.strerror})') from None
     h = hashlib.sha256()
-    with os.fdopen(fd, 'rb') as src:
-        if not stat.S_ISREG(os.fstat(src.fileno()).st_mode):
-            raise Refused(f'{snapshot}: not a regular file')
-        out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(out_fd, 'wb') as out:
-            for chunk in iter(lambda: src.read(1 << 20), b''):
-                h.update(chunk)
-                out.write(chunk)
+    try:
+        with os.fdopen(fd, 'rb') as src:
+            st = os.fstat(src.fileno())
+            if not stat.S_ISREG(st.st_mode):
+                raise Refused(f'{snapshot}: not a regular file')
+            left = free(os.path.dirname(dest)) - st.st_size
+            if left < MIN_FREE_AFTER_COPY:
+                raise Refused(f'{snapshot}: copying {st.st_size} bytes would leave {left} free, '
+                              f'under the {MIN_FREE_AFTER_COPY} the host must keep')
+            out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(out_fd, 'wb') as out:
+                for chunk in iter(lambda: src.read(1 << 20), b''):
+                    h.update(chunk)
+                    out.write(chunk)
+    except OSError as e:
+        if os.path.lexists(dest):
+            os.unlink(dest)
+        raise Refused(f'{snapshot}: copy failed ({e.strerror or type(e).__name__})') from None
     if h.hexdigest() != want:
         os.unlink(dest)
         raise Refused(f'{snapshot}: sha256 {h.hexdigest()} != {want}')
     os.chown(dest, *ids)
 
 
-def trial(sha, snapshot, roots, scratch_root, runner=subprocess.run, node=sb.NODE, ids=trial_ids):
+def trial(sha, snapshot, roots, scratch_root, runner=bounded.run, node=sb.NODE, ids=trial_ids, glibc=_host_glibc,
+          free=lambda path: shutil.disk_usage(path).free):
     """Migrate a private copy of the pre snapshot twice with the release's own code, in the sandbox."""
     pub.verify_release(sha, roots)
     release = os.path.join(roots.releases, sha)
+    # The same gate as the probe: no release code runs on a host it was not built for (#817 AI review).
+    _ident, refused = _compatible(sha, release, runner, node, glibc)
+    if refused:
+        return refused
     owner = ids()
     scratch = _scratch(scratch_root, owner)
     keep = False
     try:
         db = os.path.join(scratch, 'trial.db')
         try:
-            copy_snapshot(snapshot, db, owner)
+            copy_snapshot(snapshot, db, owner, free)
         except Refused as e:
-            # A bad snapshot says nothing about the candidate; the next tick takes a new one.
+            # A bad snapshot or a full disk says nothing about the candidate; the next tick retries.
             return Step('transient', f'snapshot unusable: {e}')
         pub.verify_release(sha, roots)
         step, keep = _run('trial', sha, release, scratch, ['migrate', db], 'migrate', None, runner, node)

@@ -21,6 +21,7 @@ class Argv(unittest.TestCase):
             '-p', 'User=wbb-trial', '-p', 'Group=wbb-trial',
             '-p', 'PrivateNetwork=yes', '-p', 'ProtectHome=yes', '-p', 'NoNewPrivileges=yes',
             '-p', 'ProtectSystem=strict', '-p', 'PrivateTmp=yes', '-p', 'PrivateDevices=yes',
+            '-p', 'ProtectProc=invisible',
             '-p', 'InaccessiblePaths=-/etc/warsaw-beer-bot', '-p', 'InaccessiblePaths=-/etc/wbb-deploy',
             '-p', 'InaccessiblePaths=-/var/lib/warsaw-beer-bot', '-p', 'InaccessiblePaths=-/var/lib/wbb-deploy',
             '-p', f'ReadWritePaths={SCRATCH}', '-p', f'WorkingDirectory={SCRATCH}',
@@ -124,8 +125,15 @@ class Run(unittest.TestCase):
         self.assertEqual(self.run_probe(FakeSystemd(show=(0, 'LoadState=loaded\nActiveState=failed\n'))).result, 'success')
 
     def test_no_systemd_binary_is_transient_with_nothing_to_stop(self):
-        fake = FakeSystemd(run_raises=FileNotFoundError())
-        with self.assertRaisesRegex(sb.Transient, '^systemd-run is not available$'):
+        fake = FakeSystemd(run_raises=FileNotFoundError(2, 'No such file or directory'))
+        with self.assertRaisesRegex(sb.Transient, '^systemd-run could not start \\(No such file or directory\\)$'):
+            self.run_probe(fake)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_any_exec_failure_is_transient(self):
+        # #817 AI review: not only a missing binary — EPERM, EIO, EAGAIN at exec never start a unit either.
+        fake = FakeSystemd(run_raises=PermissionError(13, 'Permission denied'))
+        with self.assertRaisesRegex(sb.Transient, '^systemd-run could not start \\(Permission denied\\)$'):
             self.run_probe(fake)
         self.assertEqual(len(fake.calls), 1)
 

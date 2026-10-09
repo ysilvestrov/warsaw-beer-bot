@@ -150,7 +150,7 @@ class Cli(unittest.TestCase):
         os.makedirs(trial_root)
         code, out = self.run_step(['probe', '--sha', SHA], trial_root=trial_root, runner=runner, node=sys.executable,
                                   ids=lambda: (os.geteuid(), os.getegid()))
-        self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run is not available\n'))
+        self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run could not start (FileNotFoundError)\n'))
 
     def test_production_releases_are_root_owned(self):
         self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
