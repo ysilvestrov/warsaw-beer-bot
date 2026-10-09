@@ -4,8 +4,63 @@ import {
   contextReader,
   filterReviewableFiles,
   globToRegExp,
+  isBodyExcluded,
   matchesAny,
 } from './ai-pr-review';
+
+describe('filterReviewableFiles scope expansion (#816, #526)', () => {
+  it('includes Python, shell, CJS, and extension/API HTML & CSS', () => {
+    const files = [
+      'scripts/ops/resource_monitor.py',
+      'scripts/autodeploy/autodeploy.sh',
+      'deploy/deploy.sh',
+      'deploy/release/package_runtime.py',
+      'deploy/release/payload-probe.cjs',
+      'extension/scripts/zip-dist.py',
+      'extension/src/popup/popup.html',
+      'extension/src/popup/popup.css',
+      'src/api/fest-print/index.html',
+      'deploy/warsaw-beer-bot.service',
+      'deploy/sudoers.d/warsaw-beer-bot',
+      'site/index.html',
+      'docs/spec.md',
+    ];
+    expect(filterReviewableFiles(files)).toEqual([
+      'scripts/ops/resource_monitor.py',
+      'scripts/autodeploy/autodeploy.sh',
+      'deploy/deploy.sh',
+      'deploy/release/package_runtime.py',
+      'deploy/release/payload-probe.cjs',
+      'extension/scripts/zip-dist.py',
+      'extension/src/popup/popup.html',
+      'extension/src/popup/popup.css',
+      'src/api/fest-print/index.html',
+    ]);
+  });
+});
+
+describe('isBodyExcluded (#816)', () => {
+  it('never excludes scripts/ops/test_run.py', () => {
+    expect(isBodyExcluded('scripts/ops/test_run.py')).toBe(false);
+  });
+
+  it('excludes Python tests and test helpers', () => {
+    expect(isBodyExcluded('scripts/ops/test_test_run.py')).toBe(true);
+    expect(isBodyExcluded('scripts/ops/test_resource_monitor.py')).toBe(true);
+    expect(isBodyExcluded('deploy/release/test_publish.py')).toBe(true);
+    expect(isBodyExcluded('deploy/release/release_testkit.py')).toBe(true);
+    expect(isBodyExcluded('src/sources/http.test.ts')).toBe(true);
+    expect(isBodyExcluded('extension/tests/popup.test.ts')).toBe(true);
+  });
+
+  it('does not exclude non-test files due to unanchored globs', () => {
+    expect(isBodyExcluded('deploy/contest_foo.py')).toBe(false);
+    expect(isBodyExcluded('deploy/release/latest_x.py')).toBe(false);
+    expect(isBodyExcluded('deploy/release/package_runtime.py')).toBe(false);
+    expect(isBodyExcluded('scripts/ops/host_patch_collect.py')).toBe(false);
+  });
+});
+
 
 describe('BODY_EXCLUDE_PATTERNS', () => {
   it('excludes test bodies at any depth without touching source that merely contains "test"', () => {
