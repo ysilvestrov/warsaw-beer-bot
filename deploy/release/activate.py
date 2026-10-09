@@ -287,19 +287,19 @@ def _verdict(s):
 def _booted_onto_candidate(store, host, s, boot):
     """2v review: a reboot while activating, with `current` already on the candidate.
 
-    The enabled bot unit starts from `current` at boot, so the candidate may have run, unobserved,
-    and written to the DB before this tick — whatever the persisted intent says. Neither the
-    no-DB abort nor a fresh start with a window counted from now is sound: it is the full code+DB
-    rollback, which (§8) starts by persisting the candidate as the failed SHA. None when not the case.
+    The enabled bot unit starts from `current` at boot, so the candidate may already run (and have
+    written to the DB) whatever the persisted intent says. That is §10b's "start may already have
+    happened": go on to `start` (no restart of an active unit) and its normal window, never back to
+    `switch`, whose refusal would be the no-DB abort over the candidate's writes. A reboot is no
+    verdict on the candidate (§5); only its own window can fail it. None when not the case.
     """
     if boot == s.boot_id:
         return None
     cur = host.current()
     if cur != s.candidate.sha:
         return None
-    reason = (f'reboot while activating (boot {s.boot_id} -> {boot}) with current on {_short(cur)}: '
-              f'the boot may have started it unobserved')
-    return _to_rollback(store, s, boot, host.now(), reason)
+    reason = f'boot {s.boot_id} -> {boot} with current on {_short(cur)}: the candidate may already run'
+    return _put(store, s.replace(intent='start', boot_id=boot).log(host.now(), 'rebooted', reason))
 
 
 def post_dir(pre_path):
