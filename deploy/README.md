@@ -454,6 +454,14 @@ Host side, stage Ядро-2б (code only; the `wbb-trial` user and sudo rules co
   user, no scratch, a unit systemd did not start, another `wbb-trial-*` unit loaded, no audit report).
   Only 1 with its verdict line may become a failed SHA.
 
+Host side, stage Ядро-2в (code only; production activation stays off until the controller lands):
+
+- `deploy_state.py` — controller state v2: one `deploy-state.json`, canonical JSON, `formatVersion: 2`,
+  written temp → fsync → rename → fsync(dir). `phase`/`intent` record an action as *planned*, never as
+  done (`settled`; `activating`: stop/switch/start; `observing`; `rolling-back`: stop-writers/save-post/
+  restore-pre/switch-previous/start-baseline; `unverified`; `recovery-failed`). A missing file is the
+  first run; an empty, non-JSON, other-version or schema-breaking file is an error, never a blank slate.
+
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
 ```bash
