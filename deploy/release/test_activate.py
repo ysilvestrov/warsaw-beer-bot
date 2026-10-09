@@ -523,7 +523,34 @@ class Rollback(Engine):
                          ({'bot.db': db1, 'bot.db-wal': wal1}, []))
         self.assertEqual(self.whats(), ['begin', 'stop', 'abort', 'switch-previous', 'stop-writers', 'save-post',
                                         'restore-pre', 'switch-previous', 'rolled-back'])
-        self.assertEqual(s.evidence[3]['result'], 'candidate started by a reboot during the abort')
+        self.assertEqual(s.evidence[3]['result'], 'another release than the previous could have run during the abort')
+
+    def test_a_candidate_a_reboot_ran_and_that_died_since_still_restores_the_database(self):
+        # #823 AI review, second pass: the check used to hang on a RUNNING bot; a candidate that wrote
+        # and then failed before the next tick read as "never started".
+        self.begin()
+        self.world.trees[CAND] = '9' * 64
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.world.reboot()
+        self.world.bot, self.world.running = 'failed', None
+        self.assertEqual(self.world.db_files(), self.migrated())
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load().last_failed_sha, self.world.db_files(), self.world.running),
+                         ('rolled-back', None, {'': PRE_DB}, OLD))
+
+    def test_a_reboot_during_an_abort_that_never_moved_current_keeps_the_database(self):
+        # The boundary: the switch was refused before the rename, `current` is the previous release,
+        # so the reboot started only the previous release — nothing to restore.
+        self.world.tampered = {CAND}
+        self.begin()
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.assertEqual((self.store.load().intent, self.world.current), ('switch-previous', OLD))
+        self.world.reboot()
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, self.world.db_files(), self.world.posts, self.world.running),
+                         ('aborted', {'': PRE_DB}, [], OLD))
 
     def test_writers_started_by_a_reboot_are_stopped_before_the_restore(self):
         self.roll_to('restore-pre')

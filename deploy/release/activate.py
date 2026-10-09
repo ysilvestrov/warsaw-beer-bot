@@ -415,15 +415,18 @@ def _switch_previous(store, host, s, boot):
     prev = s.previous.sha
     try:
         at = host.now()
-        if host.bot_state() not in STOPPED:
+        running = host.bot_state() not in STOPPED
+        if not _verdict(s) and not s.posts and (running or boot != s.boot_id) and host.current() != prev:
+            # #823 AI review: the abort's database is untouched only while nothing but the previous
+            # release could have run. A reboot starts the unit from `current`; if that is not the
+            # previous release (the switch had moved it), whatever started may have written — and
+            # may have stopped or failed again by now. Not a verdict on the candidate, but the
+            # database goes back like a rollback, with its own post.
+            return _restop(store, s, boot, at, 'another release than the previous could have run during the abort')
+        if running:
             if _verdict(s) or s.posts:
                 # Started by a reboot from `current` — maybe the candidate, on the restored DB.
                 return _restop(store, s, boot, at, 'bot running')
-            if host.current() == s.candidate.sha:
-                # #823 AI review: an abort whose switch had already moved `current` (another tree
-                # than admitted) and a reboot that started the unit from it — the candidate ran and
-                # may have written. Not a verdict on it, but the database goes back like a rollback.
-                return _restop(store, s, boot, at, 'candidate started by a reboot during the abort')
             host.stop_bot()
             if host.bot_state() not in STOPPED:
                 return Outcome('blocked', s, 'switch-previous: the bot does not stop')

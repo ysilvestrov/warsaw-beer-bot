@@ -81,9 +81,10 @@ def _copy(src, dst, mode=0o600):
     h, size = hashlib.sha256(), 0
     with _open_regular(src) as f:
         out_fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, mode)
-        # #823 AI review: open's mode passes through the umask; the live DB must keep its exact mode.
-        os.fchmod(out_fd, mode)
         with os.fdopen(out_fd, 'wb') as out:
+            # #823 AI review: open's mode passes through the umask; the live DB must keep its exact
+            # mode. Inside the `with`, so a failing fchmod still closes the descriptor.
+            os.fchmod(out.fileno(), mode)
             for chunk in iter(lambda: f.read(1 << 20), b''):
                 out.write(chunk)
                 h.update(chunk)
