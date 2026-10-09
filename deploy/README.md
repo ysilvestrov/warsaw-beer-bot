@@ -438,6 +438,15 @@ Host side, stage Ядро-2а (code only; nothing is installed on the host yet):
 - `publish.py` / `wbb_release.py publish|verify` — private copy, checks, `releases/<sha>` by one
   rename, then the 0600 receipt; `verify` re-checks a tree against its receipt without network.
 
+Host side, stage Ядро-2б (code only; the `wbb-trial` user and sudo rules come later):
+
+- `audit_verdict.py` / `host_audit.py` — `wbb_release.py audit`: npm audit of the release's
+  lockfile alone, as the operator; the verdict reads the JSON exactly like `audit-verdict.ts`.
+- `sandbox.py` / `trial.py` — `wbb_release.py probe|trial`: the release's code runs only inside
+  the fixed `systemd-run` sandbox (`wbb-trial`, no network, no secrets, read-only system,
+  limits, whole-cgroup kill); `trial` migrates a private, checksum-verified copy of a pre snapshot.
+- Exit codes: 0 ok, 1 refused / candidate failed, 75 could not judge now (retry).
+
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
 ```bash

@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -11,6 +12,7 @@ import publish as pub  # noqa: E402
 import wbb_release as cli  # noqa: E402
 from release_testkit import SHA, packed  # noqa: E402
 from zip_admission import sha256_file  # noqa: E402
+from audit_verdict import Finding, Verdict  # noqa: E402
 
 REPO = 'ysilvestrov/warsaw-beer-bot'
 
@@ -103,8 +105,47 @@ class Cli(unittest.TestCase):
         code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
         self.assertEqual((code, err), (1, f'REFUSED: {self.token}: expected exactly one non-empty WBB_GITHUB_TOKEN=\n'))
 
+    def published(self):
+        self.assertEqual(self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])[0], 0)
+
+    def run_step(self, argv, **kw):
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = cli.main(argv, self.roots, self.token, self.api_factory(), **kw)
+        return code, out.getvalue()
+
+    def test_audit_exit_codes(self):
+        self.published()
+        cases = [(Verdict('clean'), 0), (Verdict('advisory', findings=(Finding('a', 'high'),)), 1),
+                 (Verdict('unrunnable', reason='is empty — x'), 75)]
+        seen = []
+        for verdict, _ in cases:
+            seen.append(self.run_step(['audit', '--sha', SHA], audit=lambda release, work, v=verdict: v)[0])
+        self.assertEqual(seen, [code for _, code in cases])
+
+    def test_audit_reads_the_verified_release(self):
+        self.published()
+        got = []
+        self.run_step(['audit', '--sha', SHA], audit=lambda release, work: got.append(release) or Verdict('clean'))
+        self.assertEqual(got, [os.path.join(self.roots.releases, SHA)])
+
+    def test_probe_transient_is_75(self):
+        self.published()
+        def runner(argv, **kw):
+            if argv[0] == '/usr/bin/systemd-run':
+                raise FileNotFoundError()
+            return subprocess.CompletedProcess(argv, 0, 'v24.1.0 137\n', '')
+        trial_root = os.path.join(self.base, 'trial')
+        os.makedirs(trial_root)
+        code, out = self.run_step(['probe', '--sha', SHA], trial_root=trial_root, runner=runner, node=sys.executable,
+                                  ids=lambda: (os.geteuid(), os.getegid()))
+        self.assertEqual((code, out), (75, f'PROBE TRANSIENT {SHA}: systemd-run is not available\n'))
+
     def test_production_releases_are_root_owned(self):
         self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
+
+    def test_production_trial_root(self):
+        self.assertEqual(cli.TRIAL_ROOT, '/var/lib/wbb-trial')
 
     def test_production_roots_share_one_filesystem_tree(self):
         # releases and staging under one directory, so publish's single rename can work.

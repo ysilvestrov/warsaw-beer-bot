@@ -9,19 +9,29 @@ installation is a later stage). It takes no paths but the operator's ZIP: the
 release, receipt and scratch roots and the token file are constants here, and
 trust comes from metadata fetched now, never from anything the operator passes.
 
-Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>
-       wbb_release.py verify  --sha <full sha>
-Exit:  0 done, 1 refused (reason on stderr), 64 usage.
+Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
+       wbb_release.py verify  --sha <full sha>                            (root)
+       wbb_release.py audit   --sha <full sha>                            (operator, never root)
+       wbb_release.py probe   --sha <full sha>                            (root; runs the sandbox)
+       wbb_release.py trial   --sha <full sha> --snapshot <pre.db>        (root; runs the sandbox)
+Exit:  0 done/ok, 1 refused or the candidate failed (reason on stderr), 75 could not judge
+       now — retry, never a failed SHA (EX_TEMPFAIL), 64 usage.
 Nothing is activated: no unit, pointer or database is touched.
 """
 import argparse
 import os
 import stat
+import subprocess
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import github_trust as gt  # noqa: E402
+import host_audit  # noqa: E402
 import publish as pub  # noqa: E402
+import sandbox as sb  # noqa: E402
+import trial as tr  # noqa: E402
+from audit_verdict import render_verdict  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 
 PRODUCTION_ROOTS = pub.Roots(
@@ -31,6 +41,9 @@ PRODUCTION_ROOTS = pub.Roots(
     owner=(0, 0),
 )
 TOKEN_FILE = '/etc/wbb-deploy/github.env'
+# Parent of the per-run sandbox scratch directories (root-owned; each run is 0700 wbb-trial).
+TRIAL_ROOT = '/var/lib/wbb-trial'
+EX_TEMPFAIL = 75
 TOKEN_KEY = 'WBB_GITHUB_TOKEN'
 
 
@@ -48,14 +61,18 @@ def read_token(path):
     return values[0]
 
 
-def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi):
-    ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept or re-verify a runtime release.')
+def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.GitHubApi, trial_root=TRIAL_ROOT,
+         runner=subprocess.run, node=sb.NODE, ids=tr.trial_ids, audit=host_audit.audit_release):
+    ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept, audit, probe or trial a runtime release.')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('publish')
     p.add_argument('--sha', required=True)
     p.add_argument('--archive', required=True)
-    v = sub.add_parser('verify')
-    v.add_argument('--sha', required=True)
+    for name in ('verify', 'audit', 'probe'):
+        sub.add_parser(name).add_argument('--sha', required=True)
+    t = sub.add_parser('trial')
+    t.add_argument('--sha', required=True)
+    t.add_argument('--snapshot', required=True)
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
@@ -65,6 +82,16 @@ def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.Git
             receipt = pub.verify_release(a.sha, roots)
             print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
             return 0
+        if a.cmd == 'audit':
+            pub.verify_release(a.sha, roots)
+            verdict = audit(os.path.join(roots.releases, a.sha), tempfile.gettempdir())
+            print(f'AUDIT {verdict.kind.upper()} {a.sha}: {render_verdict(verdict)}')
+            return {'clean': 0, 'advisory': 1}.get(verdict.kind, EX_TEMPFAIL)
+        if a.cmd in ('probe', 'trial'):
+            step = (tr.probe(a.sha, roots, trial_root, runner, node, ids) if a.cmd == 'probe'
+                    else tr.trial(a.sha, a.snapshot, roots, trial_root, runner, node, ids))
+            print(f'{a.cmd.upper()} {step.kind.upper()} {a.sha}: {step.detail}')
+            return {'ok': 0, 'failed': 1}.get(step.kind, EX_TEMPFAIL)
         api = api_factory(read_token(token_file))
         trusted = gt.fetch_trusted(api, gt.REPO, a.sha)
         outcome = pub.publish(trusted, a.archive, roots)
