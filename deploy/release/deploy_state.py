@@ -163,6 +163,10 @@ def _event(e, where):
     return MappingProxyType(dict(e))
 
 
+class _Frozen(tuple):
+    """Private marker: events that _event already froze inside a State (see State.__post_init__)."""
+
+
 class _Evidence(_Kind):
     def check(self, v, where):
         if not isinstance(v, tuple) or not all(isinstance(e, MappingProxyType) for e in v):
@@ -289,7 +293,10 @@ class State(_Record):
     )
 
     def __post_init__(self):
-        if isinstance(self.evidence, (list, tuple)):
+        if type(self.evidence) is _Frozen:
+            # Events a State already froze (carried by replace/log): checked once, not on every change.
+            object.__setattr__(self, 'evidence', tuple(self.evidence))
+        elif isinstance(self.evidence, (list, tuple)):
             # Callers pass a list of dicts; the state keeps frozen copies so nothing can change it in place.
             object.__setattr__(self, 'evidence', tuple(_event(e, f'State.evidence[{i}]')
                                                        for i, e in enumerate(self.evidence)))
@@ -307,11 +314,13 @@ class State(_Record):
 
     def replace(self, **changes):
         """A new, validated State with these fields changed; this one is untouched."""
+        changes.setdefault('evidence', _Frozen(self.evidence))
         return dc_replace(self, **changes)
 
     def log(self, at, what, result, **detail):
         """A new State with one more evidence event (scalar details only)."""
-        return self.replace(evidence=self.evidence + (dict(detail, at=at, what=what, result=result),))
+        event = _event(dict(detail, at=at, what=what, result=result), f'State.evidence[{len(self.evidence)}]')
+        return self.replace(evidence=_Frozen(self.evidence + (event,)))
 
     def to_json(self):
         return {'formatVersion': FORMAT_VERSION, **super().to_json()}

@@ -473,6 +473,21 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   <post>` needs that complete post and a `pre` matching its `.sha256`; it drops -wal/-shm *before* the
   replace (a stale post-state WAL next to the restored pre would be replayed by SQLite), then copies pre
   in with fsync and one rename. Exit 0; 2 refused (nothing changed); 64 usage; 70 internal; 75 OS error.
+- `activate.py` — the activation and rollback engine, over an injected state store and `Host` (the real
+  sudo/systemctl/HTTP adapter and the tick come with the periphery). `begin` opens an activation only from
+  `settled` with a settled baseline, never for the last failed or the settled SHA. Every `step` persists the
+  intent before acting and the next one only after reading the result back from the host, so `resume` at
+  the start of a tick repeats the persisted intent. Window as merge-deploy: the candidate's own
+  `releaseSha` healthy within 120 s, then a probe every 10 s until 600 s from the start; 3 failures in a row
+  or an NRestarts change roll back; a gap over 30 s, a reboot or NRestarts never read → `unverified`.
+  Rollback: lastFailedSha, stop bot + Litestream, `dbsnap` post once, restore pre, `current` back to the
+  settled release, start Litestream + bot, its `releaseSha` healthy within 120 s. A candidate that never
+  started (refused switch) goes back without touching the DB and without a verdict. Outcomes: `continue`,
+  `idle`, `blocked` (a host error — retried, never a verdict), `settled`, `unverified`, `rolled-back`,
+  `aborted`, `recovery-failed`, `drift` (settled but another release runs — reported, nothing done).
+- `fake_host.py` — the engine's test world (which release the running process serves, `current`, real DB
+  files under real `dbsnap`, NRestarts, boot, clock) with crash injection before/after every host call and
+  save; `test_crash_matrix.py` crashes the engine at every such point and checks the world after recovery.
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 

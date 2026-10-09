@@ -143,9 +143,9 @@ Production activation, як і раніше, заборонена до кінц�
 
 **Files:** modify `deploy/release/activate.py`, `deploy/release/test_activate.py`; create `deploy/release/test_crash_matrix.py`.
 
-- [ ] Кроки `rolling-back` за Global Constraints: `stop-writers` (бот і litestream, обидва підтверджено зупиненими), `save-post` (`post` у state після complete), `restore-pre`, `switch-previous`, `start-baseline` (litestream, потім бот; `releaseSha == previous` до `STARTUP_S`). Успіх → `settled` на `previous`, `lastFailedSha = candidate`, `evidence` з pre, post і проміжком втрачених записів. Невдача кроку, що не лікується повтором, → `recovery-failed` з evidence.
-- [ ] `resume(store, host)` на старті tick: `None`/`settled` → нічого; `activating`/`rolling-back` → повторити `intent`; `observing` → якщо `boot_id()` змінився або `now - lastSampleAt > GAP_S` → `unverified` (pre лишається, `settled` не рухається), інакше продовжити вікно; `unverified`/`recovery-failed` → нічого не робити, повернути Outcome для повідомлення. `settled` із `current()` чи `releaseSha`, що не дорівнює `settled.sha` → Outcome `drift` без жодної дії (§10b рядок settled).
-- [ ] **Crash-матриця** (`test_crash_matrix.py`): для сценаріїв «успіх», «відкат у startup», «відкат на 9:59», «відкат без БД (switch не вдався)» пройти повний прогін, перелічити всі точки падіння (кожен виклик Host і кожен `save` — до і після), і для **кожної** точки: прогін до `Crash` → новий рушій → `resume`/`run` до термінального Outcome. Інваріанти після кожного:
+- [x] Кроки `rolling-back` за Global Constraints: `stop-writers` (бот і litestream, обидва підтверджено зупиненими), `save-post` (`post` у state після complete), `restore-pre`, `switch-previous`, `start-baseline` (litestream, потім бот; `releaseSha == previous` до `STARTUP_S`). Успіх → `settled` на `previous`, `lastFailedSha = candidate`, `evidence` з pre, post і проміжком втрачених записів. Невдача кроку, що не лікується повтором, → `recovery-failed` з evidence.
+- [x] `resume(store, host)` на старті tick: `None`/`settled` → нічого; `activating`/`rolling-back` → повторити `intent`; `observing` → якщо `boot_id()` змінився або `now - lastSampleAt > GAP_S` → `unverified` (pre лишається, `settled` не рухається), інакше продовжити вікно; `unverified`/`recovery-failed` → нічого не робити, повернути Outcome для повідомлення. `settled` із `current()` чи `releaseSha`, що не дорівнює `settled.sha` → Outcome `drift` без жодної дії (§10b рядок settled).
+- [x] **Crash-матриця** (`test_crash_matrix.py`): для сценаріїв «успіх», «відкат у startup», «відкат на 9:59», «відкат без БД (switch не вдався)» пройти повний прогін, перелічити всі точки падіння (кожен виклик Host і кожен `save` — до і після), і для **кожної** точки: прогін до `Crash` → новий рушій → `resume`/`run` до термінального Outcome. Інваріанти після кожного:
   - бот запущений рівно з того SHA, який state називає (`settled.sha`), або state у `recovery-failed`/`unverified` з evidence;
   - `settled` ніколи не вказує на SHA, чиє вікно не завершилось повністю;
   - complete post ніколи не переписано; restore не почався без complete post;
@@ -153,9 +153,11 @@ Production activation, як і раніше, заборонена до кінц�
   - `lastFailedSha` встановлено тоді й лише тоді, коли candidate відкочено;
   - падіння в `observing` через reboot (зміна `boot_id`) → `unverified`, не `settled`.
   Кількість точок друкується в назві subTest, щоб нова дія в рушії автоматично додавала нові падіння.
-- [ ] `spec.md` §5.9 — абзац про рушій (state v2, phase/intent, resume), `deploy/README.md` — опис модулів; `scripts/deploy-rsync.test.ts` — нові файли.
+- [x] `spec.md` §5.9 — абзац про рушій (state v2, phase/intent, resume), `deploy/README.md` — опис модулів; `scripts/deploy-rsync.test.ts` — нові файли.
 
 ---
+
+- Зроблено з уточненнями: шлях відкату без БД визначається тим, що candidate не отримав вироку (`lastFailedSha != candidate`), а не окремим полем; він закінчується Outcome `aborted` (а не `rolled-back`) і **не** пише `lastFailedSha` — відмова перемикання є фактом про хост, не про кандидата (§5). Writers, яких знову підняв reboot, перед `save-post`/`restore-pre`/`switch-previous` спостерігаються і зупиняються ще раз (повертаємось до `stop-writers`, post не переписується, restore повторюється). Пауза між пробами відміряється від persisted вибірки **перед** пробою: падіння між записом вибірки і сном інакше дає дві невдачі в ту саму мить (знайдено crash-матрицею). Падіння одразу після фінального запису лишає наступному tick-у `idle` — повідомлення про результат обв'язка має виводити зі state, а не з Outcome.
 
 ## Після ядра
 
