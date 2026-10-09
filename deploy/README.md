@@ -486,7 +486,9 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   or an NRestarts change roll back; a gap over 30 s, a reboot or NRestarts never read → `unverified`.
   Rollback: lastFailedSha, stop bot + Litestream, `dbsnap` post once, restore pre, `current` back to the
   settled release, start Litestream + bot, its `releaseSha` healthy within 120 s. A candidate that never
-  started (refused switch) goes back without touching the DB and without a verdict. Outcomes: `continue`,
+  started (refused switch) goes back without touching the DB and without a verdict. A reboot while
+  `activating` with `current` already on the candidate may have started it from the enabled unit: that
+  is the full code+DB rollback (lastFailedSha included), never the no-DB abort. Outcomes: `continue`,
   `idle`, `blocked` (a host error — retried, never a verdict), `settled`, `unverified`, `rolled-back`,
   `aborted`, `recovery-failed`, `drift` (settled but another release runs — reported, nothing done).
 - `fake_host.py` — the engine's test world (which release the running process serves, `current`, real DB

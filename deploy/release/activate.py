@@ -284,6 +284,24 @@ def _verdict(s):
     return s.last_failed_sha == s.candidate.sha
 
 
+def _booted_onto_candidate(store, host, s, boot):
+    """2v review: a reboot while activating, with `current` already on the candidate.
+
+    The enabled bot unit starts from `current` at boot, so the candidate may have run, unobserved,
+    and written to the DB before this tick — whatever the persisted intent says. Neither the
+    no-DB abort nor a fresh start with a window counted from now is sound: it is the full code+DB
+    rollback, which (§8) starts by persisting the candidate as the failed SHA. None when not the case.
+    """
+    if boot == s.boot_id:
+        return None
+    cur = host.current()
+    if cur != s.candidate.sha:
+        return None
+    reason = (f'reboot while activating (boot {s.boot_id} -> {boot}) with current on {_short(cur)}: '
+              f'the boot may have started it unobserved')
+    return _to_rollback(store, s, boot, host.now(), reason)
+
+
 def post_dir(pre_path):
     """Where the rollback keeps the post DB: fixed by the pre snapshot, so a retry finds the same one."""
     stem = pre_path[:-len('-pre.db')] if pre_path.endswith('-pre.db') else pre_path
@@ -438,7 +456,12 @@ def step(store, host):
     if s.phase in ('unverified', 'recovery-failed'):
         return Outcome(s.phase, s, _held(s))
     try:
-        return _STEPS[(s.phase, s.intent)](store, host, s, host.boot_id())
+        boot = host.boot_id()
+        if s.phase == 'activating':
+            booted = _booted_onto_candidate(store, host, s, boot)
+            if booted is not None:
+                return booted
+        return _STEPS[(s.phase, s.intent)](store, host, s, boot)
     except HostError as e:
         # The clock, the boot id or a sleep failed: nothing was judged, the next tick repeats.
         return Outcome('blocked', s, f'{s.phase}/{s.intent}: {e}')
