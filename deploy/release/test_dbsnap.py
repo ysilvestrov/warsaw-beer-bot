@@ -313,6 +313,15 @@ class Restore(Tmp):
             os.umask(old)
         self.assertEqual(stat.S_IMODE(os.stat(self.db).st_mode), 0o660)
 
+    def test_a_failing_fchmod_closes_the_descriptor(self):
+        # #823 AI review: the fchmod ran before the descriptor had an owner that closes it.
+        self.scenario()
+        before = len(os.listdir('/proc/self/fd'))
+        with mock.patch.object(dbsnap.os, 'fchmod', side_effect=OSError(1, 'Operation not permitted')), \
+                self.assertRaises(OSError):
+            dbsnap.restore(self.pre, self.db, self.out)
+        self.assertEqual(len(os.listdir('/proc/self/fd')), before)
+
 class Cli(Tmp):
     def run_cli(self, argv):
         out, err = io.StringIO(), io.StringIO()
