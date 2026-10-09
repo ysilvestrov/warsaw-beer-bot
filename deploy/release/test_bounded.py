@@ -1,7 +1,9 @@
 import os
 import subprocess
 import sys
+import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import bounded  # noqa: E402
@@ -19,16 +21,56 @@ class Bounded(unittest.TestCase):
     def test_a_flood_is_cut_at_the_cap_and_the_child_still_finishes(self):
         # 8 MiB on each stream against a 1000-byte cap: kept bytes stay bounded, nothing blocks.
         r = bounded.run(py('import sys; sys.stdout.write("x" * (8 << 20)); sys.stderr.write("y" * (8 << 20))'),
-                        timeout=60, cap=1000)
-        self.assertEqual((r.returncode, r.stdout, r.stderr, r.truncated), (0, b'x' * 1000, b'y' * 1000, True))
+                        timeout=60, cap=1000, tail=10)
+        self.assertEqual((r.returncode, r.stdout, r.stderr, r.truncated),
+                         (0, b'x' * 1000 + bounded.MARK + b'x' * 10, b'y' * 1000 + bounded.MARK + b'y' * 10, True))
+
+    def test_the_last_line_survives_a_flood(self):
+        # #817 AI review: systemd-run's footer comes after whatever the candidate wrote.
+        r = bounded.run(py('import sys; sys.stderr.write("y" * (4 << 20)); sys.stderr.write("\\nFinished with result: success\\n")'),
+                        timeout=60, cap=100, tail=64, text=True)
+        footer = '\nFinished with result: success\n'
+        self.assertEqual(r.stderr, 'y' * 100 + bounded.MARK.decode() + 'y' * (64 - len(footer)) + footer)
 
     def test_exactly_the_cap_is_not_truncated(self):
-        r = bounded.run(py('import sys; sys.stdout.write("x" * 1000)'), timeout=30, cap=1000)
-        self.assertEqual((len(r.stdout), r.truncated), (1000, False))
+        r = bounded.run(py('import sys; sys.stdout.write("x" * 1010)'), timeout=30, cap=1000, tail=10)
+        self.assertEqual((r.stdout, r.truncated), (b'x' * 1010, False))
 
     def test_timeout_kills_the_child(self):
         with self.assertRaises(subprocess.TimeoutExpired):
             bounded.run(py('import time; time.sleep(60)'), timeout=1)
+
+    def test_a_descendant_holding_the_pipe_does_not_hang_the_timeout(self):
+        # #817 AI review: with --pipe the unit's processes keep our pipes open after systemd-run dies.
+        start = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py('import subprocess, time; subprocess.Popen(["sleep", "30"]); time.sleep(30)'),
+                        timeout=1, join_grace=1)
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_a_descendant_holding_the_pipe_does_not_hang_a_normal_exit(self):
+        start = time.monotonic()
+        r = bounded.run(py('import subprocess; subprocess.Popen(["sleep", "30"]); print("done")'),
+                        timeout=20, join_grace=1, text=True)
+        self.assertEqual((r.returncode, r.stdout, r.truncated), (0, 'done\n', True))
+        self.assertLess(time.monotonic() - start, 10)
+
+    def test_any_exception_kills_the_child(self):
+        # #817 AI review: Ctrl-C while waiting must not leave the child (systemd-run) running.
+        killed = []
+
+        class Interrupted(subprocess.Popen):
+            def wait(self, timeout=None):
+                if timeout is not None and not killed:
+                    raise KeyboardInterrupt
+                return super().wait(timeout)
+
+            def kill(self):
+                killed.append(self.pid)
+                super().kill()
+        with mock.patch.object(bounded.subprocess, 'Popen', Interrupted), self.assertRaises(KeyboardInterrupt):
+            bounded.run(py('import time; time.sleep(30)'), timeout=20, join_grace=1)
+        self.assertEqual(len(killed), 1)
 
     def test_check_raises_on_failure(self):
         with self.assertRaises(subprocess.CalledProcessError) as cm:
