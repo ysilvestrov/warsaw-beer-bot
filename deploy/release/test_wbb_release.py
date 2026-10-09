@@ -223,7 +223,8 @@ class Cli(unittest.TestCase):
     def test_switch_then_again(self):
         self.published()
         got = [self.run_cli(['switch', '--sha', SHA]), self.run_cli(['switch', '--sha', SHA])]
-        self.assertEqual(got, [(0, f'SWITCHED {SHA}\n', ''), (0, f'CURRENT {SHA}\n', '')])
+        tree = pub.read_receipt(os.path.join(self.roots.receipts, f'{SHA}.json'))['treeSha256']
+        self.assertEqual(got, [(0, f'SWITCHED {SHA} tree {tree}\n', ''), (0, f'CURRENT {SHA} tree {tree}\n', '')])
         self.assertEqual(os.readlink(os.path.join(self.base, 'current')), f'releases/{SHA}')
 
     def test_switch_to_an_unaccepted_release_is_refused(self):
