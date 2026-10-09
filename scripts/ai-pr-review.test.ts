@@ -3,9 +3,12 @@ import {
   BODY_EXCLUDE_PATTERNS,
   contextReader,
   filterReviewableFiles,
+  formatCodeSpan,
   globToRegExp,
   isBodyExcluded,
+  isSkipReview,
   matchesAny,
+  MAX_UNREVIEWED_DISPLAY,
   partitionPrFiles,
   renderSkipBody,
   wrapBody,
@@ -39,6 +42,21 @@ describe('partitionPrFiles (#816, #526)', () => {
   });
 });
 
+describe('formatCodeSpan (#816)', () => {
+  it('formats normal filenames with single backticks', () => {
+    expect(formatCodeSpan('deploy/warsaw-beer-bot.service')).toBe(
+      '`deploy/warsaw-beer-bot.service`',
+    );
+  });
+
+  it('escapes filenames with embedded backticks without breaking Markdown code span', () => {
+    expect(formatCodeSpan('deploy/foo`bar.service')).toBe('``deploy/foo`bar.service``');
+    expect(formatCodeSpan('deploy/foo``bar.service')).toBe('```deploy/foo``bar.service```');
+    expect(formatCodeSpan('`leading')).toBe('`` `leading ``');
+    expect(formatCodeSpan('trailing`')).toBe('`` trailing` ``');
+  });
+});
+
 describe('renderSkipBody (#816, #526)', () => {
   it('renders unreviewed file list when unreviewed files exist', () => {
     const body = wrapBody(
@@ -53,6 +71,16 @@ describe('renderSkipBody (#816, #526)', () => {
     expect(body).toContain('- `deploy/sudoers.d/warsaw-beer-bot`');
   });
 
+  it('truncates unreviewed file list exceeding MAX_UNREVIEWED_DISPLAY to prevent exceeding GitHub body limits', () => {
+    const unreviewed = Array.from({ length: 65 }, (_, i) => `deploy/file_${i}.service`);
+    const body = renderSkipBody({ unreviewed });
+    expect(body).toContain('65 changed file(s) not reviewed (outside reviewer scope):');
+    expect(body).toContain('- `deploy/file_0.service`');
+    expect(body).toContain(`- \`deploy/file_${MAX_UNREVIEWED_DISPLAY - 1}.service\``);
+    expect(body).not.toContain(`- \`deploy/file_${MAX_UNREVIEWED_DISPLAY}.service\``);
+    expect(body).toContain('- … and 15 more file(s)');
+  });
+
   it('renders documentation notice when all changed files are ignored assets', () => {
     const body = wrapBody(renderSkipBody({ unreviewed: [] }));
     expect(body).toContain('<!-- ai-pr-review -->');
@@ -60,6 +88,29 @@ describe('renderSkipBody (#816, #526)', () => {
     expect(body).toContain(
       'No reviewable code changed in this pull request (all changed files are documentation or ignored assets).',
     );
+  });
+});
+
+describe('isSkipReview (#816)', () => {
+  it('returns true for genuine skip review comments', () => {
+    const skip1 = wrapBody(renderSkipBody({ unreviewed: ['deploy/a.service'] }));
+    const skip2 = wrapBody(renderSkipBody({ unreviewed: [] }));
+    expect(isSkipReview(skip1)).toBe(true);
+    expect(isSkipReview(skip2)).toBe(true);
+  });
+
+  it('returns false for reviews without marker or normal reviews', () => {
+    expect(isSkipReview('Some random comment')).toBe(false);
+    expect(
+      isSkipReview(
+        '<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\nNo verified findings.\n\n<!-- ai-pr-review-state ... -->',
+      ),
+    ).toBe(false);
+  });
+
+  it('returns false for reviews with open findings even if findings quote contains "**Review skipped:**"', () => {
+    const findingReview = `<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\n### Open findings\n\n### 1. P2 — Quote mismatch\nWhere: src/a.ts:10\nQuote: const x = "**Review skipped:**";`;
+    expect(isSkipReview(findingReview)).toBe(false);
   });
 });
 
@@ -755,6 +806,23 @@ describe('skip comment lifecycle (#816, #526)', () => {
     const nonSkipBody =
       '<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\n### Open findings\n\nExisting bug finding';
     const gh = githubFetch(nonSkipBody);
+    const logs: string[] = [];
+    await runReview(
+      CFG,
+      deps({
+        githubFetch: gh.fetchFn,
+        listChangedFiles: () => ['deploy/warsaw-beer-bot.service'],
+        log: (msg) => logs.push(msg),
+      }),
+    );
+    expect(gh.put.body).toBeUndefined();
+    expect(logs.some((l) => l.includes('retaining existing review'))).toBe(true);
+  });
+
+  it('retains existing review even if a finding quote contains "**Review skipped:**"', async () => {
+    const reviewWithQuote =
+      '<!-- ai-pr-review -->\n\n## 🤖 AI PR Review\n\n### Open findings\n\nQuote: const x = "**Review skipped:**";';
+    const gh = githubFetch(reviewWithQuote);
     const logs: string[] = [];
     await runReview(
       CFG,
