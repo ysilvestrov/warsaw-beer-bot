@@ -89,11 +89,12 @@ def _compatible(sha, release, runner, node, glibc):
     """(Node identity, None) when this host can run the release, else (identity or None, Step without running it)."""
     try:
         ident = sb.node_identity(node, runner)
-    except (OSError, subprocess.SubprocessError, ValueError) as e:
-        # A Node that will not answer says nothing about the candidate (#817 AI review).
-        return None, Step('transient', f'host Node identity unavailable: {type(e).__name__}: {e}')
+        host_glibc = glibc()
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError, AttributeError) as e:
+        # A host that will not say which Node or glibc it runs says nothing about the candidate (#817 AI review).
+        return None, Step('transient', f'host Node/glibc identity unavailable: {type(e).__name__}: {e}')
     try:
-        check_release(release, sha, ident.modules, glibc())
+        check_release(release, sha, ident.modules, host_glibc)
     except Refused as e:
         return ident, Step('failed', f'incompatible with this host: {e}', ident)
     return ident, None
@@ -153,13 +154,26 @@ def copy_snapshot(snapshot, dest, ids, free=lambda path: shutil.disk_usage(path)
                               f'under the {MIN_FREE_AFTER_COPY} the host must keep')
             out_fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
             with os.fdopen(out_fd, 'wb') as out:
-                for chunk in iter(lambda: src.read(1 << 20), b''):
+                # Exactly the size the free-space check counted (#817 AI review): a snapshot
+                # that grows while copied is refused, not followed into the reserve.
+                remaining = st.st_size
+                while remaining > 0:
+                    chunk = src.read(min(1 << 20, remaining))
+                    if not chunk:
+                        raise Refused(f'{snapshot}: shrank while being copied')
                     h.update(chunk)
                     out.write(chunk)
+                    remaining -= len(chunk)
+                if src.read(1):
+                    raise Refused(f'{snapshot}: grew while being copied')
     except OSError as e:
         if os.path.lexists(dest):
             os.unlink(dest)
         raise Refused(f'{snapshot}: copy failed ({e.strerror or type(e).__name__})') from None
+    except Refused:
+        if os.path.lexists(dest):
+            os.unlink(dest)
+        raise
     if h.hexdigest() != want:
         os.unlink(dest)
         raise Refused(f'{snapshot}: sha256 {h.hexdigest()} != {want}')
@@ -172,7 +186,7 @@ def trial(sha, snapshot, roots, scratch_root, runner=bounded.run, node=sb.NODE, 
     pub.verify_release(sha, roots)
     release = os.path.join(roots.releases, sha)
     # The same gate as the probe: no release code runs on a host it was not built for (#817 AI review).
-    _ident, refused = _compatible(sha, release, runner, node, glibc)
+    ident, refused = _compatible(sha, release, runner, node, glibc)
     if refused:
         return refused
     owner = ids()
@@ -186,7 +200,7 @@ def trial(sha, snapshot, roots, scratch_root, runner=bounded.run, node=sb.NODE, 
             # A bad snapshot or a full disk says nothing about the candidate; the next tick retries.
             return Step('transient', f'snapshot unusable: {e}')
         pub.verify_release(sha, roots)
-        step, keep = _run('trial', sha, release, scratch, ['migrate', db], 'migrate', None, runner, node)
+        step, keep = _run('trial', sha, release, scratch, ['migrate', db], 'migrate', ident, runner, node)
         return step
     finally:
         if not keep:

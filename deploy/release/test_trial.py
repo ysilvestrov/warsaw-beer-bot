@@ -188,8 +188,40 @@ class Trial(Tmp):
         fake = Fake(node_out='garbage\n')
         step = self.trial(fake)
         self.assertEqual((step, [c[0] for c in fake.calls]), (tr.Step(
-            'transient', 'host Node identity unavailable: ValueError: not enough values to unpack (expected 2, got 1)'),
+            'transient', 'host Node/glibc identity unavailable: ValueError: not enough values to unpack (expected 2, got 1)'),
             ['node -p']))
+
+    def test_unreadable_host_glibc_is_transient(self):
+        # #817 AI review: a host that cannot say its glibc says nothing about the candidate.
+        def broken():
+            raise OSError(22, 'Invalid argument')
+        fake = Fake()
+        step = tr.trial(SHA, self.snapshot, self.roots, self.trial_root, runner=fake, node=sys.executable,
+                        ids=lambda: IDS, glibc=broken, free=lambda path: 1 << 40)
+        self.assertEqual((step, [c[0] for c in fake.calls]), (tr.Step(
+            'transient', 'host Node/glibc identity unavailable: OSError: [Errno 22] Invalid argument'), ['node -p']))
+
+    def test_trial_reports_the_node_it_ran_on(self):
+        step = self.trial(Fake(sandbox_out='PROBE OK migrate: schema 1 -> 1\n'))
+        self.assertEqual((step.node.realpath, step.node.modules), (os.path.realpath(sys.executable), '137'))
+
+    def test_snapshot_growing_during_the_copy_is_refused(self):
+        # #817 AI review: copy exactly the size the free-space check counted.
+        real_fstat = os.fstat
+        grown = []
+
+        def fstat_then_grow(fd):
+            st = real_fstat(fd)
+            if not grown:
+                grown.append(True)
+                with open(self.snapshot, 'ab') as more:
+                    more.write(b'+appended after fstat')
+            return st
+        fake = Fake()
+        with mock.patch.object(tr.os, 'fstat', fstat_then_grow):
+            step = self.trial(fake)
+        self.assertEqual(step, tr.Step('transient', f'snapshot unusable: {self.snapshot}: grew while being copied'))
+        self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_copy_that_would_eat_the_disk_reserve_is_refused(self):
         # #817 AI review: never let the trial copy take the host under its free-space reserve.
@@ -220,7 +252,7 @@ class Trial(Tmp):
 
     def test_killed_at_the_time_limit_fails_the_candidate(self):
         step = self.trial(Fake(sandbox_out='', sandbox_exit=1, result='timeout'))
-        self.assertEqual(step, tr.Step('failed', 'migrate: killed by the sandbox (timeout)'))
+        self.assertEqual((step.kind, step.detail), ('failed', 'migrate: killed by the sandbox (timeout)'))
         self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_unconfirmed_stop_keeps_the_trial_scratch(self):

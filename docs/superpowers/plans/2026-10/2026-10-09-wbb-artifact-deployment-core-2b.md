@@ -143,6 +143,16 @@ G2 доповнено перевірками формату `Finished with resul
 7. **Звіт npm буферизувався цілком.** Аудит теж іде через `bounded.run` (ліміт = `MAX_REPORT_BYTES + 1`).
 8. **`audit` неопублікованого SHA падав traceback'ом.** Тепер `Refused`.
 
+## AI-рев'ю, другий прохід (голова `a24d67c`)
+
+- Закрито 6 знахідок першого проходу. Дві «carried» (необмежений capture у `sandbox.run_sandboxed` і в `host_audit`) — **хибні**: рядок викликає параметр `runner`, дефолт якого вже `bounded.run`, а не `subprocess.run`.
+- Нові, всі справжні, виправлено:
+  - `bounded.run` чекав на нащадків, що тримають pipe, без межі. Через `--pipe` це процеси самого unit, тож зависання настало б до `confirm_stopped`. Тепер daemon-читачі з `join` на grace 5 с, `read1` замість `read` (інакше вже записані байти не віддаються, поки pipe відкрита), і `kill` дочірнього на будь-якому винятку, зокрема Ctrl-C.
+  - Потік у stderr понад ліміт витісняв футер `Finished with result:`. Тепер зберігається ще й хвіст (64 KiB) кожного потоку.
+  - Знімок, що росте під час копіювання, з'їдав резерв. Тепер копіюється рівно `st_size` байтів, а ріст чи зменшення — відмова.
+  - Збій `glibc()` тепер `transient`.
+  - `trial` повертає identity Node, на якому працював.
+
 ## Після 2б
 
 Наскрізне рев'ю 2б. Далі план 2в: контролер (state v2, активація, crash/recovery-матриця §10b, локальний code+DB rollback) поверх `publish`/`verify_release` (2а) і `audit`/`probe`/`trial` (2б). Production activation, як і раніше, заборонена до кінця 2в. Acceptance sandbox і rollback — на disposable Ubuntu 24.04 VM (спека §10).
