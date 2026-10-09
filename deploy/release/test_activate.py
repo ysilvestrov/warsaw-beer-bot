@@ -393,6 +393,20 @@ class Rollback(Engine):
             activate.step(self.store, self.host)
         raise AssertionError(f'never reached {intent}')
 
+    def test_a_post_is_never_taken_while_a_writer_runs(self):
+        # Writers a reboot (or an operator) started again between stop-writers and save-post: stop
+        # them again first — the post of a live DB is not the DB a restore will replace.
+        for writer in ('bot', 'litestream'):
+            with self.subTest(writer):
+                self.fresh(tempfile.mkdtemp(dir=self._tmp.name))
+                self.roll_to('save-post')
+                setattr(self.world, writer, 'active')
+                out = activate.step(self.store, self.host)
+                s = self.store.load()
+                self.assertEqual((out.kind, s.intent, s.posts, self.world.posts, self.last_event()),
+                                 ('continue', 'stop-writers', (), [],
+                                  {'at': T0 + 120, 'what': 'save-post', 'result': 'writers running'}))
+
     def test_a_writer_that_will_not_stop_blocks_the_rollback(self):
         self.roll_to('stop-writers')
         self.world.stop_works = False
