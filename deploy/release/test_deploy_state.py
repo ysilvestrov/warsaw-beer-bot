@@ -196,6 +196,13 @@ class Load(Tmp):
         self.assertEqual(self.refused(json.dumps(obj).encode()),
                          f'{self.path}: state.observe.startedAt: not a finite non-negative number: nan')
 
+    def test_an_int_too_big_for_a_float_time_is_refused(self):
+        # 2v review: math.isfinite(10**400) raised OverflowError instead of a StateError.
+        obj = as_json(EXAMPLES[5])
+        obj['observe']['startedAt'] = 10 ** 400
+        self.assertEqual(self.refused(json.dumps(obj).encode()),
+                         f'{self.path}: state.observe.startedAt: not a finite non-negative number: 1{"0" * 400}')
+
     def test_observe_without_healthy_at(self):
         # The window cannot tell startup from the watch without it, so a file lacking it is refused.
         obj = as_json(EXAMPLES[5])
@@ -280,6 +287,14 @@ class Immutable(unittest.TestCase):
         with self.assertRaises(StateError) as cm:
             Pre(PRE.path, PRE.sha256, -1)
         self.assertEqual(str(cm.exception), 'Pre.takenAt: not a finite non-negative number: -1')
+
+    def test_the_largest_int_a_float_holds_is_a_time_and_the_next_power_of_two_is_not(self):
+        # 2v review: the boundary of the OverflowError fix — 2**1024 is the first int no float can hold.
+        biggest = int(sys.float_info.max)
+        with self.assertRaises(StateError) as cm:
+            Pre(PRE.path, PRE.sha256, 2 ** 1024)
+        self.assertEqual((Pre(PRE.path, PRE.sha256, biggest).taken_at, str(cm.exception)),
+                         (biggest, f'Pre.takenAt: not a finite non-negative number: {2 ** 1024}'))
 
 
 class Save(Tmp):
