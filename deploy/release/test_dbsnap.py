@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import stat
 import sqlite3
 import subprocess
 import sys
@@ -299,6 +300,18 @@ class Restore(Tmp):
         self.assertEqual(dbsnap.restore(self.pre, self.db, self.out), 'restored')
         self.assertEqual(self.rows(), ['a', 'b'])
 
+
+    def test_the_live_database_keeps_its_exact_mode_under_a_tight_umask(self):
+        # #823 AI review: the copy was created with the saved mode filtered by the umask, so a 0660
+        # database (group access for another service) came back 0600 after a rollback.
+        self.scenario()
+        os.chmod(self.db, 0o660)
+        old = os.umask(0o077)
+        try:
+            self.assertEqual(dbsnap.restore(self.pre, self.db, self.out), 'restored')
+        finally:
+            os.umask(old)
+        self.assertEqual(stat.S_IMODE(os.stat(self.db).st_mode), 0o660)
 
 class Cli(Tmp):
     def run_cli(self, argv):
