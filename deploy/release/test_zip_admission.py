@@ -17,11 +17,11 @@ TAR_SHA = hashlib.sha256(TAR).hexdigest()
 CHECK = f'{TAR_SHA}  runtime.tar.gz\n'.encode()
 
 
-def info(name, attr=None):
+def info(name, attr=stat.S_IFREG | 0o644, method=zipfile.ZIP_STORED):
+    """An entry shaped like the real artifact's (gate G1): STORED, unix mode 0o100644."""
     i = zipfile.ZipInfo(name, date_time=(2026, 10, 9, 0, 0, 0))
-    i.compress_type = zipfile.ZIP_DEFLATED
-    if attr is not None:
-        i.external_attr = attr << 16
+    i.compress_type = method
+    i.external_attr = attr << 16
     return i
 
 
@@ -58,11 +58,24 @@ class Admit(Tmp):
         self.assertEqual(sorted(os.listdir(self.out)), ['runtime.tar.gz', 'runtime.tar.gz.sha256'])
         self.assertEqual(stat.S_IMODE(os.stat(self.out).st_mode), 0o700)
 
-    def test_stored_method_is_accepted(self):
-        a, b = info('runtime.tar.gz'), info('runtime.tar.gz.sha256')
-        a.compress_type = b.compress_type = zipfile.ZIP_STORED
-        path = self.make([(a, TAR), (b, CHECK)])
+    def test_deflated_entry_is_refused(self):
+        path = self.make([(info('runtime.tar.gz', method=zipfile.ZIP_DEFLATED), TAR), (info('runtime.tar.gz.sha256'), CHECK)])
+        self.assertEqual(self.refused(path), 'ZIP entry runtime.tar.gz uses compression method 8')
+
+    def test_entry_without_a_unix_mode_is_refused(self):
+        path = self.make([(info('runtime.tar.gz', attr=0), TAR), (info('runtime.tar.gz.sha256'), CHECK)])
+        self.assertEqual(self.refused(path), 'ZIP entry runtime.tar.gz is not a regular file')
+
+    def test_data_descriptor_flag_as_in_the_real_artifact(self):
+        path = self.good()
+        patch_central(path, 'runtime.tar.gz', 'flags', 0x8)
+        patch_central(path, 'runtime.tar.gz.sha256', 'flags', 0x8)
         self.assertEqual(za.admit_zip(path, za.sha256_file(path), self.out)[1], TAR_SHA)
+
+    def test_strong_encryption_flag(self):
+        path = self.good()
+        patch_central(path, 'runtime.tar.gz', 'flags', 0x40)
+        self.assertEqual(self.refused(path), 'ZIP entry runtime.tar.gz is encrypted')
 
     def test_wrong_digest_unpacks_nothing(self):
         path = self.good()
@@ -98,10 +111,6 @@ class Admit(Tmp):
         path = self.make([(info('runtime.tar.gz', stat.S_IFLNK | 0o777), b'/etc/passwd'),
                           (info('runtime.tar.gz.sha256'), CHECK)])
         self.assertEqual(self.refused(path), 'ZIP entry runtime.tar.gz is not a regular file')
-
-    def test_regular_file_mode_is_accepted(self):
-        path = self.make([(info('runtime.tar.gz', stat.S_IFREG | 0o644), TAR), (info('runtime.tar.gz.sha256'), CHECK)])
-        self.assertEqual(za.admit_zip(path, za.sha256_file(path), self.out)[1], TAR_SHA)
 
     def test_encrypted_flag(self):
         # zipfile rewrites flag_bits on write, so the bit is set in the central directory afterwards.
@@ -145,13 +154,8 @@ def patch_central(path, name, field, value):
 
 
 class LyingHeaders(Tmp):
-    def stored(self):
-        a, b = info('runtime.tar.gz'), info('runtime.tar.gz.sha256')
-        a.compress_type = b.compress_type = zipfile.ZIP_STORED
-        return self.make([(a, TAR), (b, CHECK)])
-
     def test_damaged_crc(self):
-        path = self.stored()
+        path = self.good()
         patch_central(path, 'runtime.tar.gz', 'crc', 0)
         self.assertEqual(self.refused(path), "artifact ZIP is damaged: Bad CRC-32 for file 'runtime.tar.gz'")
 

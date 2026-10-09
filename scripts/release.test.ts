@@ -50,6 +50,8 @@ describe('ci.yml package job (spec §3, §9)', () => {
     '${{ runner.temp }}/release/runtime.tar.gz.sha256',
     'if-no-files-found: error',
     'retention-days: 30',
+    // The host admits only STORED ZIP entries (deploy/release/zip_admission.py, gate G1).
+    'compression-level: 0',
     'run: npx tsc -p tsconfig.release.json --outDir "$RUNNER_TEMP/dist"',
   ])('has %s', (line) => {
     expect(pkg).toContain(line);

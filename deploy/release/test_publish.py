@@ -22,7 +22,8 @@ OWNER = (os.geteuid(), os.getegid())
 
 
 def zip_up(archive, dest):
-    with zipfile.ZipFile(dest, 'w', zipfile.ZIP_DEFLATED) as z:
+    """A ZIP shaped like the real artifact (gate G1): two STORED regular files."""
+    with zipfile.ZipFile(dest, 'w', zipfile.ZIP_STORED) as z:
         z.write(archive, 'runtime.tar.gz')
         z.write(archive + '.sha256', 'runtime.tar.gz.sha256')
     return dest
@@ -133,8 +134,9 @@ class Publish(Tmp):
         pub.publish(self.trusted, self.zip, self.roots, lambda: NOW)
         rezip = os.path.join(self.base, 'rezip.zip')
         with zipfile.ZipFile(rezip, 'w', zipfile.ZIP_STORED) as z:  # a different wrapper around the same files
-            z.write(self.archive, 'runtime.tar.gz')
             z.write(self.archive + '.sha256', 'runtime.tar.gz.sha256')
+            z.write(self.archive, 'runtime.tar.gz')
+        self.assertNotEqual(sha256_file(rezip), sha256_file(self.zip))
         # release.json still names attempt 2, so the identity check holds for this trusted record.
         self.assertEqual(pub.publish(trusted_for(rezip, artifact_id=100), rezip, self.roots, lambda: NOW), 'already-accepted')
 
