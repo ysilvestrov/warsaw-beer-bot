@@ -28,6 +28,7 @@ PRODUCTION_ROOTS = pub.Roots(
     releases='/opt/warsaw-beer-bot/releases',
     receipts='/var/lib/wbb-deploy/receipts',
     scratch='/opt/warsaw-beer-bot/staging',
+    owner=(0, 0),
 )
 TOKEN_FILE = '/etc/wbb-deploy/github.env'
 TOKEN_KEY = 'WBB_GITHUB_TOKEN'

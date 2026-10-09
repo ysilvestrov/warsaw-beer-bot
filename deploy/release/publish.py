@@ -39,6 +39,8 @@ class Roots:
     releases: str
     receipts: str
     scratch: str
+    # Who owns a published tree: root in production; tests pass their own ids.
+    owner: tuple = (0, 0)
 
 
 def _utc_now():
@@ -83,18 +85,36 @@ def check_identity(payload, trusted):
         raise Refused(f'release.json does not match the trusted run: {", ".join(bad)}')
 
 
-def normalize(tree, manifest):
-    """Modes exactly as the manifest says; as root, everything owned by root."""
-    as_root = os.geteuid() == 0
+def normalize(tree, manifest, owner):
+    """Every entry, the root and the manifest: owned by owner, modes exactly as the manifest says."""
     for e in manifest['entries']:
         path = os.path.join(tree, e['path'])
-        if as_root:
-            os.lchown(path, 0, 0)
+        os.lchown(path, *owner)
         if e['type'] != 'symlink':
             os.chmod(path, e['mode'])
-    if as_root:
-        os.chown(tree, 0, 0)
+    os.chown(os.path.join(tree, tm.MANIFEST_NAME), *owner)
+    os.chmod(os.path.join(tree, tm.MANIFEST_NAME), 0o644)
+    os.chown(tree, *owner)
     os.chmod(tree, tm.DIR_MODE)
+
+
+def fsync_tree(tree):
+    """fsync every regular file and directory under tree, children before parents, root last.
+
+    A directory fsync makes its entries durable, not the data of the files they name
+    (fsync(2)); the receipt must never become durable ahead of the bytes it vouches for.
+    """
+    for dirpath, dirnames, filenames in os.walk(tree, topdown=False):
+        for name in filenames:
+            path = os.path.join(dirpath, name)
+            if os.path.islink(path):
+                continue
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        _fsync_dir(dirpath)
 
 
 def _fsync_dir(path):
@@ -165,7 +185,7 @@ def verify_release(sha, roots):
     digest = hashlib.sha256(data).hexdigest()
     if digest != receipt['treeSha256']:
         raise Refused(f'{sha}: tree digest {digest} != receipt {receipt["treeSha256"]}')
-    problems = tm.verify_tree(final, data)
+    problems = tm.verify_tree(final, data, roots.owner)
     if problems:
         raise Refused(f'{sha}: release tree changed:\n' + '\n'.join(problems[:50]))
     return receipt
@@ -207,13 +227,18 @@ def publish(trusted, operator_zip, roots, now=_utc_now):
                 same = _manifest_bytes(final) == data
             except OSError:
                 same = False
-            if not same or tm.verify_tree(final, data):
+            if not same or tm.verify_tree(final, data, roots.owner):
                 raise Refused(f'{final} exists without a receipt and does not match this artifact; operator recovery required')
+            # The crash may have come before its bytes reached the disk.
+            fsync_tree(final)
         else:
-            manifest = json.loads(data)
-            normalize(tree, manifest)
+            normalize(tree, json.loads(data), roots.owner)
+            problems = tm.verify_tree(tree, data, roots.owner)
+            if problems:
+                raise Refused('normalised tree is not exact:\n' + '\n'.join(problems[:50]))
+            fsync_tree(tree)
             os.rename(tree, final)
-            _fsync_dir(roots.releases)
+        _fsync_dir(roots.releases)
 
         write_receipt(receipt_path, {
             'formatVersion': RECEIPT_FORMAT, 'repo': trusted.repo, 'sourceSha': trusted.sha,

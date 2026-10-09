@@ -19,8 +19,9 @@ class Cli(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         base = self._tmp.name
-        self.roots = pub.Roots(*(os.path.join(base, d) for d in ('releases', 'receipts', 'scratch')))
-        for d in self.roots.__dict__.values():
+        self.roots = pub.Roots(*(os.path.join(base, d) for d in ('releases', 'receipts', 'scratch')),
+                               (os.geteuid(), os.getegid()))
+        for d in (self.roots.releases, self.roots.receipts, self.roots.scratch):
             os.makedirs(d)
         self.base = base
         self.zip = self.artifact('src', REPO)
@@ -101,6 +102,9 @@ class Cli(unittest.TestCase):
             f.write('OTHER=x\n')
         code, _, err = self.run_cli(['publish', '--sha', SHA, '--archive', self.zip])
         self.assertEqual((code, err), (1, f'REFUSED: {self.token}: expected exactly one non-empty WBB_GITHUB_TOKEN=\n'))
+
+    def test_production_releases_are_root_owned(self):
+        self.assertEqual(cli.PRODUCTION_ROOTS.owner, (0, 0))
 
     def test_production_roots_share_one_filesystem_tree(self):
         # releases and staging under one directory, so publish's single rename can work.

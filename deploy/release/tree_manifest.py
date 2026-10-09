@@ -82,15 +82,17 @@ def _scan(root):
                     stack.append(rel)
 
 
-def entry_for(root, rel, st):
+def entry_for(root, rel, st, exact=False):
+    """The manifest entry describing rel. exact=True reports the real permission bits
+    instead of normalising them, so a published tree's modes can be checked as they are."""
     if stat.S_ISLNK(st.st_mode):
         return {'path': rel, 'type': 'symlink', 'target': os.readlink(os.path.join(root, rel))}
     if stat.S_ISDIR(st.st_mode):
-        return {'path': rel, 'type': 'dir', 'mode': DIR_MODE}
+        return {'path': rel, 'type': 'dir', 'mode': stat.S_IMODE(st.st_mode) if exact else DIR_MODE}
     if stat.S_ISREG(st.st_mode):
         if st.st_nlink > 1:
             raise ManifestError(f'{rel}: hardlinked file')
-        mode = 0o755 if st.st_mode & 0o111 else 0o644
+        mode = stat.S_IMODE(st.st_mode) if exact else (0o755 if st.st_mode & 0o111 else 0o644)
         return {'path': rel, 'type': 'file', 'mode': mode, 'size': st.st_size,
                 'sha256': _sha256_file(os.path.join(root, rel))}
     raise ManifestError(f'{rel}: not a regular file, directory or symlink')
@@ -187,8 +189,20 @@ def check_entries(entries):
     return problems
 
 
-def verify_tree(root, manifest_bytes):
-    """Problems of the tree at root against manifest_bytes; [] means an exact match."""
+def _owner_problem(rel, st, owner):
+    if (st.st_uid, st.st_gid) != owner:
+        return f'{rel}: owned by {st.st_uid}:{st.st_gid}, expected {owner[0]}:{owner[1]}'
+    return None
+
+
+def verify_tree(root, manifest_bytes, owner=None):
+    """Problems of the tree at root against manifest_bytes; [] means an exact match.
+
+    With owner=(uid, gid) the check is strict, for a published release: real permission
+    bits must equal the manifest's (no normalising), every entry, the root and
+    tree-manifest.json itself must belong to owner, the root must be 0755 and the
+    manifest a single-link 0644 file.
+    """
     try:
         manifest = json.loads(manifest_bytes.decode('utf-8'))
     except (UnicodeDecodeError, json.JSONDecodeError) as e:
@@ -209,6 +223,16 @@ def verify_tree(root, manifest_bytes):
         return ['manifest entries are not sorted']
     expected = {e['path']: e for e in manifest['entries']}
     seen = set()
+    exact = owner is not None
+    if exact:
+        for rel, want_mode, kind in (('.', DIR_MODE, stat.S_ISDIR), (MANIFEST_NAME, 0o644, stat.S_ISREG)):
+            st = os.lstat(os.path.join(root, rel))
+            if not kind(st.st_mode) or stat.S_IMODE(st.st_mode) != want_mode or (
+                    kind is stat.S_ISREG and st.st_nlink != 1):
+                problems.append(f'{rel}: expected mode {want_mode:04o}, got {stat.S_IMODE(st.st_mode):04o}')
+            why = _owner_problem(rel, st, owner)
+            if why:
+                problems.append(why)
     try:
         for rel, st in _scan(root):
             if rel == MANIFEST_NAME:
@@ -218,8 +242,12 @@ def verify_tree(root, manifest_bytes):
             if want is None:
                 problems.append(f'{rel}: not in manifest')
                 continue
+            if exact:
+                why = _owner_problem(rel, st, owner)
+                if why:
+                    problems.append(why)
             try:
-                got = entry_for(root, rel, st)
+                got = entry_for(root, rel, st, exact)
             except ManifestError as e:
                 problems.append(str(e))
                 continue
