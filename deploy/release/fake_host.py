@@ -1,0 +1,248 @@
+"""A model of the host for the activation engine's tests (not a test module).
+
+Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2c.md, Tasks 3-4.
+
+`World` is what is true on the host: the bot and Litestream units, WHICH release the running
+bot process actually serves (fixed when it starts: switching `current` does not change a
+running process — plan 2v premise probe on realpath), the `current` pointer (only accepted
+releases), the database files in a temporary directory (post and restore are the real dbsnap
+on real files), NRestarts, the boot, a clock. It also records what the engine must never do
+(`violations`): switch under a running bot, touch the DB with writers running, rewrite a
+complete post, restore without one.
+
+`FakeHost` is the engine's Host over a World; `MemoryStore` keeps the state as the bytes
+deploy_state would write. Both go through `Faults`, which numbers every host call and every
+save, before and after the action, and raises `Crash` at a chosen number.
+"""
+import hashlib
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dbsnap  # noqa: E402
+from activate import Health  # noqa: E402
+from deploy_state import State  # noqa: E402
+from safe_tar import Refused  # noqa: E402
+
+T0 = 1_760_000_000
+BOOT_A = '0f0e0d0c-0b0a-4908-8706-050403020100'
+BOOT_B = '11111111-2222-4333-8444-555555555555'
+PRE_DB = b'SQLite pre: the database before the activation'
+
+
+class Crash(BaseException):
+    """The controller process dies here (not an Exception: nothing in the engine may catch it)."""
+
+
+class Faults:
+    def __init__(self, crash_at=None):
+        self.crash_at = crash_at
+        self.points = []
+
+    def _point(self, name, when):
+        index = len(self.points)
+        self.points.append(f'{name} {when}')
+        if index == self.crash_at:
+            raise Crash(index, name, when)
+
+    def around(self, name, action):
+        self._point(name, 'before')
+        result = action()
+        self._point(name, 'after')
+        return result
+
+
+class MemoryStore:
+    """The state as canonical bytes, loaded back through State.from_json like the file would be."""
+    def __init__(self, faults=None, state=None):
+        self.faults = faults or Faults()
+        self.data = None if state is None else state.to_bytes()
+        self.saves = 0
+
+    def load(self):
+        return None if self.data is None else State.from_json(json.loads(self.data))
+
+    def save(self, state):
+        def write():
+            self.data = state.to_bytes()
+            self.saves += 1
+        self.faults.around(f'save {state.phase}/{state.intent}', write)
+
+
+def _read(path):
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def _write(path, data):
+    with open(path, 'wb') as f:
+        f.write(data)
+
+
+class World:
+    """The host. `old` is running and settled; `cand` is the release being activated.
+
+    healthy(sha, age) and restarts(sha, age) script the bot by the release a process serves and
+    the seconds since it started; restarts returning None models an unreadable NRestarts.
+    """
+    def __init__(self, base, old, cand, accepted=None):
+        self.base, self.old, self.cand = base, old, cand
+        self.db = os.path.join(base, 'bot.db')
+        self.pre = os.path.join(base, '20261009T080000Z-ccccccc-pre.db')
+        self.now = T0
+        self.boot = BOOT_A
+        self.accepted = {old, cand} if accepted is None else set(accepted)
+        self.current = old
+        self.bot = 'active'
+        self.running = old
+        self.started_at = T0 - 86400
+        self.litestream = 'active'
+        self.stop_works = True
+        self.port_owner = None
+        self.healthy = lambda sha, age: True
+        self.restarts = lambda sha, age: 0
+        self.starts = []
+        self.health_calls = []
+        self.violations = []
+        self.posts = []
+        self.restores = []
+        # Host method name -> the exception it raises instead of acting (sudo broken, systemctl down).
+        self.errors = {}
+        _write(self.db, PRE_DB)
+        _write(self.pre, PRE_DB)
+        _write(self.pre + '.sha256', (hashlib.sha256(PRE_DB).hexdigest() + '\n').encode())
+
+    def candidate_writes(self):
+        """What the candidate's process writes on start: a migration in bot.db and a live WAL."""
+        return PRE_DB + b' | migrated by ' + self.cand.encode(), b'WAL of ' + self.cand.encode()
+
+    def writers_running(self):
+        return self.bot == 'active' or self.litestream == 'active'
+
+    def stop_bot(self):
+        if self.stop_works:
+            self.bot, self.running = 'inactive', None
+
+    def start_bot(self):
+        if self.bot == 'active':
+            return
+        self.bot, self.running, self.started_at = 'active', self.current, self.now
+        self.starts.append((self.current, self.now))
+        if self.current == self.cand:
+            db, wal = self.candidate_writes()
+            _write(self.db, db)
+            _write(self.db + '-wal', wal)
+
+    def switch(self, sha):
+        if self.bot == 'active':
+            self.violations.append(f'switch to {sha[:7]} under a running bot')
+        if sha not in self.accepted:
+            raise Refused(f'{sha}: no receipt — not an accepted release')
+        self.current = sha
+
+    def health(self):
+        self.health_calls.append((self.now, self.running))
+        if self.port_owner is not None:
+            return Health(True, self.port_owner)
+        if self.bot != 'active':
+            return Health(False, None)
+        return Health(self.healthy(self.running, self.now - self.started_at), self.running)
+
+    def nrestarts(self):
+        if self.running is None:
+            return 0
+        return self.restarts(self.running, self.now - self.started_at)
+
+    def post(self, out):
+        if self.writers_running():
+            self.violations.append('post with writers running')
+        manifest = os.path.join(out, dbsnap.POST_MANIFEST)
+        before = os.stat(manifest) if os.path.exists(manifest) else None
+        result = dbsnap.post(self.db, out)
+        after = os.stat(manifest)
+        if before is not None and (before.st_ino, before.st_mtime_ns) != (after.st_ino, after.st_mtime_ns):
+            self.violations.append(f'complete post {out} rewritten')
+        self.posts.append(out)
+        return result
+
+    def restore(self, pre, post_dir):
+        if self.writers_running():
+            self.violations.append('restore with writers running')
+        try:
+            dbsnap.read_post(post_dir, self.db)
+        except Refused:
+            self.violations.append('restore without a complete post')
+        self.restores.append((pre, post_dir))
+        return dbsnap.restore(pre, self.db, post_dir)
+
+    def reboot(self, seconds=5):
+        """A new boot: units come back up by themselves, the bot from whatever `current` is now."""
+        self.now += seconds
+        self.boot = BOOT_B if self.boot == BOOT_A else BOOT_A
+        self.bot, self.running, self.litestream = 'inactive', None, 'active'
+        self.start_bot()
+
+    def db_files(self):
+        """bot.db and its side files as they are now: {suffix: bytes}."""
+        return {s: _read(self.db + s) for s in ('', '-wal', '-shm') if os.path.exists(self.db + s)}
+
+
+class FakeHost:
+    def __init__(self, world, faults=None):
+        self.world = world
+        self.faults = faults or Faults()
+
+    def _do(self, name, action):
+        def act():
+            if name in self.world.errors:
+                raise self.world.errors[name]
+            return action()
+        return self.faults.around(name, act)
+
+    def bot_state(self):
+        return self._do('bot_state', lambda: self.world.bot)
+
+    def stop_bot(self):
+        return self._do('stop_bot', self.world.stop_bot)
+
+    def start_bot(self):
+        return self._do('start_bot', self.world.start_bot)
+
+    def litestream_state(self):
+        return self._do('litestream_state', lambda: self.world.litestream)
+
+    def stop_litestream(self):
+        return self._do('stop_litestream', lambda: setattr(self.world, 'litestream', 'inactive'))
+
+    def start_litestream(self):
+        return self._do('start_litestream', lambda: setattr(self.world, 'litestream', 'active'))
+
+    def current(self):
+        return self._do('current', lambda: self.world.current)
+
+    def switch(self, sha):
+        return self._do('switch', lambda: self.world.switch(sha))
+
+    def health(self):
+        return self._do('health', self.world.health)
+
+    def nrestarts(self):
+        return self._do('nrestarts', self.world.nrestarts)
+
+    def boot_id(self):
+        return self._do('boot_id', lambda: self.world.boot)
+
+    def post(self, out):
+        return self._do('post', lambda: self.world.post(out))
+
+    def restore(self, pre, post_dir):
+        return self._do('restore', lambda: self.world.restore(pre, post_dir))
+
+    def now(self):
+        return self._do('now', lambda: self.world.now)
+
+    def sleep(self, seconds):
+        def advance():
+            self.world.now += seconds
+        return self._do('sleep', advance)

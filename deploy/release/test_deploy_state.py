@@ -18,7 +18,7 @@ CAND = Release('c' * 40, '1' * 64)
 PREV = Release('b' * 40, '2' * 64)
 PRE = Pre('/var/lib/warsaw-beer-bot/deploy-snapshots/20261009T080000Z-pre.db', '3' * 64, 1760000000)
 POST = '/var/lib/warsaw-beer-bot/deploy-snapshots/20261009T080000Z-post'
-OBS = Observe(1760000100, BOOT, 0, 1760000110.5, 1)
+OBS = Observe(1760000100, BOOT, 0, 1760000110.5, 1, 1760000102)
 SETTLED = Settled(PREV.sha, PREV.tree_sha256, 1759990000)
 
 # A full, valid state of every phase/intent pair, written out by hand.
@@ -90,7 +90,8 @@ class RoundTrip(Tmp):
     def test_nested_records_use_their_json_keys(self):
         got = as_json(EXAMPLES[12])
         self.assertEqual((got['observe'], got['unverified'], got['pre']), (
-            {'startedAt': 1760000100, 'bootId': BOOT, 'nrestarts0': 0, 'lastSampleAt': 1760000110.5, 'fails': 1},
+            {'startedAt': 1760000100, 'bootId': BOOT, 'nrestarts0': 0, 'lastSampleAt': 1760000110.5, 'fails': 1,
+             'healthyAt': 1760000102},
             {'sha': CAND.sha, 'reason': 'reboot during the window',
              'pre': {'path': PRE.path, 'sha256': '3' * 64, 'takenAt': 1760000000}},
             {'path': PRE.path, 'sha256': '3' * 64, 'takenAt': 1760000000}))
@@ -194,6 +195,19 @@ class Load(Tmp):
         obj['observe']['startedAt'] = float('nan')
         self.assertEqual(self.refused(json.dumps(obj).encode()),
                          f'{self.path}: state.observe.startedAt: not a finite non-negative number: nan')
+
+    def test_observe_without_healthy_at(self):
+        # The window cannot tell startup from the watch without it, so a file lacking it is refused.
+        obj = as_json(EXAMPLES[5])
+        del obj['observe']['healthyAt']
+        self.assertEqual(self.refused(json.dumps(obj).encode()),
+                         f"{self.path}: state.observe: missing ['healthyAt'], unknown []")
+
+    def test_negative_healthy_at(self):
+        obj = as_json(EXAMPLES[5])
+        obj['observe']['healthyAt'] = -1
+        self.assertEqual(self.refused(json.dumps(obj).encode()),
+                         f'{self.path}: state.observe.healthyAt: not a finite non-negative number: -1')
 
     def test_relative_post_path(self):
         self.assertEqual(self.mutated(EXAMPLES[9], post='post'),

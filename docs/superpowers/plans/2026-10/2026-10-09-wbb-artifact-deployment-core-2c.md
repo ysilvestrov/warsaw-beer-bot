@@ -127,15 +127,17 @@ Production activation, як і раніше, заборонена до кінц�
 
 **Files:** create `deploy/release/activate.py`, `deploy/release/fake_host.py`, `deploy/release/test_activate.py`.
 
-- [ ] `begin(store, host, candidate, pre)`: лише з `settled` з baseline (`settled` не `null`), `candidate.sha != lastFailedSha`, `candidate.sha != settled.sha`; інакше `Refused` без запису. Записує `activating/stop`, `previous = settled`.
-- [ ] `step(store, host) -> Outcome`: виконує поточний `intent` і повертає `continue | settled | unverified | rolled-back | recovery-failed | blocked`:
+- [x] `begin(store, host, candidate, pre)`: лише з `settled` з baseline (`settled` не `null`), `candidate.sha != lastFailedSha`, `candidate.sha != settled.sha`; інакше `Refused` без запису. Записує `activating/stop`, `previous = settled`.
+- [x] `step(store, host) -> Outcome`: виконує поточний `intent` і повертає `continue | settled | unverified | rolled-back | recovery-failed | blocked`:
   - `stop`: `stop_bot()`; не `inactive/failed` → `blocked` (стан не змінюємо, наступний tick повторить).
   - `switch`: `switch(candidate)`; `current() != candidate` → відкат без БД.
   - `start`: якщо бот активний і `health().releaseSha == candidate` — не перезапускати; інакше `start_bot()`. Далі `observing` з `observe.startedAt = now`, `bootId`.
   - `observing`: опитування кожні `POLL_S`, кожне persisted. Startup: ok з правильним SHA до `STARTUP_S`, інакше відкат. Далі до `WINDOW_S`: 3 невдачі підряд або зміна `NRestarts` → відкат; кінець вікна без жодного прочитаного `NRestarts` → `unverified`; інакше `settled` (`settled = candidate`, `txn = null`).
-- [ ] `run(store, host)`: `step` до термінального Outcome.
-- [ ] `FakeHost`: світ (стан бота й litestream, який SHA реально запущений, `current`, файли БД у tmp-теці, `NRestarts`, годинник), сценарії health, і **точки падіння**: кожен метод `Host` і кожен `save` state може кинути `Crash` до або після дії.
-- [ ] Тести: щасливий шлях до `settled`; старий процес відповідає ok з іншим SHA → відкат; невдача на 9:59 → відкат; 3 невдачі не підряд → `settled`; зміна `NRestarts` → відкат; `NRestarts` ніколи не прочитано → `unverified`; `begin` з `lastFailedSha`, без baseline, з `unverified` → `Refused`.
+- [x] `run(store, host)`: `step` до термінального Outcome.
+- [x] `FakeHost`: світ (стан бота й litestream, який SHA реально запущений, `current`, файли БД у tmp-теці, `NRestarts`, годинник), сценарії health, і **точки падіння**: кожен метод `Host` і кожен `save` state може кинути `Crash` до або після дії.
+- [x] Тести: щасливий шлях до `settled`; старий процес відповідає ok з іншим SHA → відкат; невдача на 9:59 → відкат; 3 невдачі не підряд → `settled`; зміна `NRestarts` → відкат; `NRestarts` ніколи не прочитано → `unverified`; `begin` з `lastFailedSha`, без baseline, з `unverified` → `Refused`.
+
+- Зроблено з уточненнями: `Observe.healthyAt` (коли кандидат уперше відповів healthy як сам — без нього рушій не відрізняє startup від вікна після падіння) додано в state v2; startup опитується кожні 2 с, як `wait_healthy`; `start` не дивиться в `health()` — `start` активного unit у systemd і так no-op; `HostError` будь-якого кроку → `blocked`, не вердикт; Outcome `idle` для спокою.
 
 ### Task 4: відкат і resume за матрицею §10b
 
