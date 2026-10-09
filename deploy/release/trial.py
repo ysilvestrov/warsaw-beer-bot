@@ -57,14 +57,28 @@ def _host_glibc():
     return os.confstr('CS_GNU_LIBC_VERSION').split()[1]
 
 
-def _outcome(code, stdout, mode, ident):
-    lines = [line for line in stdout.splitlines() if line.startswith('PROBE ')]
+def _outcome(ran, mode, ident):
+    """The probe's own result line decides; systemd's result covers a probe killed before it could print one."""
+    if ran.result in ('timeout', 'oom-kill'):
+        return Step('failed', f'{mode}: killed by the sandbox ({ran.result})', ident)
+    lines = [line for line in ran.stdout.splitlines() if line.startswith('PROBE ')]
     m = RESULT.fullmatch(lines[-1]) if lines else None
     if m is None or m.group(2) != mode:
-        return Step('failed', f'{mode}: no result line from the probe (exit {code}): {stdout.strip()[-500:]!r}', ident)
-    if m.group(1) == 'OK' and code == 0:
+        return Step('failed', f'{mode}: no result line from the probe ({ran.result}, exit {ran.exit}): '
+                              f'{ran.stdout.strip()[-500:]!r}', ident)
+    if m.group(1) == 'OK' and ran.exit == 0 and ran.result == 'success':
         return Step('ok', f'{mode}: {m.group(3)}', ident)
     return Step('failed', f'{mode}: {m.group(3)}', ident)
+
+
+def _run(kind, sha, release, scratch, args, mode, ident, runner, node):
+    """(Step, keep scratch?) — the scratch is kept whenever the unit could not be confirmed stopped."""
+    try:
+        return _outcome(sb.run_sandboxed(kind, sha, release, scratch, PROBE_FILE, args, runner, node), mode, ident), False
+    except sb.Unconfirmed as e:
+        return Step('transient', f'{e}; scratch kept at {scratch} for inspection', ident), True
+    except sb.Transient as e:
+        return Step('transient', str(e), ident), False
 
 
 def probe(sha, roots, scratch_root, runner=subprocess.run, node=sb.NODE, ids=trial_ids, glibc=_host_glibc):
@@ -77,13 +91,13 @@ def probe(sha, roots, scratch_root, runner=subprocess.run, node=sb.NODE, ids=tri
     except Refused as e:
         return Step('failed', f'incompatible with this host: {e}', ident)
     scratch = _scratch(scratch_root, ids())
+    keep = False
     try:
-        code, out = sb.run_sandboxed('probe', sha, release, scratch, PROBE_FILE, ['native'], runner, node)
-        return _outcome(code, out, 'native', ident)
-    except sb.Transient as e:
-        return Step('transient', str(e), ident)
+        step, keep = _run('probe', sha, release, scratch, ['native'], 'native', ident, runner, node)
+        return step
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(scratch, ignore_errors=True)
 
 
 def _expected_snapshot_sum(snapshot):
@@ -128,6 +142,7 @@ def trial(sha, snapshot, roots, scratch_root, runner=subprocess.run, node=sb.NOD
     release = os.path.join(roots.releases, sha)
     owner = ids()
     scratch = _scratch(scratch_root, owner)
+    keep = False
     try:
         db = os.path.join(scratch, 'trial.db')
         try:
@@ -136,9 +151,8 @@ def trial(sha, snapshot, roots, scratch_root, runner=subprocess.run, node=sb.NOD
             # A bad snapshot says nothing about the candidate; the next tick takes a new one.
             return Step('transient', f'snapshot unusable: {e}')
         pub.verify_release(sha, roots)
-        code, out = sb.run_sandboxed('trial', sha, release, scratch, PROBE_FILE, ['migrate', db], runner, node)
-        return _outcome(code, out, 'migrate', None)
-    except sb.Transient as e:
-        return Step('transient', str(e))
+        step, keep = _run('trial', sha, release, scratch, ['migrate', db], 'migrate', None, runner, node)
+        return step
     finally:
-        shutil.rmtree(scratch, ignore_errors=True)
+        if not keep:
+            shutil.rmtree(scratch, ignore_errors=True)

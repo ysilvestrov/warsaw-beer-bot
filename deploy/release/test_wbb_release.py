@@ -13,6 +13,7 @@ import wbb_release as cli  # noqa: E402
 from release_testkit import SHA, packed  # noqa: E402
 from zip_admission import sha256_file  # noqa: E402
 from audit_verdict import Finding, Verdict  # noqa: E402
+from host_audit import AuditResult  # noqa: E402
 
 REPO = 'ysilvestrov/warsaw-beer-bot'
 
@@ -118,16 +119,21 @@ class Cli(unittest.TestCase):
         self.published()
         cases = [(Verdict('clean'), 0), (Verdict('advisory', findings=(Finding('a', 'high'),)), 1),
                  (Verdict('unrunnable', reason='is empty — x'), 75)]
-        seen = []
-        for verdict, _ in cases:
-            seen.append(self.run_step(['audit', '--sha', SHA], audit=lambda release, work, v=verdict: v)[0])
+        seen = [self.run_step(['audit', '--sha', SHA],
+                              audit=lambda release, work, owner, v=v: AuditResult(v, 'd' * 64))[0] for v, _ in cases]
         self.assertEqual(seen, [code for _, code in cases])
 
-    def test_audit_reads_the_verified_release(self):
+    def test_audit_names_the_tree_it_checked(self):
         self.published()
         got = []
-        self.run_step(['audit', '--sha', SHA], audit=lambda release, work: got.append(release) or Verdict('clean'))
-        self.assertEqual(got, [os.path.join(self.roots.releases, SHA)])
+        code, out = self.run_step(['audit', '--sha', SHA], audit=lambda release, work, owner: got.append(
+            (release, owner)) or AuditResult(Verdict('clean'), 'd' * 64))
+        self.assertEqual((code, got, out), (0, [(os.path.join(self.roots.releases, SHA), self.roots.owner)],
+                         f'AUDIT CLEAN {SHA} tree {"d" * 64}: npm audit: no high or critical advisory in production dependencies\n'))
+
+    def test_audit_of_a_bad_sha(self):
+        code, _ = self.run_step(['audit', '--sha', '../x'], audit=lambda *a: self.fail('audit ran'))
+        self.assertEqual(code, 1)
 
     def test_probe_transient_is_75(self):
         self.published()

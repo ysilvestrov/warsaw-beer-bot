@@ -17,7 +17,7 @@ UNIT = f'wbb-trial-probe-{SHA[:12]}-0123abcd'
 class Argv(unittest.TestCase):
     def test_exact_probe_argv(self):
         self.assertEqual(sb.sandbox_argv('probe', SHA, RELEASE, SCRATCH, PROBE, ['native'], UNIT), [
-            '/usr/bin/systemd-run', '--wait', '--pipe', '--collect', '--quiet', f'--unit={UNIT}',
+            '/usr/bin/systemd-run', '--wait', '--pipe', '--collect', f'--unit={UNIT}',
             '-p', 'User=wbb-trial', '-p', 'Group=wbb-trial',
             '-p', 'PrivateNetwork=yes', '-p', 'ProtectHome=yes', '-p', 'NoNewPrivileges=yes',
             '-p', 'ProtectSystem=strict', '-p', 'PrivateTmp=yes', '-p', 'PrivateDevices=yes',
@@ -26,7 +26,7 @@ class Argv(unittest.TestCase):
             '-p', f'ReadWritePaths={SCRATCH}', '-p', f'WorkingDirectory={SCRATCH}',
             '-p', 'CapabilityBoundingSet=', '-p', 'AmbientCapabilities=',
             '-p', 'MemoryMax=768M', '-p', 'CPUQuota=100%', '-p', 'TasksMax=64',
-            '-p', 'RuntimeMaxSec=30', '-p', 'KillMode=control-group',
+            '-p', 'RuntimeMaxSec=30', '-p', 'TimeoutStopSec=10s', '-p', 'KillMode=control-group',
             '-p', 'Environment=PATH=/usr/bin:/bin', '-p', f'Environment=HOME={SCRATCH}',
             '-p', f'Environment=TMPDIR={SCRATCH}/tmp', '-p', f'Environment=WBB_PAYLOAD={RELEASE}',
             '-p', 'Environment=DOTENV_CONFIG_PATH=/dev/null',
@@ -49,47 +49,75 @@ class Argv(unittest.TestCase):
         self.assertRegex(sb.unit_name('trial', SHA), rf'^wbb-trial-trial-{SHA[:12]}-[0-9a-f]{{8}}$')
 
 
+FINISHED_OK = 'Running as unit: x.service\nFinished with result: success\nMain processes terminated with: code=exited/status=0\n'
+GONE = 'LoadState=not-found\nActiveState=inactive\n'
+
+
 class FakeSystemd:
-    def __init__(self, run_result=None, run_raises=None, show='ActiveState=inactive\nSubState=dead\n'):
-        self.run_result, self.run_raises, self.show, self.calls = run_result, run_raises, show, []
+    """systemd-run, systemctl stop and systemctl show, each answer configurable, every call recorded."""
+
+    def __init__(self, run=(0, 'PROBE OK native: sqlite 3\n', FINISHED_OK), run_raises=None, show=(0, GONE),
+                 stop_raises=None):
+        self.run, self.run_raises, self.show, self.stop_raises, self.calls = run, run_raises, show, stop_raises, []
 
     def __call__(self, argv, **kw):
         self.calls.append((argv, kw))
         if argv[0] == sb.SYSTEMD_RUN:
             if self.run_raises:
                 raise self.run_raises
-            return self.run_result
-        return subprocess.CompletedProcess(argv, 0, self.show, '')
+            code, out, err = self.run
+            return subprocess.CompletedProcess(argv, code, out, err)
+        if argv[1] == 'stop':
+            if self.stop_raises:
+                raise self.stop_raises
+            return subprocess.CompletedProcess(argv, 5, '', 'Unit not loaded.')
+        code, out = self.show
+        return subprocess.CompletedProcess(argv, code, out, '')
 
 
 class Run(unittest.TestCase):
     def run_probe(self, fake):
         return sb.run_sandboxed('probe', SHA, RELEASE, SCRATCH, PROBE, ['native'], runner=fake)
 
-    def test_exit_and_stdout_of_the_probe(self):
-        fake = FakeSystemd(subprocess.CompletedProcess([], 1, 'PROBE FAILED native: x\n', ''))
-        self.assertEqual(self.run_probe(fake), (1, 'PROBE FAILED native: x\n'))
-        run_argv, run_kw = fake.calls[0]
-        show_argv, _ = fake.calls[1]
-        unit = run_argv[5].split('=', 1)[1]
-        self.assertEqual((run_kw['timeout'], show_argv), (60, [sb.SYSTEMCTL, 'show', '--property=ActiveState,SubState', unit]))
+    def test_a_unit_that_ran(self):
+        fake = FakeSystemd(run=(1, 'PROBE FAILED native: x\n', 'Finished with result: exit-code\n'))
+        self.assertEqual(self.run_probe(fake), sb.Ran('exit-code', 1, 'PROBE FAILED native: x\n'))
+        unit = fake.calls[0][0][4].split('=', 1)[1]
+        self.assertEqual([c[0] for c in fake.calls[1:]], [
+            [sb.SYSTEMCTL, 'stop', unit], [sb.SYSTEMCTL, 'show', '--property=LoadState,ActiveState', unit]])
+        self.assertEqual(fake.calls[0][1]['timeout'], 30 + 10 + 30)
 
-    def test_collected_unit_is_fine(self):
-        fake = FakeSystemd(subprocess.CompletedProcess([], 0, 'PROBE OK native: sqlite 3\n', ''), show='')
-        self.assertEqual(self.run_probe(fake), (0, 'PROBE OK native: sqlite 3\n'))
-
-    def test_unit_still_running_is_refused(self):
-        fake = FakeSystemd(subprocess.CompletedProcess([], 0, '', ''), show='ActiveState=deactivating\nSubState=stop-sigterm\n')
-        with self.assertRaisesRegex(Refused, r"is still \['ActiveState=deactivating', 'SubState=stop-sigterm'\] — its cgroup is not empty"):
+    def test_systemd_never_ran_the_unit_is_transient(self):
+        # #817 review: exit 1, empty stdout, a bus error on stderr — the candidate never ran.
+        fake = FakeSystemd(run=(1, '', 'Failed to connect to bus: No such file or directory\n'))
+        with self.assertRaisesRegex(sb.Transient, "^systemd-run did not run the unit \\(exit 1\\): 'Failed to connect to bus"):
             self.run_probe(fake)
 
-    def test_no_systemd_is_transient(self):
-        with self.assertRaisesRegex(sb.Transient, '^systemd-run is not available$'):
-            self.run_probe(FakeSystemd(run_raises=FileNotFoundError()))
+    def test_a_lingering_unit_is_unconfirmed(self):
+        fake = FakeSystemd(show=(0, 'LoadState=loaded\nActiveState=deactivating\n'))
+        with self.assertRaisesRegex(sb.Unconfirmed, 'could not be confirmed stopped$'):
+            self.run_probe(fake)
 
-    def test_systemd_run_hanging_is_transient(self):
-        with self.assertRaisesRegex(sb.Transient, '^systemd-run did not return within 60 s$'):
-            self.run_probe(FakeSystemd(run_raises=subprocess.TimeoutExpired('systemd-run', 60)))
+    def test_failed_show_is_unconfirmed_not_gone(self):
+        # #817 review: an empty answer from a systemctl that failed proves nothing.
+        fake = FakeSystemd(show=(1, ''))
+        with self.assertRaisesRegex(sb.Unconfirmed, 'could not be confirmed stopped$'):
+            self.run_probe(fake)
+
+    def test_failed_unit_counts_as_stopped(self):
+        self.assertEqual(self.run_probe(FakeSystemd(show=(0, 'LoadState=loaded\nActiveState=failed\n'))).result, 'success')
+
+    def test_no_systemd_binary_is_transient_with_nothing_to_stop(self):
+        fake = FakeSystemd(run_raises=FileNotFoundError())
+        with self.assertRaisesRegex(sb.Transient, '^systemd-run is not available$'):
+            self.run_probe(fake)
+        self.assertEqual(len(fake.calls), 1)
+
+    def test_systemd_run_hanging_stops_the_unit_then_is_transient(self):
+        fake = FakeSystemd(run_raises=subprocess.TimeoutExpired('systemd-run', 70))
+        with self.assertRaisesRegex(sb.Transient, '^systemd-run did not return within 70 s$'):
+            self.run_probe(fake)
+        self.assertEqual(fake.calls[1][0][1], 'stop')
 
 
 class Identity(unittest.TestCase):

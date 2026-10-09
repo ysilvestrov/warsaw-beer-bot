@@ -83,10 +83,14 @@ def main(argv, roots=PRODUCTION_ROOTS, token_file=TOKEN_FILE, api_factory=gt.Git
             print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
             return 0
         if a.cmd == 'audit':
-            pub.verify_release(a.sha, roots)
-            verdict = audit(os.path.join(roots.releases, a.sha), tempfile.gettempdir())
-            print(f'AUDIT {verdict.kind.upper()} {a.sha}: {render_verdict(verdict)}')
-            return {'clean': 0, 'advisory': 1}.get(verdict.kind, EX_TEMPFAIL)
+            # Runs as the operator, who cannot read the root-only receipt: the audit proves its
+            # inputs against the tree's manifest and prints that manifest's digest, which the
+            # controller matches with the receipt through `verify` (root) before trusting it.
+            if not gt.SHA.fullmatch(a.sha):
+                raise Refused(f'not a full lowercase SHA: {a.sha!r}')
+            result = audit(os.path.join(roots.releases, a.sha), tempfile.gettempdir(), roots.owner)
+            print(f'AUDIT {result.verdict.kind.upper()} {a.sha} tree {result.tree_sha256}: {render_verdict(result.verdict)}')
+            return {'clean': 0, 'advisory': 1}.get(result.verdict.kind, EX_TEMPFAIL)
         if a.cmd in ('probe', 'trial'):
             step = (tr.probe(a.sha, roots, trial_root, runner, node, ids) if a.cmd == 'probe'
                     else tr.trial(a.sha, a.snapshot, roots, trial_root, runner, node, ids))

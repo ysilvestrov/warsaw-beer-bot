@@ -124,6 +124,14 @@
   - `TRIAL FAILED` → `failed`, systemd відсутній → `transient`;
   - scratch прибраний і після успіху, і після відмови.
 
+## Рев'ю codex (власник, голова `923f345`) — три знахідки, виправлено
+
+- **P1 — аудит від оператора не міг прочитати root-only receipt.** `verify_release` першим кроком відкривав `receipts/<sha>.json` (root, 0600), тож штатний виклик падав з `PermissionError`, а від root аудит заборонено. Тепер аудит не торкається receipt: `releases/` і тека релізу належать власнику релізу й не доступні на запис групі чи іншим, `tree-manifest.json` — `0644` того самого власника, байти `package.json`/`package-lock.json` хешуються під час читання й звіряються з маніфестом. Аудит повертає digest маніфесту (`AuditResult.tree_sha256`), і контролер 2в звіряє його з receipt через root `verify`, перш ніж довіряти вердикту. Регресії: «receipt недоступний» (не-root) і end-to-end «публікує uid 0, аудитує uid 65534» (root).
+- **P2 — збій systemd ставав провалом кандидата.** Порожній stdout `systemctl show` приймався за «unit зник», а `systemd-run` з exit 1 і `Failed to connect to bus` давав `failed`. Тепер результат — з рядка `Finished with result:` (без `--quiet`); немає рядка — unit не запускався → `Transient`; `timeout`/`oom-kill` — провал кандидата. Зупинку підтверджує лише успішний `systemctl show` з `ActiveState` `inactive`/`failed`.
+- **P2 — scratch видалявся без підтвердженої зупинки.** Тепер на кожному виході `systemctl stop` + `show` (`TimeoutStopSec=10s`, щоб зупинка була обмеженою); без підтвердження scratch лишається, відповідь — `transient` з його шляхом. Виняток один: `systemd-run` не існує (`FileNotFoundError` на exec) — unit не створювався, підтверджувати нічого.
+
+G2 доповнено перевірками формату `Finished with result:`, `systemctl show` зібраного unit і `TimeoutStopSec`.
+
 ## Після 2б
 
 Наскрізне рев'ю 2б. Далі план 2в: контролер (state v2, активація, crash/recovery-матриця §10b, локальний code+DB rollback) поверх `publish`/`verify_release` (2а) і `audit`/`probe`/`trial` (2б). Production activation, як і раніше, заборонена до кінця 2в. Acceptance sandbox і rollback — на disposable Ubuntu 24.04 VM (спека §10).

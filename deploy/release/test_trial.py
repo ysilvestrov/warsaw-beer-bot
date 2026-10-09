@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 import stat
 import subprocess
 import sys
@@ -21,8 +22,10 @@ class Fake:
     """systemd-run / systemctl / node -p, recording each call and what the scratch held."""
 
     def __init__(self, sandbox_out='PROBE OK native: sqlite 3.53.4\n', sandbox_exit=0, node_out='v24.1.0 137\n',
-                 sandbox_raises=None):
+                 sandbox_raises=None, result='success', stderr=None, show=(0, 'LoadState=not-found\nActiveState=inactive\n')):
         self.sandbox_out, self.sandbox_exit, self.node_out, self.sandbox_raises = sandbox_out, sandbox_exit, node_out, sandbox_raises
+        self.stderr = stderr if stderr is not None else f'Finished with result: {result}\n'
+        self.show = show
         self.calls = []
 
     def __call__(self, argv, **kw):
@@ -33,10 +36,11 @@ class Fake:
                                (open(db, 'rb').read(), stat.S_IMODE(os.stat(db).st_mode)) if os.path.exists(db) else None))
             if self.sandbox_raises:
                 raise self.sandbox_raises
-            return subprocess.CompletedProcess(argv, self.sandbox_exit, self.sandbox_out, '')
+            return subprocess.CompletedProcess(argv, self.sandbox_exit, self.sandbox_out, self.stderr)
         if argv[0] == sb.SYSTEMCTL:
-            self.calls.append(('systemctl',))
-            return subprocess.CompletedProcess(argv, 0, '', '')
+            self.calls.append(('systemctl ' + argv[1],))
+            return subprocess.CompletedProcess(argv, self.show[0] if argv[1] == 'show' else 0,
+                                               self.show[1] if argv[1] == 'show' else '', '')
         self.calls.append(('node -p',))
         return subprocess.CompletedProcess(argv, 0, self.node_out, '')
 
@@ -74,7 +78,7 @@ class Probe(Tmp):
         fake = Fake()
         step = self.probe(fake)
         self.assertEqual((step.kind, step.detail, step.node.modules), ('ok', 'native: sqlite 3.53.4', '137'))
-        self.assertEqual([c[0] for c in fake.calls], ['node -p', 'systemd-run', 'systemctl'])
+        self.assertEqual([c[0] for c in fake.calls], ['node -p', 'systemd-run', 'systemctl stop', 'systemctl show'])
         self.assertEqual(fake.calls[1][1], [sys.executable, tr.PROBE_FILE, 'native'])
         self.assertEqual(fake.calls[1][2], ['tmp'])
         self.assertEqual(os.listdir(self.trial_root), [])
@@ -106,13 +110,24 @@ class Probe(Tmp):
         self.assertEqual((step.kind, step.detail), ('failed', 'native: Cannot find module'))
 
     def test_no_result_line(self):
-        step = self.probe(Fake(sandbox_out='Killed\n', sandbox_exit=137))
-        self.assertEqual((step.kind, step.detail), ('failed', "native: no result line from the probe (exit 137): 'Killed'"))
+        step = self.probe(Fake(sandbox_out='Segmentation fault\n', sandbox_exit=139, result='core-dump'))
+        self.assertEqual((step.kind, step.detail),
+                         ('failed', "native: no result line from the probe (core-dump, exit 139): 'Segmentation fault'"))
 
-    def test_no_systemd_is_transient_and_cleans_up(self):
-        step = self.probe(Fake(sandbox_raises=FileNotFoundError()))
-        self.assertEqual((step.kind, step.detail), ('transient', 'systemd-run is not available'))
+    def test_systemd_never_running_the_unit_is_transient(self):
+        # #817 review P2: a bus failure must not become a failed candidate.
+        step = self.probe(Fake(sandbox_out='', sandbox_exit=1, stderr='Failed to connect to bus: No such file or directory\n'))
+        self.assertEqual((step.kind, step.detail), ('transient', "systemd-run did not run the unit (exit 1): "
+                                                                 "'Failed to connect to bus: No such file or directory'"))
         self.assertEqual(os.listdir(self.trial_root), [])
+
+    def test_unconfirmed_stop_keeps_the_scratch(self):
+        # #817 review P2: no removal while the unit may still be alive.
+        step = self.probe(Fake(show=(0, 'LoadState=loaded\nActiveState=deactivating\n')))
+        kept = os.listdir(self.trial_root)
+        self.assertEqual((step.kind, len(kept)), ('transient', 1))
+        self.assertRegex(step.detail, rf'^sandbox unit wbb-trial-probe-{SHA[:12]}-[0-9a-f]{{8}} could not be confirmed stopped; '
+                                      rf'scratch kept at {re.escape(os.path.join(self.trial_root, kept[0]))} for inspection$')
 
 
 class Trial(Tmp):
@@ -152,6 +167,15 @@ class Trial(Tmp):
     def test_migration_failure_fails_the_candidate(self):
         step = self.trial(Fake(sandbox_out='PROBE FAILED migrate: integrity_check: [...]\n', sandbox_exit=1))
         self.assertEqual((step.kind, step.detail), ('failed', 'migrate: integrity_check: [...]'))
+
+    def test_killed_at_the_time_limit_fails_the_candidate(self):
+        step = self.trial(Fake(sandbox_out='', sandbox_exit=1, result='timeout'))
+        self.assertEqual(step, tr.Step('failed', 'migrate: killed by the sandbox (timeout)'))
+        self.assertEqual(os.listdir(self.trial_root), [])
+
+    def test_unconfirmed_stop_keeps_the_trial_scratch(self):
+        step = self.trial(Fake(sandbox_out='PROBE OK migrate: schema 1 -> 1\n', show=(1, '')))
+        self.assertEqual((step.kind, len(os.listdir(self.trial_root))), ('transient', 1))
 
     def test_wrong_mode_line_is_not_a_pass(self):
         step = self.trial(Fake(sandbox_out='PROBE OK native: sqlite\n'))
