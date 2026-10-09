@@ -31,13 +31,12 @@ def pre_db(world):
 
 
 def migrated(world):
-    db, wal = world.candidate_writes()
-    return {'': db, '-wal': wal}
+    """The DB files as the candidate's LAST start left them (each start writes rows of its own)."""
+    return world.cand_writes[-1]
 
 
 def migrated_post(world):
-    db, wal = world.candidate_writes()
-    return {'bot.db': db, 'bot.db-wal': wal}
+    return {'bot.db' + suffix: data for suffix, data in migrated(world).items()}
 
 
 def no_post(world):

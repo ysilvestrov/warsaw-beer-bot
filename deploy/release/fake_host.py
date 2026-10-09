@@ -122,15 +122,27 @@ class World:
         self.violations = []
         self.posts = []
         self.restores = []
+        # The DB files as the candidate's process left them after each of its starts, in order.
+        self.cand_writes = []
         # Host method name -> the exception it raises instead of acting (sudo broken, systemctl down).
         self.errors = {}
         _write(self.db, PRE_DB)
         _write(self.pre, PRE_DB)
         _write(self.pre + '.sha256', (hashlib.sha256(PRE_DB).hexdigest() + '\n').encode())
 
-    def candidate_writes(self):
-        """What the candidate's process writes on start: a migration in bot.db and a live WAL."""
-        return PRE_DB + b' | migrated by ' + self.cand.encode(), b'WAL of ' + self.cand.encode()
+    def candidate_writes(self, n=1):
+        """What the candidate's n-th start writes when it finds exactly the pre DB: bot.db and a live WAL.
+
+        Every start writes rows of its own (2в e2e review Ф1), so a test sees which start's writes a
+        post holds and which ones a restore would lose.
+        """
+        return PRE_DB + self._row(n), self._wal(n)
+
+    def _row(self, n):
+        return f' | migrated by {self.cand}, start {n}'.encode()
+
+    def _wal(self, n):
+        return f'WAL of {self.cand}, start {n}'.encode()
 
     def writers_running(self):
         return self.bot == 'active' or self.litestream == 'active'
@@ -145,9 +157,12 @@ class World:
         self.bot, self.running, self.started_at = 'active', self.current, self.now
         self.starts.append((self.current, self.now))
         if self.current == self.cand:
-            db, wal = self.candidate_writes()
-            _write(self.db, db)
-            _write(self.db + '-wal', wal)
+            n = len(self.cand_writes) + 1
+            found = self.db_files()
+            # SQLite applies the WAL it finds; then the candidate writes its own rows and a new WAL.
+            _write(self.db, found.get('', b'') + found.get('-wal', b'') + self._row(n))
+            _write(self.db + '-wal', self._wal(n))
+            self.cand_writes.append(self.db_files())
 
     def switch(self, sha):
         if self.bot == 'active':
