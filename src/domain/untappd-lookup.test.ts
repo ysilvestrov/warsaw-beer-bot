@@ -2328,6 +2328,67 @@ describe('#665 Czech grade lookup context', () => {
     });
   });
 
+  describe('Issue #485 and #814 cider makers and spelling variants', () => {
+    test('matches Chyliczki / Cydr Chyliczki - Japoński Sad to Cydr Chyliczki Japoński Sad via curated alias (#485)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 4382570, beer_name: 'Japoński Sad', brewery_name: 'Cydr Chyliczki', style: 'Cider - Traditional / Apfelwein', abv: 7.0, global_rating: 3.8, rating_count: 50 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Chyliczki',
+        name: 'Cydr Chyliczki - Japoński Sad',
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(4382570);
+    });
+
+    test('matches Cydr polski Brewery / DZIK to Cydrownia Dzik via curated alias (#485)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 825830, beer_name: 'Dzik', brewery_name: 'Cydrownia', style: 'Cider - Traditional / Apfelwein', abv: 4.5, global_rating: 3.3, rating_count: 500 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Cydr polski Brewery',
+        name: 'DZIK',
+        abv: 4.5,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(825830);
+    });
+
+    test('matches Magick road Brewery / Cherry & dark grapes to Magic Road Fufty / Fifty - Cherry & Dark Grapes via curated alias (#814)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 6919376, beer_name: 'Fufty / Fifty - Cherry & Dark Grapes', brewery_name: 'Magic Road', style: 'Sour - Smoothie / Pastry', abv: 4.2, global_rating: 3.9, rating_count: 100 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Magick road Brewery',
+        name: 'Cherry & dark grapes',
+        abv: 4.2,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(6919376);
+    });
+
+    test('matches Maddriver Brewery / Vermont IPA 7,5° to Mad Driver Bezalkoholowe Vermont IPA via curated alias (#814)', async () => {
+      const search = fakeSearch(() => [
+        { bid: 2498571, beer_name: 'Mad Driver Bezalkoholowe Vermont IPA', brewery_name: 'Mad Driver', style: 'Non-Alcoholic - IPA', abv: 0.5, global_rating: 3.2, rating_count: 200 },
+      ]);
+      const out = await lookupBeer({
+        brewery: 'Maddriver Brewery',
+        name: 'Vermont IPA 7,5°',
+        abv: 0.5,
+        search,
+      });
+      expect(out.kind).toBe('matched');
+      assert(out.kind === 'matched');
+      expect(out.result.bid).toBe(2498571);
+    });
+  });
+
   describe('Issue #751 comma-split collaboration identity', () => {
     test('matches Kojetin Brewery / Som pohár čau 14° to the complete split SomPivo identity', async () => {
       const search = fakeSearch(() => [
