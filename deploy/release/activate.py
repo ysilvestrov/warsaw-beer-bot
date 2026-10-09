@@ -81,7 +81,9 @@ class Outcome:
     rolled-back — the candidate failed its window, code and DB are back on the previous settled
     release and the candidate is lastFailedSha; aborted — the candidate never started (its switch
     failed), the previous release runs again on the untouched DB, no verdict on the candidate;
-    recovery-failed — a rollback step a retry cannot fix, evidence kept, nothing new starts;
+    recovery-failed — the rollback did not reach its baseline: either a step a retry cannot fix
+    (phase recovery-failed, evidence kept, nothing new starts) or the previous release not healthy
+    at start-baseline (phase stays rolling-back, the next tick retries; 2в e2e review Ф5);
     drift — settled, but `current` or the running process is another release (no action).
     """
     kind: str
@@ -429,6 +431,20 @@ def _switch_previous(store, host, s, boot):
     return _put(store, s.replace(intent='start-baseline', boot_id=boot).log(at, 'switch-previous', 'ok'))
 
 
+def _baseline_unhealthy(store, s, boot, at, reason):
+    """The previous release did not answer healthy as itself (2в e2e review Ф5).
+
+    §10b row start baseline: "Fail — лишити pending/evidence й critical alert". A retry CAN fix this
+    (a slow start, a dependency back up), so the phase stays rolling-back/start-baseline — the next
+    tick repeats it, starting a unit only if it is inactive, never restarting an active one — and the
+    Outcome is recovery-failed, for the alert. The evidence gets the first failure only: a tick per
+    minute must not grow the state file without bound.
+    """
+    if s.evidence[-1]['what'] != 'start-baseline':
+        s = _put(store, s.replace(boot_id=boot).log(at, 'start-baseline', reason)).state
+    return Outcome('recovery-failed', s, f'start-baseline: {reason}')
+
+
 def _start_baseline(store, host, s, boot):
     prev = s.previous.sha
     try:
@@ -445,8 +461,8 @@ def _start_baseline(store, host, s, boot):
                 break
             now = host.now()
             if now - t0 >= STARTUP_S:
-                return _failed(store, s, boot, now, 'start-baseline',
-                               f'{_short(prev)} not healthy within {STARTUP_S} s (last: {_describe(h)})')
+                return _baseline_unhealthy(store, s, boot, now,
+                                           f'{_short(prev)} not healthy within {STARTUP_S} s (last: {_describe(h)})')
             host.sleep(STARTUP_POLL_S)
         at = host.now()
     except HostError as e:

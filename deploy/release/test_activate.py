@@ -441,14 +441,46 @@ class Rollback(Engine):
         self.assertEqual((self.world.bot, self.world.starts, self.world.db_files()),
                          ('inactive', [(CAND, T0)], {'': PRE_DB}))
 
-    def test_a_previous_release_that_stays_unhealthy_fails_the_recovery(self):
+    def test_a_previous_release_that_stays_unhealthy_stays_pending_and_is_retried(self):
+        # 2в e2e review Ф5 (§10b start baseline: "Fail — лишити pending/evidence й critical alert"):
+        # not the terminal phase, which nothing would ever retry.
         self.world.healthy = lambda sha, age: False
         self.run_until('rolling-back')
         out = activate.run(self.store, self.host)
-        self.assertEqual((out.kind, out.reason, self.store.load().phase), (
-            'recovery-failed', 'start-baseline: bbbbbbb not healthy within 120 s (last: ok=False releaseSha=bbbbbbb)',
-            'recovery-failed'))
-        self.assertEqual((self.world.now, self.world.running, self.world.db_files()), (T0 + 240, OLD, {'': PRE_DB}))
+        why = 'bbbbbbb not healthy within 120 s (last: ok=False releaseSha=bbbbbbb)'
+        s = self.store.load()
+        self.assertEqual((out.kind, out.reason, s.phase, s.intent, s.settled, s.last_failed_sha),
+                         ('recovery-failed', f'start-baseline: {why}', 'rolling-back', 'start-baseline', OLD_SETTLED, CAND))
+        self.assertEqual(self.last_event(), {'at': T0 + 240, 'what': 'start-baseline', 'result': why})
+        self.assertEqual((self.world.now, self.world.running, self.world.starts, self.world.db_files()),
+                         (T0 + 240, OLD, [(CAND, T0), (OLD, T0 + 120)], {'': PRE_DB}))
+        # The next tick tries again: no restart of the active unit, no second evidence event.
+        saved = self.store.load()
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load(), self.world.now, self.world.starts),
+                         ('recovery-failed', saved, T0 + 360, [(CAND, T0), (OLD, T0 + 120)]))
+        # Once it answers as itself, the rollback ends as usual.
+        self.world.healthy = lambda sha, age: True
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load().phase, self.store.load().settled), ('rolled-back', 'settled', OLD_SETTLED))
+
+    def test_a_previous_release_that_is_down_is_started_again_on_the_retry(self):
+        # Inactive (it crashed, or a reboot left it down): start only what does not run.
+        self.world.healthy = lambda sha, age: False
+        self.run_until('rolling-back')
+        self.assertEqual(activate.run(self.store, self.host).kind, 'recovery-failed')
+        self.world.stop_bot()
+        self.world.healthy = lambda sha, age: True
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
+        self.assertEqual(self.world.starts, [(CAND, T0), (OLD, T0 + 120), (OLD, T0 + 240)])
+
+    def test_another_release_answering_ok_is_not_the_baseline(self):
+        # A process of another SHA still on the port (the candidate's) says ok: not the previous release.
+        self.roll_to('start-baseline')
+        self.world.port_owner = CAND
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, out.reason), (
+            'recovery-failed', 'start-baseline: bbbbbbb not healthy within 120 s (last: ok=True releaseSha=ccccccc)'))
 
     def post_files(self, path):
         return {name: pathlib.Path(path, name).read_bytes() for name in ('bot.db', 'bot.db-wal')}
