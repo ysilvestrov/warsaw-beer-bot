@@ -296,5 +296,131 @@ class VerifyRelease(Tmp):
                          f'{SHA}: tree digest {hashlib.sha256(data).hexdigest()} != receipt {tm.tree_digest(self.manifest)}')
 
 
+OTHER = 'b' * 40
+
+
+class Current(Tmp):
+    def setUp(self):
+        super().setUp()
+        self.current = os.path.join(self.base, 'current')
+
+    def link(self, target):
+        os.symlink(target, self.current)
+
+    def current_refused(self):
+        with self.assertRaises(Refused) as cm:
+            pub.current_sha(self.roots)
+        return str(cm.exception)
+
+    def test_path_is_next_to_releases(self):
+        self.assertEqual(pub.current_path(self.roots), self.current)
+
+    def test_points_at_a_release(self):
+        self.link(f'releases/{SHA}')
+        self.assertEqual(pub.current_sha(self.roots), SHA)
+
+    def test_missing_is_none(self):
+        self.assertIsNone(pub.current_sha(self.roots))
+
+    def test_a_directory_is_refused(self):
+        os.mkdir(self.current)
+        self.assertEqual(self.current_refused(), f'{self.current}: not a symlink')
+
+    def test_absolute_target_is_refused(self):
+        self.link(os.path.join(self.roots.releases, SHA))
+        self.assertEqual(self.current_refused(),
+                         f"{self.current} -> {os.path.join(self.roots.releases, SHA)!r}: not releases/<full sha>")
+
+    def test_escaping_target_is_refused(self):
+        self.link('releases/../x')
+        self.assertEqual(self.current_refused(), f"{self.current} -> 'releases/../x': not releases/<full sha>")
+
+    def test_trailing_slash_and_short_sha_are_refused(self):
+        got = []
+        for target in (f'releases/{SHA}/', f'releases/{SHA[:39]}', f'staging/{SHA}', f'releases/{SHA.upper()}'):
+            os.symlink(target, self.current)
+            got.append(self.current_refused())
+            os.unlink(self.current)
+        self.assertEqual(got, [f"{self.current} -> {t!r}: not releases/<full sha>" for t in (
+            f'releases/{SHA}/', f'releases/{SHA[:39]}', f'staging/{SHA}', f'releases/{SHA.upper()}')])
+
+
+class Switch(Tmp):
+    def setUp(self):
+        super().setUp()
+        self.current = os.path.join(self.base, 'current')
+
+    def published(self):
+        self.assertEqual(pub.publish(self.trusted, self.zip, self.roots, lambda: NOW), 'accepted')
+
+    def switch_refused(self, sha=SHA):
+        with self.assertRaises(Refused) as cm:
+            pub.switch(sha, self.roots)
+        return str(cm.exception)
+
+    def test_switches_by_a_relative_symlink_and_leaves_no_temp(self):
+        self.published()
+        os.symlink(f'releases/{OTHER}', self.current)
+        self.assertEqual(pub.switch(SHA, self.roots), 'switched')
+        self.assertEqual((os.readlink(self.current), sorted(os.listdir(self.base))),
+                         (f'releases/{SHA}', ['artifact.zip', 'current', 'receipts', 'releases', 'scratch', 'src']))
+
+    def test_first_switch_creates_current(self):
+        self.published()
+        self.assertEqual((pub.switch(SHA, self.roots), pub.current_sha(self.roots)), ('switched', SHA))
+
+    def test_repeat_is_a_no_op(self):
+        self.published()
+        pub.switch(SHA, self.roots)
+        ino = os.lstat(self.current).st_ino
+        self.assertEqual((pub.switch(SHA, self.roots), os.lstat(self.current).st_ino), ('current', ino))
+
+    def test_unaccepted_sha_is_refused_and_current_is_unchanged(self):
+        os.symlink(f'releases/{OTHER}', self.current)
+        self.assertEqual(self.switch_refused(), f'{SHA}: no receipt — not an accepted release')
+        self.assertEqual(os.readlink(self.current), f'releases/{OTHER}')
+
+    def test_changed_tree_is_refused_and_current_is_unchanged(self):
+        self.published()
+        os.symlink(f'releases/{OTHER}', self.current)
+        write(os.path.join(self.roots.releases, SHA), 'dist/index.js', b'console.log(3);\n')
+        self.assertEqual(self.switch_refused(),
+                         f'{SHA}: release tree changed:\ndist/index.js: differs from manifest (sha256)')
+        self.assertEqual(os.readlink(self.current), f'releases/{OTHER}')
+
+    def test_a_current_it_does_not_understand_is_never_replaced(self):
+        self.published()
+        os.mkdir(self.current)
+        self.assertEqual(self.switch_refused(), f'{self.current}: not a symlink')
+        self.assertEqual((os.path.isdir(self.current), os.path.islink(self.current)), (True, False))
+
+    def test_failed_rename_leaves_current_and_no_temp(self):
+        self.published()
+        os.symlink(f'releases/{OTHER}', self.current)
+        with mock.patch.object(pub.os, 'replace', side_effect=OSError(5, 'Input/output error')):
+            with self.assertRaises(OSError):
+                pub.switch(SHA, self.roots)
+        self.assertEqual((os.readlink(self.current), [n for n in os.listdir(self.base) if n.startswith('current')]),
+                         (f'releases/{OTHER}', ['current']))
+
+    def test_the_rename_is_made_durable(self):
+        self.published()
+        events = []
+        real_fsync, real_replace = os.fsync, os.replace
+        base_ino = os.stat(self.base).st_ino
+
+        def fsync(fd):
+            events.append(('fsync', os.fstat(fd).st_ino == base_ino))
+            return real_fsync(fd)
+
+        def replace(src, dst):
+            events.append(('replace', os.readlink(src), dst))
+            return real_replace(src, dst)
+
+        with mock.patch.object(os, 'fsync', fsync), mock.patch.object(os, 'replace', replace):
+            pub.switch(SHA, self.roots)
+        self.assertEqual(events, [('replace', f'releases/{SHA}', self.current), ('fsync', True)])
+
+
 if __name__ == '__main__':
     unittest.main()

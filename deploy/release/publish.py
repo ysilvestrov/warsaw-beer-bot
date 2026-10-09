@@ -3,6 +3,7 @@
 Spec: docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md §2, §4
 ("Publication TOCTOU boundary"), §10a, §10b row prepared/publish.
 Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2a.md, Task 3.
+`current_sha`/`switch` (the `current` pointer): plan .../2026-10-09-wbb-artifact-deployment-core-2c.md, Task 2.
 
 Every check runs on bytes this process copied into its own private scratch: the
 operator's download is opened once, without following a final symlink, and copied
@@ -16,6 +17,7 @@ import errno
 import hashlib
 import json
 import os
+import secrets
 import shutil
 import stat
 import sys
@@ -114,10 +116,10 @@ def fsync_tree(tree):
                 os.fsync(fd)
             finally:
                 os.close(fd)
-        _fsync_dir(dirpath)
+        fsync_dir(dirpath)
 
 
-def _fsync_dir(path):
+def fsync_dir(path):
     fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         os.fsync(fd)
@@ -144,7 +146,7 @@ def write_atomic(path, data, prefix):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
-    _fsync_dir(directory)
+    fsync_dir(directory)
 
 
 def write_receipt(path, receipt):
@@ -200,6 +202,55 @@ def verify_release(sha, roots):
     return receipt
 
 
+def current_path(roots):
+    """The `current` symlink: next to releases/, so its target is the relative `releases/<sha>`."""
+    return os.path.join(os.path.dirname(roots.releases), 'current')
+
+
+def current_sha(roots):
+    """The SHA `current` points at; None if there is no `current`. Anything but `releases/<sha>` is refused.
+
+    This says where the NEXT start will run from, not what is running now: a started
+    process keeps the tree it was started from (plan 2v, premise probe on realpath).
+    """
+    path = current_path(roots)
+    try:
+        target = os.readlink(path)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        if e.errno == errno.EINVAL:
+            raise Refused(f'{path}: not a symlink') from None
+        raise
+    prefix = os.path.basename(roots.releases) + '/'
+    sha = target[len(prefix):]
+    if not target.startswith(prefix) or not SHA.fullmatch(sha):
+        raise Refused(f'{path} -> {target!r}: not {prefix}<full sha>')
+    return sha
+
+
+def switch(sha, roots):
+    """Point `current` at releases/<sha> by one atomic rename. Returns 'switched' or 'current' (already there).
+
+    The tree is verified against its receipt immediately before the rename; a `current`
+    this does not understand (a directory, a foreign target) is refused, never replaced.
+    """
+    verify_release(sha, roots)
+    if current_sha(roots) == sha:
+        return 'current'
+    path = current_path(roots)
+    parent = os.path.dirname(path)
+    tmp = os.path.join(parent, f'current.tmp-{secrets.token_hex(8)}')
+    os.symlink(os.path.join(os.path.basename(roots.releases), sha), tmp)
+    try:
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    fsync_dir(parent)
+    return 'switched'
+
+
 def publish(trusted, operator_zip, roots, now=_utc_now):
     """Accept trusted.sha from the operator's ZIP. Returns 'accepted' or 'already-accepted'."""
     final, receipt_path = _paths(trusted.sha, roots)
@@ -247,7 +298,7 @@ def publish(trusted, operator_zip, roots, now=_utc_now):
                 raise Refused('normalised tree is not exact:\n' + '\n'.join(problems[:50]))
             fsync_tree(tree)
             os.rename(tree, final)
-        _fsync_dir(roots.releases)
+        fsync_dir(roots.releases)
 
         write_receipt(receipt_path, {
             'formatVersion': RECEIPT_FORMAT, 'repo': trusted.repo, 'sourceSha': trusted.sha,

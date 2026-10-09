@@ -11,12 +11,14 @@ trust comes from metadata fetched now, never from anything the operator passes.
 
 Usage: wbb_release.py publish --sha <full sha> --archive <artifact zip>   (root)
        wbb_release.py verify  --sha <full sha>                            (root)
+       wbb_release.py switch  --sha <full sha>                            (root; points `current` at it)
        wbb_release.py audit   --sha <full sha>                            (operator, never root)
        wbb_release.py probe   --sha <full sha>                            (root; runs the sandbox)
        wbb_release.py trial   --sha <full sha> --snapshot <name>-pre.db   (root; runs the sandbox)
 The snapshot is a NAME in SNAPSHOT_ROOT, never a path.
 
 Output: one verdict line on stdout — `VERIFIED <sha>: tree <hex> ...`, `ACCEPTED|ALREADY-ACCEPTED <sha>: ...`,
+`SWITCHED|CURRENT <sha>` (CURRENT: `current` already pointed there, nothing changed),
 `AUDIT <KIND> <sha> tree <hex>` (details from the next line on), `PROBE|TRIAL <KIND> <sha>: <detail>`
 followed, when the Node identity is known, by `NODE <realpath> <sha256> <version> <modules>`.
 Exit (2b review B1; the controller records a failed SHA only on 1 together with its verdict line):
@@ -28,7 +30,8 @@ Exit (2b review B1; the controller records a failed SHA only on 1 together with 
   70  internal error (a traceback on stderr) — not a verdict on the candidate
   75  could not judge now — retry, never a failed SHA (EX_TEMPFAIL): no wbb-trial user, no scratch,
       a unit systemd did not start, another wbb-trial unit loaded, an audit with no report
-Nothing is activated: no unit, pointer or database is touched.
+Only `switch` touches the `current` pointer (after re-verifying the tree against its receipt);
+nothing here starts or stops a unit or touches a database.
 """
 import argparse
 import os
@@ -84,12 +87,12 @@ def read_token(path):
 
 
 def _parser():
-    ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept, audit, probe or trial a runtime release.')
+    ap = argparse.ArgumentParser(prog='wbb_release.py', description='Accept, audit, probe, trial or switch to a release.')
     sub = ap.add_subparsers(dest='cmd', required=True)
     p = sub.add_parser('publish')
     p.add_argument('--sha', required=True)
     p.add_argument('--archive', required=True)
-    for name in ('verify', 'audit', 'probe'):
+    for name in ('verify', 'audit', 'probe', 'switch'):
         sub.add_parser(name).add_argument('--sha', required=True)
     t = sub.add_parser('trial')
     t.add_argument('--sha', required=True)
@@ -110,6 +113,9 @@ def _run(a, roots, token_file, api_factory, trial_root, snapshot_root, runner, n
     if a.cmd == 'verify':
         receipt = pub.verify_release(a.sha, roots)
         print(f'VERIFIED {a.sha}: tree {receipt["treeSha256"]} (run {receipt["runId"]} attempt {receipt["runAttempt"]})')
+        return 0
+    if a.cmd == 'switch':
+        print(f'{pub.switch(a.sha, roots).upper()} {a.sha}')
         return 0
     if a.cmd == 'audit':
         # Runs as the operator, who cannot read the root-only receipt: the audit proves its
