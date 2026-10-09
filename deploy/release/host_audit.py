@@ -16,6 +16,7 @@ lifecycle script runs. The verdict comes from the JSON (audit_verdict.py), never
 npm's exit code; a timeout or a missing report is `unrunnable` — retry later, not a
 failed SHA.
 """
+import functools
 import hashlib
 import json
 import os
@@ -27,6 +28,7 @@ import tempfile
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bounded  # noqa: E402
 import tree_manifest as tm  # noqa: E402
 from audit_verdict import Verdict, audit_verdict  # noqa: E402
 from safe_tar import Refused  # noqa: E402
@@ -81,7 +83,10 @@ def _read_owned(path, owner, cap, want_mode=None):
 
 
 def _check_dir(path, owner):
-    st = os.lstat(path)
+    try:
+        st = os.lstat(path)
+    except OSError as e:
+        raise Refused(f'{path}: {e.strerror} — no accepted release here') from None
     if not stat.S_ISDIR(st.st_mode) or (st.st_uid, st.st_gid) != owner or st.st_mode & 0o022:
         raise Refused(f'{path}: owner {st.st_uid}:{st.st_gid} mode {stat.S_IMODE(st.st_mode):04o} — '
                       'not a directory only the release owner can change')
@@ -117,7 +122,7 @@ def audit_argv(npm, userconfig, globalconfig):
             '--registry', REGISTRY, '--ignore-scripts']
 
 
-def audit_release(release_dir, workdir, owner=(0, 0), runner=subprocess.run, npm=NPM, extra_env=None, euid=os.geteuid):
+def audit_release(release_dir, workdir, owner=(0, 0), runner=None, npm=NPM, extra_env=None, euid=os.geteuid):
     """AuditResult of a fresh npm audit of release_dir's lockfile. Never runs as root.
 
     extra_env exists for a live probe behind a TLS-intercepting proxy (a CA bundle);
@@ -125,6 +130,9 @@ def audit_release(release_dir, workdir, owner=(0, 0), runner=subprocess.run, npm
     """
     if euid() == 0:
         raise Refused('the host audit must not run as root')
+    # Bounded capture: a report larger than we would read is cut while it streams, not after
+    # it has filled memory (#817 AI review).
+    runner = runner or functools.partial(bounded.run, cap=MAX_REPORT_BYTES + 1)
     files, tree_sha256 = release_inputs(release_dir, owner)
     base = tempfile.mkdtemp(dir=workdir, prefix='audit-')
     try:
@@ -154,7 +162,7 @@ def _run_audit(runner, npm, userconfig, globalconfig, project, env):
         return Verdict('unrunnable', reason=f'never arrived — npm audit timed out after {TIMEOUT_S} s')
     except OSError as e:
         return Verdict('unrunnable', reason=f'never arrived — npm could not start ({e.strerror})')
-    if len(result.stdout) > MAX_REPORT_BYTES:
+    if len(result.stdout) > MAX_REPORT_BYTES or getattr(result, 'truncated', False) and len(result.stdout) >= MAX_REPORT_BYTES:
         return Verdict('unrunnable', reason=f'is over {MAX_REPORT_BYTES} bytes — not a report we read')
     verdict = audit_verdict(result.stdout.decode('utf-8', 'replace'))
     stderr = result.stderr.decode('utf-8', 'replace').strip()

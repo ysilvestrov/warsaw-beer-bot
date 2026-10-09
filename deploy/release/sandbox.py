@@ -21,6 +21,7 @@ import sys
 from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import bounded  # noqa: E402
 from github_trust import SHA  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 
@@ -50,7 +51,7 @@ class NodeIdentity:
     modules: str
 
 
-def node_identity(node=NODE, runner=subprocess.run):
+def node_identity(node=NODE, runner=bounded.run):
     """Which Node binary the probe runs on, so the controller can tell if it changed before stop/start."""
     real = os.path.realpath(node)
     h = hashlib.sha256()
@@ -100,6 +101,8 @@ def sandbox_argv(kind, sha, release, scratch, probe, args, unit, node=NODE):
         f'User={TRIAL_USER}', f'Group={TRIAL_USER}',
         'PrivateNetwork=yes', 'ProtectHome=yes', 'NoNewPrivileges=yes', 'ProtectSystem=strict',
         'PrivateTmp=yes', 'PrivateDevices=yes',
+        # #817 AI review: other users' processes (and their /proc/<pid>/cmdline) stay invisible.
+        'ProtectProc=invisible',
         *(f'InaccessiblePaths=-{p}' for p in INACCESSIBLE),
         f'ReadWritePaths={scratch}', f'WorkingDirectory={scratch}',
         'CapabilityBoundingSet=', 'AmbientCapabilities=',
@@ -131,7 +134,7 @@ class Unconfirmed(Transient):
 FINISHED = re.compile(r'^Finished with result: (\S+)$', re.M)
 
 
-def confirm_stopped(unit, runner=subprocess.run):
+def confirm_stopped(unit, runner=bounded.run):
     """Stop unit (idempotent) and confirm systemd reports it gone or inactive. False if that cannot be shown."""
     try:
         runner([SYSTEMCTL, 'stop', unit], capture_output=True, text=True, check=False, timeout=STOP_WAIT_S)
@@ -146,7 +149,7 @@ def confirm_stopped(unit, runner=subprocess.run):
     return props.get('ActiveState') in ('inactive', 'failed') and props.get('LoadState') in ('not-found', 'loaded')
 
 
-def run_sandboxed(kind, sha, release, scratch, probe, args, runner=subprocess.run, node=NODE):
+def run_sandboxed(kind, sha, release, scratch, probe, args, runner=bounded.run, node=NODE):
     """Run the probe in the sandbox and confirm the unit is stopped on every path.
 
     Returns Ran when systemd ran the unit to an end. Raises Transient when systemd could
@@ -166,9 +169,10 @@ def run_sandboxed(kind, sha, release, scratch, probe, args, runner=subprocess.ru
         else:
             # No result line: systemd never ran the unit (e.g. "Failed to connect to bus").
             failure = f'systemd-run did not run the unit (exit {r.returncode}): {(r.stderr or "").strip()[-500:]!r}'
-    except FileNotFoundError:
-        # The binary never started, so no unit was ever created: nothing to stop or confirm.
-        raise Transient('systemd-run is not available') from None
+    except OSError as e:
+        # exec of systemd-run itself failed (missing, not executable, out of resources): the
+        # process never started, so no unit was ever created — nothing to stop or confirm.
+        raise Transient(f'systemd-run could not start ({e.strerror or type(e).__name__})') from None
     except subprocess.TimeoutExpired:
         failure = f'systemd-run did not return within {RUNTIME_MAX_S[kind] + STOP_TIMEOUT_S + WAIT_MARGIN_S} s'
     if not confirm_stopped(unit, runner):
