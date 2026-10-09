@@ -131,7 +131,9 @@ class Unconfirmed(Transient):
     """The unit could not be confirmed stopped: its scratch must be kept, not removed."""
 
 
-FINISHED = re.compile(r'^Finished with result: (\S+)$', re.M)
+# Not anchored at the line start (2v review): with --pipe the candidate's stderr may end without
+# a newline, and systemd-run's footer is then glued to it ("xFinished with result: exit-code").
+FINISHED = re.compile(r'Finished with result: (\S+)$', re.M)
 LIST_UNITS_S = 10
 
 

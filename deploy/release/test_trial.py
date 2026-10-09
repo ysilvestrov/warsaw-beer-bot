@@ -18,6 +18,10 @@ from test_publish import trusted_for, zip_up  # noqa: E402
 
 IDS = (os.geteuid(), os.getegid())
 NODE_REAL = os.path.realpath(sys.executable)
+with open(tr.PROBE_FILE, 'rb') as _f:
+    PROBE_BYTES = _f.read()
+# 2v review: the unit runs a private copy of the probe in its scratch, readable by the trial user.
+PROBE_COPY = ('payload-probe.cjs', PROBE_BYTES, 0o400, IDS)
 RAN = ['node -p', 'systemctl list-units', 'systemd-run', 'systemctl stop', 'systemctl show']
 
 
@@ -32,11 +36,17 @@ class Fake:
         self.show = show
         self.on_run = on_run
         self.calls = []
+        self.probe = None
 
     def __call__(self, argv, **kw):
         if argv[0] == sb.SYSTEMD_RUN:
             scratch = next(p.split('=', 1)[1] for p in argv if p.startswith('WorkingDirectory='))
             db = os.path.join(scratch, 'trial.db')
+            # The probe the unit runs: where it is (relative to the scratch), its bytes, mode and owner.
+            probe = argv[argv.index(NODE_REAL) + 1]
+            st = os.stat(probe)
+            self.probe = (os.path.relpath(probe, scratch), open(probe, 'rb').read(), stat.S_IMODE(st.st_mode),
+                          (st.st_uid, st.st_gid))
             self.calls.append(('systemd-run', argv[-3:], sorted(os.listdir(scratch)),
                                (open(db, 'rb').read(), stat.S_IMODE(os.stat(db).st_mode)) if os.path.exists(db) else None))
             if self.on_run:
@@ -96,8 +106,8 @@ class Probe(Tmp):
         step = self.probe(fake)
         self.assertEqual((step.kind, step.detail, step.node.modules), ('ok', 'native: sqlite 3.53.4', '137'))
         self.assertEqual([c[0] for c in fake.calls], RAN)
-        self.assertEqual(fake.calls[2][1], [NODE_REAL, tr.PROBE_FILE, 'native'])
-        self.assertEqual(fake.calls[2][2], ['tmp'])
+        self.assertEqual((fake.calls[2][1][0], fake.calls[2][1][2], fake.probe), (NODE_REAL, 'native', PROBE_COPY))
+        self.assertEqual(fake.calls[2][2], ['payload-probe.cjs', 'tmp'])
         self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_runs_the_binary_whose_identity_it_took(self):
@@ -148,6 +158,14 @@ class Probe(Tmp):
                         ids=lambda: IDS, glibc=lambda: '2.39')
         self.assertEqual((step, [c[0] for c in fake.calls]), (
             tr.Step('transient', 'cannot prepare the sandbox scratch: No such file or directory'), ['node -p']))
+
+    def test_a_probe_that_cannot_be_copied_is_transient_and_runs_nothing(self):
+        # 2v review: an unreadable installed probe made Node fail without a PROBE line -> `failed`.
+        fake = Fake()
+        with mock.patch.object(tr, 'PROBE_FILE', os.path.join(self._tmp.name, 'no-probe.cjs')):
+            step = self.probe(fake)
+        self.assertEqual((step, [c[0] for c in fake.calls], os.listdir(self.trial_root)), (
+            tr.Step('transient', 'cannot prepare the sandbox scratch: No such file or directory'), ['node -p'], []))
 
     def test_scratch_that_cannot_be_chowned_is_transient_and_removed(self):
         def deny(*a):
@@ -221,9 +239,9 @@ class Trial(Tmp):
         self.assertEqual((step.kind, step.detail), ('ok', 'migrate: schema 40 -> 45 (knows 45)'))
         self.assertEqual([c[0] for c in fake.calls], RAN)
         name, args, listing, db = fake.calls[2]
-        self.assertEqual((name, args[:2], os.path.basename(args[2]), listing, db),
-                         ('systemd-run', [tr.PROBE_FILE, 'migrate'], 'trial.db', ['tmp', 'trial.db'],
-                          (b'SQLite pretend bytes', 0o600)))
+        self.assertEqual((name, args[1], os.path.basename(args[2]), listing, db, fake.probe),
+                         ('systemd-run', 'migrate', 'trial.db', ['payload-probe.cjs', 'tmp', 'trial.db'],
+                          (b'SQLite pretend bytes', 0o600), PROBE_COPY))
         self.assertEqual(os.listdir(self.trial_root), [])
 
     def test_snapshot_checksum_mismatch_runs_nothing(self):

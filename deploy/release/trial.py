@@ -31,7 +31,8 @@ import sandbox as sb  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 from verify_payload import check_release  # noqa: E402
 
-PROBE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payload-probe.cjs')
+PROBE_NAME = 'payload-probe.cjs'
+PROBE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), PROBE_NAME)
 SNAPSHOT_SUM = re.compile(r'([0-9a-f]{64})\n?')
 # 2b review S2: the trial reads a snapshot by name from one fixed directory, never a path.
 SNAPSHOT_NAME = re.compile(r'[0-9A-Za-z][0-9A-Za-z._-]*-pre\.db')
@@ -57,12 +58,30 @@ def trial_ids():
     return entry.pw_uid, entry.pw_gid
 
 
+def _install_probe(scratch, ids):
+    """Copy the installed probe into the scratch, 0400 and owned by the trial user (2v review).
+
+    The sandbox once ran PROBE_FILE where it is installed; a helper directory wbb-trial cannot
+    read made Node die with MODULE_NOT_FOUND before any PROBE line — a host failure that read
+    as a failed candidate. The copy is the one file the unit is sure to be able to read.
+    """
+    with open(PROBE_FILE, 'rb') as src:
+        data = src.read()
+    dest = os.path.join(scratch, PROBE_NAME)
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o400)
+    with os.fdopen(fd, 'wb') as out:
+        out.write(data)
+    os.chown(dest, *ids)
+
+
 def _scratch(scratch_root, ids):
     path = tempfile.mkdtemp(dir=scratch_root, prefix='run-')
     try:
         os.mkdir(os.path.join(path, 'tmp'), 0o700)
         for p in (path, os.path.join(path, 'tmp')):
             os.chown(p, *ids)
+        # Inside the try: a probe that cannot be copied is the host's problem (transient), never the candidate's.
+        _install_probe(path, ids)
     except OSError:
         shutil.rmtree(path, ignore_errors=True)
         raise
@@ -117,7 +136,8 @@ def _run(kind, sha, release, scratch, args, mode, ident, runner):
     """(Step, keep scratch?) — the scratch is kept whenever the unit could not be confirmed stopped."""
     try:
         # The binary whose identity was taken, not the path that led to it (2b review N9).
-        ran = sb.run_sandboxed(kind, sha, release, scratch, PROBE_FILE, args, runner, ident.realpath)
+        ran = sb.run_sandboxed(kind, sha, release, scratch, os.path.join(scratch, PROBE_NAME), args, runner,
+                               ident.realpath)
         return _outcome(ran, mode, ident), False
     except sb.Unconfirmed as e:
         return Step('transient', f'{e}; scratch kept at {scratch} for inspection', ident), True

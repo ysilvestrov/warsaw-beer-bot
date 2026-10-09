@@ -445,6 +445,8 @@ Host side, stage Ядро-2б (code only; the `wbb-trial` user and sudo rules co
 - `sandbox.py` / `trial.py` — `wbb_release.py probe|trial`: the release's code runs only inside
   the fixed `systemd-run` sandbox (`wbb-trial`, no network, no secrets, read-only system,
   limits, whole-cgroup kill); `trial` migrates a private, checksum-verified copy of a pre snapshot.
+  The unit runs a 0400 copy of `payload-probe.cjs` in the run's scratch, owned by `wbb-trial`; a probe
+  that cannot be copied is 75, never a failed candidate.
 - `trial --snapshot` takes a name (`<name>-pre.db`) in `/var/lib/warsaw-beer-bot/deploy-snapshots`,
   never a path. `probe`/`trial` print one verdict line and then `NODE <realpath> <sha256> <version> <abi>`;
   `audit` prints `AUDIT <KIND> <sha> tree <hex>` first and its details from the second line.

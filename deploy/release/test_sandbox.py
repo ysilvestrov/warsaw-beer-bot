@@ -117,6 +117,11 @@ class Run(unittest.TestCase):
         fake = FakeSystemd(run=(1, '', 'Finished with result: success\nboom\nFinished with result: exit-code\n'))
         self.assertEqual(self.run_probe(fake), sb.Ran('exit-code', 1, ''))
 
+    def test_a_footer_glued_to_stderr_without_a_newline_is_still_the_last(self):
+        # 2v review: the candidate's last stderr line had no newline, so the footer shares its line.
+        fake = FakeSystemd(run=(1, '', 'Finished with result: success\nxFinished with result: exit-code\n'))
+        self.assertEqual(self.run_probe(fake), sb.Ran('exit-code', 1, ''))
+
     def test_interrupt_while_waiting_stops_the_unit_then_goes_on(self):
         # 2b review N2: the unit is stopped and confirmed before the interrupt reaches the caller.
         fake = FakeSystemd(run_raises=KeyboardInterrupt())
