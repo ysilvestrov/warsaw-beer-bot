@@ -114,6 +114,8 @@ class World:
         self.trees = {old: OLD_TREE, cand: CAND_TREE} if trees is None else dict(trees)
         # Releases whose tree changed after `begin` verified it: the switch's own re-verification refuses.
         self.tampered = set()
+        # A `current` publish does not understand (a directory, a foreign target): its description, or None.
+        self.foreign = None
         self.current = old
         self.bot = 'active'
         self.running = old
@@ -170,7 +172,14 @@ class World:
             _write(self.db + '-wal', self._wal(n))
             self.cand_writes.append(self.db_files())
 
+    def read_current(self):
+        """publish.current_sha: Refused for a pointer it does not understand."""
+        if self.foreign is not None:
+            raise Refused(f'{self.base}/current -> {self.foreign!r}: not releases/<full sha>')
+        return self.current
+
     def switch(self, sha):
+        self.read_current()  # publish.switch never replaces a `current` it does not understand
         if self.bot == 'active':
             self.violations.append(f'switch to {sha[:7]} under a running bot')
         if sha in self.tampered:
@@ -262,7 +271,7 @@ class FakeHost:
         return self._do('start_litestream', lambda: setattr(self.world, 'litestream', 'active'))
 
     def current(self):
-        return self._do('current', lambda: self.world.current)
+        return self._do('current', self.world.read_current)
 
     def switch(self, sha):
         return self._do('switch', lambda: self.world.switch(sha))

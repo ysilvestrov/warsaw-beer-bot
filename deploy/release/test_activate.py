@@ -642,6 +642,66 @@ class Resume(Engine):
         self.assertEqual(activate.resume(self.store, self.host).kind, 'settled')
 
 
+class ForeignCurrent(Engine):
+    """2в e2e review, item 4: `current()` raising Refused (a pointer publish does not understand)."""
+    TARGET = '/srv/elsewhere'
+
+    def why(self):
+        return f"current: {self.world.base}/current -> '{self.TARGET}': not releases/<full sha>"
+
+    def test_before_start_it_is_the_abort_without_a_verdict(self):
+        self.begin()
+        activate.step(self.store, self.host)
+        self.world.foreign = self.TARGET
+        out = activate.step(self.store, self.host)
+        s = self.store.load()
+        self.assertEqual((out.kind, s.phase, s.intent, s.last_failed_sha, self.last_event()),
+                         ('continue', 'rolling-back', 'switch-previous', None,
+                          {'at': T0, 'what': 'abort', 'result': self.why()}))
+        # The way back refuses the same pointer: recovery-failed, nothing started, the DB untouched.
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, self.store.load().phase, self.world.bot, self.world.starts, self.world.db_files()),
+                         ('recovery-failed', 'recovery-failed', 'inactive', [], {'': PRE_DB}))
+
+    def test_after_a_reboot_before_the_switch_it_is_the_abort(self):
+        self.begin()
+        self.world.foreign = self.TARGET
+        self.world.reboot()
+        self.assertEqual(activate.step(self.store, self.host).kind, 'continue')
+        s = self.store.load()
+        self.assertEqual((s.phase, s.intent, s.last_failed_sha, self.last_event()['what'], self.last_event()['result']),
+                         ('rolling-back', 'switch-previous', None, 'abort', self.why()))
+
+    def test_at_start_it_blocks(self):
+        self.begin()
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.world.foreign = self.TARGET
+        before = self.store.data
+        out = activate.step(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.data), ('blocked', f'activating/start: {self.why()}', before))
+
+    def test_in_a_rollback_it_is_recovery_failed(self):
+        self.world.healthy = lambda sha, age: sha == OLD
+        self.run_until('rolling-back')
+        for _ in range(4):
+            activate.step(self.store, self.host)
+        self.assertEqual(self.store.load().intent, 'start-baseline')
+        self.world.foreign = self.TARGET
+        out = activate.step(self.store, self.host)
+        s = self.store.load()
+        self.assertEqual((out.kind, out.reason, s.phase, s.last_failed_sha, self.last_event()),
+                         ('recovery-failed', f'start-baseline: {self.why()}', 'recovery-failed', CAND,
+                          {'at': T0 + 120, 'what': 'start-baseline', 'result': self.why()}))
+        self.assertEqual((self.world.bot, self.world.litestream), ('inactive', 'inactive'))
+
+    def test_settled_it_is_drift(self):
+        self.world.foreign = self.TARGET
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out, self.store.saves),
+                         (Outcome('drift', SETTLED_STATE, f'settled is bbbbbbb, {self.why()}'), 0))
+
+
 class FileStore(unittest.TestCase):
     def test_round_trips_through_the_state_file(self):
         with tempfile.TemporaryDirectory() as d:
