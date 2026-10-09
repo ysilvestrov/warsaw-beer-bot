@@ -8,7 +8,7 @@ running process — plan 2v premise probe on realpath), the `current` pointer (o
 releases), the database files in a temporary directory (post and restore are the real dbsnap
 on real files), NRestarts, the boot, a clock. It also records what the engine must never do
 (`violations`): switch under a running bot, touch the DB with writers running, rewrite a
-complete post, restore without one.
+complete post, restore without one (no post.json — dbsnap.restore checks the rest).
 
 `FakeHost` is the engine's Host over a World; `MemoryStore` keeps the state as the bytes
 deploy_state would write. Both go through `Faults`, which numbers every host call and every
@@ -54,18 +54,33 @@ class Faults:
 
 
 class MemoryStore:
-    """The state as canonical bytes, loaded back through State.from_json like the file would be."""
-    def __init__(self, faults=None, state=None):
+    """The state as deploy_state would write it, in memory.
+
+    `save` keeps the State itself (it is immutable); its canonical bytes are what `data` returns,
+    and what `reopened()` — a new process after a crash — parses back through State.from_json.
+    """
+    def __init__(self, faults=None, state=None, data=None):
         self.faults = faults or Faults()
-        self.data = None if state is None else state.to_bytes()
+        self._state = state
+        self._data = data
         self.saves = 0
 
+    @property
+    def data(self):
+        return self._state.to_bytes() if self._state is not None else self._data
+
+    def reopened(self, faults=None):
+        """The same bytes as a new process would open them."""
+        return MemoryStore(faults, data=self.data)
+
     def load(self):
-        return None if self.data is None else State.from_json(json.loads(self.data))
+        if self._state is None and self._data is not None:
+            self._state = State.from_json(json.loads(self._data))
+        return self._state
 
     def save(self, state):
         def write():
-            self.data = state.to_bytes()
+            self._state = state
             self.saves += 1
         self.faults.around(f'save {state.phase}/{state.intent}', write)
 
@@ -169,9 +184,8 @@ class World:
     def restore(self, pre, post_dir):
         if self.writers_running():
             self.violations.append('restore with writers running')
-        try:
-            dbsnap.read_post(post_dir, self.db)
-        except Refused:
+        if not os.path.exists(os.path.join(post_dir, dbsnap.POST_MANIFEST)):
+            # dbsnap.restore refuses it too; recorded here so a test sees the attempt itself.
             self.violations.append('restore without a complete post')
         self.restores.append((pre, post_dir))
         return dbsnap.restore(pre, self.db, post_dir)

@@ -1,8 +1,11 @@
-"""Activation engine of the deploy controller: switch production to an accepted release and watch it (host).
+"""Activation and rollback engine of the deploy controller (host, as the operator).
+
+Switches production to an accepted release, watches it, and puts code AND database back when it
+fails its window — so that a crash at any point leaves a state the next tick finishes.
 
 Spec: docs/superpowers/specs/2026-10/2026-10-08-wbb-artifact-deployment-design.md §7 (ACTIVATE-001),
-§10a (DEPLOYED_SHA, Pending phase/substep, settled, previous settled), §10b (crash/recovery matrix).
-Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2c.md, Task 3.
+§8 (ROLLBACK-001), §10a (DEPLOYED_SHA, Pending phase/substep, settled, previous settled), §10b (crash/recovery matrix).
+Plan: docs/superpowers/plans/2026-10/2026-10-09-wbb-artifact-deployment-core-2c.md, Tasks 3-4.
 
 The engine never touches the host itself: it gets a `store` (load/save of the state v2 file,
 deploy_state) and a `host` with the methods below, and every step is
@@ -36,6 +39,7 @@ boot, ends the window as `unverified`: a window nobody watched is not proof.
 """
 import os
 import sys
+import time
 from dataclasses import dataclass, replace
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -69,7 +73,12 @@ class Outcome:
 
     idle — nothing in flight; blocked — the host would not do the current step (state unchanged,
     repeated next tick); settled — the candidate went through its whole window; unverified — the
-    window was not proven, the candidate keeps running, unattended activation is blocked.
+    window was not proven, the candidate keeps running, unattended activation is blocked;
+    rolled-back — the candidate failed its window, code and DB are back on the previous settled
+    release and the candidate is lastFailedSha; aborted — the candidate never started (its switch
+    failed), the previous release runs again on the untouched DB, no verdict on the candidate;
+    recovery-failed — a rollback step a retry cannot fix, evidence kept, nothing new starts;
+    drift — settled, but `current` or the running process is another release (no action).
     """
     kind: str
     state: object
@@ -86,6 +95,10 @@ class Store:
 
     def save(self, state):
         ds.save(self.path, state)
+
+
+def _utc(seconds):
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(seconds))
 
 
 def _short(sha):
@@ -231,20 +244,24 @@ def _observe(store, host, s, boot):
     last = o.last_sample_at if o.last_sample_at is not None else o.started_at
     if now - last > GAP_S:
         return _unverified(store, s, boot, now, f'no sample for {now - last:g} s (over {GAP_S} s)')
+    if o.last_sample_at is not None:
+        # The pause comes BEFORE the probe, measured from the persisted sample: a tick that died
+        # between saving a sample and sleeping must not probe again at once (a second failure
+        # at the same moment would count as a run of failures).
+        due = o.last_sample_at + (POLL_S if o.healthy_at is not None else STARTUP_POLL_S)
+        if now < due:
+            host.sleep(due - now)
+            now = host.now()
     t = now - o.started_at
     if o.healthy_at is None:
         h = _health(host)
         if h.ok and h.release_sha == sha:
-            s = s.replace(observe=replace(o, last_sample_at=now, healthy_at=now)).log(now, 'healthy', 'ok', t=t)
-            pause = POLL_S
-        elif t >= STARTUP_S:
+            return _put(store, s.replace(observe=replace(o, last_sample_at=now, healthy_at=now))
+                        .log(now, 'healthy', 'ok', t=t))
+        if t >= STARTUP_S:
             return _to_rollback(store, s, boot, now,
                                 f'not healthy as {_short(sha)} within {STARTUP_S} s (last: {_describe(h)})')
-        else:
-            s, pause = s.replace(observe=replace(o, last_sample_at=now)), STARTUP_POLL_S
-        _put(store, s)
-        host.sleep(pause)
-        return Outcome('continue', s)
+        return _put(store, s.replace(observe=replace(o, last_sample_at=now)))
     if t >= WINDOW_S:
         if o.nrestarts0 is None:
             return _unverified(store, s, boot, now, 'NRestarts could not be read once during the window')
@@ -258,10 +275,141 @@ def _observe(store, host, s, boot):
     if r is not None and n0 is not None and r != n0:
         return _to_rollback(store, s, boot, now, f'service restarted (NRestarts {n0} -> {r}) at +{t:g} s')
     # An unreadable NRestarts is neither a change nor a pass; the baseline is the first reading.
-    s = s.replace(observe=replace(o, last_sample_at=now, fails=fails, nrestarts0=r if n0 is None else n0))
-    _put(store, s)
-    host.sleep(POLL_S)
-    return Outcome('continue', s)
+    return _put(store, s.replace(observe=replace(o, last_sample_at=now, fails=fails,
+                                                 nrestarts0=r if n0 is None else n0)))
+
+
+def _verdict(s):
+    """The candidate started and failed its window: the rollback restores the DB, it is the failed SHA."""
+    return s.last_failed_sha == s.candidate.sha
+
+
+def post_dir(pre_path):
+    """Where the rollback keeps the post DB: fixed by the pre snapshot, so a retry finds the same one."""
+    stem = pre_path[:-len('-pre.db')] if pre_path.endswith('-pre.db') else pre_path
+    return stem + '-rollback-post'
+
+
+def _writers_stopped(host):
+    return host.bot_state() in STOPPED and host.litestream_state() in STOPPED
+
+
+def _failed(store, s, boot, at, what, reason):
+    """A rollback step a retry cannot fix: keep the phase's evidence, no baseline claim, no new activation."""
+    return _put(store, s.replace(phase='recovery-failed', intent=None, boot_id=boot).log(at, what, reason),
+                'recovery-failed', f'{what}: {reason}')
+
+
+def _restop(store, s, boot, at, why):
+    """Writers run again (a reboot starts the units): the DB may have changed; stop them before touching it."""
+    return _put(store, s.replace(intent='stop-writers', boot_id=boot).log(at, s.intent, why))
+
+
+def _stop_writers(store, host, s, boot):
+    try:
+        host.stop_bot()
+        host.stop_litestream()
+        bot, litestream = host.bot_state(), host.litestream_state()
+        at = host.now()
+    except HostError as e:
+        return _blocked(s, 'stop-writers', e)
+    if bot not in STOPPED or litestream not in STOPPED:
+        return Outcome('blocked', s, f'stop-writers: the bot is {bot}, litestream is {litestream}')
+    return _put(store, s.replace(intent='save-post', boot_id=boot).log(at, 'stop-writers', 'ok'))
+
+
+def _save_post(store, host, s, boot):
+    out = post_dir(s.pre.path)
+    try:
+        at = host.now()
+        if not _writers_stopped(host):
+            return _restop(store, s, boot, at, 'writers running')
+        try:
+            # dbsnap.post: a complete post already there is returned as it is, never rewritten.
+            host.post(out)
+        except Refused as e:
+            return _failed(store, s, boot, at, 'save-post', str(e))
+    except HostError as e:
+        return _blocked(s, 'save-post', e)
+    return _put(store, s.replace(intent='restore-pre', boot_id=boot, post=out).log(at, 'save-post', 'ok', post=out))
+
+
+def _restore_pre(store, host, s, boot):
+    try:
+        at = host.now()
+        if not _writers_stopped(host):
+            return _restop(store, s, boot, at, 'writers running')
+        try:
+            # dbsnap.restore checks the complete post and pre's checksum before the first change.
+            host.restore(s.pre.path, s.post)
+        except Refused as e:
+            return _failed(store, s, boot, at, 'restore-pre', str(e))
+    except HostError as e:
+        return _blocked(s, 'restore-pre', e)
+    return _put(store, s.replace(intent='switch-previous', boot_id=boot).log(at, 'restore-pre', 'ok'))
+
+
+def _switch_previous(store, host, s, boot):
+    prev = s.previous.sha
+    try:
+        at = host.now()
+        if host.bot_state() not in STOPPED:
+            if _verdict(s):
+                # Started by a reboot from `current` — maybe the candidate, on the restored DB.
+                return _restop(store, s, boot, at, 'bot running')
+            host.stop_bot()
+            if host.bot_state() not in STOPPED:
+                return Outcome('blocked', s, 'switch-previous: the bot does not stop')
+        try:
+            host.switch(prev)
+        except Refused as e:
+            # The baseline does not verify: never start some other release instead (§10b).
+            return _failed(store, s, boot, at, 'switch-previous', str(e))
+        cur = host.current()
+    except HostError as e:
+        return _blocked(s, 'switch-previous', e)
+    if cur != prev:
+        return _failed(store, s, boot, at, 'switch-previous', f'current is {_short(cur)} after the switch to {_short(prev)}')
+    return _put(store, s.replace(intent='start-baseline', boot_id=boot).log(at, 'switch-previous', 'ok'))
+
+
+def _first(s, what):
+    return next(e['at'] for e in s.evidence if e['what'] == what)
+
+
+def _start_baseline(store, host, s, boot):
+    prev = s.previous.sha
+    try:
+        if host.current() != prev:
+            return _put(store, s.replace(intent='switch-previous', boot_id=boot)
+                        .log(host.now(), 'start-baseline', 'current moved'))
+        host.start_litestream()
+        if host.bot_state() != 'active':
+            host.start_bot()
+        t0 = host.now()
+        while True:
+            h = _health(host)
+            if h.ok and h.release_sha == prev:
+                break
+            now = host.now()
+            if now - t0 >= STARTUP_S:
+                return _failed(store, s, boot, now, 'start-baseline',
+                               f'{_short(prev)} not healthy within {STARTUP_S} s (last: {_describe(h)})')
+            host.sleep(STARTUP_POLL_S)
+        at = host.now()
+    except HostError as e:
+        return _blocked(s, 'start-baseline', e)
+    cand = s.candidate.sha
+    done = s.replace(phase='settled', intent=None, boot_id=boot, txn=None, candidate=None, previous=None,
+                     pre=None, post=None, observe=None, unverified=None)
+    if not _verdict(s):
+        reason = f'{_short(cand)} never started; back on {_short(prev)}, database untouched'
+        return _put(store, done.log(at, 'aborted', reason, candidate=cand, previous=prev), 'aborted', reason)
+    lost_to = _first(s, 'stop-writers')
+    reason = (f'{_short(cand)} rolled back to {_short(prev)}, code and database; writes between '
+              f'{_utc(s.pre.taken_at)} and {_utc(lost_to)} exist only in {s.post}')
+    return _put(store, done.log(at, 'rolled-back', reason, candidate=cand, previous=prev, pre=s.pre.path,
+                                post=s.post, lostFrom=s.pre.taken_at, lostTo=lost_to), 'rolled-back', reason)
 
 
 _STEPS = {
@@ -269,7 +417,17 @@ _STEPS = {
     ('activating', 'switch'): _switch,
     ('activating', 'start'): _start,
     ('observing', None): _observe,
+    ('rolling-back', 'stop-writers'): _stop_writers,
+    ('rolling-back', 'save-post'): _save_post,
+    ('rolling-back', 'restore-pre'): _restore_pre,
+    ('rolling-back', 'switch-previous'): _switch_previous,
+    ('rolling-back', 'start-baseline'): _start_baseline,
 }
+
+
+def _held(s):
+    """Why a held phase holds: the unverified reason, or the last evidence of a failed recovery."""
+    return s.unverified.reason if s.phase == 'unverified' else s.evidence[-1]['result']
 
 
 def step(store, host):
@@ -278,7 +436,7 @@ def step(store, host):
     if s is None or s.phase == 'settled':
         return Outcome('idle', s)
     if s.phase in ('unverified', 'recovery-failed'):
-        return Outcome(s.phase, s, s.unverified.reason if s.unverified else '')
+        return Outcome(s.phase, s, _held(s))
     try:
         return _STEPS[(s.phase, s.intent)](store, host, s, host.boot_id())
     except HostError as e:
@@ -292,3 +450,31 @@ def run(store, host):
         out = step(store, host)
         if out.kind != 'continue':
             return out
+
+
+def resume(store, host):
+    """The start of every tick: finish what a dead tick left, before anything new (§10b).
+
+    No state / settled: `idle` — or `drift`, without any action, when `current` or the running
+    process is not the settled release (an incident, never a destructive DB rollback).
+    activating / rolling-back: repeat the persisted intent and run on. observing: continue the
+    window only if it is still continuous (same boot, no gap over GAP_S), else `unverified`.
+    unverified / recovery-failed: nothing is done; the Outcome is for the notification.
+    """
+    s = store.load()
+    if s is None:
+        return Outcome('idle', None)
+    if s.phase in ('activating', 'observing', 'rolling-back'):
+        return run(store, host)
+    if s.phase != 'settled':
+        return step(store, host)
+    if s.settled is None:
+        return Outcome('idle', s)
+    try:
+        cur, h = host.current(), _health(host)
+    except HostError as e:
+        return _blocked(s, 'resume', e)
+    if cur != s.settled.sha or h.release_sha != s.settled.sha:
+        return Outcome('drift', s, f'settled is {_short(s.settled.sha)}, current is {_short(cur)}, '
+                                   f'the running process says {_short(h.release_sha)}')
+    return Outcome('idle', s)

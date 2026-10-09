@@ -130,6 +130,7 @@ describe('deploy rsync payload', () => {
       'deploy/release/test_activate.py',
       'deploy/release/test_audit_verdict.py',
       'deploy/release/test_bounded.py',
+      'deploy/release/test_crash_matrix.py',
       'deploy/release/test_dbsnap.py',
       'deploy/release/test_deploy_state.py',
       'deploy/release/test_github_trust.py',

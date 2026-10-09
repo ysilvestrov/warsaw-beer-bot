@@ -1,5 +1,6 @@
 import hashlib
 import os
+import pathlib
 import sys
 import tempfile
 import unittest
@@ -49,6 +50,11 @@ class Engine(unittest.TestCase):
             if self.store.load().phase == phase:
                 return out
         raise AssertionError(f'never reached {phase}')
+
+    def migrated(self):
+        """The DB files as the candidate's process leaves them."""
+        db, wal = self.world.candidate_writes()
+        return {'': db, '-wal': wal}
 
     def whats(self):
         return [e['what'] for e in self.store.load().evidence]
@@ -261,6 +267,194 @@ class Blocked(Engine):
         self.world.start_bot()
         out = activate.step(self.store, self.host)
         self.assertEqual((out.kind, self.store.load().phase, self.world.starts), ('continue', 'observing', [(CAND, T0)]))
+
+
+POST_DIR_NAME = '20261009T080000Z-ccccccc-rollback-post'
+
+
+class Rollback(Engine):
+    def post_dir(self):
+        return os.path.join(self._tmp.name, POST_DIR_NAME)
+
+    def test_startup_failure_restores_code_and_database(self):
+        self.world.healthy = lambda sha, age: sha == OLD
+        out = self.run_engine()
+        s = self.store.load()
+        reason = ('ccccccc rolled back to bbbbbbb, code and database; writes between 2025-10-09T08:52:20Z and '
+                  f'2025-10-09T08:55:20Z '
+                  f'exist only in {self.post_dir()}')
+        self.assertEqual((out.kind, out.reason), ('rolled-back', reason))
+        self.assertEqual((s.phase, s.intent, s.txn, s.settled, s.last_failed_sha, s.candidate, s.post),
+                         ('settled', None, None, OLD_SETTLED, CAND, None, None))
+        self.assertEqual(self.whats(), ['begin', 'stop', 'switch', 'start', 'rollback', 'stop-writers', 'save-post',
+                                        'restore-pre', 'switch-previous', 'rolled-back'])
+        self.assertEqual(self.last_event(), {
+            'at': T0 + 120, 'what': 'rolled-back', 'result': reason, 'candidate': CAND, 'previous': OLD,
+            'pre': self.world.pre, 'post': self.post_dir(), 'lostFrom': T0 - 60, 'lostTo': T0 + 120})
+        # The world: the old release runs again on exactly pre; what the candidate wrote is in post.
+        self.assertEqual((self.world.bot, self.world.running, self.world.current, self.world.litestream),
+                         ('active', OLD, OLD, 'active'))
+        self.assertEqual(self.world.starts, [(CAND, T0), (OLD, T0 + 120)])
+        self.assertEqual(self.world.db_files(), {'': PRE_DB})
+        post = {name: pathlib.Path(self.post_dir(), name).read_bytes() for name in ('bot.db', 'bot.db-wal')}
+        self.assertEqual(post, {'bot.db': self.migrated()[''], 'bot.db-wal': self.migrated()['-wal']})
+        self.assertEqual(self.world.violations, [])
+
+    def test_an_aborted_activation_never_touches_the_database(self):
+        self.world.accepted = {OLD}
+        out = self.run_engine()
+        s = self.store.load()
+        reason = 'ccccccc never started; back on bbbbbbb, database untouched'
+        self.assertEqual((out.kind, out.reason, s.phase, s.settled, s.last_failed_sha),
+                         ('aborted', reason, 'settled', OLD_SETTLED, None))
+        self.assertEqual(self.whats(), ['begin', 'stop', 'abort', 'switch-previous', 'aborted'])
+        self.assertEqual((self.world.running, self.world.current, self.world.starts), (OLD, OLD, [(OLD, T0)]))
+        self.assertEqual((self.world.db_files(), self.world.posts, self.world.restores), ({'': PRE_DB}, [], []))
+
+    def roll_to(self, intent):
+        """Fail the candidate at startup and step until the rollback's persisted intent is `intent`."""
+        self.world.healthy = lambda sha, age: sha == OLD
+        self.run_until('rolling-back')
+        for _ in range(10):
+            if self.store.load().intent == intent:
+                return
+            activate.step(self.store, self.host)
+        raise AssertionError(f'never reached {intent}')
+
+    def test_a_writer_that_will_not_stop_blocks_the_rollback(self):
+        self.roll_to('stop-writers')
+        self.world.stop_works = False
+        before = self.store.data
+        out = activate.step(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.data),
+                         ('blocked', 'stop-writers: the bot is active, litestream is inactive', before))
+
+    def test_a_foreign_post_directory_fails_the_recovery(self):
+        self.roll_to('save-post')
+        os.mkdir(self.post_dir())
+        out = activate.run(self.store, self.host)
+        s = self.store.load()
+        why = f'{self.post_dir()}: no post.json — not a complete post'
+        self.assertEqual((out.kind, out.reason, s.phase, s.last_failed_sha), ('recovery-failed', f'save-post: {why}',
+                                                                           'recovery-failed', CAND))
+        self.assertEqual((self.world.restores, self.world.db_files(), self.world.bot), ([], self.migrated(), 'inactive'))
+        self.assertEqual(activate.resume(self.store, self.host), Outcome('recovery-failed', s, why))
+
+    def test_a_corrupt_pre_fails_the_recovery_and_leaves_the_database(self):
+        self.roll_to('restore-pre')
+        with open(self.world.pre, 'ab') as f:
+            f.write(b'!')
+        out = activate.run(self.store, self.host)
+        want, got = hashlib.sha256(PRE_DB).hexdigest(), hashlib.sha256(PRE_DB + b'!').hexdigest()
+        self.assertEqual((out.kind, out.reason),
+                         ('recovery-failed', f'restore-pre: checksum mismatch for {self.world.pre}: want {want}, got {got}'))
+        self.assertEqual((self.world.db_files(), self.world.current, self.world.bot), (self.migrated(), CAND, 'inactive'))
+
+    def test_a_previous_release_that_does_not_verify_is_never_replaced_by_another(self):
+        self.roll_to('switch-previous')
+        self.world.accepted = {CAND}
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, out.reason),
+                         ('recovery-failed', f'switch-previous: {OLD}: no receipt — not an accepted release'))
+        self.assertEqual((self.world.current, self.world.bot, self.world.db_files()), (CAND, 'inactive', {'': PRE_DB}))
+
+    def test_a_previous_release_that_stays_unhealthy_fails_the_recovery(self):
+        self.world.healthy = lambda sha, age: False
+        self.run_until('rolling-back')
+        out = activate.run(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.load().phase), (
+            'recovery-failed', 'start-baseline: bbbbbbb not healthy within 120 s (last: ok=False releaseSha=bbbbbbb)',
+            'recovery-failed'))
+        self.assertEqual((self.world.now, self.world.running, self.world.db_files()), (T0 + 240, OLD, {'': PRE_DB}))
+
+    def test_writers_started_by_a_reboot_are_stopped_before_the_restore(self):
+        self.roll_to('restore-pre')
+        # The reboot starts both units, the bot from `current` — the candidate, on the post-state DB.
+        self.world.reboot()
+        self.assertEqual(self.world.running, CAND)
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
+        self.assertEqual(self.whats()[-7:], ['save-post', 'restore-pre', 'stop-writers', 'save-post', 'restore-pre',
+                                             'switch-previous', 'rolled-back'])
+        self.assertEqual((self.world.db_files(), self.world.running, self.world.violations), ({'': PRE_DB}, OLD, []))
+
+    def test_a_candidate_rebooted_onto_the_restored_database_is_restored_again(self):
+        self.roll_to('switch-previous')
+        self.world.reboot()
+        self.assertEqual(self.world.db_files(), self.migrated())
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'rolled-back')
+        self.assertEqual((self.world.db_files(), self.world.running, self.world.current), ({'': PRE_DB}, OLD, OLD))
+
+
+class Resume(Engine):
+    def test_nothing_to_do(self):
+        for name, state in (('first run', None), ('no baseline', State('settled', BOOT_A)), ('settled', SETTLED_STATE)):
+            with self.subTest(name):
+                store = MemoryStore(state=state)
+                self.assertEqual(activate.resume(store, self.host), Outcome('idle', store.load()))
+                self.assertEqual(store.saves, 0)
+
+    def test_drift_is_reported_without_any_action(self):
+        cases = (
+            ('current moved', dict(current=CAND), f'settled is bbbbbbb, current is ccccccc, the running process says bbbbbbb'),
+            ('another process', dict(running=CAND), f'settled is bbbbbbb, current is bbbbbbb, the running process says ccccccc'),
+            ('bot down', dict(bot='inactive', running=None), 'settled is bbbbbbb, current is bbbbbbb, the running process says None'),
+        )
+        for name, world, why in cases:
+            with self.subTest(name):
+                self.fresh(tempfile.mkdtemp(dir=self._tmp.name))
+                for k, v in world.items():
+                    setattr(self.world, k, v)
+                before = (self.world.bot, self.world.running, self.world.current)
+                self.assertEqual(activate.resume(self.store, self.host), Outcome('drift', SETTLED_STATE, why))
+                self.assertEqual(((self.world.bot, self.world.running, self.world.current), self.store.saves),
+                                 (before, 0))
+
+    def test_held_phases_do_nothing(self):
+        self.world.restarts = lambda sha, age: None
+        self.run_engine()
+        self.host.faults.points.clear()
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.host.faults.points),
+                         ('unverified', 'NRestarts could not be read once during the window', []))
+
+    def test_a_reboot_in_the_window_is_unverified_not_settled(self):
+        self.run_until('observing')
+        for _ in range(5):
+            activate.step(self.store, self.host)
+        self.world.reboot()
+        out = activate.resume(self.store, self.host)
+        s = self.store.load()
+        why = 'reboot during the window (boot 0f0e0d0c-0b0a-4908-8706-050403020100 -> 11111111-2222-4333-8444-555555555555)'
+        self.assertEqual((out.kind, out.reason, s.phase, s.unverified, s.settled, s.last_failed_sha),
+                         ('unverified', why, 'unverified', Unverified(CAND, why, self.pre), OLD_SETTLED, None))
+        # Nothing is rolled back: the candidate (restarted by the boot) keeps running on its own writes.
+        self.assertEqual((self.world.running, self.world.db_files(), self.world.restores),
+                         (CAND, self.migrated(), []))
+
+    def test_a_gap_over_30_s_is_unverified(self):
+        self.run_until('observing')
+        for _ in range(3):
+            activate.step(self.store, self.host)
+        # The last sample was taken just now; 31 s later there has been none for 31 s.
+        self.world.now += 31
+        out = activate.resume(self.store, self.host)
+        self.assertEqual((out.kind, out.reason, self.store.load().settled),
+                         ('unverified', 'no sample for 31 s (over 30 s)', OLD_SETTLED))
+
+    def test_a_gap_of_exactly_30_s_continues_the_window(self):
+        self.run_until('observing')
+        for _ in range(3):
+            activate.step(self.store, self.host)
+        self.world.now += 30
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'settled')
+        self.assertEqual(self.store.load().settled, Settled(CAND, '1' * 64, T0 + 600))
+
+    def test_a_dead_start_is_finished_by_the_next_tick(self):
+        self.begin()
+        activate.step(self.store, self.host)
+        activate.step(self.store, self.host)
+        self.assertEqual(self.store.load().intent, 'start')
+        self.assertEqual(activate.resume(self.store, self.host).kind, 'settled')
 
 
 class FileStore(unittest.TestCase):

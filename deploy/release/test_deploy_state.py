@@ -259,6 +259,18 @@ class Immutable(unittest.TestCase):
                          [{'at': 10, 'what': 'stop', 'result': 'ok'},
                           {'at': 11, 'what': 'switch', 'result': 'ok', 'sha': CAND.sha}])
 
+    def test_log_refuses_a_detail_that_is_not_a_scalar(self):
+        with self.assertRaises(StateError) as cm:
+            EXAMPLES[2].log(10, 'stop', 'ok', units=['bot'])
+        self.assertEqual(str(cm.exception), "State.evidence[0]: detail 'units' is not a finite JSON scalar: ['bot']")
+
+    def test_replace_carries_the_frozen_events_as_a_plain_tuple(self):
+        logged = EXAMPLES[2].log(10, 'stop', 'ok')
+        moved = logged.replace(intent='switch')
+        self.assertEqual((type(moved.evidence), moved.evidence[0] is logged.evidence[0], moved),
+                         (tuple, True, State('activating', BOOT, intent='switch', evidence=[
+                             {'at': 10, 'what': 'stop', 'result': 'ok'}], **OPEN)))
+
     def test_constructor_refuses_a_bad_record(self):
         with self.assertRaises(StateError) as cm:
             State('activating', BOOT, intent='stop', **{**OPEN, 'candidate': {'sha': CAND.sha}})
