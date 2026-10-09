@@ -242,6 +242,10 @@ def _observe(store, host, s, boot):
     if boot != o.boot_id:
         return _unverified(store, s, boot, now, f'reboot during the window (boot {o.boot_id} -> {boot})')
     last = o.last_sample_at if o.last_sample_at is not None else o.started_at
+    if now < last:
+        # 2в e2e review Ф2: the clock stepped back (NTP, a manual set). The persisted times no longer
+        # measure the window, and a pause to `due` would be as long as the step: not proof, no sleep.
+        return _unverified(store, s, boot, now, f'the clock went back {last - now:g} s behind the last sample')
     if now - last > GAP_S:
         return _unverified(store, s, boot, now, f'no sample for {now - last:g} s (over {GAP_S} s)')
     if o.last_sample_at is not None:
