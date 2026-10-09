@@ -34,6 +34,7 @@ export interface RenderParams {
   /** The commit this review was computed against; goes into the state block. */
   head: string;
   spend: Spend;
+  unreviewedCount?: number;
 }
 
 function openBlock(item: OpenFinding, n: number): string {
@@ -68,6 +69,7 @@ function assemble(p: {
   omitted: number;
   head: string;
   spend: Spend;
+  unreviewedCount?: number;
 }): string {
   const sections: string[] = [];
 
@@ -86,6 +88,13 @@ function assemble(p: {
     sections.push(
       '',
       `<sub>${p.omitted} further finding(s) omitted to fit this review's size limit.</sub>`,
+    );
+  }
+
+  if (p.unreviewedCount && p.unreviewedCount > 0) {
+    sections.push(
+      '',
+      `<sub>${p.unreviewedCount} changed file(s) outside reviewer scope.</sub>`,
     );
   }
 
