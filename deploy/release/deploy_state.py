@@ -223,15 +223,17 @@ class Pre(_Record):
 
 @dataclass(frozen=True)
 class Observe(_Record):
-    """The window: when it began and in which boot, NRestarts at its start (None until read), last sample."""
+    """The window: when it began and in which boot, NRestarts baseline (None until read), last sample,
+    failures in a row, and when the candidate first answered healthy as itself (None: still starting)."""
     started_at: float
     boot_id: str
     nrestarts0: int | None
     last_sample_at: float | None
     fails: int
+    healthy_at: float | None = None
     _SPEC = (('started_at', 'startedAt', _Number()), ('boot_id', 'bootId', _Pattern(_BOOT_ID, 'a boot id')),
              ('nrestarts0', 'nrestarts0', _Opt(_Count())), ('last_sample_at', 'lastSampleAt', _Opt(_Number())),
-             ('fails', 'fails', _Count()))
+             ('fails', 'fails', _Count()), ('healthy_at', 'healthyAt', _Opt(_Number())))
 
 
 @dataclass(frozen=True)
