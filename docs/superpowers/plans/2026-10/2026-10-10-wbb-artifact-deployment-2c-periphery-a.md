@@ -101,3 +101,18 @@ Production activation заборонена до кінця В.
 ## Після етапу А
 
 Наскрізне рев'ю tick-а. Далі план етапу Б: справжні `Host` і `Helpers` (sudo-виклики `wbb_release.py`, `dbsnap.py` від користувача бота, `systemctl`, `/health` з таймаутами ≪ `GAP_S`, `gh` для міток і завантаження artifact), `/health.releaseSha` + `WBB_RELEASE_REQUIRED` (`[deploy:hold]`), обгортка `deploy.sh`, retention (pre, усі post, дерева з посилань state/evidence), міграція state v1→v2 і контракт першого settled baseline, `TimeoutStartSec` deploy service, перелік подвійних падінь.
+
+**Наскрізне рев'ю етапу А — виправлено в цій гілці:** B1 (`noop {sha, settledSha}` замість `noopSha`), S1 (`ackThrough`: підтверджені holds не тримають наступних злиттів після noop), S2 (`github_trust.RunFailed`/`NoRunYet`; CI `failed` лише за вердиктом самого CI), S3 (`resume` до читання tick-стану), S4 (ручний запуск крізь drift/`unreachable`), S5 (`is_ancestor` — False для невідомого коміту; збій git/installed_stale — щоденне «не можу оцінити», не 70), S6 (fetch до огляду settled), N2 (pre прибирається за будь-якого збою `begin`, крім уже записаної активації).
+
+**Ще до етапу Б (з того самого рев'ю, у план Б):**
+- Транспортний контракт `Helpers.trusted`: справжній адаптер обгортає `github_trust.fetch_trusted` над `GitHubApi` і **не** перетворює `RunFailed`/`NoRunYet` на інші винятки; будь-який інший збій (`gh`, мережа, токен) лишається «не можу прочитати CI».
+- `installed_stale` потребує явної мапи «файл репо → встановлений шлях» (зараз лише шаблони `gates.INSTALLED_COPIES`): без неї адаптер не знає, з чим порівнювати.
+- Винятки `make_env` (збірка справжніх `Host`/`Helpers`) — обгорнути в 70 з критичним повідомленням, як верхній catch tick-а; зараз вони летять повз нього.
+- Один годинник epoch для `abort.at` (час рушія, `host.now()`) і `Inputs.now` (`env.clock()`): backoff порівнює числа з двох джерел.
+- Rearm `lastFailedSha` і підтвердження fence/baseline (заміна оператором) — у tick-стан із CLI (`tick.py rearm`, `tick.py ack-baseline`), а не ручне редагування state.
+- Обгортка `deploy.sh`: відмова на брудному checkout до будь-якої мутації, ціль = `HEAD`, прокидання `--ack-holds`.
+- Пропуск download/publish, коли receipt цього SHA вже є; backoff для транзієнтної підготовки (зараз кожен tick повторює все з нуля).
+- `TimeoutStartSec` deploy-юніта проти вікна (600 с), trial і `LOCK_STALL_S` (2100 с): юніт не має вбивати легітимний tick.
+- Міграція state v1→v2: засіяти `lastSeenSettled`/`regression` з v1 (`LAST_SEEN_DEPLOYED_SHA`, `REGRESSION_*`) і переконатися, що settled-коміт є в приватному клоні.
+- Коди 3/4/70 поза `SuccessExitStatus` юніта (сьогодні `0 1 2`): юніт у failed — це сигнал, а не шум; узгодити з повідомленнями.
+
