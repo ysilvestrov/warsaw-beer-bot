@@ -68,9 +68,9 @@ Production activation заборонена до кінця В.
 
 **Files:** create `deploy/release/tick_state.py`, `deploy/release/gates.py`, тести до обох.
 
-- [ ] `tick_state`: durable JSON (через `publish.write_atomic`), `load` → `None` для відсутнього, `StateError` для зіпсованого; поля з «Рішень» п.2.
-- [ ] `gates.admission(inputs) -> Decision(kind, reason, notice_key)`: чиста функція кроків 5–11 і 13 з Global Constraints. `kind ∈ {idle, wait, hold, refuse, admit}`; `inputs` — dataclass зі значеннями, які tick уже прочитав (без I/O). Окремо `mode ∈ {timer, manual, force}` і `ack_holds`.
-- [ ] Тести — по рядку таблиці «Гейти за шляхом» спеки §5 для кожного стовпця (timer / manual / force), плюс: backoff межі (рівно 1 год, 2 год після другого abort, стеля 24 год); `ack_holds`, що не збігається з показаним переліком, — hold; `noopSha == main` — idle; regression fence не стирається manual.
+- [x] `tick_state`: durable JSON (через `publish.write_atomic`), `load` → `None` для відсутнього, `StateError` для зіпсованого; поля з «Рішень» п.2.
+- [x] `gates.admission(inputs) -> Decision(kind, reason, notice_key)`: чиста функція кроків 5–11 і 13 з Global Constraints. `kind ∈ {idle, wait, hold, refuse, admit}`; `inputs` — dataclass зі значеннями, які tick уже прочитав (без I/O). Окремо `mode ∈ {timer, manual, force}` і `ack_holds`.
+- [x] Тести — по рядку таблиці «Гейти за шляхом» спеки §5 для кожного стовпця (timer / manual / force), плюс: backoff межі (рівно 1 год, 2 год після другого abort, стеля 24 год); `ack_holds`, що не збігається з показаним переліком, — hold; `noopSha == main` — idle; regression fence не стирається manual.
 
 ### Task 2: `prepare.py` — від довіреного run до готового кандидата
 

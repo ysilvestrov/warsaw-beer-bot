@@ -505,6 +505,23 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   files under real `dbsnap`, NRestarts, boot, clock) with crash injection before/after every host call and
   save; `test_crash_matrix.py` crashes the engine at every such point and checks the world after recovery.
 
+Host side, periphery 2в stage A (code only; the tick that uses these comes next, nothing is installed):
+
+- `tick_state.py` — the tick's own `tick-state.json` next to `deploy-state.json` (same durable write; a
+  broken file is an error, never a blank slate): `mainSeen` (first sighting of a head, for quiet), `noopSha`
+  (payload equal to settled), `abort` (SHA, aborts in a row, last time), `notifiedTxn`, the regression fence
+  (`lastSeenSettled`, `regression{from,to}`) and `notices` (UTC day per notice key, kept 31 days).
+- `gates.py` — `admission(Inputs) -> Decision`: a pure function of facts the tick already read, by the
+  spec §5 table for `timer` / `manual` / `force`. Kinds: `idle`, `wait`, `hold`, `refuse`, `admit`, and
+  `need <field>` — a costly fact (ancestry, installed copies, the range's paths and PR labels, CI) is read
+  only when its gate is reached. Quiet 600 s and the abort backoff (1 h doubling per abort in a row, at most
+  24 h) are the timer's; PAUSED stops only the timer. Held paths: `deploy/release/**`,
+  `deploy/*.service|*.timer|*.path`, `deploy/sudoers.d/**`, `deploy/install-*.sh`, `deploy/litestream.*`,
+  `.github/workflows/ci.yml`, `scripts/ops/host_patch_collect.py`, `scripts/ops/reboot_request.py`, plus the
+  `deploy:hold` label; by hand they pass only with `--ack-holds` equal to the shown keys (`path:<p>`,
+  `pr:<n>`). A path or label that could not be read blocks and cannot be acknowledged. `observe` is the
+  regression fence over the settled SHA; only a settled release containing `from` clears it.
+
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
 ```bash
