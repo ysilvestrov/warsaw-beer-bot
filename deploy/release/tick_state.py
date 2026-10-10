@@ -176,8 +176,9 @@ class Verdict(ds._Record):
     _SPEC = (('sha', 'sha', _SHA_KIND), ('text', 'text', ds._Text()), ('recorded', 'recorded', _Flag()))
 
 
-# Undelivered verdict messages kept at once (each at most NOTIFY_LIMIT characters): a bound on the file,
-# far above what a broken notify could pile up — every verdict needs a new main SHA that fails.
+# Undelivered verdict messages kept at once (each at most NOTIFY_LIMIT characters, so the file stays far
+# under its 1 MiB limit). The queue is never truncated: at this many the tick prepares nothing new until
+# they went out — every verdict needs a new main SHA that fails, so this means notify has been broken long.
 MAX_PENDING_VERDICTS = 10
 
 

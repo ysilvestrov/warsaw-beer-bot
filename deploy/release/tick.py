@@ -240,7 +240,11 @@ class _Tick:
         for v in self.ts.pending_verdicts:
             if not v.recorded:
                 state = self.store.load()
-                if state is not None and state.phase == 'settled' and state.last_failed_sha != v.sha:
+                if state is None or state.phase != 'settled':
+                    # (#827 AI review) nowhere to record it yet: the entry stays unrecorded — not sent, not
+                    # dropped — and a later tick records it once the engine is settled again.
+                    continue
+                if state.last_failed_sha != v.sha:
                     self.store.save(state.replace(last_failed_sha=v.sha))
                 self.save(self.ts.replace(pending_verdicts=tuple(
                     tick_state.Verdict(x.sha, x.text, True) if x is v else x for x in self.ts.pending_verdicts)))
@@ -502,6 +506,12 @@ class _Tick:
         if self.timer and self.paused():
             self.say('paused (PAUSED exists); no new deploy')
             return 0
+        if len(self.ts.pending_verdicts) >= tick_state.MAX_PENDING_VERDICTS:
+            # (#827 AI review) the queue is never truncated: with this many verdicts undelivered, notify is
+            # broken and no new candidate is prepared until they went out.
+            self.say(f'{len(self.ts.pending_verdicts)} verdict messages are undelivered (notify is failing); '
+                     f'no new deploy until they are sent')
+            return self.served(0)
         state = self.store.load()
         settled = state.settled if state is not None else None
         main = None
@@ -550,8 +560,8 @@ class _Tick:
             # written to the engine's state, then marked recorded — a tick that died in between finishes
             # that write before anything else (flush_verdicts). Queued, not overwritten: a later verdict
             # never replaces one still undelivered.
-            queue = self.ts.pending_verdicts + (tick_state.Verdict(sha, text, False),)
-            self.save(self.ts.replace(pending_verdicts=queue[-tick_state.MAX_PENDING_VERDICTS:]))
+            # Never truncated: deploy() is not reached while the queue is full (see run).
+            self.save(self.ts.replace(pending_verdicts=self.ts.pending_verdicts + (tick_state.Verdict(sha, text, False),)))
             self.record_verdicts()
             self.flush_verdicts()
             return 1

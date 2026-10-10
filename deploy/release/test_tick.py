@@ -534,6 +534,30 @@ class Verdicts(Base):
                                                            ['⛔ refused ccccccc']))
         self.assertEqual('download' in self.h.names(), False)
 
+    def test_a_full_verdict_queue_stops_new_preparation_and_drops_nothing(self):
+        # #827 AI review, third pass: the queue was sliced to its newest ten, dropping the oldest.
+        os.makedirs(self.dir, exist_ok=True)
+        old = tuple(tick_state.Verdict(f'{i:x}' * 40, f'⛔ verdict {i}', True) for i in range(1, 11))
+        self.queued(*old)
+        self.notify_ok = False
+        self.h = self.helpers()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.h.names(), [])
+        self.assertEqual(tick_state.load(os.path.join(self.dir, tick_state.STATE_NAME)).pending_verdicts, old)
+
+    def test_an_unrecorded_verdict_waits_while_the_engine_is_not_settled(self):
+        # #827 AI review, third pass: it was marked recorded (and could be sent) with lastFailedSha written nowhere.
+        os.makedirs(self.dir, exist_ok=True)
+        self.queued(tick_state.Verdict(CAND, '⛔ refused ccccccc', False))
+        self.store = MemoryStore()
+        self.h = self.helpers()
+        # The tick goes on to its usual answer for a missing baseline (a hold, not an internal error); the
+        # verdict is not sent, not dropped, still unrecorded.
+        self.assertEqual(self.tick(), 1)
+        self.assertEqual([n.startswith('⏸ wbb-deploy: no settled baseline') for n in self.notes], [True])
+        self.assertEqual(tick_state.load(os.path.join(self.dir, tick_state.STATE_NAME)).pending_verdicts,
+                         (tick_state.Verdict(CAND, '⛔ refused ccccccc', False),))
+
     def test_a_huge_verdict_is_cut_before_it_is_kept(self):
         # #827 AI review, second pass: the tick-state file is refused over 1 MiB; the queued text is cut first.
         self.h = self.helpers(probe=Run(1, 'FAILED', 'PROBE FAILED: ' + 'x' * (2 << 20)))
