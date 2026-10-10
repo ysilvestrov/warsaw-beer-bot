@@ -42,22 +42,32 @@ CAND_TREE = hashlib.sha256(CAND_MANIFEST).hexdigest()
 SETTLED = Settled(BASE, BASE_TREE, 1759990000)
 PREPARED = Prepared(Release(CAND, CAND_TREE), PRE)
 
-# Every call of a candidate that goes all the way, in order: the audit before the first execution.
-FULL = [('download', CAND, TRUSTED), ('publish', CAND, ZIP), ('verify', CAND), ('verify', BASE),
+# Every call of a candidate that goes all the way, in order: is it accepted already (not yet: no receipt),
+# then the download path, and the audit before the first execution.
+FULL = [('verify', CAND), ('download', CAND, TRUSTED), ('publish', CAND, ZIP), ('verify', CAND), ('verify', BASE),
         ('manifest', CAND), ('manifest', BASE), ('audit', CAND), ('probe', CAND), ('snapshot_pre', CAND),
         ('trial', CAND, PRE_NAME)]
-UP_TO_AUDIT = [c[0] for c in FULL[:7]]
-UP_TO_PROBE = [c[0] for c in FULL[:8]]
+UP_TO_AUDIT = [c[0] for c in FULL[:8]]
+UP_TO_PROBE = [c[0] for c in FULL[:9]]
 UP_TO_TRIAL = [c[0] for c in FULL]
+NO_RECEIPT = Run(2, None, 'REFUSED: no receipt — not an accepted release')
 
 
 def helpers(cand_manifest=CAND_MANIFEST, **answers):
     manifests = {CAND: cand_manifest, BASE: BASE_MANIFEST}
     trees = {CAND: hashlib.sha256(cand_manifest).hexdigest(), BASE: BASE_TREE}
+    calls = []
+
+    def verify(sha):
+        # The settled release was accepted long ago; the candidate has a receipt once publish was called.
+        if sha == BASE or ('publish', CAND, ZIP) in calls:
+            return Run(0, 'VERIFIED', f'VERIFIED {sha}: tree {trees[sha]}', trees[sha])
+        return NO_RECEIPT
+
     defaults = dict(
         download=ZIP,
         publish=Run(0, 'ACCEPTED', f'ACCEPTED {CAND}: run 7 attempt 1, artifact 9'),
-        verify=lambda sha: Run(0, 'VERIFIED', f'VERIFIED {sha}: tree {trees[sha]}', trees[sha]),
+        verify=verify,
         manifest=lambda sha: manifests[sha],
         audit=Run(0, 'CLEAN', 'AUDIT CLEAN', trees[CAND]),
         probe=Run(0, 'OK', 'PROBE OK'),
@@ -65,7 +75,9 @@ def helpers(cand_manifest=CAND_MANIFEST, **answers):
         trial=Run(0, 'OK', 'TRIAL OK'),
         discard_pre=None,
     )
-    return FakeHelpers(**{**defaults, **answers})
+    h = FakeHelpers(**{**defaults, **answers})
+    h.calls = calls
+    return h
 
 
 def run(h):
@@ -83,12 +95,40 @@ class Ready(unittest.TestCase):
         self.assertEqual(run(h), PREPARED)
 
 
+class AlreadyAccepted(unittest.TestCase):
+    """(plan periphery-b2 "Рішення" п.5) a candidate whose tree verifies against its receipt is not fetched again."""
+
+    def test_a_verified_candidate_is_neither_downloaded_nor_published(self):
+        trees = {CAND: CAND_TREE, BASE: BASE_TREE}
+        h = helpers(verify=lambda sha: Run(0, 'VERIFIED', '', trees[sha]))
+        self.assertEqual(run(h), PREPARED)
+        self.assertEqual(h.calls, [FULL[0]] + FULL[4:])
+
+    def test_a_verify_without_a_tree_digest_takes_the_download_path(self):
+        answers = iter([Run(0, 'VERIFIED', 'VERIFIED', None), Run(0, 'VERIFIED', '', CAND_TREE),
+                        Run(0, 'VERIFIED', '', BASE_TREE)])
+        h = helpers(verify=lambda sha: next(answers))
+        self.assertEqual(run(h), PREPARED)
+        self.assertEqual(h.calls, FULL)
+
+    def test_a_tree_that_changed_since_it_was_accepted_takes_the_download_path(self):
+        changed = Run(2, None, f'REFUSED: {CAND}: release tree changed')
+        h = helpers(verify=lambda sha: changed if sha == CAND else Run(0, 'VERIFIED', '', BASE_TREE))
+        self.assertEqual(run(h), Transient('verify', f'exit 2, no verdict line: REFUSED: {CAND}: release tree changed'))
+        self.assertEqual(h.names(), ['verify', 'download', 'publish', 'verify'])
+
+    def test_a_first_verify_that_raises_is_transient_and_fetches_nothing(self):
+        h = helpers(verify=HelperError('sudo: a password is required'))
+        self.assertEqual(run(h), Transient('verify', 'HelperError: sudo: a password is required'))
+        self.assertEqual(h.names(), ['verify'])
+
+
 class NothingShips(unittest.TestCase):
     def test_only_release_json_differs_is_a_noop_that_runs_nothing_of_the_candidate(self):
         same = manifest(entries(release='a'))
         h = helpers(cand_manifest=same)
         self.assertEqual(run(h), Noop(CAND, hashlib.sha256(same).hexdigest()))
-        self.assertEqual(h.calls, FULL[:6])
+        self.assertEqual(h.calls, FULL[:7])
 
     def test_any_runtime_difference_is_a_release(self):
         cases = {
@@ -116,7 +156,7 @@ class BeforeTheCandidateRuns(unittest.TestCase):
 
     def test_download(self):
         self.check(dict(download=HelperError('HTTP 410: artifact expired')),
-                   Transient('download', 'HelperError: HTTP 410: artifact expired'), ['download'])
+                   Transient('download', 'HelperError: HTTP 410: artifact expired'), ['verify', 'download'])
 
     def test_publish(self):
         cases = (
@@ -127,9 +167,9 @@ class BeforeTheCandidateRuns(unittest.TestCase):
         )
         for answer, reason in cases:
             with self.subTest(reason):
-                self.check(dict(publish=answer), Transient('publish', reason), ['download', 'publish'])
+                self.check(dict(publish=answer), Transient('publish', reason), ['verify', 'download', 'publish'])
 
-    def test_verify_of_the_candidate(self):
+    def test_verify_of_the_candidate_after_publish(self):
         cases = (
             (Run(2, None, 'REFUSED: release tree changed'), 'exit 2, no verdict line: REFUSED: release tree changed'),
             (Run(0, 'VERIFIED', 'VERIFIED', None), f'{CAND[:7]} verified without a tree digest'),
@@ -137,7 +177,9 @@ class BeforeTheCandidateRuns(unittest.TestCase):
         )
         for answer, reason in cases:
             with self.subTest(reason):
-                self.check(dict(verify=answer), Transient('verify', reason), ['download', 'publish', 'verify'])
+                answers = iter([NO_RECEIPT, answer])
+                self.check(dict(verify=lambda sha: next(answers)), Transient('verify', reason),
+                           ['verify', 'download', 'publish', 'verify'])
 
     def test_settled_that_verifies_as_another_tree(self):
         def verify(sha):
@@ -145,7 +187,7 @@ class BeforeTheCandidateRuns(unittest.TestCase):
 
         self.check(dict(verify=verify),
                    Transient('verify', f'settled bbbbbbb verifies as tree {"9" * 64}, recorded {BASE_TREE}'),
-                   ['download', 'publish', 'verify', 'verify'])
+                   ['verify', 'verify'])
 
     def test_manifest_that_is_not_the_verified_tree(self):
         def manifest_of(sha):
@@ -153,17 +195,17 @@ class BeforeTheCandidateRuns(unittest.TestCase):
 
         self.check(dict(manifest=manifest_of),
                    Transient('manifest', f'the manifest of ccccccc is not its verified tree {CAND_TREE}'),
-                   UP_TO_AUDIT[:5])
+                   UP_TO_AUDIT[:6])
 
     def test_manifest_that_does_not_parse(self):
         pretty = b'{"entries": [], "formatVersion": 1}'
         self.check(dict(cand_manifest=pretty),
                    Transient('manifest', 'the manifest of ccccccc: manifest bytes are not canonical'),
-                   UP_TO_AUDIT[:5])
+                   UP_TO_AUDIT[:6])
 
     def test_manifest_read_failure(self):
         self.check(dict(manifest=PermissionError('denied')), Transient('manifest', 'PermissionError: denied'),
-                   UP_TO_AUDIT[:5])
+                   UP_TO_AUDIT[:6])
 
 
 class Audit(unittest.TestCase):

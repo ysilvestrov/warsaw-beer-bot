@@ -12,8 +12,8 @@ One tick, every step under the lock `<state dir>/lock` (the file merge-deploy us
    3. drift (or `unreachable`: /health does not answer 3 probes 10 s apart), unverified, recovery-failed —
       a reminder once a day; a manual run goes on through drift and `unreachable` (stage A review S4)
    4.-11. fetch main, then the regression fence over settled (skipped when the fetch failed), then
-      gates.admission over the facts read here (no baseline, the fetch, settled/noop, ancestry and the fence, last failed SHA and the abort backoff, quiet, installed copies, holds, CI)
-  12. prepare.prepare — noop / verdict / transient / a prepared candidate
+      gates.admission over the facts read here (no baseline, the fetch, settled/noop, ancestry and the fence, last failed SHA, the abort and prepare backoffs, quiet, installed copies, holds, CI)
+  12. prepare.prepare — noop / verdict / transient (counted for its backoff) / a prepared candidate
   13. the gates once more right before begin: main unmoved (timer), PAUSED absent, the same holds
   14. activate.begin -> activate.run
 
@@ -540,6 +540,7 @@ class _Tick:
             mode=self.mode, now=now, main=main, target=main if self.timer else self.env.target,
             paused=self.paused(), settled_sha=settled.sha if settled else None, noop=self.ts.noop,
             last_failed_sha=state.last_failed_sha if state else None, abort=self.ts.abort,
+            prepare_retry=self.ts.prepare_retry,
             main_seen=self.ts.main_seen, regression=self.ts.regression, ack_holds=self.ack_holds)
         d, i = self.admit(i)
         if d.kind != 'admit':
@@ -550,6 +551,11 @@ class _Tick:
         sha = i.target
         self.say(f'preparing {sha}')
         got = pp.prepare(self.h, sha, i.ci.trusted, settled)
+        if isinstance(got, pp.Transient):
+            # (plan periphery-b2 "Рішення" п.5) the timer waits gates.prepare_retry_s before it tries this SHA again.
+            self.save(tick_state.prepare_transient(self.ts, sha, self.env.clock()))
+        elif self.ts.prepare_retry is not None:
+            self.save(self.ts.replace(prepare_retry=None))
         if isinstance(got, pp.Noop):
             self.say(f'{_short(sha)} changes nothing in the runtime payload; nothing to activate')
             # (stage A review S1) admission passed the holds of this range — none, or exactly the ones a human
@@ -575,7 +581,7 @@ class _Tick:
         if isinstance(got, pp.Transient):
             note = f'\n{got.note}' if got.note else ''
             self.notice('prepare', f'⚠️ wbb-deploy could not prepare {_short(sha)} ({got.step}): {got.reason} — '
-                                   f'not a verdict; the next tick tries again.{note}')
+                                   f'not a verdict; it is tried again after a backoff.{note}')
             return self.served(0)
         return self.activate(got, i)
 

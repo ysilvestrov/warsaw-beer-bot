@@ -21,6 +21,7 @@ FULL = TickState(
     notices={'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
     blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1), ack_through=A,
     pending_verdicts=(ts.Verdict(A, 'wbb-deploy refused aaaaaaa: PROBE FAILED', True),),
+    prepare_retry=ts.PrepareRetry(A, 3, 1760000300.25),
 )
 # The file FULL is, written out by hand (canonical: sorted keys, no whitespace).
 FULL_JSON = {
@@ -35,6 +36,7 @@ FULL_JSON = {
     'blocked': {'txn': TXN2, 'step': 'rolling-back/start-baseline', 'at': 1760000200, 'alerts': 1},
     'ackThrough': A,
     'pendingVerdicts': [{'sha': A, 'text': 'wbb-deploy refused aaaaaaa: PROBE FAILED', 'recorded': True}],
+    'prepareRetry': {'sha': A, 'count': 3, 'at': 1760000300.25},
 }
 
 
@@ -110,6 +112,10 @@ class Files(Tmp):
                              r'pendingVerdicts\[0\]\.recorded: not a boolean'),
             'too many verdicts': (json.dumps(dict(FULL_JSON, pendingVerdicts=[{'sha': A, 'text': 'x', 'recorded': True}] * 11)).encode(),
                                   'pendingVerdicts: not a tuple of at most 10 Verdict'),
+            'zero prepare retries': (json.dumps(dict(FULL_JSON, prepareRetry={'sha': A, 'count': 0, 'at': 1})).encode(),
+                                     'tick-state.prepareRetry.count: not a positive integer: 0'),
+            'prepare retry without at': (json.dumps(dict(FULL_JSON, prepareRetry={'sha': A, 'count': 1})).encode(),
+                                         r"tick-state.prepareRetry: missing \['at'\]"),
             'bad txn': (json.dumps(dict(FULL_JSON, notifiedTxn='x')).encode(), 'notifiedTxn: not a 32-hex'),
             'bad day': (json.dumps(dict(FULL_JSON, notices={'hold': '2026-02-30'})).encode(),
                         'notices.hold: not a YYYY-MM-DD day'),
@@ -156,6 +162,13 @@ class Transitions(unittest.TestCase):
         self.assertEqual(s.abort, Abort(A, 1, 10, TXN))
         self.assertEqual(ts.aborted(s, A, 70, TXN), s)
         self.assertEqual(ts.aborted(s, A, 70, TXN2).abort, Abort(A, 2, 70, TXN2))
+
+    def test_transient_preparations_of_one_sha_count_up_and_another_sha_starts_at_one(self):
+        s = ts.prepare_transient(TickState(), A, 10)
+        self.assertEqual(s.prepare_retry, ts.PrepareRetry(A, 1, 10))
+        s = ts.prepare_transient(s, A, 20)
+        self.assertEqual(s.prepare_retry, ts.PrepareRetry(A, 2, 20))
+        self.assertEqual(ts.prepare_transient(s, B, 30).prepare_retry, ts.PrepareRetry(B, 1, 30))
 
     def test_daily_notice_is_due_once_per_day(self):
         s = TickState(notices={'hold': '2026-10-10'})

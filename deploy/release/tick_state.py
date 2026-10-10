@@ -30,6 +30,9 @@ claims, and its evidence (plan, "заявка → доказ"):
   pendingVerdicts [{sha, text, recorded}]  verdict messages not delivered yet, oldest first (#827 AI review):
                          lastFailedSha stops a SHA from being prepared again, so each message waits here until
                          sent; `recorded` says lastFailedSha already landed in the engine's state
+  prepareRetry {sha, count, at}  preparing `sha` ended Transient `count` times in a row, last at `at` (plan
+                         periphery-b2 "Рішення" п.5); the timer waits gates.prepare_retry_s(count) before the
+                         next try; cleared once a preparation of it ends otherwise, restarted by another SHA
 
 A missing file is a first tick (None). An empty, non-JSON, other-version or schema-breaking file is a
 StateError, never a blank slate: a blank slate would forget a regression fence.
@@ -111,6 +114,15 @@ class Abort(ds._Record):
     txn: str | None = None
     _SPEC = (('sha', 'sha', _SHA_KIND), ('count', 'count', _Positive()), ('at', 'at', ds._Number()),
              ('txn', 'txn', ds._Opt(_TXN_KIND)))
+
+
+@dataclass(frozen=True)
+class PrepareRetry(ds._Record):
+    """Transient preparations of `sha` in a row: how many, and when the last one ended."""
+    sha: str
+    count: int
+    at: float
+    _SPEC = (('sha', 'sha', _SHA_KIND), ('count', 'count', _Positive()), ('at', 'at', ds._Number()))
 
 
 @dataclass(frozen=True)
@@ -201,6 +213,7 @@ class TickState(ds._Record):
     blocked: Blocked | None = None
     ack_through: str | None = None
     pending_verdicts: tuple = ()
+    prepare_retry: PrepareRetry | None = None
     _SPEC = (
         ('main_seen', 'mainSeen', ds._Opt(ds._Rec(Seen))),
         ('noop', 'noop', ds._Opt(ds._Rec(Noop))),
@@ -212,6 +225,7 @@ class TickState(ds._Record):
         ('blocked', 'blocked', ds._Opt(ds._Rec(Blocked))),
         ('ack_through', 'ackThrough', ds._Opt(_SHA_KIND)),
         ('pending_verdicts', 'pendingVerdicts', _Records(Verdict, MAX_PENDING_VERDICTS)),
+        ('prepare_retry', 'prepareRetry', ds._Opt(ds._Rec(PrepareRetry))),
     )
 
     def __post_init__(self):
@@ -281,6 +295,13 @@ def aborted(state, sha, now, txn=None):
         return state
     count = state.abort.count + 1 if state.abort is not None and state.abort.sha == sha else 1
     return state.replace(abort=Abort(sha, count, now, txn))
+
+
+def prepare_transient(state, sha, now):
+    """One more Transient preparation of sha: the count goes on for the same SHA and starts at 1 for another."""
+    r = state.prepare_retry
+    count = r.count + 1 if r is not None and r.sha == sha else 1
+    return state.replace(prepare_retry=PrepareRetry(sha, count, now))
 
 
 def notice_due(state, key, day, repeat='daily'):

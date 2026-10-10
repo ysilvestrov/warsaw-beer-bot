@@ -25,7 +25,7 @@ day per key) or 'once' (once per key). Only the timer gets notices: a manual run
 operator who is waiting for it.
 
 Modes (spec §5 table): timer forward, manual (`deploy.sh`), force (`deploy.sh --force`). Manual and force
-skip PAUSED, quiet and the abort backoff, and pass holds only with `ack_holds` equal to the shown keys;
+skip PAUSED, quiet, the abort backoff and the backoff of a Transient preparation, and pass holds only with `ack_holds` equal to the shown keys;
 force also skips ancestry. Nothing skips the regression fence except a target that contains its `from`
 (recovery forward), and `admission` never clears it — `observe` does, from what is settled.
 """
@@ -35,7 +35,7 @@ import sys
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tick_state import Abort, Noop, Regression, Seen  # noqa: E402
+from tick_state import Abort, Noop, PrepareRetry, Regression, Seen  # noqa: E402
 
 MODES = ('timer', 'manual', 'force')
 QUIET_S = 600
@@ -43,6 +43,9 @@ QUIET_S = 600
 CI_STUCK_S = 3600
 BACKOFF_BASE_S = 3600
 BACKOFF_MAX_S = 86400
+# A preparation that ended Transient (plan periphery-b2 "Рішення" п.5): 5 min doubling, at most 1 h.
+PREPARE_RETRY_BASE_S = 300
+PREPARE_RETRY_MAX_S = 3600
 HOLD_LABEL = 'deploy:hold'
 CI_KINDS = ('pass', 'pending', 'failed', 'unreadable')
 
@@ -93,6 +96,7 @@ class Inputs:
     noop: Noop | None                # tick-state: a payload found equal to a settled release's
     last_failed_sha: str | None      # state v2
     abort: Abort | None = None       # tick-state
+    prepare_retry: PrepareRetry | None = None  # tick-state
     main_seen: Seen | None = None    # tick-state, already updated for this main by the tick
     regression: Regression | None = None  # tick-state, after `observe`
     ack_holds: frozenset = frozenset()
@@ -199,6 +203,11 @@ def backoff_s(count):
     return min(BACKOFF_BASE_S * 2 ** (min(count, 6) - 1), BACKOFF_MAX_S)
 
 
+def prepare_retry_s(count):
+    """How long after the count-th Transient preparation in a row the same SHA is prepared again."""
+    return min(PREPARE_RETRY_BASE_S * 2 ** (min(count, 5) - 1), PREPARE_RETRY_MAX_S)
+
+
 def _short(sha):
     return sha[:7] if sha else str(sha)
 
@@ -271,6 +280,12 @@ def admission(i):
         left = i.abort.at + backoff_s(i.abort.count) - i.now
         if left > 0:
             return Decision('wait', f'{_short(i.target)} aborted {i.abort.count} time(s); next try in {int(left)} s')
+    if timer and i.prepare_retry is not None and i.prepare_retry.sha == i.target:
+        r = i.prepare_retry
+        left = r.at + prepare_retry_s(r.count) - i.now
+        if left > 0:
+            return Decision('wait', f'{_short(i.target)} could not be prepared {r.count} time(s) in a row; '
+                                    f'next try in {int(left)} s')
     if timer:
         if i.main_seen is None or i.main_seen.sha != i.target:
             return Decision('wait', f'new main head {_short(i.target)}; waiting {QUIET_S} s of quiet')

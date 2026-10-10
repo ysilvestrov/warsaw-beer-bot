@@ -6,7 +6,12 @@ trial on a copy), §10a (lastFailedSha).
 Plan: docs/superpowers/plans/2026-10/2026-10-10-wbb-artifact-deployment-2c-periphery-a.md, Task 2, "Рішення"
 п.1 (noop by manifests) and п.3 (what is a verdict).
 
-    download -> publish -> verify (candidate and settled) -> noop? -> audit -> probe -> snapshot pre -> trial
+    verify -> [download -> publish -> verify] (candidate) -> verify (settled) -> noop? -> audit -> probe
+           -> snapshot pre -> trial
+
+A candidate that already verifies (its receipt exists and its tree is the one the receipt accepted — an
+earlier tick published it, plan periphery-b2 "Рішення" п.5) is not downloaded or published again; any other
+answer of that first verify (no receipt: exit 2) takes the download path, whose own verify then decides.
 
 The audit runs before probe and trial, the first steps that execute candidate code. A `Verdict` — the only
 result the tick may record as lastFailedSha — comes from exit 1 together with its verdict word: `AUDIT
@@ -111,6 +116,12 @@ def _runtime_entries(sha, tree, data):
     return [e for e in manifest['entries'] if e['path'] != RELEASE_JSON]
 
 
+def _accepted_tree(h, sha):
+    """The tree of an already accepted release (this tick's verify against its receipt), or None."""
+    run = _call('verify', h.verify, sha)
+    return run.tree if run.code == 0 and run.kind == 'VERIFIED' else None
+
+
 def _verified_tree(h, sha):
     run = _expect('verify', _call('verify', h.verify, sha), ('VERIFIED',))
     if run.tree is None:
@@ -140,9 +151,11 @@ def prepare(h, sha, trusted, settled):
     settled is the state v2 Settled baseline whose payload a noop is compared with.
     """
     try:
-        zip_path = _call('download', h.download, sha, trusted)
-        _expect('publish', _call('publish', h.publish, sha, zip_path), PUBLISHED)
-        tree = _verified_tree(h, sha)
+        tree = _accepted_tree(h, sha)
+        if tree is None:
+            zip_path = _call('download', h.download, sha, trusted)
+            _expect('publish', _call('publish', h.publish, sha, zip_path), PUBLISHED)
+            tree = _verified_tree(h, sha)
         base_tree = _verified_tree(h, settled.sha)
         if base_tree != settled.tree_sha256:
             return Transient('verify', f'settled {_short(settled.sha)} verifies as tree {base_tree}, '

@@ -61,8 +61,9 @@ SETTLED_NOTE = '✅ wbb-deploy ccccccc is live and settled.'
 # admission (ancestry, installed copies, the range, CI), prepare (audit before any execution), then the
 # gates once more right before begin (main, installed copies, the range).
 ADMIT = ['fetch_main', 'is_ancestor', 'installed_stale', 'changed_paths', 'commits', 'pr_labels', 'trusted']
-PREPARE = ['download', 'publish', 'verify', 'verify', 'manifest', 'manifest', 'audit', 'probe', 'snapshot_pre',
-           'trial']
+PREPARE = ['verify', 'download', 'publish', 'verify', 'verify', 'manifest', 'manifest', 'audit', 'probe',
+           'snapshot_pre', 'trial']
+NO_RECEIPT = Run(2, None, 'REFUSED: no receipt — not an accepted release')
 RECHECK = ['fetch_main', 'installed_stale', 'changed_paths', 'commits', 'pr_labels']
 
 
@@ -82,13 +83,22 @@ class Base(unittest.TestCase):
     def tearDown(self):
         self._tmp.cleanup()
 
-    def helpers(self, **answers):
+    def helpers(self, trees=TREES, **answers):
+        """verify answers as the host does: the settled release has a receipt, another one once it was published."""
+        receipts = {OLD}
+
+        def publish(sha, zip_path):
+            receipts.add(sha)
+            return Run(0, 'ACCEPTED')
+
+        def verify(sha):
+            return Run(0, 'VERIFIED', f'VERIFIED {sha}', trees[sha]) if sha in receipts else NO_RECEIPT
+
         defaults = dict(
             fetch_main=CAND, is_ancestor=lambda a, b: True, installed_stale=None,
             changed_paths=('src/index.ts',), commits=(CAND,), pr_labels=(Pr(41, ('dependencies',)),),
-            trusted=TRUSTED, download=ZIP, publish=Run(0, 'ACCEPTED'),
-            verify=lambda sha: Run(0, 'VERIFIED', f'VERIFIED {sha}', TREES[sha]),
-            manifest=lambda sha: MANIFESTS[sha], audit=Run(0, 'CLEAN', 'AUDIT CLEAN', TREES[CAND]),
+            trusted=TRUSTED, download=ZIP, publish=publish,
+            verify=verify, manifest=lambda sha: MANIFESTS[sha], audit=Run(0, 'CLEAN', 'AUDIT CLEAN', TREES[CAND]),
             probe=Run(0, 'OK', 'PROBE OK'), snapshot_pre=self.pre, trial=Run(0, 'OK', 'TRIAL OK'), discard_pre=None,
         )
         return FakeHelpers(**{**defaults, **answers})
@@ -392,10 +402,13 @@ class NeverAVerdict(Base):
     def test_a_transient_prepare_is_a_daily_notice_and_no_failed_sha(self):
         self.h = self.helpers(audit=Run(75, 'UNRUNNABLE', 'AUDIT UNRUNNABLE: registry 503'))
         self.quiet()
-        self.assertEqual([self.tick(), self.tick()], [0, 0])
+        self.assertEqual(self.tick(), 0)
+        self.world.now += gates.PREPARE_RETRY_BASE_S
+        self.assertEqual(self.tick(), 0)
         self.assertEqual(self.notes, ['⚠️ wbb-deploy could not prepare ccccccc (audit): exit 75, UNRUNNABLE: AUDIT '
-                                      'UNRUNNABLE: registry 503 — not a verdict; the next tick tries again.'])
+                                      'UNRUNNABLE: registry 503 — not a verdict; it is tried again after a backoff.'])
         self.assertEqual(self.store.load(), SETTLED_STATE)
+
 
     def test_a_state_that_cannot_be_written_is_exit_4(self):
         class ReadOnly(MemoryStore):
@@ -408,6 +421,69 @@ class NeverAVerdict(Base):
         self.assertEqual(self.notes, ['🔥 wbb-deploy: failed to write the engine state: PermissionError: [Errno 13] '
                                       'Permission denied — its record may now disagree with production.'])
 
+
+class PrepareRetries(Base):
+    """(plan periphery-b2 "Рішення" п.5) a Transient preparation backs off 5 min doubling, up to 1 h."""
+
+    def setUp(self):
+        super().setUp()
+        self.h = self.helpers(audit=Run(75, 'UNRUNNABLE', 'AUDIT UNRUNNABLE: registry 503'))
+
+    def prepared(self):
+        """Did this tick prepare (call audit)? The calls are cleared for the next one."""
+        went = 'audit' in self.h.names()
+        self.h.calls.clear()
+        return went
+
+    def test_the_second_retry_comes_only_ten_minutes_after_the_second_transient(self):
+        self.quiet()
+        t1 = self.world.now
+        self.assertEqual((self.tick(), self.prepared()), (0, True))
+        self.assertEqual(self.ts().prepare_retry, tick_state.PrepareRetry(CAND, 1, t1))
+        self.world.now = t1 + 299
+        self.assertEqual((self.tick(), self.prepared()), (0, False))
+        self.assertEqual(self.lines[-1], '⚠️ wbb-deploy: ccccccc could not be prepared 1 time(s) in a row; next try in 1 s')
+        self.world.now = t1 + 300
+        self.assertEqual((self.tick(), self.prepared()), (0, True))
+        self.assertEqual(self.ts().prepare_retry, tick_state.PrepareRetry(CAND, 2, t1 + 300))
+        self.world.now = t1 + 300 + 599
+        self.assertEqual((self.tick(), self.prepared()), (0, False))
+        self.world.now = t1 + 300 + 600
+        self.assertEqual((self.tick(), self.prepared()), (0, True))
+        self.assertEqual(self.ts().prepare_retry.count, 3)
+
+    def test_a_retry_neither_downloads_nor_publishes_what_an_earlier_tick_published(self):
+        self.quiet()
+        self.tick()
+        self.assertEqual(self.h.names(), ADMIT + PREPARE[:8])
+        self.h.calls.clear()
+        self.world.now += gates.PREPARE_RETRY_BASE_S
+        self.tick()
+        self.assertEqual(self.h.names(), ADMIT + ['verify', 'verify', 'manifest', 'manifest', 'audit'])
+
+    def test_success_clears_the_backoff(self):
+        self.quiet()
+        self.tick()
+        self.h.answers['audit'] = Run(0, 'CLEAN', 'AUDIT CLEAN', TREES[CAND])
+        self.world.now += gates.PREPARE_RETRY_BASE_S
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual((self.store.load().settled.sha, self.ts().prepare_retry), (CAND, None))
+
+    def test_a_new_sha_is_not_held_by_the_backoff_of_another_and_restarts_the_count(self):
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        TickState(prepare_retry=tick_state.PrepareRetry(OTHER, 4, T0)))
+        self.world.now = T0 + 1
+        self.quiet()
+        self.assertEqual((self.tick(), self.prepared()), (0, True))
+        self.assertEqual(self.ts().prepare_retry, tick_state.PrepareRetry(CAND, 1, self.world.now))
+
+    def test_a_human_is_not_held_by_the_backoff(self):
+        self.quiet()
+        self.tick()
+        self.prepared()
+        self.assertEqual((self.tick('manual'), self.prepared()), (1, True))
+        self.assertEqual(self.ts().prepare_retry.count, 2)
 
 class BrokenTickState(Base):
     """(stage A review S3) the engine finishes a pending phase before a broken tick-state.json stops the tick."""
@@ -582,12 +658,11 @@ class Verdicts(Base):
     def test_a_payload_equal_to_settled_is_noop_and_not_prepared_again(self):
         noop = {**MANIFESTS, CAND: manifest('1', 'c')}
         trees = {sha: hashlib.sha256(m).hexdigest() for sha, m in noop.items()}
-        self.h = self.helpers(manifest=lambda sha: noop[sha],
-                              verify=lambda sha: Run(0, 'VERIFIED', '', trees[sha]))
+        self.h = self.helpers(manifest=lambda sha: noop[sha], trees=trees)
         self.quiet()
         self.assertEqual(self.tick(), 0)
         self.assertEqual(self.ts().noop, Noop(CAND, OLD))
-        self.assertEqual(self.h.names(), ADMIT + PREPARE[:6])
+        self.assertEqual(self.h.names(), ADMIT + PREPARE[:7])
         self.h.calls.clear()
         self.assertEqual(self.tick(), 0)
         self.assertEqual(self.h.names(), ['fetch_main', 'installed_stale'])

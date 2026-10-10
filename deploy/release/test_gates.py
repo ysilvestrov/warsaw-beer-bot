@@ -13,7 +13,7 @@ from dataclasses import replace
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gates  # noqa: E402
 from gates import UNREAD, Ci, CommitPrs, Decision, Inputs, Observation, Pr  # noqa: E402
-from tick_state import Abort, Noop, Regression, Seen  # noqa: E402
+from tick_state import Abort, Noop, PrepareRetry, Regression, Seen  # noqa: E402
 
 SETTLED = '5' * 40
 MAIN = 'a' * 40
@@ -346,6 +346,37 @@ class Backoff(unittest.TestCase):
         for mode in ('manual', 'force'):
             with self.subTest(mode):
                 self.assertEqual(decide(mode, abort=Abort(MAIN, 1, NOW)), ADMIT)
+
+
+class PrepareBackoff(unittest.TestCase):
+    """(plan periphery-b2 "Рішення" п.5) a Transient preparation: 5 min doubling, at most 1 h; the timer only."""
+
+    def test_boundaries(self):
+        cases = (  # (count, seconds since the last Transient, expected kind)
+            (1, 299, 'wait'), (1, 300, 'admit'),
+            (2, 599, 'wait'), (2, 600, 'admit'),
+            (4, 2399, 'wait'), (4, 2400, 'admit'),
+            (5, 3599, 'wait'), (5, 3600, 'admit'),   # 80 min uncapped
+            (10 ** 9, 3599, 'wait'), (10 ** 9, 3600, 'admit'),
+        )
+        for count, ago, kind in cases:
+            with self.subTest(count=count, ago=ago):
+                self.assertEqual(decide('timer', prepare_retry=PrepareRetry(MAIN, count, NOW - ago)).kind, kind)
+
+    def test_retry_formula(self):
+        self.assertEqual([gates.prepare_retry_s(n) for n in (1, 2, 3, 4, 5, 6)], [300, 600, 1200, 2400, 3600, 3600])
+
+    def test_wait_says_how_long_is_left(self):
+        self.assertEqual(decide('timer', prepare_retry=PrepareRetry(MAIN, 2, NOW - 100)),
+                         Decision('wait', 'aaaaaaa could not be prepared 2 time(s) in a row; next try in 500 s'))
+
+    def test_another_sha_is_not_backed_off(self):
+        self.assertEqual(decide('timer', prepare_retry=PrepareRetry(OTHER, 3, NOW)), ADMIT)
+
+    def test_by_hand_is_not_backed_off(self):
+        for mode in ('manual', 'force'):
+            with self.subTest(mode):
+                self.assertEqual(decide(mode, prepare_retry=PrepareRetry(MAIN, 1, NOW)), ADMIT)
 
 
 class NothingToDo(unittest.TestCase):
