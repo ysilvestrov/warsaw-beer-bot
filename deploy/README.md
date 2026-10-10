@@ -521,6 +521,16 @@ Host side, periphery 2в stage A (code only; the tick that uses these comes next
   `deploy:hold` label; by hand they pass only with `--ack-holds` equal to the shown keys (`path:<p>`,
   `pr:<n>`). A path or label that could not be read blocks and cannot be acknowledged. `observe` is the
   regression fence over the settled SHA; only a settled release containing `from` clears it.
+- `helpers.py` — the `Helpers` interface the tick uses besides the engine's `Host` (git, GitHub, the
+  `wbb_release.py` calls, pre snapshots, installed copies); a `wbb_release.py` call returns `Run(code, kind,
+  text, tree)` as it came, and only the caller interprets it. `fake_helpers.py` is the scripted test double.
+- `prepare.py` — `prepare(helpers, sha, trusted, settled)`: download → publish → verify (candidate and settled)
+  → noop? → audit → probe → pre snapshot → trial → `Prepared(candidate, pre)`. Noop: both manifests are the
+  bytes of their verified trees and their entries are equal without `release.json` — nothing is audited,
+  probed or trialled. `Verdict` only for exit 1 with `AUDIT ADVISORY` / `PROBE FAILED` / `TRIAL FAILED` and the
+  audited tree equal to the verified one; anything else (2, 70, 75, a word and a code that disagree, a helper
+  exception, a tree that changed between steps) is `Transient`. A trial that did not pass discards its pre.
+- `tree_manifest.parse_manifest` — the byte checks of `verify_tree` without a tree (used by the noop).
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 

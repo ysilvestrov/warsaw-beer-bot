@@ -195,6 +195,42 @@ def _owner_problem(rel, st, owner):
     return None
 
 
+def _manifest_problems(manifest_bytes):
+    """(manifest, []) for well-formed canonical manifest bytes, else (None, problems)."""
+    try:
+        manifest = json.loads(manifest_bytes.decode('utf-8'))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        return None, [f'manifest is not UTF-8 JSON: {e}']
+    if not isinstance(manifest, dict) or set(manifest) != {'formatVersion', 'entries'}:
+        return None, ['manifest must have exactly formatVersion and entries']
+    if manifest['formatVersion'] != FORMAT_VERSION:
+        return None, [f'unsupported formatVersion {manifest["formatVersion"]!r}']
+    if not isinstance(manifest['entries'], list) or not all(isinstance(e, dict) for e in manifest['entries']):
+        return None, ['entries must be a list of objects']
+    if canonical_bytes(manifest) != manifest_bytes:
+        return None, ['manifest bytes are not canonical']
+    # Structure first: sorting needs every entry to carry a string path.
+    problems = check_entries(manifest['entries'])
+    if problems:
+        return None, problems
+    if manifest['entries'] != _sorted(manifest['entries']):
+        return None, ['manifest entries are not sorted']
+    return manifest, []
+
+
+def parse_manifest(manifest_bytes):
+    """The manifest (formatVersion, sorted entries) of well-formed canonical bytes; ManifestError otherwise.
+
+    The same checks verify_tree makes before it looks at a tree; `.problems` lists them.
+    """
+    manifest, problems = _manifest_problems(manifest_bytes)
+    if problems:
+        e = ManifestError('; '.join(problems))
+        e.problems = problems
+        raise e
+    return manifest
+
+
 def verify_tree(root, manifest_bytes, owner=None):
     """Problems of the tree at root against manifest_bytes; [] means an exact match.
 
@@ -203,24 +239,9 @@ def verify_tree(root, manifest_bytes, owner=None):
     tree-manifest.json itself must belong to owner, the root must be 0755 and the
     manifest a single-link 0644 file.
     """
-    try:
-        manifest = json.loads(manifest_bytes.decode('utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as e:
-        return [f'manifest is not UTF-8 JSON: {e}']
-    if not isinstance(manifest, dict) or set(manifest) != {'formatVersion', 'entries'}:
-        return ['manifest must have exactly formatVersion and entries']
-    if manifest['formatVersion'] != FORMAT_VERSION:
-        return [f'unsupported formatVersion {manifest["formatVersion"]!r}']
-    if not isinstance(manifest['entries'], list) or not all(isinstance(e, dict) for e in manifest['entries']):
-        return ['entries must be a list of objects']
-    if canonical_bytes(manifest) != manifest_bytes:
-        return ['manifest bytes are not canonical']
-    # Structure first: sorting needs every entry to carry a string path.
-    problems = check_entries(manifest['entries'])
+    manifest, problems = _manifest_problems(manifest_bytes)
     if problems:
         return problems
-    if manifest['entries'] != _sorted(manifest['entries']):
-        return ['manifest entries are not sorted']
     expected = {e['path']: e for e in manifest['entries']}
     seen = set()
     exact = owner is not None

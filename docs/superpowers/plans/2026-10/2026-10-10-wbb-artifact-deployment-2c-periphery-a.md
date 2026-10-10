@@ -76,9 +76,9 @@ Production activation заборонена до кінця В.
 
 **Files:** create `deploy/release/prepare.py`, `deploy/release/test_prepare.py`.
 
-- [ ] `prepare(helpers, sha, settled) -> Prepared | Noop | Verdict | Transient`: download → publish → verify (tree) → noop-порівняння маніфестів → audit → probe → snapshot pre → trial (ім'я знімка) → `Prepared(candidate=Release(sha, tree), pre)`. Аудит до першого виконання коду кандидата (§5; рев'ю 2б N7) — тест перевіряє порядок викликів.
-- [ ] Мапа результатів helper-ів за «Рішеннями» п.3: `ADVISORY`/`FAILED` + код 1 → `Verdict`; `UNRUNNABLE`/`TRANSIENT`/2/70/75/виняток helper-а → `Transient` з причиною. Провал trial прибирає pre (`discard_pre`), транзієнт — теж.
-- [ ] Тести: кожен крок у кожному з результатів; noop не запускає audit/probe/trial; tree з `verify` ≠ tree з `audit` → `Transient` («дерево змінилося між кроками»).
+- [x] `prepare(helpers, sha, settled) -> Prepared | Noop | Verdict | Transient`: download → publish → verify (tree) → noop-порівняння маніфестів → audit → probe → snapshot pre → trial (ім'я знімка) → `Prepared(candidate=Release(sha, tree), pre)`. Аудит до першого виконання коду кандидата (§5; рев'ю 2б N7) — тест перевіряє порядок викликів.
+- [x] Мапа результатів helper-ів за «Рішеннями» п.3: `ADVISORY`/`FAILED` + код 1 → `Verdict`; `UNRUNNABLE`/`TRANSIENT`/2/70/75/виняток helper-а → `Transient` з причиною. Провал trial прибирає pre (`discard_pre`), транзієнт — теж.
+- [x] Тести: кожен крок у кожному з результатів; noop не запускає audit/probe/trial; tree з `verify` ≠ tree з `audit` → `Transient` («дерево змінилося між кроками»).
 
 ### Task 3: `tick.py` — оркестрація, lock, PAUSED, повідомлення
 

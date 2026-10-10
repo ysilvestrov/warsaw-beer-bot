@@ -204,5 +204,31 @@ class Verify(Tree):
         self.assertEqual(tm.verify_tree(self.root, b'\xff')[0][:27], 'manifest is not UTF-8 JSON:')
 
 
+class Parse(unittest.TestCase):
+    """parse_manifest: the checks verify_tree makes on the bytes, without a tree (prepare's noop)."""
+
+    def test_canonical_manifest_parses_to_its_entries(self):
+        m = {'formatVersion': 1, 'entries': [{'path': 'a', 'type': 'dir', 'mode': 0o755},
+                                             {'path': 'a/b', 'type': 'file', 'mode': 0o644, 'size': 1,
+                                              'sha256': '0' * 64}]}
+        self.assertEqual(tm.parse_manifest(tm.canonical_bytes(m)), m)
+
+    def test_malformed_bytes_raise_with_the_same_problems_verify_tree_reports(self):
+        e = {'path': 'a', 'type': 'dir', 'mode': 0o755}
+        cases = {
+            'not canonical': (b'{"entries": [], "formatVersion": 1}', ['manifest bytes are not canonical']),
+            'unsorted': (tm.canonical_bytes({'formatVersion': 1, 'entries': [
+                {'path': 'b', 'type': 'dir', 'mode': 0o755}, e]}), ['manifest entries are not sorted']),
+            'duplicate': (tm.canonical_bytes({'formatVersion': 1, 'entries': [e, e]}), ['a: duplicate entry']),
+            'version': (b'{"entries":[],"formatVersion":2}', ['unsupported formatVersion 2']),
+        }
+        for name, (data, problems) in cases.items():
+            with self.subTest(name):
+                with self.assertRaises(tm.ManifestError) as cm:
+                    tm.parse_manifest(data)
+                self.assertEqual(cm.exception.problems, problems)
+                self.assertEqual(str(cm.exception), '; '.join(problems))
+
+
 if __name__ == '__main__':
     unittest.main()
