@@ -273,7 +273,17 @@ class RealHelpers:
             return []
         wanted = {self._locate(p) for p in paths}
         out = []
-        for root, _, names in os.walk(self._lib_dir):
+
+        def fail(e):
+            # #828 AI review: a directory the scan cannot read hides what is in it — cannot assess, not "none".
+            raise HelperError(f'{e.filename}: {type(e).__name__}: {e.strerror}')
+
+        for root, dirs, names in os.walk(self._lib_dir, onerror=fail):
+            for name in dirs:
+                full = os.path.join(root, name)
+                if os.path.islink(full):
+                    # os.walk does not descend into it: whatever it points at would escape the scan (#828 AI review).
+                    out.append(f'{full} (a symlink inside the installed library)')
             for name in names:
                 full = os.path.join(root, name)
                 if full not in wanted and '__pycache__' not in full.split(os.sep):

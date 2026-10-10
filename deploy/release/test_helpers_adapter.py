@@ -497,6 +497,27 @@ class RealClone(unittest.TestCase):
                          'STALE: 1 installed file(s) differ from origin/main:\n'
                          f'  {gone} (installed, but nothing in origin/main installs it)')
 
+    def test_a_directory_symlink_in_the_library_is_stale(self):
+        # #828 AI review, second pass: os.walk does not descend into it.
+        self.install('deploy/release/tick.py', self.files['deploy/release/tick.py'])
+        elsewhere = os.path.join(self.data, 'elsewhere')
+        os.makedirs(elsewhere)
+        link = os.path.join(self.inst, 'deploy', 'release', 'pkg')
+        os.symlink(elsewhere, link)
+        self.assertEqual(self.h.installed_stale(('deploy/release/**',)),
+                         'STALE: 1 installed file(s) differ from origin/main:\n'
+                         f'  {link} (a symlink inside the installed library)')
+
+    @unittest.skipIf(os.geteuid() == 0, 'root reads a 0000 directory anyway')
+    def test_a_library_directory_that_cannot_be_read_is_cannot_assess(self):
+        self.install('deploy/release/tick.py', self.files['deploy/release/tick.py'])
+        closed = os.path.join(self.inst, 'deploy', 'release', 'closed')
+        os.makedirs(closed)
+        os.chmod(closed, 0)
+        self.addCleanup(os.chmod, closed, 0o755)
+        with self.assertRaisesRegex(HelperError, 'PermissionError'):
+            self.h.installed_stale(('deploy/release/**',))
+
     def test_a_copy_that_cannot_be_read_is_cannot_assess(self):
         os.makedirs(os.path.join(self.inst, 'deploy', 'db-snapshot.sh'))
         with self.assertRaisesRegex(HelperError, 'IsADirectoryError'):
