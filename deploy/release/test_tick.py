@@ -24,7 +24,7 @@ import tick_state  # noqa: E402
 import tree_manifest as tm  # noqa: E402
 from activate import HostError  # noqa: E402
 from deploy_state import Pre, Release, Settled, State  # noqa: E402
-from fake_helpers import FakeHelpers  # noqa: E402
+from fake_helpers import Clone, FakeHelpers  # noqa: E402
 from fake_host import BOOT_A, PRE_DB, T0, Crash, FakeHost, MemoryStore, World  # noqa: E402
 from gates import Ci, Pr  # noqa: E402
 import github_trust as gt  # noqa: E402
@@ -142,7 +142,7 @@ class HappyPath(Base):
 
         self.h.calls.clear()
         self.assertEqual(self.tick(), 0)
-        self.assertEqual(self.h.names(), ['is_ancestor', 'fetch_main', 'installed_stale'])
+        self.assertEqual(self.h.names(), ['fetch_main', 'is_ancestor', 'installed_stale'])
         self.assertEqual(self.notes, [SETTLED_NOTE])
         self.assertEqual(self.ts().last_seen_settled, CAND)
 
@@ -354,17 +354,38 @@ class ByHandThroughDrift(Base):
 
 
 class NeverAVerdict(Base):
-    def test_an_exception_of_a_helper_is_exit_70_with_one_critical_notice_and_no_failed_sha(self):
-        h = self.helpers(installed_stale=HelperError('sudo: unable to resolve host'))
-        self.assertEqual(self.tick(helpers=h), 0)
-        self.world.now += gates.QUIET_S
+    def test_an_unexpected_exception_is_exit_70_with_one_critical_notice_and_no_failed_sha(self):
+        self.world.errors['current'] = RuntimeError('readlink: unexpected')
+        h = FakeHelpers()
         self.assertEqual([self.tick(helpers=h), self.tick(helpers=h)], [70, 70])
-        self.assertEqual(self.notes, ['🔥 wbb-deploy: internal error, nothing judged: HelperError: sudo: unable to '
-                                      'resolve host'])
-        self.assertEqual(self.store.load(), SETTLED_STATE)
+        self.assertEqual(self.notes, ['🔥 wbb-deploy: internal error, nothing judged: RuntimeError: readlink: '
+                                      'unexpected'])
+        self.assertEqual((h.calls, self.store.load()), ([], SETTLED_STATE))
         self.world.now += DAY
         self.assertEqual(self.tick(helpers=h), 70)
         self.assertEqual(len(self.notes), 2)
+
+    def cannot_assess(self, why, **answers):
+        """(stage A review S5) not 70: the helper did not answer, nothing is judged — a daily wait; by hand, 1."""
+        self.h = self.helpers(**answers)
+        text = f'⚠️ wbb-deploy: cannot assess {why} — nothing judged; unattended deploys wait.'
+        self.assertEqual([self.tick(), self.tick()], [0, 0])
+        self.world.now += gates.QUIET_S
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.notes, [text])
+        self.world.now += DAY
+        self.assertEqual([self.tick(), self.tick('manual')], [0, 1])
+        self.assertEqual(self.notes, [text, text])
+        self.assertEqual(self.lines[-1], text)
+        self.assertEqual(self.store.load(), SETTLED_STATE)
+
+    def test_git_that_cannot_answer_ancestry_is_a_daily_wait(self):
+        self.cannot_assess('ancestry: HelperError: git: index.lock exists',
+                           is_ancestor=HelperError('git: index.lock exists'))
+
+    def test_an_installed_check_that_raises_is_a_daily_wait(self):
+        self.cannot_assess('the installed copies: HelperError: sudo: unable to resolve host',
+                           installed_stale=HelperError('sudo: unable to resolve host'))
 
     def test_a_transient_prepare_is_a_daily_notice_and_no_failed_sha(self):
         self.h = self.helpers(audit=Run(75, 'UNRUNNABLE', 'AUDIT UNRUNNABLE: registry 503'))
@@ -421,6 +442,41 @@ class BrokenTickState(Base):
                                       f'{path}: not JSON (Expecting property name enclosed in double quotes: line 1 '
                                       'column 2 (char 1))'])
         self.assertEqual((h.calls, self.store.load()), ([], SETTLED_STATE))
+
+
+class PrivateClone(Base):
+    """Helpers.is_ancestor answers False for a commit the clone does not have (stage A review S5), so the clone
+    is fetched before anything asks it (S6)."""
+
+    def test_a_manual_target_the_clone_does_not_have_is_not_reachable_from_main(self):
+        clone = Clone({OTHER: OLD}, known={OLD, OTHER})
+        self.h = self.helpers(fetch_main=OTHER, is_ancestor=clone.is_ancestor)
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.lines, ['⛔ wbb-deploy: ccccccc is not reachable from main eeeeeee'])
+        self.assertEqual((self.notes, self.store.load()), ([], SETTLED_STATE))
+
+    def settled_on_cand_seen_at_old(self):
+        """CAND settled (by hand, elsewhere) after the fence last saw OLD; the clone has only OLD so far."""
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME), TickState(last_seen_settled=OLD))
+        self.store = MemoryStore(state=State('settled', BOOT_A, settled=Settled(CAND, TREES[CAND], T0 - 60)))
+        self.world.current = self.world.running = CAND
+        return Clone({CAND: OLD}, known={OLD})
+
+    def test_the_clone_is_fetched_before_the_fence_looks_at_settled(self):
+        clone = self.settled_on_cand_seen_at_old()
+        h = self.helpers(fetch_main=lambda: clone.fetch(CAND) or CAND, is_ancestor=clone.is_ancestor)
+        self.assertEqual(self.tick(helpers=h), 0)
+        self.assertEqual(h.names(), ['fetch_main', 'is_ancestor', 'installed_stale'])
+        self.assertEqual((self.ts().last_seen_settled, self.ts().regression, self.notes), (CAND, None, []))
+
+    def test_a_failed_fetch_observes_nothing(self):
+        clone = self.settled_on_cand_seen_at_old()
+        h = self.helpers(fetch_main=HelperError('could not resolve host'), is_ancestor=clone.is_ancestor)
+        self.assertEqual(self.tick(helpers=h), 0)
+        self.assertEqual(h.names(), ['fetch_main'])
+        self.assertEqual((self.ts().last_seen_settled, self.ts().regression), (OLD, None))
+        self.assertEqual(self.notes, ['⚠️ wbb-deploy: could not fetch main'])
 
 
 class Verdicts(Base):
@@ -525,6 +581,18 @@ class AckThrough(Base):
         self.assertEqual(self.ts().ack_through, OTHER)
         self.assertEqual(self.tick(), 0)
         self.assertEqual(self.ts().ack_through, CAND)
+
+    def test_git_that_cannot_place_the_acknowledgement_is_a_wait(self):
+        # (stage A review S5) not "the range is unreadable", not 70: ancestry could not be assessed.
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        TickState(last_seen_settled=OLD, ack_through=OTHER))
+        broken = HelperError('git: bad object eeeeeee')
+        self.h = self.helpers(is_ancestor=lambda a, b: broken if OTHER in (a, b) else True)
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.lines, ['⚠️ wbb-deploy: cannot assess ancestry: HelperError: git: bad object eeeeeee — '
+                                      'nothing judged; unattended deploys wait.'])
+        self.assertEqual(self.ranges(), [])
 
     def held_from_settled(self, edges):
         """A manual run of CAND with ackThrough OTHER, git history `edges` (and OLD <- CAND): held from OLD."""

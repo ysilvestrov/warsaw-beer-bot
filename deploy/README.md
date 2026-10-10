@@ -533,7 +533,9 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
 - `helpers.py` — the `Helpers` interface the tick uses besides the engine's `Host` (git, GitHub, the
   `wbb_release.py` calls, pre snapshots, installed copies); a `wbb_release.py` call returns `Run(code, kind,
   text, tree)` as it came, and only the caller interprets it; `installed_stale(patterns)` gets
-  `gates.INSTALLED_COPIES`. `fake_helpers.py` is the scripted test double.
+  `gates.INSTALLED_COPIES`. `is_ancestor` answers False for a commit the private clone does not have and
+  raises only when git cannot answer; a raise there or in `installed_stale` is a daily "cannot assess" wait,
+  never exit 70. `fake_helpers.py` is the scripted test double (and `Clone`, a history that keeps that contract).
 - `prepare.py` — `prepare(helpers, sha, trusted, settled)`: download → publish → verify (candidate and settled)
   → noop? → audit → probe → pre snapshot → trial → `Prepared(candidate, pre)`. Noop: both manifests are the
   bytes of their verified trees and their entries are equal without `release.json` — nothing is audited,
@@ -545,14 +547,16 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   (the `deploy.sh` wrapper of stage Б); root is refused (64). Under the merge-deploy lock (`~/.local/state/
   wbb-autodeploy/lock`; the timer does not wait and reports a lock held over 35 min once a day, by hand it
   waits 30 s): `activate.resume` first (a pending phase is finished even under PAUSED), then PAUSED stops the
-  timer, then drift (or `unreachable` — `/health` silent for 3 probes 10 s apart), `unverified` and
-  `recovery-failed` are daily reminders, then `gates.admission`, `prepare`, the gates once more right before
+  timer, then drift (or `unreachable` — `/health` silent for 3 probes 10 s apart; a manual run goes on
+  through both), `unverified` and `recovery-failed` are daily reminders, then fetch main and only then the
+  regression fence over settled (nothing observed when the fetch failed), then `gates.admission`, `prepare`, the gates once more right before
   `begin` (main unmoved, PAUSED absent, the same holds), `begin` → `run`. The end of a transaction (settled,
   rolled back, aborted, unverified, recovery-failed) is notified once per txn from the engine's state against
   `notifiedTxn` (written only after a successful send, so a tick that dies first leaves it to the next one); a
   block with the bot down (`activating/switch|start`, `rolling-back/*`) is a critical alert at once and again
   after 15 min. `lastFailedSha` comes only from a prepare `Verdict` (written into the settled state) or the
-  engine's rollback; an uncaught exception is a critical notice with its type and text (once per UTC day per
+  engine's rollback; CI `failed` only from `github_trust.RunFailed`; an uncaught exception (a broken
+  `tick-state.json` too, but only after `resume` ran) is a critical notice with its type and text (once per UTC day per
   text) and exit 70. Exit: 0 idle/waiting/settled/noop, 1 refused or held (and a manual run not served), 2
   rolled back, 3 recovery failed or blocked with the bot down, 4 state not written, 64 usage/root, 70
   internal. Everything is injected (`tick.Env`: state dir, store, `Host`, `Helpers`, notify, clock, sleep);

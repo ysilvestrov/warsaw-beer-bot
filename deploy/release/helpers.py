@@ -40,7 +40,10 @@ class Helpers(Protocol):
         """Fetch origin and return the full SHA of origin/main."""
 
     def is_ancestor(self, a: str, b: str) -> bool:
-        """git merge-base --is-ancestor a b (reflexive)."""
+        """git merge-base --is-ancestor a b (reflexive). A commit the private clone does not have is an answer, not
+        an error (stage A review S5): False — a target missing from the clone is not reachable from main. It
+        raises only when git itself could not answer (a broken repository, a missing binary); the tick then waits
+        and says once a day that it cannot assess."""
 
     def changed_paths(self, a: str, b: str) -> tuple:
         """Paths of diff(a, b), --no-renames (a move is both its paths)."""
@@ -88,4 +91,5 @@ class Helpers(Protocol):
     # installed copies
     def installed_stale(self, patterns: tuple) -> str | None:
         """None if the installed copy of every repo file matching `patterns` (gates.INSTALLED_COPIES, the same
-        list that holds a range) is the one in main; otherwise the report of what differs or is missing."""
+        list that holds a range) is the one in main; otherwise the report of what differs or is missing. A raise
+        is "cannot assess" (a daily wait), never a verdict and never exit 70 (stage A review S5)."""

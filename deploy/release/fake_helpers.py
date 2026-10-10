@@ -76,3 +76,29 @@ class FakeHelpers:
 
     def installed_stale(self, patterns):
         return self._answer('installed_stale', patterns)
+
+
+class Clone:
+    """The controller's private clone for a test, following Helpers.is_ancestor's contract (stage A review S5):
+    `parents` is the history known to exist; only commits fetched so far are known, and a commit the clone does
+    not know is no one's ancestor and has none — False, never an error."""
+
+    def __init__(self, parents, known=()):
+        self.parents = dict(parents)
+        self.known = set(known)
+
+    def fetch(self, *shas):
+        """origin brought these commits (and their history) into the clone."""
+        for sha in shas:
+            while sha is not None:
+                self.known.add(sha)
+                sha = self.parents.get(sha)
+
+    def is_ancestor(self, a, b):
+        if a not in self.known or b not in self.known:
+            return False
+        while b is not None:
+            if a == b:
+                return True
+            b = self.parents.get(b)
+        return False

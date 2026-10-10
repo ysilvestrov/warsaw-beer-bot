@@ -474,12 +474,17 @@ class Observe(unittest.TestCase):
         self.assertEqual(gates.observe(C1, fence, C2, is_ancestor), Observation(C2, fence, None, C1))
         self.assertEqual(gates.observe(C2, fence, C3, is_ancestor), Observation(C3, None, 'cleared', C2))
 
-    def test_an_unknown_commit_is_an_error_for_the_tick(self):
+    def test_git_that_cannot_answer_is_an_error_for_the_tick(self):
         def broken(a, b):
-            raise LookupError(f'{a} is not a local commit')
+            raise OSError(f'git: {a}: corrupt pack')
 
-        with self.assertRaisesRegex(LookupError, f'{C1} is not a local commit'):
+        with self.assertRaisesRegex(OSError, f'git: {C1}: corrupt pack'):
             gates.observe(C1, None, C2, broken)
+
+    def test_a_settled_commit_the_clone_lacks_reads_as_diverged(self):
+        # Helpers.is_ancestor: an unknown commit is False (stage A review S5) — held, never silently forward.
+        self.assertEqual(gates.observe(C1, None, 'f' * 40, is_ancestor),
+                         Observation('f' * 40, Regression(C1, 'f' * 40), 'diverged', C1))
 
 
 if __name__ == '__main__':

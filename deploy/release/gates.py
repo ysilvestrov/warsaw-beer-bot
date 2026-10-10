@@ -322,8 +322,10 @@ def observe(last_seen, regression, settled_sha, is_ancestor):
     A settled release that is not a descendant of the last one seen is a regression: unattended deploys
     are held from then on, with `from` kept from an earlier, still open regression. The fence clears only
     when what is settled contains `from` again — never because someone deployed by hand.
-    `is_ancestor(a, b)` is git's merge-base --is-ancestor (reflexive); it may raise, and the tick then
-    reports it cannot assess and keeps the previous observation (merge-deploy).
+    `is_ancestor(a, b)` is git's merge-base --is-ancestor (reflexive), False for a commit the clone does not
+    have (helpers.Helpers.is_ancestor) — so the tick fetches before it observes (stage A review S6), and an
+    unknown settled commit reads as diverged: held, the safe direction. It raises only when git cannot answer,
+    and the tick then reports it cannot assess and keeps the previous observation (merge-deploy).
     The tick persists `regression` BEFORE it reports went-backwards/diverged and `last_seen` only after the
     report was sent, so a failed send is retried by the next tick.
     """

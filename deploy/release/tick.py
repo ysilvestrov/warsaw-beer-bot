@@ -11,8 +11,8 @@ One tick, every step under the lock `<state dir>/lock` (the file merge-deploy us
    2. PAUSED — the timer stops here, quietly
    3. drift (or `unreachable`: /health does not answer 3 probes 10 s apart), unverified, recovery-failed —
       a reminder once a day; a manual run goes on through drift and `unreachable` (stage A review S4)
-   4.-11. gates.admission over the facts read here (no baseline, fetch main, settled/noop, ancestry and the
-      regression fence, last failed SHA and the abort backoff, quiet, installed copies, holds, CI)
+   4.-11. fetch main, then the regression fence over settled (skipped when the fetch failed), then
+      gates.admission over the facts read here (no baseline, the fetch, settled/noop, ancestry and the fence, last failed SHA and the abort backoff, quiet, installed copies, holds, CI)
   12. prepare.prepare — noop / verdict / transient / a prepared candidate
   13. the gates once more right before begin: main unmoved (timer), PAUSED absent, the same holds
   14. activate.begin -> activate.run
@@ -95,6 +95,10 @@ class Env:
 
 class _WriteFailed(Exception):
     """A state file could not be written: exit 4."""
+
+
+class _CannotAssess(Exception):
+    """A git question or the installed-copies check failed (not an answer): a wait, never a verdict or 70."""
 
 
 class _Guarded:
@@ -195,6 +199,7 @@ class _Tick:
         # (stage A review S3) a broken tick-state.json must not keep the engine from finishing a pending phase
         # (a rollback): it is read here, but it stops the tick only after activate.resume ran.
         self.ts, self.ts_error = None, None
+        self.base = None  # where the held range starts, read with the changed paths (holds_base)
         try:
             self.ts = tick_state.load(self.ts_path) or TickState()
         except (StateError, OSError) as e:
@@ -354,25 +359,35 @@ class _Tick:
         return None
 
     # --- admission -----------------------------------------------------------------------------------------------
+    def ask(self, what, fn, *args):
+        """(stage A review S5) a helper that raised has not answered: _CannotAssess, which `admit` turns into a
+        daily "cannot assess" wait. An unknown commit is an answer (Helpers.is_ancestor: False), not this."""
+        try:
+            return fn(*args)
+        except Exception as e:
+            raise _CannotAssess(f'{what}: {type(e).__name__}: {e}') from None
+
     def read(self, name, i):
         h = self.h
         if name == 'from_in_target':
-            return h.is_ancestor(i.regression.from_sha, i.target)
+            return self.ask('ancestry', h.is_ancestor, i.regression.from_sha, i.target)
         if name == 'settled_in_target':
-            return h.is_ancestor(i.settled_sha, i.target)
+            return self.ask('ancestry', h.is_ancestor, i.settled_sha, i.target)
         if name == 'target_in_main':
-            return h.is_ancestor(i.target, i.main)
+            return self.ask('ancestry', h.is_ancestor, i.target, i.main)
         if name == 'installed_stale':
-            return h.installed_stale(gates.INSTALLED_COPIES)
+            return self.ask('the installed copies', h.installed_stale, gates.INSTALLED_COPIES)
         if name == 'changed_paths':
+            # gates ask for the paths before the commits: both read the range from this one base
+            self.base = self.ask('ancestry', self.holds_base, i)
             try:
-                return tuple(h.changed_paths(self.holds_base(i), i.target))
+                return tuple(h.changed_paths(self.base, i.target))
             except Exception as e:
                 self.say(f'changed paths: {type(e).__name__}: {e}')
                 return None
         if name == 'commit_prs':
             try:
-                commits = tuple(h.commits(self.holds_base(i), i.target))
+                commits = tuple(h.commits(self.base, i.target))
             except Exception as e:
                 self.say(f'commits: {type(e).__name__}: {e}')
                 return None
@@ -404,7 +419,12 @@ class _Tick:
             d = gates.admission(i)
             if d.kind != 'need':
                 return d, i
-            i = replace(i, **{d.reason: self.read(d.reason, i)})
+            try:
+                value = self.read(d.reason, i)
+            except _CannotAssess as e:
+                return gates.Decision('wait', f'cannot assess {e} — nothing judged; unattended deploys wait.',
+                                      'assess' if self.timer else None), i
+            i = replace(i, **{d.reason: value})
 
     def report(self, d):
         text = f'{ICONS[d.kind]} wbb-deploy: {d.reason}'
@@ -458,10 +478,14 @@ class _Tick:
         settled = state.settled if state is not None else None
         main = None
         if settled is not None:
-            code = self.observe(settled.sha)
-            if code is not None:
-                return code
+            # (stage A review S6) fetch first, as merge-deploy did: a settled commit the private clone does not
+            # have yet is not an ancestor of anything there and would read as a regression. A failed fetch
+            # observes nothing; admission waits on it.
             main = self.fetch_main()
+            if main is not None:
+                code = self.observe(settled.sha)
+                if code is not None:
+                    return code
         now = self.env.clock()
         if self.timer and main is not None:
             seen = tick_state.seen_main(self.ts, main, now)
