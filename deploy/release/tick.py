@@ -10,7 +10,7 @@ One tick, every step under the lock `<state dir>/lock` (the file merge-deploy us
    1. activate.resume — a pending phase is finished even under PAUSED; anything but `idle` ends the tick
    2. PAUSED — the timer stops here, quietly
    3. drift (or `unreachable`: /health does not answer 3 probes 10 s apart), unverified, recovery-failed —
-      a reminder once a day
+      a reminder once a day; a manual run goes on through drift and `unreachable` (stage A review S4)
    4.-11. gates.admission over the facts read here (no baseline, fetch main, settled/noop, ancestry and the
       regression fence, last failed SHA and the abort backoff, quiet, installed copies, holds, CI)
   12. prepare.prepare — noop / verdict / transient / a prepared candidate
@@ -275,7 +275,12 @@ class _Tick:
             self.notice(out.kind, summary(out.kind, ended(s)[2]))
             return self.served(3 if out.kind == 'recovery-failed' else 0)
         if out.kind == 'drift':
-            if self.timer and self.paused():
+            if not self.timer:
+                # (stage A review S4) spec §7 forbids a human to bypass only unfinished recovery and the lock;
+                # merge-deploy's deploy.sh went through drift too. begin verifies both trees before the stop.
+                self.say(f'⚠️ wbb-deploy: production drift or no answer — {out.reason}. Deploying by hand anyway.')
+                return None
+            if self.paused():
                 return 0
             if self.answers():
                 self.notice('drift', f'⚠️ wbb-deploy: production drift — {out.reason}. Nothing is done; '

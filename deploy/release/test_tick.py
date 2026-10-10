@@ -320,6 +320,39 @@ class DriftOrUnreachable(Base):
                                       'until a human decides.'])
 
 
+class ByHandThroughDrift(Base):
+    """(stage A review S4) a human deploys through drift and `unreachable`; begin re-verifies both trees."""
+
+    def another_release_answering(self, mode):
+        self.world.running = CAND
+        self.assertEqual(self.tick(mode), 0)
+        self.assertEqual(self.store.load().settled.sha, CAND)
+        self.assertEqual(self.lines[0], '⚠️ wbb-deploy: production drift or no answer — settled is bbbbbbb, '
+                                        'current is bbbbbbb, the running process says ccccccc. Deploying by hand '
+                                        'anyway.')
+        self.assertEqual(self.notes, [SETTLED_NOTE])
+
+    def test_another_release_answering_by_hand(self):
+        self.another_release_answering('manual')
+
+    def test_another_release_answering_forced(self):
+        self.another_release_answering('force')
+
+    def test_a_bot_that_does_not_answer(self):
+        self.world.stop_bot()
+        self.assertEqual(self.tick('manual'), 0)
+        self.assertEqual((self.store.load().settled.sha, self.world.running), (CAND, CAND))
+        self.assertEqual(self.notes, [SETTLED_NOTE])
+
+    def test_a_tree_that_does_not_verify_still_stops_it_before_the_bot(self):
+        self.world.running = CAND
+        self.world.accepted = {CAND}
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.store.load(), SETTLED_STATE)
+        self.assertEqual((self.world.running, self.world.starts), (CAND, []))
+        self.assertEqual(self.h.calls[-1], ('discard_pre', self.pre))
+
+
 class NeverAVerdict(Base):
     def test_an_exception_of_a_helper_is_exit_70_with_one_critical_notice_and_no_failed_sha(self):
         h = self.helpers(installed_stale=HelperError('sudo: unable to resolve host'))
