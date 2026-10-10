@@ -31,6 +31,10 @@ Any uncaught exception is a critical notification with its type and text (once p
 exit 70. A tick-state.json that cannot be read is such an error too, but only after activate.resume ran and
 what it ended was reported (stage A review S3).
 
+By hand only, never from the timer (plan periphery-b2 "Рішення" п.4), under the same lock: `rearm --sha` clears
+lastFailedSha when it is that SHA and the abort backoff of that SHA; `ack-baseline --from` clears the regression
+fence whose `from` is that SHA. Both print what they changed and log it as an evidence event of state v2.
+
 Exit codes (merge-deploy's unit has SuccessExitStatus=0 1 2):
   0 nothing to do, waiting, settled, noop   1 refused candidate or hold (and a manual run not served)
   2 rolled back   3 recovery failed, or blocked with the bot down   4 state not written   64 usage / root
@@ -163,12 +167,15 @@ def ended(state):
     if state.phase != 'settled' or state.last_txn is None:
         return None
     mine = [e for e in state.evidence if e.get('txn') == state.last_txn]
-    ends = [e for e in mine if e['what'] in ENDS]
+    ends = [n for n, e in enumerate(mine) if e['what'] in ENDS]
     if not ends:
         return None
-    d = dict(ends[-1])
+    d = dict(mine[ends[-1]])
     # Why an abort happened is the engine's `abort` event (the refused switch), not its closing line.
     d['why'] = '; '.join(e['result'] for e in mine if e['what'] == 'abort')
+    # (periphery-b2 Task 2) `tick.py rearm` logs into this same txn: the abort it cleared is not counted again.
+    d['rearmed'] = any(e['what'] == 'rearm' and e.get('sha') == d.get('candidate')
+                       for e in mine[ends[-1] + 1:])
     return state.last_txn, d['what'], d
 
 
@@ -270,7 +277,7 @@ class _Tick:
         if end is None:
             return
         txn, kind, d = end
-        if kind == 'aborted':
+        if kind == 'aborted' and not d['rearmed']:
             counted = tick_state.aborted(self.ts, d['candidate'], d['at'], txn)
             if counted != self.ts:
                 self.save(counted)
@@ -728,6 +735,107 @@ def tick(env, mode, ack_holds=()):
             os.close(fd)
 
 
+# --- the operator's commands (periphery-b2, plan "Рішення" п.4) ----------------------------------------------------------
+class _Refused(Exception):
+    """An operator command that changes nothing: exit 1 with this text."""
+
+
+def _settled_engine(env):
+    """The engine's state, which these commands write only between transactions."""
+    state = env.store.load()
+    if state is None:
+        raise _Refused('no engine state: nothing was ever deployed through it')
+    if state.phase != 'settled':
+        raise _Refused(f'the engine is in {state.phase}/{state.intent}: a pending transaction is finished by the '
+                       'next tick first; nothing changed')
+    return state
+
+
+def _rearm(env, ts, sha):
+    """lastFailedSha (only when it is `sha`) and the abort backoff of `sha` cleared; refused when neither names it.
+
+    Writes tick-state first: a verdict message still queued for `sha` is marked recorded (its write did land —
+    lastFailedSha is `sha`), so no later tick writes the failed SHA back. Then the engine's state: lastFailedSha
+    and a `rearm` evidence event in the transaction that ended last, which keeps that transaction's abort from
+    being counted again (ended()). A run cut between the two writes is repeated by running it again.
+    """
+    state = _settled_engine(env)
+    failed = state.last_failed_sha == sha
+    aborted = ts.abort is not None and ts.abort.sha == sha
+    if not failed and not aborted:
+        raise _Refused(f'nothing to rearm for {sha}: lastFailedSha is {state.last_failed_sha}, the abort backoff is '
+                       f'{"for " + ts.abort.sha if ts.abort else "not set"}; nothing changed')
+    cleared = []
+    if failed:
+        cleared.append(f'lastFailedSha {sha}')
+    if aborted:
+        cleared.append(f'abort backoff of {sha} ({ts.abort.count} abort(s))')
+    verdicts = tuple(tick_state.Verdict(v.sha, v.text, True) if failed and v.sha == sha else v
+                     for v in ts.pending_verdicts)
+    _save_ts(env, ts.replace(abort=None if aborted else ts.abort, pending_verdicts=verdicts))
+    _save_engine(env, state.replace(last_failed_sha=None if failed else state.last_failed_sha)
+                 .log(env.clock(), 'rearm', 'ok', sha=sha, cleared=cleared))
+    return f'rearmed {sha}: cleared ' + '; '.join(cleared)
+
+
+def _ack_baseline(env, ts, from_sha):
+    """The regression fence cleared, only when it is the one from `from_sha` that tick-state shows."""
+    r = ts.regression
+    if r is None:
+        raise _Refused('no regression fence is set; nothing changed')
+    if r.from_sha != from_sha:
+        raise _Refused(f'the fence is {r.from_sha} → {r.to_sha}, not from {from_sha}; nothing changed')
+    state = _settled_engine(env)
+    _save_engine(env, state.log(env.clock(), 'ack-baseline', 'ok', **{'from': r.from_sha, 'to': r.to_sha}))
+    _save_ts(env, ts.replace(regression=None))
+    return f'regression fence {r.from_sha} → {r.to_sha} acknowledged: unattended deploys resume from {r.to_sha}'
+
+
+def _save_ts(env, ts):
+    path = env.path(tick_state.STATE_NAME)
+    try:
+        tick_state.save(path, ts)
+    except OSError as e:
+        raise _WriteFailed(f'{path}: {type(e).__name__}: {e}') from None
+
+
+def _save_engine(env, state):
+    _Guarded(env.store).save(state)
+
+
+OPERATOR = {'rearm': _rearm, 'ack-baseline': _ack_baseline}
+
+
+def operator(env, command, sha):
+    """`rearm` or `ack-baseline` by hand, under the deploy lock (a busy lock: 1 after LOCK_WAIT_S). Never the timer.
+
+    Prints what changed (or why nothing did). Exit: 0 changed, 1 refused, 4 a state not written, 70 internal.
+    """
+    if command not in OPERATOR:
+        raise ValueError(f'unknown command {command!r}')
+    fd = None
+    try:
+        fd = _lock(env, 'manual')
+        if fd is None:
+            env.out(f'ERROR: another deploy holds {env.path("lock")} (waited {LOCK_WAIT_S} s); nothing changed')
+            return 1
+        ts = tick_state.load(env.path(tick_state.STATE_NAME)) or TickState()
+        env.out(OPERATOR[command](env, ts, sha))
+        return 0
+    except _Refused as e:
+        env.out(f'REFUSED: {e}')
+        return 1
+    except _WriteFailed as e:
+        env.out(f'ERROR: failed to write {e}')
+        return 4
+    except Exception as e:
+        env.out(f'ERROR: {type(e).__name__}: {e}; nothing judged')
+        return 70
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 class EnvFailed(Exception):
     """make_env could not build the Env; `notify` is what it had built before that (or None)."""
     def __init__(self, cause, notify=None, state_dir=None):
@@ -798,7 +906,8 @@ def _full_sha(value):
 
 
 def main(argv=None, make_env=make_env, geteuid=os.geteuid):
-    """`tick.py timer` | `tick.py deploy --target <sha> [--force] [--ack-holds KEY ...]`.
+    """`tick.py timer` | `tick.py deploy --target <sha> [--force] [--ack-holds KEY ...]` |
+    `tick.py rearm --sha <sha>` | `tick.py ack-baseline --from <sha>` (by hand only; see `operator`).
 
     make_env(mode, target) builds the Env with the real Host and Helpers; if it fails, the tick does not run:
     a critical notice (when notify was built) and exit 70. --target is the operator's checkout HEAD
@@ -811,6 +920,9 @@ def main(argv=None, make_env=make_env, geteuid=os.geteuid):
     d.add_argument('--target', required=True, type=_full_sha, metavar='SHA')
     d.add_argument('--force', action='store_true')
     d.add_argument('--ack-holds', nargs='+', default=[], metavar='KEY')
+    sub.add_parser('rearm').add_argument('--sha', required=True, type=_full_sha, metavar='SHA')
+    sub.add_parser('ack-baseline').add_argument('--from', dest='from_sha', required=True, type=_full_sha,
+                                                metavar='SHA')
     try:
         args = p.parse_args(argv)
     except SystemExit:
@@ -819,6 +931,12 @@ def main(argv=None, make_env=make_env, geteuid=os.geteuid):
         print('ERROR: run the deploy as the operator, not as root or via sudo — it calls sudo itself, per step.',
               file=sys.stderr)
         return 64
+    if args.command in OPERATOR:
+        try:
+            env = make_env('manual', None)
+        except Exception as e:
+            return _start_failed(e)
+        return operator(env, args.command, args.sha if args.command == 'rearm' else args.from_sha)
     mode = 'timer' if args.command == 'timer' else ('force' if args.force else 'manual')
     try:
         env = make_env(mode, getattr(args, 'target', None))

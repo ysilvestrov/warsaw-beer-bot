@@ -951,6 +951,145 @@ class Lock(Base):
         self.assertEqual((len(self.sleeps), self.store.load().settled.sha), (3, CAND))
 
 
+class Operator(Base):
+    """`tick.py rearm` / `ack-baseline` (plan periphery-b2 "Рішення" п.4): by hand, under the lock, printed, logged."""
+
+    def run_op(self, command, sha):
+        return tick.operator(self.env('manual'), command, sha)
+
+    def save_ts(self, ts):
+        os.makedirs(self.dir, exist_ok=True)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME), ts)
+
+    def last_event(self):
+        return dict(self.store.load().evidence[-1])
+
+    def test_rearm_clears_the_failed_sha_and_a_manual_deploy_of_it_goes_through(self):
+        self.store = MemoryStore(state=SETTLED_STATE.replace(last_failed_sha=CAND))
+        self.assertEqual(self.tick('manual'), 1)
+        self.lines.clear()
+        self.world.now = T0 + 5
+        self.assertEqual(self.run_op('rearm', CAND), 0)
+        self.assertEqual(self.lines, [f'rearmed {CAND}: cleared lastFailedSha {CAND}'])
+        self.assertEqual(self.store.load().last_failed_sha, None)
+        self.assertEqual(self.last_event(), {'at': T0 + 5, 'what': 'rearm', 'result': 'ok', 'txn': None, 'sha': CAND,
+                                             'cleared': (f'lastFailedSha {CAND}',)})
+        self.assertEqual(self.tick('manual'), 0)
+        self.assertEqual(self.store.load().settled.sha, CAND)
+
+    def test_rearm_of_another_sha_is_refused_and_changes_nothing(self):
+        failed = SETTLED_STATE.replace(last_failed_sha=CAND)
+        self.store = MemoryStore(state=failed)
+        self.save_ts(TickState(abort=Abort(CAND, 1, T0, None)))
+        self.assertEqual(self.run_op('rearm', OTHER), 1)
+        self.assertEqual(self.lines, [f'REFUSED: nothing to rearm for {OTHER}: lastFailedSha is {CAND}, the abort '
+                                      f'backoff is for {CAND}; nothing changed'])
+        self.assertEqual((self.store.load(), self.store.saves, self.ts()),
+                         (failed, 0, TickState(abort=Abort(CAND, 1, T0, None))))
+
+    def test_rearm_with_nothing_recorded_is_refused(self):
+        self.assertEqual(self.run_op('rearm', CAND), 1)
+        self.assertEqual(self.lines, [f'REFUSED: nothing to rearm for {CAND}: lastFailedSha is None, the abort '
+                                      'backoff is not set; nothing changed'])
+        self.assertEqual((self.store.saves, self.ts()), (0, None))
+
+    def test_rearm_clears_the_abort_backoff_and_the_next_tick_does_not_count_that_abort_again(self):
+        self.world.tampered = {CAND}
+        self.quiet()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.ts().abort.count, 1)
+        self.assertEqual(self.run_op('rearm', CAND), 0)
+        self.assertEqual(self.lines[-1], f'rearmed {CAND}: cleared abort backoff of {CAND} (1 abort(s))')
+        self.assertEqual(self.ts().abort, None)
+        # Well inside the 1 h backoff: without the rearm this tick would wait.
+        self.world.now += 60
+        self.world.tampered = set()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual((self.store.load().settled.sha, self.ts().abort), (CAND, None))
+
+    def test_rearm_marks_a_queued_verdict_recorded_so_no_tick_writes_the_failed_sha_back(self):
+        text = '⛔ wbb-deploy refused ccccccc: PROBE FAILED'
+        self.store = MemoryStore(state=SETTLED_STATE.replace(last_failed_sha=CAND))
+        self.save_ts(TickState(pending_verdicts=(tick_state.Verdict(CAND, text, False),)))
+        self.assertEqual(self.run_op('rearm', CAND), 0)
+        self.assertEqual(self.ts().pending_verdicts, (tick_state.Verdict(CAND, text, True),))
+        self.assertEqual(self.tick(helpers=self.helpers(fetch_main=OLD)), 0)
+        self.assertEqual((self.notes, self.store.load().last_failed_sha, self.ts().pending_verdicts), ([text], None, ()))
+
+    def test_rearm_and_ack_are_refused_while_a_transaction_is_open(self):
+        self.save_ts(TickState(regression=Regression(CAND, OLD), abort=Abort(CAND, 1, T0, None)))
+        state = self.at('activating', 'switch')
+        saves = self.store.saves
+        self.assertEqual([self.run_op('rearm', CAND), self.run_op('ack-baseline', CAND)], [1, 1])
+        why = ('REFUSED: the engine is in activating/switch: a pending transaction is finished by the next tick '
+               'first; nothing changed')
+        self.assertEqual(self.lines, [why, why])
+        self.assertEqual((self.store.load(), self.store.saves, self.ts()),
+                         (state, saves, TickState(regression=Regression(CAND, OLD), abort=Abort(CAND, 1, T0, None))))
+
+    def test_rearm_without_an_engine_state_is_refused(self):
+        self.store = MemoryStore()
+        self.assertEqual(self.run_op('rearm', CAND), 1)
+        self.assertEqual(self.lines, ['REFUSED: no engine state: nothing was ever deployed through it'])
+
+    def test_ack_baseline_clears_only_the_fence_tick_state_shows(self):
+        self.save_ts(TickState(last_seen_settled=OLD, regression=Regression(CAND, OLD)))
+        self.h = self.helpers(is_ancestor=lambda a, b: a == b or (a, b) == (OLD, CAND))
+        self.assertEqual(self.tick(), 1)
+        self.lines.clear()
+        self.assertEqual(self.run_op('ack-baseline', OTHER), 1)
+        self.assertEqual(self.lines, [f'REFUSED: the fence is {CAND} → {OLD}, not from {OTHER}; nothing changed'])
+        self.assertEqual((self.ts().regression, self.store.saves), (Regression(CAND, OLD), 0))
+        self.world.now = T0 + 7
+        self.assertEqual(self.run_op('ack-baseline', CAND), 0)
+        self.assertEqual(self.lines[-1], f'regression fence {CAND} → {OLD} acknowledged: unattended deploys resume '
+                                         f'from {OLD}')
+        self.assertEqual(self.ts().regression, None)
+        self.assertEqual(self.last_event(), {'at': T0 + 7, 'what': 'ack-baseline', 'result': 'ok', 'txn': None,
+                                             'from': CAND, 'to': OLD})
+        # The timer is no longer held: it sees main and waits for quiet.
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.ts().regression, None)
+
+    def test_ack_baseline_without_a_fence_is_refused(self):
+        self.assertEqual(self.run_op('ack-baseline', CAND), 1)
+        self.assertEqual(self.lines, ['REFUSED: no regression fence is set; nothing changed'])
+        self.assertEqual(self.store.saves, 0)
+
+    def test_a_busy_lock_refuses_after_thirty_seconds_and_changes_nothing(self):
+        Lock.hold(self)
+        self.store = MemoryStore(state=SETTLED_STATE.replace(last_failed_sha=CAND))
+        self.save_ts(TickState(regression=Regression(CAND, OLD)))
+        self.assertEqual([self.run_op('rearm', CAND), self.run_op('ack-baseline', CAND)], [1, 1])
+        busy = f'ERROR: another deploy holds {self.dir}/lock (waited 30 s); nothing changed'
+        self.assertEqual((self.lines, self.sleeps), ([busy, busy], [1] * 60))
+        self.assertEqual((self.store.saves, self.ts()), (0, TickState(regression=Regression(CAND, OLD))))
+
+    def test_an_engine_state_that_cannot_be_written_is_exit_4(self):
+        class ReadOnly(MemoryStore):
+            def save(self, state):
+                raise PermissionError(13, 'Permission denied')
+
+        self.store = ReadOnly(state=SETTLED_STATE.replace(last_failed_sha=CAND))
+        self.assertEqual(self.run_op('rearm', CAND), 4)
+        self.assertEqual(self.lines, ['ERROR: failed to write the engine state: PermissionError: [Errno 13] '
+                                      'Permission denied'])
+
+    def test_a_broken_tick_state_is_exit_70_and_changes_nothing(self):
+        os.makedirs(self.dir)
+        with open(os.path.join(self.dir, tick_state.STATE_NAME), 'w') as f:
+            f.write('{')
+        self.store = MemoryStore(state=SETTLED_STATE.replace(last_failed_sha=CAND))
+        self.assertEqual(self.run_op('rearm', CAND), 70)
+        self.assertEqual(self.store.saves, 0)
+        self.assertEqual(self.lines, [f'ERROR: StateError: {self.dir}/{tick_state.STATE_NAME}: not JSON (Expecting '
+                                      'property name enclosed in double quotes: line 1 column 2 (char 1)); nothing judged'])
+
+    def test_an_unknown_command_is_a_programming_error(self):
+        with self.assertRaises(ValueError):
+            self.run_op('deploy', CAND)
+
+
 class Pieces(unittest.TestCase):
     def test_cut_counts_characters_not_bytes(self):
         self.assertEqual(tick.cut('є' * 3500), 'є' * 3500)
@@ -1037,6 +1176,26 @@ class Cli(unittest.TestCase):
 
     def test_root_is_refused_before_anything(self):
         self.assertEqual(self.run_main(['deploy', '--target', CAND], uid=0), (64, [], []))
+        self.assertEqual(self.run_operator(['rearm', '--sha', CAND], uid=0), (64, [], []))
+
+    def run_operator(self, argv, uid=1000):
+        envs = []
+        with mock.patch.object(tick, 'operator', side_effect=lambda env, command, sha: (command, sha)) as op, \
+                mock.patch.object(tick, 'tick') as t, contextlib.redirect_stderr(io.StringIO()):
+            got = tick.main(argv, make_env=lambda mode, target: envs.append((mode, target)) or 'env',
+                            geteuid=lambda: uid)
+        self.assertEqual(t.call_count, 0)
+        return got, envs, [c.args for c in op.call_args_list]
+
+    def test_rearm_and_ack_baseline_are_operator_commands_with_a_full_sha(self):
+        self.assertEqual(self.run_operator(['rearm', '--sha', CAND]),
+                         (('rearm', CAND), [('manual', None)], [('env', 'rearm', CAND)]))
+        self.assertEqual(self.run_operator(['ack-baseline', '--from', OLD]),
+                         (('ack-baseline', OLD), [('manual', None)], [('env', 'ack-baseline', OLD)]))
+        for argv in (['rearm'], ['rearm', '--sha', 'HEAD'], ['rearm', '--sha', CAND[:39]], ['ack-baseline'],
+                     ['ack-baseline', '--sha', CAND], ['rearm', '--from', CAND], ['ack-baseline', '--from', CAND.upper()]):
+            with self.subTest(argv):
+                self.assertEqual(self.run_operator(argv), (64, [], []))
 
     def test_usage_errors(self):
         for argv in (['deploy', '--target', CAND, '--bogus'], [], ['timer', '--force'], ['deploy'],
