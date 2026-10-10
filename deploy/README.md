@@ -505,25 +505,30 @@ Host side, stage Ядро-2в (code only; production activation stays off until 
   files under real `dbsnap`, NRestarts, boot, clock) with crash injection before/after every host call and
   save; `test_crash_matrix.py` crashes the engine at every such point and checks the world after recovery.
 
-Host side, periphery 2в stage A (code only; the tick that uses these comes next, nothing is installed):
+Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters are stage Б, nothing is installed):
 
 - `tick_state.py` — the tick's own `tick-state.json` next to `deploy-state.json` (same durable write; a
   broken file is an error, never a blank slate): `mainSeen` (first sighting of a head, for quiet), `noopSha`
-  (payload equal to settled), `abort` (SHA, aborts in a row, last time), `notifiedTxn`, the regression fence
-  (`lastSeenSettled`, `regression{from,to}`) and `notices` (UTC day per notice key, kept 31 days).
+  (payload equal to settled), `abort` (SHA, aborts in a row, last time, the txn that counted it — once per txn),
+  `notifiedTxn`, the regression fence (`lastSeenSettled`, `regression{from,to}`), `notices` (UTC day per notice
+  key, kept 31 days) and `blocked` (txn, step, first alert time, alerts sent — the bot-down alert).
 - `gates.py` — `admission(Inputs) -> Decision`: a pure function of facts the tick already read, by the
   spec §5 table for `timer` / `manual` / `force`. Kinds: `idle`, `wait`, `hold`, `refuse`, `admit`, and
   `need <field>` — a costly fact (ancestry, installed copies, the range's paths and PR labels, CI) is read
   only when its gate is reached. Quiet 600 s and the abort backoff (1 h doubling per abort in a row, at most
-  24 h) are the timer's; PAUSED stops only the timer. Held paths: `deploy/release/**`,
-  `deploy/*.service|*.timer|*.path`, `deploy/sudoers.d/**`, `deploy/install-*.sh`, `deploy/litestream.*`,
-  `.github/workflows/ci.yml`, `scripts/ops/host_patch_collect.py`, `scripts/ops/reboot_request.py`, plus the
-  `deploy:hold` label; by hand they pass only with `--ack-holds` equal to the shown keys (`path:<p>`,
-  `pr:<n>`). A path or label that could not be read blocks and cannot be acknowledged. `observe` is the
+  24 h) are the timer's; PAUSED stops only the timer. An idle timer (up to date, noop, last failed SHA)
+  still reads the installed copies and reminds once a day when they are stale. Held paths: every installed
+  copy, from ONE list `INSTALLED_COPIES` (`deploy/release/**`, `deploy/*.service|*.timer|*.path`,
+  `deploy/sudoers.d/**`, `deploy/litestream.*`, `scripts/ops/host_patch_collect.py`,
+  `scripts/ops/reboot_request.py`, merge-deploy's `autodeploy.sh`, `ships.sh`, `read-env.sh`,
+  `installed-current.sh`, `db-snapshot.sh`, `trial-migrate.cjs`) — the same tuple the installed-current check
+  gets — plus `HUMAN_STEPS` (`deploy/install-*.sh`, `.github/workflows/ci.yml`) and the `deploy:hold` label; by
+  hand they pass only with `--ack-holds` equal to the shown keys (`path:<p>`, `pr:<n>`). A path or label that could not be read blocks and cannot be acknowledged. `observe` is the
   regression fence over the settled SHA; only a settled release containing `from` clears it.
 - `helpers.py` — the `Helpers` interface the tick uses besides the engine's `Host` (git, GitHub, the
   `wbb_release.py` calls, pre snapshots, installed copies); a `wbb_release.py` call returns `Run(code, kind,
-  text, tree)` as it came, and only the caller interprets it. `fake_helpers.py` is the scripted test double.
+  text, tree)` as it came, and only the caller interprets it; `installed_stale(patterns)` gets
+  `gates.INSTALLED_COPIES`. `fake_helpers.py` is the scripted test double.
 - `prepare.py` — `prepare(helpers, sha, trusted, settled)`: download → publish → verify (candidate and settled)
   → noop? → audit → probe → pre snapshot → trial → `Prepared(candidate, pre)`. Noop: both manifests are the
   bytes of their verified trees and their entries are equal without `release.json` — nothing is audited,
@@ -531,6 +536,22 @@ Host side, periphery 2в stage A (code only; the tick that uses these comes next
   audited tree equal to the verified one; anything else (2, 70, 75, a word and a code that disagree, a helper
   exception, a tree that changed between steps) is `Transient`. A trial that did not pass discards its pre.
 - `tree_manifest.parse_manifest` — the byte checks of `verify_tree` without a tree (used by the noop).
+- `tick.py` — the controller: `tick.py timer` (the unit) and `tick.py deploy [--force] [--ack-holds KEY ...]`
+  (the `deploy.sh` wrapper of stage Б); root is refused (64). Under the merge-deploy lock (`~/.local/state/
+  wbb-autodeploy/lock`; the timer does not wait and reports a lock held over 35 min once a day, by hand it
+  waits 30 s): `activate.resume` first (a pending phase is finished even under PAUSED), then PAUSED stops the
+  timer, then drift (or `unreachable` — `/health` silent for 3 probes 10 s apart), `unverified` and
+  `recovery-failed` are daily reminders, then `gates.admission`, `prepare`, the gates once more right before
+  `begin` (main unmoved, PAUSED absent, the same holds), `begin` → `run`. The end of a transaction (settled,
+  rolled back, aborted, unverified, recovery-failed) is notified once per txn from the engine's state against
+  `notifiedTxn` (written only after a successful send, so a tick that dies first leaves it to the next one); a
+  block with the bot down (`activating/switch|start`, `rolling-back/*`) is a critical alert at once and again
+  after 15 min. `lastFailedSha` comes only from a prepare `Verdict` (written into the settled state) or the
+  engine's rollback; an uncaught exception is a critical notice with its type and text (once per UTC day per
+  text) and exit 70. Exit: 0 idle/waiting/settled/noop, 1 refused or held (and a manual run not served), 2
+  rolled back, 3 recovery failed or blocked with the bot down, 4 state not written, 64 usage/root, 70
+  internal. Everything is injected (`tick.Env`: state dir, store, `Host`, `Helpers`, notify, clock, sleep);
+  without the stage-Б adapters the CLI exits 70 without running.
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 

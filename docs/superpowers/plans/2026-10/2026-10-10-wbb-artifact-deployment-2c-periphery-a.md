@@ -84,16 +84,16 @@ Production activation заборонена до кінця В.
 
 **Files:** create `deploy/release/tick.py`, `deploy/release/test_tick.py`.
 
-- [ ] `tick(env, mode, ack_holds) -> exit code` за порядком Global Constraints; lock — `fcntl.flock` неблокуючий для timer (зайнято → порт `lock-busy-since`/stall-повідомлення merge-deploy), з очікуванням 30 с для manual.
-- [ ] Повідомлення: підсумок раз на `txn`; Ф3; стійкі стани раз на добу; верхній catch.
-- [ ] CLI: `tick.py timer`, `tick.py deploy [--force] [--ack-holds <ключ>…]`; root — відмова.
-- [ ] Тести (фейкові `Host` з ядра + `Helpers` + `notify`): щасливий шлях до settled з одним повідомленням; PAUSED з незавершеним відкатом — відкат іде, admission ні; PAUSED у спокої — тиша; падіння між `run` і notify → повідомлення наступним tick-ом, рівно одне; `blocked` із лежачим ботом — критичне одразу й через 15 хв, не частіше; `aborted` тричі — backoff; `drift` проти `unreachable`; виняток у helper-і → 70 і без `lastFailedSha`; зайнятий lock.
+- [x] `tick(env, mode, ack_holds) -> exit code` за порядком Global Constraints; lock — `fcntl.flock` неблокуючий для timer (зайнято → порт `lock-busy-since`/stall-повідомлення merge-deploy), з очікуванням 30 с для manual.
+- [x] Повідомлення: підсумок раз на `txn`; Ф3; стійкі стани раз на добу; верхній catch.
+- [x] CLI: `tick.py timer`, `tick.py deploy [--force] [--ack-holds <ключ>…]`; root — відмова.
+- [x] Тести (фейкові `Host` з ядра + `Helpers` + `notify`): щасливий шлях до settled з одним повідомленням; PAUSED з незавершеним відкатом — відкат іде, admission ні; PAUSED у спокої — тиша; падіння між `run` і notify → повідомлення наступним tick-ом, рівно одне; `blocked` із лежачим ботом — критичне одразу й через 15 хв, не частіше; `aborted` тричі — backoff; `drift` проти `unreachable`; виняток у helper-і → 70 і без `lastFailedSha`; зайнятий lock.
 
 ### Task 4: документи
 
 **Files:** modify `spec.md` §5.9, `deploy/README.md`, `scripts/deploy-rsync.test.ts`; спека — рядки §10a для `noopSha` (доказ — рівність маніфестів).
 
-- [ ] Абзац про tick у `spec.md` §5.9: порядок, «нічого не їде» за payload, holds і `--ack-holds`, backoff, повідомлення раз на транзакцію.
+- [x] Абзац про tick у `spec.md` §5.9: порядок, «нічого не їде» за payload, holds і `--ack-holds`, backoff, повідомлення раз на транзакцію.
 
 ---
 
