@@ -770,7 +770,8 @@ def _rearm(env, ts, sha):
     Writes tick-state first: a verdict message still queued for `sha` is marked recorded (its write did land —
     lastFailedSha is `sha`), so no later tick writes the failed SHA back. Then the engine's state: lastFailedSha
     and a `rearm` evidence event in the transaction that ended last, which keeps that transaction's abort from
-    being counted again (ended()). A run cut between the two writes is repeated by running it again.
+    being counted again (ended()). The abort is cleared last, so a run cut between any two writes still finds
+    something to rearm and is repeated by running it again.
     """
     state = _settled_engine(env)
     failed = state.last_failed_sha == sha
@@ -785,9 +786,15 @@ def _rearm(env, ts, sha):
         cleared.append(f'abort backoff of {sha} ({ts.abort.count} abort(s))')
     verdicts = tuple(tick_state.Verdict(v.sha, v.text, True) if failed and v.sha == sha else v
                      for v in ts.pending_verdicts)
-    _save_ts(env, ts.replace(abort=None if aborted else ts.abort, pending_verdicts=verdicts))
+    # Three writes, each leaving a state the same command can finish (#829 AI review): the verdicts first (so no
+    # tick writes lastFailedSha back), then the engine, and only then the abort — the one record that lets an
+    # abort-only rearm be run again if a write in between failed.
+    ts = ts.replace(pending_verdicts=verdicts)
+    _save_ts(env, ts)
     _save_engine(env, state.replace(last_failed_sha=None if failed else state.last_failed_sha)
                  .log(env.clock(), 'rearm', 'ok', sha=sha, cleared=cleared))
+    if aborted:
+        _save_ts(env, ts.replace(abort=None))
     return f'rearmed {sha}: cleared ' + '; '.join(cleared)
 
 

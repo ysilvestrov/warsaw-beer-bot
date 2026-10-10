@@ -1098,6 +1098,24 @@ class Operator(Base):
         self.assertEqual(self.tick(), 0)
         self.assertEqual((self.store.load().settled.sha, self.ts().abort), (CAND, None))
 
+    def test_an_abort_only_rearm_whose_engine_write_failed_can_be_run_again(self):
+        # #829 AI review: the abort was cleared before the engine write; when that failed, nothing named the SHA
+        # any more and the second run refused, with no rearm evidence to stop the abort being counted again.
+        self.world.tampered = {CAND}
+        self.quiet()
+        self.assertEqual(self.tick(), 0)
+        good = self.store
+
+        class ReadOnly(MemoryStore):
+            def save(self, state):
+                raise PermissionError(13, 'Permission denied')
+        self.store = ReadOnly(state=good.load())
+        self.assertEqual(self.run_op('rearm', CAND), 4)
+        self.assertEqual(self.ts().abort.count, 1)
+        self.store = good
+        self.assertEqual(self.run_op('rearm', CAND), 0)
+        self.assertEqual((self.ts().abort, self.last_event()['what']), (None, 'rearm'))
+
     def test_rearm_marks_a_queued_verdict_recorded_so_no_tick_writes_the_failed_sha_back(self):
         text = '⛔ wbb-deploy refused ccccccc: PROBE FAILED'
         self.store = MemoryStore(state=SETTLED_STATE.replace(last_failed_sha=CAND))
