@@ -35,7 +35,7 @@ import sys
 from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from tick_state import Abort, Regression, Seen  # noqa: E402
+from tick_state import Abort, Noop, Regression, Seen  # noqa: E402
 
 MODES = ('timer', 'manual', 'force')
 QUIET_S = 600
@@ -89,7 +89,7 @@ class Inputs:
     target: str | None               # the SHA to deploy: main for the timer, the checkout's HEAD by hand
     paused: bool
     settled_sha: str | None          # state v2 settled baseline; None: no first install yet
-    noop_sha: str | None             # tick-state: payload equal to settled
+    noop: Noop | None                # tick-state: a payload found equal to a settled release's
     last_failed_sha: str | None      # state v2
     abort: Abort | None = None       # tick-state
     main_seen: Seen | None = None    # tick-state, already updated for this main by the tick
@@ -232,7 +232,9 @@ def admission(i):
         return Decision('wait', f'main moved to {_short(i.main)}')
     if i.target == i.settled_sha:
         return idle(f'up to date at {_short(i.target)}')
-    if i.target == i.noop_sha:
+    # (stage A review B1) a noop is a comparison with ONE settled release: after settled moved, the same
+    # target may differ from the new one (deploy --force back to it after a later release settled).
+    if i.noop is not None and (i.target, i.settled_sha) == (i.noop.sha, i.noop.settled_sha):
         return idle(f'{_short(i.target)} changes nothing in the runtime payload')
 
     if i.regression is not None:

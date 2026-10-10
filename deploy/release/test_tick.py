@@ -26,7 +26,7 @@ from fake_host import BOOT_A, PRE_DB, T0, Crash, FakeHost, MemoryStore, World  #
 from gates import Ci, Pr  # noqa: E402
 from github_trust import Untrusted  # noqa: E402
 from helpers import HelperError, Run  # noqa: E402
-from tick_state import Abort, Blocked, Regression, Seen, TickState  # noqa: E402
+from tick_state import Abort, Blocked, Noop, Regression, Seen, TickState  # noqa: E402
 
 OLD = 'b' * 40
 CAND = 'c' * 40
@@ -367,12 +367,22 @@ class Verdicts(Base):
                               verify=lambda sha: Run(0, 'VERIFIED', '', trees[sha]))
         self.quiet()
         self.assertEqual(self.tick(), 0)
-        self.assertEqual(self.ts().noop_sha, CAND)
+        self.assertEqual(self.ts().noop, Noop(CAND, OLD))
         self.assertEqual(self.h.names(), ADMIT + PREPARE[:6])
         self.h.calls.clear()
         self.assertEqual(self.tick(), 0)
         self.assertEqual(self.h.names(), ['fetch_main', 'installed_stale'])
         self.assertEqual((self.notes, self.store.load()), ([], SETTLED_STATE))
+
+    def test_a_noop_found_against_another_settled_release_is_prepared_again(self):
+        # (stage A review B1) CAND was a noop against OTHER; OLD is settled now, so CAND's payload is
+        # compared again — and it differs: the deploy goes on to settled.
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME), TickState(noop=Noop(CAND, OTHER)))
+        self.quiet()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.h.names(), ADMIT + PREPARE + RECHECK)
+        self.assertEqual(self.store.load().settled.sha, CAND)
 
 
 class Holds(Base):

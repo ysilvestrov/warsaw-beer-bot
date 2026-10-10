@@ -422,7 +422,7 @@ class _Tick:
                 self.save(seen)
         i = Inputs(
             mode=self.mode, now=now, main=main, target=main if self.timer else self.env.target,
-            paused=self.paused(), settled_sha=settled.sha if settled else None, noop_sha=self.ts.noop_sha,
+            paused=self.paused(), settled_sha=settled.sha if settled else None, noop=self.ts.noop,
             last_failed_sha=state.last_failed_sha if state else None, abort=self.ts.abort,
             main_seen=self.ts.main_seen, regression=self.ts.regression, ack_holds=self.ack_holds)
         d, i = self.admit(i)
@@ -436,7 +436,7 @@ class _Tick:
         got = pp.prepare(self.h, sha, i.ci.trusted, settled)
         if isinstance(got, pp.Noop):
             self.say(f'{_short(sha)} changes nothing in the runtime payload; nothing to activate')
-            self.save(self.ts.replace(noop_sha=sha))
+            self.save(self.ts.replace(noop=tick_state.Noop(sha, settled.sha)))
             return 0
         if isinstance(got, pp.Verdict):
             # The only verdict the tick itself writes: exit 1 with its verdict word (prepare, plan "Рішення" п.3).

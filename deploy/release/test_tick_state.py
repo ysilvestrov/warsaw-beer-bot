@@ -9,14 +9,14 @@ from types import MappingProxyType
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tick_state as ts  # noqa: E402
 from deploy_state import StateError  # noqa: E402
-from tick_state import Abort, Blocked, Regression, Seen, TickState  # noqa: E402
+from tick_state import Abort, Blocked, Noop, Regression, Seen, TickState  # noqa: E402
 
 A = 'a' * 40
 B = 'b' * 40
 TXN = '0123456789abcdef0123456789abcdef'
 TXN2 = 'fedcba9876543210fedcba9876543210'
 FULL = TickState(
-    main_seen=Seen(A, 1760000000), noop_sha=B, abort=Abort(A, 2, 1760000100.5, TXN2), notified_txn=TXN,
+    main_seen=Seen(A, 1760000000), noop=Noop(B, A), abort=Abort(A, 2, 1760000100.5, TXN2), notified_txn=TXN,
     last_seen_settled=B, regression=Regression(A, B),
     notices={'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
     blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1),
@@ -25,7 +25,7 @@ FULL = TickState(
 FULL_JSON = {
     'formatVersion': 1,
     'mainSeen': {'sha': A, 'at': 1760000000},
-    'noopSha': B,
+    'noop': {'sha': B, 'settledSha': A},
     'abort': {'sha': A, 'count': 2, 'at': 1760000100.5, 'txn': TXN2},
     'notifiedTxn': TXN,
     'lastSeenSettled': B,
@@ -81,10 +81,15 @@ class Files(Tmp):
             'empty': (b'', 'empty$'),
             'not json': (b'{', 'not JSON'),
             'other version': (json.dumps(dict(FULL_JSON, formatVersion=2)).encode(), 'formatVersion 2, expected 1'),
-            'missing key': (json.dumps(without('noopSha')).encode(), r"missing \['noopSha'\]"),
+            'missing key': (json.dumps(without('noop')).encode(), r"missing \['noop'\]"),
             'unknown key': (json.dumps(dict(FULL_JSON, extra=1)).encode(), r"unknown \['extra'\]"),
             'duplicate key': (b'{"formatVersion":1,"formatVersion":1}', r"duplicate keys \['formatVersion'\]"),
-            'short sha': (json.dumps(dict(FULL_JSON, noopSha='abc')).encode(), 'noopSha: not a full lowercase SHA'),
+            'short sha': (json.dumps(dict(FULL_JSON, noop={'sha': 'abc', 'settledSha': A})).encode(),
+                          'noop.sha: not a full lowercase SHA'),
+            # (stage A review B1) a noop without the settled release it was compared with proves nothing.
+            'noop without settled': (json.dumps(dict(FULL_JSON, noop={'sha': B})).encode(),
+                                     r"tick-state.noop: missing \['settledSha'\]"),
+            'bare noop sha': (json.dumps(dict(FULL_JSON, noop=B)).encode(), 'tick-state.noop: not an object'),
             'zero aborts': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': 0, 'at': 1, 'txn': None})).encode(),
                             'tick-state.abort.count: not a positive integer: 0'),
             'bool count': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': True, 'at': 1, 'txn': None})).encode(),

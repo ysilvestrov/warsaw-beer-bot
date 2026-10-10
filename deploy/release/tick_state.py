@@ -9,7 +9,9 @@ about an activation and its rollback, this file is about admission and notificat
 claims, and its evidence (plan, "заявка → доказ"):
 
   mainSeen {sha, at}     main was `sha` from `at` on, by the tick's own clock at its first sighting
-  noopSha                the payload of this SHA equals the settled one (manifests compared in a tick)
+  noop {sha, settledSha} the payload of `sha` equals that of the settled release `settledSha` (manifests
+                         compared in a tick); it says nothing once another release is settled (stage A
+                         review B1)
   abort {sha, count, at, txn}  this SHA was aborted before it started `count` times in a row, last at
                          `at`, by transaction `txn` (an abort is counted once per txn, however often the
                          tick that reads it is repeated)
@@ -116,6 +118,15 @@ class Blocked(ds._Record):
 
 
 @dataclass(frozen=True)
+class Noop(ds._Record):
+    """`sha` changes nothing against the settled release `settled_sha` it was compared with — and only against
+    it: once settled moves, a target equal to `sha` is prepared again (stage A review B1)."""
+    sha: str
+    settled_sha: str
+    _SPEC = (('sha', 'sha', _SHA_KIND), ('settled_sha', 'settledSha', _SHA_KIND))
+
+
+@dataclass(frozen=True)
 class Regression(ds._Record):
     from_sha: str
     to_sha: str
@@ -125,7 +136,7 @@ class Regression(ds._Record):
 @dataclass(frozen=True)
 class TickState(ds._Record):
     main_seen: Seen | None = None
-    noop_sha: str | None = None
+    noop: Noop | None = None
     abort: Abort | None = None
     notified_txn: str | None = None
     last_seen_settled: str | None = None
@@ -134,7 +145,7 @@ class TickState(ds._Record):
     blocked: Blocked | None = None
     _SPEC = (
         ('main_seen', 'mainSeen', ds._Opt(ds._Rec(Seen))),
-        ('noop_sha', 'noopSha', ds._Opt(_SHA_KIND)),
+        ('noop', 'noop', ds._Opt(ds._Rec(Noop))),
         ('abort', 'abort', ds._Opt(ds._Rec(Abort))),
         ('notified_txn', 'notifiedTxn', ds._Opt(_TXN_KIND)),
         ('last_seen_settled', 'lastSeenSettled', ds._Opt(_SHA_KIND)),

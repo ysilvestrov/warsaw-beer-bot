@@ -13,7 +13,7 @@ from dataclasses import replace
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gates  # noqa: E402
 from gates import UNREAD, Ci, CommitPrs, Decision, Inputs, Observation, Pr  # noqa: E402
-from tick_state import Abort, Regression, Seen  # noqa: E402
+from tick_state import Abort, Noop, Regression, Seen  # noqa: E402
 
 SETTLED = '5' * 40
 MAIN = 'a' * 40
@@ -25,7 +25,7 @@ MODES = ('timer', 'manual', 'force')
 
 # Every gate passes: the facts a tick would have read for a quiet, green, unheld main.
 GREEN = dict(
-    now=NOW, main=MAIN, target=MAIN, paused=False, settled_sha=SETTLED, noop_sha=None, last_failed_sha=None,
+    now=NOW, main=MAIN, target=MAIN, paused=False, settled_sha=SETTLED, noop=None, last_failed_sha=None,
     abort=None, main_seen=Seen(MAIN, NOW - 600), regression=None,
     settled_in_target=True, target_in_main=True, installed_stale=None,
     changed_paths=('src/index.ts', 'docs/x.md'),
@@ -349,8 +349,15 @@ class NothingToDo(unittest.TestCase):
         for mode in MODES:
             with self.subTest(mode):
                 self.assertEqual(decide(mode, settled_sha=MAIN), Decision('idle', 'up to date at aaaaaaa'))
-                self.assertEqual(decide(mode, noop_sha=MAIN),
+                self.assertEqual(decide(mode, noop=Noop(MAIN, SETTLED)),
                                  Decision('idle', 'aaaaaaa changes nothing in the runtime payload'))
+
+    def test_a_noop_against_another_settled_release_is_not_idle(self):
+        # (stage A review B1) MAIN was compared with OTHER; SETTLED is settled now (deploy --force back to
+        # MAIN after a later release settled): MAIN's payload may differ from SETTLED's, so it goes on.
+        for mode in MODES:
+            with self.subTest(mode):
+                self.assertEqual(decide(mode, noop=Noop(MAIN, OTHER)), ADMIT)
 
     def test_an_idle_timer_reads_the_installed_copies_and_a_human_does_not(self):
         # Adjustment (b): merge-deploy reminded of a stale deployer while up to date, without a deploy.
@@ -364,7 +371,7 @@ class NothingToDo(unittest.TestCase):
         stale = 'STALE: 1 installed file(s) differ from origin/main:\n  deploy/release/tick.py'
         cases = {
             'up to date': (dict(settled_sha=MAIN), 'up to date at aaaaaaa'),
-            'noop': (dict(noop_sha=MAIN), 'aaaaaaa changes nothing in the runtime payload'),
+            'noop': (dict(noop=Noop(MAIN, SETTLED)), 'aaaaaaa changes nothing in the runtime payload'),
             'last failed': (dict(last_failed_sha=MAIN), 'aaaaaaa is the last failed SHA; waiting for the next merge'),
         }
         for name, (changes, reason) in cases.items():
