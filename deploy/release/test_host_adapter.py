@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.request
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -115,6 +116,15 @@ class RootHelper(unittest.TestCase):
                 with self.assertRaisesRegex(Refused, f'^{verb} ccccccc: REFUSED: {SHA}: no receipt$'):
                     getattr(h, verb)(SHA)
 
+    def test_exit_2_without_our_refused_line_is_a_host_error(self):
+        # Б-ядро review: Python exits 2 when it cannot open the script (an install half done); a reinstall fixes
+        # that, so it must never reach the engine as a Refused (which it turns into recovery-failed).
+        for verb in ('verify', 'switch'):
+            with self.subTest(verb):
+                h, _ = host({helper(verb): done(2, b'', b"python3: can't open file '/usr/local/lib/wbb-release/x'\n")})
+                with self.assertRaises(HostError):
+                    getattr(h, verb)(SHA)
+
     def test_exit_1_without_a_verdict_line_is_sudo_failing_not_a_verdict(self):
         for verb in ('verify', 'switch'):
             with self.subTest(verb):
@@ -171,6 +181,11 @@ class Database(unittest.TestCase):
         with self.assertRaisesRegex(Refused, '^dbsnap restore: REFUSED: no complete post$'):
             h.restore(PRE, POST)
 
+    def test_dbsnap_that_python_cannot_open_is_a_host_error(self):
+        h, _ = host({tuple(DBSNAP + ['restore', PRE, DB, POST]): done(2, b'', b"python3: can't open file\n")})
+        with self.assertRaises(HostError):
+            h.restore(PRE, POST)
+
     def test_sudo_failing_a_retryable_error_or_odd_output_is_a_host_error(self):
         argv = tuple(DBSNAP + ['post', DB, POST])
         for answer, why in ((SUDO_FAILED, 'exit 1: sudo: a password is required'),
@@ -203,6 +218,20 @@ class HealthProbe(unittest.TestCase):
             h, _ = host({tuple(PORT_ARGV): done(0, f'{s.port}\n'.encode())})
             self.assertEqual(h.health(), Health(True, SHA))
         self.assertEqual(s.requests, [('GET', '/health', b'')])
+
+    def test_a_redirect_is_not_followed(self):
+        # merge-deploy's curl did not follow one either (Б-ядро review).
+        # Followed, the relative Location would land on a healthy answer from the same server.
+        with self.assertRaises(HostError):
+            self.probe([(302, b'', 0, {'Location': '/health'}), (200, body({'ok': True, 'releaseSha': SHA}), 0)])
+
+    def test_a_proxy_in_the_environment_is_not_used(self):
+        # Б-ядро review: urllib's default opener sent 127.0.0.1 through http_proxy, failing every probe.
+        with Server([(200, body({'ok': True, 'releaseSha': SHA}), 0)]) as s, \
+                mock.patch.dict(os.environ, {'http_proxy': 'http://127.0.0.1:9', 'no_proxy': ''}), \
+                mock.patch.object(urllib.request, '_opener', None):
+            h, _ = host({tuple(PORT_ARGV): done(0, f'{s.port}\n'.encode())})
+            self.assertEqual(h.health(), Health(True, SHA))
 
     def test_todays_app_has_no_release_sha(self):
         self.assertEqual(self.probe([(200, b'{"ok":true}', 0)]), Health(True, None))

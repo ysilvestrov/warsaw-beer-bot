@@ -32,7 +32,7 @@ import installed as ins  # noqa: E402
 import publish as pub  # noqa: E402
 from activate import Health, HostError  # noqa: E402
 from deploy_state import _BOOT_ID  # noqa: E402
-from github_trust import SHA  # noqa: E402
+from github_trust import SHA, _NoRedirect  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 from wbb_release import PRODUCTION_ROOTS  # noqa: E402
 
@@ -67,6 +67,16 @@ def dbsnap_argv(*args):
 
 def _text(b):
     return b.decode('utf-8', 'replace') if isinstance(b, bytes) else (b or '')
+
+
+def refused(result):
+    """Exit 2 is OUR refusal only with the `REFUSED: ` line wbb_release.py and dbsnap.py print on stderr.
+
+    Python itself exits 2 when it cannot open the script (an installation half done, a LIB_DIR the bot user
+    cannot read): that is a host failure a reinstall fixes, never a refusal a retry cannot fix (Б-ядро
+    review) — the engine would turn it into recovery-failed.
+    """
+    return result.returncode == 2 and any(line.startswith('REFUSED: ') for line in _text(result.stderr).splitlines())
 
 
 def reason(result):
@@ -116,8 +126,11 @@ def _abs(path):
 
 
 class RealHost:
-    def __init__(self, run=bounded.run, urlopen=urllib.request.urlopen, clock=time.time, sleep=time.sleep,
+    def __init__(self, run=bounded.run, urlopen=None, clock=time.time, sleep=time.sleep,
                  roots=PRODUCTION_ROOTS, boot_id_file=ins.BOOT_ID_FILE, db=ins.DB_PATH):
+        # /health is local: never through a proxy from the environment, never after a redirect (merge-deploy's
+        # curl had neither) — a proxy would turn every probe into a failed one, i.e. a rollback (Б-ядро review).
+        urlopen = urlopen or urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect).open
         self._run, self._urlopen, self._clock, self._sleep = run, urlopen, clock, sleep
         self._roots, self._boot_id_file, self._db = roots, boot_id_file, db
         self._port = None
@@ -172,7 +185,7 @@ class RealHost:
 
     def _helper(self, verb, sha, line):
         r = call(self._run, ['sudo', '-n', ins.ROOT_HELPER, verb, '--sha', _sha(sha)], VERIFY_TIMEOUT_S)
-        if r.returncode == 2:
+        if refused(r):
             raise Refused(f'{verb} {sha[:7]}: {reason(r)}')
         if r.returncode != 0:
             raise HostError(f'wbb-release {verb}: exit {r.returncode}: {reason(r)}')
@@ -190,7 +203,7 @@ class RealHost:
     # --- the database (as the bot user) -------------------------------------------------------------------------
     def _dbsnap(self, args, done):
         r = call(self._run, dbsnap_argv(*args), DB_TIMEOUT_S)
-        if r.returncode == 2:
+        if refused(r):
             raise Refused(f'dbsnap {args[0]}: {reason(r)}')
         if r.returncode != 0:
             raise HostError(f'dbsnap {args[0]}: exit {r.returncode}: {reason(r)}')
