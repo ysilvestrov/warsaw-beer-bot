@@ -444,6 +444,15 @@ class _Tick:
             self.say(f'fetch main: {type(e).__name__}: {e}')
             return None
 
+    def opened(self, pre):
+        """Does the stored state hold an activation with this pre (a save that raised after it landed)? Unknown
+        counts as yes: a pre kept for nothing is a leak, a pre discarded under an activation breaks its rollback."""
+        try:
+            state = self.store.load()
+        except Exception:
+            return True
+        return state is not None and state.pre == pre
+
     def discard(self, pre):
         try:
             self.h.discard_pre(pre)
@@ -537,8 +546,13 @@ class _Tick:
             return self.report(d)
         try:
             activate.begin(self.store, self.host, prepared.candidate, prepared.pre)
-        except (Refused, HostError) as e:
-            self.discard(prepared.pre)
+        except Exception as e:
+            # (stage A review N2) any failure of begin — a refusal, a host error, a state write that failed
+            # (exit 4) — drops the pre no activation will use, unless the opened state did reach the store.
+            if not self.opened(prepared.pre):
+                self.discard(prepared.pre)
+            if not isinstance(e, (Refused, HostError)):
+                raise
             self.notice('begin', f'⚠️ wbb-deploy could not begin {_short(i.target)}: {type(e).__name__}: {e} — '
                                  'not a verdict; the next tick tries again.')
             return self.served(0)

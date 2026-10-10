@@ -634,6 +634,67 @@ class RecheckBeforeBegin(Base):
         self.assertEqual(self.store.load(), SETTLED_STATE)
 
 
+class BeginFails(Base):
+    """(stage A review N2) whatever stops begin, the pre no activation will use is dropped — unless it is in use."""
+
+    def not_begun(self, why):
+        self.quiet()
+        self.assertEqual([self.tick(), self.tick()], [0, 0])
+        self.assertEqual(self.notes, [f'⚠️ wbb-deploy could not begin ccccccc: {why} — not a verdict; the next tick '
+                                      'tries again.'])
+        self.assertEqual([c for c in self.h.calls if c[0] == 'discard_pre'], [('discard_pre', self.pre)] * 2)
+        self.assertEqual((self.store.load(), self.world.starts), (SETTLED_STATE, []))
+
+    def test_refused_is_a_daily_notice_and_drops_the_pre(self):
+        self.world.accepted = {CAND}
+        self.not_begun(f'Refused: previous bbbbbbb does not verify: {OLD}: no receipt — not an accepted release')
+
+    def test_a_host_error_is_a_daily_notice_and_drops_the_pre(self):
+        self.world.errors['boot_id'] = HostError('sudo: a password is required')
+        self.not_begun('HostError: sudo: a password is required')
+
+    def test_a_state_write_that_fails_drops_the_pre_and_is_exit_4(self):
+        class ReadOnly(MemoryStore):
+            def save(self, state):
+                raise PermissionError(13, 'Permission denied')
+
+        self.store = ReadOnly(state=SETTLED_STATE)
+        self.quiet()
+        self.assertEqual(self.tick(), 4)
+        self.assertEqual(self.h.calls[-1], ('discard_pre', self.pre))
+        self.assertEqual(self.store.load(), SETTLED_STATE)
+
+    def test_a_write_that_landed_before_it_failed_keeps_the_pre(self):
+        class LandsThenFails(MemoryStore):
+            def save(self, state):
+                super().save(state)
+                raise OSError(5, 'Input/output error: fsync of the directory')
+
+        self.store = LandsThenFails(state=SETTLED_STATE)
+        self.quiet()
+        self.assertEqual(self.tick(), 4)
+        self.assertEqual(self.h.names(), ADMIT + PREPARE + RECHECK)
+        self.assertEqual((self.store.load().phase, self.store.load().pre), ('activating', self.pre))
+
+    def test_a_store_that_cannot_be_read_after_the_failed_write_keeps_the_pre(self):
+        class BrokenAfterWrite(MemoryStore):
+            broken = False
+
+            def save(self, state):
+                self.broken = True
+                raise OSError(5, 'Input/output error')
+
+            def load(self):
+                if self.broken:
+                    raise OSError(5, 'Input/output error')
+                return super().load()
+
+        self.store = BrokenAfterWrite(state=SETTLED_STATE)
+        self.quiet()
+        self.assertEqual(self.tick(), 4)
+        self.assertEqual(self.h.names(), ADMIT + PREPARE + RECHECK)
+
+
 class Unverified(Base):
     def test_reported_once_then_once_a_day(self):
         s = self.at('observing')
