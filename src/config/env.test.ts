@@ -70,6 +70,22 @@ describe('loadEnv', () => {
     expect(env.ADMIN_API_TOKEN).toBeUndefined();
   });
 
+  it('WBB_RELEASE_REQUIRED defaults to false and parses "true"/"false"', () => {
+    expect([
+      loadEnv(baseEnv).WBB_RELEASE_REQUIRED,
+      loadEnv({ ...baseEnv, WBB_RELEASE_REQUIRED: 'true' }).WBB_RELEASE_REQUIRED,
+      loadEnv({ ...baseEnv, WBB_RELEASE_REQUIRED: 'false' }).WBB_RELEASE_REQUIRED,
+    ]).toEqual([false, true, false]);
+  });
+
+  it('WBB_RELEASE_REQUIRED refuses anything but "true"/"false"', () => {
+    expect(() => loadEnv({ ...baseEnv, WBB_RELEASE_REQUIRED: '1' })).toThrow(/WBB_RELEASE_REQUIRED/);
+  });
+
+  it('WBB_RELEASE_REQUIRED is not an expected prod key until the artifact layout turns it on', () => {
+    expect(EXPECTED_PROD_KEYS.map((k) => k.key as string)).not.toContain('WBB_RELEASE_REQUIRED');
+  });
+
   it('WEB_SEARCH_DAILY_CAP defaults to 30', () => {
     const env = loadEnv(baseEnv);
     expect(env.WEB_SEARCH_DAILY_CAP).toBe(30);

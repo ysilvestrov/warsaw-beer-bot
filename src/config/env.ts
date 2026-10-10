@@ -56,6 +56,14 @@ const Schema = z.object({
     .refine((u) => { const url = URL.canParse(u) ? new URL(u) : null; return !url || url.protocol === 'https:' || (url.protocol === 'http:' && LOOPBACK_HOSTS.includes(url.hostname)); },
       'FEST_PRINT_BASE_URL must be https (or http on localhost)')
     .default('https://beer-api.ysilvestrov-ai.uk'),
+
+  // Artifact deployment (spec 2026-10-08-wbb-artifact-deployment-design.md §7): true ⇒ startup refuses
+  // to run without a valid release.json at the application root. Default false: today's flat deploy has
+  // none; the artifact-layout installer turns it on together with the transition.
+  WBB_RELEASE_REQUIRED: z
+    .union([z.literal('true'), z.literal('false')])
+    .default('false')
+    .transform((v) => v === 'true'),
 });
 
 export type Env = z.infer<typeof Schema>;

@@ -34,7 +34,11 @@ export function postPayloadBodyLimit(
   return (c, next) => c.req.method === 'POST' ? limit(c, next) : next();
 }
 
-export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
+// The composition root's deps plus the release identity read once at startup (src/release/identity.ts).
+// Required here, not in ApiDeps: only the app needs it, and the root must not forget to pass it.
+export type ApiAppDeps = ApiDeps & { releaseSha: string | null };
+
+export function createApiApp(deps: ApiAppDeps): Hono<ApiEnv> {
   const app = new Hono<ApiEnv>();
 
   // Requests originate from arbitrary shop domains; auth is a Bearer header
@@ -48,7 +52,9 @@ export function createApiApp(deps: ApiDeps): Hono<ApiEnv> {
     onError: (err) => deps.log.error({ err }, 'catalog cache rebuild failed'),
   });
 
-  app.get('/health', (c) => c.json({ ok: true }));
+  // The frozen startup value (spec §10a): /health never re-reads release.json.
+  const releaseSha = deps.releaseSha;
+  app.get('/health', (c) => c.json({ ok: true, releaseSha }));
 
   // /match is optional-auth: no token → anonymous global-only; invalid token → 401.
   app.use('/match', postPayloadBodyLimit(deps, MATCH_BODY_LIMIT_BYTES));

@@ -1,11 +1,13 @@
 import pino from 'pino';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { readReleaseIdentity } from '../release/identity';
 import { openDb } from '../storage/db';
 import { migrate } from '../storage/schema';
 import { ensureProfile } from '../storage/user_profiles';
 import { rotateToken, hashToken } from '../storage/api_tokens';
-import type { ApiDeps } from './types';
-import { createApiApp, createApiServer } from './index';
+import { createApiApp, createApiServer, type ApiAppDeps } from './index';
 import {
   CHECKINS_SYNC_BODY_LIMIT_BYTES,
   ENRICH_CANDIDATES_BODY_LIMIT_BYTES,
@@ -27,7 +29,8 @@ function deps() {
     db,
     env: {} as never,
     log,
-  } satisfies ApiDeps;
+    releaseSha: null,
+  } satisfies ApiAppDeps;
   return { ...result, warn };
 }
 
@@ -52,11 +55,30 @@ describe('createApiApp', () => {
     expect(limitAt).toBeLessThan(authAt);
   });
 
-  it('GET /health is open and returns ok', async () => {
+  it('GET /health is open and returns ok with a null releaseSha when the process has no identity', async () => {
     const app = createApiApp(deps());
     const res = await app.request('/health');
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true });
+    expect(await res.json()).toEqual({ ok: true, releaseSha: null });
+  });
+
+  it('GET /health reports the identity read at startup, not the file as it is now', async () => {
+    // release.json is read once by the composition root; rewriting it afterwards must not move /health.
+    const dir = mkdtempSync(join(tmpdir(), 'wbb-health-identity-'));
+    try {
+      const release = (sha: string) => JSON.stringify({
+        formatVersion: 1, sourceSha: sha, node: { major: 24 }, platform: { os: 'linux', arch: 'x64', libc: 'glibc' },
+      });
+      writeFileSync(join(dir, 'release.json'), release('a'.repeat(40)));
+      const host = { os: 'linux', arch: 'x64', libc: 'glibc', nodeVersion: '24.0.0' };
+      const { releaseSha } = readReleaseIdentity({ root: dir, required: true, host });
+      const app = createApiApp({ ...deps(), releaseSha });
+      writeFileSync(join(dir, 'release.json'), release('b'.repeat(40)));
+      const res = await app.request('/health');
+      expect(await res.json()).toEqual({ ok: true, releaseSha: 'a'.repeat(40) });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('POST /match works anonymously when no token is sent (global-only)', async () => {

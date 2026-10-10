@@ -27,7 +27,7 @@ function setup(expiresAt = FAR): { db: DB; app: ReturnType<typeof createApiApp>;
               VALUES (11, 6000011, 'Bravo', 'Brew', 'bravo', 'brew')`).run();
   const glassId = takeBeer(db, { teamId: team, beerId: 11, addedBy: 1, at: '2026-10-15T18:00:00.000Z' }).id;
   const station = createStation(db, { teamId: team, createdBy: 1, now: '2026-10-15T17:00:00.000Z', expiresAt });
-  return { db, app: createApiApp({ db, env: {} as never, log: pino({ level: 'silent' }) }), station, glassId };
+  return { db, app: createApiApp({ db, env: {} as never, log: pino({ level: 'silent' }), releaseSha: null }), station, glassId };
 }
 
 const bearer = (t: string) => ({ Authorization: `Bearer ${t}` });

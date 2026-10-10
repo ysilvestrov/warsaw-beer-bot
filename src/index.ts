@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { promises as fs } from 'node:fs';
+import { promises as fs, realpathSync } from 'node:fs';
+import { join } from 'node:path';
 import cron from 'node-cron';
 import pino from 'pino';
 import { loadEnv, missingExpectedKeys } from './config/env';
@@ -76,6 +77,7 @@ import { getBeer } from './storage/beers';
 import { createShutdown } from './shutdown';
 import { interruptActiveProgress } from './bot/active-progress';
 import { createTranslator } from './i18n';
+import { readReleaseIdentity } from './release/identity';
 
 async function main(): Promise<void> {
   const env = loadEnv(process.env);
@@ -83,6 +85,15 @@ async function main(): Promise<void> {
   for (const { key, disables } of missingExpectedKeys(env)) {
     log.warn({ key }, `env ${key} unset — ${disables} disabled`);
   }
+  // Read once, before anything else starts: WBB_RELEASE_REQUIRED=true and no valid release.json ⇒ the
+  // throw ends startup with the reason. dist/index.js ⇒ the application root is one level up; realpath,
+  // so a later switch of `current` cannot change what this process says it is (spec §10a).
+  const identity = readReleaseIdentity({
+    root: realpathSync(join(__dirname, '..')),
+    required: env.WBB_RELEASE_REQUIRED,
+  });
+  if (identity.problem) log.warn({ problem: identity.problem }, 'release.json invalid — releaseSha null');
+  log.info({ releaseSha: identity.releaseSha }, 'release identity');
   const db = openDb(env.DATABASE_PATH);
   migrate(db);
   backfillNormalizedBrewery(db, log);
@@ -530,6 +541,7 @@ async function main(): Promise<void> {
 
   const apiApp = createApiApp({
     db, env, log, webFallback,
+    releaseSha: identity.releaseSha,
     // #384: lets /enrich/result resolve a shop-published bid the local catalog misses.
     hydrateByBid: (bids) => algoliaSearch.hydrateByBid(bids),
   });
