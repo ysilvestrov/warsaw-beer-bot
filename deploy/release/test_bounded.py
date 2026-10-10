@@ -1,6 +1,10 @@
+import inspect
 import os
+import shutil
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 import unittest
 from unittest import mock
@@ -14,6 +18,11 @@ def py(code):
 
 
 class Bounded(unittest.TestCase):
+    def tmp(self):
+        d = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, d)
+        return d
+
     def test_small_output_is_kept_whole(self):
         r = bounded.run(py('import sys; print("out"); print("err", file=sys.stderr); sys.exit(3)'), timeout=30, text=True)
         self.assertEqual((r.returncode, r.stdout, r.stderr, r.truncated), (3, 'out\n', 'err\n', False))
@@ -39,6 +48,71 @@ class Bounded(unittest.TestCase):
     def test_timeout_kills_the_child(self):
         with self.assertRaises(subprocess.TimeoutExpired):
             bounded.run(py('import time; time.sleep(60)'), timeout=1)
+
+    def recording_popen(self):
+        """A real Popen that records the signals bounded.run sends it, and the last instance."""
+        sent, procs = [], []
+
+        class Recording(subprocess.Popen):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                procs.append(self)
+
+            def terminate(self):
+                sent.append('TERM')
+                super().terminate()
+
+            def kill(self):
+                sent.append('KILL')
+                super().kill()
+        return Recording, sent, procs
+
+    def test_a_timeout_sends_sigterm_first_and_a_child_that_handles_it_exits_without_sigkill(self):
+        # plan periphery-b2 "Рішення" п.6: sudo relays SIGTERM to its child; SIGKILL it cannot relay.
+        marker = os.path.join(self.tmp(), 'marker')
+        code = ('import signal, sys, time\n'
+                'def on_term(signum, frame):\n'
+                f'    open({marker!r}, "w").write("TERM")\n'
+                '    sys.exit(0)\n'
+                'signal.signal(signal.SIGTERM, on_term)\n'
+                'time.sleep(60)\n')
+        Recording, sent, procs = self.recording_popen()
+        start = time.monotonic()
+        with mock.patch.object(bounded.subprocess, 'Popen', Recording), self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py(code), timeout=2, term_grace=30)
+        with open(marker) as f:
+            self.assertEqual((f.read(), sent, procs[0].returncode), ('TERM', ['TERM'], 0))
+        self.assertLess(time.monotonic() - start, 15)
+
+    def test_a_child_that_ignores_sigterm_is_killed_after_the_grace(self):
+        Recording, sent, procs = self.recording_popen()
+        start = time.monotonic()
+        with mock.patch.object(bounded.subprocess, 'Popen', Recording), self.assertRaises(subprocess.TimeoutExpired):
+            bounded.run(py('import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'),
+                        timeout=1, term_grace=1)
+        elapsed = time.monotonic() - start
+        self.assertEqual((sent, procs[0].returncode), (['TERM', 'KILL'], -signal.SIGKILL))
+        # SIGKILL came only after the grace: the timeout (1 s) and the grace (1 s) both passed first.
+        self.assertGreaterEqual(elapsed, 2)
+        self.assertLess(elapsed, 15)
+
+    def test_the_grace_is_ten_seconds_unless_a_test_says_otherwise(self):
+        self.assertEqual((bounded.TERM_GRACE_S, inspect.signature(bounded.run).parameters['term_grace'].default),
+                         (10, 10))
+
+    def test_an_interrupted_grace_still_kills_the_child(self):
+        Recording, sent, procs = self.recording_popen()
+
+        class InterruptedGrace(Recording):
+            def wait(self, timeout=None):
+                # The real 1 s timeout lets the child ignore SIGTERM; Ctrl-C then lands inside the grace.
+                if timeout == 30:
+                    raise KeyboardInterrupt
+                return super().wait(timeout)
+        with mock.patch.object(bounded.subprocess, 'Popen', InterruptedGrace), self.assertRaises(KeyboardInterrupt):
+            bounded.run(py('import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'),
+                        timeout=1, term_grace=30, join_grace=1)
+        self.assertEqual((sent, procs[0].returncode), (['TERM', 'KILL'], -signal.SIGKILL))
 
     def test_a_descendant_holding_the_pipe_does_not_hang_the_timeout(self):
         # #817 AI review: with --pipe the unit's processes keep our pipes open after systemd-run dies.

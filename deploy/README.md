@@ -429,6 +429,13 @@ The tools live in `deploy/release/` (Python 3.12+ stdlib):
 - `verify_payload.py` + `payload-probe.cjs` — unpacks into a new directory, checks the
   tree, then runs the read-only payload with an empty environment (SQLite, migrations
   twice, fest-print assets, every ops command loads, `dist/index.js` reaches `loadEnv`).
+- The app's side (`src/release/identity.ts`): at startup the bot reads `release.json` from
+  `realpath(dist/..)` once — `formatVersion` 1, `sourceSha` 40 hex, `platform.os/arch/libc` and `node.major`
+  of this process — and `/health` answers `{ "ok": true, "releaseSha": <sha|null> }` with that frozen value
+  (never re-read; a later switch of `current` does not change what a running process says). `.env`
+  `WBB_RELEASE_REQUIRED=true` makes a missing or invalid file a startup failure with the reason; the default
+  `false` (today's flat deploy has no `release.json`) gives `null`, with a warning only for an invalid file.
+  The stage В installer turns it on together with the move to the artifact layout.
 
 Host side, stage Ядро-2а (code only; nothing is installed on the host yet):
 
@@ -516,12 +523,14 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   `notifiedTxn`, `ackThrough` (holds acknowledged up to this SHA: a noop reached through the holds gate, or
   any settle — holds are read from the newest of settled and `ackThrough` that the target contains), the
   regression fence (`lastSeenSettled`, `regression{from,to}`), `notices` (UTC day per notice
-  key, kept 31 days) and `blocked` (txn, step, first alert time, alerts sent — the bot-down alert).
+  key, kept 31 days), `blocked` (txn, step, first alert time, alerts sent — the bot-down alert) and
+  `prepareRetry` (SHA, Transient preparations in a row, the last one's time; another SHA restarts it, any
+  other end of a preparation clears it).
 - `gates.py` — `admission(Inputs) -> Decision`: a pure function of facts the tick already read, by the
   spec §5 table for `timer` / `manual` / `force`. Kinds: `idle`, `wait`, `hold`, `refuse`, `admit`, and
   `need <field>` — a costly fact (ancestry, installed copies, the range's paths and PR labels, CI) is read
-  only when its gate is reached. Quiet 600 s and the abort backoff (1 h doubling per abort in a row, at most
-  24 h) are the timer's; PAUSED stops only the timer. An idle timer (up to date, noop, last failed SHA)
+  only when its gate is reached. Quiet 600 s, the abort backoff (1 h doubling per abort in a row, at most
+  24 h) and the prepare backoff (5 min doubling per Transient preparation in a row, at most 1 h) are the timer's; PAUSED stops only the timer. An idle timer (up to date, noop, last failed SHA)
   still reads the installed copies and reminds once a day when they are stale. Held paths: every installed
   copy, from ONE list `INSTALLED_COPIES` (`deploy/release/**`, `deploy/*.service|*.timer|*.path`,
   `deploy/sudoers.d/**`, `deploy/litestream.*`, `scripts/ops/host_patch_collect.py`,
@@ -536,8 +545,9 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   `gates.INSTALLED_COPIES`. `is_ancestor` answers False for a commit the private clone does not have and
   raises only when git cannot answer; a raise there or in `installed_stale` is a daily "cannot assess" wait,
   never exit 70. `fake_helpers.py` is the scripted test double (and `Clone`, a history that keeps that contract).
-- `prepare.py` — `prepare(helpers, sha, trusted, settled)`: download → publish → verify (candidate and settled)
-  → noop? → audit → probe → pre snapshot → trial → `Prepared(candidate, pre)`. Noop: both manifests are the
+- `prepare.py` — `prepare(helpers, sha, trusted, settled)`: verify the candidate — when its tree already
+  verifies against its receipt (an earlier tick published it) it is neither downloaded nor published again,
+  otherwise download → publish → verify — then verify settled → noop? → audit → probe → pre snapshot → trial → `Prepared(candidate, pre)`. Noop: both manifests are the
   bytes of their verified trees and their entries are equal without `release.json` — nothing is audited,
   probed or trialled. `Verdict` only for exit 1 with `AUDIT ADVISORY` / `PROBE FAILED` / `TRIAL FAILED` and the
   audited tree equal to the verified one; anything else (2, 70, 75, a word and a code that disagree, a helper
@@ -564,6 +574,13 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   `tick.make_env(mode, target)` builds it from the real adapters below on ONE clock (`host.now()`, which stamps
   `abort.at`, is the tick's `clock`); if building fails, a critical notice (once per UTC day, when notify was
   built) and exit 70 without running.
+- The operator's commands (never the timer), under the same lock (a busy lock: exit 1 after 30 s), as the
+  operator: `tick.py rearm --sha <sha>` clears `lastFailedSha` only when it is that SHA, and that SHA's abort
+  backoff (a verdict message still queued for it is kept, marked recorded, so no tick writes the SHA back;
+  the cleared abort is not counted again); `tick.py ack-baseline --from <sha>` clears the regression fence
+  only when its `from` is that SHA. Both refuse (exit 1, nothing changed) when nothing recorded names the SHA
+  or while a transaction is open, print what they changed, and log a `rearm` / `ack-baseline` evidence event
+  in `deploy-state.json`. Exit 4: a state not written; 70: internal (a broken `tick-state.json`).
 - The real adapters (stage Б-core; nothing is installed yet — stage В). Every command goes through
   `bounded.run` with a timeout and a fixed argv; a SHA is a full lowercase SHA and a snapshot a `trial`
   snapshot name before it reaches one. `installed.py` holds every path once.
@@ -591,6 +608,8 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   | `notify` | Telegram | `wbb-read-env` TELEGRAM_BOT_TOKEN / ADMIN_TELEGRAM_ID, POST `sendMessage`, 10 s, no redirects | bot user / operator |
 
   "As bot user" is merge-deploy's `sudo -n -u warsaw-beer-bot bash -lc '"$0" "$@"' <argv>` (argv positional).
+  A command past its timeout gets SIGTERM, then SIGKILL after `bounded.TERM_GRACE_S` (10 s): `sudo` relays
+  SIGTERM to the root process it started but cannot relay SIGKILL, which would leave that process orphaned.
   Exit codes: the root helper's 0 is done and 2 is `Refused` (Host) or `Run(2, …)` (Helpers); exit 1 is a
   `Run` only with this verb's verdict line for this SHA (Helpers) — sudo exits 1 for its own failures, so 1
   without the line, 64, 70, 75 and anything else are `HostError`/`HelperError`, never a verdict. `/health`

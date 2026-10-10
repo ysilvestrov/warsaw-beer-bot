@@ -9,7 +9,11 @@ rest is discarded, so the child is never blocked on a full pipe.
 
 Pipes can outlive the child: with systemd-run --pipe the unit's own processes hold them.
 Readers are daemon threads joined with a grace period, never forever, and the child is
-killed on any exception (a timeout, Ctrl-C) before the exception propagates.
+stopped on any exception before the exception propagates. A timeout stops it with SIGTERM
+first and SIGKILL only after TERM_GRACE_S (plan periphery-b2 "Рішення" п.6): the child is
+often `sudo`, which relays SIGTERM to the root process it started but cannot relay SIGKILL,
+so a bare kill would leave that process running as an orphan. Any other exception (Ctrl-C,
+which the terminal already delivers to the whole process group) kills at once.
 A CompletedProcess comes back as from subprocess.run, with `truncated` set when anything
 was dropped.
 """
@@ -20,6 +24,8 @@ import threading
 DEFAULT_CAP = 1024 * 1024
 DEFAULT_TAIL = 64 * 1024
 JOIN_GRACE_S = 5
+# After a timeout's SIGTERM, how long the child has to exit before SIGKILL.
+TERM_GRACE_S = 10
 MARK = b'\n[... output truncated ...]\n'
 
 
@@ -62,8 +68,22 @@ class _Drain:
         return bytes(self.head) + (MARK + end if self.dropped else end)
 
 
+def _terminate(proc, term_grace):
+    """SIGTERM, up to term_grace seconds for the child to exit, then SIGKILL; reaped either way."""
+    try:
+        proc.terminate()
+        proc.wait(timeout=term_grace)
+    except subprocess.TimeoutExpired:
+        pass
+    finally:
+        # Also when something interrupted the grace (Ctrl-C): the child never outlives the call.
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+
+
 def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None, stdin=subprocess.DEVNULL,
-        text=False, check=False, capture_output=True, join_grace=JOIN_GRACE_S):
+        text=False, check=False, capture_output=True, join_grace=JOIN_GRACE_S, term_grace=TERM_GRACE_S):
     """Like subprocess.run(argv, capture_output=True, ...) with bounded capture and bounded waiting."""
     del capture_output  # always captured; accepted so callers can pass subprocess.run's keywords
     if not (isinstance(cap, int) and cap >= 0 and isinstance(tail, int) and tail >= 1):
@@ -73,10 +93,16 @@ def run(argv, *, timeout, cap=DEFAULT_CAP, tail=DEFAULT_TAIL, cwd=None, env=None
     for d in drains:
         d.thread.start()
     try:
-        proc.wait(timeout=timeout)
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            _terminate(proc, term_grace)
+            raise
+        except BaseException:
+            proc.kill()
+            proc.wait()
+            raise
     except BaseException:
-        proc.kill()
-        proc.wait()
         for d in drains:
             d.thread.join(join_grace)
         raise

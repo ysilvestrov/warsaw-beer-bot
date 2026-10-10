@@ -37,26 +37,26 @@
 
 **Files:** `src/config/env.ts` (+ тест), новий `src/release/identity.ts` (+ тест), `src/api/index.ts` (+ тест `/health`), `src/index.ts` (читання на старті), `.env.example`.
 
-- [ ] Ключ і схема (Рішення п.1). Модуль ідентичності (п.2) з інжектованим коренем і `fs` для тестів; тести: валідний, відсутній, невалідний JSON, чужа платформа, інший major Node, `formatVersion` інший — у режимах required/не required.
-- [ ] `/health` повертає заморожене значення (п.3); тест, що зміна файлу після старту не міняє відповідь.
+- [x] Ключ і схема (Рішення п.1). Модуль ідентичності (п.2) з інжектованим коренем і `fs` для тестів; тести: валідний, відсутній, невалідний JSON, чужа платформа, інший major Node, `formatVersion` інший — у режимах required/не required.
+- [x] `/health` повертає заморожене значення (п.3); тест, що зміна файлу після старту не міняє відповідь.
 
 ### Task 2: `tick.py rearm` і `ack-baseline`
 
 **Files:** `deploy/release/tick.py`, `test_tick.py`.
 
-- [ ] За Рішенням п.4; тести: rearm на інший SHA — відмова без змін; rearm знімає `abort` того SHA; ack-baseline з парою, що не збігається, — відмова; обидва під lock (зайнятий lock — відмова з кодом 1).
+- [x] За Рішенням п.4; тести: rearm на інший SHA — відмова без змін; rearm знімає `abort` того SHA; ack-baseline з парою, що не збігається, — відмова; обидва під lock (зайнятий lock — відмова з кодом 1).
 
 ### Task 3: пропуск download/publish і backoff транзієнтів
 
 **Files:** `deploy/release/prepare.py`, `tick.py`, `tick_state.py`, `gates.py` + тести.
 
-- [ ] За Рішенням п.5. Тести: receipt є — `download`/`publish` не викликаються; транзієнт двічі — другий повтор лише через 10 хв; новий SHA скидає backoff; успіх скидає.
+- [x] За Рішенням п.5. Тести: receipt є — `download`/`publish` не викликаються; транзієнт двічі — другий повтор лише через 10 хв; новий SHA скидає backoff; успіх скидає.
 
 ### Task 4: `bounded.run` — SIGTERM спершу; документи
 
 **Files:** `deploy/release/bounded.py`, `test_bounded.py`; `spec.md` §5.9 і `/health`; `deploy/README.md`.
 
-- [ ] За Рішенням п.6. Тест: дочірній процес, що ловить SIGTERM і пише маркер, отримує його до SIGKILL; процес, що ігнорує SIGTERM, гине через `TERM_GRACE_S`.
+- [x] За Рішенням п.6. Тест: дочірній процес, що ловить SIGTERM і пише маркер, отримує його до SIGKILL; процес, що ігнорує SIGTERM, гине через `TERM_GRACE_S`.
 
 ---
 
