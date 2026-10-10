@@ -20,7 +20,7 @@ FULL = TickState(
     last_seen_settled=B, regression=Regression(A, B),
     notices={'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
     blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1), ack_through=A,
-    pending_verdict='wbb-deploy refused aaaaaaa: PROBE FAILED',
+    pending_verdicts=(ts.Verdict(A, 'wbb-deploy refused aaaaaaa: PROBE FAILED', True),),
 )
 # The file FULL is, written out by hand (canonical: sorted keys, no whitespace).
 FULL_JSON = {
@@ -34,7 +34,7 @@ FULL_JSON = {
     'notices': {'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
     'blocked': {'txn': TXN2, 'step': 'rolling-back/start-baseline', 'at': 1760000200, 'alerts': 1},
     'ackThrough': A,
-    'pendingVerdict': 'wbb-deploy refused aaaaaaa: PROBE FAILED',
+    'pendingVerdicts': [{'sha': A, 'text': 'wbb-deploy refused aaaaaaa: PROBE FAILED', 'recorded': True}],
 }
 
 
@@ -104,7 +104,12 @@ class Files(Tmp):
             'blocked without step': (json.dumps(dict(FULL_JSON, blocked=dict(FULL_JSON['blocked'], step=''))).encode(),
                                      'tick-state.blocked.step: not a non-empty string'),
             'short ack': (json.dumps(dict(FULL_JSON, ackThrough='abc')).encode(), 'ackThrough: not a full lowercase SHA'),
-            'empty verdict': (json.dumps(dict(FULL_JSON, pendingVerdict='')).encode(), 'pendingVerdict: not a non-empty string'),
+            'empty verdict': (json.dumps(dict(FULL_JSON, pendingVerdicts=[{'sha': A, 'text': '', 'recorded': True}])).encode(),
+                              r'pendingVerdicts\[0\]\.text: not a non-empty string'),
+            'verdict flag': (json.dumps(dict(FULL_JSON, pendingVerdicts=[{'sha': A, 'text': 'x', 'recorded': 1}])).encode(),
+                             r'pendingVerdicts\[0\]\.recorded: not a boolean'),
+            'too many verdicts': (json.dumps(dict(FULL_JSON, pendingVerdicts=[{'sha': A, 'text': 'x', 'recorded': True}] * 11)).encode(),
+                                  'pendingVerdicts: not a tuple of at most 10 Verdict'),
             'bad txn': (json.dumps(dict(FULL_JSON, notifiedTxn='x')).encode(), 'notifiedTxn: not a 32-hex'),
             'bad day': (json.dumps(dict(FULL_JSON, notices={'hold': '2026-02-30'})).encode(),
                         'notices.hold: not a YYYY-MM-DD day'),

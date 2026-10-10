@@ -235,10 +235,22 @@ class _Tick:
         if self.timer and tick_state.notice_due(self.ts, key, day, repeat) and self.send(text):
             self.save(tick_state.noted(self.ts, key, day))
 
-    def flush_verdict(self):
-        """Send a verdict message a previous tick persisted but could not deliver; clear it once sent."""
-        if self.ts.pending_verdict is not None and self.send(self.ts.pending_verdict):
-            self.save(self.ts.replace(pending_verdict=None))
+    def record_verdicts(self):
+        """Finish lastFailedSha for every queued verdict whose engine-state write may not have landed."""
+        for v in self.ts.pending_verdicts:
+            if not v.recorded:
+                state = self.store.load()
+                if state is not None and state.phase == 'settled' and state.last_failed_sha != v.sha:
+                    self.store.save(state.replace(last_failed_sha=v.sha))
+                self.save(self.ts.replace(pending_verdicts=tuple(
+                    tick_state.Verdict(x.sha, x.text, True) if x is v else x for x in self.ts.pending_verdicts)))
+
+    def flush_verdicts(self):
+        """Send queued verdict messages oldest first; each leaves the queue only once it went out."""
+        while self.ts.pending_verdicts and self.ts.pending_verdicts[0].recorded:
+            if not self.send(self.ts.pending_verdicts[0].text):
+                return
+            self.save(self.ts.replace(pending_verdicts=self.ts.pending_verdicts[1:]))
 
     def paused(self):
         return os.path.exists(self.env.path('PAUSED'))
@@ -485,7 +497,8 @@ class _Tick:
         code = self.engine(out)
         if code is not None:
             return code
-        self.flush_verdict()
+        self.record_verdicts()
+        self.flush_verdicts()
         if self.timer and self.paused():
             self.say('paused (PAUSED exists); no new deploy')
             return 0
@@ -530,14 +543,17 @@ class _Tick:
         if isinstance(got, pp.Verdict):
             # The only verdict the tick itself writes: exit 1 with its verdict word (prepare, plan "Рішення" п.3).
             text = f'⛔ wbb-deploy refused {_short(sha)}: {got.step.upper()} {got.kind}\n{got.text}'
-            text += f'\n{got.note}' if got.note else ''
-            # (#827 AI review) once lastFailedSha is written no later tick prepares this SHA again, so the
-            # message is persisted first and cleared only after it went out: a failed notify is retried by
-            # the next tick, never lost. The note (a pre that could not be discarded) goes with it.
-            self.save(self.ts.replace(pending_verdict=text))
-            self.store.save(self.store.load().replace(last_failed_sha=sha))
+            text = cut(text + (f'\n{got.note}' if got.note else ''))
             self.say(text)
-            self.flush_verdict()
+            # (#827 AI review) lastFailedSha stops this SHA from being prepared again, so its message must
+            # outlive a failed notify: queued first (cut, so the file stays bounded), then the verdict is
+            # written to the engine's state, then marked recorded — a tick that died in between finishes
+            # that write before anything else (flush_verdicts). Queued, not overwritten: a later verdict
+            # never replaces one still undelivered.
+            queue = self.ts.pending_verdicts + (tick_state.Verdict(sha, text, False),)
+            self.save(self.ts.replace(pending_verdicts=queue[-tick_state.MAX_PENDING_VERDICTS:]))
+            self.record_verdicts()
+            self.flush_verdicts()
             return 1
         if isinstance(got, pp.Transient):
             note = f'\n{got.note}' if got.note else ''
@@ -605,7 +621,12 @@ def _busy(env, lock_path):
         # lock must not both send the once-a-day notice.
         fd = os.open(env.path('lock-notice.lock'), os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                # Another tick is sending this very notice right now; never wait on it (#827 AI review).
+                env.out(f'another process holds the lock ({held} s); exiting')
+                return
             try:
                 with open(notice_path, encoding='ascii') as f:
                     last = f.read().strip()

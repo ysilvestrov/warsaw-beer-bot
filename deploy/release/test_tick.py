@@ -505,6 +505,44 @@ class Verdicts(Base):
         self.assertEqual(self.notes, [text, text])
         self.assertEqual(self.store.load(), SETTLED_STATE.replace(last_failed_sha=CAND))
 
+    def queued(self, *verdicts):
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        tick_state.TickState(pending_verdicts=tuple(verdicts)))
+
+    def test_a_new_verdict_queues_behind_one_still_undelivered(self):
+        # #827 AI review, second pass: a single slot let the next verdict overwrite the undelivered one.
+        os.makedirs(self.dir, exist_ok=True)
+        self.queued(tick_state.Verdict(OTHER, '⛔ older verdict', True))
+        self.h = self.helpers(probe=Run(1, 'FAILED', 'PROBE FAILED: ABI 137 != 127'))
+        self.notify_ok = False
+        self.quiet()
+        self.assertEqual(self.tick(), 1)
+        self.notify_ok = True
+        self.notes.clear()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.notes, ['⛔ older verdict',
+                                      '⛔ wbb-deploy refused ccccccc: PROBE FAILED\nPROBE FAILED: ABI 137 != 127'])
+
+    def test_a_verdict_whose_engine_write_never_landed_is_finished_before_anything_else(self):
+        # #827 AI review, second pass: the message is queued before lastFailedSha is written; a tick that died
+        # between the two left the gates unaware. The next tick writes it, sends, and never prepares the SHA.
+        os.makedirs(self.dir, exist_ok=True)
+        self.queued(tick_state.Verdict(CAND, '⛔ refused ccccccc', False))
+        self.h = self.helpers()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual((self.store.load(), self.notes), (SETTLED_STATE.replace(last_failed_sha=CAND),
+                                                           ['⛔ refused ccccccc']))
+        self.assertEqual('download' in self.h.names(), False)
+
+    def test_a_huge_verdict_is_cut_before_it_is_kept(self):
+        # #827 AI review, second pass: the tick-state file is refused over 1 MiB; the queued text is cut first.
+        self.h = self.helpers(probe=Run(1, 'FAILED', 'PROBE FAILED: ' + 'x' * (2 << 20)))
+        self.notify_ok = False
+        self.quiet()
+        self.assertEqual(self.tick(), 1)
+        self.assertEqual(len(tick_state.load(os.path.join(self.dir, tick_state.STATE_NAME)).pending_verdicts[0].text),
+                         tick.NOTIFY_LIMIT + len('\n… truncated'))
+
     def test_a_verdict_carries_the_note_of_a_pre_that_could_not_be_discarded(self):
         self.h = self.helpers(trial=Run(1, 'FAILED', 'TRIAL FAILED: migrate: no such table'),
                               discard_pre=HelperError('sudo: unable to remove'))
@@ -835,6 +873,18 @@ class Lock(Base):
         self.assertEqual(self.notes, ['⚠️ wbb-deploy: the deploy lock has been held for 35 min — no tick can run. '
                                       f'A stuck manual deploy? Check: fuser -v {self.dir}/lock'])
         self.assertEqual((h.calls, self.store.load()), ([], SETTLED_STATE))
+
+    def test_a_busy_notice_another_tick_is_sending_is_not_waited_for(self):
+        # #827 AI review, second pass: the notice's own lock is taken without waiting.
+        self.hold()
+        fd = os.open(os.path.join(self.dir, 'lock-notice.lock'), os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.addCleanup(os.close, fd)
+        self.world.now = T0
+        self.assertEqual(self.tick(helpers=FakeHelpers()), 0)
+        self.world.now = T0 + 2100
+        self.assertEqual(self.tick(helpers=FakeHelpers()), 0)
+        self.assertEqual(self.notes, [])
 
     def test_a_busy_record_older_than_two_stall_periods_starts_afresh(self):
         self.hold()

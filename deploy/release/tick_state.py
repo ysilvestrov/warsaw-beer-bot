@@ -27,8 +27,9 @@ claims, and its evidence (plan, "заявка → доказ"):
                          observes; holds are read from the newest of settled and ackThrough that the target
                          contains (stage A review S1: a held range that was a noop otherwise held forever)
   notices {key: day}     the UTC day a standing condition was last reported under this key
-  pendingVerdict         the message of a verdict the tick wrote but could not deliver yet (#827 AI review):
-                         lastFailedSha stops the SHA from being prepared again, so the next tick sends this
+  pendingVerdicts [{sha, text, recorded}]  verdict messages not delivered yet, oldest first (#827 AI review):
+                         lastFailedSha stops a SHA from being prepared again, so each message waits here until
+                         sent; `recorded` says lastFailedSha already landed in the engine's state
 
 A missing file is a first tick (None). An empty, non-JSON, other-version or schema-breaking file is a
 StateError, never a blank slate: a blank slate would forget a regression fence.
@@ -132,6 +133,54 @@ class Noop(ds._Record):
     _SPEC = (('sha', 'sha', _SHA_KIND), ('settled_sha', 'settledSha', _SHA_KIND))
 
 
+class _Flag(ds._Kind):
+    def check(self, v, where):
+        if not isinstance(v, bool):
+            ds._fail(where, f'not a boolean: {v!r}')
+
+
+class _Records(ds._Kind):
+    """A tuple of records of one class (JSON: a list), at most `limit` of them."""
+    def __init__(self, cls, limit):
+        self.cls, self.limit = cls, limit
+
+    def check(self, v, where):
+        if not isinstance(v, tuple) or len(v) > self.limit:
+            ds._fail(where, f'not a tuple of at most {self.limit} {self.cls.__name__}: {v!r}')
+        for i, r in enumerate(v):
+            if not isinstance(r, self.cls):
+                ds._fail(f'{where}[{i}]', f'not a {self.cls.__name__}: {r!r}')
+
+    def load(self, v, where):
+        if not isinstance(v, list):
+            ds._fail(where, f'not a list: {v!r}')
+        out = tuple(self.cls.from_json(r, f'{where}[{i}]') for i, r in enumerate(v))
+        self.check(out, where)
+        return out
+
+    def dump(self, v):
+        return [r.to_json() for r in v]
+
+
+@dataclass(frozen=True)
+class Verdict(ds._Record):
+    """A verdict the tick wrote, with its message, until the message went out (#827 AI review).
+
+    `recorded` is False from the moment the message is persisted until lastFailedSha is in the engine's
+    state: the two live in different files, and a tick that died between them must finish the second
+    write, not send a verdict the gates do not know.
+    """
+    sha: str
+    text: str
+    recorded: bool
+    _SPEC = (('sha', 'sha', _SHA_KIND), ('text', 'text', ds._Text()), ('recorded', 'recorded', _Flag()))
+
+
+# Undelivered verdict messages kept at once (each at most NOTIFY_LIMIT characters): a bound on the file,
+# far above what a broken notify could pile up — every verdict needs a new main SHA that fails.
+MAX_PENDING_VERDICTS = 10
+
+
 @dataclass(frozen=True)
 class Regression(ds._Record):
     from_sha: str
@@ -150,7 +199,7 @@ class TickState(ds._Record):
     notices: MappingProxyType = MappingProxyType({})
     blocked: Blocked | None = None
     ack_through: str | None = None
-    pending_verdict: str | None = None
+    pending_verdicts: tuple = ()
     _SPEC = (
         ('main_seen', 'mainSeen', ds._Opt(ds._Rec(Seen))),
         ('noop', 'noop', ds._Opt(ds._Rec(Noop))),
@@ -161,7 +210,7 @@ class TickState(ds._Record):
         ('notices', 'notices', _Notices()),
         ('blocked', 'blocked', ds._Opt(ds._Rec(Blocked))),
         ('ack_through', 'ackThrough', ds._Opt(_SHA_KIND)),
-        ('pending_verdict', 'pendingVerdict', ds._Opt(ds._Text())),
+        ('pending_verdicts', 'pendingVerdicts', _Records(Verdict, MAX_PENDING_VERDICTS)),
     )
 
     def __post_init__(self):
