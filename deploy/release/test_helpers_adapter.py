@@ -222,6 +222,16 @@ class Download(unittest.TestCase):
         self.assertEqual(self.got, [(tg.REPO, 11602159138, 257 * 1024 * 1024)])
         self.assertEqual(os.listdir(os.path.dirname(path)), [f'{tg.SHA}.zip'])
 
+    def test_a_left_over_partial_is_made_private(self):
+        # #828 AI review: O_CREAT keeps the mode of a file that already exists.
+        os.mkdir(os.path.join(self.data, 'artifacts'), 0o700)
+        part = os.path.join(self.data, 'artifacts', f'{tg.SHA}.zip.partial')
+        with open(part, 'wb'):
+            pass
+        os.chmod(part, 0o644)
+        path = self.helpers().download(tg.SHA, self.trusted)
+        self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
+
     def test_a_failed_download_leaves_nothing_and_its_untrusted_passes_through(self):
         with self.assertRaisesRegex(gt.Untrusted, '^artifact storage returned 403$'):
             self.helpers(exc=gt.Untrusted('artifact storage returned 403')).download(tg.SHA, self.trusted)
@@ -411,7 +421,8 @@ class RealClone(unittest.TestCase):
         self.first = self.head()
         git(self.repo, 'commit', '-q', '--allow-empty', '-m', 'two')
         git(self.repo, 'update-ref', 'refs/remotes/origin/main', 'HEAD')
-        self.h = hpa.RealHelpers(self.data, run=bounded.run, locate=self.locate)
+        self.h = hpa.RealHelpers(self.data, run=bounded.run, locate=self.locate, installed_owner=os.geteuid(),
+                                 lib_dir=os.path.join(self.inst, 'deploy', 'release'))
 
     def head(self):
         return subprocess.run(['git', '-C', self.repo, 'rev-parse', 'HEAD'], check=True, capture_output=True,
@@ -425,6 +436,8 @@ class RealClone(unittest.TestCase):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         with open(dest, 'wb') as f:
             f.write(data)
+        os.chmod(dest, 0o644)
+        return dest
 
     def test_ancestry_in_a_real_clone(self):
         main = self.head()
@@ -453,6 +466,36 @@ class RealClone(unittest.TestCase):
     def test_only_files_of_the_given_patterns_are_compared(self):
         self.install('deploy/release/tick.py', self.files['deploy/release/tick.py'])
         self.assertIsNone(self.h.installed_stale(('deploy/release/**',)))
+
+    def test_a_right_copy_others_could_rewrite_is_stale(self):
+        # #828 AI review: what sudo runs must be closed to writes by anyone but its owner.
+        os.chmod(self.install('deploy/db-snapshot.sh', self.files['deploy/db-snapshot.sh']), 0o664)
+        self.assertEqual(self.h.installed_stale(('deploy/db-snapshot.sh',)),
+                         'STALE: 1 installed file(s) differ from origin/main:\n'
+                         f'  deploy/db-snapshot.sh ({self.inst}/deploy/db-snapshot.sh is not {os.geteuid()}-owned and '
+                         'closed to group/other writes)')
+
+    def test_a_right_copy_of_another_owner_is_stale(self):
+        self.install('deploy/db-snapshot.sh', self.files['deploy/db-snapshot.sh'])
+        h = hpa.RealHelpers(self.data, run=bounded.run, locate=self.locate, installed_owner=os.geteuid() + 1,
+                            lib_dir=os.path.join(self.inst, 'deploy', 'release'))
+        self.assertEqual(h.installed_stale(('deploy/db-snapshot.sh',)).splitlines()[1],
+                         f'  deploy/db-snapshot.sh ({self.inst}/deploy/db-snapshot.sh is not {os.geteuid() + 1}-owned '
+                         'and closed to group/other writes)')
+
+    def test_a_symlink_in_place_of_a_copy_is_stale(self):
+        real = self.install('deploy/elsewhere.sh', self.files['deploy/db-snapshot.sh'])
+        os.symlink(real, os.path.join(self.inst, 'deploy', 'db-snapshot.sh'))
+        self.assertEqual(self.h.installed_stale(('deploy/db-snapshot.sh',)).splitlines()[1],
+                         f'  deploy/db-snapshot.sh ({self.inst}/deploy/db-snapshot.sh is a symlink)')
+
+    def test_a_library_file_main_no_longer_has_is_stale(self):
+        # #828 AI review: a module deleted from the repository kept running from its installed copy.
+        self.install('deploy/release/tick.py', self.files['deploy/release/tick.py'])
+        gone = self.install('deploy/release/old_helper.py', b'print(0)\n')
+        self.assertEqual(self.h.installed_stale(('deploy/release/**',)),
+                         'STALE: 1 installed file(s) differ from origin/main:\n'
+                         f'  {gone} (installed, but nothing in origin/main installs it)')
 
     def test_a_copy_that_cannot_be_read_is_cannot_assess(self):
         os.makedirs(os.path.join(self.inst, 'deploy', 'db-snapshot.sh'))

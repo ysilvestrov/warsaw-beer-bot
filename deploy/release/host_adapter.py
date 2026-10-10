@@ -234,6 +234,7 @@ class RealHost:
             with self._urlopen(url, timeout=HEALTH_TIMEOUT_S) as resp:
                 body = resp.read(HEALTH_MAX_BYTES + 1)
         except urllib.error.HTTPError as e:
+            e.close()  # #828 AI review: the error carries the open response; a probe a minute must not leak it
             raise HostError(f'/health: HTTP {e.code}') from None
         except (OSError, http.client.HTTPException, ValueError) as e:
             raise HostError(f'/health: {type(e).__name__}') from None

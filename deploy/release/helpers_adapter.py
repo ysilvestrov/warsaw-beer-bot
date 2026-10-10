@@ -22,6 +22,7 @@ else (64, 70, 75, a signal, sudo's 1 without our line) is HelperError. The GitHu
 in output or in an exception: it goes from `gh auth token` straight into GitHubApi.
 """
 import json
+import errno
 import os
 import re
 import stat
@@ -94,9 +95,11 @@ def parse_run(verb, sha, result):
 
 class RealHelpers:
     def __init__(self, data_dir, run=bounded.run, api_factory=gt.GitHubApi, clock=time.time, roots=PRODUCTION_ROOTS,
-                 snapshot_root=SNAPSHOT_ROOT, db=ins.DB_PATH, locate=ins.installed_path, repo=gt.REPO):
+                 snapshot_root=SNAPSHOT_ROOT, db=ins.DB_PATH, locate=ins.installed_path, repo=gt.REPO,
+                 installed_owner=0, lib_dir=ins.LIB_DIR):
         self._repo_dir = os.path.join(data_dir, 'repo')
         self._artifacts = os.path.join(data_dir, 'artifacts')
+        self._installed_owner, self._lib_dir = installed_owner, lib_dir
         self._run, self._api_factory, self._clock = run, api_factory, clock
         self._roots, self._snapshots, self._db, self._locate, self._repo = roots, snapshot_root, db, locate, repo
         self._api = None
@@ -181,6 +184,8 @@ class RealHelpers:
         try:
             fd = os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
             with os.fdopen(fd, 'wb') as f:
+                # #828 AI review: a left-over .partial keeps its old mode through O_CREAT; the ZIP is private.
+                os.fchmod(f.fileno(), 0o600)
                 api.download(trusted.repo, trusted.artifact_id, f, ZipCaps().zip_bytes)
             os.replace(part, path)
         except BaseException:
@@ -260,6 +265,21 @@ class RealHelpers:
         self._as_bot([ins.SNAPSHOT_BIN, 'discard', pre.path], SMALL_TIMEOUT_S, 'discard')
 
     # --- installed copies -----------------------------------------------------------------------------------------
+    def _orphans(self, paths):
+        """Files in LIB_DIR that no file of origin/main installs there (#828 AI review: a module deleted from the
+        repository keeps running from its old installed copy). Other destinations (/etc/...) are shared with other
+        software and cannot be listed as ours; the installer removes what it stops installing (stage В)."""
+        if not os.path.isdir(self._lib_dir):
+            return []
+        wanted = {self._locate(p) for p in paths}
+        out = []
+        for root, _, names in os.walk(self._lib_dir):
+            for name in names:
+                full = os.path.join(root, name)
+                if full not in wanted and '__pycache__' not in full.split(os.sep):
+                    out.append(f'{full} (installed, but nothing in {REF} installs it)')
+        return sorted(out)
+
     def installed_stale(self, patterns):
         listing = _whole(self._git('ls-tree', '-r', '-z', '--name-only', REF), 'git ls-tree')
         paths = [p.decode('utf-8', 'surrogateescape') for p in listing.split(b'\0') if p]
@@ -270,15 +290,28 @@ class RealHelpers:
                 continue
             want = _whole(self._git('show', f'{REF}:{path}'), f'git show {path}')
             try:
-                with open(dest, 'rb') as f:
-                    got = f.read(len(want) + 1)
+                fd = os.open(dest, os.O_RDONLY | os.O_NOFOLLOW)
             except FileNotFoundError:
                 stale.append(f'{path} (not installed at {dest})')
                 continue
             except OSError as e:
+                if e.errno == errno.ELOOP:
+                    stale.append(f'{path} ({dest} is a symlink)')
+                    continue
                 raise HelperError(f'{dest}: {type(e).__name__}: {e.strerror}') from None
-            if got != want:
+            try:
+                with os.fdopen(fd, 'rb') as f:
+                    st = os.fstat(f.fileno())
+                    got = f.read(len(want) + 1)
+            except OSError as e:
+                raise HelperError(f'{dest}: {type(e).__name__}: {e.strerror}') from None
+            # #828 AI review: the right bytes in a file the operator could rewrite later are not an installed
+            # copy — what sudo runs must be root's and writable by nobody else.
+            if st.st_uid != self._installed_owner or st.st_mode & 0o022:
+                stale.append(f'{path} ({dest} is not {self._installed_owner}-owned and closed to group/other writes)')
+            elif got != want:
                 stale.append(path)
+        stale += self._orphans(paths)
         if not stale:
             return None
         return f'STALE: {len(stale)} installed file(s) differ from {REF}:\n' + '\n'.join(f'  {s}' for s in stale)
