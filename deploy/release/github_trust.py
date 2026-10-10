@@ -32,7 +32,18 @@ DIGEST = re.compile(r'sha256:([0-9a-f]{64})')
 
 
 class Untrusted(Exception):
-    pass
+    """Not trusted: anything missing, mistyped, ambiguous or unreachable. On its own it says nothing about the
+    CI run itself — a transport error, a 5xx, no token or a partial listing raise it too."""
+
+
+class NoRunYet(Untrusted):
+    """No completed push run of the workflow for this SHA is listed (yet): CI has not concluded."""
+
+
+class RunFailed(Untrusted):
+    """A verdict on CI (stage A review S2): the run for this SHA, otherwise the trusted one, concluded
+    unsuccessfully, or a required job of its attempt completed unsuccessfully (failure, skipped, cancelled …).
+    The only Untrusted a caller may read as "CI failed"; every other one is "cannot tell"."""
 
 
 @dataclass(frozen=True)
@@ -97,9 +108,14 @@ def run_problems(run, repo, sha):
 def select_run(runs_json, repo, sha):
     runs = _items(runs_json, 'workflow_runs')
     trusted = [r for r in runs if not run_problems(r, repo, sha)]
+    if not runs:
+        raise NoRunYet(f'no trusted CI run for {sha}')
     if not trusted:
         why = '; '.join(f'run {_get(r, "id", object)}: {", ".join(run_problems(r, repo, sha))}' for r in runs[:5])
-        raise Untrusted(f'no trusted CI run for {sha}' + (f' ({why})' if why else ''))
+        # A run that would be the trusted one but for its conclusion is CI's verdict (stage A review S2).
+        failed = any(run_problems(r, repo, sha) == [f'conclusion={_get(r, "conclusion", object)!r}']
+                     and isinstance(_get(r, 'conclusion', object), str) for r in runs)
+        raise (RunFailed if failed else Untrusted)(f'no trusted CI run for {sha} ({why})')
     if len(trusted) > 1:
         raise Untrusted(f'{len(trusted)} trusted CI runs for {sha}: {sorted(r["id"] for r in trusted)}; refusing to choose')
     return trusted[0]
@@ -117,7 +133,9 @@ def check_jobs(jobs_json, run_id, attempt):
             raise Untrusted(f'run {run_id} attempt {attempt}: {name!r} job belongs to '
                             f'run {_get(job, "run_id", object)} attempt {_get(job, "run_attempt", object)}')
         if _get(job, 'status', str) != 'completed' or _get(job, 'conclusion', str) != 'success':
-            raise Untrusted(f'run {run_id} attempt {attempt}: {name!r} is '
+            # Completed with another conclusion is CI's verdict; anything else is not (stage A review S2).
+            done = _get(job, 'status', str) == 'completed' and _get(job, 'conclusion', str) is not None
+            raise (RunFailed if done else Untrusted)(f'run {run_id} attempt {attempt}: {name!r} is '
                             f'{_get(job, "status", object)}/{_get(job, "conclusion", object)}')
 
 

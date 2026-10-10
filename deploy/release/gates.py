@@ -70,8 +70,9 @@ class CommitPrs:
 
 @dataclass(frozen=True)
 class Ci:
-    """CI of the target: pass (a trusted run, `trusted` is github_trust.Trusted), pending (no trusted run
-    yet), failed (the run exists and failed: `detail` says how), unreadable (GitHub did not answer)."""
+    """CI of the target: pass (a trusted run, `trusted` is github_trust.Trusted), pending (no run listed yet),
+    failed (CI's own verdict, github_trust.RunFailed: `detail` says how), unreadable (anything else: GitHub did
+    not answer, no token, a partial listing … — stage A review S2)."""
     kind: str
     detail: str = ''
     trusted: object = None

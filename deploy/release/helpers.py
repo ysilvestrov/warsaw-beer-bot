@@ -52,7 +52,9 @@ class Helpers(Protocol):
         """gates.Pr for every PR that contains the commit."""
 
     def trusted(self, sha: str):
-        """github_trust.fetch_trusted for sha: a Trusted, or github_trust.Untrusted."""
+        """github_trust.fetch_trusted for sha: a Trusted, or it raises (stage A review S2). github_trust.RunFailed
+        is CI's verdict and github_trust.NoRunYet "no run yet"; any other exception, Untrusted included, means
+        only that CI could not be read now."""
 
     def download(self, sha: str, trusted) -> str:
         """The artifact ZIP of trusted, downloaded into an operator-private file; returns its path."""

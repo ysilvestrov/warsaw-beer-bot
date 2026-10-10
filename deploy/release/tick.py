@@ -51,7 +51,7 @@ import prepare as pp  # noqa: E402
 import tick_state  # noqa: E402
 from activate import HostError  # noqa: E402
 from gates import UNREAD, Ci, CommitPrs, Inputs  # noqa: E402
-from github_trust import Untrusted  # noqa: E402
+from github_trust import NoRunYet, RunFailed  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 from tick_state import Blocked, TickState  # noqa: E402
 
@@ -124,17 +124,20 @@ def cut(text):
 
 
 def ci_of(helpers, sha):
-    """gates.Ci from Helpers.trusted: no run at all yet is pending, any other Untrusted reason is failed, a
-    failure to ask is unreadable — never a pass."""
+    """gates.Ci from Helpers.trusted (stage A review S2): failed only for CI's own verdict (github_trust.RunFailed),
+    pending only when no run is listed yet (NoRunYet); any other Untrusted — a 5xx, no token, a partial listing,
+    an expired artifact — and any other exception is unreadable: the tick waits and says so once a day. Never a
+    pass without a Trusted."""
     try:
         answer = helpers.trusted(sha)
-    except Untrusted as e:
-        answer = e
+        if isinstance(answer, BaseException):
+            raise answer
+    except RunFailed as e:
+        return Ci('failed', str(e))
+    except NoRunYet as e:
+        return Ci('pending', str(e))
     except Exception as e:
         return Ci('unreadable', f'{type(e).__name__}: {e}')
-    if isinstance(answer, Untrusted):
-        text = str(answer)
-        return Ci('pending', text) if text == f'no trusted CI run for {sha}' else Ci('failed', text)
     return Ci('pass', trusted=answer)
 
 

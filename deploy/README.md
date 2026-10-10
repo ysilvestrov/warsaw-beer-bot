@@ -434,6 +434,9 @@ Host side, stage Ядро-2а (code only; nothing is installed on the host yet):
 
 - `github_trust.py` — which CI run and artifact may stand for a SHA (trusted run metadata,
   same-attempt `package`/`ci`, run-scoped artifact with a `digest`); token only to api.github.com.
+  A refusal is `Untrusted`; only its `RunFailed` (the run or a required job concluded unsuccessfully) is CI's
+  verdict and `NoRunYet` "no run listed yet" — any other refusal (5xx, no token, partial listing) the tick
+  reads as "cannot read CI", a wait.
 - `zip_admission.py` — ZIP sha256 equals the trusted digest; exactly the two files; streamed sizes.
 - `publish.py` / `wbb_release.py publish|verify` — private copy, checks, `releases/<sha>` by one
   rename, then the 0600 receipt; `verify` re-checks a tree against its receipt without network.

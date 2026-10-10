@@ -4,13 +4,16 @@ Plan: docs/superpowers/plans/2026-10/2026-10-10-wbb-artifact-deployment-2c-perip
 the World's: nothing here sleeps for real, a window of 600 s is a loop of host.sleep calls.
 """
 import contextlib
+import email.message
 import fcntl
 import hashlib
 import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+import urllib.error
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -24,7 +27,9 @@ from deploy_state import Pre, Release, Settled, State  # noqa: E402
 from fake_helpers import FakeHelpers  # noqa: E402
 from fake_host import BOOT_A, PRE_DB, T0, Crash, FakeHost, MemoryStore, World  # noqa: E402
 from gates import Ci, Pr  # noqa: E402
-from github_trust import Untrusted  # noqa: E402
+import github_trust as gt  # noqa: E402
+import test_github_trust as tg  # noqa: E402
+from github_trust import NoRunYet, Untrusted  # noqa: E402
 from helpers import HelperError, Run  # noqa: E402
 from tick_state import Abort, Blocked, Noop, Regression, Seen, TickState  # noqa: E402
 
@@ -426,7 +431,7 @@ class AckThrough(Base):
 
     def test_an_acknowledged_noop_does_not_hold_the_next_merge(self):
         heads = [CAND]
-        self.h = self.noop_helpers(heads, trusted=lambda sha: TRUSTED if sha == CAND else Untrusted(
+        self.h = self.noop_helpers(heads, trusted=lambda sha: TRUSTED if sha == CAND else NoRunYet(
             f'no trusted CI run for {sha}'))
         self.assertEqual(self.tick('manual', ack=(HELD,)), 0)
         self.assertEqual((self.ts().noop, self.ts().ack_through), (Noop(CAND, OLD), CAND))
@@ -601,19 +606,60 @@ class Pieces(unittest.TestCase):
         self.assertEqual(tick.cut('є' * 3500), 'є' * 3500)
         self.assertEqual(tick.cut('є' * 3501), 'є' * 3500 + '\n… truncated')
 
-    def test_ci_of(self):
+    def test_ci_of_a_scripted_answer(self):
         cases = {
             'pass': (TRUSTED, Ci('pass', trusted=TRUSTED)),
-            'no run yet': (Untrusted(f'no trusted CI run for {CAND}'), Ci('pending', f'no trusted CI run for {CAND}')),
-            'failed run': (Untrusted(f"no trusted CI run for {CAND} (run 7: conclusion='failure')"),
-                           Ci('failed', f"no trusted CI run for {CAND} (run 7: conclusion='failure')")),
-            'returned untrusted': (Untrusted('run 7 attempt 1: \'package\' is completed/failure'),
-                                   Ci('failed', 'run 7 attempt 1: \'package\' is completed/failure')),
+            'no run yet': (NoRunYet('no trusted CI run'), Ci('pending', 'no trusted CI run')),
+            'failed run': (gt.RunFailed('run 7: failure'), Ci('failed', 'run 7: failure')),
+            # (stage A review S2) an Untrusted that is not CI's verdict is no failure: it cannot be read now.
+            'other untrusted': (Untrusted('workflow_runs listing shows 1 of 2'),
+                                Ci('unreadable', 'Untrusted: workflow_runs listing shows 1 of 2')),
             'network': (HelperError('gh: HTTP 502'), Ci('unreadable', 'HelperError: gh: HTTP 502')),
         }
         for name, (answer, expected) in cases.items():
             with self.subTest(name):
                 self.assertEqual(tick.ci_of(FakeHelpers(trusted=answer), CAND), expected)
+
+    def test_ci_of_the_real_client(self):
+        """(stage A review S2) github_trust.GitHubApi over a scripted transport: what GitHub answers, as it fails."""
+        runs = f'/repos/{tg.REPO}/actions/workflows/ci.yml/runs'
+        jobs = f'/repos/{tg.REPO}/actions/runs/{tg.RUN}/attempts/2/jobs'
+
+        def client(token='tok', **failures):
+            data = dict(tg.GOOD, **{k: v for k, v in failures.items() if isinstance(v, dict)})
+
+            def urlopen(req, timeout):
+                path = req.full_url[len(gt.API):].split('?')[0]
+                key = {runs: 'runs', jobs: 'jobs'}.get(path, 'artifacts')
+                answer = failures.get(key, data[key])
+                if isinstance(answer, Exception):
+                    raise answer
+                return tg.Response(json.dumps(answer).encode())
+            return FakeHelpers(trusted=lambda sha: gt.fetch_trusted(gt.GitHubApi(token, urlopen), tg.REPO, sha))
+
+        def http(code):
+            return urllib.error.HTTPError('u', code, 'x', email.message.Message(), None)
+
+        cases = {
+            'green': (client(), Ci('pass', trusted=gt.fetch_trusted(tg.fake_api(tg.GOOD), tg.REPO, tg.SHA))),
+            '502 on runs': (client(runs=http(502)), Ci('unreadable', f'Untrusted: GitHub API 502 for {runs}')),
+            '503 on jobs': (client(jobs=http(503)), Ci('unreadable', f'Untrusted: GitHub API 503 for {jobs}')),
+            'unreachable': (client(runs=urllib.error.URLError('refused')),
+                            Ci('unreadable', f'Untrusted: GitHub API unreachable for {runs}: URLError')),
+            'no token': (client(token=''), Ci('unreadable', 'Untrusted: no GitHub token')),
+            'partial listing': (client(runs={'total_count': 2, 'workflow_runs': [tg.run(conclusion='failure')]}),
+                                Ci('unreadable', 'Untrusted: workflow_runs listing shows 1 of 2; refusing to decide '
+                                                 'on a partial list')),
+            'no run yet': (client(runs=tg.listing('workflow_runs', [])),
+                           Ci('pending', f'no trusted CI run for {tg.SHA}')),
+            'run failed': (client(runs=tg.listing('workflow_runs', [tg.run(conclusion='failure')])),
+                           Ci('failed', f"no trusted CI run for {tg.SHA} (run {tg.RUN}: conclusion='failure')")),
+            'package failed': (client(jobs=tg.listing('jobs', [tg.job('package', 'failure'), tg.job('ci')])),
+                               Ci('failed', f"run {tg.RUN} attempt 2: 'package' is completed/failure")),
+        }
+        for name, (helpers, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(tick.ci_of(helpers, tg.SHA), expected)
 
     def test_a_timer_has_no_target_and_a_human_has_one(self):
         env = tick.Env('/nonexistent', None, None, None)
