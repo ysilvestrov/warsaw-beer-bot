@@ -6,7 +6,7 @@ FakeRun stands in for bounded.run: every call is recorded as (argv, timeout) and
 by the exact argv tuple — a test states every command it expects, word for word, and any other argv fails it.
 An answer is (code, stdout, stderr), an exception instance (raised), or a list of those (one per call, in order).
 
-Server is an HTTP server on 127.0.0.1 with a scripted answer per request: (status, body, delay seconds).
+Server is an HTTP server on 127.0.0.1 with a scripted answer per request: (status, body, delay seconds[, headers]).
 """
 import http.server
 import subprocess
@@ -52,13 +52,15 @@ class Server:
             def _answer(self):
                 n = int(self.headers.get('Content-Length') or 0)
                 outer.requests.append((self.command, self.path, self.rfile.read(n)))
-                status, body, delay = outer.answers.pop(0)
+                status, body, delay, *headers = outer.answers.pop(0)
                 if delay:
                     threading.Event().wait(delay)
                 try:
                     self.send_response(status)
                     self.send_header('Content-Type', 'application/json')
                     self.send_header('Content-Length', str(len(body)))
+                    for name, value in (headers[0] if headers else {}).items():
+                        self.send_header(name, value)
                     self.end_headers()
                     self.wfile.write(body)
                 except OSError:

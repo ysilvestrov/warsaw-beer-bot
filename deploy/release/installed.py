@@ -27,9 +27,10 @@ DB_PATH = '/var/lib/warsaw-beer-bot/bot.db'
 BOOT_ID_FILE = '/proc/sys/kernel/random/boot_id'
 UNIT_DIR = '/etc/systemd/system'
 SUDOERS_DIR = '/etc/sudoers.d'
-# The operator's own directories, relative to $HOME (merge-deploy's XDG defaults).
-DATA_SUBDIR = '.local/share/wbb-autodeploy'   # repo/ — the private clone; artifacts/ — downloaded ZIPs
-STATE_SUBDIR = '.local/state/wbb-autodeploy'  # lock, PAUSED, tick-state.json, deploy-state.json
+# The operator's own directories, as merge-deploy names them: ${XDG_DATA_HOME:-$HOME/.local/share}/<APP_DIR>
+# (repo/ — the private clone, artifacts/ — downloaded ZIPs) and ${XDG_STATE_HOME:-$HOME/.local/state}/<APP_DIR>
+# (lock, PAUSED, tick-state.json, deploy-state.json).
+APP_DIR = 'wbb-autodeploy'
 
 # One repo file -> one installed copy.
 COPIES = {

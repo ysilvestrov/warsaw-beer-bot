@@ -53,7 +53,7 @@ import tick_state  # noqa: E402
 from activate import HostError  # noqa: E402
 from deploy_state import StateError  # noqa: E402
 from gates import UNREAD, Ci, CommitPrs, Inputs  # noqa: E402
-from github_trust import NoRunYet, RunFailed  # noqa: E402
+from github_trust import SHA as FULL_SHA, NoRunYet, RunFailed  # noqa: E402
 from safe_tar import Refused  # noqa: E402
 from tick_state import Blocked, TickState  # noqa: E402
 
@@ -728,16 +728,87 @@ def tick(env, mode, ack_holds=()):
             os.close(fd)
 
 
-def main(argv=None, make_env=None, geteuid=os.geteuid):
-    """`tick.py timer` | `tick.py deploy [--force] [--ack-holds KEY ...]`.
+class EnvFailed(Exception):
+    """make_env could not build the Env; `notify` is what it had built before that (or None)."""
+    def __init__(self, cause, notify=None, state_dir=None):
+        super().__init__(f'{type(cause).__name__}: {cause}')
+        self.cause, self.notify, self.state_dir = cause, notify, state_dir
 
-    make_env(mode) builds the Env with the real Host and Helpers — the adapters of stage Б; without them the
-    CLI refuses to run (70) rather than guess.
+
+def _real_factories():
+    # Imported here: a broken adapter module is a failure of make_env (exit 70 and a notice), not of tick.py.
+    import helpers_adapter
+    import host_adapter
+    import notify_telegram
+    return {'notify': notify_telegram.make_notify, 'host': host_adapter.RealHost,
+            'helpers': helpers_adapter.RealHelpers}
+
+
+def _xdg(environ, var, default):
+    import installed
+    return os.path.join(environ.get(var) or os.path.join(environ['HOME'], default), installed.APP_DIR)
+
+
+def make_env(mode, target=None, environ=None, clock=time.time, sleep=time.sleep, factories=None):
+    """The Env with the real Host, Helpers and Telegram notify (plan Б-ядро, Task 3).
+
+    One clock (plan "Рішення" п.5): the engine's host.now() — which stamps abort.at — and the tick's clock — which
+    gives Inputs.now — are the same function. The directories are merge-deploy's: the state (and its lock) in
+    ${XDG_STATE_HOME:-~/.local/state}/wbb-autodeploy, the private clone in ${XDG_DATA_HOME:-~/.local/share}/….
+    Any failure is EnvFailed, carrying the notify if it was built by then.
+    """
+    environ = os.environ if environ is None else environ
+    notify = state_dir = None
+    try:
+        f = factories or _real_factories()
+        notify = f['notify']()
+        state_dir = _xdg(environ, 'XDG_STATE_HOME', '.local/state')
+        host = f['host'](clock=clock, sleep=sleep)
+        helpers = f['helpers'](_xdg(environ, 'XDG_DATA_HOME', '.local/share'), clock=clock)
+        return Env(state_dir, host, helpers, notify, clock=clock, sleep=sleep,
+                   target=None if mode == 'timer' else target)
+    except Exception as e:
+        raise EnvFailed(e, notify, state_dir) from e
+
+
+def _start_failed(e, clock=time.time):
+    """make_env failed: the critical notice of the top-level catch (once per UTC day per text), and 70."""
+    if not isinstance(e, EnvFailed):
+        e = EnvFailed(e)
+    text = f'🔥 wbb-deploy: could not start, nothing judged: {e}'
+    print(text, file=sys.stderr)
+    if e.notify is None:
+        return 70
+    env = Env(e.state_dir or '', None, None, e.notify, clock=clock, out=lambda line: print(line, file=sys.stderr))
+    if e.state_dir is None:
+        _notify(env, text)
+        return 70
+    try:
+        os.makedirs(e.state_dir, exist_ok=True)
+        _internal(env, text)
+    except OSError as err:
+        print(f'WARNING: {e.state_dir}: {type(err).__name__}: {err}', file=sys.stderr)
+    return 70
+
+
+def _full_sha(value):
+    if not FULL_SHA.fullmatch(value):
+        raise argparse.ArgumentTypeError(f'not a full lowercase SHA: {value!r}')
+    return value
+
+
+def main(argv=None, make_env=make_env, geteuid=os.geteuid):
+    """`tick.py timer` | `tick.py deploy --target <sha> [--force] [--ack-holds KEY ...]`.
+
+    make_env(mode, target) builds the Env with the real Host and Helpers; if it fails, the tick does not run:
+    a critical notice (when notify was built) and exit 70. --target is the operator's checkout HEAD
+    (deploy.sh passes it — Б-периферія).
     """
     p = argparse.ArgumentParser(prog='tick.py')
     sub = p.add_subparsers(dest='command', required=True)
     sub.add_parser('timer')
     d = sub.add_parser('deploy')
+    d.add_argument('--target', required=True, type=_full_sha, metavar='SHA')
     d.add_argument('--force', action='store_true')
     d.add_argument('--ack-holds', nargs='+', default=[], metavar='KEY')
     try:
@@ -749,10 +820,11 @@ def main(argv=None, make_env=None, geteuid=os.geteuid):
               file=sys.stderr)
         return 64
     mode = 'timer' if args.command == 'timer' else ('force' if args.force else 'manual')
-    if make_env is None:
-        print('ERROR: the host adapters (Host, Helpers) are not installed yet (stage Б).', file=sys.stderr)
-        return 70
-    return tick(make_env(mode), mode, getattr(args, 'ack_holds', []))
+    try:
+        env = make_env(mode, getattr(args, 'target', None))
+    except Exception as e:
+        return _start_failed(e)
+    return tick(env, mode, getattr(args, 'ack_holds', []))
 
 
 if __name__ == '__main__':

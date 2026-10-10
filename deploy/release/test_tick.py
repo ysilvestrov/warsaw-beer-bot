@@ -7,9 +7,11 @@ import contextlib
 import email.message
 import fcntl
 import hashlib
+import inspect
 import io
 import json
 import os
+import shutil
 import sys
 import tempfile
 import unittest
@@ -1022,27 +1024,134 @@ class Cli(unittest.TestCase):
         envs = []
         with mock.patch.object(tick, 'tick', side_effect=lambda env, mode, ack: (mode, tuple(ack))) as t, \
                 contextlib.redirect_stderr(io.StringIO()):
-            got = tick.main(argv, make_env=lambda mode: envs.append(mode) or f'env:{mode}', geteuid=lambda: uid)
+            got = tick.main(argv, make_env=lambda mode, target: envs.append((mode, target)) or f'env:{mode}',
+                            geteuid=lambda: uid)
         return got, envs, [c.args for c in t.call_args_list]
 
-    def test_modes_and_acknowledgements(self):
-        self.assertEqual(self.run_main(['timer']), (('timer', ()), ['timer'], [('env:timer', 'timer', [])]))
-        self.assertEqual(self.run_main(['deploy']), (('manual', ()), ['manual'], [('env:manual', 'manual', [])]))
-        self.assertEqual(self.run_main(['deploy', '--force', '--ack-holds', HELD, 'pr:12']),
-                         (('force', (HELD, 'pr:12')), ['force'], [('env:force', 'force', [HELD, 'pr:12'])]))
+    def test_modes_targets_and_acknowledgements(self):
+        self.assertEqual(self.run_main(['timer']), (('timer', ()), [('timer', None)], [('env:timer', 'timer', [])]))
+        self.assertEqual(self.run_main(['deploy', '--target', CAND]),
+                         (('manual', ()), [('manual', CAND)], [('env:manual', 'manual', [])]))
+        self.assertEqual(self.run_main(['deploy', '--target', CAND, '--force', '--ack-holds', HELD, 'pr:12']),
+                         (('force', (HELD, 'pr:12')), [('force', CAND)], [('env:force', 'force', [HELD, 'pr:12'])]))
 
     def test_root_is_refused_before_anything(self):
-        self.assertEqual(self.run_main(['deploy'], uid=0), (64, [], []))
+        self.assertEqual(self.run_main(['deploy', '--target', CAND], uid=0), (64, [], []))
 
     def test_usage_errors(self):
-        self.assertEqual(self.run_main(['deploy', '--bogus']), (64, [], []))
-        self.assertEqual(self.run_main([]), (64, [], []))
-        self.assertEqual(self.run_main(['timer', '--force']), (64, [], []))
+        for argv in (['deploy', '--target', CAND, '--bogus'], [], ['timer', '--force'], ['deploy'],
+                     ['deploy', '--target', 'HEAD'], ['deploy', '--target', CAND.upper()], ['deploy', '--target', CAND[:39]],
+                     ['timer', '--target', CAND]):
+            with self.subTest(argv):
+                self.assertEqual(self.run_main(argv), (64, [], []))
 
-    def test_without_the_host_adapters_it_does_not_run(self):
-        with contextlib.redirect_stderr(io.StringIO()) as err:
-            self.assertEqual(tick.main(['timer'], geteuid=lambda: 1000), 70)
-        self.assertEqual(err.getvalue(), 'ERROR: the host adapters (Host, Helpers) are not installed yet (stage Б).\n')
+    def test_the_real_adapters_are_the_default(self):
+        self.assertIs(inspect.signature(tick.main).parameters['make_env'].default, tick.make_env)
+
+
+class StartFailed(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.dir)
+        self.sent = []
+
+    def notify(self, text):
+        self.sent.append(text)
+        return True
+
+    def main(self, error):
+        def make_env(mode, target):
+            raise error
+        with mock.patch.object(tick, 'tick') as t, contextlib.redirect_stderr(io.StringIO()) as err:
+            got = tick.main(['timer'], make_env=make_env, geteuid=lambda: 1000)
+        self.assertEqual(t.call_count, 0)
+        return got, err.getvalue()
+
+    def test_a_failed_make_env_is_a_critical_notice_once_a_day_and_70(self):
+        text = '🔥 wbb-deploy: could not start, nothing judged: RuntimeError: no sudo'
+        error = tick.EnvFailed(RuntimeError('no sudo'), self.notify, self.dir)
+        self.assertEqual(self.main(error), (70, text + '\n'))
+        self.assertEqual(self.main(error), (70, text + '\n'))
+        self.assertEqual(self.sent, [text])
+        self.assertEqual(os.listdir(self.dir), ['internal-notice'])
+
+    def test_without_a_state_directory_the_notice_is_sent_anyway(self):
+        error = tick.EnvFailed(KeyError('HOME'), self.notify, None)
+        self.assertEqual(self.main(error), (70, "🔥 wbb-deploy: could not start, nothing judged: KeyError: 'HOME'\n"))
+        self.assertEqual(self.sent, ["🔥 wbb-deploy: could not start, nothing judged: KeyError: 'HOME'"])
+
+    def test_without_notify_it_only_says_so(self):
+        self.assertEqual(self.main(tick.EnvFailed(ImportError('host_adapter'))),
+                         (70, '🔥 wbb-deploy: could not start, nothing judged: ImportError: host_adapter\n'))
+        self.assertEqual(self.main(ValueError('bare')),
+                         (70, '🔥 wbb-deploy: could not start, nothing judged: ValueError: bare\n'))
+        self.assertEqual(self.sent, [])
+
+
+class MakeEnv(unittest.TestCase):
+    HOME = '/home/ysi'
+
+    def factories(self, fail=None):
+        built = []
+
+        def make(name, value):
+            def factory(*args, **kwargs):
+                built.append((name, args, kwargs))
+                if name == fail:
+                    raise OSError(f'{name} broke')
+                return value
+            return factory
+        notify = object()
+        return built, notify, {'notify': make('notify', notify), 'host': make('host', 'HOST'),
+                               'helpers': make('helpers', 'HELPERS')}
+
+    def test_merge_deploys_directories_and_one_clock(self):
+        built, notify, f = self.factories()
+        clock, sleep = object(), object()
+        env = tick.make_env('timer', None, environ={'HOME': self.HOME}, clock=clock, sleep=sleep, factories=f)
+        self.assertEqual((env.state_dir, env.host, env.helpers, env.notify, env.clock, env.sleep, env.target),
+                         ('/home/ysi/.local/state/wbb-autodeploy', 'HOST', 'HELPERS', notify, clock, sleep, None))
+        self.assertEqual(built, [('notify', (), {}), ('host', (), {'clock': clock, 'sleep': sleep}),
+                                 ('helpers', ('/home/ysi/.local/share/wbb-autodeploy',), {'clock': clock})])
+        self.assertEqual(env.store.path, '/home/ysi/.local/state/wbb-autodeploy/deploy-state.json')
+
+    def test_xdg_directories_and_a_manual_target(self):
+        built, _, f = self.factories()
+        env = tick.make_env('manual', CAND, factories=f,
+                            environ={'HOME': self.HOME, 'XDG_STATE_HOME': '/s', 'XDG_DATA_HOME': '/d'})
+        self.assertEqual((env.state_dir, built[2][1], env.target), ('/s/wbb-autodeploy', ('/d/wbb-autodeploy',), CAND))
+
+    def test_a_timer_never_gets_a_target(self):
+        _, _, f = self.factories()
+        self.assertIsNone(tick.make_env('timer', CAND, environ={'HOME': self.HOME}, factories=f).target)
+
+    def test_a_failure_carries_what_was_built(self):
+        _, notify, f = self.factories(fail='helpers')
+        with self.assertRaises(tick.EnvFailed) as caught:
+            tick.make_env('timer', environ={'HOME': self.HOME}, factories=f)
+        e = caught.exception
+        self.assertEqual((str(e), e.notify, e.state_dir), ('OSError: helpers broke', notify,
+                                                           '/home/ysi/.local/state/wbb-autodeploy'))
+
+    def test_a_failure_before_notify_carries_nothing(self):
+        _, _, f = self.factories(fail='notify')
+        with self.assertRaises(tick.EnvFailed) as caught:
+            tick.make_env('timer', environ={'HOME': self.HOME}, factories=f)
+        self.assertEqual((caught.exception.notify, caught.exception.state_dir), (None, None))
+
+    def test_no_home_is_a_failure_after_notify(self):
+        _, notify, f = self.factories()
+        with self.assertRaises(tick.EnvFailed) as caught:
+            tick.make_env('timer', environ={}, factories=f)
+        self.assertEqual((str(caught.exception), caught.exception.notify), ("KeyError: 'HOME'", notify))
+
+    def test_the_real_adapters_share_the_tick_clock(self):
+        """(plan "Рішення" п.5) abort.at is the engine's host.now(), Inputs.now the tick's clock: one source."""
+        ticks = iter([100.0, 200.0])
+        env = tick.make_env('timer', environ={'HOME': self.HOME}, clock=lambda: next(ticks))
+        self.assertEqual((env.host.now(), env.clock()), (100.0, 200.0))
+        self.assertEqual((type(env.host).__name__, type(env.helpers).__name__), ('RealHost', 'RealHelpers'))
+        self.assertEqual(env.helpers._repo_dir, '/home/ysi/.local/share/wbb-autodeploy/repo')
 
 
 if __name__ == '__main__':
