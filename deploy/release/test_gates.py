@@ -3,7 +3,9 @@
 Rows that are not admission's: trusted origin/digests/tree, host audit and snapshot+trial are prepare's
 (test_prepare.py); the shared lock is the tick's. "Internal rollback" is the engine's (test_activate.py).
 """
+import glob
 import os
+import re
 import sys
 import unittest
 from dataclasses import replace
@@ -196,9 +198,39 @@ class HeldPaths(unittest.TestCase):
                      'deploy/warsaw-beer-bot.service', 'deploy/wbb-autodeploy.service', 'deploy/wbb-autodeploy.timer',
                      'deploy/wbb-reboot-request.path', 'deploy/install-autodeploy.sh', 'deploy/litestream.yml',
                      'deploy/litestream.service', 'deploy/litestream.env.example', '.github/workflows/ci.yml',
-                     'scripts/ops/host_patch_collect.py', 'scripts/ops/reboot_request.py'):
+                     'scripts/ops/host_patch_collect.py', 'scripts/ops/reboot_request.py',
+                     # merge-deploy's installed copies (controller adjustment (a): every installed copy)
+                     'deploy/autodeploy.sh', 'deploy/ships.sh', 'deploy/read-env.sh', 'deploy/installed-current.sh',
+                     'deploy/db-snapshot.sh', 'deploy/trial-migrate.cjs'):
             with self.subTest(path):
                 self.assertTrue(gates.path_is_held(path))
+
+    def test_every_file_an_installer_copies_is_held(self):
+        # The installers are the record of what has an installed copy; a new one must land in INSTALLED_COPIES.
+        self.assertEqual(installed_sources(), {
+            'deploy/ships.sh', 'deploy/db-snapshot.sh', 'deploy/trial-migrate.cjs', 'deploy/read-env.sh',
+            'deploy/installed-current.sh', 'deploy/autodeploy.sh', 'deploy/wbb-autodeploy.service',
+            'deploy/wbb-autodeploy.timer', 'scripts/ops/host_patch_collect.py', 'deploy/wbb-host-patch.service',
+            'deploy/wbb-host-patch.timer', 'scripts/ops/reboot_request.py', 'deploy/wbb-reboot-request.path',
+            'deploy/wbb-reboot-request.service',
+        })
+        for path in sorted(installed_sources()):
+            with self.subTest(path):
+                self.assertTrue(any(gates.matches(path, p) for p in gates.INSTALLED_COPIES))
+
+    def test_installers_and_the_ci_workflow_are_held_without_being_installed_copies(self):
+        for path in ('deploy/install-autodeploy.sh', '.github/workflows/ci.yml'):
+            with self.subTest(path):
+                self.assertEqual((gates.path_is_held(path), any(gates.matches(path, p) for p in gates.INSTALLED_COPIES)),
+                                 (True, False))
+
+    def test_star_stays_within_one_segment_and_double_star_takes_a_whole_directory(self):
+        self.assertEqual([gates.matches(p, 'deploy/*.service') for p in
+                          ('deploy/a.service', 'deploy/x/a.service', 'deploy/.service', 'deploy/a.service.bak')],
+                         [True, False, True, False])
+        self.assertEqual([gates.matches(p, 'deploy/release/**') for p in
+                          ('deploy/release/a.py', 'deploy/release/x/y.py', 'deploy/release', 'deploy/releases/a')],
+                         [True, True, False, False])
 
     def test_not_held(self):
         for path in ('src/index.ts', 'docs/deploy.md', 'deploy/README.md', 'deploy/deploy.sh', 'deploy/rsync-filter',
@@ -207,6 +239,15 @@ class HeldPaths(unittest.TestCase):
                      'scripts/ops/other.py', 'x/deploy/release/a.py', 'package-lock.json'):
             with self.subTest(path):
                 self.assertFalse(gates.path_is_held(path))
+
+
+def installed_sources():
+    """The repo files every deploy/install-*.sh copies with `install -m <mode> <repo path> <dest>`."""
+    found = set()
+    for path in glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'install-*.sh')):
+        with open(path, encoding='utf-8') as f:
+            found |= set(re.findall(r'^install -m [0-7]+ +([A-Za-z0-9_./-]+) ', f.read(), re.M))
+    return found
 
 
 class InstalledCurrent(unittest.TestCase):
@@ -310,6 +351,26 @@ class NothingToDo(unittest.TestCase):
                 self.assertEqual(decide(mode, settled_sha=MAIN), Decision('idle', 'up to date at aaaaaaa'))
                 self.assertEqual(decide(mode, noop_sha=MAIN),
                                  Decision('idle', 'aaaaaaa changes nothing in the runtime payload'))
+
+    def test_an_idle_timer_reads_the_installed_copies_and_a_human_does_not(self):
+        # Adjustment (b): merge-deploy reminded of a stale deployer while up to date, without a deploy.
+        idle = dict(settled_sha=MAIN, installed_stale=UNREAD)
+        self.assertEqual(decide('timer', **idle), Decision('need', 'installed_stale'))
+        for mode in ('manual', 'force'):
+            with self.subTest(mode):
+                self.assertEqual(decide(mode, **idle), Decision('idle', 'up to date at aaaaaaa'))
+
+    def test_an_idle_timer_reminds_of_a_stale_deployer_daily(self):
+        stale = 'STALE: 1 installed file(s) differ from origin/main:\n  deploy/release/tick.py'
+        cases = {
+            'up to date': (dict(settled_sha=MAIN), 'up to date at aaaaaaa'),
+            'noop': (dict(noop_sha=MAIN), 'aaaaaaa changes nothing in the runtime payload'),
+            'last failed': (dict(last_failed_sha=MAIN), 'aaaaaaa is the last failed SHA; waiting for the next merge'),
+        }
+        for name, (changes, reason) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(decide('timer', installed_stale=stale, **changes), Decision(
+                    'idle', f'{reason}; the installed deployer is out of date:\n{stale}', 'installed-stale'))
 
     def test_paused_stops_the_timer_quietly_and_not_a_human(self):
         self.assertEqual(decide('timer', paused=True), Decision('idle', 'paused'))

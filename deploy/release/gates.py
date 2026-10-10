@@ -19,7 +19,8 @@ Decision kinds:
   refuse — this SHA will not go now (CI failed, the last failed SHA by hand, a target not in main)
   admit  — every gate passed; the tick prepares the candidate
   need   — read the input named by `reason`, then call again
-`notice_key` names the standing notice for the tick (None: say nothing); `repeat` is 'daily' (once per UTC
+An idle timer still reads the installed copies and names them stale once a day (merge-deploy kept that
+reminder while up to date). `notice_key` names the standing notice for the tick (None: say nothing); `repeat` is 'daily' (once per UTC
 day per key) or 'once' (once per key). Only the timer gets notices: a manual run prints its decision to the
 operator who is waiting for it.
 
@@ -28,8 +29,8 @@ skip PAUSED, quiet and the abort backoff, and pass holds only with `ack_holds` e
 force also skips ancestry. Nothing skips the regression fence except a target that contains its `from`
 (recovery forward), and `admission` never clears it — `observe` does, from what is settled.
 """
+import fnmatch
 import os
-import posixpath
 import sys
 from dataclasses import dataclass, field
 
@@ -124,16 +125,39 @@ class Hold:
     reason: str
 
 
+# Every file of the repo that has an INSTALLED COPY on the host (plan "Рішення" п.4: every installed copy,
+# one list). The same tuple is what the tick hands to Helpers.installed_stale, so a file is checked for being
+# current exactly when its change holds the range: a new installed file is added here once, never in two
+# places. Patterns: `*` matches within one path segment; a trailing `/**` matches everything under a directory.
+INSTALLED_COPIES = (
+    'deploy/release/**',                    # the controller and its root helpers (stage В installs them)
+    'deploy/sudoers.d/**',
+    'deploy/*.service', 'deploy/*.timer', 'deploy/*.path',
+    'deploy/litestream.*',
+    # merge-deploy's installed copies (install-autodeploy.sh), while they are installed
+    'deploy/autodeploy.sh', 'deploy/ships.sh', 'deploy/read-env.sh', 'deploy/installed-current.sh',
+    'deploy/db-snapshot.sh', 'deploy/trial-migrate.cjs',
+    # root runs the installed copy (#469): install-host-patch-collector.sh, install-reboot-request.sh
+    'scripts/ops/host_patch_collect.py', 'scripts/ops/reboot_request.py',
+)
+# Held although nothing is copied: a human runs them (installers), or they change what the host trusts.
+HUMAN_STEPS = (
+    'deploy/install-*.sh',
+    '.github/workflows/ci.yml',             # which run and artifact stand for a SHA
+)
+
+
+def matches(path, pattern):
+    """`path` matches `pattern` (see INSTALLED_COPIES): segment by segment, `*` never crosses a `/`."""
+    if pattern.endswith('/**'):
+        return path.startswith(pattern[:-2])
+    parts, want = path.split('/'), pattern.split('/')
+    return len(parts) == len(want) and all(fnmatch.fnmatchcase(p, w) for p, w in zip(parts, want))
+
+
 def path_is_held(path):
-    """A control-plane file the payload does not carry and a human must install (plan "Рішення" п.4)."""
-    parent, name = posixpath.split(path)
-    if path.startswith(('deploy/release/', 'deploy/sudoers.d/')):
-        return True
-    if parent == 'deploy' and (name.endswith(('.service', '.timer', '.path'))
-                               or name.startswith('litestream.')
-                               or (name.startswith('install-') and name.endswith('.sh'))):
-        return True
-    return path in ('.github/workflows/ci.yml', 'scripts/ops/host_patch_collect.py', 'scripts/ops/reboot_request.py')
+    """A control-plane file the payload does not carry and a human must install or run (plan "Рішення" п.4)."""
+    return any(matches(path, p) for p in INSTALLED_COPIES + HUMAN_STEPS)
 
 
 def range_holds(changed_paths, commit_prs):
@@ -186,6 +210,18 @@ def admission(i):
     def need(name):
         return Decision('need', name)
 
+    def idle(reason):
+        # Adjustment (b) to the plan: with nothing to deploy, the timer still says once a day that the
+        # installed deployer is stale (merge-deploy report_stale_once) — a merged fix is not live until then.
+        if not timer:
+            return Decision('idle', reason)
+        if i.installed_stale is UNREAD:
+            return need('installed_stale')
+        if i.installed_stale is None:
+            return Decision('idle', reason)
+        return Decision('idle', f'{reason}; the installed deployer is out of date:\n{i.installed_stale}',
+                        'installed-stale')
+
     if i.paused and timer:
         return Decision('idle', 'paused')
     if i.settled_sha is None:
@@ -195,9 +231,9 @@ def admission(i):
     if timer and i.target != i.main:
         return Decision('wait', f'main moved to {_short(i.main)}')
     if i.target == i.settled_sha:
-        return Decision('idle', f'up to date at {_short(i.target)}')
+        return idle(f'up to date at {_short(i.target)}')
     if i.target == i.noop_sha:
-        return Decision('idle', f'{_short(i.target)} changes nothing in the runtime payload')
+        return idle(f'{_short(i.target)} changes nothing in the runtime payload')
 
     if i.regression is not None:
         r = i.regression
@@ -224,7 +260,7 @@ def admission(i):
 
     if i.target == i.last_failed_sha:
         if timer:
-            return Decision('idle', f'{_short(i.target)} is the last failed SHA; waiting for the next merge')
+            return idle(f'{_short(i.target)} is the last failed SHA; waiting for the next merge')
         return Decision('refuse', f'{_short(i.target)} is the last failed SHA; it needs an explicit rearm')
     if timer and i.abort is not None and i.abort.sha == i.target:
         left = i.abort.at + backoff_s(i.abort.count) - i.now

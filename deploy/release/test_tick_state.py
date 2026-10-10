@@ -9,26 +9,29 @@ from types import MappingProxyType
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tick_state as ts  # noqa: E402
 from deploy_state import StateError  # noqa: E402
-from tick_state import Abort, Regression, Seen, TickState  # noqa: E402
+from tick_state import Abort, Blocked, Regression, Seen, TickState  # noqa: E402
 
 A = 'a' * 40
 B = 'b' * 40
 TXN = '0123456789abcdef0123456789abcdef'
+TXN2 = 'fedcba9876543210fedcba9876543210'
 FULL = TickState(
-    main_seen=Seen(A, 1760000000), noop_sha=B, abort=Abort(A, 2, 1760000100.5), notified_txn=TXN,
+    main_seen=Seen(A, 1760000000), noop_sha=B, abort=Abort(A, 2, 1760000100.5, TXN2), notified_txn=TXN,
     last_seen_settled=B, regression=Regression(A, B),
     notices={'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
+    blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1),
 )
 # The file FULL is, written out by hand (canonical: sorted keys, no whitespace).
 FULL_JSON = {
     'formatVersion': 1,
     'mainSeen': {'sha': A, 'at': 1760000000},
     'noopSha': B,
-    'abort': {'sha': A, 'count': 2, 'at': 1760000100.5},
+    'abort': {'sha': A, 'count': 2, 'at': 1760000100.5, 'txn': TXN2},
     'notifiedTxn': TXN,
     'lastSeenSettled': B,
     'regression': {'from': A, 'to': B},
     'notices': {'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
+    'blocked': {'txn': TXN2, 'step': 'rolling-back/start-baseline', 'at': 1760000200, 'alerts': 1},
 }
 
 
@@ -82,10 +85,16 @@ class Files(Tmp):
             'unknown key': (json.dumps(dict(FULL_JSON, extra=1)).encode(), r"unknown \['extra'\]"),
             'duplicate key': (b'{"formatVersion":1,"formatVersion":1}', r"duplicate keys \['formatVersion'\]"),
             'short sha': (json.dumps(dict(FULL_JSON, noopSha='abc')).encode(), 'noopSha: not a full lowercase SHA'),
-            'zero aborts': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': 0, 'at': 1})).encode(),
+            'zero aborts': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': 0, 'at': 1, 'txn': None})).encode(),
                             'tick-state.abort.count: not a positive integer: 0'),
-            'bool count': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': True, 'at': 1})).encode(),
+            'bool count': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': True, 'at': 1, 'txn': None})).encode(),
                            'tick-state.abort.count: not a positive integer: True'),
+            'abort without txn key': (json.dumps(dict(FULL_JSON, abort={'sha': A, 'count': 1, 'at': 1})).encode(),
+                                      r"tick-state.abort: missing \['txn'\]"),
+            'zero alerts': (json.dumps(dict(FULL_JSON, blocked=dict(FULL_JSON['blocked'], alerts=0))).encode(),
+                            'tick-state.blocked.alerts: not a positive integer: 0'),
+            'blocked without step': (json.dumps(dict(FULL_JSON, blocked=dict(FULL_JSON['blocked'], step=''))).encode(),
+                                     'tick-state.blocked.step: not a non-empty string'),
             'bad txn': (json.dumps(dict(FULL_JSON, notifiedTxn='x')).encode(), 'notifiedTxn: not a 32-hex'),
             'bad day': (json.dumps(dict(FULL_JSON, notices={'hold': '2026-02-30'})).encode(),
                         'notices.hold: not a YYYY-MM-DD day'),
@@ -126,6 +135,12 @@ class Transitions(unittest.TestCase):
         s = ts.aborted(s, A, 20)
         self.assertEqual(s.abort, Abort(A, 2, 20))
         self.assertEqual(ts.aborted(s, B, 30).abort, Abort(B, 1, 30))
+
+    def test_an_abort_is_counted_once_per_transaction(self):
+        s = ts.aborted(TickState(), A, 10, TXN)
+        self.assertEqual(s.abort, Abort(A, 1, 10, TXN))
+        self.assertEqual(ts.aborted(s, A, 70, TXN), s)
+        self.assertEqual(ts.aborted(s, A, 70, TXN2).abort, Abort(A, 2, 70, TXN2))
 
     def test_daily_notice_is_due_once_per_day(self):
         s = TickState(notices={'hold': '2026-10-10'})

@@ -10,7 +10,11 @@ claims, and its evidence (plan, "заявка → доказ"):
 
   mainSeen {sha, at}     main was `sha` from `at` on, by the tick's own clock at its first sighting
   noopSha                the payload of this SHA equals the settled one (manifests compared in a tick)
-  abort {sha, count, at} this SHA was aborted before it started `count` times in a row, last at `at`
+  abort {sha, count, at, txn}  this SHA was aborted before it started `count` times in a row, last at
+                         `at`, by transaction `txn` (an abort is counted once per txn, however often the
+                         tick that reads it is repeated)
+  blocked {txn, step, at, alerts}  the engine is blocked at `step` (phase/intent) with the bot down; the
+                         first critical alert for this txn and step was SENT at `at`, `alerts` sent so far
   notifiedTxn            the end of this transaction was reported (written AFTER a successful notify)
   lastSeenSettled        the settled SHA the regression fence last observed (merge-deploy
                          LAST_SEEN_DEPLOYED_SHA)
@@ -95,7 +99,20 @@ class Abort(ds._Record):
     sha: str
     count: int
     at: float
-    _SPEC = (('sha', 'sha', _SHA_KIND), ('count', 'count', _Positive()), ('at', 'at', ds._Number()))
+    txn: str | None = None
+    _SPEC = (('sha', 'sha', _SHA_KIND), ('count', 'count', _Positive()), ('at', 'at', ds._Number()),
+             ('txn', 'txn', ds._Opt(_TXN_KIND)))
+
+
+@dataclass(frozen=True)
+class Blocked(ds._Record):
+    """Ф3 (2в e2e review): a blocked step with the bot down — when it was first reported, how many alerts."""
+    txn: str
+    step: str
+    at: float
+    alerts: int
+    _SPEC = (('txn', 'txn', _TXN_KIND), ('step', 'step', ds._Text()), ('at', 'at', ds._Number()),
+             ('alerts', 'alerts', _Positive()))
 
 
 @dataclass(frozen=True)
@@ -114,6 +131,7 @@ class TickState(ds._Record):
     last_seen_settled: str | None = None
     regression: Regression | None = None
     notices: MappingProxyType = MappingProxyType({})
+    blocked: Blocked | None = None
     _SPEC = (
         ('main_seen', 'mainSeen', ds._Opt(ds._Rec(Seen))),
         ('noop_sha', 'noopSha', ds._Opt(_SHA_KIND)),
@@ -122,6 +140,7 @@ class TickState(ds._Record):
         ('last_seen_settled', 'lastSeenSettled', ds._Opt(_SHA_KIND)),
         ('regression', 'regression', ds._Opt(ds._Rec(Regression))),
         ('notices', 'notices', _Notices()),
+        ('blocked', 'blocked', ds._Opt(ds._Rec(Blocked))),
     )
 
     def __post_init__(self):
@@ -181,10 +200,16 @@ def seen_main(state, sha, now):
     return state.replace(main_seen=Seen(sha, now))
 
 
-def aborted(state, sha, now):
-    """One more abort of sha: the count goes on for the same SHA and starts at 1 for another."""
+def aborted(state, sha, now, txn=None):
+    """One more abort of sha: the count goes on for the same SHA and starts at 1 for another.
+
+    An abort already counted for this txn is not counted again (the tick reads the engine's state on every
+    run, and a failed notification makes it read the same ended transaction again).
+    """
+    if txn is not None and state.abort is not None and state.abort.txn == txn:
+        return state
     count = state.abort.count + 1 if state.abort is not None and state.abort.sha == sha else 1
-    return state.replace(abort=Abort(sha, count, now))
+    return state.replace(abort=Abort(sha, count, now, txn))
 
 
 def notice_due(state, key, day, repeat='daily'):

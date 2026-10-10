@@ -84,5 +84,6 @@ class Helpers(Protocol):
         """Drop a pre that no activation will use (it must not count as a settled snapshot)."""
 
     # installed copies
-    def installed_stale(self) -> str | None:
-        """None if every installed copy matches main; otherwise the report of what differs."""
+    def installed_stale(self, patterns: tuple) -> str | None:
+        """None if the installed copy of every repo file matching `patterns` (gates.INSTALLED_COPIES, the same
+        list that holds a range) is the one in main; otherwise the report of what differs or is missing."""

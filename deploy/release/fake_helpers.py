@@ -74,5 +74,5 @@ class FakeHelpers:
     def discard_pre(self, pre):
         return self._answer('discard_pre', pre)
 
-    def installed_stale(self):
-        return self._answer('installed_stale')
+    def installed_stale(self, patterns):
+        return self._answer('installed_stale', patterns)
