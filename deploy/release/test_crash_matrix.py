@@ -24,6 +24,11 @@ OLD = 'b' * 40
 CAND = 'c' * 40
 CAND_REL = Release(CAND, '1' * 64)
 OLD_SETTLED = Settled(OLD, '2' * 64, T0 - 86400)
+# The window in this matrix only. Every crash point is a replay of the tick from its start, so the
+# cost grows with the square of the window's samples; the 60 samples of the real 600 s window are
+# all the same kind of point, and 200 s (past the 120 s startup limit, with probes after it) keep every kind —
+# startup, the first window probes, the last before the end. test_activate proves the real timing.
+W = 200
 
 
 def pre_db(world):
@@ -47,17 +52,17 @@ def no_post(world):
 SCENARIOS = {
     'success': dict(
         healthy=lambda sha, age: True, tampered=set(),
-        kind='settled', settled=Settled(CAND, '1' * 64, T0 + 600), last_failed=None, db=migrated, post=no_post,
+        kind='settled', settled=Settled(CAND, '1' * 64, T0 + W), last_failed=None, db=migrated, post=no_post,
         starts=[(CAND, T0)]),
     'rollback in startup': dict(
         healthy=lambda sha, age: sha == OLD, tampered=set(),
         kind='rolled-back', settled=OLD_SETTLED, last_failed=CAND, db=pre_db, post=migrated_post,
         starts=[(CAND, T0), (OLD, T0 + 120)]),
-    # Healthy from 8 s, so the probes fall on 8, 18, ... 598 s: the third failure is the last probe.
-    'rollback at 9:58': dict(
-        healthy=lambda sha, age: sha == OLD or 8 <= age < 578, tampered=set(),
+    # Healthy from 8 s, so the probes fall on 8, 18, ... W - 2 s: the third failure is the last probe.
+    'rollback at the end of the window': dict(
+        healthy=lambda sha, age: sha == OLD or 8 <= age < W - 22, tampered=set(),
         kind='rolled-back', settled=OLD_SETTLED, last_failed=CAND, db=pre_db, post=migrated_post,
-        starts=[(CAND, T0), (OLD, T0 + 598)]),
+        starts=[(CAND, T0), (OLD, T0 + W - 2)]),
     'abort, switch refused': dict(
         healthy=lambda sha, age: True, tampered={CAND},
         kind='aborted', settled=OLD_SETTLED, last_failed=None, db=pre_db, post=no_post,
@@ -93,6 +98,9 @@ def max_gap(times):
 class CrashMatrix(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
+        patcher = mock.patch.object(activate, 'WINDOW_S', W)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -204,7 +212,7 @@ class CrashMatrix(unittest.TestCase):
         # no restart, its own window decides — never the no-DB abort, never a verdict for the reboot.
         def check(out, s, world):
             self.assertEqual((out.kind, s.phase, s.settled, s.last_failed_sha, self.rebooted(s)),
-                             ('settled', 'settled', Settled(CAND, '1' * 64, T0 + 605), None,
+                             ('settled', 'settled', Settled(CAND, '1' * 64, T0 + W + 5), None,
                               [f'boot {BOOT_A} -> {BOOT_B} with current on ccccccc: the candidate may already run']))
             self.assertEqual((world.bot, world.running, world.current, world.litestream, world.violations,
                               world.starts[-1], world.db_files(), post_files(world)),
@@ -229,7 +237,7 @@ class CrashMatrix(unittest.TestCase):
         self.check('rollback in startup')
 
     def test_rollback_at_the_end_of_the_window(self):
-        self.check('rollback at 9:58')
+        self.check('rollback at the end of the window')
 
     def test_abort_without_the_database(self):
         self.check('abort, switch refused')

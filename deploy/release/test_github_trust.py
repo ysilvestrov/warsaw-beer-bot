@@ -159,6 +159,49 @@ class FetchTrusted(unittest.TestCase):
                          f"{NAME}: no valid sha256 digest ({bad!r}); operator recovery required")
 
 
+class WhatTheRefusalSays(unittest.TestCase):
+    """(stage A review S2) only RunFailed is CI's verdict and only NoRunYet is "not yet"; every other refusal —
+    a listing, an identity or a transport problem — is plain Untrusted: the caller cannot tell."""
+
+    def kind(self, data):
+        with self.assertRaises(gt.Untrusted) as cm:
+            gt.fetch_trusted(fake_api(data), REPO, SHA)
+        return type(cm.exception)
+
+    def test_ci_concluded_unsuccessfully(self):
+        cases = {
+            'run failure': with_(runs=listing('workflow_runs', [run(conclusion='failure')])),
+            'run cancelled': with_(runs=listing('workflow_runs', [run(conclusion='cancelled')])),
+            'package failed': with_(jobs=listing('jobs', [job('package', 'failure'), job('ci')])),
+            'package skipped': with_(jobs=listing('jobs', [job('package', 'skipped'), job('ci')])),
+            'ci failed': with_(jobs=listing('jobs', [job('package'), job('ci', 'failure')])),
+        }
+        for name, data in cases.items():
+            with self.subTest(name):
+                self.assertIs(self.kind(data), gt.RunFailed)
+
+    def test_no_run_listed_is_not_yet(self):
+        self.assertIs(self.kind(with_(runs=listing('workflow_runs', []))), gt.NoRunYet)
+
+    def test_everything_else_cannot_tell(self):
+        unfinished = dict(job('package'), status='in_progress', conclusion=None)
+        cases = {
+            'failed run of a fork': with_(runs=listing('workflow_runs', [
+                run(conclusion='failure', head_repository={'full_name': 'evil/fork'})])),
+            'run without a conclusion': with_(runs=listing('workflow_runs', [run(conclusion=None)])),
+            'partial runs listing': with_(runs={'total_count': 2, 'workflow_runs': [run(conclusion='failure')]}),
+            'two trusted runs': with_(runs=listing('workflow_runs', [run(), run(id=RUN + 1)])),
+            'job unfinished': with_(jobs=listing('jobs', [unfinished, job('ci')])),
+            'job without a conclusion': with_(jobs=listing('jobs', [dict(job('package'), conclusion=None), job('ci')])),
+            'job missing': with_(jobs=listing('jobs', [job('ci')])),
+            'job of another attempt': with_(jobs=listing('jobs', [job('package', 'failure', attempt=1), job('ci')])),
+            'expired artifact': with_(artifacts=listing('artifacts', [artifact(expired=True)])),
+        }
+        for name, data in cases.items():
+            with self.subTest(name):
+                self.assertIs(self.kind(data), gt.Untrusted)
+
+
 class Response(io.BytesIO):
     def __enter__(self):
         return self
