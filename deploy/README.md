@@ -510,7 +510,9 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
 - `tick_state.py` — the tick's own `tick-state.json` next to `deploy-state.json` (same durable write; a
   broken file is an error, never a blank slate): `mainSeen` (first sighting of a head, for quiet), `noop`
   (`sha` and the `settledSha` whose payload it equals — a noop only while that release is settled), `abort` (SHA, aborts in a row, last time, the txn that counted it — once per txn),
-  `notifiedTxn`, the regression fence (`lastSeenSettled`, `regression{from,to}`), `notices` (UTC day per notice
+  `notifiedTxn`, `ackThrough` (holds acknowledged up to this SHA: a noop reached through the holds gate, or
+  any settle — holds are read from the newest of settled and `ackThrough` that the target contains), the
+  regression fence (`lastSeenSettled`, `regression{from,to}`), `notices` (UTC day per notice
   key, kept 31 days) and `blocked` (txn, step, first alert time, alerts sent — the bot-down alert).
 - `gates.py` — `admission(Inputs) -> Decision`: a pure function of facts the tick already read, by the
   spec §5 table for `timer` / `manual` / `force`. Kinds: `idle`, `wait`, `hold`, `refuse`, `admit`, and

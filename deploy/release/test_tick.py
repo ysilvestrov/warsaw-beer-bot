@@ -409,6 +409,65 @@ class Holds(Base):
         self.assertEqual(self.ts().main_seen, None)
 
 
+class AckThrough(Base):
+    """(stage A review S1) holds are read from the newest of settled and ackThrough that the target contains."""
+
+    def noop_helpers(self, heads, **answers):
+        noop = {**MANIFESTS, CAND: manifest('1', 'c')}
+        trees = {sha: hashlib.sha256(m).hexdigest() for sha, m in noop.items()}
+        return self.helpers(
+            fetch_main=lambda: heads[0], manifest=lambda sha: noop[sha],
+            verify=lambda sha: Run(0, 'VERIFIED', '', trees[sha]),
+            changed_paths=lambda a, b: ('deploy/release/tick.py',) if a == OLD else ('src/x.ts',),
+            commits=lambda a, b: (b,), **answers)
+
+    def ranges(self):
+        return [c for c in self.h.calls if c[0] in ('changed_paths', 'commits')]
+
+    def test_an_acknowledged_noop_does_not_hold_the_next_merge(self):
+        heads = [CAND]
+        self.h = self.noop_helpers(heads, trusted=lambda sha: TRUSTED if sha == CAND else Untrusted(
+            f'no trusted CI run for {sha}'))
+        self.assertEqual(self.tick('manual', ack=(HELD,)), 0)
+        self.assertEqual((self.ts().noop, self.ts().ack_through), (Noop(CAND, OLD), CAND))
+        self.assertEqual(self.store.load(), SETTLED_STATE)
+        # OTHER is merged on top of CAND: only CAND..OTHER is a new range; it holds nothing.
+        heads[0] = OTHER
+        self.quiet()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.ranges(), [('changed_paths', CAND, OTHER), ('commits', CAND, OTHER)])
+        self.assertEqual(self.h.calls[-1], ('trusted', OTHER))
+        self.assertEqual(self.notes, [])
+
+    def test_every_settle_acknowledges_through_itself(self):
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        TickState(last_seen_settled=OLD, ack_through=OTHER))
+        self.h = self.helpers(is_ancestor=lambda a, b: a == b or (a, b) == (OLD, CAND))
+        self.quiet()
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.store.load().settled.sha, CAND)
+        self.assertEqual(self.ts().ack_through, OTHER)
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.ts().ack_through, CAND)
+
+    def held_from_settled(self, edges):
+        """A manual run of CAND with ackThrough OTHER, git history `edges` (and OLD <- CAND): held from OLD."""
+        os.makedirs(self.dir)
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        TickState(last_seen_settled=OLD, ack_through=OTHER))
+        history = edges | {(OLD, CAND)}
+        self.h = self.noop_helpers([CAND], is_ancestor=lambda a, b: a == b or (a, b) in history)
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.ranges(), [('changed_paths', OLD, CAND), ('commits', OLD, CAND)])
+
+    def test_an_acknowledgement_the_target_does_not_contain_is_ignored(self):
+        self.held_from_settled({(OLD, OTHER)})
+
+    def test_an_acknowledgement_older_than_settled_is_ignored(self):
+        self.held_from_settled({(OTHER, OLD), (OTHER, CAND)})
+
+
 class RecheckBeforeBegin(Base):
     def test_main_that_moved_during_preparation_stops_before_begin_and_drops_the_pre(self):
         heads = iter([CAND, CAND, OTHER])

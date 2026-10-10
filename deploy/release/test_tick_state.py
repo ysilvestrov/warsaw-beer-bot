@@ -19,7 +19,7 @@ FULL = TickState(
     main_seen=Seen(A, 1760000000), noop=Noop(B, A), abort=Abort(A, 2, 1760000100.5, TXN2), notified_txn=TXN,
     last_seen_settled=B, regression=Regression(A, B),
     notices={'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
-    blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1),
+    blocked=Blocked(TXN2, 'rolling-back/start-baseline', 1760000200, 1), ack_through=A,
 )
 # The file FULL is, written out by hand (canonical: sorted keys, no whitespace).
 FULL_JSON = {
@@ -32,6 +32,7 @@ FULL_JSON = {
     'regression': {'from': A, 'to': B},
     'notices': {'hold': '2026-10-10', f'ci-failed:{A}': '2026-10-01'},
     'blocked': {'txn': TXN2, 'step': 'rolling-back/start-baseline', 'at': 1760000200, 'alerts': 1},
+    'ackThrough': A,
 }
 
 
@@ -100,6 +101,7 @@ class Files(Tmp):
                             'tick-state.blocked.alerts: not a positive integer: 0'),
             'blocked without step': (json.dumps(dict(FULL_JSON, blocked=dict(FULL_JSON['blocked'], step=''))).encode(),
                                      'tick-state.blocked.step: not a non-empty string'),
+            'short ack': (json.dumps(dict(FULL_JSON, ackThrough='abc')).encode(), 'ackThrough: not a full lowercase SHA'),
             'bad txn': (json.dumps(dict(FULL_JSON, notifiedTxn='x')).encode(), 'notifiedTxn: not a 32-hex'),
             'bad day': (json.dumps(dict(FULL_JSON, notices={'hold': '2026-02-30'})).encode(),
                         'notices.hold: not a YYYY-MM-DD day'),

@@ -329,7 +329,12 @@ class _Tick:
             if not self.send(text):
                 return self.served(0)
         if (o.last_seen, o.regression) != (self.ts.last_seen_settled, self.ts.regression):
-            self.save(self.ts.replace(last_seen_settled=o.last_seen, regression=o.regression))
+            ts = self.ts.replace(last_seen_settled=o.last_seen, regression=o.regression)
+            if o.last_seen != self.ts.last_seen_settled:
+                # (stage A review S1) every settle acknowledges through itself: an older acknowledgement
+                # never reaches past what is settled now.
+                ts = ts.replace(ack_through=o.last_seen)
+            self.save(ts)
         return None
 
     # --- admission -----------------------------------------------------------------------------------------------
@@ -345,13 +350,13 @@ class _Tick:
             return h.installed_stale(gates.INSTALLED_COPIES)
         if name == 'changed_paths':
             try:
-                return tuple(h.changed_paths(i.settled_sha, i.target))
+                return tuple(h.changed_paths(self.holds_base(i), i.target))
             except Exception as e:
                 self.say(f'changed paths: {type(e).__name__}: {e}')
                 return None
         if name == 'commit_prs':
             try:
-                commits = tuple(h.commits(i.settled_sha, i.target))
+                commits = tuple(h.commits(self.holds_base(i), i.target))
             except Exception as e:
                 self.say(f'commits: {type(e).__name__}: {e}')
                 return None
@@ -359,6 +364,16 @@ class _Tick:
         if name == 'ci':
             return ci_of(h, i.target)
         raise AssertionError(f'gates asked for an unknown input {name!r}')
+
+    def holds_base(self, i):
+        """Where the held range starts (stage A review S1): the newest of settled and ackThrough that the target
+        contains. A range a human acknowledged and that settled nothing new (a noop) is not shown again."""
+        a = self.ts.ack_through
+        if a is None or a == i.settled_sha:
+            return i.settled_sha
+        if self.h.is_ancestor(i.settled_sha, a) and self.h.is_ancestor(a, i.target):
+            return a
+        return i.settled_sha
 
     def labels(self, commit):
         try:
@@ -436,7 +451,10 @@ class _Tick:
         got = pp.prepare(self.h, sha, i.ci.trusted, settled)
         if isinstance(got, pp.Noop):
             self.say(f'{_short(sha)} changes nothing in the runtime payload; nothing to activate')
-            self.save(self.ts.replace(noop=tick_state.Noop(sha, settled.sha)))
+            # (stage A review S1) admission passed the holds of this range — none, or exactly the ones a human
+            # acknowledged with --ack-holds — and settled does not move: the next merge shows only what is new
+            # after `sha`, instead of the same acknowledged holds forever.
+            self.save(self.ts.replace(noop=tick_state.Noop(sha, settled.sha), ack_through=sha))
             return 0
         if isinstance(got, pp.Verdict):
             # The only verdict the tick itself writes: exit 1 with its verdict word (prepare, plan "Рішення" п.3).

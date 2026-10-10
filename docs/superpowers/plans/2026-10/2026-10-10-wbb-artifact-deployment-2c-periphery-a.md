@@ -32,6 +32,7 @@ Production activation заборонена до кінця В.
 | Заявка (що tick записує) | Що стверджує | Доказ | Сила |
 |---|---|---|---|
 | `noop {sha, settledSha}` | Payload `sha` ідентичний settled `settledSha` (чинний лише доки settled той самий — рев'ю етапу А B1) | Посимвольна рівність записів двох `tree-manifest.json` без `release.json`; обидва дерева пройшли `verify_release` у цьому tick | сильний |
+| `ackThrough` | Holds діапазону до цього SHA підтверджено | Noop, до якого admission дійшла крізь holds (жодних або рівно підтверджені `--ack-holds`), чи settle цього SHA (рев'ю етапу А S1) | сильний |
 | `mainSeen.at` | `main` не рухався з цього моменту | Власний годинник tick-а при першому баченні SHA; той самий підхід, що в merge-deploy | сильний для quiet, не для «CI завершено» |
 | CI pass | Довірений run exact SHA мав `package=success` і `ci=success` | `github_trust.fetch_trusted` (та сама перевірка, що в publish) | сильний |
 | `abort.count` | Скільки разів підряд цей SHA впав до старту | Outcome `aborted` рушія, записаний цим tick | сильний |

@@ -22,6 +22,10 @@ claims, and its evidence (plan, "заявка → доказ"):
                          LAST_SEEN_DEPLOYED_SHA)
   regression {from, to}  production went from `from` back (or sideways) to `to`; unattended deploys
                          are held until a settled release contains `from` again
+  ackThrough             a human acknowledged the holds of the range up to this SHA: set by a manual run with
+                         --ack-holds that settled or found a noop, and by every settled release the fence
+                         observes; holds are read from the newest of settled and ackThrough that the target
+                         contains (stage A review S1: a held range that was a noop otherwise held forever)
   notices {key: day}     the UTC day a standing condition was last reported under this key
 
 A missing file is a first tick (None). An empty, non-JSON, other-version or schema-breaking file is a
@@ -143,6 +147,7 @@ class TickState(ds._Record):
     regression: Regression | None = None
     notices: MappingProxyType = MappingProxyType({})
     blocked: Blocked | None = None
+    ack_through: str | None = None
     _SPEC = (
         ('main_seen', 'mainSeen', ds._Opt(ds._Rec(Seen))),
         ('noop', 'noop', ds._Opt(ds._Rec(Noop))),
@@ -152,6 +157,7 @@ class TickState(ds._Record):
         ('regression', 'regression', ds._Opt(ds._Rec(Regression))),
         ('notices', 'notices', _Notices()),
         ('blocked', 'blocked', ds._Opt(ds._Rec(Blocked))),
+        ('ack_through', 'ackThrough', ds._Opt(_SHA_KIND)),
     )
 
     def __post_init__(self):
