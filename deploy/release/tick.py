@@ -555,7 +555,14 @@ class _Tick:
             # (plan periphery-b2 "Рішення" п.5) the timer waits gates.prepare_retry_s before it tries this SHA again.
             self.save(tick_state.prepare_transient(self.ts, sha, self.env.clock()))
         elif self.ts.prepare_retry is not None:
-            self.save(self.ts.replace(prepare_retry=None))
+            try:
+                self.save(self.ts.replace(prepare_retry=None))
+            except _WriteFailed:
+                # (periphery-b2 review S2) the pre of a prepared candidate is never a settled snapshot: a tick
+                # that cannot go on to begin() takes it away, as on every other begin failure (stage A N2).
+                if isinstance(got, pp.Prepared):
+                    self.discard(got.pre)
+                raise
         if isinstance(got, pp.Noop):
             self.say(f'{_short(sha)} changes nothing in the runtime payload; nothing to activate')
             # (stage A review S1) admission passed the holds of this range — none, or exactly the ones a human
@@ -793,7 +800,10 @@ def _ack_baseline(env, ts, from_sha):
         raise _Refused(f'the fence is {r.from_sha} → {r.to_sha}, not from {from_sha}; nothing changed')
     state = _settled_engine(env)
     _save_engine(env, state.log(env.clock(), 'ack-baseline', 'ok', **{'from': r.from_sha, 'to': r.to_sha}))
-    _save_ts(env, ts.replace(regression=None))
+    # (periphery-b2 review S1) the observation moves to what is settled now, as observe() does after a sent
+    # alert: left on the old settled, the next tick would see the same divergence and set the fence again.
+    _save_ts(env, ts.replace(regression=None, last_seen_settled=state.settled.sha,
+                             ack_through=state.settled.sha if ts.last_seen_settled != state.settled.sha else ts.ack_through))
     return f'regression fence {r.from_sha} → {r.to_sha} acknowledged: unattended deploys resume from {r.to_sha}'
 
 

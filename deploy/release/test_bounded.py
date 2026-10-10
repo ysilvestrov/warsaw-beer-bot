@@ -79,7 +79,7 @@ class Bounded(unittest.TestCase):
         Recording, sent, procs = self.recording_popen()
         start = time.monotonic()
         with mock.patch.object(bounded.subprocess, 'Popen', Recording), self.assertRaises(subprocess.TimeoutExpired):
-            bounded.run(py(code), timeout=2, term_grace=30)
+            bounded.run(py(code), timeout=5, term_grace=30)
         with open(marker) as f:
             self.assertEqual((f.read(), sent, procs[0].returncode), ('TERM', ['TERM'], 0))
         self.assertLess(time.monotonic() - start, 15)
@@ -89,11 +89,11 @@ class Bounded(unittest.TestCase):
         start = time.monotonic()
         with mock.patch.object(bounded.subprocess, 'Popen', Recording), self.assertRaises(subprocess.TimeoutExpired):
             bounded.run(py('import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'),
-                        timeout=1, term_grace=1)
+                        timeout=4, term_grace=1)
         elapsed = time.monotonic() - start
         self.assertEqual((sent, procs[0].returncode), (['TERM', 'KILL'], -signal.SIGKILL))
-        # SIGKILL came only after the grace: the timeout (1 s) and the grace (1 s) both passed first.
-        self.assertGreaterEqual(elapsed, 2)
+        # SIGKILL came only after the grace: the timeout (4 s) and the grace (1 s) both passed first.
+        self.assertGreaterEqual(elapsed, 5)
         self.assertLess(elapsed, 15)
 
     def test_the_grace_is_ten_seconds_unless_a_test_says_otherwise(self):
@@ -111,7 +111,7 @@ class Bounded(unittest.TestCase):
                 return super().wait(timeout)
         with mock.patch.object(bounded.subprocess, 'Popen', InterruptedGrace), self.assertRaises(KeyboardInterrupt):
             bounded.run(py('import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)'),
-                        timeout=1, term_grace=30, join_grace=1)
+                        timeout=4, term_grace=30, join_grace=1)
         self.assertEqual((sent, procs[0].returncode), (['TERM', 'KILL'], -signal.SIGKILL))
 
     def test_a_descendant_holding_the_pipe_does_not_hang_the_timeout(self):

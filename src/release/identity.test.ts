@@ -35,8 +35,10 @@ function missing(): (p: string) => string {
 const INVALID: Array<[string, string, string]> = [
   ['broken JSON', '{"formatVersion":', 'not valid JSON'],
   ['another formatVersion', JSON.stringify(release({ formatVersion: 2 })), 'formatVersion 2 is not 1'],
-  ['a short sourceSha', JSON.stringify(release({ sourceSha: 'a'.repeat(39) })), 'is not 40 lowercase hex'],
-  ['an uppercase sourceSha', JSON.stringify(release({ sourceSha: 'A'.repeat(40) })), 'is not 40 lowercase hex'],
+  ['a short sourceSha', JSON.stringify(release({ sourceSha: 'a'.repeat(39) })),
+    `sourceSha ${JSON.stringify('a'.repeat(39))} is not 40 lowercase hex`],
+  ['an uppercase sourceSha', JSON.stringify(release({ sourceSha: 'A'.repeat(40) })),
+    `sourceSha ${JSON.stringify('A'.repeat(40))} is not 40 lowercase hex`],
   ['a foreign arch', JSON.stringify(release({ platform: { os: 'linux', arch: 'arm64', libc: 'glibc' } })), 'platform.arch "arm64" does not match this host (x64)'],
   ['a foreign os', JSON.stringify(release({ platform: { os: 'darwin', arch: 'x64', libc: 'glibc' } })), 'platform.os "darwin" does not match this host (linux)'],
   ['a foreign libc', JSON.stringify(release({ platform: { os: 'linux', arch: 'x64', libc: 'musl' } })), 'platform.libc "musl" does not match this host (glibc)'],
@@ -73,9 +75,7 @@ describe('readReleaseIdentity', () => {
 
   it.each(INVALID)('%s: not required ⇒ null and the reason as a problem', (_name, text, reason) => {
     const got = readReleaseIdentity({ root: ROOT, required: false, readFile: reader(text).readFile, host: HOST });
-    expect(got.releaseSha).toBeNull();
-    expect(got.problem).toContain(`${ROOT}/release.json: `);
-    expect(got.problem).toContain(reason);
+    expect(got).toEqual({ releaseSha: null, problem: `${ROOT}/release.json: ${reason}` });
   });
 
   it.each(INVALID)('%s: required ⇒ startup fails with the reason', (_name, text, reason) => {

@@ -827,6 +827,22 @@ class BeginFails(Base):
         self.assertEqual(self.h.calls[-1], ('discard_pre', self.pre))
         self.assertEqual(self.store.load(), SETTLED_STATE)
 
+    def test_a_prepared_pre_is_dropped_when_clearing_the_retry_cannot_be_written(self):
+        # periphery-b2 review S2: the save that clears prepareRetry failed after Prepared; the tick stopped before
+        # begin() and the pre stayed behind.
+        self.quiet()
+        tick_state.save(os.path.join(self.dir, tick_state.STATE_NAME),
+                        self.ts().replace(prepare_retry=tick_state.PrepareRetry(OTHER, 1, T0)))
+        real = tick_state.save
+
+        def save(path, ts):
+            if ts.prepare_retry is None:
+                raise PermissionError(13, 'Permission denied')
+            real(path, ts)
+        with mock.patch.object(tick.tick_state, 'save', save):
+            self.assertEqual(self.tick(), 4)
+        self.assertEqual(self.h.calls[-1], ('discard_pre', self.pre))
+
     def test_a_write_that_landed_before_it_failed_keeps_the_pre(self):
         class LandsThenFails(MemoryStore):
             def save(self, state):
@@ -1124,6 +1140,16 @@ class Operator(Base):
                                              'from': CAND, 'to': OLD})
         # The timer is no longer held: it sees main and waits for quiet.
         self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.ts().regression, None)
+
+    def test_an_acknowledged_fence_stays_down_when_its_alert_never_went_out(self):
+        # periphery-b2 review S1: the alert failed, so the observation stayed on the old settled (CAND); the ack
+        # must move it, or the next tick sees the same divergence and sets the fence again.
+        self.save_ts(TickState(last_seen_settled=CAND, regression=Regression(CAND, OLD)))
+        self.h = self.helpers(is_ancestor=lambda a, b: a == b)
+        self.assertEqual(self.run_op('ack-baseline', CAND), 0)
+        self.assertEqual((self.ts().regression, self.ts().last_seen_settled, self.ts().ack_through), (None, OLD, OLD))
+        self.tick()
         self.assertEqual(self.ts().regression, None)
 
     def test_ack_baseline_without_a_fence_is_refused(self):

@@ -62,8 +62,9 @@ describe('createApiApp', () => {
     expect(await res.json()).toEqual({ ok: true, releaseSha: null });
   });
 
-  it('GET /health reports the identity read at startup, not the file as it is now', async () => {
-    // release.json is read once by the composition root; rewriting it afterwards must not move /health.
+  it('GET /health reports the identity it was built with, not what release.json says later', async () => {
+    // The handler serves the value handed to createApiApp; that the composition root reads release.json only
+    // once (src/index.ts) is not something this test can see.
     const dir = mkdtempSync(join(tmpdir(), 'wbb-health-identity-'));
     try {
       const release = (sha: string) => JSON.stringify({
