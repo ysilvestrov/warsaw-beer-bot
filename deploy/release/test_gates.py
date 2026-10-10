@@ -335,6 +335,10 @@ class Backoff(unittest.TestCase):
         self.assertEqual([gates.backoff_s(n) for n in (1, 2, 3, 4, 5, 6, 7)],
                          [3600, 7200, 14400, 28800, 57600, 86400, 86400])
 
+    def test_a_huge_persisted_count_is_the_cap_at_once(self):
+        # #827 AI review: the exponent is capped before it is computed.
+        self.assertEqual(gates.backoff_s(10 ** 9), 86400)
+
     def test_another_sha_is_not_backed_off(self):
         self.assertEqual(decide('timer', abort=Abort(OTHER, 3, NOW)), ADMIT)
 

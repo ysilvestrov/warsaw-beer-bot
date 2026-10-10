@@ -194,7 +194,9 @@ def range_holds(changed_paths, commit_prs):
 
 def backoff_s(count):
     """How long after the count-th abort in a row the same SHA may be tried again: 1 h doubling, at most 24 h."""
-    return min(BACKOFF_BASE_S * 2 ** (count - 1), BACKOFF_MAX_S)
+    # (#827 AI review) the exponent is capped before it is computed: a huge persisted count must not
+    # build a huge integer on its way to the 24 h cap (2**5 h already exceeds it).
+    return min(BACKOFF_BASE_S * 2 ** (min(count, 6) - 1), BACKOFF_MAX_S)
 
 
 def _short(sha):

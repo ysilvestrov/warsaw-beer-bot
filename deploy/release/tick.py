@@ -235,6 +235,11 @@ class _Tick:
         if self.timer and tick_state.notice_due(self.ts, key, day, repeat) and self.send(text):
             self.save(tick_state.noted(self.ts, key, day))
 
+    def flush_verdict(self):
+        """Send a verdict message a previous tick persisted but could not deliver; clear it once sent."""
+        if self.ts.pending_verdict is not None and self.send(self.ts.pending_verdict):
+            self.save(self.ts.replace(pending_verdict=None))
+
     def paused(self):
         return os.path.exists(self.env.path('PAUSED'))
 
@@ -480,6 +485,7 @@ class _Tick:
         code = self.engine(out)
         if code is not None:
             return code
+        self.flush_verdict()
         if self.timer and self.paused():
             self.say('paused (PAUSED exists); no new deploy')
             return 0
@@ -523,10 +529,15 @@ class _Tick:
             return 0
         if isinstance(got, pp.Verdict):
             # The only verdict the tick itself writes: exit 1 with its verdict word (prepare, plan "Рішення" п.3).
-            self.store.save(self.store.load().replace(last_failed_sha=sha))
             text = f'⛔ wbb-deploy refused {_short(sha)}: {got.step.upper()} {got.kind}\n{got.text}'
-            self.say(text + (f'\n{got.note}' if got.note else ''))
-            self.send(text)
+            text += f'\n{got.note}' if got.note else ''
+            # (#827 AI review) once lastFailedSha is written no later tick prepares this SHA again, so the
+            # message is persisted first and cleared only after it went out: a failed notify is retried by
+            # the next tick, never lost. The note (a pre that could not be discarded) goes with it.
+            self.save(self.ts.replace(pending_verdict=text))
+            self.store.save(self.store.load().replace(last_failed_sha=sha))
+            self.say(text)
+            self.flush_verdict()
             return 1
         if isinstance(got, pp.Transient):
             note = f'\n{got.note}' if got.note else ''
@@ -589,16 +600,24 @@ def _busy(env, lock_path):
     held = now - since
     notice_path = env.path('lock-notice')
     day = _day(now)
-    try:
-        with open(notice_path, encoding='ascii') as f:
-            last = f.read().strip()
-    except OSError:
-        last = None
-    if held >= LOCK_STALL_S and last != day:
-        text = (f'⚠️ wbb-deploy: the deploy lock has been held for {held // 60} min — no tick can run. '
-                f'A stuck manual deploy? Check: fuser -v {lock_path}')
-        if _notify(env, text):
-            _write_text(notice_path, day)
+    if held >= LOCK_STALL_S:
+        # (#827 AI review) read-notify-write under a lock of its own: two ticks that both miss the deploy
+        # lock must not both send the once-a-day notice.
+        fd = os.open(env.path('lock-notice.lock'), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                with open(notice_path, encoding='ascii') as f:
+                    last = f.read().strip()
+            except OSError:
+                last = None
+            if last != day:
+                text = (f'⚠️ wbb-deploy: the deploy lock has been held for {held // 60} min — no tick can run. '
+                        f'A stuck manual deploy? Check: fuser -v {lock_path}')
+                if _notify(env, text):
+                    _write_text(notice_path, day)
+        finally:
+            os.close(fd)
     env.out(f'another process holds the lock ({held} s); exiting')
 
 

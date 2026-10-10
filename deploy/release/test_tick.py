@@ -491,6 +491,30 @@ class Verdicts(Base):
         self.assertEqual(self.h.names(), ['fetch_main', 'is_ancestor', 'installed_stale'])
         self.assertEqual(len(self.notes), 1)
 
+    def test_a_verdict_whose_notify_failed_is_sent_by_the_next_tick(self):
+        # #827 AI review: lastFailedSha stops the SHA from being prepared again, so the message is the
+        # one thing that must survive a failed notify — persisted first, cleared only once it went out.
+        self.h = self.helpers(probe=Run(1, 'FAILED', 'PROBE FAILED: ABI 137 != 127'))
+        self.quiet()
+        self.notify_ok = False
+        self.assertEqual(self.tick(), 1)
+        self.notify_ok = True
+        self.assertEqual(self.tick(), 0)
+        self.assertEqual(self.tick(), 0)
+        text = '⛔ wbb-deploy refused ccccccc: PROBE FAILED\nPROBE FAILED: ABI 137 != 127'
+        self.assertEqual(self.notes, [text, text])
+        self.assertEqual(self.store.load(), SETTLED_STATE.replace(last_failed_sha=CAND))
+
+    def test_a_verdict_carries_the_note_of_a_pre_that_could_not_be_discarded(self):
+        self.h = self.helpers(trial=Run(1, 'FAILED', 'TRIAL FAILED: migrate: no such table'),
+                              discard_pre=HelperError('sudo: unable to remove'))
+        self.quiet()
+        self.assertEqual(self.tick(), 1)
+        self.assertEqual(len(self.notes), 1)
+        self.assertEqual(self.notes[0].startswith('⛔ wbb-deploy refused ccccccc: TRIAL FAILED\nTRIAL FAILED: migrate: '
+                                                  'no such table\n'), True)
+        self.assertEqual('sudo: unable to remove' in self.notes[0], True)
+
     def test_a_payload_equal_to_settled_is_noop_and_not_prepared_again(self):
         noop = {**MANIFESTS, CAND: manifest('1', 'c')}
         trees = {sha: hashlib.sha256(m).hexdigest() for sha, m in noop.items()}
