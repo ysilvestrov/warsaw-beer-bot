@@ -695,6 +695,57 @@ class BeginFails(Base):
         self.assertEqual(self.h.names(), ADMIT + PREPARE + RECHECK)
 
 
+class ExitCodes(Base):
+    """(stage A review: surviving mutations) a manual run whose own deploy did not happen is 1, whatever the
+    timer's code for the same outcome; recovery-failed is 3; drift under PAUSED is the timer's silence."""
+
+    def test_by_hand_an_aborted_activation_is_1(self):
+        self.world.tampered = {CAND}
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.ts().abort.count, 1)
+        self.assertEqual(self.store.load().settled.sha, OLD)
+
+    def test_by_hand_a_ci_that_has_not_concluded_is_1(self):
+        self.h = self.helpers(trusted=NoRunYet(f'no trusted CI run for {CAND}'))
+        self.assertEqual(self.tick('manual'), 1)
+        self.assertEqual(self.lines, ['⚠️ wbb-deploy: CI has not concluded on ccccccc'])
+        self.assertEqual(self.store.load(), SETTLED_STATE)
+
+    def test_by_hand_an_unverified_release_is_1(self):
+        self.at('observing')
+        self.world.reboot()
+        self.assertEqual(self.tick('manual', helpers=FakeHelpers()), 1)
+        self.assertEqual(self.store.load().phase, 'unverified')
+
+    def test_by_hand_settling_an_activation_this_run_did_not_begin_is_1(self):
+        # The window of an earlier activation of CAND ends in this run's resume: not this run's deploy.
+        self.at('observing')
+        h = FakeHelpers()
+        self.assertEqual(self.tick('manual', helpers=h), 1)
+        self.assertEqual((self.store.load().settled.sha, h.calls, self.notes), (CAND, [], [SETTLED_NOTE]))
+
+    def test_recovery_failed_is_3_every_tick_and_said_once(self):
+        self.world.healthy = lambda sha, age: sha != CAND
+        self.at('rolling-back', 'switch-previous')
+        self.world.accepted = {CAND}
+        h = FakeHelpers()
+        self.assertEqual([self.tick(helpers=h), self.tick(helpers=h), self.tick('manual', helpers=h)], [3, 3, 3])
+        self.assertEqual(self.store.load().phase, 'recovery-failed')
+        self.assertEqual(self.notes, [f'🔥 wbb-deploy RECOVERY FAILED at switch-previous: {OLD}: no receipt — not an '
+                                      'accepted release. Production state is UNKNOWN — the bot may be down. Manual '
+                                      'intervention required; nothing new starts.'])
+        self.assertEqual(h.calls, [])
+
+    def test_drift_under_paused_is_silent_for_the_timer(self):
+        self.world.running = CAND
+        os.makedirs(self.dir)
+        open(os.path.join(self.dir, 'PAUSED'), 'w').close()
+        h = FakeHelpers()
+        self.assertEqual(self.tick(helpers=h), 0)
+        self.assertEqual((self.notes, self.lines, h.calls), ([], [], []))
+        self.assertEqual(len(self.world.health_calls), 1)
+
+
 class Unverified(Base):
     def test_reported_once_then_once_a_day(self):
         s = self.at('observing')
