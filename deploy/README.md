@@ -543,8 +543,9 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   audited tree equal to the verified one; anything else (2, 70, 75, a word and a code that disagree, a helper
   exception, a tree that changed between steps) is `Transient`. A trial that did not pass discards its pre.
 - `tree_manifest.parse_manifest` — the byte checks of `verify_tree` without a tree (used by the noop).
-- `tick.py` — the controller: `tick.py timer` (the unit) and `tick.py deploy [--force] [--ack-holds KEY ...]`
-  (the `deploy.sh` wrapper of stage Б); root is refused (64). Under the merge-deploy lock (`~/.local/state/
+- `tick.py` — the controller: `tick.py timer` (the unit) and `tick.py deploy --target <sha> [--force] [--ack-holds
+  KEY ...]` (`--target`: the checkout's HEAD, passed by the `deploy.sh` wrapper of stage Б-periphery); root is
+  refused (64). Under the merge-deploy lock (`~/.local/state/
   wbb-autodeploy/lock`; the timer does not wait and reports a lock held over 35 min once a day, by hand it
   waits 30 s): `activate.resume` first (a pending phase is finished even under PAUSED), then PAUSED stops the
   timer, then drift (or `unreachable` — `/health` silent for 3 probes 10 s apart; a manual run goes on
@@ -560,7 +561,41 @@ Host side, periphery 2в stage A (code only; the real `Host`/`Helpers` adapters 
   text) and exit 70. Exit: 0 idle/waiting/settled/noop, 1 refused or held (and a manual run not served), 2
   rolled back, 3 recovery failed or blocked with the bot down, 4 state not written, 64 usage/root, 70
   internal. Everything is injected (`tick.Env`: state dir, store, `Host`, `Helpers`, notify, clock, sleep);
-  without the stage-Б adapters the CLI exits 70 without running.
+  `tick.make_env(mode, target)` builds it from the real adapters below on ONE clock (`host.now()`, which stamps
+  `abort.at`, is the tick's `clock`); if building fails, a critical notice (once per UTC day, when notify was
+  built) and exit 70 without running.
+- The real adapters (stage Б-core; nothing is installed yet — stage В). Every command goes through
+  `bounded.run` with a timeout and a fixed argv; a SHA is a full lowercase SHA and a snapshot a `trial`
+  snapshot name before it reaches one. `installed.py` holds every path once.
+
+  | Who | Method | Command | As |
+  |---|---|---|---|
+  | `RealHost` | `bot_state` / `litestream_state` | `systemctl show -p ActiveState --value warsaw-beer-bot\|litestream` | operator |
+  | | `stop_*` / `start_*` | `sudo -n systemctl stop\|start warsaw-beer-bot\|litestream` | root (existing rule) |
+  | | `nrestarts` | `systemctl show -p NRestarts --value warsaw-beer-bot` (not a count → None) | operator |
+  | | `verify` / `switch` | `sudo -n /usr/local/libexec/wbb-release verify\|switch --sha <sha>` | root helper |
+  | | `post` / `restore` | `python3 -I -B /usr/local/lib/wbb-release/dbsnap.py post\|restore …` | bot user |
+  | | `health` | `GET http://127.0.0.1:<API_PORT>/health`, 3 s, ≤ 64 KiB | operator |
+  | | `current` | `publish.current_sha` (reads the `current` symlink) | operator |
+  | | API_PORT (once per tick) | `wbb-read-env /etc/warsaw-beer-bot/.env API_PORT` (empty → 3000) | bot user |
+  | `RealHelpers` | `fetch_main` | `git -C ~/.local/share/wbb-autodeploy/repo fetch -q --prune origin`, `rev-parse --verify origin/main^{commit}` | operator |
+  | | `is_ancestor` | `git cat-file -e` each (exit 1 → False), then `git merge-base --is-ancestor` | operator |
+  | | `changed_paths` / `commits` | `git -c core.quotePath=false diff --no-renames --name-only -z`, `git rev-list a..b` | operator |
+  | | `pr_labels` | `gh api repos/<repo>/commits/<sha>/pulls?per_page=100` (a full page → error) | operator |
+  | | `trusted` / `download` | `gh auth token` → `github_trust` (ZIP into `~/.local/share/wbb-autodeploy/artifacts/<sha>.zip`, 0700 dir) | operator |
+  | | `publish` `verify` `probe` `trial` | `sudo -n /usr/local/libexec/wbb-release <verb> --sha <sha> […]` | root helper |
+  | | `audit` | `/usr/local/libexec/wbb-release audit --sha <sha>` | operator |
+  | | `snapshot_pre` / `discard_pre` | `wbb-db-snapshot snapshot\|discard` (`<UTC>-<sha7>-pre.db` in the snapshot dir), `cat <pre>.sha256` | bot user |
+  | | `manifest` | read `releases/<sha>/tree-manifest.json` (O_NOFOLLOW, ≤ 64 MiB) | operator |
+  | | `installed_stale` | each installed copy (`installed.installed_path`) vs `git show origin/main:<path>` | operator |
+  | `notify` | Telegram | `wbb-read-env` TELEGRAM_BOT_TOKEN / ADMIN_TELEGRAM_ID, POST `sendMessage`, 10 s, no redirects | bot user / operator |
+
+  "As bot user" is merge-deploy's `sudo -n -u warsaw-beer-bot bash -lc '"$0" "$@"' <argv>` (argv positional).
+  Exit codes: the root helper's 0 is done and 2 is `Refused` (Host) or `Run(2, …)` (Helpers); exit 1 is a
+  `Run` only with this verb's verdict line for this SHA (Helpers) — sudo exits 1 for its own failures, so 1
+  without the line, 64, 70, 75 and anything else are `HostError`/`HelperError`, never a verdict. `/health`
+  without a 2xx answer is `HostError` (a failed probe); `releaseSha` counts only as a full SHA. The GitHub
+  and Telegram tokens never appear in argv, output or exception text.
 
 To check a downloaded artifact by hand (no production access needed, any scratch directory):
 
