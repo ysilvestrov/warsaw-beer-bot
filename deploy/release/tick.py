@@ -28,7 +28,8 @@ day per key (tick_state.notices). Only the timer sends gate notices; a manual ru
 A verdict on a candidate (state v2 lastFailedSha) comes only from the engine's own rollback or from a
 prepare `Verdict`; nothing else — a helper's exception, a host error, an internal error — ever writes one.
 Any uncaught exception is a critical notification with its type and text (once per UTC day per text) and
-exit 70.
+exit 70. A tick-state.json that cannot be read is such an error too, but only after activate.resume ran and
+what it ended was reported (stage A review S3).
 
 Exit codes (merge-deploy's unit has SuccessExitStatus=0 1 2):
   0 nothing to do, waiting, settled, noop   1 refused candidate or hold (and a manual run not served)
@@ -50,6 +51,7 @@ import gates  # noqa: E402
 import prepare as pp  # noqa: E402
 import tick_state  # noqa: E402
 from activate import HostError  # noqa: E402
+from deploy_state import StateError  # noqa: E402
 from gates import UNREAD, Ci, CommitPrs, Inputs  # noqa: E402
 from github_trust import NoRunYet, RunFailed  # noqa: E402
 from safe_tar import Refused  # noqa: E402
@@ -190,7 +192,13 @@ class _Tick:
         self.h, self.host = env.helpers, env.host
         self.store = _Guarded(env.store)
         self.ts_path = env.path(tick_state.STATE_NAME)
-        self.ts = tick_state.load(self.ts_path) or TickState()
+        # (stage A review S3) a broken tick-state.json must not keep the engine from finishing a pending phase
+        # (a rollback): it is read here, but it stops the tick only after activate.resume ran.
+        self.ts, self.ts_error = None, None
+        try:
+            self.ts = tick_state.load(self.ts_path) or TickState()
+        except (StateError, OSError) as e:
+            self.ts_error = e
 
     # --- plumbing -------------------------------------------------------------------------------------------
     def save(self, ts):
@@ -418,8 +426,24 @@ class _Tick:
             self.say(f'WARNING: could not discard {pre.path}: {type(e).__name__}: {e}')
 
     # --- the tick --------------------------------------------------------------------------------------------------
+    def degraded(self, out):
+        """(stage A review S3) resume ran without a readable tick-state: report what the engine just ended — a
+        rolled-back, settled or aborted transaction, which no later resume repeats — without the once-per-txn
+        record (a duplicate once the file is repaired is possible, a loss is not), then fail the tick with the
+        state error and the engine's outcome: exit 70 and its critical notice."""
+        end = ended(out.state) if out.kind in ENDS else None
+        if end is not None:
+            text = summary(end[1], end[2])
+            self.say(text)
+            self.send(text)
+        engine = '' if out.kind == 'idle' else f'; the engine: {out.kind}' + (f': {out.reason}' if out.reason else '')
+        raise StateError(f'{self.ts_error}{engine}')
+
     def run(self):
-        code = self.engine(activate.resume(self.store, self.host))
+        out = activate.resume(self.store, self.host)
+        if self.ts_error is not None:
+            return self.degraded(out)
+        code = self.engine(out)
         if code is not None:
             return code
         if self.timer and self.paused():

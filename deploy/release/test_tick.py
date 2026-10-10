@@ -353,6 +353,43 @@ class NeverAVerdict(Base):
                                       'Permission denied — its record may now disagree with production.'])
 
 
+class BrokenTickState(Base):
+    """(stage A review S3) the engine finishes a pending phase before a broken tick-state.json stops the tick."""
+
+    def break_tick_state(self):
+        os.makedirs(self.dir, exist_ok=True)
+        with open(os.path.join(self.dir, tick_state.STATE_NAME), 'wb') as f:
+            f.write(b'{')
+
+    def test_a_rollback_in_flight_completes_then_exit_70(self):
+        self.world.healthy = lambda sha, age: sha != CAND
+        self.at('rolling-back', 'stop-writers')
+        self.break_tick_state()
+        h = FakeHelpers()
+        self.assertEqual(self.tick(helpers=h), 70)
+        s = self.store.load()
+        self.assertEqual((s.phase, s.settled.sha, s.last_failed_sha), ('settled', OLD, CAND))
+        self.assertEqual((self.world.current, self.world.running, h.calls), (OLD, OLD, []))
+        record = [e['result'] for e in s.evidence if e['what'] == 'rolled-back']
+        path = os.path.join(self.dir, tick_state.STATE_NAME)
+        self.assertEqual(self.notes, [
+            f'🔥 wbb-deploy ROLLED BACK ccccccc → bbbbbbb, code AND database.\n{record[0]}\n'
+            'A human must reconcile; nothing will do it automatically.',
+            '🔥 wbb-deploy: internal error, nothing judged: StateError: '
+            f'{path}: not JSON (Expecting property name enclosed in double quotes: line 1 column 2 (char 1)); '
+            'the engine: rolled-back: ' + self.store.load().evidence[-1]['result']])
+
+    def test_idle_with_a_broken_tick_state_is_exit_70_and_admits_nothing(self):
+        self.break_tick_state()
+        h = FakeHelpers()
+        self.assertEqual(self.tick(helpers=h), 70)
+        path = os.path.join(self.dir, tick_state.STATE_NAME)
+        self.assertEqual(self.notes, ['🔥 wbb-deploy: internal error, nothing judged: StateError: '
+                                      f'{path}: not JSON (Expecting property name enclosed in double quotes: line 1 '
+                                      'column 2 (char 1))'])
+        self.assertEqual((h.calls, self.store.load()), ([], SETTLED_STATE))
+
+
 class Verdicts(Base):
     def test_a_failed_probe_is_the_failed_sha_reported_once(self):
         self.h = self.helpers(probe=Run(1, 'FAILED', 'PROBE FAILED: ABI 137 != 127'))
